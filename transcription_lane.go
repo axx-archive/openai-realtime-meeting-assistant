@@ -1357,10 +1357,6 @@ func transcriptionLaneEnabled() bool {
 }
 
 func transcriptionLaneModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_TRANSCRIPT_MODEL")); model != "" {
-		return model
-	}
-
 	return defaultTranscriptionLaneModel
 }
 
@@ -1376,7 +1372,7 @@ func transcriptionLaneWebSocketURL() string {
 // whisper model does NOT — sending `prompt` there is rejected live with
 // "The 'prompt' parameter is not supported for this model" and would break the
 // session. So the prompt/near-field config is gated by model rather than sent
-// unconditionally (prod pins OPENAI_TRANSCRIPT_MODEL=gpt-realtime-whisper).
+// unconditionally. The committed lane is server-pinned to gpt-transcribe.
 func transcriptionModelAcceptsPrompt(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.Contains(model, "gpt-4o") || model == "gpt-transcribe" || model == "gpt-live-transcribe"

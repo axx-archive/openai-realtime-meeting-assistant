@@ -623,6 +623,13 @@
         width: auto;
         justify-content: center;
       }
+
+      /* Home is already a stable primary destination. Inside Work, the rail is
+         contextual navigation only; repeating Home here created a second,
+         visually equal global navigation system. */
+      #appShell[data-pd1-destination="Work"] .tool-rail__slot:has(.tool-rail__tool[data-tool="office"]) {
+        display: none;
+      }
       /* .tool-rail__avatar has no markup left; the selector survives because
          frontend_latency_test.go pins ".tool-rail__avatar[hidden]". */
       .tool-rail__slot[hidden],
@@ -1000,9 +1007,10 @@
       }
 
       .topbar__brand-lockup {
+        position: relative;
         display: inline-flex;
         align-items: center;
-        gap: 13px;
+        gap: 10px;
         min-width: 0;
         flex: 0 0 auto;
       }
@@ -1038,12 +1046,12 @@
       .topbar__organization {
         display: inline-flex;
         align-items: center;
-        gap: 9px;
+        gap: 6px;
         min-height: 40px;
-        padding: 4px 8px 4px 4px;
+        padding: 0 10px;
         min-width: 0;
         border: 0;
-        border-radius: 14px;
+        border-radius: 12px;
         background: transparent;
         color: inherit;
         font: inherit;
@@ -1056,41 +1064,61 @@
       .topbar__organization:active { scale: .96; }
       .topbar__organization:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-      .topbar__organization-mark {
-        display: grid;
-        place-items: center;
-        width: 30px;
-        height: 30px;
-        flex: 0 0 auto;
-        border-radius: 10px;
-        background: color-mix(in srgb, var(--accent) 12%, var(--surface-3));
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--line-1));
-        color: var(--text-1);
-        font: 650 12px/1 var(--font-sans);
-        letter-spacing: -0.02em;
-      }
-
-      .topbar__organization-copy {
-        display: grid;
-        gap: 1px;
-        min-width: 0;
-      }
-
-      .topbar__organization-label {
-        color: var(--text-3);
-        font: 600 9.5px/1.1 var(--font-sans);
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
       .topbar__organization-name {
+        display: block;
+        max-width: min(25vw, 240px);
         color: var(--text-1);
-        font: 600 13px/1.2 var(--font-sans);
-        letter-spacing: -0.01em;
+        font: 600 13px/1 var(--font-sans);
+        letter-spacing: -0.012em;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      .topbar__organization-meta { color: var(--text-3); font: 500 10px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
-      .topbar__organization-pending { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 2px; padding: 0 5px; border-radius: 999px; background: var(--text-1); color: var(--surface-1); font: 700 10px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+      .topbar__organization-chevron { width: 12px; height: 12px; flex: 0 0 auto; color: var(--text-3); transition: transform var(--dur-fast) var(--ease); }
+      .topbar__organization[aria-expanded="true"] .topbar__organization-chevron { transform: rotate(180deg); }
+
+      .topbar__organization-menu {
+        position: absolute;
+        z-index: 330;
+        top: calc(100% + 10px);
+        left: 78px;
+        width: min(280px, calc(100vw - 32px));
+        padding: 8px;
+        border: 1px solid color-mix(in srgb, var(--line-1) 88%, transparent);
+        border-radius: 18px;
+        background: var(--surface-1);
+        box-shadow: var(--glass-highlight), 0 18px 52px rgb(0 0 0 / 0.16);
+        backdrop-filter: blur(24px) saturate(1.08);
+        -webkit-backdrop-filter: blur(24px) saturate(1.08);
+      }
+      .topbar__organization-menu[hidden] { display: none; }
+      .topbar__organization-menu-items { display: grid; gap: 3px; }
+      .topbar__organization-menu-item,
+      .topbar__organization-menu-action {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 44px;
+        padding: 0 11px;
+        border-radius: 12px;
+        color: var(--text-2);
+        text-align: left;
+        transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .topbar__organization-menu-item:hover,
+      .topbar__organization-menu-action:hover { background: var(--surface-3); color: var(--text-1); }
+      .topbar__organization-menu-item:active,
+      .topbar__organization-menu-action:active { transform: scale(var(--press-scale)); }
+      .topbar__organization-menu-item svg,
+      .topbar__organization-menu-action svg { width: 20px; height: 20px; }
+      .topbar__organization-menu-item > span,
+      .topbar__organization-menu-action > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-caption-medium); }
+      .topbar__organization-menu-item[aria-checked="true"] { color: var(--text-1); background: var(--surface-3); }
+      .topbar__organization-menu-item[aria-checked="true"]::after { content: 'Current'; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+      .topbar__organization-menu-empty { padding: 12px 11px; color: var(--text-3); font: var(--type-caption); text-wrap: pretty; }
+      .topbar__organization-menu-action { grid-template-columns: 20px minmax(0, 1fr); margin-top: 6px; border-top: 1px solid var(--line-1); border-radius: 0 0 12px 12px; padding-top: 6px; }
 
       .topbar__context {
         display: grid;
@@ -9461,66 +9489,128 @@
       }
 
       .scout-chat-empty {
-        margin: auto;
-        max-width: 52ch;
-        padding: 0 30px;
+        width: min(680px, 100%);
+        margin: 0 auto;
+        padding: 8px 30px 0;
         text-align: center;
         text-wrap: balance;
-        font: var(--type-label-lg);
-        line-height: 1.7;
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
+        color: var(--text-1);
       }
 
-      /* discovery starters — a quiet row of tappable run shortcuts beneath the
-         private empty state (design polish wave §task-discovery) */
-      .scout-starters {
-        margin: 12px auto 0;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
+      #chatTool .scout-chat-thread:has(> .scout-chat-empty) {
         justify-content: center;
-        max-width: 46ch;
-        padding: 0 24px;
+      }
+
+      .scout-chat-empty__inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .scout-chat-empty__eyebrow {
+        margin-bottom: 14px;
+        color: var(--text-3);
+        font: 600 11px/1.2 var(--font-sans);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .scout-chat-empty__title {
+        max-width: 18ch;
+        margin: 0;
+        color: var(--text-1);
+        font: 600 clamp(28px, 2.4vw, 38px)/1.08 var(--font-sans);
+        letter-spacing: -0.035em;
+      }
+
+      .scout-chat-empty__body {
+        max-width: 52ch;
+        margin: 14px 0 0;
+        color: var(--text-2);
+        font: 400 15px/1.55 var(--font-sans);
+        letter-spacing: var(--track-text);
+      }
+
+      /* Natural-language examples, never capability selectors. They teach the
+         conversation contract while the server retains tool/output authority. */
+      .scout-starters {
+        width: min(680px, calc(100% - 48px));
+        margin: 26px auto 0;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
       }
 
       .scout-starter {
-        display: inline-flex;
-        align-items: center;
-        min-height: 34px;
-        padding: 0 14px;
+        display: flex;
+        min-width: 0;
+        min-height: 76px;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 5px;
+        padding: 14px 16px;
         border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-2);
+        border-radius: 18px;
+        background: color-mix(in srgb, var(--surface-2) 90%, transparent);
         color: var(--text-2);
-        font: var(--type-label-lg);
-        letter-spacing: var(--track-label);
+        text-align: left;
         cursor: pointer;
-        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        box-shadow: 0 1px 0 color-mix(in srgb, white 32%, transparent) inset;
+        transition:
+          border-color var(--dur-fast) var(--ease),
+          background var(--dur-fast) var(--ease),
+          box-shadow var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
       }
 
-      .scout-starter:hover { border-color: var(--line-2); color: var(--text-1); }
+      .scout-starter:hover,
+      .scout-starter:focus-visible {
+        border-color: var(--line-2);
+        background: var(--surface-2);
+        box-shadow: 0 10px 30px rgb(0 0 0 / 0.07), 0 1px 0 color-mix(in srgb, white 40%, transparent) inset;
+        transform: translateY(-1px);
+      }
       .scout-starter:active { transform: scale(var(--press-scale)); }
-      .scout-starter--all { color: var(--text-3); }
+
+      .scout-starter__label {
+        color: var(--text-1);
+        font: 600 14px/1.25 var(--font-sans);
+        letter-spacing: -0.01em;
+      }
+
+      .scout-starter__example {
+        color: var(--text-3);
+        font: 400 12.5px/1.35 var(--font-sans);
+        letter-spacing: var(--track-text);
+      }
 
       /* card 082: the "Feed the brain" door under the private empty state */
       .scout-chat-brain-chip {
         display: block;
-        margin: 14px auto 0;
-        padding: 8px 16px;
-        border: 1px solid var(--line-1);
-        border-radius: 999px;
-        background: var(--surface-2);
-        color: var(--text-2);
-        font: var(--type-label-lg);
-        letter-spacing: var(--track-label);
+        margin: 18px auto 0;
+        padding: 8px 12px;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-3);
+        font: 500 12.5px/1.35 var(--font-sans);
+        letter-spacing: var(--track-text);
         cursor: pointer;
         transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
       }
       .scout-chat-brain-chip:hover {
-        border-color: var(--accent);
         color: var(--text-1);
-        background: var(--surface-3);
+        background: var(--surface-2);
+      }
+
+      @media (max-width: 720px) {
+        .scout-chat-empty { padding-inline: 20px; }
+        .scout-chat-empty__title { font-size: 28px; }
+        .scout-starters {
+          width: min(520px, calc(100% - 32px));
+          grid-template-columns: 1fr;
+        }
       }
       /* The 4 composer pills were cut (spec §2 "cut them"): the propose-confirm
          router replaced their quick lane — a deliverable-shaped message earns a
@@ -10507,6 +10597,139 @@
       .scout-chat-msg.is-followup:not(.scout-chat-msg--longform) .scout-chat-msg__idrow {
         display: none;
       }
+
+	  .scout-chat-work-record {
+	    align-self: flex-start;
+	    width: min(620px, 92%);
+	    padding: 18px 19px 16px;
+	    border: 1px solid color-mix(in srgb, var(--ember) 28%, var(--line-1));
+	    border-radius: var(--r-xl);
+	    background: linear-gradient(145deg, color-mix(in srgb, var(--surface-2) 94%, var(--ember) 6%), var(--surface-1));
+	    box-shadow: var(--shadow-card);
+	  }
+	  .scout-chat-work-record__head,
+	  .scout-chat-work-record__actions {
+	    display: flex;
+	    align-items: center;
+	    gap: 10px;
+	  }
+	  .scout-chat-work-record__head { justify-content: space-between; }
+	  .scout-chat-work-record__identity,
+	  .scout-chat-work-record__status,
+	  .scout-chat-work-record__stage,
+	  .scout-chat-work-record__fence {
+	    font: var(--type-label);
+	    letter-spacing: var(--track-label);
+	    color: var(--text-3);
+	    text-transform: lowercase;
+	  }
+	  .scout-chat-work-record__status { color: var(--success); }
+	  .scout-chat-work-record__title {
+	    margin: 18px 0 7px;
+	    font: var(--type-title-sm);
+	    letter-spacing: var(--track-title-sm);
+	    color: var(--text-1);
+	  }
+	  .scout-chat-work-record__summary {
+	    margin: 0;
+	    max-width: 64ch;
+	    font: var(--type-body);
+	    color: var(--text-2);
+	  }
+	  .scout-chat-work-record__progress {
+	    height: 3px;
+	    margin-top: 17px;
+	    overflow: hidden;
+	    border-radius: 999px;
+	    background: var(--surface-3);
+	  }
+	  .scout-chat-work-record__progress > span {
+	    display: block;
+	    height: 100%;
+	    border-radius: inherit;
+	    background: var(--ember);
+	  }
+	  .scout-chat-work-record__stage { margin-top: 7px; }
+	  .scout-chat-work-record__actions { margin-top: 16px; flex-wrap: wrap; }
+	  .scout-chat-work-record__action {
+	    min-height: 36px;
+	    display: inline-flex;
+	    align-items: center;
+	    justify-content: center;
+	    padding: 0 14px;
+	    border: 1px solid var(--line-1);
+	    border-radius: 999px;
+	    background: transparent;
+	    color: var(--text-1);
+	    text-decoration: none;
+	    font: var(--type-label-lg);
+	    cursor: pointer;
+	  }
+	  .scout-chat-work-record__action.is-primary {
+	    border-color: var(--text-1);
+	    background: var(--text-1);
+	    color: var(--surface-1);
+	  }
+	  .scout-chat-work-record__fence { margin-left: auto; }
+	  .governed-work-viewer {
+	    width: 100%;
+	    max-width: 70ch;
+	    margin: 0 auto;
+	    padding: 10px 2px 48px;
+	    color: var(--text-1);
+	  }
+	  .governed-work-viewer__eyebrow {
+	    margin: 0 0 12px;
+	    font: var(--type-label);
+	    letter-spacing: var(--track-label);
+	    color: var(--accent);
+	    text-transform: uppercase;
+	  }
+	  .governed-work-viewer__title {
+	    margin: 0;
+	    font: var(--type-display);
+	    letter-spacing: var(--track-display);
+	    text-wrap: balance;
+	  }
+	  .governed-work-viewer__meta {
+	    margin: 10px 0 28px;
+	    color: var(--text-3);
+	    font: var(--type-caption);
+	  }
+	  .governed-work-viewer__lead {
+	    margin: 0 0 30px;
+	    padding-top: 24px;
+	    border-top: 1px solid var(--line-1);
+	    color: var(--text-2);
+	    font: var(--type-body-lg);
+	    line-height: 1.65;
+	  }
+	  .governed-work-viewer__section { margin-top: 26px; }
+	  .governed-work-viewer__section h3 {
+	    margin: 0 0 8px;
+	    font: var(--type-label);
+	    letter-spacing: var(--track-label);
+	    color: var(--text-3);
+	    text-transform: uppercase;
+	  }
+	  .governed-work-viewer__section p {
+	    margin: 0;
+	    color: var(--text-2);
+	    font: var(--type-body);
+	    line-height: 1.62;
+	  }
+	  .governed-work-viewer__verified {
+	    display: inline-flex;
+	    align-items: center;
+	    gap: 7px;
+	    margin-top: 24px;
+	    padding: 7px 10px;
+	    border-radius: var(--r-full);
+	    background: color-mix(in srgb, var(--success) 12%, transparent);
+	    color: var(--success);
+	    font: var(--type-caption);
+	  }
+	  .governed-work-viewer__error { color: var(--danger); }
 
       /* sheet §3 letters: past ~400 chars a bubble stops being a bubble — it
          becomes a letter card on the feed measure with an identity header
@@ -14095,8 +14318,103 @@
           cursor: default;
         }
 
+        /* One quiet, durable work card stays in the conversation at launch.
+           It names the outcome, worker, current human-readable step, and the
+           activity door without exposing the internal process/stage graph. */
+        #chatTool .scout-chat-work-card {
+          width: min(var(--desktop-chat-work-measure), 100%);
+          align-self: center;
+          display: grid;
+          grid-template-columns: 38px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 12px;
+          padding: 13px 14px;
+          border: 1px solid var(--line-1);
+          border-radius: 18px;
+          background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.055);
+          color: var(--text-1);
+        }
+
+        #chatTool .scout-chat-work-card__mark {
+          width: 38px;
+          height: 38px;
+          display: inline-grid;
+          place-items: center;
+          border-radius: 13px;
+          background: var(--ember-soft);
+          color: var(--ember-text);
+          font: 650 16px/1 var(--font-sans);
+        }
+
+        #chatTool .scout-chat-work-card__copy {
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+
+        #chatTool .scout-chat-work-card__eyebrow {
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          text-transform: uppercase;
+        }
+
+        #chatTool .scout-chat-work-card__title {
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          overflow: hidden;
+          white-space: normal;
+          font: 600 14px/1.35 var(--font-sans);
+        }
+
+        #chatTool .scout-chat-work-card__meta {
+          color: var(--text-2);
+          font: var(--type-caption);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .scout-chat-work-card__progress {
+          width: min(280px, 48%);
+          height: 2px;
+          overflow: hidden;
+          border-radius: var(--r-full);
+          background: var(--line-1);
+        }
+
+        #chatTool .scout-chat-work-card__progress > span {
+          display: block;
+          width: var(--work-progress, 4%);
+          height: 100%;
+          border-radius: inherit;
+          background: var(--ember-text);
+        }
+
+        #chatTool .scout-chat-work-card__open {
+          min-height: 40px;
+          padding: 0 12px;
+          border: 1px solid var(--line-1);
+          border-radius: 12px;
+          background: var(--surface-1);
+          color: var(--text-1);
+          font: var(--type-caption-medium);
+          cursor: pointer;
+          transition: background-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        }
+
+        #chatTool .scout-chat-work-card__open:hover { background: var(--surface-3); }
+        #chatTool .scout-chat-work-card__open:active { transform: scale(0.96); }
+        #chatTool .scout-chat-work-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
         #chatTool .scout-chat-destination {
           align-self: center;
+          width: min(1120px, calc(100% - 56px));
+          max-width: none;
+          box-sizing: border-box;
+          justify-content: flex-start;
+          margin-left: auto;
+          margin-right: auto;
           min-height: 30px;
           margin-bottom: 7px;
           border-color: transparent;
@@ -14106,6 +14424,10 @@
 
         #chatTool .scout-chat-form {
           position: relative;
+          width: min(1120px, calc(100% - 56px));
+          box-sizing: border-box;
+          margin-left: auto;
+          margin-right: auto;
           margin-top: 0;
           margin-bottom: 18px;
           min-height: 56px;
@@ -14117,6 +14439,11 @@
             0 0 0 1px rgba(0, 0, 0, 0.07),
             0 1px 2px -1px rgba(0, 0, 0, 0.08),
             0 10px 28px rgba(0, 0, 0, 0.1);
+        }
+
+        #chatTool .chat-conversation[data-audience="private"] .scout-chat-destination,
+        #chatTool .chat-conversation[data-audience="private"] .scout-chat-form {
+          width: min(880px, calc(100% - 56px));
         }
 
         [data-theme="dark"] #chatTool .scout-chat-form {
@@ -14211,9 +14538,134 @@
           outline: 2px solid var(--ring);
           outline-offset: 2px;
         }
-      }
+	      }
 
-      @media (min-width: 1280px) {
+	      /* The same outcome-first work card is used at every responsive width.
+	         Desktop opens the shared inspector; narrow layouts disclose the same
+	         plain-language activity inline without falling back to goal/runtime UI. */
+	      #chatTool .scout-chat-work-card {
+	        width: min(var(--desktop-chat-work-measure, 760px), 100%);
+	        align-self: center;
+	        display: grid;
+	        grid-template-columns: 38px minmax(0, 1fr) auto;
+	        align-items: center;
+	        gap: 12px;
+	        padding: 13px 14px;
+	        border: 1px solid var(--line-1);
+	        border-radius: 18px;
+	        background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+	        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.055);
+	        color: var(--text-1);
+	      }
+
+	      #chatTool .scout-chat-work-card__mark {
+	        width: 38px;
+	        height: 38px;
+	        display: inline-grid;
+	        place-items: center;
+	        border-radius: 13px;
+	        background: var(--ember-soft);
+	        color: var(--ember-text);
+	        font: 650 16px/1 var(--font-sans);
+	      }
+
+	      #chatTool .scout-chat-work-card__copy {
+	        min-width: 0;
+	        display: grid;
+	        gap: 3px;
+	      }
+
+	      #chatTool .scout-chat-work-card__eyebrow {
+	        color: var(--text-3);
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        text-transform: uppercase;
+	      }
+
+	      #chatTool .scout-chat-work-card__title {
+	        display: -webkit-box;
+	        -webkit-box-orient: vertical;
+	        -webkit-line-clamp: 2;
+	        overflow: hidden;
+	        white-space: normal;
+	        font: 600 14px/1.35 var(--font-sans);
+	      }
+
+	      #chatTool .scout-chat-work-card__meta {
+	        color: var(--text-2);
+	        font: var(--type-caption);
+	        font-variant-numeric: tabular-nums;
+	      }
+
+	      #chatTool .scout-chat-work-card__progress {
+	        width: min(280px, 48%);
+	        height: 2px;
+	        overflow: hidden;
+	        border-radius: var(--r-full);
+	        background: var(--line-1);
+	      }
+
+	      #chatTool .scout-chat-work-card__progress > span {
+	        display: block;
+	        width: var(--work-progress, 4%);
+	        height: 100%;
+	        border-radius: inherit;
+	        background: var(--ember-text);
+	      }
+
+	      #chatTool .scout-chat-work-card__open {
+	        min-height: 40px;
+	        padding: 0 12px;
+	        border: 1px solid var(--line-1);
+	        border-radius: 12px;
+	        background: var(--surface-1);
+	        color: var(--text-1);
+	        font: var(--type-caption-medium);
+	        cursor: pointer;
+	        transition: background-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+	      }
+
+	      #chatTool .scout-chat-work-card__open:hover { background: var(--surface-3); }
+	      #chatTool .scout-chat-work-card__open:active { transform: scale(0.96); }
+	      #chatTool .scout-chat-work-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+	      #chatTool .scout-chat-work-card__details {
+	        grid-column: 1 / -1;
+	        display: grid;
+	        gap: 5px;
+	        padding: 11px 12px;
+	        border-radius: 13px;
+	        background: color-mix(in srgb, var(--surface-1) 78%, transparent);
+	        color: var(--text-2);
+	        font: var(--type-caption);
+	      }
+
+	      #chatTool .scout-chat-work-card__details[hidden] { display: none; }
+	      #chatTool .scout-chat-work-card__details strong { color: var(--text-1); font: var(--type-caption-medium); }
+
+	      @media (max-width: 860px) {
+	        #chatTool .scout-chat-work-card {
+	          width: calc(100% - 24px);
+	          grid-template-columns: 38px minmax(0, 1fr);
+	          align-items: start;
+	          gap: 10px;
+	          padding: 12px;
+	          border-radius: 17px;
+	        }
+
+	        #chatTool .scout-chat-work-card__copy { grid-column: 2; }
+	        #chatTool .scout-chat-work-card__title {
+	          display: -webkit-box;
+	          -webkit-box-orient: vertical;
+	          -webkit-line-clamp: 2;
+	          white-space: normal;
+	        }
+	        #chatTool .scout-chat-work-card__meta { text-wrap: pretty; }
+	        #chatTool .scout-chat-work-card__progress { width: min(220px, 72%); }
+	        #chatTool .scout-chat-work-card__open { grid-column: 2; justify-self: start; }
+	      }
+
+	      @media (min-width: 1280px) {
         #chatTool { --desktop-chat-media-measure: 920px; }
       }
 
@@ -27885,37 +28337,193 @@
       .settings-organizations__card h3 { margin: 0; text-wrap: balance; }
       .settings-organizations__card p { margin: 7px 0 0; color: var(--text-2); text-wrap: pretty; }
 
-      /* PD1: one governed top-level IA. The icon rail remains a contextual
-         Work tool switcher; planned Network/Search children do not enter it. */
+      /* PD1 shell: one global rail owns the product grammar. Work spaces are
+         subordinate to Work and appear only in its disclosed menu; the header
+         carries context, never a second destination picker. */
+      @media (min-width: 641px) {
+        #appShell.is-authed { padding-left: 136px; }
+        #appShell.is-authed .tool-rail {
+          display: flex;
+          width: 136px;
+          padding: 12px 10px;
+          align-items: stretch;
+          gap: 4px;
+          background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+          border-right-color: var(--line-1);
+          backdrop-filter: blur(24px) saturate(1.06);
+          -webkit-backdrop-filter: blur(24px) saturate(1.06);
+        }
+        #appShell.is-authed .tool-rail > .topbar__mark {
+          display: inline-flex;
+          width: 100%;
+          height: 48px;
+          margin: 0 0 10px;
+        }
+        #appShell.is-authed .topbar__brand-wordmark,
+        #appShell.is-authed .topbar__identity-divider { display: none; }
+        #appShell.is-authed .topbar__organization-menu { left: 0; }
+        #appShell.is-authed .tool-rail__utilities {
+          display: grid;
+          width: 100%;
+          gap: 2px;
+          padding-top: 10px;
+          border-top: 1px solid var(--line-1);
+        }
+        #appShell.is-authed .tool-rail__utilities > .tool-rail__tool,
+        #appShell.is-authed .tool-rail__account,
+        #appShell.is-authed .tool-rail__account-button {
+          width: 100%;
+          min-width: 0;
+          height: 42px;
+          margin: 0;
+        }
+        #appShell.is-authed .tool-rail__utilities > .tool-rail__tool,
+        #appShell.is-authed .tool-rail__account-button {
+          justify-content: flex-start;
+          gap: 8px;
+          padding: 0 9px;
+        }
+        #appShell.is-authed .tool-rail__utilities .tool-rail__label {
+          position: static;
+          min-width: 0;
+          overflow: hidden;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          box-shadow: none;
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+          color: inherit;
+          font: 600 11px/1.15 var(--font-sans);
+          letter-spacing: -0.005em;
+          text-transform: none;
+          text-overflow: ellipsis;
+          opacity: 1;
+          translate: none;
+        }
+        #appShell.is-authed .tool-rail__utilities .tool-rail__theme svg {
+          left: 9px;
+          transform: translate(0, -50%) scale(1);
+        }
+        #appShell.is-authed .tool-rail__utilities .tool-rail__theme .tool-rail__icon--sun,
+        [data-theme="light"] #appShell.is-authed .tool-rail__utilities .tool-rail__theme .tool-rail__icon--sun {
+          transform: translate(0, -50%) scale(.25);
+        }
+        [data-theme="dark"] #appShell.is-authed .tool-rail__utilities .tool-rail__theme .tool-rail__icon--sun {
+          transform: translate(0, -50%) scale(1);
+        }
+        [data-theme="dark"] #appShell.is-authed .tool-rail__utilities .tool-rail__theme .tool-rail__icon--moon {
+          transform: translate(0, -50%) scale(.25);
+        }
+        #appShell.is-authed .tool-rail__utilities .tool-rail__theme .tool-rail__label {
+          margin-left: 25px;
+        }
+        #appShell.is-authed .tool-rail__account-button .topbar__avatar {
+          flex: 0 0 auto;
+          width: 28px;
+          height: 28px;
+        }
+      }
       .pd1-primary-nav {
         display: flex;
+        flex-direction: column;
         align-items: center;
         gap: var(--sp-1);
         min-width: 0;
-        padding: var(--sp-1);
-        overflow-x: auto;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-2);
-        scrollbar-width: none;
+        width: 100%;
+        padding: 0;
+        overflow: visible;
       }
-      .pd1-primary-nav::-webkit-scrollbar { display: none; }
       .pd1-primary-nav__item {
-        display: inline-flex;
+        position: relative;
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) 10px;
         align-items: center;
-        justify-content: center;
-        min-width: 40px;
-        min-height: 40px;
-        padding: 0 var(--sp-3);
-        border-radius: var(--r-full);
+        gap: 8px;
+        width: 100%;
+        min-width: 0;
+        min-height: 46px;
+        padding: 0 9px;
+        border: 1px solid transparent;
+        border-radius: 14px;
         color: var(--text-2);
-        font: var(--type-caption-medium);
+        font: 600 11px/1.15 var(--font-sans);
+        letter-spacing: -0.005em;
+        text-align: left;
         white-space: nowrap;
-        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        transition:
+          background-color var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
       }
+      .pd1-primary-nav__item > svg:not(.pd1-primary-nav__disclosure) { width: 18px; height: 18px; }
+      .pd1-primary-nav__item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .pd1-primary-nav__item:not([data-pd1-destination="Work"]) { grid-template-columns: 18px minmax(0, 1fr); }
+      .pd1-primary-nav__disclosure { width: 10px; height: 10px; transition: transform var(--dur-fast) var(--ease); }
+      .pd1-primary-nav__item[aria-expanded="true"] .pd1-primary-nav__disclosure { transform: rotate(90deg); }
       .pd1-primary-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
       .pd1-primary-nav__item:active { transform: scale(var(--press-scale)); }
-      .pd1-primary-nav__item[aria-current="page"] { background: var(--text-1); color: var(--surface-1); }
+      .pd1-primary-nav__item[aria-current="page"] {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-1);
+      }
+      .pd1-primary-nav__item[aria-current="page"]::before {
+        content: '';
+        position: absolute;
+        inset: 12px auto 12px -5px;
+        width: 2px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+      }
+
+      .work-tool-menu {
+        position: absolute;
+        z-index: 320;
+        top: 116px;
+        left: calc(100% + 8px);
+        display: grid;
+        width: 226px;
+        gap: 3px;
+        padding: 8px;
+        border: 1px solid color-mix(in srgb, var(--line-1) 88%, transparent);
+        border-radius: 18px;
+        background: var(--surface-1);
+        box-shadow: var(--glass-highlight), 0 18px 52px rgb(0 0 0 / 0.16);
+        backdrop-filter: blur(24px) saturate(1.08);
+        -webkit-backdrop-filter: blur(24px) saturate(1.08);
+      }
+      .work-tool-menu[hidden] { display: none; }
+      .work-tool-menu .tool-rail__slot { display: block; width: 100%; }
+      .work-tool-menu .tool-rail__slot[hidden],
+      .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="office"]),
+      .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="network"]) { display: none !important; }
+      .work-tool-menu .tool-rail__tool {
+        width: 100%;
+        height: 42px;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 0 11px;
+        border-radius: 12px;
+      }
+      .work-tool-menu .tool-rail__tool:hover { transform: none; background: var(--surface-3); color: var(--text-1); }
+      .work-tool-menu .tool-rail__tool:active { transform: scale(var(--press-scale)); }
+      .work-tool-menu .tool-rail__tool[data-tool][aria-pressed="true"]::after { left: 4px; }
+      .work-tool-menu .tool-rail__label {
+        position: static;
+        translate: none;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        color: inherit;
+        font: var(--type-caption-medium);
+        text-transform: none;
+        opacity: 1;
+      }
 
       .pd1-destination-surface {
         grid-area: workspace;
@@ -27928,7 +28536,9 @@
       }
       #appShell[data-pd1-surface] .workspace { display: none !important; }
       #appShell[data-pd1-surface] .pd1-destination-surface { display: grid; }
-      #appShell:not([data-pd1-destination="Work"]) .tool-rail { display: none !important; }
+      #appShell:not([data-pd1-destination="Work"]) .work-tool-menu { display: none !important; }
+      #appShell[data-pd1-destination="Work"] .topbar__context-divider,
+      #appShell[data-pd1-destination="Work"] .topbar__context { display: none; }
       .pd1-destination-state {
         display: none;
         width: min(100%, 660px);
@@ -27979,10 +28589,8 @@
          Its legacy route remains deep-link compatible and server-gated. */
       .tool-rail__slot:has(.tool-rail__tool[data-tool="network"]) { display: none; }
       @media (max-width: 760px) {
-        #appShell.is-authed { --shell-topbar-height: calc(112px + env(safe-area-inset-top, 0px)); }
-        #appShell.is-authed .topbar { flex-wrap: wrap; align-content: center; }
-        .pd1-primary-nav { order: 20; flex: 1 0 100%; justify-content: flex-start; }
-        .pd1-primary-nav__item { min-height: 44px; padding-inline: var(--sp-3); }
+        #appShell.is-authed { --shell-topbar-height: calc(60px + env(safe-area-inset-top, 0px)); }
+        .pd1-primary-nav__item { min-height: 44px; }
         .pd1-destination-surface { padding: var(--sp-4); padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
         .pd1-destination-state { padding: var(--sp-5); border-radius: var(--r-lg); }
         .stride-w2 { inset: 60px 0 0; display: block; overflow-y: auto; padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
@@ -28008,6 +28616,31 @@
         .stride-w2__pending { left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); grid-template-columns: 1fr 1fr; width: auto; }
         .stride-w2__pending-copy { grid-column: 1 / -1; }
       }
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
+        #appShell.is-authed { padding-left: 0; }
+        .pd1-primary-nav { flex-direction: row; width: auto; gap: 4px; }
+        .pd1-primary-nav__item,
+        .pd1-primary-nav__item:not([data-pd1-destination="Work"]) {
+          display: inline-grid;
+          grid-template-columns: 1fr;
+          width: 44px;
+          min-width: 44px;
+          height: 44px;
+          padding: 0;
+          border-radius: 50%;
+          place-items: center;
+        }
+        .pd1-primary-nav__item > span,
+        .pd1-primary-nav__disclosure { display: none; }
+        .pd1-primary-nav__item[aria-current="page"]::before { display: none; }
+        .work-tool-menu {
+          position: fixed;
+          inset: auto 12px calc(82px + env(safe-area-inset-bottom)) 12px;
+          width: auto;
+          max-height: min(420px, calc(100svh - 180px));
+          overflow-y: auto;
+        }
+      }
       @media (prefers-reduced-motion: reduce) {
         .topbar__mark.is-wake .topbar__wordmark,
         .voice-island.is-wake .bf-wave-bar,
@@ -28020,93 +28653,120 @@
   </head>
   <body>
     <main id="appShell" data-tool="office" data-pd1-destination="Home">
-      <nav id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden>
+      <aside id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden>
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
           <span class="wordmark topbar__wordmark" aria-hidden="true"></span>
         </span>
+        <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-current="page" tabindex="0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+            <span>Home</span>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 5V3h8v2M3 10h18"></path></svg>
+            <span>Work</span>
+            <svg class="pd1-primary-nav__disclosure" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 3 3-3 3"></path></svg>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-current="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="7" r="2"></circle><circle cx="19" cy="7" r="2"></circle><circle cx="5" cy="18" r="2"></circle><circle cx="19" cy="18" r="2"></circle><path d="m7 8 3 2M17 8l-3 2M7 17l3-3M17 17l-3-3"></path></svg>
+            <span>Network</span>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-current="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
+            <span>Work Search</span>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-current="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
+            <span>You</span>
+          </button>
+        </nav>
+        <div id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces" hidden>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Stride home" aria-pressed="true">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="office" aria-label="Stride home" aria-pressed="true" aria-checked="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
             <span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="The room" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="room" aria-label="Meetings" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
-            <span class="tool-rail__label">the room</span>
+            <span class="tool-rail__label">meetings</span>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
           <span id="roomRailUnread" class="tool-rail__unread" aria-hidden="true" hidden>0</span>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="chat" aria-label="Conversations" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
-            <span class="tool-rail__label">chat</span>
+            <span class="tool-rail__label">conversations</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Intelligence" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="artifacts" aria-label="Work library" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>
-            <span class="tool-rail__label">intel</span>
+            <span class="tool-rail__label">work library</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="research" aria-label="Research" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="design" aria-label="Design" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="grill" aria-label="Grill mode" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
             <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" aria-pressed="false">
+          <button id="toolBoard" class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="board" aria-label="Projects" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 5v11"></path><path d="M12 5v6"></path><path d="M18 5v14"></path></svg>
-            <span class="tool-rail__label">board</span>
+            <span class="tool-rail__label">projects</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Memory" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
             <span class="tool-rail__label">memory</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="files" aria-label="Drive" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="files" aria-label="Files" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
-            <span class="tool-rail__label">drive</span>
+            <span class="tool-rail__label">files</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="network" aria-label="Work network" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="network" aria-label="Work network" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="6" r="3"></circle><circle cx="5" cy="17" r="3"></circle><circle cx="19" cy="17" r="3"></circle><path d="m10.4 8.6-3.8 5.8"></path><path d="m13.6 8.6 3.8 5.8"></path><path d="M8 17h8"></path></svg>
             <span class="tool-rail__label">network</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="team" aria-label="Agent team and Marketplace" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="team" aria-label="Agent team" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19v-1.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V19"></path><circle cx="17.5" cy="9" r="2.5"></circle><path d="M15.5 14.4A4 4 0 0 1 21 18v1"></path></svg>
             <span class="tool-rail__label">team</span>
           </button>
         </span>
+        </div>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
+        <div class="tool-rail__utilities" aria-label="Account and display controls">
         <button id="notificationBell" class="tool-rail__tool tool-rail__bell" type="button" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
-          <span class="tool-rail__label">alerts</span>
+          <span class="tool-rail__label">Notifications</span>
           <span id="notificationBadge" class="chat-thread-item__unread notification-bell__unread" hidden>0</span>
         </button>
         <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false">
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+          <span class="tool-rail__label">Appearance</span>
         </button>
         <span id="topbarAccount" class="tool-rail__slot tool-rail__account" hidden>
           <button id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings">
@@ -28141,7 +28801,8 @@
             </div>
           </section>
         </span>
-      </nav>
+        </div>
+      </aside>
       <header class="topbar mount-stagger">
         <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to Stride">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
@@ -28149,28 +28810,23 @@
         <div class="topbar__brand-lockup" aria-label="Stride · organization workspace">
           <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
           <span class="topbar__identity-divider" aria-hidden="true"></span>
-          <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Organizations unavailable · open organization settings">
-            <span id="topbarOrganizationMark" class="topbar__organization-mark" aria-hidden="true">—</span>
-            <span class="topbar__organization-copy">
-              <span id="topbarOrganizationRole" class="topbar__organization-label">not loaded</span>
-              <strong id="topbarOrganizationName" class="topbar__organization-name">Organization unavailable</strong>
-              <span id="topbarOrganizationCount" class="topbar__organization-meta">0 of 3 active</span>
-            </span>
-            <span id="topbarOrganizationPending" class="topbar__organization-pending" aria-label="0 pending requests" hidden>0</span>
+          <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Choose organization" aria-haspopup="menu" aria-expanded="false">
+            <strong id="topbarOrganizationName" class="topbar__organization-name">Organizations</strong>
+            <svg class="topbar__organization-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
           </button>
+          <div id="topbarOrganizationMenu" class="topbar__organization-menu" role="menu" aria-label="Organizations" hidden>
+            <div id="topbarOrganizationMenuItems" class="topbar__organization-menu-items"></div>
+            <button id="topbarOrganizationCreate" class="topbar__organization-menu-action" type="button" role="menuitem">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"></path></svg>
+              <span>Create organization</span>
+            </button>
+          </div>
         </div>
         <span class="topbar__context-divider" aria-hidden="true"></span>
         <div class="topbar__context">
           <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
           <span id="topbarSubtitle" class="topbar__subtitle"></span>
         </div>
-        <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-current="page" tabindex="0">Home</button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-current="false" tabindex="-1">Work</button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-current="false" tabindex="-1">Network</button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-current="false" tabindex="-1">Work Search</button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-current="false" tabindex="-1">You</button>
-        </nav>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true">·</span>
@@ -28810,7 +29466,7 @@
             </div>
             <p class="scout-private-caption">private · voice and chat route Scout work here</p>
             <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
-              <p class="scout-chat-empty">ask Scout about any meeting — only you can see this</p>
+              <div class="scout-chat-empty"></div>
               <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
                 <svg class="scout-chat-thinking__flame" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
@@ -28845,12 +29501,6 @@
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path>
-                </svg>
-              </button>
-              <button id="scoutChatToolsBtn" class="scout-chat-tools" type="button" aria-label="Run a task or tool" aria-haspopup="dialog" title="Run a task or tool (or type /)" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 5v14"></path>
-                  <path d="M5 12h14"></path>
                 </svg>
               </button>
               <button id="scoutChatDeliverables" class="scout-chat-attach" type="button" aria-label="Attach a deliverable for feedback" aria-haspopup="listbox" title="Attach a deliverable for feedback" disabled>
@@ -30537,6 +31187,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
       const pd1PrimaryNav = document.getElementById('pd1PrimaryNav')
       const pd1DestinationButtons = Array.from(pd1PrimaryNav.querySelectorAll('[data-pd1-destination]'))
+      const workDestinationButton = pd1PrimaryNav.querySelector('[data-pd1-destination="Work"]')
+      const workToolMenu = document.getElementById('workToolMenu')
       const pd1DestinationSurface = document.getElementById('pd1DestinationSurface')
       const pd1OpenProfileSettings = document.getElementById('pd1OpenProfileSettings')
       const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))
@@ -30827,7 +31479,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const scoutChatDestination = document.getElementById('scoutChatDestination')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
-	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
 	      const chatNewThread = document.getElementById('chatNewThread')
@@ -31161,19 +31812,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatContextState = null
 	      let chatContextReturnFocus = null
 	      let chatContextGeneration = 0
+	      let chatContextReplyAttempt = null
 	      let pendingScoutFiles = []
 	      let pendingDesktopReplyFiles = []
 	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
 	      // next send re-runs that artifact in place via followUpArtifactId
 	      let scoutFollowUpTarget = null
-	      // armed palette tool template (fidelity fix): the palette's
-	      // conversational tiles stash {toolId, name, threadId} here so the next
-	      // send in THAT thread carries it and the launched workstream inherits
-	      // the tool's contract + rubric. Scoped + rendered as a visible chip
-	      // (renderScoutFollowUpTarget, mirroring scoutFollowUpTarget) so a
-	      // forgotten armed template can never silently hijack an unrelated
-	      // later message into a contract-gated agent launch.
-	      let pendingScoutToolTemplate = null
 	      let chatThreadPollTimer = 0
 	      // current poll cadence in ms — the interval is rebuilt whenever the
 	      // wanted cadence changes (15s on the chat tool, 45s elsewhere)
@@ -32162,23 +32806,56 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       })
       toolButtons.forEach(button => {
-        button.addEventListener('click', () => setActiveTool(button.dataset.tool))
+        button.addEventListener('click', () => {
+          setWorkToolMenuOpen(false)
+          setActiveTool(button.dataset.tool)
+        })
       })
       pd1DestinationButtons.forEach(button => {
-        button.addEventListener('click', () => selectPD1Destination(button.dataset.pd1Destination))
+        button.addEventListener('click', event => {
+          const destination = button.dataset.pd1Destination
+          if (destination === 'Work' && appShell.dataset.pd1Destination === 'Work') {
+            setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })
+            return
+          }
+          selectPD1Destination(destination)
+        })
       })
       pd1PrimaryNav.addEventListener('keydown', event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        const horizontal = window.matchMedia('(max-width: 640px)').matches
+        const previousKey = horizontal ? 'ArrowLeft' : 'ArrowUp'
+        const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown'
+        if (![previousKey, nextKey, 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
         const current = Math.max(0, pd1DestinationButtons.indexOf(document.activeElement))
         const next = event.key === 'Home'
           ? 0
           : event.key === 'End'
             ? pd1DestinationButtons.length - 1
-            : (current + (event.key === 'ArrowRight' ? 1 : -1) + pd1DestinationButtons.length) % pd1DestinationButtons.length
+            : (current + (event.key === nextKey ? 1 : -1) + pd1DestinationButtons.length) % pd1DestinationButtons.length
         const button = pd1DestinationButtons[next]
         selectPD1Destination(button.dataset.pd1Destination, { focus: false })
         button.focus()
+      })
+      workToolMenu?.addEventListener('keydown', event => {
+        const buttons = Array.from(workToolMenu.querySelectorAll('button[data-tool]:not([disabled])')).filter(button => button.offsetParent !== null)
+        if (!buttons.length) return
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setWorkToolMenuOpen(false, { restoreFocus: true })
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const current = Math.max(0, buttons.indexOf(document.activeElement))
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+        buttons[next].focus()
+      })
+      document.addEventListener('pointerdown', event => {
+        if (!workToolMenu?.hidden && !workToolMenu.contains(event.target) && !workDestinationButton?.contains(event.target)) setWorkToolMenuOpen(false)
+      }, true)
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !workToolMenu?.hidden) setWorkToolMenuOpen(false, { restoreFocus: true })
       })
       pd1OpenProfileSettings.addEventListener('click', () => openSettings({ section: 'profile', restoreFocusTo: pd1OpenProfileSettings, allowLocked: true }))
       officeToolButtons.forEach(button => {
@@ -32540,13 +33217,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       artifactShareButton?.addEventListener('click', toggleArtifactSharePanel)
       scoutChatInput.addEventListener('input', () => {
         resizeScoutChatInput()
-        // emptying the composer abandons a palette-armed tool template: the
-        // armed intent died with the cleared starter text, so a later plain
-        // message must not launch the tool
-        if (pendingScoutToolTemplate && !scoutChatInput.value.trim()) {
-          pendingScoutToolTemplate = null
-          renderScoutFollowUpTarget()
-        }
       })
       scoutChatInput.addEventListener('keydown', event => {
         // Never send mid-IME-composition: the Enter that confirms a
@@ -34390,7 +35060,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncAudioSettingsForAccount()
           renderLoginMode()
           saveCachedIdentity(authedUser.name)
-	          setActiveTool('office')
+	          // renderLoginMode() already restored the canonical destination for
+	          // the current path. Do not force Home here: a member signing in on
+	          // /work must land in Work with the chat surface and destination in
+	          // agreement.
+	          syncAuthenticatedShell()
 	          loadScoutChatThreads()
 	          // fresh sign-in hydrates the lobby + home strip immediately —
 	          // never an empty rooms surface until reload
@@ -37215,14 +37889,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const next = PD1_DESTINATIONS.includes(destination) ? destination : 'Home'
         appShell.dataset.pd1Destination = next
         const workContext = next === 'Work'
-        toolRail.hidden = !workContext
-        toolRail.inert = !workContext
-        toolRail.setAttribute('aria-hidden', workContext ? 'false' : 'true')
+        const shellVisible = appShell.classList.contains('is-authed') && !appShell.classList.contains('is-guest')
+        toolRail.hidden = !shellVisible
+        toolRail.inert = !shellVisible
+        toolRail.setAttribute('aria-hidden', shellVisible ? 'false' : 'true')
+        if (!workContext) setWorkToolMenuOpen(false)
         pd1DestinationButtons.forEach(button => {
           const current = button.dataset.pd1Destination === next
           button.setAttribute('aria-current', current ? 'page' : 'false')
           button.tabIndex = current ? 0 : -1
         })
+      }
+
+      function setWorkToolMenuOpen(open, options = {}) {
+        if (!workToolMenu || !workDestinationButton) return false
+        const next = Boolean(open && appShell.dataset.pd1Destination === 'Work')
+        workToolMenu.hidden = !next
+        workDestinationButton.setAttribute('aria-expanded', next ? 'true' : 'false')
+        if (next && options.focusFirst) {
+          requestAnimationFrame(() => Array.from(workToolMenu.querySelectorAll('button[data-tool]:not([disabled])')).find(button => button.offsetParent !== null)?.focus({ preventScroll: true }))
+        }
+        if (!next && options.restoreFocus) workDestinationButton.focus({ preventScroll: true })
+        return next
       }
 
       function clearPD1DestinationSurface() {
@@ -37246,6 +37934,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function selectPD1Destination(destination, options = {}) {
         if (!PD1_DESTINATIONS.includes(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
         if (!closePD1OverlaysForNavigation()) return false
+        setWorkToolMenuOpen(false)
         const path = PD1_PATHS[destination]
         if (options.push !== false && location.pathname !== path) {
           history.pushState({ view: 'pd1', destination }, '', path)
@@ -37304,7 +37993,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           stopGreenRoomPreview()
         }
         toolButtons.forEach(button => {
-          button.setAttribute('aria-pressed', button.dataset.tool === tool ? 'true' : 'false')
+          const active = button.dataset.tool === tool
+          button.setAttribute('aria-pressed', active ? 'true' : 'false')
+          if (button.getAttribute('role') === 'menuitemradio') button.setAttribute('aria-checked', active ? 'true' : 'false')
         })
         syncToolTopbar()
         applyStatusPillForTool()
@@ -38560,8 +39251,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (worker === 'codex_exec') return 'Codex worker'
         if (worker === 'openai_text_response') return 'Scout writer'
         // model identity in the reader's voice, matching the chat letter header
-        // ("claude · fable 5") — never a raw worker slug like "anthropic fable"
-        if (/fable/i.test(worker)) return 'claude · fable 5'
+        // Historical artifacts may retain the retired worker slug. Label the
+        // provenance honestly without presenting it as a current route.
+        if (/fable/i.test(worker)) return 'historical · claude fable 5'
         return worker ? worker.replace(/_/g, ' ') : 'Scout'
       }
 
@@ -41367,7 +42059,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         let output = { ok: false, error: 'tool request failed' }
         try {
-          const response = await postAuthJSON('/assistant/realtime-tool', { name, arguments: args })
+          const response = await postAuthJSON('/assistant/realtime-tool', { callId, name, arguments: args })
           output = response.data?.result || { ok: Boolean(response.ok) }
           if (!response.ok && !output.error) {
             output.error = response.data?.error || 'tool request failed'
@@ -47627,7 +48319,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       const osEventHandlers = []
 
       function osEventsKey(event) {
-        return `${event?.kind || ''}|${event?.ref || ''}|${event?.at || ''}`
+	        return event?.deliveryId || `${event?.kind || ''}|${event?.ref || ''}|${event?.at || ''}`
       }
 
       // Rich-consumer fetches coalesce: a burst of completions/advances off-room
@@ -50282,11 +50974,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatAttach) {
 	          scoutChatAttach.disabled = !Boolean(authedUser)
 	        }
-	        if (scoutChatToolsBtn) {
-	          // the palette + /goal launch work for any signed-in user off-room
-	          // (POST /assistant/goal needs no room join); only sign-in gates it.
-	          scoutChatToolsBtn.disabled = !Boolean(authedUser)
-	        }
 	        if (scoutChatDeliverables) {
 	          scoutChatDeliverables.disabled = !Boolean(authedUser)
 	        }
@@ -50464,6 +51151,39 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !seen || updated > seen
 	      }
 
+	      // Render-only local regression fixture for the founder-rejected deck
+	      // request. The production/server route is exercised separately by
+	      // TestConversationPresentationRequestShowsOnePremiumWorkCardNotInternalProcessCopy;
+	      // this loopback-only projection makes that exact durable result available
+	      // for screenshot QA without a provider key or a second implementation.
+	      function pd1PresentationWorkFixtureThread() {
+	        const params = new URLSearchParams(location.search)
+	        if (!['localhost', '127.0.0.1'].includes(location.hostname) || params.get('pd1PresentationFixture') !== '1') return null
+	        const request = 'Can you make a 10 slide deck pitching me this platform?'
+	        const objective = 'Create a polished 10-slide pitch deck for the STRIDE platform'
+	        return {
+	          id: 'pd1-presentation-work-fixture',
+	          title: 'Pitch the STRIDE platform',
+	          preview: 'Presentation in progress',
+	          ownerEmail: 'aj@shareability.com',
+	          createdBy: 'AJ',
+	          visibility: 'private',
+	          createdAt: '2026-08-11T17:31:00Z',
+	          updatedAt: '2026-08-11T17:32:00Z',
+	          messages: [
+	            { id: 'pd1-presentation-request', kind: 'message', role: 'user', text: request, authorName: 'AJ', authorEmail: 'aj@shareability.com', createdAt: '2026-08-11T17:31:00Z' },
+	            {
+	              id: 'pd1-presentation-work-card', kind: 'thread', role: 'scout', text: 'Presentation in progress', authorName: 'Scout',
+	              intentOutcome: 'start_private_work', causedByMessageId: 'pd1-presentation-request', createdAt: '2026-08-11T17:32:00Z',
+	              thread: {
+	                id: 'pd1-presentation-run', mode: 'goal', query: objective, status: 'running', artifactId: 'pd1-presentation-artifact',
+	                agentName: 'Scout', currentStage: 'identify_goal', progressPercent: 4, progressNote: 'Shaping the deck brief', startedAt: '2026-08-11T17:32:00Z'
+	              }
+	            }
+	          ]
+	        }
+	      }
+
 	      async function loadScoutChatThreads(options = {}) {
 	        if (!authedUser) {
 	          resetPersistedScoutChatState()
@@ -50475,13 +51195,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            return
 	          }
 	          const payload = await response.json()
-	          const threads = Array.isArray(payload?.threads) ? payload.threads : []
+	          const presentationFixture = pd1PresentationWorkFixtureThread()
+	          const threads = presentationFixture ? [presentationFixture] : (Array.isArray(payload?.threads) ? payload.threads : [])
 	          const fingerprint = chatThreadsListFingerprint(threads)
 	          if (options.onlyIfChanged && fingerprint === chatThreadsFingerprint) {
 	            return
 	          }
 	          chatThreadsFingerprint = fingerprint
 	          scoutChatThreads = threads
+	          if (presentationFixture) activeScoutThreadId = presentationFixture.id
 	          if (!activeScoutThreadId || !scoutChatThreads.some(thread => thread.id === activeScoutThreadId)) {
 	            // auto-select only a thread matching the current scope pill —
 	            // landing a public channel under the 'private' filter would
@@ -50490,6 +51212,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	          renderChatAgentThreads()
 	          renderActiveScoutThread()
+	          // The compact work bar depends on the desktop media-query binding
+	          // and the newly selected thread. Reconcile once after the list and
+	          // feed have both committed so a boot-time work card cannot remain
+	          // hidden until the next socket event.
+	          window.requestAnimationFrame(syncDesktopActiveWorkIndicator)
 	          renderOfficeRecentThreads()
 	        } catch {
 	          // Persistent chat can refresh again; keep the current in-memory view.
@@ -50665,29 +51392,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
-	        const armedTemplate = pendingScoutToolTemplate && (!pendingScoutToolTemplate.threadId || pendingScoutToolTemplate.threadId === activeScoutThreadId)
-	          ? pendingScoutToolTemplate
-	          : null
-	        // an ARMED send launches the tool with this text as its objective —
-	        // the untouched starter prefill ("Turn this into a goal workflow: ")
-	        // is not an objective. Block the send and keep the template armed
-	        // (this also catches a real user hitting enter on the prefill).
-	        if (armedTemplate && trimmed === String(armedTemplate.prefill || '').trim()) {
-	          appendScoutChatHintChip('describe what the tool should work on')
-	          if (scoutChatInput && !scoutChatInput.disabled) scoutChatInput.focus()
-	          return false
-	        }
-	        // capture-and-clear the palette-armed tool template: it rides this
-	        // send only, so an error or a later plain message never re-fires it.
-	        // A template armed for another thread is dropped instead of firing
-	        // here (the scoutFollowUpTarget scoping rule).
-	        const toolTemplate = armedTemplate ? String(armedTemplate.toolId || '') : ''
-	        pendingScoutToolTemplate = null
-	        renderScoutFollowUpTarget()
 	        if (authedUser) {
 	          pendingScoutFiles = []
 	          renderPendingScoutFiles()
-	          sendScoutChatViaOffice(trimmed, files, toolTemplate)
+	          sendScoutChatViaOffice(trimmed, files)
 	          return true
 	        }
 	        if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -50704,7 +51412,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return true
 	      }
 
-	      async function sendScoutChatViaOffice(text, files = [], toolTemplate = '') {
+	      async function sendScoutChatViaOffice(text, files = []) {
 	        // capture-and-clear the armed follow-up target at entry so an error
 	        // can never leave a stale armed chip; a target armed on another
 	        // thread's card is dropped instead of mis-firing here
@@ -50729,16 +51437,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Channel agent launches additionally require an explicit "mode:"
 	        // prefix — conversational keywords must not read as a launch. A
 	        // follow-up target counts as explicit engagement (no @scout needed).
-	        // An armed tool template is an explicit palette invocation — like a
-	        // follow-up target it engages Scout regardless of channel visibility.
 	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
-	        const scoutEngaged = Boolean(followUp) || Boolean(toolTemplate) || !isChannel || /@scout/i.test(text)
+	        const scoutEngaged = Boolean(followUp) || !isChannel || /@scout/i.test(text)
 	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
 	        // Private threads never keyword-launch anymore (the propose-confirm
 	        // router replaced scoutChatThreadModeForText server-side), so the
 	        // "launching workstream" label only applies to explicit channel
-	        // prefixes and armed tool templates.
-	        const threadMode = followUp ? '' : toolTemplate ? 'tool' : !scoutEngaged ? '' : channelPrefixMode
+	        // prefixes.
+	        const threadMode = followUp ? '' : !scoutEngaged ? '' : channelPrefixMode
 	        if (scoutEngaged) {
 	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}` : threadMode ? 'launching workstream' : 'thinking')
 	        }
@@ -50749,12 +51455,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const hadPlaceholderTitle = !chatThreadIsChannel(thread) && chatThreadTitleIsPlaceholder(thread)
 	          const messagePayload = followUp
 	            ? { text, files, followUpArtifactId: followUp.artifactId }
-	            : toolTemplate
-	              ? { text, files, toolTemplate }
-	              : { text, files }
-	          if (toolTemplate === 'economics_waterfall') {
-	            messagePayload.operationId = globalThis.crypto?.randomUUID?.() || `workbook-${Date.now()}-${Math.random().toString(16).slice(2)}`
-	          }
+	            : { text, files }
+	          messagePayload.operationId = globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`
 	          if (replyTarget?.messageId) {
 	            messagePayload.replyToMessageId = replyTarget.messageId
 	          }
@@ -50768,7 +51470,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          try {
 	            response = await postMessage()
 	          } catch (error) {
-	            if (toolTemplate !== 'economics_waterfall') throw error
+	            // The operation id is bound to the exact request body, so a lost
+	            // response can retry once without re-routing or duplicating work.
 	            response = await postMessage()
 	          }
 	          const payload = await response.json().catch(() => ({}))
@@ -51250,7 +51953,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        return chatThreadIsChannel(thread)
 	          ? (isPhone ? 'message…' : 'message the channel')
-	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'}, or tap + to run a task`)
+	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'} anything`)
 	      }
 
 	      function scoutChatDirectAgentName(thread) {
@@ -51264,43 +51967,44 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      // card 070: destination guard — a persistent pill naming where the next
-	      // send lands. A public channel reads hot ("everyone in the office"); a
-	      // private thread reads calm ("private to you"). The composer's aria-label
-	      // follows so screen readers hear the true audience, not a stale "privately".
+	      // send lands. The Table names the whole office, a project names only
+	      // its members, and a private thread names its one human audience. The
+	      // composer's aria-label follows so screen readers hear the true ACL.
 	      function renderScoutChatDestination() {
 	        if (!scoutChatDestination) {
 	          return
 	        }
 	        const thread = selectedScoutChatThread()
 	        const isChannel = chatThreadIsChannel(thread)
+	        const isTeam = chatThreadIsTeam(thread)
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        const privateTarget = directAgent || 'Scout'
+	        scoutPrivatePane.dataset.audience = isChannel ? 'channel' : 'private'
 	        scoutChatDestination.classList.toggle('scout-chat-destination--channel', isChannel)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--private', !isChannel)
 	        const title = chatThreadDisplayTitle(thread)
 	        scoutChatDestination.textContent = isChannel
-	          ? `→ #${title} · everyone in the office`
+	          ? `→ #${title} · ${isTeam ? 'everyone in the office' : 'project members only'}`
 	          : `→ ${privateTarget} · private to you`
 	        scoutChatDestination.hidden = false
 	        if (scoutChatInput) {
 	          scoutChatInput.setAttribute('aria-label', isChannel
-	            ? `Message #${title} — everyone in the office`
+	            ? `Message #${title} — ${isTeam ? 'everyone in the office' : 'project members only'}`
 	            : `Message ${privateTarget} privately`)
 	        }
 	      }
 
 	      // composer target chips: while armed, the next send routes through
-	      // followUpArtifactId (re-runs the target artifact in place) and/or the
-	      // palette-armed tool template (contract-gated workstream launch). Both
-	      // armed states MUST be visible + dismissible here — an invisible armed
-	      // template would silently hijack an unrelated later message.
+	      // followUpArtifactId (re-runs the target artifact in place). The armed
+	      // target is always visible and dismissible; ordinary work is selected
+	      // by the server-owned conversation router, never a client tool choice.
 	      function renderScoutFollowUpTarget() {
 	        if (!scoutFollowUpTargetEl) {
 	          return
 	        }
 	        scoutFollowUpTargetEl.replaceChildren()
-	        scoutFollowUpTargetEl.hidden = !scoutFollowUpTarget && !pendingScoutToolTemplate && !scoutChatReplyTarget
-	        if (!scoutFollowUpTarget && !pendingScoutToolTemplate && !scoutChatReplyTarget) {
+	        scoutFollowUpTargetEl.hidden = !scoutFollowUpTarget && !scoutChatReplyTarget
+	        if (!scoutFollowUpTarget && !scoutChatReplyTarget) {
 	          if (scoutChatInput) {
 	            scoutChatInput.placeholder = scoutChatDefaultPlaceholder()
 	          }
@@ -51333,17 +52037,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            'Clear follow-up target',
 	            () => {
 	              scoutFollowUpTarget = null
-	              renderScoutFollowUpTarget()
-	            }
-	          ))
-	        }
-	        if (pendingScoutToolTemplate) {
-	          const toolName = String(pendingScoutToolTemplate.name || paletteToolById(pendingScoutToolTemplate.toolId)?.name || pendingScoutToolTemplate.toolId || 'tool')
-	          scoutFollowUpTargetEl.appendChild(armedChip(
-	            `tool → ${toolName} · next send launches it`,
-	            'Clear armed tool',
-	            () => {
-	              pendingScoutToolTemplate = null
 	              renderScoutFollowUpTarget()
 	            }
 	          ))
@@ -51489,9 +52182,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!scoutChatInput.value.trim() && !pendingScoutFiles.length) {
 	          return
 	        }
-	        // /goal text door: a message whose FIRST token is exactly "/goal"
-	        // launches the same goal spec the voice initiate_goal tool emits,
-	        // scoped to this thread as its origin surface.
+	        // Legacy /goal shorthand strips only its marker, then enters the same
+	        // natural-language router as every other turn. It cannot bypass the
+	        // five-way outcome contract or select a goal/tool client-side.
 	        const goalObjective = parseGoalCommand(scoutChatInput.value)
 	        if (goalObjective !== null) {
 	          if (goalObjective) {
@@ -51527,27 +52220,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           appendScoutChatNode(scoutChatMessageNode('error', 'sign in to launch a goal', new Date().toISOString()))
           return
         }
-        const ts = new Date().toISOString()
-        appendScoutChatNode(scoutChatMessageNode('user', `/goal ${objective}`, ts))
-        updateChatThreadItem(`/goal ${objective}`, ts)
-        // The /goal text door and the quick-select palette are siblings, not
-        // rivals: both converge on runGoalPipeline → POST /assistant/goal.
-        await runGoalPipeline({ objective })
+        sendScoutChat(objective)
       }
 
       // ==================================================================
-      // Wave 11 — Quick-select tool palette + /goal running-state cards.
-      // Three doors (+ Tools button, "/" first char, Scout voice) render the
-      // same tool registry (GET /assistant/tools) and converge on
-      // runGoalPipeline. The goalcard makes the persisted 10-step loop legible.
+      // Wave 11 legacy admin/test palette + /goal running-state cards.
+      // The normal composer exposes no tool picker. Natural language goes
+      // through the shared server-owned conversation router.
       // ==================================================================
 
-      // runGoalPipeline is the single door the /goal parser, the palette Run, and
-      // (via initiate_goal) voice converge on. It POSTs the goal spec — objective
-      // plus optional toolTemplate/authorityHint/package — to /assistant/goal,
-      // scoped to the private chat thread as its origin surface, then renders the
-      // running goalcard in-thread. Keyless: the POST 503s and the honest line
-      // shows (the same door the composer /goal already used).
+      // runGoalPipeline is retained only as a compatibility shim for old local
+      // fixtures. It cannot launch a goal or select a package/output contract;
+      // the objective re-enters the same natural-language conversation router.
       async function runGoalPipeline(spec) {
         spec = spec || {}
         const objective = String(spec.objective || '').trim()
@@ -51558,45 +52242,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           appendScoutChatNode(scoutChatMessageNode('error', 'sign in to launch a goal', new Date().toISOString()))
           return
         }
-        // a Run-door launch supersedes any armed conversational template —
-        // it must not survive to hijack the next composer send
-        if (pendingScoutToolTemplate) {
-          pendingScoutToolTemplate = null
-          renderScoutFollowUpTarget()
-        }
         setActiveTool('chat')
-        showScoutChatThinking('kicking off the goal')
-        try {
-          const thread = await ensurePersistedScoutThread()
-          const body = { objective, originSurface: spec.originSurface || `chat:${thread?.id || ''}` }
-          if (spec.toolTemplate) body.toolTemplate = String(spec.toolTemplate)
-          if (spec.package) body.package = String(spec.package)
-          if (spec.authorityHint) body.authorityHint = String(spec.authorityHint)
-          const response = await fetch('/assistant/goal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          })
-          const payload = await response.json().catch(() => ({}))
-          withScoutChatThinkingHold(() => {
-            hideScoutChatThinking()
-            if (!response.ok) {
-              const message = payload.error || (response.status === 503 ? 'the goal engine is not configured here' : 'could not launch that goal')
-              appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
-              return
-            }
-            const artifact = payload.artifact || payload.thread?.artifact
-            if (artifact) {
-              addArtifactEntry(artifact, { select: false })
-              scheduleArtifactRefresh()
-              upsertGoalCardNode(artifact)
-            }
-            showToast({ text: 'goal running', kind: 'done' })
-          })
-        } catch (error) {
-          hideScoutChatThinking()
-          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not launch that goal', new Date().toISOString()))
-        }
+        return sendScoutChat(objective)
       }
 
       // ---- the tool registry, fetched once (the one taxonomy source) ---------
@@ -51737,12 +52384,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         ensurePaletteDom()
-        // re-opening the palette supersedes a previously armed conversational
-        // tool: the selection made here re-arms (or launches) explicitly
-        if (pendingScoutToolTemplate) {
-          pendingScoutToolTemplate = null
-          renderScoutFollowUpTarget()
-        }
         // Warm the packages list so the form's package picker (and the quick-run
         // default) can link a launched goal to the open/most-recent venture.
         loadPackages().catch(() => { /* the picker still offers standalone */ })
@@ -51951,7 +52592,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const objective = paletteToolObjective(tool, {})
           pushPaletteRecent(tool.id)
           closeToolPalette({ restoreComposer: false })
-          runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority, package: paletteDefaultPackageId() })
+          runGoalPipeline({ objective, package: paletteDefaultPackageId() })
           return
         }
         paletteShowForm(tool)
@@ -51963,19 +52604,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const mode = ['research', 'design', 'grill', 'workflow'].includes(tool.mode) ? tool.mode : 'research'
         // reuse the existing promptScoutForWork machinery (§1.5b, least new code)
         promptScoutForWork(mode, scoutStarterText(mode))
-        // fidelity fix (spec §2): arm tool.id so the send carries the template
-        // and the talk-it-out door gets the same contract-gated run as Run.
-        // Armed AFTER promptScoutForWork so threadId reflects the composer the
-        // user actually landed in; the chip makes the armed state visible and
-        // dismissible (renderScoutFollowUpTarget). prefill records the starter
-        // text WHEN the composer actually holds it — an armed send whose value
-        // still equals the untouched prefill carries no objective and must be
-        // blocked, never launched. A composer the user had already filled
-        // stamps no prefill, so their exact text still sends.
-        const starter = scoutStarterText(mode)
-        const composerHoldsStarter = String(scoutChatInput?.value || '').trim() === starter.trim()
-        pendingScoutToolTemplate = { toolId: tool.id, name: String(tool.name || tool.id), threadId: activeScoutThreadId, prefill: composerHoldsStarter ? starter : '' }
-        renderScoutFollowUpTarget()
       }
 
       function paletteToolObjective(tool, inputs) {
@@ -52115,7 +52743,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const pkg = packageSelect ? String(packageSelect.value || '') : paletteDefaultPackageId()
         pushPaletteRecent(tool.id)
         closeToolPalette({ restoreComposer: false })
-        runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority, package: pkg })
+        runGoalPipeline({ objective, package: pkg })
       }
 
       // ---- the goalcard: the 10-step loop made legible (§1.6) ----------------
@@ -53017,7 +53645,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         })
         const restart = bfEl('button', 'goalcard__link', 'Restart')
         restart.type = 'button'
-        restart.addEventListener('click', () => runGoalPipeline({ objective: plan?.objective || goalArtifactTitle(artifact), toolTemplate: plan?.toolTemplate || '' }))
+        restart.addEventListener('click', () => sendScoutChat(plan?.objective || goalArtifactTitle(artifact)))
         const ask = bfEl('button', 'goalcard__link goalcard__link--ghost', 'Ask Scout')
         ask.type = 'button'
         ask.addEventListener('click', () => promptScoutForWork('', `About the goal "${goalArtifactTitle(artifact)}": `))
@@ -53216,35 +53844,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         appendScoutChatNode(renderReturnCard(entry))
       }
 
-      // ---- wire the three doors ---------------------------------------------
-      // door 1: the + Tools button
-      scoutChatToolsBtn?.addEventListener('click', () => openToolPalette('button'))
-      // door 2: "/" as the first char of an empty composer (siblings with the
-      // /goal parser: a "/goal " command closes the palette and sends normally).
-      scoutChatInput?.addEventListener('input', () => {
-        const value = scoutChatInput.value
-        const isGoalDoor = /^\/goal(\s|$)/i.test(value)
-        const isSlashToken = /^\/[^\s]*$/.test(value) && !isGoalDoor
-        if (isSlashToken) {
-          if (!paletteIsOpen()) openToolPalette('slash', value.slice(1))
-          else { paletteQuery = value.slice(1); palettePinnedTool = null; paletteRenderList() }
-        } else if (paletteIsOpen() && paletteMode === 'inline') {
-          closeToolPalette({ restoreComposer: false })
-        }
-      })
-      // in inline mode the composer keeps focus; ↓ hops into the tiles, ↵ runs
-      // the top match, Esc closes — all before the normal send handler sees it.
-      scoutChatInput?.addEventListener('keydown', (event) => {
-        if (!paletteIsOpen() || paletteMode !== 'inline') return
-        if (event.key === 'Escape') { event.preventDefault(); closeToolPalette(); return }
-        if (event.key === 'ArrowDown') { event.preventDefault(); paletteFocusTile(0); return }
-        if (event.key === 'Enter') {
-          const top = paletteTiles()[0]
-          if (top) { event.preventDefault(); event.stopPropagation(); paletteSelectTool(paletteToolById(top.dataset.toolId), { run: false }) }
-        }
-      }, true)
-      // door 3 (voice) lands via initiate_goal → the same artifact stream, which
-      // the osEvents consumer below renders as a goalcard.
+      // The normal composer intentionally has no tool door or slash palette.
+      // Server-owned routing selects conversation, clarification, private work,
+      // approval, or unavailability from the person's words. Voice uses the
+      // same outcome contract and artifact stream.
 
       // ---- @-mention autocomplete (public channels only) ---------------------
       // Typing "@" in a channel composer offers the roster + scout; private
@@ -55053,7 +55656,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!desktopChatLayoutQuery.matches || !trigger?.isConnected) return
 	        window.clearTimeout(chatChannelActivityHideTimer)
 	        const popover = ensureChatChannelActivityPopover()
-	        const phase = desktopWorkPhase(work.artifact, work.status)
+	        const phase = desktopWorkPhase(work.artifact, work.status, work.message?.thread)
 	        const eyebrow = bfEl('span', 'chat-channel-activity-popover__eyebrow', 'Channel activity')
 	        const agent = bfEl('div', 'chat-channel-activity-popover__agent')
 	        const avatar = bfEl('span', 'chat-channel-activity-popover__avatar', String(work.agentName || 'S').slice(0, 1).toUpperCase())
@@ -55088,7 +55691,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        timer.type = 'button'
 	        timer.className = 'chat-thread-item__work-timer'
 	        timer.setAttribute('aria-label', `${work.agentName} is working in ${chatThreadDisplayTitle(thread)}. View activity.`)
-	        timer.title = `${work.agentName} · ${desktopWorkPhase(work.artifact, work.status).label}`
+	        timer.title = `${work.agentName} · ${desktopWorkPhase(work.artifact, work.status, work.message?.thread).label}`
 	        const elapsed = bfEl('span', '', chatWorkElapsedLabel(work.startedAt))
 	        elapsed.dataset.chatWorkStartedAt = work.startedAt
 	        timer.appendChild(elapsed)
@@ -55295,8 +55898,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsTeam(thread)
 	        }
 	        if (chatConvoMeta) {
+	          const isTeam = chatThreadIsTeam(thread)
 	          chatConvoMeta.textContent = isChannel
-	            ? 'public · everyone in the office'
+	            ? (isTeam ? 'public · everyone in the office' : 'project · members only')
 	            : `private · only you and ${privateTarget}`
 	        }
 	        if (chatConvoContext) {
@@ -55400,7 +56004,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
+        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -55415,6 +56019,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      var feedPrevMsgDay = ''
 	      var feedPrevMsgTs = 0
 	      var scoutChatReplyTarget = null
+	      var scoutInlineWorkDetailsExpanded = null
 	      // var + lazy init: boot can call renderActiveScoutThread before this
 	      // late chat section executes, matching the render-pass vars above.
 	      var desktopChatPreviewCache = null
@@ -55469,16 +56074,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
 	        let empty = scoutChatThread.querySelector('.scout-chat-empty')
 	        if (!empty) {
-	          empty = document.createElement('p')
+	          empty = document.createElement('div')
 	          empty.className = 'scout-chat-empty'
 	          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
 	        }
 	        // A single feed node is reused while people move between channels and
 	        // private Scout threads, so copy and privacy affordances must be
 	        // reconciled on every render rather than only on first creation.
-	        empty.textContent = isChannel
-	          ? 'start the conversation — @scout can help when you want it.'
-	          : 'ask Scout about any meeting — only you can see this'
+	        empty.replaceChildren()
+	        const inner = bfEl('div', 'scout-chat-empty__inner')
+	        const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', isChannel ? 'shared channel' : 'private work with Scout')
+	        const title = bfEl('h2', 'scout-chat-empty__title', isChannel ? 'Start the conversation' : 'What do you want to accomplish?')
+	        const body = bfEl('p', 'scout-chat-empty__body', isChannel
+	          ? 'Message the team. Mention @Scout when you want help.'
+	          : 'Ask anything, or describe the outcome you want. Scout can answer, start private work, or ask for approval when it actually matters.')
+	        inner.append(eyebrow, title, body)
+	        empty.append(inner)
 	        const existingBrain = scoutChatThread.querySelector('.scout-chat-brain-chip')
 	        if (isChannel && existingBrain) {
 	          existingBrain.remove()
@@ -55503,28 +56114,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      // Discovery starters — each opens the tool palette (the full catalog)
-	      // pre-filtered to that run; the last chip opens the whole catalog. The
-	      // visible signpost the gesture-gated palette otherwise lacked.
+	      // Discovery starters are ordinary example prompts, never capability
+	      // selectors. They only place natural language in the composer.
 	      function buildScoutStarterRow() {
 	        const row = bfEl('div', 'scout-starters')
-	        row.setAttribute('aria-label', 'Start a run')
+	        row.setAttribute('aria-label', 'Example requests')
 	        const starters = [
-	          { seed: 'packaging studio', label: 'Package a venture' },
-	          { seed: 'deck outline', label: 'Outline a deck' },
-	          { seed: 'deep research', label: 'Deep research' },
-	          { seed: 'grill', label: 'Grill a pitch' }
+	          { prompt: 'Create a polished 10-slide pitch deck for ', label: 'Pitch the idea', example: 'Tell a compelling 10-slide story' },
+	          { prompt: 'Research ', label: 'Research the question', example: 'Compare the market and cite sources' },
+	          { prompt: 'Build a financial model for ', label: 'Model the business', example: 'Turn assumptions into a working forecast' },
+	          { prompt: 'Design ', label: 'Shape the visual direction', example: 'Turn a brief into a coherent design' }
 	        ]
 	        for (const s of starters) {
-	          const chip = bfEl('button', 'scout-starter', s.label)
+	          const chip = bfEl('button', 'scout-starter')
 	          chip.type = 'button'
-	          chip.addEventListener('click', () => openToolPalette('button', s.seed))
+	          chip.append(
+	            bfEl('span', 'scout-starter__label', s.label),
+	            bfEl('span', 'scout-starter__example', s.example)
+	          )
+	          chip.addEventListener('click', () => {
+	            scoutChatInput.value = s.prompt
+	            resizeScoutChatInput()
+	            scoutChatInput.focus()
+	          })
 	          row.appendChild(chip)
 	        }
-	        const all = bfEl('button', 'scout-starter scout-starter--all', 'Browse all tasks')
-	        all.type = 'button'
-	        all.addEventListener('click', () => openToolPalette('button', ''))
-	        row.appendChild(all)
 	        return row
 	      }
 
@@ -55558,8 +56172,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+	      function scoutWorkCardFocusSnapshot() {
+	        const focused = document.activeElement
+	        if (!focused?.matches?.('.scout-chat-work-card__open')) return ''
+	        return String(focused.closest('.scout-chat-work-card')?.dataset?.workArtifactId || '')
+	      }
+
+	      function restoreScoutWorkCardFocus(workCardId) {
+	        if (!workCardId) return
+	        scoutChatThread
+	          ?.querySelector(`.scout-chat-work-card[data-work-artifact-id="${selectorEscape(workCardId)}"] .scout-chat-work-card__open`)
+	          ?.focus?.({ preventScroll: true })
+	      }
+
 	      function renderActiveScoutThread() {
 	        return withScoutChatRenderTransaction(() => {
+	        const focusedWorkCardId = scoutWorkCardFocusSnapshot()
 	        // a rebuild from persisted state (reload, poll, socket echo) never
 	        // shows a shimmer — only a send still in flight THIS session may
 	        // keep it up
@@ -55588,11 +56216,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // a follow-up armed on another thread's card must not fire here
 	        if (scoutFollowUpTarget && scoutFollowUpTarget.threadId && scoutFollowUpTarget.threadId !== activeScoutThreadId) {
 	          scoutFollowUpTarget = null
-	        }
-	        // same rule for a palette-armed tool template: switching threads
-	        // drops it rather than letting it hijack a message elsewhere
-	        if (pendingScoutToolTemplate && pendingScoutToolTemplate.threadId && pendingScoutToolTemplate.threadId !== activeScoutThreadId) {
-	          pendingScoutToolTemplate = null
 	        }
 	        if (scoutChatReplyTarget && scoutChatReplyTarget.threadId && scoutChatReplyTarget.threadId !== activeScoutThreadId) {
 	          scoutChatReplyTarget = null
@@ -55650,6 +56273,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // replace running state immediately without closing the conversation.
 	        syncDesktopOpenChatContext()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
+	        restoreScoutWorkCardFocus(focusedWorkCardId)
         })
       }
 
@@ -55795,7 +56419,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const run = scoutThreadFromChatMessage(message)
 	          // P0-1: a goal ref mounts the live goalcard in the thread — for
 	          // everyone, across reloads — instead of the research run card
-	          if (run.artifact && (String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
+	          if (run.artifact && (String(message.intentOutcome || '') === 'start_private_work' || String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
 	            return scoutGoalRefRecordNode(message, run.artifact)
 	          }
 	          runlogMarkerGoalId = ''
@@ -55816,6 +56440,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          runlogMarkerGoalId = ''
 	          feedPrevMsgKey = ''
 	          return scoutStageArtifactNode(message)
+	        }
+	        if ((recordKind === 'work_result' || recordKind === 'work_record') && message.work) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
+	          return scoutChatWorkRecordNode(message)
 	        }
 	        runlogMarkerGoalId = ''
 	        const role = String(message?.role || '').toLowerCase()
@@ -55848,7 +56477,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // tighten into one turn — never for via-Scout rows (the disclosure
 	        // chip must stay visible) and never for longform reading cards
 	        // (those always name their author)
-	        const followKey = `${kind}|${authorEmail || kind}`
+	        // Agent-authored channel messages intentionally carry no human email.
+	        // Keep the server-stamped author name in the grouping key so Mary,
+	        // Colton, Jules, and Scout never collapse into one visual speaker.
+	        const followKey = `${kind}|${authorEmail || authorName.toLowerCase() || kind}`
 	        const isFollowup = !viaScout && text.length <= 400 && feedPrevMsgKey === followKey
 	        feedPrevMsgKey = viaScout ? '' : followKey
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
@@ -55875,6 +56507,139 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	        }
 	        return node
+	      }
+
+	      function governedWorkResourcePath(href, resourceKind) {
+	        const value = String(href || '').trim()
+	        const pattern = resourceKind === 'evidence'
+	          ? /^\/api\/stride\/v1\/work\/suggestions\/[a-z0-9_-]+\/evidence$/
+	          : /^\/api\/stride\/v1\/work\/runs\/[a-z0-9_-]+\/artifact$/
+	        return pattern.test(value) ? value : ''
+	      }
+
+	      async function openGovernedWorkResource(href, work, resourceKind, returnFocus) {
+	        const path = governedWorkResourcePath(href, resourceKind)
+	        if (!path) return
+	        closeArtifactStage()
+	        artifactStageReturnFocus = returnFocus || document.activeElement
+
+	        const stage = document.createElement('div')
+	        stage.className = 'artifact-stage'
+	        stage.setAttribute('role', 'dialog')
+	        stage.setAttribute('aria-modal', 'true')
+	        stage.setAttribute('aria-label', resourceKind === 'evidence' ? 'Verified work source' : String(work?.title || 'Completed work'))
+
+	        const scrim = document.createElement('div')
+	        scrim.className = 'artifact-stage__scrim'
+	        scrim.addEventListener('click', closeArtifactStage)
+
+	        const panel = bfEl('section', 'artifact-stage__panel')
+	        const head = bfEl('header', 'artifact-stage__head')
+	        const headings = bfEl('div', 'artifact-stage__headings')
+	        headings.appendChild(bfEl('span', 'artifact-stage__kicker', resourceKind === 'evidence' ? 'private source evidence' : 'Scout · completed work'))
+	        const heading = bfEl('h2', 'artifact-stage__title', resourceKind === 'evidence' ? 'Verified source' : String(work?.title || 'Completed work'))
+	        heading.title = heading.textContent
+	        headings.appendChild(heading)
+	        const close = bfEl('button', 'artifact-stage__close')
+	        close.type = 'button'
+	        close.setAttribute('aria-label', 'Close')
+	        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+	        close.addEventListener('click', closeArtifactStage)
+	        head.append(headings, close)
+
+	        const body = bfEl('div', 'artifact-stage__body artifact-stage__body--read')
+	        const read = bfEl('div', 'artifact-stage__read')
+	        read.appendChild(bfEl('p', 'governed-work-viewer__meta', 'Opening the governed private result…'))
+	        body.appendChild(read)
+	        panel.append(head, body)
+	        stage.append(scrim, panel)
+	        document.body.appendChild(stage)
+	        artifactStageNode = stage
+	        close.focus()
+
+	        const section = (viewer, label, value) => {
+	          const text = String(value || '').trim()
+	          if (!text) return
+	          const node = bfEl('section', 'governed-work-viewer__section')
+	          node.append(bfEl('h3', null, label), bfEl('p', null, text))
+	          viewer.appendChild(node)
+	        }
+
+	        try {
+	          const response = await fetch(path, { cache: 'no-store', headers: { Accept: 'application/json' } })
+	          if (!response.ok) throw new Error('governed work resource unavailable')
+	          const payload = await response.json()
+	          const viewer = bfEl('article', 'governed-work-viewer')
+	          if (resourceKind === 'evidence') {
+	            const evidence = payload?.evidence || {}
+	            viewer.append(
+	              bfEl('p', 'governed-work-viewer__eyebrow', 'private source evidence'),
+	              bfEl('h2', 'governed-work-viewer__title', 'Source remains verified'),
+	              bfEl('p', 'governed-work-viewer__meta', 'Reauthorized against the current conversation and project audience.')
+	            )
+	            section(viewer, 'Grounded request', evidence.sourceSnippet)
+	            const verified = bfEl('span', 'governed-work-viewer__verified', evidence.sourceCurrent ? '✓ Source current · private audience' : 'Source unavailable')
+	            viewer.appendChild(verified)
+	          } else {
+	            const artifact = payload?.artifact || {}
+	            viewer.append(
+	              bfEl('p', 'governed-work-viewer__eyebrow', 'completed work report'),
+	              bfEl('h2', 'governed-work-viewer__title', String(artifact.title || work?.title || 'Completed work')),
+	              bfEl('p', 'governed-work-viewer__meta', `${String(work?.workerName || 'Scout')} · delivered to this conversation`),
+	              bfEl('p', 'governed-work-viewer__lead', String(artifact.summary || work?.summary || ''))
+	            )
+	            section(viewer, 'Approved outcome', artifact.approvedOutcome)
+	            section(viewer, 'Verified source', artifact.sourceSnippet)
+	            const verified = bfEl('span', 'governed-work-viewer__verified', artifact.providerExecutionFenced ? '✓ Deterministic local · provider fenced' : '✓ Governed provider result')
+	            viewer.appendChild(verified)
+	          }
+	          read.replaceChildren(viewer)
+	        } catch {
+	          read.replaceChildren(bfEl('p', 'governed-work-viewer__error', 'This governed resource is unavailable. Nothing was opened or changed.'))
+	        }
+	      }
+
+	      function scoutChatWorkRecordNode(message) {
+	        const work = message?.work || {}
+	        const card = document.createElement('article')
+	        card.className = 'scout-chat-work-record'
+	        card.dataset.messageId = String(message?.id || '')
+	        card.setAttribute('aria-label', `${String(work.title || 'Completed work')}. ${String(work.status || 'complete')}. ${String(work.summary || '')}`)
+
+	        const head = document.createElement('div')
+	        head.className = 'scout-chat-work-record__head'
+	        const identity = bfEl('span', 'scout-chat-work-record__identity', `${String(work.workerName || 'Scout')} · completed work`)
+	        const status = bfEl('span', 'scout-chat-work-record__status', String(work.status || 'complete').replaceAll('_', ' '))
+	        head.append(identity, status)
+
+	        const title = bfEl('h3', 'scout-chat-work-record__title', String(work.title || 'Completed work'))
+	        const summary = bfEl('p', 'scout-chat-work-record__summary', String(work.summary || message?.text || ''))
+	        const progress = document.createElement('div')
+	        progress.className = 'scout-chat-work-record__progress'
+	        const progressBar = document.createElement('span')
+	        progressBar.style.width = `${Math.max(0, Math.min(100, Number(work.progressPercent || 0)))}%`
+	        progress.appendChild(progressBar)
+	        const stage = bfEl('div', 'scout-chat-work-record__stage', `${String(work.currentStage || 'complete').replaceAll('_', ' ')} · ${Math.round(Number(work.progressPercent || 100))}%`)
+
+	        const actions = document.createElement('div')
+	        actions.className = 'scout-chat-work-record__actions'
+	        const addAction = (href, label, resourceKind, primary = false) => {
+	          const path = governedWorkResourcePath(href, resourceKind)
+	          if (!path) return
+	          const button = document.createElement('button')
+	          button.type = 'button'
+	          button.className = `scout-chat-work-record__action${primary ? ' is-primary' : ''}`
+	          button.textContent = label
+	          button.addEventListener('click', () => openGovernedWorkResource(path, work, resourceKind, button))
+	          actions.appendChild(button)
+	        }
+	        addAction(work.artifactHref, 'Open', 'artifact', true)
+	        addAction(work.evidenceHref, 'View source', 'evidence')
+	        const fence = bfEl('span', 'scout-chat-work-record__fence', work.providerExecutionFenced ? 'deterministic local · provider fenced' : 'provider-backed')
+	        actions.appendChild(fence)
+
+	        card.append(head, title, summary, progress, stage, actions)
+	        return card
 	      }
 
 	      function clampDesktopChatWidth(value, min, max) {
@@ -56623,16 +57388,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const files = pendingDesktopReplyFiles.slice()
 	        if ((!text && !files.length) || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
 	        chatContextReplySend.disabled = true
+	        const operationKey = JSON.stringify({ threadId: state.threadId, rootMessageId: state.rootMessageId, text, files })
+	        const replyAttempt = chatContextReplyAttempt?.key === operationKey
+	          ? chatContextReplyAttempt
+	          : { key: operationKey, operationId: globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}` }
+	        chatContextReplyAttempt = replyAttempt
 	        try {
 	          let response
 	          try {
 	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
 	              method: 'POST',
 	              headers: { 'Content-Type': 'application/json' },
-	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId })
+	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })
 	            })
 	          } catch {
-	            throw new Error('Connection interrupted — your reply is still here. Try again.')
+	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
+	              method: 'POST',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })
+	            })
 	          }
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok) {
@@ -56644,6 +57418,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!payload?.thread) {
 	            throw new Error('Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.')
 	          }
+	          chatContextReplyAttempt = null
 		          upsertScoutChatThread(payload.thread, { select: false })
 		          syncDesktopReplySurfaces(payload.thread, state.rootMessageId, { clearComposer: true, scrollRailToBottom: true })
 	        } catch (error) {
@@ -56652,18 +57427,67 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function desktopWorkPhase(artifact, status) {
-	        const current = String(artifact?.metadata?.currentStage || '').toLowerCase()
+	      function desktopWorkPhase(artifact, status, ref) {
+	        const current = String(artifact?.metadata?.currentStage || ref?.currentStage || '').toLowerCase()
 	        const value = String(status || '').toLowerCase()
-	        if (['complete', 'published'].includes(value)) return { label: 'Delivered', index: 4 }
+	        if (['complete', 'completed', 'published'].includes(value)) return { label: 'Delivered', index: 4 }
 	        if (['approval_required', 'needs_input', 'parked'].includes(value)) return { label: 'Needs input', index: 3 }
-	        if (['error', 'failed', 'rejected'].includes(value)) return { label: 'Needs attention', index: 3 }
+	        if (['error', 'failed', 'needs_attention', 'rejected'].includes(value)) return { label: 'Needs attention', index: 3 }
 	        if (/deliver|verify_goal_completed/.test(current)) return { label: 'Delivering', index: 4 }
 	        if (/gate|review|verif/.test(current)) return { label: 'Verifying', index: 3 }
+	        if (/(^|_)ship(_|$)/.test(current)) return { label: 'Delivering', index: 4 }
 	        if (/research|source|evidence/.test(current)) return { label: 'Gathering evidence', index: 1 }
-	        if (/build|draft|synth|execute|codex/.test(current)) return { label: 'Building', index: 2 }
+	        if (/build|draft|synth|execute|codex|assembl|compos|prepar/.test(current)) return { label: 'Building', index: 2 }
 	        if (/assign|decompose|identify|goal|plan/.test(current)) return { label: 'Understanding', index: 0 }
 	        return value === 'queued' ? { label: 'Queued', index: 0 } : { label: 'Working', index: 1 }
+	      }
+
+	      function desktopWorkFamily(ref, artifact) {
+	        const description = `${String(ref?.query || artifact?.metadata?.threadQuery || '')} ${String(ref?.mode || artifact?.metadata?.mode || '')}`.toLowerCase()
+	        if (/\b(schedule|scheduled|recurring|daily|weekly|monthly|every (?:day|weekday|week|month))\b/.test(description)) return 'Scheduled work'
+	        if (/\b(revise|revision|redline|translate|translation|regenerate|rewrite|edit (?:this|the|my)|update (?:this|the|my))\b/.test(description)) return 'Revision'
+	        if (/\b(mixed package|investor package|diligence package|fundraising package|data room package)\b/.test(description) || /\b(research|memo|deck)\b.{0,32}\b(deck|workbook|financial model)\b/.test(description)) return 'Mixed package'
+	        if (/\b(meeting recap|meeting notes|action record|decision log|transcript recap)\b/.test(description)) return 'Meeting recap'
+	        if (/\b(chart|visualization|dashboard|plot|graph|data table)\b/.test(description)) return 'Data visualization'
+	        if (/\b(code|implementation|repository|pull request|execution handoff|deployment handoff)\b/.test(description)) return 'Build'
+	        if (/\b(project plan|task board|operating plan|roadmap|work breakdown)\b/.test(description)) return 'Project plan'
+	        if (/\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/.test(description)) return 'Financial model'
+	        if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/.test(description)) return 'Presentation'
+	        if (/\b(image|images|design|visual|logo|brand|mockup|illustration|render|creative)\b/.test(description)) return 'Design'
+	        if (/\b(research|investigate|compare|market scan|sources?|due diligence)\b/.test(description)) return 'Research'
+	        if (/\b(document|memo|brief|one-pager|report)\b/.test(description)) return 'Document'
+	        return 'Work'
+	      }
+
+	      function desktopWorkFamilyGlyph(family) {
+	        return ({ Presentation: '▤', Research: '⌕', Design: '◈', 'Financial model': '▦', Document: '▧', Revision: '↻', 'Meeting recap': '✓', 'Data visualization': '⌁', 'Project plan': '☷', 'Mixed package': '◫', 'Scheduled work': '◷', Build: '⌘' })[String(family || '')] || '✦'
+	      }
+
+	      function desktopSafeWorkNote(note, fallback) {
+	        const value = String(note || '').trim()
+	        if (!value) return fallback
+	        // Progress notes cross a model/runtime boundary. Only server-reviewed
+	        // product copy is admitted; every unknown string fails closed to the
+	        // stable phase instead of trying to enumerate internal identifiers.
+	        const approvedNotes = {
+	          'shaping the deck brief': 'Shaping the deck brief',
+	          'gathering reliable sources': 'Gathering reliable sources',
+	          'building the first draft': 'Building the first draft',
+	          'checking the work': 'Checking the work',
+	          'preparing your deliverable': 'Preparing your deliverable',
+	          'waiting for your input': 'Waiting for your input',
+	          'ready for review': 'Ready for review',
+	          'saving the final deliverable': 'Saving the final deliverable',
+	          'drafting the document': 'Drafting the document',
+	          'turning the meeting into decisions': 'Turning the meeting into decisions',
+	          'preparing the revision': 'Preparing the revision',
+	          'setting the schedule': 'Setting the schedule',
+	          'preparing the handoff': 'Preparing the handoff',
+	          'assembling the package': 'Assembling the package',
+	          'building the visualization': 'Building the visualization',
+	          'mapping the plan': 'Mapping the plan'
+	        }
+	        return approvedNotes[value.toLowerCase()] || fallback
 	      }
 
 	      function desktopWorkAgentName(message, artifact) {
@@ -56694,28 +57518,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatContextState?.mode !== 'work' || String(chatContextState.messageId) !== String(message?.id || '')) return
 	        const ref = message?.thread || {}
 	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
-	        const phase = desktopWorkPhase(artifact, status)
+	        const phase = desktopWorkPhase(artifact, status, ref)
 	        const agentName = desktopWorkAgentName(message, artifact)
-	        const terminalError = ['error', 'failed', 'rejected'].includes(status)
-	        const terminalComplete = ['complete', 'published'].includes(status)
+	        const family = desktopWorkFamily(ref, artifact)
+	        const terminalError = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
+	        const terminalComplete = ['complete', 'completed', 'published'].includes(status)
 	        const note = terminalError
 	          ? desktopWorkAttentionCopy(ref.attentionReason, agentName)
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
-	            : String(artifact?.metadata?.progressNote || ref.progressNote || '').trim() || `${agentName} is working on it.`
+	            : desktopSafeWorkNote(artifact?.metadata?.progressNote || ref.progressNote, `${agentName} is ${phase.label.toLowerCase()}.`)
 	        const sources = artifact ? researchArtifactSources(artifact) : []
-	        const model = String(artifact?.metadata?.model || artifact?.metadata?.orchestratorModel || '').trim()
-	        const effort = String(artifact?.metadata?.reasoningEffort || '').trim()
-	        chatContextKicker.textContent = `${agentName} · work`
-	        chatContextTitle.textContent = String(ref.query || artifact?.metadata?.threadQuery || message?.text || 'Research workstream')
-	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, model, effort ? `${effort} reasoning` : '', sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+	        chatContextKicker.textContent = `${agentName} · ${family}`
+	        chatContextTitle.textContent = String(ref.query || artifact?.metadata?.threadQuery || message?.text || `${family} workstream`)
+	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
 	        const summary = document.createElement('section')
 	        summary.className = 'chat-context-event'
 	        summary.append(
 	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${terminalComplete ? 'Delivered' : phase.label}`),
 	          bfEl('p', 'chat-context-event__note', note)
 	        )
-	        summary.appendChild(bfEl('span', 'chat-context-event__meta', status.replaceAll('_', ' ')))
+	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${family} · ${terminalComplete ? 'Complete' : phase.label}`))
 	        const actions = bfEl('div', 'chat-context-actions')
 	        if (artifact?.id && artifact?.text) {
 	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : 'Inspect work')
@@ -56754,13 +57577,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
 	          worklog.appendChild(sourceList)
 	        }
-	        const technical = document.createElement('details')
-	        technical.className = 'chat-context-card'
-	        const technicalTitle = document.createElement('summary')
-	        technicalTitle.className = 'chat-context-card__author'
-	        technicalTitle.textContent = 'Technical details'
-	        technical.append(technicalTitle, bfEl('p', 'chat-context-card__body', `run ${ref.id || 'pending'} · artifact ${ref.artifactId || artifact?.id || 'pending'} · stage ${artifact?.metadata?.currentStage || 'not reported'} · worker ${artifact?.metadata?.worker || 'provider managed'}`))
-	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null, technical].filter(Boolean))
+	        const governance = document.createElement('details')
+	        governance.className = 'chat-context-card'
+	        const governanceTitle = document.createElement('summary')
+	        governanceTitle.className = 'chat-context-card__author'
+	        governanceTitle.textContent = 'Governance and provenance'
+	        governance.append(governanceTitle, bfEl('p', 'chat-context-card__body', `${agentName} is the visible worker. STRIDE keeps routing, authority and output contracts server-managed while this private workstream remains durable and auditable.`))
+	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null, governance].filter(Boolean))
 	      }
 
 	      function openDesktopWorkContext(message, trigger) {
@@ -56834,16 +57657,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(message.thread.artifactId || ''))
 	        const status = String(artifactStatusValue(artifact) || message.thread.status || 'running')
 	        const normalizedStatus = status.toLowerCase()
-	        const complete = ['complete', 'published'].includes(normalizedStatus)
-	        const phase = desktopWorkPhase(artifact, status)
+	        const complete = ['complete', 'completed', 'published'].includes(normalizedStatus)
+	        const phase = desktopWorkPhase(artifact, status, message.thread)
 	        const agent = desktopWorkAgentName(message, artifact)
+	        const family = desktopWorkFamily(message.thread, artifact)
 	        const pct = Number(artifact?.metadata?.progressPercent)
-	        const update = String(artifact?.metadata?.progressNote || message.thread.progressNote || '').trim()
+	        const update = desktopSafeWorkNote(artifact?.metadata?.progressNote || message.thread.progressNote, phase.label)
 	        const title = compactArtifactPreview(String(artifact?.metadata?.title || message.thread.query || 'Completed work'))
 	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
 	        chatWorkIndicatorText.textContent = complete
-	          ? `${agent} delivered · ${event}`
-	          : `${agent} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
+	          ? `${agent} delivered ${family.toLowerCase()} · ${event}`
+	          : `${agent} · ${family} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
 	        chatWorkIndicator.dataset.messageId = String(message.id || '')
 	        chatWorkIndicator.dataset.workState = complete ? 'complete' : normalizedStatus
 	        if (chatWorkIndicatorActions) {
@@ -57195,8 +58019,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutThreadFromChatMessage(message) {
 	        const ref = message?.thread || {}
 	        const artifactId = String(ref.artifactId || '')
-	        const artifact = artifactEntries.find(entry => String(entry?.id || '') === artifactId) || (artifactId ? {
-	          id: artifactId,
+	        const governedWorkThread = String(message?.intentOutcome || '') === 'start_private_work'
+	        const projectedArtifactId = artifactId || (governedWorkThread ? String(ref.id || '') : '')
+	        const artifact = artifactEntries.find(entry => artifactId && String(entry?.id || '') === artifactId) || (projectedArtifactId ? {
+	          id: projectedArtifactId,
 	          kind: 'os_artifact',
 	          text: '',
 	          metadata: {
@@ -57223,28 +58049,98 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      // P0-1 latest-wins mount: the LAST goal-ref message in the thread
-	      // mounts the ONE live goalcard (goalCardNodeFor's cached node); every
-	      // earlier ref renders a one-line marker chip that jumps to the card.
-	      // syncGoalCards querySelectorAll keeps whichever mount is live updated.
+	      function desktopWorkCardIdentity(ref, artifact) {
+	        return String(ref?.id || ref?.artifactId || artifact?.id || '')
+	      }
+
+	      function scoutDesktopGoalWorkCardNode(message, artifact) {
+	        const ref = message?.thread || {}
+	        const query = String(ref.query || message?.text || 'Work in progress').trim()
+	        const family = desktopWorkFamily(ref, artifact)
+	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
+	        const pctValue = Number(ref.progressPercent || artifact?.metadata?.progressPercent || 4)
+	        const pct = Math.max(0, Math.min(100, Number.isFinite(pctValue) ? pctValue : 4))
+	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
+	        const phase = desktopWorkPhase(artifact, status, ref)
+	        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
+	        const state = status === 'approval_required'
+	          ? 'Needs approval'
+	          : ['complete', 'completed', 'published'].includes(status)
+	            ? 'Delivered'
+	            : ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
+	              ? 'Needs attention'
+	              : 'In progress'
+	        const step = progress || phase.label
+	        const workCardID = desktopWorkCardIdentity(ref, artifact)
+	        const expandedWorkDetails = scoutInlineWorkDetailsExpanded || (scoutInlineWorkDetailsExpanded = new Set())
+
+	        const card = document.createElement('article')
+	        card.className = 'scout-chat-work-card'
+	        card.dataset.state = status
+	        card.dataset.workArtifactId = workCardID
+	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${query}`)
+	        const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
+	        mark.setAttribute('aria-hidden', 'true')
+	        const copy = bfEl('span', 'scout-chat-work-card__copy')
+	        const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
+	        eyebrow.setAttribute('aria-live', 'polite')
+	        eyebrow.setAttribute('aria-atomic', 'true')
+	        copy.append(
+	          eyebrow,
+	          bfEl('span', 'scout-chat-work-card__title', query),
+	          bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step} · ${Math.round(pct)}%`)
+	        )
+	        const progressBar = bfEl('span', 'scout-chat-work-card__progress')
+	        progressBar.setAttribute('role', 'progressbar')
+	        progressBar.setAttribute('aria-label', `${state} ${Math.round(pct)} percent`)
+	        progressBar.setAttribute('aria-valuemin', '0')
+	        progressBar.setAttribute('aria-valuemax', '100')
+	        progressBar.setAttribute('aria-valuenow', String(Math.round(pct)))
+	        progressBar.style.setProperty('--work-progress', `${pct}%`)
+	        progressBar.appendChild(document.createElement('span'))
+	        copy.appendChild(progressBar)
+	        const open = bfEl('button', 'scout-chat-work-card__open', 'View activity')
+	        open.type = 'button'
+	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}, ${Math.round(pct)}% complete`)
+	        const details = bfEl('div', 'scout-chat-work-card__details')
+	        details.hidden = !expandedWorkDetails.has(workCardID)
+	        open.textContent = details.hidden ? 'View activity' : 'Hide activity'
+	        open.setAttribute('aria-expanded', String(!details.hidden))
+	        details.append(
+	          bfEl('strong', '', `${agent} · ${family}`),
+	          bfEl('span', '', `${phase.label} · ${Math.round(pct)}% complete`),
+	          bfEl('span', '', progress || 'Work is moving forward.'),
+	          bfEl('span', '', 'Private, durable work. Routing and tools stay server-managed.')
+	        )
+	        open.addEventListener('click', () => {
+	          if (desktopChatLayoutQuery.matches) {
+	            openDesktopWorkContext(message, open)
+	            return
+	          }
+	          details.hidden = !details.hidden
+	          if (workCardID) {
+	            if (details.hidden) expandedWorkDetails.delete(workCardID)
+	            else expandedWorkDetails.add(workCardID)
+	          }
+	          open.textContent = details.hidden ? 'View activity' : 'Hide activity'
+	          open.setAttribute('aria-expanded', String(!details.hidden))
+	        })
+	        card.append(mark, copy, open, details)
+	        return card
+	      }
+
+	      // The LAST goal-ref message mounts one outcome-first work card at every
+	      // responsive width. Earlier refs collapse to a marker that jumps to it.
 	      function scoutGoalRefRecordNode(message, artifact) {
-	        // Desktop's compact work bar and the shared activity rail own the
-	        // durable work state. Keep the transcript conversational instead of
-	        // repeating the same lifecycle in a second oversized goal card.
-	        // Mobile keeps the existing inline card until its activity sheet is
-	        // available as a dedicated full-height surface.
-	        if (desktopChatLayoutQuery.matches) {
-	          const replyText = String(message?.text || '').trim()
-	          const query = String(message?.thread?.query || '').trim()
-	          return replyText && replyText !== query
-	            ? scoutThreadReplyNode(replyText, message)
-	            : document.createDocumentFragment()
-	        }
-	        const goalId = String(artifact?.id || '')
+	        // The run identity is immutable across the artifactless -> material
+	        // artifact transition. Artifact identity remains for Open/Save only;
+	        // it must never split one conversation workstream into two cards.
+	        const goalId = desktopWorkCardIdentity(message?.thread, artifact)
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
 	        let lastRefId = ''
 	        for (const candidate of messages) {
-	          if (String(candidate?.kind || '') === 'thread' && String(candidate?.thread?.artifactId || '') === goalId) {
+	          const candidateWorkId = desktopWorkCardIdentity(candidate?.thread, null)
+	          if (String(candidate?.kind || '') === 'thread' && candidateWorkId === goalId) {
 	            lastRefId = String(candidate?.id || '')
 	          }
 	        }
@@ -57261,16 +58157,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const jump = bfEl('button', 'goalcard__link', `▸ ${goalArtifactTitle(artifact)} — jump to the card`)
 	          jump.type = 'button'
 	          jump.addEventListener('click', () => {
-	            scoutChatThread.querySelector(`.goalcard[data-goal-artifact-id="${selectorEscape(goalId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+	            scoutChatThread.querySelector(`.scout-chat-work-card[data-work-artifact-id="${selectorEscape(goalId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 	          })
 	          marker.appendChild(jump)
 	          return marker
 	        }
 	        runlogMarkerGoalId = ''
-	        const card = goalCardNodeFor(artifact)
+	        const card = scoutDesktopGoalWorkCardNode(message, artifact)
 	        if (!card) return document.createDocumentFragment()
-	        // the committed ref owns the mount now — stop the ghost re-append
-	        delete card.dataset.goalGhostThreadId
 	        const replyText = String(message?.text || '').trim()
 	        if (replyText && replyText !== String(message.thread?.query || '').trim()) {
 	          const group = document.createDocumentFragment()
@@ -57347,11 +58241,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      // ---- the router confirmation card (spec §2 — the trust surface) ----
 	      // A proposal is DATA the server committed on the reply; this card is
-	      // the ONLY thing that turns it into a launch. Run posts the identical
-	      // spec the palette Run posts (runGoalPipeline → POST /assistant/goal
-	      // with toolTemplate for tool runs; the proposal route performs the
-	      // explicit workstream launch). "just answer instead" re-asks as Tier 0
-	      // and logs the dismissal signal. NEVER silent-launch.
+	      // the ONLY thing that turns it into a launch. Approve posts only the
+	      // edited objective to the proposal route. The server-owned proposal
+	      // fixes tool, authority, provider, and output contract and performs the
+	      // exactly-once launch. "Keep it conversational" records dismissal.
 	      //
 	      // ONE card node per proposal message id, cached at module level (the
 	      // goalThreadCardNodes pattern): the immediate-reply render and every
@@ -57404,10 +58297,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // package field, and its Run confirms WITHOUT runGoalPipeline (the
 	        // workstream path; the server generates the picture async).
 	        const isImage = String(proposal.kind || '') === 'image'
+	        const isExactApproval = String(proposal.intentOutcome || message.intentOutcome || '') === 'approval_required' || Boolean(String(proposal.effectClass || '').trim())
 	        // card 088: a goal_run is a free-form multi-step goal (no registry
-	        // tool). It renders like the conversational branch — one editable
-	        // objective + a package field — and its Run posts /assistant/goal with
-	        // NO toolTemplate (a plain goal), the typed twin of voice initiate_goal.
+	        // tool). It renders like the conversational branch with one editable
+	        // objective; approval remains bound to the persisted proposal.
 	        const isGoal = String(proposal.kind || '') === 'goal_run'
 	        const toolName = isWorkstream
 	          ? `${assistantToolLabelText(proposal.mode)} workstream`
@@ -57425,7 +58318,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Never repeat the person's raw request. This is the trust surface for
 	        // Scout's interpreted execution prompt, followed by one quiet line
 	        // explaining that nothing runs until approval.
-	        card.appendChild(bfEl('p', 'scout-proposal-card__summary', String(proposal.summary || 'Review or edit Scout’s execution prompt before it runs.')))
+	        card.appendChild(bfEl('p', 'scout-proposal-card__summary', String(proposal.summary || (isExactApproval ? 'Review the exact held request before it runs.' : 'Review or edit Scout’s execution prompt before it runs.'))))
 
 	        // editable pre-filled inputs — the palette form-card pattern reused:
 	        // form tools render their registry fields, conversational/workstream
@@ -57443,6 +58336,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            input.placeholder = field.placeholder || ''
 	            if (input.tagName === 'TEXTAREA') input.rows = 2
 	            input.value = String((proposal.fields || {})[field.key] || '')
+	            input.readOnly = isExactApproval
 	            fieldEls[field.key] = { input, required: field.required }
 	            wrap.appendChild(input)
 	            card.appendChild(wrap)
@@ -57458,17 +58352,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          objectiveInput.className = 'palette__field'
 	          objectiveInput.rows = 5
 	          objectiveInput.value = String(proposal.objective || '')
+	          objectiveInput.readOnly = isExactApproval
 	          wrap.appendChild(objectiveInput)
 	          card.appendChild(wrap)
-	        }
-
-	        // target package — tool runs only (workstreams and single-shot image
-	        // renders are single passes with no package binder)
-	        let pkgField = null
-	        if (!isWorkstream && !isImage) {
-	          pkgField = paletteBuildPackageField()
-	          if (proposal.packageId) populatePalettePackageOptions(pkgField.select, String(proposal.packageId))
-	          card.appendChild(pkgField.wrap)
 	        }
 
 	        const meta = bfEl('div', 'scout-proposal-card__meta')
@@ -57499,13 +58385,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            // both confirm via the proposal route with the edited objective
 	            // and NEVER runGoalPipeline — the server does the single pass
 	            // (workstream launch, or the async concept render for card 096)
-	            const query = String(objectiveInput?.value || proposal.objective || '').trim()
+	            const query = String(isExactApproval ? proposal.objective : (objectiveInput?.value || proposal.objective || '')).trim()
 	            if (!query) { objectiveInput?.focus(); return }
 	            markProposalCardResolved(card, 'accepted')
 	            postScoutProposalAction('accepted', proposal, message, { objective: query })
 	            return
 	          }
-	          // identical spec to the palette Run button — reuse, do not fork
+	          // Build the edited objective, then let the persisted proposal's
+	          // server-owned contract perform the one launch.
 	          const inputs = {}
 	          let missing = null
 	          for (const [key, entry] of Object.entries(fieldEls)) {
@@ -57518,18 +58405,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            missing.style.borderColor = 'var(--warn)'
 	            return
 	          }
-	          const objective = tool && (tool.formFields || []).length
+	          const objective = isExactApproval
+	            ? String(proposal.objective || '').trim()
+	            : tool && (tool.formFields || []).length
 	            ? paletteToolObjective(tool, inputs)
 	            : String(objectiveInput?.value || proposal.objective || '').trim()
 	          if (!objective) { objectiveInput?.focus(); return }
 	          markProposalCardResolved(card, 'accepted')
 	          postScoutProposalAction('accepted', proposal, message, { objective })
-	          runGoalPipeline({
-	            objective,
-	            toolTemplate: String(proposal.toolId || ''),
-	            authorityHint: String(proposal.authority || tool?.authority || ''),
-	            package: pkgField ? String(pkgField.select.value || '') : paletteDefaultPackageId()
-	          })
 	        })
 	        const escape = bfEl('button', 'scout-proposal-card__escape', 'Keep it conversational')
 	        escape.type = 'button'
@@ -70421,11 +71304,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const canvas = document.getElementById('strideW2Canvas')
         const close = document.getElementById('strideW2Close')
         const organizationSwitcher = document.getElementById('topbarOrganizationSwitcher')
-        const organizationMark = document.getElementById('topbarOrganizationMark')
-        const organizationRole = document.getElementById('topbarOrganizationRole')
         const organizationName = document.getElementById('topbarOrganizationName')
-        const organizationCount = document.getElementById('topbarOrganizationCount')
-        const organizationPending = document.getElementById('topbarOrganizationPending')
+        const organizationMenu = document.getElementById('topbarOrganizationMenu')
+        const organizationMenuItems = document.getElementById('topbarOrganizationMenuItems')
+        const organizationCreate = document.getElementById('topbarOrganizationCreate')
         const organizationSwitcherProjection = document.createElement('div')
         const routes = new Set(['/me','/work-record','/org/people','/org/requests','/org/contributions','/org/recruiting','/network/draft'])
         const coworkerRoutePattern = /^\/people\/[a-zA-Z0-9_-]+$/
@@ -70906,24 +71788,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (pendingActionOperation.path && location.pathname !== pendingActionOperation.path) history.pushState({ strideW2: pendingActionOperation.path }, '', pendingActionOperation.path)
           return true
         }
+        function setOrganizationMenuOpen(open, options = {}) {
+          if (!organizationSwitcher || !organizationMenu) return false
+          const next = Boolean(open)
+          organizationMenu.hidden = !next
+          organizationSwitcher.setAttribute('aria-expanded', next ? 'true' : 'false')
+          if (next && options.focusFirst) requestAnimationFrame(() => organizationMenu.querySelector('[role="menuitemradio"], [role="menuitem"]')?.focus({ preventScroll: true }))
+          if (!next && options.restoreFocus) organizationSwitcher.focus({ preventScroll: true })
+          return next
+        }
+        function openOrganizationSettingsFromMenu() {
+          if (blockPendingNavigation()) return
+          setOrganizationMenuOpen(false)
+          if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocusTo: organizationSwitcher, allowLocked: true })
+          loadProjection('organizations', document.getElementById('settingsOrganizationsProjection') || organizationSwitcherProjection, '/settings/organizations')
+        }
         function renderOrganizationSwitcher(envelope) {
-          if (!organizationSwitcher) return
-          const items = envelope?.availability === 'available' && envelope.surface === 'organizations' ? envelope.items : []
+          if (!organizationSwitcher || !organizationMenuItems) return
+          const organizationProjectionAvailable = envelope?.availability === 'available' && envelope.surface === 'organizations'
+          const items = organizationProjectionAvailable ? envelope.items : []
           const organizations = items.filter(item => item.kind === 'organization-summary')
           const active = organizations.filter(item => item.status === 'active' || item.status === 'current')
-          const current = organizations.find(item => item.status === 'current')
-          const pending = organizations.reduce((total,item) => total + Number(item.detail?.pendingCount || 0),0)
+          const current = active.find(item => item.status === 'current')
           if (active.length > 3) return renderOrganizationSwitcher(null)
-          organizationName.textContent = current?.title || (envelope?.availability === 'available' ? (active.length ? 'Choose organization' : 'Choose or create organization') : 'Organization unavailable')
-          organizationRole.textContent = current?.context || (envelope?.availability === 'available' && !active.length ? 'No active organization' : 'role unavailable')
-          organizationMark.textContent = current?.title?.trim().slice(0, 1).toUpperCase() || (envelope?.availability === 'available' && !active.length ? '+' : '—')
-          organizationCount.textContent = `${active.length} of 3 active`
-          organizationPending.textContent = String(pending)
-          organizationPending.hidden = pending === 0
-          organizationPending.setAttribute('aria-label', `${pending} pending request${pending === 1 ? '' : 's'}`)
-          organizationSwitcher.setAttribute('aria-label', `${organizationName.textContent} · ${organizationRole.textContent} · ${active.length} of 3 active · open organization settings`)
-          window.__strideCurrentOrganizationLabel = organizationName.textContent
-          if (typeof phoneLayoutQuery !== 'undefined' && phoneLayoutQuery.matches && appShell?.dataset.tool === 'office' && typeof topbarSubtitleEl !== 'undefined') topbarSubtitleEl.textContent = organizationName.textContent
+          const currentLabel = current?.title || (organizationProjectionAvailable && active.length ? 'Choose organization' : 'Organizations')
+          organizationName.textContent = currentLabel
+          organizationSwitcher.setAttribute('aria-label', `${currentLabel} · choose organization`)
+          organizationMenuItems.replaceChildren()
+          active.forEach(item => {
+            const button = document.createElement('button')
+            button.className = 'topbar__organization-menu-item'
+            button.type = 'button'
+            button.setAttribute('role', 'menuitemradio')
+            button.setAttribute('aria-checked', item === current ? 'true' : 'false')
+            const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+            icon.setAttribute('viewBox', '0 0 20 20'); icon.setAttribute('fill', 'none'); icon.setAttribute('stroke', 'currentColor'); icon.setAttribute('stroke-width', '1.7'); icon.setAttribute('aria-hidden', 'true')
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+            path.setAttribute('d', 'M3 17V6l7-3 7 3v11M7 17v-4h6v4')
+            icon.append(path)
+            const label = document.createElement('span'); label.textContent = item.title
+            button.append(icon, label)
+            button.addEventListener('click', () => item === current ? setOrganizationMenuOpen(false, { restoreFocus: true }) : openOrganizationSettingsFromMenu())
+            organizationMenuItems.append(button)
+          })
+          if (!active.length) {
+            const empty = document.createElement('p')
+            empty.className = 'topbar__organization-menu-empty'
+            empty.textContent = organizationProjectionAvailable ? 'No organizations yet' : 'Organization list unavailable'
+            organizationMenuItems.append(empty)
+          }
+          window.__strideCurrentOrganizationLabel = currentLabel
+          if (typeof phoneLayoutQuery !== 'undefined' && phoneLayoutQuery.matches && appShell?.dataset.tool === 'office' && typeof topbarSubtitleEl !== 'undefined') topbarSubtitleEl.textContent = currentLabel
         }
         function strideW2FixtureProjection(surfaceName) {
           if (!['localhost','127.0.0.1'].includes(location.hostname) || new URLSearchParams(location.search).get('strideW2Fixture') !== '1') return null
@@ -71107,7 +72022,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (settingsSurface && !blockPendingNavigation()) loadProjection(settingsSurface.dataset.strideW2SettingsSurface, document.getElementById('settingsOrganizationsProjection'), '/settings/organizations')
         })
         close.addEventListener('click', () => closeRoute())
-        organizationSwitcher?.addEventListener('click', () => { if (blockPendingNavigation()) return; if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocusTo: organizationSwitcher }); loadProjection('organizations', document.getElementById('settingsOrganizationsProjection') || organizationSwitcherProjection, '/settings/organizations') })
+        organizationSwitcher?.addEventListener('click', () => setOrganizationMenuOpen(organizationMenu.hidden))
+        organizationSwitcher?.addEventListener('keydown', event => {
+          if (!['ArrowDown', 'Enter', ' '].includes(event.key) || event.key !== 'ArrowDown' && organizationMenu.hidden) return
+          event.preventDefault()
+          setOrganizationMenuOpen(true, { focusFirst: true })
+        })
+        organizationCreate?.addEventListener('click', openOrganizationSettingsFromMenu)
+        organizationMenu?.addEventListener('keydown', event => {
+          const items = Array.from(organizationMenu.querySelectorAll('[role="menuitemradio"], [role="menuitem"]'))
+          if (event.key === 'Escape') { event.preventDefault(); setOrganizationMenuOpen(false, { restoreFocus: true }); return }
+          if (!items.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          const current = Math.max(0, items.indexOf(document.activeElement))
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+          items[next].focus()
+        })
+        document.addEventListener('pointerdown', event => {
+          if (!organizationMenu?.hidden && !organizationMenu.contains(event.target) && !organizationSwitcher?.contains(event.target)) setOrganizationMenuOpen(false)
+        }, true)
+        document.addEventListener('keydown', event => {
+          if (event.key === 'Escape' && !organizationMenu?.hidden) setOrganizationMenuOpen(false, { restoreFocus: true })
+        })
         surface.addEventListener('keydown', event => { if (event.key === 'Escape') closeRoute() })
         window.addEventListener('popstate', () => { if (!renderRoute(location.pathname, { push: false })) closeRoute({ push: false }) })
         window.openStrideContributionSurface = path => renderRoute(path)

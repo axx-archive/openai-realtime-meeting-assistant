@@ -11,7 +11,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -271,17 +270,18 @@ func TestRunSlideJuryNoPageImagesErrors(t *testing.T) {
 // scoreboard files as a slide_jury_v1 artifact with the voices on the record.
 func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	app.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
 	deck := seedSlideJuryDeck(t, app, []byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two"))
 
 	const seatJSON = `{"pages":[{"page":1,"score":6.5,"fix":"Cut the headline to seven words"},{"page":2,"score":9,"fix":"KEEP"}],"weakest_three":[1],"strongest_three":[2]}`
 	const mergedScoreboard = "Merged scoreboard: page 1 avg 6.5 — cut the headline to seven words; page 2 KEEP."
 
 	var mu sync.Mutex
-	var requests []anthropicMessagesRequest
-	original := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = original })
-	createAnthropicMessagesResponse = func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	var requests []openAITextRequest
+	original := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = original })
+	createOpenAITextResponse = func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 		if apiKey != "test-key" {
 			t.Errorf("apiKey=%q, want test-key", apiKey)
 		}
@@ -289,10 +289,10 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 		requests = append(requests, request)
 		mu.Unlock()
 		text := seatJSON
-		if strings.Contains(strings.ToLower(request.System), "slide jury synthesizer") {
+		if strings.Contains(strings.ToLower(request.Instructions), "slide jury synthesizer") {
 			text = mergedScoreboard
 		}
-		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+		return text, nil
 	}
 
 	jury, err := runSlideJury(context.Background(), app, "goal-1", deck)
@@ -306,28 +306,28 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 	}
 	seatSystems := 0
 	for index, request := range requests {
-		if len(request.Messages) == 0 || request.Messages[0].Role != "user" {
-			t.Fatalf("request %d has no leading user message", index)
+		if request.Model != defaultOpenAIGoalReviewModel || request.ReasoningEffort != defaultOpenAIGoalReviewEffort || request.Seat != seatGoalReview {
+			t.Fatalf("request %d route=%s/%s seat=%s, want slide review %s/%s seat=%s", index, request.Model, request.ReasoningEffort, request.Seat, defaultOpenAIGoalReviewModel, defaultOpenAIGoalReviewEffort, seatGoalReview)
 		}
 		images := 0
-		for _, raw := range request.Messages[0].Content {
-			if decodeAnthropicBlock(raw).Type == "image" {
+		for _, content := range request.Attachments {
+			if content.Type == "input_image" {
 				images++
 			}
 		}
 		if images != 2 {
 			t.Fatalf("request %d carries %d image blocks, want ALL 2 pages", index, images)
 		}
-		system := strings.ToLower(request.System)
+		system := strings.ToLower(request.Instructions)
 		if !strings.Contains(system, "slide jury") {
-			t.Fatalf("request %d system is not jury-shaped: %q", index, request.System)
+			t.Fatalf("request %d system is not jury-shaped: %q", index, request.Instructions)
 		}
 		if !strings.Contains(system, "slide jury synthesizer") {
 			seatSystems++
 			// Every seat carries the shared strict-JSON schema with the
 			// executable-or-KEEP fix rule.
-			if !strings.Contains(request.System, "KEEP") || !strings.Contains(request.System, "weakest_three") {
-				t.Fatalf("seat request %d missing the jury schema: %q", index, request.System)
+			if !strings.Contains(request.Instructions, "KEEP") || !strings.Contains(request.Instructions, "weakest_three") {
+				t.Fatalf("seat request %d missing the jury schema: %q", index, request.Instructions)
 			}
 		}
 	}
@@ -357,7 +357,9 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 // discloses the skip before ever calling in, and nothing hits the network.
 func TestRunSlideJuryKeylessErrors(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	app.apiKey = ""
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
 	deck := seedSlideJuryDeck(t, app, []byte("fake-jpeg-page-one"))
 	if _, err := runSlideJury(context.Background(), app, "goal-1", deck); err == nil {
 		t.Fatal("keyless jury must error, not silently succeed")

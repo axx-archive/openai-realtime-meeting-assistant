@@ -25,7 +25,7 @@ func TestIndexFilesToolRegistration(t *testing.T) {
 	html := readIndexForFilesSurface(t)
 	for _, want := range []string{
 		// rail button + surface section
-		`data-tool="files" aria-label="Drive"`,
+		`data-tool="files" aria-label="Files"`,
 		`<section id="filesTool" class="memory-tool" aria-label="Drive">`,
 		// tool registries: routable + full-page treatment
 		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'network', 'team']`,

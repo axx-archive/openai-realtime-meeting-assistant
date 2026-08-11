@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_remaining_recurring_families_rendered_checkpoint",
+  "observedAt": "2026-08-11T14:34:08Z",
+  "status": "bounded_twelve_family_interaction_grammar_independent_critic_pass",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "28281a8105bee793aa77b988acafb0b8c9da776df0521632fb0f7918b4aa2867",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "fixture": {
+    "organization": "STRIDE Agentic Lab",
+    "humanMembers": 1,
+    "humanOwner": "AJ",
+    "intentOutcome": "start_private_work",
+    "assistantMessagesPerThread": 1,
+    "messagesPerThreadAfterRestart": 2,
+    "visibleWorker": "Scout",
+    "recurringThreads": [
+      {"family":"Presentation","title":"Pitch the STRIDE platform","request":"Scout can you make a 10 slide deck pitching me this platform?","visiblePhase":"Understanding","visibleProgressPercent":4,"visibleProgressNote":"Shaping the deck brief"},
+      {"family":"Research","title":"Research the agentic work market","request":"Scout, research the market for AI-native team workspaces and ground it in reliable sources.","visiblePhase":"Gathering evidence","visibleProgressPercent":28,"visibleProgressNote":"Gathering reliable sources"},
+      {"family":"Design","title":"Design the STRIDE launch image","request":"Scout, create a launch image and visual direction for STRIDE.","visiblePhase":"Building","visibleProgressPercent":46,"visibleProgressNote":"Building the first draft"},
+      {"family":"Financial model","title":"Model STRIDE's operating plan","request":"Scout, build a three-year financial model and operating forecast for STRIDE.","visiblePhase":"Verifying","visibleProgressPercent":72,"visibleProgressNote":"Checking the work"},
+      {"family":"Document","title":"Draft the STRIDE launch memo","request":"Scout, draft a concise launch memo for the STRIDE team.","visiblePhase":"Building","visibleProgressPercent":38,"visibleProgressNote":"Drafting the document"},
+      {"family":"Meeting recap","title":"Recap the product review","request":"Scout, turn the product review meeting into a recap, decision log, and action record.","visiblePhase":"Building","visibleProgressPercent":52,"visibleProgressNote":"Turning the meeting into decisions"},
+      {"family":"Revision","title":"Revise the investor deck","request":"Scout, revise this investor deck with a sharper opening and retain the prior version.","visiblePhase":"Verifying","visibleProgressPercent":76,"visibleProgressNote":"Preparing the revision"},
+      {"family":"Scheduled work","title":"Schedule the weekly market brief","request":"Scout, schedule a weekly market brief for this private team.","visiblePhase":"Understanding","visibleProgressPercent":22,"visibleProgressNote":"Setting the schedule"},
+      {"family":"Build","title":"Prepare the implementation handoff","request":"Scout, prepare a scoped repository implementation handoff for Codex.","visiblePhase":"Building","visibleProgressPercent":44,"visibleProgressNote":"Preparing the handoff"},
+      {"family":"Mixed package","title":"Assemble the investor package","request":"Scout, assemble an investor package with cited research, a memo, deck, financial model, and imagery.","visiblePhase":"Building","visibleProgressPercent":61,"visibleProgressNote":"Assembling the package"},
+      {"family":"Data visualization","title":"Chart the market landscape","request":"Scout, build a source-bound market share chart and reusable data table.","visiblePhase":"Building","visibleProgressPercent":48,"visibleProgressNote":"Building the visualization"},
+      {"family":"Project plan","title":"Plan the STRIDE launch","request":"Scout, create a governed launch project plan and task board.","visiblePhase":"Understanding","visibleProgressPercent":32,"visibleProgressNote":"Mapping the plan"}
+    ],
+    "acceptedLoopbackRenderProviderCalls": 0,
+    "acceptedLoopbackRenderExternalEffects": 0,
+    "acceptedLoopbackRenderProductionData": 0
+  },
+  "claims": {
+    "conversationFirst": "each_natural_language_request_projects_exactly_one_matching_recurring_work_card",
+    "webNativeParity": "all_twelve_families_share_priority_phase_terminal_status_and_allowlisted_progress_grammar",
+    "stableCardIdentity": "immutable_run_identity_preserves_one_evolving_card_before_and_after_material_artifact_attachment",
+    "humanGrammar": "reviewed_family_phase_progress_and_governance_copy_only",
+    "iPhone": "mixed_package_request_card_activity_and_composer_are_distinct_safe_area_aware_and_unobstructed",
+    "iPad": "twelve_private_threads_remain_readable_in_stable_list_and_selected_detail_grammar",
+    "restart": "all_twelve_threads_restore_exactly_two_messages_and_unchanged_progress_without_duplicate_or_provider_session",
+    "runtimeSuppression": "no_tool_provider_model_run_artifact_template_or_raw_stage_identifiers_render",
+    "defaultOff": true
+  },
+  "selectedFileSha256": {
+    "index.html": "3cf3c3184cb2eac085122ca7b6756e76c4f16a5499a43d9b6cfa3a9dc1a20ff4",
+    "frontend_design_polish_wave_test.go": "3737320b6d2886d8441f8757ba578a4a34427418fd97f18babe607907e76d2f0",
+    "stride_e10_agentic_lab_test.go": "148fc6432a5d29d11173439a68fe7009926f8ec58e11b4dee1dbdcdab0cb3b0a",
+    "mobile/src/messaging/workPresentation.ts": "aac86e68aeef9d35d6724785769ad96ffd3a23745e04ab6a446a4ea96b66fb1c",
+    "mobile/src/messaging/MessageBubble.tsx": "577a21b2b452acd2af2ac0b8336662f413df85fcc3ce942dbe1bc91bc20bd998",
+    "mobile/src/screens/ThreadScreen.tsx": "db92035e53bc73e693819600ee9f1794f058e1dc4ba3b54f8e268627a8616148",
+    "mobile/src/__tests__/workPresentation.test.ts": "34b8643fc82cc7fa182ca7b7f00a31ea8f72ef5fe232bddd8bf89371bcfa43ca"
+  },
+  "simulatorBuild": {
+    "configuration": "Release",
+    "sdk": "iphonesimulator26.5",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "infoPlistBundleVersion": "52",
+    "expoConfigBuildNumber": "53",
+    "apiBaseUrl": "http://127.0.0.1:19092",
+    "webAppUrl": "http://127.0.0.1:19092",
+    "mainJsBundleSha256": "22d8c796038153b75085f40bce09825c40678ccab9d47c6125e93a57cb14a254",
+    "expoAppConfigSha256": "b491b2bd1bbc296f3ebb1edc4fcec9a91aa8772a2baa2d0c22e35b78cea18325",
+    "infoPlistSha256": "82d111d26cb97feed048af2db0e856c8ef2e425da381d3168a4a619c54d22cfc",
+    "buildVerdict": "PASS"
+  },
+  "renderedEvidence": [
+    {"surface":"native_iphone_mixed_package","device":"iPhone 17 Pro simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-mixed-package-iphone.png","sha256":"5c0312bb7f6125b7bed89aab1f7ae3bad7e6c881149833fbc8b658e625c5e0da","width":456,"height":972},
+    {"surface":"native_ipad_project_plan_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-project-plan-ipad.png","sha256":"b42718e16ff878715388e61a54adcf6cf627e7b8841cbf0222fd57827edb00b3","width":710,"height":975},
+    {"surface":"native_ipad_data_visualization_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-data-visualization-ipad.png","sha256":"471b44b17f75857ed437a5e66209127fbd9caf725d0e9bd7efee6abf0fd10c9e","width":710,"height":975},
+    {"surface":"native_ipad_build_handoff_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-build-handoff-ipad.png","sha256":"3d85141718f02744b1213b20fd8ff532f35bd29a681b02c7d8287cc4e1fb7dc0","width":710,"height":975},
+    {"surface":"native_ipad_scheduled_work_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-scheduled-work-ipad.png","sha256":"8d00a5c796ace671d48d6bcda957c7cedf94b456e6b69355314a343ceca036e1","width":710,"height":975},
+    {"surface":"native_ipad_revision_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-revision-ipad.png","sha256":"96703423ea90c28fa6227df0a1b1b751c39cceae524951ae896b2392fa633889","width":710,"height":975},
+    {"surface":"native_ipad_meeting_recap_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-meeting-recap-ipad.png","sha256":"7e16afd46ad4b2d0ea7926590dc8f750a896a742f2402602b94ae909f77a55fb","width":710,"height":975},
+    {"surface":"native_ipad_document_list_detail","device":"iPad Pro 13-inch M5 simulator","os":"iOS 26.5","captureKind":"simulator_window_capture","path":"/tmp/stride-pd1-remaining-document-ipad.png","sha256":"d136ef8f94e193495aa905bdd18678e1c5781cc60f4d10fb2193dbb30b9c9d1c","width":710,"height":975}
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS_2.437s",
+    "focusedGoRace": "PASS_13.609s",
+    "fullMobile": "PASS_495_of_495",
+    "mobileTypecheck": "PASS",
+    "releaseSimulatorBuild": "PASS",
+    "renderHarnessTermination": "EXPECTED_OPERATOR_INTERRUPT_AFTER_RENDER_CAPTURE_NO_ASSERTION_FAILURE",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS_AFTER_TWO_REVISE_ROUNDS",
+      "focusedGoNormal": "PASS_2.553s",
+      "focusedGoRace": "PASS_16.855s",
+      "focusedNative": "PASS_3_of_3",
+      "directArtifactAttachmentIdentityProbe": "PASS",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_twelve_family_interaction_grammar_web_native_restart_and_rendered_journeys"
+    }
+  },
+  "operationalIncident": {
+    "status": "recorded_not_accepted_as_local_evidence",
+    "cause": "first_release_simulator_build_inherited_https_thebonfire_xyz_before_explicit_loopback_rebuild",
+    "actionsObserved": [
+      "first_build_installed_and_launched_on_iphone_and_ipad_simulators",
+      "AJ_credentials_entered_on_iphone_simulator",
+      "existing_production_thread_list_read",
+      "both_apps_terminated_after_configuration_was_detected"
+    ],
+    "productionAuthSessionMayHaveBeenCreated": true,
+    "productionMessageSentObserved": false,
+    "productionWorkLaunchedObserved": false,
+    "productionContentEditObserved": false,
+    "productionDataMutationAbsenceNotProved": true,
+    "cleanupOrRevocationAttempted": false,
+    "acceptedRendersUseVerifiedLoopbackRebuild": true
+  },
+  "openGates": [
+    "complete_full_pd1_rendered_accessibility_dynamic_type_voiceover_orientation_split_view_pointer_hardware_keyboard_and_performance_matrix",
+    "generate_and_accept_real_openai_authored_cited_research_document_image_xlsx_financial_model_pptx_pdf_chart_and_mixed_package_artifacts",
+    "exercise_attachments_reply_context_revision_translation_regeneration_scheduling_and_execution_handoff_with_real_provider_backed_work",
+    "accept_rich_preview_truthful_progress_final_artifact_and_drive_save_on_web_iphone_and_ipad_where_applicable",
+    "qualify_exact_provider_project_budget_and_cost_caps_before_paid_calls",
+    "physical_iphone_ipad_current_release_and_production_acceptance"
+  ],
+  "exclusions": {
+    "providerCalledForAcceptedLoopbackRender": false,
+    "actualDeliverableGenerated": false,
+    "artifactPreviewAccepted": false,
+    "driveAccepted": false,
+    "physicalDeviceAccepted": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

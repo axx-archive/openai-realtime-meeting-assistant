@@ -19,21 +19,10 @@ test('expanded shortcut cluster owns the full visible touch region', () => {
   assert.match(source, /!open && styles\.inert/);
 });
 
-test('canvas shortcuts distinguish the room list from room creation', () => {
-  const source = fs.readFileSync(
-    path.join(mobileRoot, 'src', 'screens', 'CanvasScreen.tsx'),
-    'utf8',
-  );
-
-  assert.match(
-    source,
-    /id: 'rooms',[\s\S]*label: 'Rooms',[\s\S]*navigation\.navigate\('Deck', \{ segment: 'rooms' \}\)/,
-  );
-  assert.match(
-    source,
-    /id: 'new-room',[\s\S]*label: 'New',[\s\S]*navigation\.navigate\('CreateRoom'\)/,
-  );
-  assert.doesNotMatch(source, /label: 'Live'/);
-  assert.match(source, /<View style=\{styles\.navRow\} pointerEvents="box-none">/);
-  assert.match(source, /navRow: \{[\s\S]*position: 'absolute',[\s\S]*bottom: 0/);
+test('Canvas has no duplicate shortcut band competing with the universal shell', () => {
+  const canvas = fs.readFileSync(path.join(mobileRoot, 'src', 'screens', 'CanvasScreen.tsx'), 'utf8');
+  const shell = fs.readFileSync(path.join(mobileRoot, 'src', 'navigation', 'NativeUniversalShell.tsx'), 'utf8');
+  assert.doesNotMatch(canvas, /<ChatCircle|<NavCluster|styles\.navRow|composerDock/);
+  assert.match(shell, /compactItem: \{[\s\S]*minHeight: 52/);
+  assert.match(shell, /bottomRail: \{[\s\S]*minHeight: 64/);
 });

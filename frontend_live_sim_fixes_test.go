@@ -218,41 +218,25 @@ func TestIndexParkedGoalCardRendersFromThreadRef(t *testing.T) {
 	}
 }
 
-// Bug 4 — an armed-tool send must always take the composer's live value as
-// the objective, and a value still equal to the untouched starter prefill is
-// no objective at all: the send blocks with a hint, the template stays armed.
-func TestIndexArmedToolSendGuardsPrefillObjective(t *testing.T) {
+// Conversation-first replacement for Bug 4: the composer has no armed tool
+// state at all, so starter text cannot silently hijack a later message.
+func TestIndexComposerHasNoArmedToolState(t *testing.T) {
 	html := readIndexForLiveSimFixes(t)
 	handoff := functionBody(html, "function paletteConversationalHandoff(tool)")
 	if handoff == "" {
 		t.Fatal("could not extract paletteConversationalHandoff body")
 	}
-	for _, want := range []string{
-		"scoutStarterText(mode)",
-		"composerHoldsStarter",
-		"prefill: composerHoldsStarter ? starter : ''",
-	} {
-		if !strings.Contains(handoff, want) {
-			t.Errorf("paletteConversationalHandoff body missing %q", want)
-		}
+	if strings.Contains(handoff, "pendingScoutToolTemplate") || strings.Contains(handoff, "toolId: tool.id") {
+		t.Error("legacy palette handoff still arms a client-selected tool")
 	}
 	send := functionBody(html, "function sendScoutChat(text)")
 	if send == "" {
 		t.Fatal("could not extract sendScoutChat body")
 	}
-	for _, want := range []string{
-		"trimmed === String(armedTemplate.prefill || '').trim()",
-		"describe what the tool should work on",
-	} {
-		if !strings.Contains(send, want) {
-			t.Errorf("sendScoutChat body missing %q", want)
-		}
+	if strings.Contains(send, "pendingScoutToolTemplate") || strings.Contains(send, "armedTemplate") || strings.Contains(send, "toolTemplate") {
+		t.Error("normal send path retains client tool state")
 	}
-	// the block must precede the capture-and-clear so the template survives
-	// for the real objective
-	blockAt := strings.Index(send, "describe what the tool should work on")
-	clearAt := strings.Index(send, "pendingScoutToolTemplate = null")
-	if blockAt == -1 || clearAt == -1 || blockAt > clearAt {
-		t.Error("the prefill block must run before the armed template is cleared")
+	if !strings.Contains(send, "sendScoutChatViaOffice(trimmed, files)") {
+		t.Error("normal send path must forward the person's text and files")
 	}
 }

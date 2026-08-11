@@ -27,8 +27,8 @@ func TestScoutCoreRouteModelsAreExplicitOpenAISeats(t *testing.T) {
 	if got := scoutRouterModel(); got != "gpt-5.6-luna" {
 		t.Fatalf("router model=%q, want Luna", got)
 	}
-	if got := scoutChatModel(); got != "gpt-5.6-luna" {
-		t.Fatalf("chat model=%q, want Luna", got)
+	if got := scoutChatModel(); got != "gpt-5.6-terra" {
+		t.Fatalf("chat model=%q, want Terra", got)
 	}
 	if got := scoutExtractionModel(); got != "gpt-5.6-luna" {
 		t.Fatalf("extraction model=%q, want Luna", got)
@@ -58,13 +58,13 @@ func TestScoutCoreIgnoresInstalledAnthropicKey(t *testing.T) {
 		workflows = append(workflows, request.Workflow)
 		switch request.Workflow {
 		case "scout_route":
-			if request.Model != defaultScoutRouterModel || request.JSONSchema == nil || request.Seat != seatRouter || request.ReasoningEffort != scoutReasoningEffort() {
-				t.Fatalf("router request=%+v, want Luna/max route seat", request)
+			if request.Model != defaultScoutRouterModel || request.JSONSchema == nil || request.Seat != seatRouter || request.ReasoningEffort != scoutRouterReasoningEffort() {
+				t.Fatalf("router request=%+v, want Luna/medium route seat", request)
 			}
-			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
 		case "scout_chat":
 			if request.Model != defaultScoutChatModel || request.Seat != seatChat || request.ReasoningEffort != scoutReasoningEffort() {
-				t.Fatalf("chat request=%+v, want Luna/max chat seat", request)
+				t.Fatalf("chat request=%+v, want Terra/high chat seat", request)
 			}
 			return "OpenAI core answer", nil
 		default:

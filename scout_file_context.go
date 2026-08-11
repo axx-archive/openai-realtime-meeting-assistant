@@ -412,6 +412,13 @@ func (app *kanbanBoardApp) agentThreadRecallPrincipal(requester string, metadata
 		}
 		principal.Audience = "shared_channel"
 		principal.ThreadID = thread.ID
+	case agentThreadOriginPrivateThread:
+		threadID := strings.TrimSpace(metadata["originId"])
+		thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+		if err != nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate || thread.ArchivedAt != "" {
+			return RecallPrincipal{}, false
+		}
+		principal.ThreadID = thread.ID
 	case agentThreadOriginRoom:
 		roomID := normalizeRoomID(firstNonEmptyString(metadata["originRoomId"], officeRoomID))
 		principal.Audience = "shared_room"
@@ -442,17 +449,18 @@ func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester stri
 }
 
 // agentThreadSourceConversationEntries resolves the exact, currently
-// authorized channel transcript ending at the human message that minted the
-// work proposal. It deliberately excludes later conversation: a run is bound
-// to what the requester could see and approved, not whatever happened to land
-// in the channel while the provider was working.
+// authorized public-channel or private-thread transcript ending at the human
+// message that minted the work. It deliberately excludes later conversation:
+// a run is bound to what the requester could see and approved, not whatever
+// happened to land while the provider was working.
 func (app *kanbanBoardApp) agentThreadSourceConversationEntries(principal RecallPrincipal, metadata map[string]string) ([]meetingMemoryEntry, error) {
 	sourceMessageID := strings.TrimSpace(metadata["sourceMessageId"])
 	if sourceMessageID == "" {
 		return nil, nil
 	}
 	threadID := strings.TrimSpace(metadata["originId"])
-	if strings.TrimSpace(metadata["originKind"]) != agentThreadOriginChannel || threadID == "" || principal.ThreadID != threadID {
+	originKind := strings.TrimSpace(metadata["originKind"])
+	if (originKind != agentThreadOriginChannel && originKind != agentThreadOriginPrivateThread) || threadID == "" || principal.ThreadID != threadID {
 		return nil, fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
 	}
 	if principal.User == nil || normalizeAccountEmail(principal.User.Email) == "" {
@@ -461,7 +469,11 @@ func (app *kanbanBoardApp) agentThreadSourceConversationEntries(principal Recall
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	thread, _, threadErr := app.scoutChatThreadByID(principal.User.Email, threadID)
-	if threadErr != nil || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+	wantVisibility := scoutChatVisibilityPublic
+	if originKind == agentThreadOriginPrivateThread {
+		wantVisibility = scoutChatVisibilityPrivate
+	}
+	if threadErr != nil || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != wantVisibility {
 		lock.Unlock()
 		return nil, fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
 	}
@@ -511,14 +523,19 @@ func (app *kanbanBoardApp) withCurrentAgentThreadSource(thread scoutAgentThread,
 	}
 	threadID := strings.TrimSpace(metadata["originId"])
 	requester := normalizeAccountEmail(metadata["requestedBy"])
-	if strings.TrimSpace(metadata["originKind"]) != agentThreadOriginChannel || threadID == "" || requester == "" {
+	originKind := strings.TrimSpace(metadata["originKind"])
+	if (originKind != agentThreadOriginChannel && originKind != agentThreadOriginPrivateThread) || threadID == "" || requester == "" {
 		return fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
 	}
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
 	current, _, err := app.scoutChatThreadByID(requester, threadID)
-	if err != nil || current.ArchivedAt != "" || scoutChatThreadVisibility(current) != scoutChatVisibilityPublic {
+	wantVisibility := scoutChatVisibilityPublic
+	if originKind == agentThreadOriginPrivateThread {
+		wantVisibility = scoutChatVisibilityPrivate
+	}
+	if err != nil || current.ArchivedAt != "" || scoutChatThreadVisibility(current) != wantVisibility {
 		return fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
 	}
 	_, binding, err := scoutChatSourceWindow(current, sourceMessageID)
@@ -616,6 +633,11 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 		return AgentJobContext{}, fmt.Errorf("%w: assistant is unavailable", ErrAgentThreadSourceChanged)
 	}
 	metadata := thread.Artifact.Metadata
+	if strings.TrimSpace(metadata["goalParentId"]) != "" {
+		if err := app.verifyGoalChildRoute(thread.Artifact); err != nil {
+			return AgentJobContext{}, err
+		}
+	}
 	requester := firstNonEmptyString(strings.TrimSpace(metadata["requestedBy"]), strings.TrimSpace(metadata["createdBy"]))
 	principal, ok := app.agentThreadRecallPrincipal(requester, metadata)
 	var base []meetingMemoryEntry

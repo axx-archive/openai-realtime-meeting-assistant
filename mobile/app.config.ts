@@ -20,7 +20,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'The voice-first company OS where conversation becomes memory, approved work, and verified results.',
     slug: 'bonfireos',
     version: '1.0.0',
-    orientation: 'portrait',
+    // iPhone and iPad work threads are adaptive. Keep this aligned with the
+    // checked-in plist so Expo regeneration cannot silently remove landscape
+    // or iPad Split View support.
+    orientation: 'default',
     icon: './assets/icon.png',
     userInterfaceStyle: 'automatic',
     // Retain the installed deep-link scheme while adding the visible Stride

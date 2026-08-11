@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestScoutRouterBuildsNativeActionInsteadOfWorkProposal(t *testing.T) {
+func TestScoutRouterKeepsUnadmittedNativeActionUnavailable(t *testing.T) {
 	output := openAIScoutRouterOutput{
 		Route:  "app_action",
 		ToolID: "archive_channel",
@@ -16,14 +16,8 @@ func TestScoutRouterBuildsNativeActionInsteadOfWorkProposal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("native action verdict: %v", err)
 	}
-	if verdict == nil || verdict.action == nil {
-		t.Fatalf("verdict=%#v, want native action", verdict)
-	}
-	if verdict.proposal != nil || verdict.choices != nil {
-		t.Fatalf("native action must not mint work: %#v", verdict)
-	}
-	if verdict.action.ToolID != "archive_channel" || verdict.action.Fields["channel"] != "Bonfire Map" {
-		t.Fatalf("action=%#v", verdict.action)
+	if verdict != nil {
+		t.Fatalf("unadmitted native action escaped as a router verdict: %#v", verdict)
 	}
 }
 
@@ -101,15 +95,15 @@ func TestScoutNativeActionDeletesFolderLabelButKeepsFilesAtRoot(t *testing.T) {
 	}
 }
 
-func TestPrivateRealtimeIncludesRequesterBoundNativeControls(t *testing.T) {
+func TestPrivateRealtimeFencesRequesterBoundNativeControlsBehindRouter(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	seen := map[string]bool{}
 	for _, tool := range app.privateRealtimeVoiceTools() {
 		seen[asString(tool["name"])] = true
 	}
 	for _, name := range []string{"archive_channel", "rename_channel", "create_file_folder", "rename_file_folder", "delete_file_folder", "delete_file"} {
-		if !seen[name] || !privateRealtimeVoiceToolAllowed(name) {
-			t.Fatalf("private Realtime missing %s", name)
+		if seen[name] || privateRealtimeVoiceToolAllowed(name) || !privateRealtimeVoiceServerActionAllowed(name) {
+			t.Fatalf("private Realtime native control %s was not correctly fenced", name)
 		}
 	}
 	for _, tool := range app.realtimeRoomVoiceTools() {

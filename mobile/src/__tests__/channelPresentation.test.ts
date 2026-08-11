@@ -30,9 +30,10 @@ test('Bonfire Chat pins first without disturbing the remaining order', () => {
 
 test('the mobile thread list separates channels and private work with an icon-only pin', () => {
   const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'messaging', 'ChannelList.tsx'), 'utf8');
-  assert.match(source, /label: 'CHANNELS'/);
-  assert.match(source, /label: 'PRIVATE'/);
-  assert.match(source, /thread\.visibility === 'public'/);
+  const rows = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'messaging', 'channelListPerformance.ts'), 'utf8');
+  assert.match(rows, /label: 'CHANNELS'/);
+  assert.match(rows, /label: 'PRIVATE'/);
+  assert.match(rows, /thread\.visibility === 'public'/);
   assert.match(source, /name="pin\.fill"/);
   assert.doesNotMatch(source, />STRIDE</);
 });

@@ -184,7 +184,7 @@ func TestGoalStageMessageLineRevisionSuffix(t *testing.T) {
 	}
 }
 
-// P0-3: the probe process run from a channel narrates its writer stage as it
+// P0-3: the probe process run from a private conversation narrates its writer stage as it
 // folds, and the checkpoint park lands as the call-to-action — a goal-parent
 // ref whose ID carries the goal's agentThreadID, so the final origin delivery
 // (deliverArtifactToOrigin) still dedupes on scoutChatThreadHasAgentRef.
@@ -192,18 +192,19 @@ func TestProcessGoalNarratesStagesAndParksCallToActionInOriginThread(t *testing.
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{})
 	installFakeChildRunner(t)
-	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("createScoutChatThread: %v", err)
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the process runtime",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_probe",
 		Origin: map[string]string{
-			"originKind": agentThreadOriginChannel,
-			"originId":   channel.ID,
+			"originKind":  agentThreadOriginPrivateThread,
+			"originId":    channel.ID,
+			"requestedBy": "aj@shareability.com",
 		},
 	})
 	if err != nil {
@@ -376,7 +377,7 @@ func TestParkProcessCheckpointGeneratesDefaultOptionsWhenExtractionFails(t *test
 		},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Pick a direction",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_defaults_probe",

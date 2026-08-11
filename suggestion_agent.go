@@ -39,7 +39,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 )
@@ -162,7 +161,7 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 		// A suggestion is lighter than a board mutation, but the output is still
 		// structured JSON the parse depends on; the shared maximum-by-default
 		// brain dial buys reliable shape for this infrequent step.
-		ReasoningEffort: meetingBrainReasoningEffort(),
+		ReasoningEffort: scoutRouterReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 700,
 	})
@@ -293,10 +292,7 @@ func researchTopicIsKnown(candidate string, known []string) bool {
 }
 
 func researchSuggestionModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_SUGGESTION_MODEL")); model != "" {
-		return model
-	}
-	return meetingBrainModel()
+	return scoutRouterModel()
 }
 
 func researchSuggestionInstructions() string {

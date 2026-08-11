@@ -201,8 +201,8 @@ func TestCapabilitySnapshotExposesEveryAmbientLaneAndCircuitTruth(t *testing.T) 
 	if !slices.Contains(degraded, "ambient.missionIntel") {
 		t.Fatalf("degraded=%v, want ambient.missionIntel", degraded)
 	}
-	if narrative := workers["narrative"].(map[string]any); narrative["provider"] != providerAnthropic {
-		t.Fatalf("keyed narrative provider=%v, want %s", narrative["provider"], providerAnthropic)
+	if narrative := workers["narrative"].(map[string]any); narrative["provider"] != providerOpenAI {
+		t.Fatalf("installed Anthropic key changed narrative provider=%v, want %s", narrative["provider"], providerOpenAI)
 	}
 }
 
@@ -300,7 +300,7 @@ func TestSpecialtyWorkerHealthRequiresItsTypedArtifactSuccess(t *testing.T) {
 	if _, appended, err := app.createOSArtifactWithMetadata("workflow", "Unrelated workflow", "complete", "AJ", nil); err != nil || !appended {
 		t.Fatalf("seed unrelated artifact: appended=%v err=%v", appended, err)
 	}
-	workers := ambientWorkersCapabilitySnapshot(time.Now().UTC(), true, true)
+	workers := ambientWorkersCapabilitySnapshot(time.Now().UTC(), true)
 	for _, name := range []string{"tasteAnalyst", "houseStyle"} {
 		worker := workers[name].(map[string]any)
 		if worker["status"] != "degraded" || worker["lastSuccessAt"] != nil {
@@ -309,19 +309,19 @@ func TestSpecialtyWorkerHealthRequiresItsTypedArtifactSuccess(t *testing.T) {
 	}
 
 	signal := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, map[string]string{"removedSections": "Intro"})
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return tasteTestResponse(t, []string{signal.ID}, nil), nil
 	}); err != nil {
 		t.Fatalf("run taste analyst: %v", err)
 	}
 	published := seedHouseStyleSourceArtifact(t, app)
-	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return houseStyleTestBody(published.ID), nil
 	}); err != nil {
 		t.Fatalf("run house style distiller: %v", err)
 	}
 
-	workers = ambientWorkersCapabilitySnapshot(time.Now().UTC(), true, true)
+	workers = ambientWorkersCapabilitySnapshot(time.Now().UTC(), true)
 	for _, name := range []string{"tasteAnalyst", "houseStyle"} {
 		worker := workers[name].(map[string]any)
 		if worker["status"] != "healthy" || strings.TrimSpace(asString(worker["lastSuccessAt"])) == "" {
@@ -494,7 +494,7 @@ func TestSpecialtyDueSourceDisappearsDoesNotManufactureSuccess(t *testing.T) {
 		if _, deleted, err := app.memory.deleteEntryByID(signal.ID); err != nil || !deleted {
 			t.Fatalf("remove due taste source: deleted=%v err=%v", deleted, err)
 		}
-		persisted, err := app.runTasteAnalystOnceResult(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		persisted, err := app.runTasteAnalystOnceResult(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			t.Fatal("provider responder called after due source disappeared")
 			return "", nil
 		})
@@ -504,7 +504,7 @@ func TestSpecialtyDueSourceDisappearsDoesNotManufactureSuccess(t *testing.T) {
 		assertNoOpPreservesArtifactAndError(t, app, tasteAnalystAgent(), oldArtifactAt, now, runtimeSuccessBefore)
 
 		fresh := recordTasteTestSignal(t, app, "AJ", signalEventSurveyOff, map[string]string{"note": "kill the buzzwords"})
-		persisted, err = app.runTasteAnalystOnceResult(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		persisted, err = app.runTasteAnalystOnceResult(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			return tasteTestResponse(t, []string{fresh.ID}, nil), nil
 		})
 		if err != nil {
@@ -540,7 +540,7 @@ func TestSpecialtyDueSourceDisappearsDoesNotManufactureSuccess(t *testing.T) {
 			t.Fatalf("remove due house-style source: deleted=%v err=%v", deleted, err)
 		}
 		revokeArtifactDeletionProjection(projection)
-		persisted, err := app.runHouseStyleDistillerOnceResult(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		persisted, err := app.runHouseStyleDistillerOnceResult(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			t.Fatal("provider responder called after due source disappeared")
 			return "", nil
 		})
@@ -550,7 +550,7 @@ func TestSpecialtyDueSourceDisappearsDoesNotManufactureSuccess(t *testing.T) {
 		assertNoOpPreservesArtifactAndError(t, app, houseStyleDistillerAgent(), oldArtifactAt, now, runtimeSuccessBefore)
 
 		fresh := seedHouseStyleSourceArtifact(t, app)
-		persisted, err = app.runHouseStyleDistillerOnceResult(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		persisted, err = app.runHouseStyleDistillerOnceResult(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			return houseStyleTestBody(fresh.ID), nil
 		})
 		if err != nil {

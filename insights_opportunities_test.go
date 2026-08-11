@@ -959,7 +959,7 @@ func TestInsightsOpportunitiesRemainsUnregisteredUntilDedicatedExecutor(t *testi
 		t.Fatalf("generic W2C registration err=%v, want fail-closed refusal", err)
 	}
 	route := insightsOpportunitiesStaticRoute()
-	if route.Orchestration.Model != "claude-fable-5" || route.Orchestration.Effort != "high" || route.Generation.Model != "claude-fable-5" || route.Generation.Effort != "high" || route.Review.Model != "claude-opus-4-8" {
+	if route.Orchestration.Model != "gpt-5.6-sol" || route.Orchestration.Effort != "high" || route.Generation.Model != "gpt-5.6-sol" || route.Generation.Effort != "high" || route.Review.Model != "gpt-5.6-sol" || route.Review.Effort != "max" {
 		t.Fatalf("static route drifted: %+v", route)
 	}
 }

@@ -3,9 +3,8 @@ package main
 // The propose-confirm router's frontend contract (packaging OS §2, Wave 2
 // item 8). These grep-style pins hold the client half of NEVER-silent-launch:
 // the confirmation card is the only thing that turns a proposal into a run,
-// its Run button posts the identical spec the palette Run posts, the escape
-// hatch re-asks as Tier 0, and the composer pills that fed the retired
-// keyword-sniff lane stay gone.
+// its button accepts the persisted server-owned proposal, the escape hatch
+// re-asks as Tier 0, and client tool-selection controls stay gone.
 
 import (
 	"os"
@@ -25,7 +24,7 @@ func readIndexForRouter(t *testing.T) string {
 // The confirmation card: rendered from the persisted Kind=proposal message,
 // with the trust-surface hooks the spec names — tool + group, one legible
 // sentence, editable pre-filled fields (palette form-card classes reused),
-// target package, authority class, weight label, Run, and the escape.
+// authority class, weight label, Run, and the escape.
 func TestIndexRouterConfirmationCardContract(t *testing.T) {
 	html := readIndexForRouter(t)
 	for _, want := range []string{
@@ -40,12 +39,10 @@ func TestIndexRouterConfirmationCardContract(t *testing.T) {
 		"scout-proposal-card__summary",
 		"scout-proposal-card__authority",
 		"scout-proposal-card__weight",
-		// editable pre-filled fields reuse the palette form-card pattern
+		// editable pre-filled fields reuse the internal form-card styling
 		"input.value = String((proposal.fields || {})[field.key] || '')",
-		"paletteBuildPackageField()",
-		// Run posts the IDENTICAL palette spec — reuse, do not fork
-		"toolTemplate: String(proposal.toolId || '')",
-		"authorityHint: String(proposal.authority || tool?.authority || '')",
+		// approval posts the edited objective to the persisted proposal route
+		"postScoutProposalAction('accepted', proposal, message, { objective",
 		// the escape hatch: Tier 0 + dismissal signal
 		"'Scout interpretation'",
 		"'Scout’s execution prompt'",
@@ -61,16 +58,15 @@ func TestIndexRouterConfirmationCardContract(t *testing.T) {
 		}
 	}
 
-	// Run must go through runGoalPipeline (the single /assistant/goal door)
-	// inside the card handler, not a bespoke fetch.
+	// Approval must not fork into a second client-selected goal launch.
 	cardStart := strings.Index(html, "function scoutProposalCardNode(message)")
 	cardEnd := strings.Index(html, "function markProposalCardResolved")
 	if cardStart < 0 || cardEnd < 0 || cardEnd <= cardStart {
 		t.Fatal("cannot scope the proposal card function body")
 	}
 	cardBody := html[cardStart:cardEnd]
-	if !strings.Contains(cardBody, "runGoalPipeline({") {
-		t.Fatal("the card's Run button must converge on runGoalPipeline — the same door as the palette Run")
+	if strings.Contains(cardBody, "runGoalPipeline({") || strings.Contains(cardBody, "toolTemplate: String(proposal.toolId") {
+		t.Fatal("proposal approval still launches a second client-selected goal")
 	}
 }
 

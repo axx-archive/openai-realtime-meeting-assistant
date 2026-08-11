@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -53,6 +54,7 @@ const (
 type osEvent struct {
 	Kind          string `json:"kind"`
 	Ref           string `json:"ref"`
+	DeliveryID    string `json:"deliveryId,omitempty"`
 	Title         string `json:"title,omitempty"`
 	OriginSurface string `json:"originSurface,omitempty"`
 	Actor         string `json:"actor,omitempty"`
@@ -62,6 +64,7 @@ type osEvent struct {
 func normalizeOSEvent(event osEvent) osEvent {
 	event.Kind = strings.TrimSpace(event.Kind)
 	event.Ref = strings.TrimSpace(event.Ref)
+	event.DeliveryID = strings.TrimSpace(event.DeliveryID)
 	event.Title = strings.TrimSpace(event.Title)
 	event.OriginSurface = strings.TrimSpace(event.OriginSurface)
 	event.Actor = strings.TrimSpace(event.Actor)
@@ -86,11 +89,24 @@ func broadcastOSEvent(event osEvent) {
 // the targeted path for private records (a private artifact, a targeted
 // notification). Same trust boundary: titles only.
 func sendOSEventToUser(email string, event osEvent) {
+	sendOSEventToUserWithContext(context.Background(), email, event)
+}
+
+func sendOSEventToUserWithContext(ctx context.Context, email string, event osEvent) {
 	event = normalizeOSEvent(event)
 	if event.Kind == "" || event.Ref == "" {
 		return
 	}
-	sendKanbanEventToUser(email, osEventName, event)
+	sendKanbanEventToUserWithContext(ctx, email, osEventName, event)
+}
+
+func sendOSEventToUserWithContextIdempotent(ctx context.Context, email string, event osEvent, deliveryID string) (bool, error) {
+	event.DeliveryID = strings.TrimSpace(deliveryID)
+	event = normalizeOSEvent(event)
+	if event.Kind == "" || event.Ref == "" || event.DeliveryID == "" {
+		return false, fmt.Errorf("idempotent OS event requires kind, ref, and delivery id")
+	}
+	return sendKanbanEventToUserWithContextIdempotent(ctx, email, osEventName, event, event.DeliveryID)
 }
 
 // osNotificationEventTitle derives a body-free label for a notification OS

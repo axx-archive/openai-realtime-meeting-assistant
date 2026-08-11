@@ -118,8 +118,8 @@ func TestAcceptanceSuiteCoverage(t *testing.T) {
 		tests     []string
 	}{
 		{
-			"A8 three doors, one pipeline",
-			[]string{"TestGoalDoorsResolveToolTemplate", "TestPaletteOpensFromBothDoors"},
+			"A8 conversation-first routing with no client-selected launch door",
+			[]string{"TestNormalComposerHasNoToolPaletteDoors", "TestRunGoalPipelineReentersConversationRouter", "TestConversationIntentContractAcceptsExactlyFiveExclusiveShapes"},
 		},
 		{
 			"A9 external-write gate — Fable in-process runner",

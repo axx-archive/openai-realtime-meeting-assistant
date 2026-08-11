@@ -269,7 +269,7 @@ func TestInstantiateProcessPlanMapsStagesInOrder(t *testing.T) {
 	if !ok {
 		t.Fatal("process_probe missing")
 	}
-	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose}
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}

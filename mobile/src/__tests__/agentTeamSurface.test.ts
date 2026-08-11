@@ -16,8 +16,8 @@ test('agent team surface reaches authenticated STRIDE product lifecycles', () =>
   assert.match(client, /strideRoster\(sessionToken: string\)/);
   assert.match(client, /strideMarketplace\(sessionToken: string\)/);
   assert.match(client, /strideWork\(sessionToken: string\)/);
-  assert.match(client, /strideStartTrial\(sessionToken: string, listingId: string\)/);
-  assert.match(client, /strideHire\(sessionToken: string, listingId: string, revision: number\)/);
+  assert.doesNotMatch(screen, /api\.strideStartTrial\(/);
+  assert.doesNotMatch(screen, /api\.strideHire\(/);
   assert.match(client, /strideWorkDestination/);
   assert.match(client, /strideWorkDecision/);
   assert.match(client, /\/api\/stride\/v1\/status/);

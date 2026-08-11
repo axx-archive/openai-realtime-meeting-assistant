@@ -815,6 +815,49 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 	}
 }
 
+func TestScoutChatAttachmentUnavailableReportsEveryProviderAttempt(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "sk-openai-test"
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
+
+	pngRef, err := putBlob([]byte("raster bytes"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		switch request.Workflow {
+		case "attachment_extract":
+			return "Source facts extracted.", nil
+		case "scout_route":
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Outcome: string(conversationIntentUnavailable), Message: "That work is not admitted yet.",
+			}), nil
+		default:
+			return "", fmt.Errorf("unexpected workflow %q", request.Workflow)
+		}
+	})
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Unavailable attachment", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	granted := grantTestPendingAttachment(t, kanbanApp, user, thread, pngRef)
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Create the unavailable deliverable from this", []scoutChatFileAttachment{{
+		Name: "source.png", Kind: "png", Size: 12, Ref: pngRef, SourceID: granted.SourceID, SourceRevision: granted.SourceRevision,
+	}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || response["providerCalls"] != 2 || response["intentOutcome"] != string(conversationIntentUnavailable) {
+		t.Fatalf("calls=%d response=%#v, want two truthful provider attempts and unavailable", calls, response)
+	}
+}
+
 // An installed Anthropic key is never selected for the core attachment path.
 func TestScoutChatAttachmentInstalledAnthropicKeyDoesNotReceiveCoreTraffic(t *testing.T) {
 	setupAuthTestEnv(t)

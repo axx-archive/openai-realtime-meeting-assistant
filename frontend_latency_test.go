@@ -442,8 +442,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
 		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
-		`data-tool="room" aria-label="The room" aria-pressed="false"`,
-		`data-tool="chat" aria-label="Chat" aria-pressed="false"`,
+		`data-tool="room" aria-label="Meetings" aria-pressed="false"`,
+		`data-tool="chat" aria-label="Conversations" aria-pressed="false"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		"let railHidden = false",
 		"function loadRailHiddenPreference()",
@@ -478,9 +478,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="researchArtifactList" class="research-library__list"`,
 		`id="designTool" class="agent-tool" data-agent-tool="design"`,
 		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
-		`<span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Intelligence" aria-pressed="false">`,
-		`<span class="tool-rail__label">intel</span>`,
+		`<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="artifacts" aria-label="Work library" aria-pressed="false" aria-checked="false">`,
+		`<span class="tool-rail__label">work library</span>`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
 		// The 4 composer starter pills were cut with the propose-confirm
 		// router (spec §2); frontend_router_test.go pins their absence and the
@@ -572,7 +571,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"goal workflow",
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 0px;",
-		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
+		`id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
@@ -596,9 +595,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"const agentToolIds = ['research', 'design', 'grill']",
 		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']",
 		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">`,
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="research" aria-label="Research" aria-pressed="false" aria-checked="false">`,
 		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" aria-pressed="false">`,
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="design" aria-label="Design" aria-pressed="false" aria-checked="false">`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false" hidden>research</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false" hidden>design</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false" hidden>grill</button>`,
@@ -796,12 +795,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if strings.Contains(html, "openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')") {
 		t.Fatal("agent thread cards should open Artifacts, not legacy Research/Design pages")
 	}
-	if !strings.Contains(html, `<span class="tool-rail__slot">
-          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" aria-pressed="false">`) {
+	if !strings.Contains(html, `<button id="toolBoard" class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="board" aria-label="Projects" aria-pressed="false" aria-checked="false">`) {
 		t.Fatal("board rail slot should be visible and enabled; the expanded board gates editing, not entry")
 	}
-	if !strings.Contains(html, `<span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" aria-pressed="false">`) {
+	if !strings.Contains(html, `<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Memory" aria-pressed="false" aria-checked="false">`) {
 		t.Fatal("memory rail slot should be visible so the memory browser is reachable")
 	}
 	if strings.Contains(html, "toolBoardButton.disabled") {
@@ -913,7 +910,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
+		`id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		"top: 50%;",
 		"inset: 0 auto 0 0;",
@@ -934,8 +931,8 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"#appShell.is-authed .workspace",
 		"padding-left: 72px;",
 		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
-		`<span class="tool-rail__label">the room</span>`,
-		`<span class="tool-rail__label">chat</span>`,
+		`<span class="tool-rail__label">meetings</span>`,
+		`<span class="tool-rail__label">conversations</span>`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		`class="tool-rail__account-icon"`,
 		`aria-haspopup="dialog"`,
@@ -1005,7 +1002,7 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
+		`id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden`,
 		"inset: 0 auto 0 0;",
 		"width: 60px;",
 		"inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;",

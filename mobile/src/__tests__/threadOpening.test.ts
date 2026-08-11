@@ -25,9 +25,9 @@ test('an explicit message link keeps control of the final opening position', () 
 });
 
 test('human scrolling suppresses live tail-follow until drag or momentum settles', () => {
-  assert.match(source, /onScrollBeginDrag=\{\(\) => \{[\s\S]*'drag-begin'[\s\S]*atBottomRef\.current = false;/);
-  assert.match(source, /onMomentumScrollBegin=\{\(\) => \{[\s\S]*'momentum-begin'/);
-  assert.match(source, /onMomentumScrollEnd=\{\(event\) => \{[\s\S]*'momentum-end'/);
+  assert.match(source, /onScrollBeginDrag=\{\(\) => \{[\s\S]*["']drag-begin["'][\s\S]*atBottomRef\.current = false;/);
+  assert.match(source, /onMomentumScrollBegin=\{\(\) => \{[\s\S]*["']momentum-begin["']/);
+  assert.match(source, /onMomentumScrollEnd=\{\(event\) => \{[\s\S]*["']momentum-end["']/);
   assert.match(source, /shouldFollowThreadTail\([\s\S]*threadScrollInteractionRef\.current/);
   assert.match(source, /threadMomentumGraceTimerRef\.current = setTimeout\([\s\S]*settleThreadScroll/);
 });

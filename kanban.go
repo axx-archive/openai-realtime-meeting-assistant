@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -312,6 +313,23 @@ type kanbanBoardApp struct {
 	apiKey                string
 	assistantStatus       string
 	serverRestarting      bool
+	// Exact goal-child artifacts activated by this process instance. This map
+	// is intentionally not durable: a real restart must treat a preexisting
+	// `started` marker as ambiguous, while duplicate reconciliation in one boot
+	// may recognize the worker that this boot just started.
+	goalStartedChildrenMu sync.Mutex
+	goalStartedChildren   map[string]struct{}
+	// openAIToolActiveRuns is the process-local half of the durable activation
+	// claim. The persisted owner distinguishes a prior process after restart;
+	// this set prevents two retries in the current process from starting the
+	// same exact carrier. Both are guarded by openAIToolActivationMu.
+	openAIToolActivationMu    sync.Mutex
+	openAIToolActiveRuns      map[string]struct{}
+	openAIToolActivationOwner string
+	// openAIToolRuntime is the default-off, server-installed bridge for the
+	// secure four-tool Responses carrier. It has no environment or persisted
+	// assignment constructor; nil keeps ordinary tool-dependent work unavailable.
+	openAIToolRuntime *openAIToolProductRuntime
 
 	model                          string
 	pc                             *webrtc.PeerConnection
@@ -527,12 +545,15 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:                    cards,
-		nextCreatedIndex:         nextKanbanCardIndex(cards),
-		updatedAt:                updatedAt,
-		handledCalls:             map[string]struct{}{},
-		memory:                   memory,
-		pendingAttachmentUploads: map[string]pendingAttachmentUploadGrant{},
+		cards:                     cards,
+		nextCreatedIndex:          nextKanbanCardIndex(cards),
+		updatedAt:                 updatedAt,
+		handledCalls:              map[string]struct{}{},
+		memory:                    memory,
+		goalStartedChildren:       map[string]struct{}{},
+		openAIToolActiveRuns:      map[string]struct{}{},
+		openAIToolActivationOwner: uuid.NewString(),
+		pendingAttachmentUploads:  map[string]pendingAttachmentUploadGrant{},
 		roomLive: map[string]*roomLiveState{
 			officeRoomID: newRoomLiveState(officeRoomID, updatedAt),
 		},
@@ -1491,7 +1512,7 @@ func warnRealtimeVoiceSessionNoVocab(surface string) {
 	if transcriptionModelAcceptsPrompt(model) {
 		return
 	}
-	log.Warnf("Realtime %s voice session transcription model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded (set OPENAI_REALTIME_TRANSCRIPTION_MODEL to a gpt-4o transcription model to restore vocabulary biasing)", surface, model)
+	log.Warnf("Realtime %s voice session transcription model %q rejects the domain-vocabulary prompt — the server-owned route is degraded", surface, model)
 	recordEvalEvent(seatTranscriptionSession, evalKindNoVocabWarning, map[string]any{
 		"model":   model,
 		"surface": surface,
@@ -1572,27 +1593,45 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfigForUser(model, userE
 
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
-		"# Role and Objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
-		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use create_channel, rename_channel, and archive_channel for Bonfire Chat channel controls. Use create_file_folder, rename_file_folder, delete_file_folder, delete_file, organize_files, and save_to_files for Drive controls; deleting a folder returns its files to All files. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use note_for_the_record when the user explicitly wants something remembered in company memory (\"note for the record…\", \"remember that…\", \"put on record that…\"); pass kind=decision for an explicit decision or stated position and it lands as a proposed decision the team can ratify. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
-		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
-		"# Meeting recap\nUse meeting_interval_recall when someone asks what happened in exactly the last 5 or 30 minutes of their current meeting; it is transcript-first, source-bound, and reports analysis lag or coverage gaps. Use meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
-		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
+		"# Role and objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime conversation outside the video room.",
+		"# One conversation contract\nFor every completed, meaningful user utterance, call route_conversation_turn exactly once with the user's exact words before answering or acting. The server returns exactly one outcome: conversational_reply, clarify_once, start_private_work, approval_required, or unavailable. Speak that result plainly. Use do_nothing only for silence, noise, or an abandoned fragment.",
+		"# Authority boundary\nYou never choose a tool, deliverable template, model, provider, reasoning effort, budget, authority, channel, audience, or effect. route_conversation_turn accepts natural language only. The server may start safe private work, hold a governed effect for approval, ask one clarification, or report a capability unavailable. Never claim work started, changed, sent, published, deleted, or saved unless the returned server result says so.",
+		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. Direct board, artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Ask one concise clarifying question when the request is ambiguous; do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
+		"# Behavior\nAnswer directly and briefly after the server outcome. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
 	}, "\n\n")
 }
 
 func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
-	tools := []map[string]any{}
-	for _, tool := range app.kanbanTools() {
-		if privateRealtimeVoiceToolAllowed(asString(tool["name"])) {
-			tools = append(tools, tool)
-		}
+	return []map[string]any{
+		{
+			"type":        "function",
+			"name":        "route_conversation_turn",
+			"description": "Submit one completed natural-language utterance to Stride's server-owned five-outcome conversation router. This function never selects a tool, template, model, authority, audience, or effect.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"utterance": map[string]any{"type": "string", "description": "The user's exact completed words, without interpretation or added instructions."},
+				},
+				"required":             []string{"utterance"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "do_nothing",
+			"description": "Use only for silence, noise, or an abandoned speech fragment that is not an accepted natural-language turn.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"reason": map[string]any{"type": "string"},
+				},
+				"required":             []string{"reason"},
+				"additionalProperties": false,
+			},
+		},
 	}
-	tools = append(tools, privateScoutNativeToolDefinitions()...)
-	return tools
 }
 
 func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, []byte, error) {
@@ -1816,33 +1855,15 @@ func (app *kanbanBoardApp) refreshRealtimeBoardContext(reason string) {
 }
 
 func realtimeModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_MODEL")); model != "" {
-		return model
-	}
-
 	return defaultRealtimeModel
 }
 
 func realtimeReasoningEffort() string {
-	effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_REASONING_EFFORT")))
-	switch effort {
-	case "minimal", "low", "medium", "high", "xhigh":
-		return effort
-	default:
-		return defaultReasoningEffort
-	}
+	return defaultReasoningEffort
 }
 
 func realtimeRoomReasoningEffort() string {
-	effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_ROOM_REALTIME_REASONING_EFFORT")))
-	switch effort {
-	case "minimal", "low", "medium", "high", "xhigh":
-		return effort
-	default:
-		// Room turn classification should feel conversational. The private
-		// homepage assistant keeps the deeper global reasoning profile.
-		return "low"
-	}
+	return "medium"
 }
 
 func realtimeVoice() string {
@@ -1979,8 +2000,9 @@ func validateRealtimeConfig() []string {
 	var warnings []string
 	now := time.Now().UTC()
 	for _, lane := range []struct{ label, model string }{
-		{"transcript lane (OPENAI_TRANSCRIPT_MODEL)", transcriptionLaneModel()},
-		{"voice-session transcription (OPENAI_REALTIME_TRANSCRIPTION_MODEL)", realtimeTranscriptionModel()},
+		{"committed transcript lane", transcriptionLaneModel()},
+		{"live voice-session transcription", realtimeTranscriptionModel()},
+		{"composer dictation", dictationTranscriptionModel()},
 	} {
 		if !transcriptionModelAcceptsPrompt(lane.model) {
 			warnings = append(warnings, fmt.Sprintf("%s model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded", lane.label, lane.model))
@@ -1989,24 +2011,8 @@ func validateRealtimeConfig() []string {
 			warnings = append(warnings, fmt.Sprintf("%s model %q has no pricing-table row — likely an env typo", lane.label, lane.model))
 		}
 	}
-	if strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")) != "" {
-		model := dictationTranscriptionModel()
-		if !transcriptionModelAcceptsPrompt(model) {
-			warnings = append(warnings, fmt.Sprintf("composer dictation (OPENAI_DICTATION_TRANSCRIPT_MODEL) model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded", model))
-		}
-		if _, priced := priceForModel(model, now); !priced {
-			warnings = append(warnings, fmt.Sprintf("composer dictation (OPENAI_DICTATION_TRANSCRIPT_MODEL) model %q has no pricing-table row — likely an env typo", model))
-		}
-	}
 	if _, priced := priceForModel(realtimeModel(), now); !priced {
-		warnings = append(warnings, fmt.Sprintf("realtime voice (OPENAI_REALTIME_MODEL) model %q has no pricing-table row — likely an env typo", realtimeModel()))
-	}
-	if raw := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_REASONING_EFFORT"))); raw != "" {
-		switch raw {
-		case "minimal", "low", "medium", "high", "xhigh":
-		default:
-			warnings = append(warnings, fmt.Sprintf("OPENAI_REALTIME_REASONING_EFFORT=%q is not one of minimal/low/medium/high/xhigh — falling back to %q", raw, defaultReasoningEffort))
-		}
+		warnings = append(warnings, fmt.Sprintf("server-owned realtime voice model %q has no pricing-table row", realtimeModel()))
 	}
 	for _, warning := range warnings {
 		log.Warnf("Realtime config: %s", warning)
@@ -4132,14 +4138,26 @@ func (app *kanbanBoardApp) fiscalDataQueryTool(args map[string]any) (map[string]
 	return map[string]any{"ok": true, "output": fiscalTruncate(output, maxChars)}, false, nil
 }
 
-// privateRealtimeVoiceToolAllowed is the single source of truth for what
-// private Scout ("she can do it all") may call. Room-only tools are excluded by
-// construction: set_voice_control / set_recording / archive_meeting mutate the
-// shared room session or recording for every participant, and
-// start_grill_session / end_grill_session swap the shared room persona — the
-// private surface has no room. Everything else the private user owns for
-// themselves, including board mutation on their behalf and artifact edits.
+// privateRealtimeVoiceToolAllowed is the complete model-controlled tool
+// surface. Natural language enters one server-owned router; silence/noise has
+// one no-effect escape hatch. No model output can select a product tool,
+// deliverable, provider, authority, audience, or effect.
 func privateRealtimeVoiceToolAllowed(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case "route_conversation_turn", "do_nothing":
+		return true
+	default:
+		return false
+	}
+}
+
+// privateRealtimeVoiceServerActionAllowed retains the pre-E10 executors only
+// for server-owned compatibility adapters and focused historical tests. These
+// names are absent from the Realtime session and the public Realtime-tool HTTP
+// boundary rejects them before dispatch. Each capability must be individually
+// admitted through the conversation contract before it can return to a
+// model-controlled surface.
+func privateRealtimeVoiceServerActionAllowed(toolName string) bool {
 	switch strings.TrimSpace(toolName) {
 	case
 		// Navigation, recall, artifacts (the private user owns editing).
@@ -4179,9 +4197,163 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 	}
 }
 
-func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, toolName string, args map[string]any) (map[string]any, bool, error) {
+const privateRealtimeVoiceUtteranceMaxRunes = 16_000
+
+// applyPrivateRealtimeVoiceModelTool is the only HTTP-reachable private voice
+// dispatch. It accepts the provider call id as an immutable replay alias and
+// carries natural language into the same five-outcome chat path used by typed
+// turns. Legacy server action executors below are deliberately unreachable
+// from this boundary.
+func (app *kanbanBoardApp) applyPrivateRealtimeVoiceModelTool(ctx context.Context, requesterEmail string, callID string, toolName string, args map[string]any) (map[string]any, bool, error) {
 	toolName = strings.TrimSpace(toolName)
 	if !privateRealtimeVoiceToolAllowed(toolName) {
+		return nil, false, fmt.Errorf("private Realtime voice capability %q is unavailable", toolName)
+	}
+	callID, err := normalizeScoutIdempotencyKey(callID)
+	if err != nil {
+		return nil, false, fmt.Errorf("private Realtime voice call id is invalid")
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	if toolName == "do_nothing" {
+		reason, err := exactPrivateRealtimeStringArgument(args, "reason")
+		if err != nil {
+			return nil, false, err
+		}
+		return map[string]any{"ok": true, "outcome": "no_effect", "message": reason}, false, nil
+	}
+
+	utterance, err := exactPrivateRealtimeStringArgument(args, "utterance")
+	if err != nil {
+		return nil, false, err
+	}
+	if utf8.RuneCountInString(utterance) > privateRealtimeVoiceUtteranceMaxRunes {
+		return nil, false, fmt.Errorf("private Realtime voice utterance is too long")
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail == "" {
+		return nil, false, fmt.Errorf("private Realtime voice requester is required")
+	}
+	bodyDigest := sha256Hex([]byte("private-realtime-conversation/v1\x00" + requesterEmail + "\x00" + utterance))
+	operationLock := app.scoutChatThreadLock("private-realtime-operation-" + sha256Hex([]byte(requesterEmail + "\x00" + callID))[:24])
+	operationLock.Lock()
+	defer operationLock.Unlock()
+
+	if replay, found, replayErr := app.replayPrivateRealtimeConversationTurn(ctx, requesterEmail, callID, bodyDigest); found || replayErr != nil {
+		return replay, false, replayErr
+	}
+
+	thread, err := app.latestOrCreatePrivateRealtimeConversationThread(requesterEmail)
+	if err != nil {
+		return nil, false, err
+	}
+	user := accountStore().findUser(requesterEmail)
+	if user == nil {
+		return nil, false, fmt.Errorf("private Realtime voice requester is unavailable")
+	}
+	ctx = withConversationTurnModality(ctx, conversationModalityPrivateRealtimeVoice)
+	ctx = withConversationTurnOperation(ctx, conversationTurnOperation{ID: callID, BodyDigest: bodyDigest})
+	response, err := app.appendScoutChatThreadMessage(ctx, user, thread.ID, utterance, nil, "")
+	if err != nil {
+		return nil, false, err
+	}
+	return privateRealtimeConversationResult(response, thread.ID), false, nil
+}
+
+func exactPrivateRealtimeStringArgument(args map[string]any, name string) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("private Realtime voice arguments do not match the admitted schema")
+	}
+	raw, exists := args[name]
+	if !exists {
+		return "", fmt.Errorf("private Realtime voice argument %q is required", name)
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("private Realtime voice argument %q must be a string", name)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("private Realtime voice argument %q is required", name)
+	}
+	return value, nil
+}
+
+func (app *kanbanBoardApp) latestOrCreatePrivateRealtimeConversationThread(requesterEmail string) (scoutChatThreadRecord, error) {
+	for _, thread := range app.scoutChatThreadsSnapshot(requesterEmail, false, 0) {
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && strings.TrimSpace(thread.AgentID) == "" && strings.TrimSpace(thread.Intake) == "" {
+			return thread, nil
+		}
+	}
+	user := accountStore().findUser(requesterEmail)
+	if user == nil {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice requester is unavailable")
+	}
+	thread, err := app.createScoutChatThread(requesterEmail, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
+	return thread, nil
+}
+
+func (app *kanbanBoardApp) replayPrivateRealtimeConversationTurn(ctx context.Context, requesterEmail string, operationID string, bodyDigest string) (map[string]any, bool, error) {
+	for _, thread := range app.scoutChatThreadsSnapshot(requesterEmail, true, 0) {
+		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate {
+			continue
+		}
+		response, found, err := app.replayConversationTurnInThread(ctx, requesterEmail, thread, conversationTurnOperation{
+			ID: operationID, BodyDigest: bodyDigest,
+		})
+		if !found && err == nil {
+			continue
+		}
+		if err != nil {
+			if strings.Contains(err.Error(), "reused with different content") {
+				return nil, true, fmt.Errorf("private Realtime voice operation id was reused with different words")
+			}
+			return nil, true, err
+		}
+		return privateRealtimeConversationResult(response, thread.ID), true, nil
+	}
+	return nil, false, nil
+}
+
+func privateRealtimeConversationResult(response map[string]any, fallbackThreadID string) map[string]any {
+	result := map[string]any{"ok": true}
+	outcome := strings.TrimSpace(asString(response["intentOutcome"]))
+	messageText := ""
+	threadID := strings.TrimSpace(fallbackThreadID)
+	if thread, ok := response["thread"].(scoutChatThreadRecord); ok {
+		threadID = thread.ID
+	}
+	if answer, ok := response["answer"].(scoutChatMessageRecord); ok {
+		outcome = firstNonEmptyString(strings.TrimSpace(answer.IntentOutcome), outcome)
+		messageText = strings.TrimSpace(answer.Text)
+		if answer.Thread != nil {
+			result["work_id"] = answer.Thread.ID
+			result["work_status"] = answer.Thread.Status
+			if answer.Thread.ArtifactID != "" {
+				result["artifact_id"] = answer.Thread.ArtifactID
+			}
+		}
+	}
+	if outcome == "" {
+		outcome = string(conversationIntentUnavailable)
+		messageText = firstNonEmptyString(messageText, "I couldn't resolve that turn safely. Nothing else was launched.")
+		result["ok"] = false
+	}
+	result["outcome"] = outcome
+	result["message"] = messageText
+	result["thread_id"] = threadID
+	result["approval_required"] = outcome == string(conversationIntentApprovalRequired)
+	return result
+}
+
+func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, toolName string, args map[string]any) (map[string]any, bool, error) {
+	toolName = strings.TrimSpace(toolName)
+	if !privateRealtimeVoiceServerActionAllowed(toolName) {
 		return nil, false, fmt.Errorf("private Realtime voice cannot use %q", toolName)
 	}
 	if args == nil {
@@ -8955,15 +9127,68 @@ func broadcastSignedInKanbanEvent(event string, data any) {
 // are reached too. Targeted payloads must never go through
 // broadcastKanbanEvent and rely on client-side redaction.
 func sendKanbanEventToUser(email string, event string, data any) {
+	sendKanbanEventToUserWithContext(context.Background(), email, event, data)
+}
+
+func sendKanbanEventToUserWithContext(ctx context.Context, email string, event string, data any) {
+	_, _ = sendKanbanEventToUserWithContextIdempotent(ctx, email, event, data, "")
+}
+
+var (
+	targetedKanbanDeliveryMu   sync.Mutex
+	targetedKanbanDeliverySeen = map[string]struct{}{}
+	// Test-only observation seam for the exact encoded attempt accepted by the
+	// process-local delivery fence. The durable delivery ID also rides inside
+	// raw; tests use this to prove a real process-restart retry is byte-exact.
+	targetedKanbanDeliveryAttemptProbe func(deliveryID, raw string)
+	// Test-only seam after the fan-out layer has claimed the exact delivery ID
+	// but before it writes any socket. A real process death clears the in-memory
+	// claim; the signed pending outbox row remains durable and retries it.
+	targetedKanbanAfterDeliveryClaimProbe func(string) error
+)
+
+// sendKanbanEventToUserWithContextIdempotent is the targeted fan-out seam for
+// a durable outbox. deliveryID is persisted by the caller and rides the wire;
+// repeated attempts in one server process are suppressed before socket write,
+// while a process restart may retry the same ID and the client router dedupes
+// it across websocket reconnects. The return value reports an actual logical
+// broadcast attempt, not merely a replayed call into this function.
+func sendKanbanEventToUserWithContextIdempotent(ctx context.Context, email string, event string, data any, deliveryID string) (bool, error) {
 	email = normalizeAccountEmail(email)
 	if email == "" {
-		return
+		return false, nil
 	}
 
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode targeted Kanban event: %v", err)
-		return
+		return false, err
+	}
+	deliveryID = strings.TrimSpace(deliveryID)
+	claimKey := ""
+	if deliveryID != "" {
+		claimKey = email + "\x00" + strings.TrimSpace(event) + "\x00" + deliveryID
+		targetedKanbanDeliveryMu.Lock()
+		if _, duplicate := targetedKanbanDeliverySeen[claimKey]; duplicate {
+			targetedKanbanDeliveryMu.Unlock()
+			return false, nil
+		}
+		targetedKanbanDeliverySeen[claimKey] = struct{}{}
+		if len(targetedKanbanDeliverySeen) > 8192 {
+			targetedKanbanDeliverySeen = map[string]struct{}{claimKey: {}}
+		}
+		targetedKanbanDeliveryMu.Unlock()
+		if targetedKanbanAfterDeliveryClaimProbe != nil {
+			if probeErr := targetedKanbanAfterDeliveryClaimProbe(deliveryID); probeErr != nil {
+				targetedKanbanDeliveryMu.Lock()
+				delete(targetedKanbanDeliverySeen, claimKey)
+				targetedKanbanDeliveryMu.Unlock()
+				return false, probeErr
+			}
+		}
+	}
+	if deliveryID != "" && targetedKanbanDeliveryAttemptProbe != nil {
+		targetedKanbanDeliveryAttemptProbe(deliveryID, raw)
 	}
 
 	listLock.RLock()
@@ -8984,7 +9209,7 @@ func sendKanbanEventToUser(email string, event string, data any) {
 	listLock.RUnlock()
 
 	for _, websocket := range websockets {
-		if err := websocket.WriteJSON(&websocketMessage{
+		if err := websocket.writeJSONWithTenantAuthorityContext(ctx, &websocketMessage{
 			Event: "kanban",
 			Data:  raw,
 		}); err != nil {
@@ -8994,6 +9219,7 @@ func sendKanbanEventToUser(email string, event string, data any) {
 			log.Errorf("Failed to send targeted Kanban event: %v", err)
 		}
 	}
+	return true, nil
 }
 
 // userHasLiveKanbanSocket reports whether the account currently holds an

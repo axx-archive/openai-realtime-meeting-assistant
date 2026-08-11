@@ -169,9 +169,8 @@ func (app *kanbanBoardApp) handleBrainIntakeMessage(user *userAccount, thread sc
 
 	now := time.Now().UTC()
 	scoutMessage := scoutChatMessageRecord{
-		ID:        fmt.Sprintf("scout-chat-message-%d", now.UnixNano()+1),
-		Kind:      "message",
-		Role:      "scout",
+		ID: fmt.Sprintf("scout-chat-message-%d", now.UnixNano()+1), Kind: "message", Role: "scout",
+		IntentOutcome: string(conversationIntentConversationalReply), CausedByMessageID: userMessage.ID,
 		CreatedAt: now.Format(time.RFC3339Nano),
 	}
 	if complete {
@@ -197,6 +196,7 @@ func (app *kanbanBoardApp) handleBrainIntakeMessage(user *userAccount, thread sc
 	}
 	response["answer"] = scoutMessage
 	response["thread"] = saved
+	response["intentOutcome"] = string(conversationIntentConversationalReply)
 	return response, nil
 }
 

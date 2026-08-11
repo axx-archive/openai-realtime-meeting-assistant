@@ -248,8 +248,8 @@ func TestMeetingRecapToolContract(t *testing.T) {
 	}
 
 	for _, tool := range []string{"meeting_recap", "catch_me_up", "post_to_channel", "create_channel"} {
-		if !privateRealtimeVoiceToolAllowed(tool) {
-			t.Fatalf("private realtime voice must allow %s", tool)
+		if privateRealtimeVoiceToolAllowed(tool) || !privateRealtimeVoiceServerActionAllowed(tool) {
+			t.Fatalf("private realtime executor %s was not fenced behind the server", tool)
 		}
 		found := false
 		for _, schema := range app.privateRealtimeVoiceTools() {
@@ -257,8 +257,8 @@ func TestMeetingRecapToolContract(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
-			t.Fatalf("privateRealtimeVoiceTools must expose the %s schema", tool)
+		if found {
+			t.Fatalf("privateRealtimeVoiceTools exposed unadmitted %s schema", tool)
 		}
 	}
 
@@ -268,8 +268,8 @@ func TestMeetingRecapToolContract(t *testing.T) {
 		if !strings.Contains(roomInstructions, want) {
 			t.Fatalf("room instructions missing %s", want)
 		}
-		if !strings.Contains(privateInstructions, want) {
-			t.Fatalf("private instructions missing %s", want)
+		if strings.Contains(privateInstructions, want) {
+			t.Fatalf("private instructions advertised unadmitted %s", want)
 		}
 	}
 	for _, want := range []string{"start_grill_session", "end_grill_session"} {

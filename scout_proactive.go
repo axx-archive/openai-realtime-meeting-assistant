@@ -336,12 +336,12 @@ func (app *kanbanBoardApp) classifyScoutProactiveCandidate(ctx context.Context, 
 		responder = createOpenAITextResponse
 	}
 	response, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           scoutChatModel(),
+		Model:           scoutRouterModel(),
 		Seat:            seatProactiveAttention,
 		Workflow:        "scout_proactive_attention",
 		Instructions:    scoutProactiveInstructions(),
 		Input:           scoutProactiveInput(candidate),
-		ReasoningEffort: scoutReasoningEffort(),
+		ReasoningEffort: scoutRouterReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 700,
 		JSONSchema:      scoutProactiveJSONSchema(),

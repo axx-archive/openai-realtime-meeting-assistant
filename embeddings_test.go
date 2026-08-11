@@ -94,6 +94,13 @@ func indexHasID(idx *embeddingIndex, id string) bool {
 	return ok
 }
 
+func TestEmbeddingModelIgnoresLegacyEnvironmentOverride(t *testing.T) {
+	t.Setenv("EMBEDDINGS_MODEL", "client-selected-embedding-model")
+	if got := embeddingModel(); got != defaultEmbeddingModel {
+		t.Fatalf("embeddingModel()=%q, want fixed %s", got, defaultEmbeddingModel)
+	}
+}
+
 func indexHashForID(t *testing.T, idx *embeddingIndex, id string) string {
 	t.Helper()
 	idx.mu.RLock()

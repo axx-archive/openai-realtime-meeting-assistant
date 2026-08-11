@@ -9,34 +9,27 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
 	defaultOpenAIResponsesBaseURL = "https://api.openai.com/v1"
-	// The company-brain and marketplace-worker OpenAI seat deliberately uses
-	// Luna at maximum reasoning by default. The environment dial remains an
-	// explicit operational override for cost/latency experiments, but a normal
-	// boot must not silently fall back to the old gpt-5.5/low-depth lane.
-	defaultMeetingBrainModel           = "gpt-5.6-luna"
-	defaultMeetingBrainReasoningEffort = "max"
+	// Company brain, memory extraction, digests, and ordinary provider-backed
+	// artifact work share the founder-approved Terra/high lane. These are
+	// server-owned constants: deployment environment drift cannot change the
+	// provider/model/reasoning contract.
+	defaultMeetingBrainModel           = "gpt-5.6-terra"
+	defaultMeetingBrainReasoningEffort = "high"
 )
 
-// openAIResponsesURL resolves the Responses API endpoint. W1 item 14 of
-// docs/model-routing-master-plan-2026-07-11.md: OPENAI_RESPONSES_BASE_URL
-// overrides the wire base (gateway/Venice shelf-readiness) with the default
-// byte-identical to the old hardcoded const. The override is a BASE url —
-// "https://gateway.example/v1" — and "/responses" is appended here, matching
-// the OpenAI SDK base-url convention.
+// openAIResponsesURL resolves the only admitted Responses API endpoint.
+// Provider and route selection are server-owned; a deployment environment
+// value must never redirect the OpenAI key or request body to another host.
 func openAIResponsesURL() string {
-	base := strings.TrimSpace(os.Getenv("OPENAI_RESPONSES_BASE_URL"))
-	if base == "" {
-		base = defaultOpenAIResponsesBaseURL
-	}
-	return strings.TrimRight(base, "/") + "/responses"
+	return defaultOpenAIResponsesBaseURL + "/responses"
 }
 
 type openAITextRequest struct {
@@ -109,6 +102,7 @@ type openAIResponsesTool struct {
 
 type openAIResponsesBody struct {
 	ID                string `json:"id,omitempty"`
+	Model             string `json:"model,omitempty"`
 	Status            string `json:"status,omitempty"`
 	ServiceTier       string `json:"service_tier,omitempty"`
 	IncompleteDetails *struct {
@@ -151,6 +145,52 @@ type openAIResponsesUsage struct {
 }
 
 type openAITextResponder func(context.Context, string, openAITextRequest) (string, error)
+
+// openAIResponseReceiptCapture is an optional, request-scoped side channel for
+// callers that must durably bind the provider response ID and exact token
+// usage beside a validated structured result. It never changes the responder
+// signature or becomes a routing input.
+type openAIResponseReceiptCapture struct {
+	mu       sync.Mutex
+	ID       string
+	Model    string
+	Usage    openAIResponsesUsage
+	Observed bool
+}
+
+type openAIResponseReceiptCaptureContextKey struct{}
+
+func withOpenAIResponseReceiptCapture(ctx context.Context, capture *openAIResponseReceiptCapture) context.Context {
+	if capture == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, openAIResponseReceiptCaptureContextKey{}, capture)
+}
+
+func captureOpenAIResponseReceipt(ctx context.Context, id string, model string, usage *openAIResponsesUsage) {
+	if ctx == nil || usage == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	capture, _ := ctx.Value(openAIResponseReceiptCaptureContextKey{}).(*openAIResponseReceiptCapture)
+	if capture == nil {
+		return
+	}
+	capture.mu.Lock()
+	capture.ID = strings.TrimSpace(id)
+	capture.Model = strings.TrimSpace(model)
+	capture.Usage = *usage
+	capture.Observed = true
+	capture.mu.Unlock()
+}
+
+func (capture *openAIResponseReceiptCapture) snapshot() (string, string, openAIResponsesUsage, bool) {
+	if capture == nil {
+		return "", "", openAIResponsesUsage{}, false
+	}
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return capture.ID, capture.Model, capture.Usage, capture.Observed
+}
 
 // openAIOutputRejection is a successful HTTP exchange whose model output is
 // unusable. Callers use this distinction to avoid treating truncation/invalid
@@ -223,21 +263,20 @@ func isProviderInvocationFailure(err error) bool {
 var createOpenAITextResponse openAITextResponder = createOpenAITextResponseHTTP
 
 func meetingBrainModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_BRAIN_MODEL")); model != "" {
-		return model
-	}
-
 	return defaultMeetingBrainModel
 }
 
 func meetingBrainReasoningEffort() string {
-	if effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_BRAIN_REASONING_EFFORT"))); effort != "" {
-		switch effort {
-		case "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-			return effort
-		}
-	}
 	return defaultMeetingBrainReasoningEffort
+}
+
+func validOpenAIReasoningEffort(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
 }
 
 func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
@@ -248,6 +287,10 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
 		model = meetingBrainModel()
+	}
+	effort := strings.ToLower(strings.TrimSpace(request.ReasoningEffort))
+	if effort != "" && !validOpenAIReasoningEffort(effort) {
+		return "", fmt.Errorf("OpenAI reasoning effort %q is not admitted", effort)
 	}
 
 	store := false
@@ -277,7 +320,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 			"schema":      request.JSONSchema.Schema,
 		}
 	}
-	if effort := strings.ToLower(strings.TrimSpace(request.ReasoningEffort)); effort != "" {
+	if effort != "" {
 		payload.Reasoning = map[string]any{"effort": effort}
 	}
 	if verbosity := strings.ToLower(strings.TrimSpace(request.Verbosity)); verbosity != "" {
@@ -375,6 +418,12 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		recordWire(body.Usage, true, false, "response_error", body.ServiceTier, bodyErr)
 		return "", bodyErr
 	}
+	providerModel := strings.TrimSpace(body.Model)
+	if providerModel == "" || providerModel != model {
+		modelErr := &openAIOutputRejection{reason: "provider_model_mismatch"}
+		recordWire(body.Usage, true, false, "provider_model_mismatch", body.ServiceTier, modelErr)
+		return "", modelErr
+	}
 	if status := strings.ToLower(strings.TrimSpace(body.Status)); status == "incomplete" || status == "failed" || status == "cancelled" {
 		reason := "response_" + status
 		if body.IncompleteDetails != nil && strings.TrimSpace(body.IncompleteDetails.Reason) != "" {
@@ -405,6 +454,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		}
 	}
 
+	captureOpenAIResponseReceipt(ctx, body.ID, providerModel, body.Usage)
 	recordWire(body.Usage, true, true, "", body.ServiceTier, nil)
 	return text, nil
 }

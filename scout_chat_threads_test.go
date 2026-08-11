@@ -192,6 +192,66 @@ func TestScoutChatChannelVisibilityAccessControl(t *testing.T) {
 	}
 }
 
+func TestScoutChatCreateConversationOperationIsIdempotentAndConflictBound(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	post := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		assistantChatThreadsHandler(response, request)
+		return response
+	}
+
+	first := post(`{"title":"Investor research","visibility":"private","operationId":"mobile-conversation-one"}`)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	var firstPayload struct {
+		Created bool                  `json:"created"`
+		Thread  scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !firstPayload.Created || firstPayload.Thread.ID == "" || scoutChatThreadVisibility(firstPayload.Thread) != scoutChatVisibilityPrivate {
+		t.Fatalf("first payload=%+v", firstPayload)
+	}
+
+	replay := post(`{"title":"Investor research","visibility":"private","operationId":"mobile-conversation-one"}`)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status=%d body=%s", replay.Code, replay.Body.String())
+	}
+	var replayPayload struct {
+		Created bool                  `json:"created"`
+		Thread  scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(replay.Body.Bytes(), &replayPayload); err != nil {
+		t.Fatal(err)
+	}
+	if replayPayload.Created || replayPayload.Thread.ID != firstPayload.Thread.ID {
+		t.Fatalf("replay payload=%+v first=%+v", replayPayload, firstPayload)
+	}
+	if got := kanbanApp.scoutChatThreadsSnapshot("aj@shareability.com", false, 100); len(got) != 1 {
+		t.Fatalf("threads=%d, want one exact replay", len(got))
+	}
+
+	conflict := post(`{"title":"Different title","visibility":"public","operationId":"mobile-conversation-one"}`)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+	if got := kanbanApp.scoutChatThreadsSnapshot("aj@shareability.com", false, 100); len(got) != 1 || got[0].ID != firstPayload.Thread.ID || scoutChatThreadVisibility(got[0]) != scoutChatVisibilityPrivate {
+		t.Fatalf("conflict changed durable thread: %+v", got)
+	}
+}
+
 // Card 070 doctrine: private is owner+Scout only, so every private audience of
 // start_chat_as_user (including the "dm" alias) resolves to the REQUESTER'S OWN
 // Scout thread and never opens a cross-user private channel.
@@ -549,7 +609,13 @@ func TestAgentThreadCompletionUpdatesPersistedChatThreadRef(t *testing.T) {
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
 	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Outcome: string(conversationIntentStartPrivateWork), Route: "workstream", Mode: "research",
+				Objective: "Research the rodeo creator market",
+			}), nil
+		}
 		return completeResearchArtifactForTest(), nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
@@ -985,12 +1051,9 @@ func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
 
 // --- The propose-confirm router (spec §2, Wave 2 item 8) ---------------------
 
-// A deliverable-shaped ask in a private thread earns a PROPOSAL — data on the
-// reply and a persisted card, never a launch and never a Q&A model call. The
-// routing turn itself must ride the registry: Haiku by default, tool schemas
-// injected from tool_registry.go, the trust-asymmetry line in the system
-// prompt.
-func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
+// A deliverable-shaped ask in a private thread starts the server-resolved
+// output contract directly and persists a truthful work card.
+func TestScoutChatRouterStartsPrivateToolRun(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "installed-but-unused")
 	t.Setenv("OPENAI_API_KEY", "openai-router-test")
@@ -1000,11 +1063,9 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-		t.Fatal("a proposal must never launch an agent thread")
-	}
-	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
 
 	var routed openAITextRequest
 	swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
@@ -1012,11 +1073,11 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 			t.Fatalf("router apiKey=%q, want the OpenAI key", apiKey)
 		}
 		if request.Workflow != "scout_route" {
-			t.Fatal("a proposing turn must not also run the Q&A path")
+			t.Fatal("a work-routing turn must not also run the Q&A path")
 		}
 		routed = request
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Route: "tool_run", ToolID: "comps_precedent", Objective: "comps for the rodeo doc against streaming buyers",
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: "comps_precedent", Objective: "comps for the rodeo doc against streaming buyers",
 			Fields: []openAIScoutRouterField{{Key: "thesis", Value: "rodeo doc"}, {Key: "format", Value: "film"}, {Key: "bogus", Value: "dropped"}},
 		}), nil
 	})
@@ -1035,7 +1096,10 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	}
 
 	text := "pull comps for the rodeo doc so we can price it"
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, text, nil, "")
+	ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "router-private-tool-run-0001", BodyDigest: sha256Hex([]byte(text)),
+	})
+	response, err := kanbanApp.appendScoutChatThreadMessage(ctx, user, private.ID, text, nil, "")
 	if err != nil {
 		t.Fatalf("append routed message: %v", err)
 	}
@@ -1043,10 +1107,10 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	if routed.Model != defaultScoutRouterModel {
 		t.Fatalf("router model=%q, want Luna", routed.Model)
 	}
-	if routed.ReasoningEffort != scoutReasoningEffort() || routed.JSONSchema == nil {
-		t.Fatalf("router request=%+v, want max + strict schema", routed)
+	if routed.ReasoningEffort != scoutRouterReasoningEffort() || routed.JSONSchema == nil {
+		t.Fatalf("router request=%+v, want medium + strict schema", routed)
 	}
-	if !strings.Contains(routed.Instructions, "under-routes is trusted") || !strings.Contains(routed.Instructions, "over-launches is muted") {
+	if !strings.Contains(routed.Instructions, "clarify_once") || !strings.Contains(routed.Instructions, "unavailable") {
 		t.Fatalf("router prompt missing trust asymmetry: %s", routed.Instructions)
 	}
 	for _, tool := range packagingTools() {
@@ -1055,46 +1119,26 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 		}
 	}
 
-	if _, launched := response["agentThread"]; launched {
-		t.Fatalf("response keys=%v — NEVER silent-launch", responseKeys(response))
-	}
-	proposal, ok := response["proposal"].(*scoutRouterProposal)
+	launched, ok := response["agentThread"].(scoutAgentThread)
 	if !ok {
-		t.Fatalf("proposal type=%T, want *scoutRouterProposal", response["proposal"])
+		t.Fatalf("agentThread type=%T, want direct private work", response["agentThread"])
 	}
-	if proposal.Kind != scoutRouterProposalKindToolRun || proposal.ToolID != "comps_precedent" {
-		t.Fatalf("proposal=%#v, want a comps_precedent tool_run", proposal)
+	if launched.Artifact.Metadata["toolTemplate"] != "comps_precedent" {
+		t.Fatalf("launch metadata=%#v, want comps_precedent", launched.Artifact.Metadata)
 	}
-	if proposal.ToolName != "Comps & Precedent" || proposal.GroupLabel != "Ideate" {
-		t.Fatalf("proposal name/group=%q/%q, want registry values", proposal.ToolName, proposal.GroupLabel)
+	if launched.Query != "comps for the rodeo doc against streaming buyers" {
+		t.Fatalf("launch query=%q", launched.Query)
 	}
-	if proposal.Authority != toolAuthorityReadOnly {
-		t.Fatalf("proposal authority=%q, want the tool's registry authority", proposal.Authority)
+	if launched.Artifact.Metadata["authority"] != toolAuthorityReadOnly {
+		t.Fatalf("launch authority=%q, want registry authority", launched.Artifact.Metadata["authority"])
 	}
-	if proposal.WeightLabel != scoutProposalWeightGoalLoop {
-		t.Fatalf("weightLabel=%q, want %q", proposal.WeightLabel, scoutProposalWeightGoalLoop)
-	}
-	if proposal.Query != text {
-		t.Fatalf("proposal query=%q, want the originating message for the Tier-0 escape", proposal.Query)
-	}
-	if proposal.Fields["thesis"] != "rodeo doc" || proposal.Fields["format"] != "film" {
-		t.Fatalf("fields=%#v, want the model's pre-fills", proposal.Fields)
-	}
-	if _, leaked := proposal.Fields["bogus"]; leaked {
-		t.Fatalf("fields=%#v — keys outside the tool's form definition must be dropped", proposal.Fields)
-	}
-	if !strings.Contains(proposal.Summary, "Comps & Precedent") || !strings.Contains(proposal.Summary, "kill condition") {
-		t.Fatalf("summary=%q, want the legible tool + kill-condition sentence", proposal.Summary)
-	}
-
-	// The card is a persisted message, so a reload re-renders it.
 	answer, ok := response["answer"].(scoutChatMessageRecord)
-	if !ok || answer.Kind != scoutChatMessageKindProposal || answer.Proposal == nil {
-		t.Fatalf("answer=%#v, want a persisted Kind=proposal message", response["answer"])
+	if !ok || answer.Kind != "thread" || answer.Thread == nil || answer.IntentOutcome != string(conversationIntentStartPrivateWork) {
+		t.Fatalf("answer=%#v, want persisted work card", response["answer"])
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
-	if len(saved.Messages) != 2 || saved.Messages[1].Proposal == nil {
-		t.Fatalf("persisted messages=%#v, want user turn + proposal card", saved.Messages)
+	if len(saved.Messages) != 2 || saved.Messages[1].Thread == nil {
+		t.Fatalf("persisted messages=%#v, want user turn + work card", saved.Messages)
 	}
 }
 
@@ -1109,11 +1153,11 @@ func TestRouterModelDialsRefuseNonOpenAI(t *testing.T) {
 		t.Fatalf("defaultRouterModel=%q, want gpt-5.6-luna", defaultRouterModel)
 	}
 	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "gpt-5.6-terra")
-	if got := routerModel(); got != "gpt-5.6-terra" {
-		t.Fatalf("routerModel() OpenAI override=%q, want gpt-5.6-terra", got)
+	if got := routerModel(); got != defaultRouterModel {
+		t.Fatalf("routerModel() client/env override=%q, want fixed %s", got, defaultRouterModel)
 	}
-	if got := routerEffort(); got != scoutReasoningEffort() {
-		t.Fatalf("routerEffort()=%q, want max", got)
+	if got := routerEffort(); got != scoutRouterReasoningEffort() {
+		t.Fatalf("routerEffort()=%q, want medium", got)
 	}
 }
 
@@ -1181,11 +1225,11 @@ func TestScoutChatRouterKeylessDoesNotFabricateInlineAnswer(t *testing.T) {
 	}
 
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "research the market and draft a one-pager for the buyer", nil, "")
-	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
-		t.Fatalf("keyless append err=%v, want explicit model configuration failure", err)
+	if err != nil {
+		t.Fatalf("keyless append err=%v, want persisted unavailable outcome", err)
 	}
-	if response != nil {
-		t.Fatalf("response=%#v, want no fabricated inline answer", response)
+	if response["intentOutcome"] != string(conversationIntentUnavailable) || response["agentThread"] != nil || response["proposal"] != nil {
+		t.Fatalf("response=%#v, want no fabricated answer or work", response)
 	}
 }
 
@@ -1333,23 +1377,17 @@ func TestScoutChatPublicConversationNeverFallsBackToMemoryHitsAfterModelFailure(
 	}
 	prompt := "@Scout from first principles, compare the two Ball Dogs pitches and the strategies behind them. What do you think the company is actually trying to build in each version? Which is more attainable? What path would each take to capital and talent? Please challenge the team's framing where you think we're wrong."
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, prompt, nil, "")
-	if err == nil || !strings.Contains(err.Error(), "max_output_truncation") {
-		t.Fatalf("append err=%v, want model truncation failure", err)
+	if err != nil {
+		t.Fatalf("append err=%v, want persisted unavailable outcome", err)
 	}
-	if response != nil {
+	if response["intentOutcome"] != string(conversationIntentUnavailable) {
 		t.Fatalf("response=%#v, want no fabricated answer", response)
 	}
-	if len(captured) != 2 {
-		t.Fatalf("requests=%d, want one bounded retry after truncation", len(captured))
+	if len(captured) != 1 {
+		t.Fatalf("requests=%d, want one bounded router attempt and fail-closed unavailable", len(captured))
 	}
-	if captured[0].Workflow != "scout_chat" || captured[0].MaxOutputTokens != scoutChatMaxOutputTokens {
-		t.Fatalf("first request=%+v, want bounded Scout chat request", captured[0])
-	}
-	if captured[1].Workflow != "scout_chat" || captured[1].MaxOutputTokens != scoutChatRetryMaxOutputTokens {
-		t.Fatalf("retry request=%+v, want bounded truncation retry", captured[1])
-	}
-	if captured[1].Model != captured[0].Model || captured[1].ReasoningEffort != captured[0].ReasoningEffort {
-		t.Fatalf("retry changed model/effort: first=%+v retry=%+v", captured[0], captured[1])
+	if captured[0].Workflow != "scout_route" || captured[0].MaxOutputTokens != scoutRouterMaxTokens {
+		t.Fatalf("first request=%+v, want bounded router request", captured[0])
 	}
 
 	saved, _, err := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
@@ -1697,29 +1735,32 @@ func assertRouterSignal(t *testing.T, event string, valence string, toolID strin
 	t.Fatalf("no %s signal recorded", event)
 }
 
-// --- Palette conversational handoff carries the tool contract (§2 fidelity fix)
+// --- Retired palette compatibility cannot select a tool contract
 
-// A conversational palette tile (deep_research, grill_pressure_test) hands off
-// to the composer; the send must carry tool.id so the launched workstream is
-// contract-gated — the same tool must never produce rubric'd output from the
-// Run door and generic output from the talk-it-out door.
+// A legacy caller may still send toolTemplate while clients migrate, but the
+// value is ignored. The server router alone chooses the governed contract.
 func TestScoutChatToolTemplateHandoffCarriesToolContract(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
-	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousRunner := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousRunner })
 
 	modelCalls := 0
-	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
 		modelCalls++
-		return "conversational answer", nil
-	}
-	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: "one_pager",
+			Objective: "Write the Rodeo creator-market one-pager",
+		}), nil
+	})
 
 	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
@@ -1730,26 +1771,29 @@ func TestScoutChatToolTemplateHandoffCarriesToolContract(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "the rodeo creator market", nil, "", "deep_research")
+	ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "retired-tool-template-0001", BodyDigest: sha256Hex([]byte("the rodeo creator market")),
+	})
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(ctx, user, private.ID, "the rodeo creator market", nil, "", "deep_research")
 	if err != nil {
 		t.Fatalf("append with tool template: %v", err)
 	}
-	if modelCalls != 0 {
-		t.Fatalf("modelCalls=%d, want 0 — a tool-template send launches a workstream, not a conversational answer", modelCalls)
+	if modelCalls != 1 {
+		t.Fatalf("modelCalls=%d, want one server routing call", modelCalls)
 	}
 	agentThread, ok := response["agentThread"].(scoutAgentThread)
 	if !ok {
-		t.Fatalf("response keys=%v, want an agentThread launch for a tool-template send", responseKeys(response))
+		t.Fatalf("response keys=%v, want the server-selected goal", responseKeys(response))
 	}
-	if agentThread.Mode != "research" {
-		t.Fatalf("mode=%q, want the deep_research tool's base mode research", agentThread.Mode)
+	if agentThread.Mode != "goal" {
+		t.Fatalf("mode=%q, want a goal", agentThread.Mode)
 	}
 	meta := agentThread.Artifact.Metadata
-	if meta["toolTemplate"] != "deep_research" {
-		t.Fatalf("artifact toolTemplate=%q, want deep_research — without it toolPromptForThread falls back to the generic contract", meta["toolTemplate"])
+	if meta["toolTemplate"] != "one_pager" {
+		t.Fatalf("artifact toolTemplate=%q, want the server-selected one_pager", meta["toolTemplate"])
 	}
-	if meta["objective"] != "the rodeo creator market" {
-		t.Fatalf("artifact objective=%q, want the composer text", meta["objective"])
+	if meta["toolTemplate"] == "deep_research" {
+		t.Fatal("retired client template selected the output contract")
 	}
 	if meta["originSurface"] != "chat:"+private.ID {
 		t.Fatalf("artifact originSurface=%q, want chat:%s (the return card routes on it)", meta["originSurface"], private.ID)
@@ -1757,42 +1801,30 @@ func TestScoutChatToolTemplateHandoffCarriesToolContract(t *testing.T) {
 	if meta["requestedBy"] != "aj@shareability.com" {
 		t.Fatalf("artifact requestedBy=%q, want the requester email", meta["requestedBy"])
 	}
-	if meta["authority"] != toolAuthorityReadOnly {
-		t.Fatalf("artifact authority=%q, want the tool's registry authority %q", meta["authority"], toolAuthorityReadOnly)
-	}
-
-	// The stamped template resolves through the SAME prompt machinery a goal
-	// deliverable uses: the generation prompt is the assembled tool wrapper
-	// (contract headings + gate rubric), not the generic per-mode scaffold.
-	prompt, ok := kanbanApp.toolPromptForThread(agentThread)
-	if !ok {
-		t.Fatal("toolPromptForThread=false for the handoff thread — the tool contract is not riding the launch")
-	}
-	for _, want := range []string{"research_brief_gate_v1", "Executive Summary", "the rodeo creator market"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("assembled tool prompt missing %q", want)
-		}
-	}
-
-	// The reply is the standard thread card wired to the launched artifact.
+	// The reply is the standard goal card wired to the launched artifact.
 	answer, ok := response["answer"].(scoutChatMessageRecord)
 	if !ok || answer.Kind != "thread" || answer.Thread == nil || answer.Thread.ArtifactID != agentThread.Artifact.ID {
 		t.Fatalf("answer=%#v, want a Kind=thread card referencing the launched artifact", response["answer"])
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
-	if !scoutChatThreadHasAgentRef(saved, agentThread.ID) {
-		t.Fatalf("persisted thread carries no ref to agent thread %s — status flips cannot land", agentThread.ID)
+	if !scoutChatThreadHasArtifactRef(saved, agentThread.Artifact.ID) {
+		t.Fatalf("persisted thread carries no ref to goal artifact %s", agentThread.Artifact.ID)
 	}
 
-	// An unknown template is rejected outright — never silently degraded to a
-	// generic run (that silent quality fork is the bug this fixes).
-	if _, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "whatever", nil, "", "not_a_tool"); err == nil || !strings.Contains(err.Error(), "unknown tool template") {
-		t.Fatalf("err=%v, want unknown tool template rejection", err)
+	unknownContext := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "retired-tool-template-0002", BodyDigest: sha256Hex([]byte("whatever")),
+	})
+	unknownResponse, err := kanbanApp.appendScoutChatThreadMessageWithTool(unknownContext, user, private.ID, "whatever", nil, "", "not_a_tool")
+	if err != nil {
+		t.Fatalf("unknown retired template should be ignored: %v", err)
+	}
+	unknownGoal := unknownResponse["agentThread"].(scoutAgentThread)
+	if unknownGoal.Artifact.Metadata["toolTemplate"] != "one_pager" || modelCalls != 2 {
+		t.Fatalf("unknown template widened routing: modelCalls=%d metadata=%v", modelCalls, unknownGoal.Artifact.Metadata)
 	}
 }
 
-// The handoff is an explicit palette invocation, so in a public channel it
-// launches without an @scout mention — exactly like an armed follow-up target.
+// A retired palette value cannot turn an unaddressed public message into work.
 func TestScoutChatToolTemplateLaunchesInChannelWithoutMention(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -1800,7 +1832,8 @@ func TestScoutChatToolTemplateLaunchesInChannelWithoutMention(t *testing.T) {
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	launches := 0
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
 	user := accountStore().findUser("tim@shareability.com")
@@ -1812,39 +1845,44 @@ func TestScoutChatToolTemplateLaunchesInChannelWithoutMention(t *testing.T) {
 		t.Fatalf("create channel: %v", err)
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, channel.ID, "grill the neon signal pitch", nil, "", "grill_pressure_test")
+	ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "retired-public-template-0001", BodyDigest: sha256Hex([]byte("grill the neon signal pitch")),
+	})
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(ctx, user, channel.ID, "grill the neon signal pitch", nil, "", "grill_pressure_test")
 	if err != nil {
 		t.Fatalf("append with tool template: %v", err)
 	}
-	agentThread, ok := response["agentThread"].(scoutAgentThread)
-	if !ok {
-		t.Fatalf("response keys=%v, want a launch without @scout — the palette tap is the invocation", responseKeys(response))
-	}
-	if agentThread.Mode != "grill" || agentThread.Artifact.Metadata["toolTemplate"] != "grill_pressure_test" {
-		t.Fatalf("mode=%q toolTemplate=%q, want grill/grill_pressure_test", agentThread.Mode, agentThread.Artifact.Metadata["toolTemplate"])
-	}
-	if agentThread.Artifact.Metadata["originKind"] != agentThreadOriginChannel {
-		t.Fatalf("originKind=%q, want %q for a channel handoff", agentThread.Artifact.Metadata["originKind"], agentThreadOriginChannel)
+	if launches != 0 || response["agentThread"] != nil || response["proposal"] != nil || response["answer"] != nil {
+		t.Fatalf("retired public template became work: launches=%d response=%v", launches, response)
 	}
 }
 
-// The HTTP messages route decodes toolTemplate and hands it to the launch path
-// — this is the wire contract the composer's fetch relies on.
-func TestAssistantChatThreadMessagesRouteCarriesToolTemplate(t *testing.T) {
+// The HTTP messages route retains toolTemplate only as a decode-only migration
+// field. The server router owns the actual output contract.
+func TestAssistantChatThreadMessagesRouteIgnoresToolTemplate(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
-	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousRunner := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousRunner })
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: "deep_research", Objective: "Map the fintech landscape",
+		}), nil
+	})
 
 	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"map the fintech landscape","toolTemplate":"deep_research"}`))
+	req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"map the fintech landscape","toolTemplate":"one_pager","operationId":"server-owned-route-operation-0001"}`))
 	req.Header.Set("Content-Type", "application/json")
 	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
 		req.AddCookie(cookie)
@@ -1855,31 +1893,40 @@ func TestAssistantChatThreadMessagesRouteCarriesToolTemplate(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		AgentThread scoutAgentThread   `json:"agentThread"`
-		Artifact    meetingMemoryEntry `json:"artifact"`
+		AgentThread               scoutAgentThread   `json:"agentThread"`
+		Artifact                  meetingMemoryEntry `json:"artifact"`
+		ClientToolTemplateIgnored bool               `json:"clientToolTemplateIgnored"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if payload.Artifact.Metadata["toolTemplate"] != "deep_research" {
-		t.Fatalf("artifact toolTemplate=%q, want deep_research — the route dropped the template", payload.Artifact.Metadata["toolTemplate"])
+	if !payload.ClientToolTemplateIgnored || payload.Artifact.Metadata["toolTemplate"] != "deep_research" {
+		t.Fatalf("payload=%+v, want ignored client template and server-owned deep_research", payload)
 	}
 	if payload.AgentThread.ID == "" {
 		t.Fatalf("body=%s, want an agentThread in the response", rec.Body.String())
 	}
 }
 
-// A PROCESS id armed by the palette's conversational handoff must launch the
-// goal pipeline (the identical spec the palette Run posts), never a single
-// agent thread — and never the "unknown tool template" refusal that blocked
-// the first live packaging_studio run (2026-07-05).
+// A retired palette PROCESS id cannot select the route. The natural-language
+// turn still launches the server-selected goal pipeline, proving compatibility
+// without restoring client authority over tool or output contract.
 func TestScoutChatProcessTemplateHandoffLaunchesGoalPipeline(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	installFakeResponder(t, goalResponderRoutes{})
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: packagingStudioProcessID,
+			Objective: "Package Station Tenn for talent and partners",
+		}), nil
+	})
 
 	previousRunner := startGoalThreadAsync
 	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
@@ -1894,7 +1941,10 @@ func TestScoutChatProcessTemplateHandoffLaunchesGoalPipeline(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "package Station Tenn for talent and partners", nil, "", "packaging_studio")
+	ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "retired-process-palette-0001", BodyDigest: sha256Hex([]byte("package Station Tenn for talent and partners")),
+	})
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(ctx, user, private.ID, "package Station Tenn for talent and partners", nil, "", "deep_research")
 	if err != nil {
 		t.Fatalf("append with process template: %v", err)
 	}

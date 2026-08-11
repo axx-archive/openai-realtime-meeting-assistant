@@ -142,6 +142,7 @@ func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
 	t.Setenv("BONFIRE_CODEX_SANDBOX", "read-only")
 	t.Setenv("BONFIRE_CODEX_APPROVAL_POLICY", "never")
 	t.Setenv("BONFIRE_CODEX_REASONING_EFFORT", "medium")
+	t.Setenv("BONFIRE_CODEX_MODEL", "legacy-client-selected-model")
 
 	originalRunner := runCodexExecCommand
 	defer func() { runCodexExecCommand = originalRunner }()
@@ -167,8 +168,8 @@ func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
 	if got := result.Metadata["worker"]; got != agentThreadWorkerCodexExec {
 		t.Fatalf("worker metadata=%q, want %q", got, agentThreadWorkerCodexExec)
 	}
-	if capturedConfig.Sandbox != "read-only" || capturedConfig.ApprovalPolicy != "never" || capturedConfig.Reasoning != "medium" {
-		t.Fatalf("capturedConfig=%+v, want explicit sandbox/approval/reasoning", capturedConfig)
+	if capturedConfig.Sandbox != "read-only" || capturedConfig.ApprovalPolicy != "never" || capturedConfig.Model != defaultCodexExecModel || capturedConfig.Reasoning != defaultCodexExecReasoning {
+		t.Fatalf("capturedConfig=%+v, want explicit sandbox/approval and server-owned %s/%s route", capturedConfig, defaultCodexExecModel, defaultCodexExecReasoning)
 	}
 	for _, want := range []string{"Use Codex subagents", "research agent", "skeptical review agent", thread.Query, "Gate before shipping"} {
 		if !strings.Contains(capturedPrompt, want) {

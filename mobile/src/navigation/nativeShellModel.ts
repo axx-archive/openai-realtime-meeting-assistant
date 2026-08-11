@@ -4,6 +4,7 @@ export type NativeShellDestination = 'home' | 'work' | 'network' | 'work-search'
 export type NativeShellLayout = 'compact' | 'sidebar';
 
 export const NATIVE_SHELL_SIDEBAR_MIN_WIDTH = 744;
+export const NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE = 1.35;
 
 export const nativeShellDestinations = [
   { id: 'home', label: 'Home', route: 'Canvas', icon: 'house.fill' },
@@ -54,11 +55,17 @@ const focusedRoutes = new Set<keyof RootStackParamList>([
   'Thread',
   'Room',
   'CreateRoom',
+  'NewConversation',
   'OSWeb',
 ]);
 
-export function nativeShellLayout(width: number): NativeShellLayout {
-  return Number.isFinite(width) && width >= NATIVE_SHELL_SIDEBAR_MIN_WIDTH
+export function nativeShellLayout(
+  width: number,
+  supportsSidebar = true,
+  fontScale = 1,
+): NativeShellLayout {
+  const largeText = Number.isFinite(fontScale) && fontScale >= NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE;
+  return supportsSidebar && !largeText && Number.isFinite(width) && width >= NATIVE_SHELL_SIDEBAR_MIN_WIDTH
     ? 'sidebar'
     : 'compact';
 }

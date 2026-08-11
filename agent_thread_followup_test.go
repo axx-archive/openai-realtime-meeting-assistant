@@ -437,29 +437,27 @@ func TestFollowUpErrorPreservesBodyAndStatus(t *testing.T) {
 	}
 }
 
-// With an Anthropic key present the follow-up rides Sonnet 5 — re-baselined
-// 3000-token budget at effort low, same instructions/input as the OpenAI
-// path, honest worker stamp — and needs NO OpenAI key at all. The injected
-// gpt-5.5 responder must never run.
-func TestFollowUpRoutesToSonnetWithAnthropicKey(t *testing.T) {
+// An installed Anthropic key cannot displace the founder-selected OpenAI
+// follow-up route or alter its provenance.
+func TestFollowUpIgnoresAnthropicKeyAndUsesOpenAI(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-test-key"
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	t.Setenv("BONFIRE_CHAT_MODEL", "")
 
-	var got anthropicTextRequest
 	swapAnthropicTextResponder(t, func(_ context.Context, apiKey string, request anthropicTextRequest) (string, error) {
-		if apiKey != "sk-ant-test" {
-			t.Fatalf("apiKey=%q, want the Anthropic key", apiKey)
-		}
-		got = request
-		return "READINESS: 7.1/10\n\nWhat changed in v2: pricing objection resolved.", nil
+		t.Fatal("Anthropic responder must not run")
+		return "", nil
 	})
 
+	var got openAITextRequest
 	previousAsync := startAgentThreadFollowUpAsync
 	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
-		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-			t.Fatal("OpenAI responder must not run when an Anthropic key is present")
-			return "", nil
+		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
+			if apiKey != "openai-test-key" {
+				t.Fatalf("apiKey=%q, want OpenAI key", apiKey)
+			}
+			got = request
+			return "READINESS: 7.1/10\n\nWhat changed in v2: pricing objection resolved.", nil
 		})
 	}
 	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
@@ -469,49 +467,126 @@ func TestFollowUpRoutesToSonnetWithAnthropicKey(t *testing.T) {
 		t.Fatalf("launchAgentThreadFollowUp: %v", err)
 	}
 
-	if got.Model != "claude-sonnet-5" {
-		t.Fatalf("model=%q, want claude-sonnet-5", got.Model)
+	if got.Model != agentThreadTextModel(scoutAgentThread{Mode: "grill"}) {
+		t.Fatalf("model=%q, want the OpenAI thread model", got.Model)
 	}
-	if got.MaxTokens != 3000 || got.Effort != "low" {
-		t.Fatalf("follow-up budget=%d/%q, want 3000/low", got.MaxTokens, got.Effort)
+	if got.Seat != seatFollowup || got.Workflow != "agent_thread_followup_grill" {
+		t.Fatalf("follow-up provenance seat/workflow=%q/%q", got.Seat, got.Workflow)
 	}
 	if !strings.Contains(got.Instructions, "What changed in v2") || !strings.Contains(got.Instructions, "READINESS") {
-		t.Fatalf("Sonnet instructions missing the follow-up contract: %q", got.Instructions)
+		t.Fatalf("OpenAI instructions missing the follow-up contract: %q", got.Instructions)
 	}
 	if !strings.Contains(got.Input, "Follow-up request: re-grill with the new pricing answers") {
-		t.Fatalf("Sonnet input missing the follow-up request: %q", got.Input)
+		t.Fatalf("OpenAI input missing the follow-up request: %q", got.Input)
 	}
 
 	stored, ok := app.osArtifactByID(artifact.ID)
 	if !ok {
 		t.Fatalf("artifact %s disappeared", artifact.ID)
 	}
-	if stored.Metadata["worker"] != agentThreadWorkerAnthropic {
-		t.Fatalf("worker=%q, want %q (the evidence stamp stays honest)", stored.Metadata["worker"], agentThreadWorkerAnthropic)
+	if stored.Metadata["worker"] != agentThreadWorkerOpenAI {
+		t.Fatalf("worker=%q, want %q", stored.Metadata["worker"], agentThreadWorkerOpenAI)
 	}
-	if stored.Metadata["workerBoundary"] != "anthropic_messages_artifact_writer" {
-		t.Fatalf("workerBoundary=%q, want anthropic_messages_artifact_writer", stored.Metadata["workerBoundary"])
+	if stored.Metadata["workerBoundary"] != "responses_artifact_writer" {
+		t.Fatalf("workerBoundary=%q, want responses_artifact_writer", stored.Metadata["workerBoundary"])
 	}
 	if !strings.HasPrefix(stored.Text, "READINESS: 7.1/10") {
-		t.Fatalf("text=%q, want the Sonnet output merged on top", stored.Text)
+		t.Fatalf("text=%q, want the OpenAI output merged on top", stored.Text)
 	}
 	if stored.Metadata["threadVersion"] != "2" || stored.Metadata["readinessScore"] != "7.1" {
 		t.Fatalf("metadata=%#v, want v2 with the new readiness score", stored.Metadata)
 	}
 }
 
-// A Sonnet follow-up failure rides the same restore path as an OpenAI one:
-// body untouched, prior terminal status back verbatim, error stamped.
-func TestFollowUpSonnetErrorPreservesBodyAndStatus(t *testing.T) {
+func TestGovernedImageDirectionChildUsesTerraHighRoute(t *testing.T) {
+	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		return "", fmt.Errorf("Anthropic chat request was declined by safety classifiers")
+	app.apiKey = "openai-test-key"
+	previousGoalStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousGoalStart })
+	parent, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Build the governed Aurora investor package", CreatedBy: "aj@shareability.com",
+		ToolTemplate: packagingStudioProcessID,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, app, parent.Artifact.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parent.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := engine.resolvedProcess(&plan)
+	if !ok {
+		t.Fatal("packaging process did not resolve")
+	}
+	stage, ok := definition.stageByID("imagery_direction")
+	if !ok {
+		t.Fatal("imagery direction stage missing")
+	}
+	plan.Subtasks = []goalSubtask{{
+		ID: stage.ID, Title: stage.Title, Mode: stage.Mode, Authority: codexJobAuthorityReadOnly,
+		Runner: agentRunnerOpenAIText, Role: stage.Role, Status: subtaskPending,
+	}}
+	plan.State = goalStateExecute
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.updateOSArtifactWithMetadata(parent.Artifact.ID, "", parent.Artifact.Text, scoutParticipantName, map[string]string{"goalPlan": string(encoded)}); err != nil {
+		t.Fatal(err)
+	}
+	receipt := plan.RouteReceipt
+	origin := goalRouteChildBindingMetadata(&plan)
+	previousAgentStart := startAgentThreadAsync
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
+	childSpec := agentThreadGoalSpec{
+		Objective: "Direct imagery for the investor deck", RequestedBy: receipt.Requester,
+		Authority: codexJobAuthorityReadOnly, ParentGoalID: parent.Artifact.ID, SubtaskID: stage.ID,
+		AssignedRunner: agentRunnerOpenAIText, OutputContract: stage.OutputContract, Deliverable: true,
+		SourceMessageID: receipt.SourceMessageID, SourceMessageDigest: receipt.SourceMessageDigest,
+		SourceWindowDigest: receipt.SourceWindowDigest, OperationID: receipt.OperationID,
+		OperationBodyDigest: receipt.OperationBodyDigest, ParentGoalRouteDigest: receipt.Digest,
+	}
+	thread, err := app.launchGoalAgentThreadScaffold(stage.Mode, "Direct imagery for the investor deck", "AJ", origin, childSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Subtasks[0].Status = subtaskRunning
+	plan.Subtasks[0].ThreadID = thread.ID
+	plan.Subtasks[0].ArtifactID = thread.Artifact.ID
+	encoded, err = json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.updateOSArtifactWithMetadata(parent.Artifact.ID, "", parent.Artifact.Text, scoutParticipantName, map[string]string{"goalPlan": string(encoded)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.activateReservedGoalAgentThread(thread, childSpec, "AJ"); err != nil {
+		t.Fatal(err)
+	}
+	thread.Artifact, _ = app.osArtifactByID(thread.Artifact.ID)
+	if _, err := app.agentThreadProviderContext(context.Background(), thread); err != nil {
+		t.Fatalf("governed image-direction child failed provider admission: %v", err)
+	}
+	if gotModel, gotEffort := agentThreadTextModel(thread), agentThreadTextReasoningEffort(thread); gotModel != defaultScoutImageDirectionModel || gotEffort != defaultScoutImageDirectionEffort {
+		t.Fatalf("image-direction route=%s/%s, want %s/%s", gotModel, gotEffort, defaultScoutImageDirectionModel, defaultScoutImageDirectionEffort)
+	}
+}
+
+// An OpenAI follow-up failure rides the same restore path:
+// body untouched, prior terminal status back verbatim, error stamped.
+func TestFollowUpOpenAIErrorPreservesBodyAndStatus(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	previousAsync := startAgentThreadFollowUpAsync
 	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
-		runApp.runAgentThreadFollowUpWithResponder(run, nil)
+		runApp.runAgentThreadFollowUpWithResponder(run, func(context.Context, string, openAITextRequest) (string, error) {
+			return "", fmt.Errorf("OpenAI response was declined by safety classifiers")
+		})
 	}
 	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
 
@@ -522,7 +597,7 @@ func TestFollowUpSonnetErrorPreservesBodyAndStatus(t *testing.T) {
 
 	stored, _ := app.osArtifactByID(artifact.ID)
 	if stored.Text != artifact.Text {
-		t.Fatalf("text changed on a failed Sonnet follow-up:\n%q\nwant\n%q", stored.Text, artifact.Text)
+		t.Fatalf("text changed on a failed OpenAI follow-up:\n%q\nwant\n%q", stored.Text, artifact.Text)
 	}
 	if stored.Metadata["status"] != "complete" || stored.Metadata["threadVersion"] != "1" {
 		t.Fatalf("status=%q version=%q, want the prior terminal state restored", stored.Metadata["status"], stored.Metadata["threadVersion"])
@@ -615,9 +690,10 @@ func TestGrillContractRequiresReadinessLine(t *testing.T) {
 	}
 }
 
-// v1 grill completions through the text worker stamp their initial score so
-// the first re-grill has a baseline to diff against.
-func TestRunAgentThreadStampsInitialGrillReadiness(t *testing.T) {
+// A free-standing grill is still tool-dependent and must stay unavailable
+// until the secure function-tool carrier is wired. It cannot smuggle a writer
+// lane by claiming to be an unverified goal deliverable.
+func TestRunAgentThreadKeepsToolDependentGrillUnavailable(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
 
@@ -626,27 +702,22 @@ func TestRunAgentThreadStampsInitialGrillReadiness(t *testing.T) {
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
 	originalResponder := createOpenAITextResponse
+	providerCalls := 0
 	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		providerCalls++
 		return "READINESS: 6.5/10\n\nStrongest objections: none yet.", nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 
-	thread, err := app.launchAgentThread("grill", "grill: the nimbus pitch", "AJ")
+	thread, err := app.launchAgentThreadWithSpec("grill", "grill: the nimbus pitch", "AJ", nil, agentThreadGoalSpec{AssignedRunner: agentRunnerOpenAIText})
 	if err != nil {
 		t.Fatalf("launchAgentThread: %v", err)
 	}
 	app.runAgentThread(thread)
 
 	stored, _ := app.osArtifactByID(thread.Artifact.ID)
-	if stored.Metadata["readinessScore"] != "6.5" {
-		t.Fatalf("readinessScore=%q, want 6.5 from the v1 run", stored.Metadata["readinessScore"])
-	}
-	if stored.Metadata["readinessDelta"] != "" {
-		t.Fatalf("readinessDelta=%q, want no delta on the first run", stored.Metadata["readinessDelta"])
-	}
-	var runs []agentThreadRunLogEntry
-	if err := json.Unmarshal([]byte(stored.Metadata["threadRuns"]), &runs); err != nil || len(runs) != 1 || runs[0].Version != 1 || runs[0].Score != "6.5" {
-		t.Fatalf("threadRuns=%q (err=%v), want a single v1 entry with the score", stored.Metadata["threadRuns"], err)
+	if providerCalls != 0 || stored.Metadata["readinessScore"] != "" || agentThreadStatusValue(stored) != "error" {
+		t.Fatalf("tool-dependent grill widened admission: providerCalls=%d status=%q readiness=%q", providerCalls, agentThreadStatusValue(stored), stored.Metadata["readinessScore"])
 	}
 }
 
@@ -724,6 +795,94 @@ func TestChannelFollowUpMessageLaunchesWithoutMention(t *testing.T) {
 	}
 	if statusMessage == nil || statusMessage.Kind != "message" {
 		t.Fatalf("status message=%#v, want a plain scout status line (no second thread card)", statusMessage)
+	}
+}
+
+func TestConversationFollowUpLostResponseReconcilesExactlyOnce(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	previousAsync := startAgentThreadFollowUpAsync
+	launches := 0
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, _ agentThreadFollowUpRun) { launches++ }
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	artifact := seedCompleteGrillArtifact(t, app)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Deck feedback", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, scoutChatMessageRecord{
+		ID: "followup-origin-card", Kind: "thread", Role: "scout", Text: "Presentation ready",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Thread:    &scoutChatThreadRef{ID: "agent-thread-grill-1", Mode: "grill", Query: "grill: the nimbus pitch", Status: "complete", ArtifactID: artifact.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	operation := conversationTurnOperation{ID: "conversation-followup-lost-response-0001", BodyDigest: sha256Hex([]byte("exact follow-up request"))}
+	ctx := withConversationTurnOperation(context.Background(), operation)
+
+	conversationFollowUpBeforeCardCommitProbe = func(_ scoutAgentThread) error {
+		conversationFollowUpBeforeCardCommitProbe = nil
+		return errors.New("simulated lost response")
+	}
+	t.Cleanup(func() { conversationFollowUpBeforeCardCommitProbe = nil })
+	if _, err := app.appendScoutChatThreadMessage(ctx, user, thread.ID, "make the closing slide more visual", nil, artifact.ID); err == nil || !strings.Contains(err.Error(), "projection needs reconciliation") {
+		t.Fatalf("lost-response boundary err=%v", err)
+	}
+	if launches != 1 {
+		t.Fatalf("provider launches=%d, want 1", launches)
+	}
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if !ok {
+		t.Fatal("follow-up artifact disappeared")
+	}
+	receipts, err := conversationFollowUpReceipts(stored.Metadata)
+	if err != nil || len(receipts) != 1 || receipts[0].OperationID != operation.ID || receipts[0].TargetArtifactID != artifact.ID {
+		t.Fatalf("durable receipts=%+v err=%v", receipts, err)
+	}
+
+	changed := operation
+	changed.BodyDigest = sha256Hex([]byte("changed follow-up request"))
+	if _, err := app.appendScoutChatThreadMessage(withConversationTurnOperation(context.Background(), changed), user, thread.ID, "make the closing slide more visual", nil, artifact.ID); !errors.Is(err, ErrSTRIDEConversationConflict) {
+		t.Fatalf("changed-body retry err=%v, want conversation conflict", err)
+	}
+	if launches != 1 {
+		t.Fatalf("changed-body retry launched providers=%d", launches)
+	}
+
+	restarted, err := newMeetingMemoryStore(app.memory.path)
+	if err != nil {
+		t.Fatalf("restart memory: %v", err)
+	}
+	app.memory = restarted
+	reconciled, err := app.appendScoutChatThreadMessage(ctx, user, thread.ID, "make the closing slide more visual", nil, artifact.ID)
+	if err != nil {
+		t.Fatalf("exact restart retry: %v", err)
+	}
+	if reconciled["reconciled"] != true || launches != 1 {
+		t.Fatalf("reconciled=%v launches=%d", reconciled["reconciled"], launches)
+	}
+	replayed, err := app.appendScoutChatThreadMessage(ctx, user, thread.ID, "make the closing slide more visual", nil, artifact.ID)
+	if err != nil || replayed["replayed"] != true || launches != 1 {
+		t.Fatalf("second exact replay response=%v err=%v launches=%d", replayed, err, launches)
+	}
+	saved := replayed["thread"].(scoutChatThreadRecord)
+	statusLines := 0
+	for _, message := range saved.Messages {
+		if message.CausedByMessageID == "scout-chat-message-"+sha256Hex([]byte("conversation-turn/v1\x00" + normalizeAccountEmail(user.Email) + "\x00" + thread.ID + "\x00" + operation.ID))[:24] {
+			statusLines++
+		}
+	}
+	if statusLines != 1 {
+		t.Fatalf("follow-up status lines=%d, want exactly one", statusLines)
 	}
 }
 
@@ -921,13 +1080,19 @@ func TestFollowUpAttachmentCommittedBeforeAsyncWorkerStillAuthorizes(t *testing.
 		t.Fatalf("follow-up source was not committed before worker: %+v", grant)
 	}
 	providerCalls := 0
-	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+	var capturedRequest openAITextRequest
+	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		providerCalls++
+		capturedRequest = request
 		return completeResearchArtifactForTest() + "\n\nI used the authorized attachment.", nil
 	})
 	stored, ok := app.osArtifactByID(artifact.ID)
 	if providerCalls != 1 || !ok || stored.Metadata["status"] != "complete" || !strings.Contains(stored.Text, "authorized attachment") {
 		t.Fatalf("committed attachment follow-up calls=%d stored=%+v", providerCalls, stored)
+	}
+	if len(capturedRequest.Attachments) != 1 || capturedRequest.Attachments[0].Type != "input_image" ||
+		!strings.HasPrefix(capturedRequest.Attachments[0].ImageURL, "data:image/png;base64,") {
+		t.Fatalf("OpenAI follow-up attachments=%+v, want one authorized input_image", capturedRequest.Attachments)
 	}
 }
 
@@ -952,7 +1117,7 @@ func TestFollowUpOnGoalDeliverableResumesGoalWithFeedback(t *testing.T) {
 	startGoalFeedbackResumeAsync = func(run func()) { pendingDrive = run }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousResume })
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{
 		Objective:    "Probe the feedback door",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_feedback_probe",
@@ -961,19 +1126,24 @@ func TestFollowUpOnGoalDeliverableResumesGoalWithFeedback(t *testing.T) {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
 	kanbanApp.runGoalThread(thread.Artifact.ID)
-	waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	parked := waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
 	parent, _ := kanbanApp.osArtifactByID(thread.Artifact.ID)
+	writer := parked.subtaskByID("w1")
+	if writer == nil || writer.ArtifactID == "" {
+		t.Fatalf("parked goal has no governed writer child: %+v", writer)
+	}
 
-	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "feedback drop zone", "public")
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "feedback drop zone", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	user := accountStore().findUser("tim@shareability.com")
+	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
 		t.Fatal("seed user tim@shareability.com missing")
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "tighten the close", nil, parent.ID)
+	followUpOperation := conversationTurnOperation{ID: "goal-child-followup-0001", BodyDigest: sha256Hex([]byte("tighten the close"))}
+	response, err := kanbanApp.appendScoutChatThreadMessage(withConversationTurnOperation(context.Background(), followUpOperation), user, channel.ID, "tighten the close", nil, writer.ArtifactID)
 	if err != nil {
 		t.Fatalf("drop goal deliverable: %v", err)
 	}

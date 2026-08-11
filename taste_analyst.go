@@ -29,9 +29,9 @@ package main
 // proposed) for a human to confirm — the codex_proposals/office_brief
 // discipline. Direct ledger writes from an ambient worker are forbidden.
 //
-// Model: the Anthropic text helper (anthropic_text.go) at effort medium —
-// taste distillation is a judgment surface, not a latency one. Keyless (no
-// ANTHROPIC_API_KEY): the worker never starts, silently, like the goal engine.
+// Model: the founder-approved OpenAI Terra/high lane. An installed Anthropic
+// key cannot change admission or routing; without an OpenAI key the worker
+// remains unavailable and consumes no cursor.
 //
 // Guardrails (spec §5): bias to under-claim — a six-person office is thin
 // data, so the prompt demands the ledger's explicit-only discipline and the
@@ -53,7 +53,7 @@ const (
 	tasteAnalystRequestTimeout  = 2 * time.Minute
 	defaultTasteAnalystMinBatch = 15
 	defaultTasteAnalystMaxBatch = 60
-	tasteAnalystEffort          = "medium"
+	tasteAnalystEffort          = "high"
 	tasteAnalystMaxOutputTokens = 2500
 	tasteAnalystMaxProposals    = 5
 	tasteAnalystProposalTextCap = 300
@@ -158,7 +158,7 @@ func tasteAnalystArtifactSuccessAt(entry meetingMemoryEntry) (time.Time, bool) {
 // agent) registers at room join, the analyst registers alongside on its own
 // key. Idempotent via the agent bookkeeping map — a later JoinConferenceRoom
 // still replaces cleanly through startTasteAnalystWorker's swap logic.
-func (app *kanbanBoardApp) ensureTasteAnalystStarted() {
+func (app *kanbanBoardApp) ensureTasteAnalystStarted(admittedKeys ...string) {
 	if app == nil {
 		return
 	}
@@ -168,12 +168,18 @@ func (app *kanbanBoardApp) ensureTasteAnalystStarted() {
 	if registered {
 		return
 	}
-	app.startTasteAnalystWorker(currentAnthropicAPIKey())
+	apiKey := ""
+	if len(admittedKeys) > 0 {
+		apiKey = strings.TrimSpace(admittedKeys[0])
+	}
+	if apiKey == "" {
+		apiKey = app.currentOpenAIAPIKey()
+	}
+	app.startTasteAnalystWorker(apiKey)
 }
 
-// startTasteAnalystWorker registers the per-user analyst loop. Keyless (no
-// ANTHROPIC_API_KEY) it silently never starts — the goal-engine posture; the
-// rest of the OS is untouched.
+// startTasteAnalystWorker registers the per-user analyst loop. Keyless OpenAI
+// it silently never starts; the rest of the OS is untouched.
 func (app *kanbanBoardApp) startTasteAnalystWorker(apiKey string) {
 	agent := tasteAnalystAgent()
 	if app == nil || app.memory == nil || strings.TrimSpace(apiKey) == "" || boolEnv(agent.disabledEnv) {
@@ -232,17 +238,17 @@ func (app *kanbanBoardApp) runTasteAnalystLoop(agent ambientAgentConfig, apiKey 
 // runTasteAnalystOnce is one whole tick: one gated pass per roster user,
 // serialized by the per-agent run-lock so overlapping ticks never consume the
 // same window twice. One user's failure never starves the rest of the roster.
-func (app *kanbanBoardApp) runTasteAnalystOnce(ctx context.Context, apiKey string, responder anthropicTextResponder) error {
+func (app *kanbanBoardApp) runTasteAnalystOnce(ctx context.Context, apiKey string, responder openAITextResponder) error {
 	_, err := app.runTasteAnalystOnceResult(ctx, apiKey, responder)
 	return err
 }
 
-func (app *kanbanBoardApp) runTasteAnalystOnceResult(ctx context.Context, apiKey string, responder anthropicTextResponder) (bool, error) {
+func (app *kanbanBoardApp) runTasteAnalystOnceResult(ctx context.Context, apiKey string, responder openAITextResponder) (bool, error) {
 	if app == nil || app.memory == nil {
 		return false, nil
 	}
 	if responder == nil {
-		responder = createAnthropicTextResponse
+		responder = createOpenAITextResponse
 	}
 	agent := tasteAnalystAgent()
 
@@ -272,7 +278,7 @@ func (app *kanbanBoardApp) runTasteAnalystOnceResult(ctx context.Context, apiKey
 }
 
 // runTasteAnalystForUser runs one gated distillation pass for one user.
-func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx context.Context, apiKey string, userName string, responder anthropicTextResponder, now time.Time) (bool, error) {
+func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx context.Context, apiKey string, userName string, responder openAITextResponder, now time.Time) (bool, error) {
 	profile, hasProfile := app.tasteProfileForUser(userName)
 	cursor := ""
 	distilledAt := time.Time{}
@@ -296,12 +302,15 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	if hasProfile {
 		priorBody = profile.Text
 	}
-	output, err := responder(ctx, apiKey, anthropicTextRequest{
-		Model:        chatModel(),
-		Instructions: tasteAnalystInstructions(),
-		Input:        app.buildTasteAnalystInput(userName, priorBody, window, now),
-		Effort:       tasteAnalystEffort,
-		MaxTokens:    tasteAnalystMaxOutputTokens,
+	output, err := responder(ctx, apiKey, openAITextRequest{
+		Model:           meetingBrainModel(),
+		Instructions:    tasteAnalystInstructions(),
+		Input:           app.buildTasteAnalystInput(userName, priorBody, window, now),
+		ReasoningEffort: tasteAnalystEffort,
+		Verbosity:       "medium",
+		MaxOutputTokens: tasteAnalystMaxOutputTokens,
+		Seat:            seatTaste,
+		Workflow:        "taste_analyst",
 	})
 	if err != nil {
 		return false, err
@@ -329,8 +338,8 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 		tasteAnalystCursorKey:      lastSignal.ID,
 		tasteProfileDistilledAtKey: now.Format(time.RFC3339Nano),
 		"signalCount":              strconv.Itoa(len(window)),
-		"source":                   agentThreadWorkerAnthropic,
-		"model":                    chatModel(),
+		"source":                   agentThreadWorkerOpenAI,
+		"model":                    meetingBrainModel(),
 	}
 	if encoded := encodeTasteProposals(proposals, now); encoded != "" {
 		metadataUpdates[tasteProfileProposalsKey] = encoded

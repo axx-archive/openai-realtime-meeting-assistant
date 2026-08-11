@@ -25,7 +25,7 @@ test('native image actions call the authorized server routes and reconcile the t
   const client = source('src', 'api', 'client.ts');
   const screen = source('src', 'screens', 'ThreadScreen.tsx');
   assert.match(client, /messages\/\$\{encodeURIComponent\(messageId\)\}\/regenerate/);
-  assert.match(client, /'\/assistant\/files\/save'/);
+  assert.match(client, /["']\/assistant\/files\/save["']/);
   assert.match(screen, /api\.saveArtifactToFiles\(sessionToken, artifactID\)/);
   assert.match(screen, /api\.regenerateScoutImage\(/);
   assert.match(screen, /Alert\.prompt\(/);

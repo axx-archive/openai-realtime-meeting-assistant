@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { AccessibilityInfo, findNodeHandle, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
@@ -20,6 +20,7 @@ type Props = {
     mode: string;
     status: string;
   };
+  returnFocusHandle?: number | null;
   onClose: () => void;
 };
 
@@ -47,18 +48,38 @@ function reportBodyWithoutDuplicateTitle(text: string, title: string): string {
     : text;
 }
 
-export function LongMessageSheet({ visible, contained = false, text, authorName, scout, activity = false, report, onClose }: Props) {
+export function LongMessageSheet({ visible, contained = false, text, authorName, scout, activity = false, report, returnFocusHandle, onClose }: Props) {
+  const titleRef = useRef<Text>(null);
+  const wasVisibleRef = useRef(false);
   const displayedText = useMemo(
     () => report ? reportBodyWithoutDuplicateTitle(text, authorName) : text,
     [authorName, report, text],
   );
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (visible) {
+      wasVisibleRef.current = true;
+      timer = setTimeout(() => {
+        const handle = findNodeHandle(titleRef.current);
+        if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+      }, 120);
+    } else if (wasVisibleRef.current) {
+      wasVisibleRef.current = false;
+      if (returnFocusHandle) {
+        timer = setTimeout(() => {
+          AccessibilityInfo.setAccessibilityFocus(returnFocusHandle);
+        }, 180);
+      }
+    }
+    return () => clearTimeout(timer);
+  }, [returnFocusHandle, visible]);
   const sheet = (
-    <SafeAreaView style={[styles.sheet, contained && styles.containedSheet]} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView accessibilityViewIsModal style={[styles.sheet, contained && styles.containedSheet]} edges={['left', 'right', 'bottom']}>
       <View style={styles.handle} />
       <View style={styles.header}>
         <View style={styles.headerCopy}>
-          <Text style={[styles.eyebrow, scout && styles.eyebrowScout]}>{report ? 'STRIDE · DELIVERABLE' : activity ? 'SCOUT · ACTIVITY' : scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
-          <Text numberOfLines={1} style={styles.title}>{report ? `${report.agentName} · ${report.status}` : authorName}</Text>
+          <Text maxFontSizeMultiplier={1.8} style={[styles.eyebrow, scout && styles.eyebrowScout]}>{report ? 'STRIDE · DELIVERABLE' : activity ? 'SCOUT · ACTIVITY' : scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
+          <Text ref={titleRef} accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.title}>{report ? `${report.agentName} · ${report.status}` : authorName}</Text>
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.closePressed]}>
           <SymbolView name="xmark" size={15} tintColor={colors.text2} />
@@ -97,7 +118,7 @@ const styles = StyleSheet.create({
   sheet: { flex: 1, overflow: 'hidden', backgroundColor: colors.bgApp },
   containedSheet: { position: 'absolute', inset: 0, zIndex: 120, elevation: 120 },
   handle: { alignSelf: 'center', width: 36, height: 5, marginTop: space[2], borderRadius: radius.full, backgroundColor: colors.line2 },
-  header: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[5], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
+  header: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[5], paddingVertical: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
   headerCopy: { flex: 1 },
   eyebrow: { ...type.captionMedium, color: colors.text3, letterSpacing: 0.5 },
   eyebrowScout: { color: colors.emberText },

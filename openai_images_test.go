@@ -184,11 +184,12 @@ func TestCreateOpenAIImageRecordsUsage(t *testing.T) {
 	}
 }
 
-// TestOpenAIImageModelEnvOverride pins the OPENAI_IMAGE_MODEL fallback seam.
-func TestOpenAIImageModelEnvOverride(t *testing.T) {
+// TestOpenAIImageModelIgnoresLegacyEnv proves the founder-approved generation
+// model cannot be widened by stale deployment configuration.
+func TestOpenAIImageModelIgnoresLegacyEnv(t *testing.T) {
 	t.Setenv("OPENAI_IMAGE_MODEL", "gpt-image-2-mini")
-	if got := openAIImageModel(); got != "gpt-image-2-mini" {
-		t.Fatalf("openAIImageModel()=%q, want the env override", got)
+	if got := openAIImageModel(); got != defaultOpenAIImageModel {
+		t.Fatalf("openAIImageModel()=%q, want fixed %s", got, defaultOpenAIImageModel)
 	}
 	t.Setenv("OPENAI_IMAGE_MODEL", "  ")
 	if got := openAIImageModel(); got != defaultOpenAIImageModel {

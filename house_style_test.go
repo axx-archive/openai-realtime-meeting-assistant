@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -84,7 +83,7 @@ func TestHouseStyleShouldRunGating(t *testing.T) {
 
 // First pass: office material exists and no style does, so the distiller
 // writes the ONE living house_style artifact — evidence-cited, on the taste
-// metadata keys, at effort medium on the chat model.
+// metadata keys, at effort high on the pinned OpenAI Terra model.
 func TestHouseStyleDistillerWritesEvidenceCitedStyle(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("BONFIRE_CHAT_MODEL", "")
@@ -92,16 +91,16 @@ func TestHouseStyleDistillerWritesEvidenceCitedStyle(t *testing.T) {
 
 	body := houseStyleTestBody(published.ID)
 	calls := 0
-	err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(_ context.Context, apiKey string, request anthropicTextRequest) (string, error) {
+	err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 		calls++
 		if apiKey != "test-key" {
 			t.Errorf("apiKey=%q, want test-key", apiKey)
 		}
-		if request.Model != "claude-sonnet-5" {
-			t.Errorf("model=%q, want claude-sonnet-5", request.Model)
+		if request.Model != meetingBrainModel() {
+			t.Errorf("model=%q, want %s", request.Model, meetingBrainModel())
 		}
-		if request.Effort != houseStyleEffort {
-			t.Errorf("effort=%q, want %s", request.Effort, houseStyleEffort)
+		if request.ReasoningEffort != houseStyleEffort {
+			t.Errorf("effort=%q, want %s", request.ReasoningEffort, houseStyleEffort)
 		}
 		if !strings.Contains(request.Input, published.ID) {
 			t.Errorf("input is missing the published artifact id %s:\n%s", published.ID, request.Input)
@@ -150,7 +149,7 @@ func TestHouseStyleDistillerBinderTriggerUpdatesInPlace(t *testing.T) {
 	seedHouseStyleSourceArtifact(t, app)
 
 	// Fresh style, no binder: the monthly gate holds.
-	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder must not run on a fresh style with no new binder")
 		return "", nil
 	}); err != nil {
@@ -159,7 +158,7 @@ func TestHouseStyleDistillerBinderTriggerUpdatesInPlace(t *testing.T) {
 
 	binder := seedHouseStyleBinderArtifact(t, app)
 	body := houseStyleTestBody(binder.ID)
-	err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if !strings.Contains(request.Input, "## Banned patterns\n- old rule (sig-1)") {
 			t.Errorf("input must carry the living document to update:\n%s", request.Input)
 		}
@@ -193,7 +192,7 @@ func TestHouseStyleDistillerBinderTriggerUpdatesInPlace(t *testing.T) {
 	}
 
 	// The binder is consumed and the style is fresh: the next tick is a no-op.
-	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder must not run again once the binder cursor is consumed")
 		return "", nil
 	}); err != nil {
@@ -209,7 +208,7 @@ func TestHouseStyleDistillerSkipsUncitedOutput(t *testing.T) {
 	seedHouseStyleSourceArtifact(t, app)
 
 	calls := 0
-	responder := func(context.Context, string, anthropicTextRequest) (string, error) {
+	responder := func(context.Context, string, openAITextRequest) (string, error) {
 		calls++
 		return "## Banned patterns\n- vibes, cited to nothing", nil
 	}
@@ -296,7 +295,7 @@ func TestHouseJudgePersonaRequiresHouseStyle(t *testing.T) {
 // panel at exactly the two standing seats.)
 func TestGrillPanelGainsHouseJudgeSeat(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	seedHouseStyleArtifact(t, app, "Banned patterns: momentum claims without numbers.")
 	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
 	scorecard, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn grill",
@@ -311,27 +310,27 @@ func TestGrillPanelGainsHouseJudgeSeat(t *testing.T) {
 
 	var mu sync.Mutex
 	houseSystems := []string{}
-	original := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = original })
-	createAnthropicMessagesResponse = func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	original := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = original })
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		text := ""
 		switch {
-		case strings.Contains(request.System, "Bonfire's house judge"):
+		case strings.Contains(request.Instructions, "Bonfire's house judge"):
 			mu.Lock()
-			houseSystems = append(houseSystems, request.System)
+			houseSystems = append(houseSystems, request.Instructions)
 			mu.Unlock()
 			text = `{"objections":["Slide 4 leans on momentum claims without numbers"],"strengths_to_keep":[]}`
-		case strings.Contains(request.System, defaultGrillPersona):
+		case strings.Contains(request.Instructions, defaultGrillPersona):
 			text = `{"objections":["No named buyer attached to the ask"],"strengths_to_keep":[]}`
-		case strings.Contains(request.System, defaultPrivateGrillPersona):
+		case strings.Contains(request.Instructions, defaultPrivateGrillPersona):
 			text = `{"objections":["The comp set is thin"],"strengths_to_keep":[]}`
-		case strings.Contains(request.System, "synthesizing Bonfire's red-team panel"):
+		case strings.Contains(request.Instructions, "synthesizing Bonfire's red-team panel"):
 			text = "Sharpest unresolved objection, one line."
 		default:
-			t.Errorf("unexpected system prompt: %q", request.System)
-			return anthropicMessagesResponse{}, fmt.Errorf("unexpected system prompt")
+			t.Errorf("unexpected system prompt: %q", request.Instructions)
+			return "", fmt.Errorf("unexpected system prompt")
 		}
-		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+		return text, nil
 	}
 
 	app.closeGrillObjectionLoop(scorecard, "AJ", record.ID, "")

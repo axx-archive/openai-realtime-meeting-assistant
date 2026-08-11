@@ -104,15 +104,14 @@ func TestFiscalToolAllowlists(t *testing.T) {
 			t.Fatalf("%s is not in orchestratorToolAllowlist", name)
 		}
 	}
-	voiceAllowed := map[string]bool{
-		"company_financial_snapshot": true,
-		"financial_comps":            true,
-		"fiscal_api_docs":            false,
-		"fiscal_data_query":          false,
-	}
 	for _, name := range fiscalToolNames {
-		if got := privateRealtimeVoiceToolAllowed(name); got != voiceAllowed[name] {
-			t.Fatalf("privateRealtimeVoiceToolAllowed(%s)=%v, want %v", name, got, voiceAllowed[name])
+		if privateRealtimeVoiceToolAllowed(name) {
+			t.Fatalf("privateRealtimeVoiceToolAllowed(%s)=true before individual conversation admission", name)
+		}
+	}
+	for _, name := range []string{"company_financial_snapshot", "financial_comps"} {
+		if !privateRealtimeVoiceServerActionAllowed(name) {
+			t.Fatalf("server-owned compatibility executor missing %s", name)
 		}
 	}
 }

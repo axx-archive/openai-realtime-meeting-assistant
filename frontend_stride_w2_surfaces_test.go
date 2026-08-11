@@ -249,7 +249,8 @@ func TestStrideW2RouteShellPreservesHistoryAndUsesNoProviderCalls(t *testing.T) 
 		`if (pendingPersistenceInvalid || pendingActionOperation && path !== pendingActionOperation.path) { blockPendingNavigation(); return true }`,
 		`if (blockPendingNavigation()) return`,
 		`settingsSurface && !blockPendingNavigation()`,
-		`organizationSwitcher?.addEventListener('click', () => { if (blockPendingNavigation()) return;`,
+		`function openOrganizationSettingsFromMenu()`,
+		`organizationSwitcher?.addEventListener('click', () => setOrganizationMenuOpen(organizationMenu.hidden))`,
 		`if (previousFingerprint && pendingActionOperation) pendingActionOperationsByAccount.set(previousFingerprint, pendingActionOperation)`,
 		`pendingActionOperation = pendingPersistenceInvalid ? null : persistedOperation || pendingActionOperationsByAccount.get(nextFingerprint) || null`,
 		`function syncPendingActionControl()`,
@@ -262,6 +263,18 @@ func TestStrideW2RouteShellPreservesHistoryAndUsesNoProviderCalls(t *testing.T) 
 		if !strings.Contains(js, marker) {
 			t.Errorf("W2 route shell missing %q", marker)
 		}
+	}
+	organizationSettingsStart := strings.Index(js, `function openOrganizationSettingsFromMenu()`)
+	if organizationSettingsStart < 0 {
+		t.Fatal("organization settings helper boundary missing")
+	}
+	organizationSettingsEnd := strings.Index(js[organizationSettingsStart:], `function renderOrganizationSwitcher(envelope)`)
+	if organizationSettingsEnd < 0 {
+		t.Fatal("organization settings helper boundary missing")
+	}
+	organizationSettingsHelper := js[organizationSettingsStart : organizationSettingsStart+organizationSettingsEnd]
+	if !strings.Contains(organizationSettingsHelper, `if (blockPendingNavigation()) return`) {
+		t.Fatal("organization settings helper must hold the exact pending-operation navigation fence")
 	}
 	if !strings.Contains(js, `['/network/draft','network-draft']`) || strings.Contains(js, `['/network/draft','profile']`) {
 		t.Fatal("private network draft must use its distinct server projection, never the public identity profile")
@@ -389,9 +402,12 @@ func TestStrideW2OrganizationSwitcherIsServerProjectedAndHonest(t *testing.T) {
 	html := string(raw)
 	for _, marker := range []string{
 		`id="topbarOrganizationSwitcher"`, `min-height: 40px`,
-		`id="topbarOrganizationName"`, `Organization unavailable`, `0 of 3 active`,
+		`id="topbarOrganizationName"`, `>Organizations</strong>`,
+		`id="topbarOrganizationMenu"`, `id="topbarOrganizationMenuItems"`,
+		`id="topbarOrganizationCreate"`, `<span>Create organization</span>`,
 		`renderOrganizationSwitcher(envelope)`, `item.status === 'current'`,
-		`item.detail?.pendingCount`, `active.length > 3`,
+		`const current = active.find(item => item.status === 'current')`, `active.length > 3`,
+		`button.setAttribute('aria-checked', item === current ? 'true' : 'false')`,
 		`loadProjection('organizations'`, `openSettings({ section: 'organizations'`,
 		`window.__strideCurrentOrganizationLabel`,
 	} {
@@ -401,6 +417,11 @@ func TestStrideW2OrganizationSwitcherIsServerProjectedAndHonest(t *testing.T) {
 	}
 	if strings.Contains(html, `items.find(item => item.status === 'current') || active[0]`) {
 		t.Fatal("organization switcher must never infer current authority from an active membership")
+	}
+	for _, stale := range []string{`id="topbarOrganizationRole"`, `id="topbarOrganizationCount"`, `id="topbarOrganizationPending"`, `0 of 3 active`, `item.detail?.pendingCount`} {
+		if strings.Contains(html, stale) {
+			t.Errorf("closed organization switcher still exposes superseded status detail %q", stale)
+		}
 	}
 	for _, stale := range []string{`class="topbar__organization-name">Bonfire`, `Stride · Bonfire organization`} {
 		if strings.Contains(html, stale) {

@@ -25,6 +25,9 @@ const manifestFiles = {
   semanticContractDigest: "docs/design/stride-pd0-semantic-system-contract-20260809.md",
   flowContractDigest: "docs/design/stride-pd0-reference-flow-contract-20260809.md",
   researchDigest: "docs/evidence/e10/stride-e10-pd0-primary-source-research-20260809.md",
+  comparativeStudyDigest: "docs/evidence/e10/stride-e10-pd0-comparative-design-study-20260810.md",
+  workstreamStudyDigest: "docs/evidence/e10/stride-e10-pd0-chatgpt-workstream-study-20260810.md",
+  workstreamInteractionDigest: "docs/evidence/e10/stride-e10-pd0-chatgpt-workstream-interaction-manifest-20260810.json",
   checkpointDigest: "docs/evidence/e10/stride-e10-pd0-pi0-contracts-20260809.json"
 };
 const expectedManifest = {
@@ -34,12 +37,21 @@ const expectedManifest = {
   parityAuditDigest: "da54564d784179c6e4552a774f0c9585d1a42eb92f0e512b45f7d34916b1091a",
   semanticContractDigest: "df5081f6f2f6d4a06275a2cd4b8fb4280f01c64d23b07e6212341bdbd41353aa",
   flowContractDigest: "475d220dddb96f32f170a8b8a24b68f98ff79a72bd53b805b30c2f98d7abca7c",
-  researchDigest: "c9f3dc31960d6d12cd41ffc31efe7e9806eaa5e760b74fefcf5d0543ce913dd2"
+  researchDigest: "c9f3dc31960d6d12cd41ffc31efe7e9806eaa5e760b74fefcf5d0543ce913dd2",
+  comparativeStudyDigest: "1e781de1ddbc10eeb051680e54e6a08a4c763d547135dece1c638a193e8cf786",
+  workstreamStudyDigest: "7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4",
+  workstreamInteractionDigest: "98027ae638ee1f0742725754cbdddfc0e7e8642cf990bd43958208bed82048fe"
 };
 const exactDestinations = ["Home", "Work", "Network", "Work Search", "You"];
 const journeyDestinations = { J1: "Home", J2: "Home", J3: "Work", J4: "Work", J5: "You", J6: "Network", J7: "Network", J8: "Network", J9: "Network", J10: "Work Search", J11: "Work", J12: "You", J13: "Network" };
-const journeyContractDigest = "671197ad94f77f44dd6f22876b5d493cf8c746199ba93ef5f977ebfdb9d9153b";
-const journeyFixtureDigest = "22c453eed63c2e67874d52ff57423c5726dcb1a0735c14618fc9abeaba1556fa";
+const journeyContractDigest = "f7ecd1c335f92b1a41938f3301e5b781f2e7c13c3422e0ec4397640dd15234b2";
+const journeyFixtureDigest = "e79ba28c98a7b70a154a8d85bd30f8b1ac0bbc599a24318b29c02ac2809156fd";
+const expectedJ4Postimages = [
+  { step: 0, stage: "scope_review", currentActor: "Scout", nextAction: "inspect_sources_and_cost", interventionTitle: "Review the approved scope", agentTitle: "Scout is waiting for story approval", artifactTitle: "Presentation artifact not started", outcomeTitle: "Human presentation review not started", artifactState: "not_started", driveState: "not_saved", artifactReviewState: "pending_review", artifactPreviewState: "unavailable", decisionState: "human_review_required", outcomeNextAction: "wait_for_deck" },
+  { step: 1, stage: "narrative_review", currentActor: "Alex", nextAction: "approve_story_direction", interventionTitle: "Approve the narrative boundary", agentTitle: "Scout assembled the story outline", artifactTitle: "Northstar story outline", outcomeTitle: "Human presentation review not started", artifactState: "outline_ready", driveState: "not_saved", artifactReviewState: "pending_review", artifactPreviewState: "unavailable", decisionState: "human_review_required", outcomeNextAction: "wait_for_deck" },
+  { step: 2, stage: "design_review", currentActor: "Alex", nextAction: "review_rendered_deck", interventionTitle: "Narrative boundary approved", agentTitle: "Scout assembled the editable deck", artifactTitle: "Northstar six-slide deck", outcomeTitle: "Human presentation review pending", artifactState: "draft_ready", driveState: "not_saved", artifactReviewState: "pending_review", artifactPreviewState: "available", decisionState: "human_review_required", outcomeNextAction: "approve_deck" },
+  { step: 3, stage: "human_review", currentActor: "Alex", nextAction: "save_approved_revision", interventionTitle: "Narrative boundary approved", agentTitle: "Scout assembled the editable deck", artifactTitle: "Northstar six-slide deck", outcomeTitle: "Human presentation review complete", artifactState: "reviewed_ready", driveState: "not_saved", artifactReviewState: "reviewed", artifactPreviewState: "available", decisionState: "human_review_complete", outcomeNextAction: "save_approved_revision" }
+];
 
 const expectedGovernedTokens = {
   "--space-0":"0px", "--space-2":"2px", "--space-4":"4px", "--space-8":"8px", "--space-12":"12px", "--space-16":"16px", "--space-20":"20px", "--space-24":"24px", "--space-32":"32px", "--space-40":"40px", "--space-48":"48px", "--space-64":"64px", "--space-80":"80px",
@@ -64,14 +76,14 @@ const specificFields = {
   HumanMessage: ["humanPrincipal", "effectiveTime", "deliveryState"],
   AgentContribution: ["agentPrincipal", "accountableHuman", "packageRuntime", "delegation", "verificationLimit"],
   SystemEvent: ["eventType", "effectiveTime", "relatedObjectRef", "boundedState"],
-  SuggestedWorkCard: ["suggestionRevision", "sourceClass", "sourceRef", "scope", "approvalState"],
-  RunTimeline: ["runRevision", "interventionRevision", "currentActor", "accountableHuman", "providerState", "recoveryState"],
+  SuggestedWorkCard: ["suggestionRevision", "sourceClass", "sourceRef", "scope", "approvalState", "deliverable", "owner", "participantSet", "inputSet", "costState", "nextAction"],
+  RunTimeline: ["runRevision", "interventionRevision", "currentActor", "accountableHuman", "providerState", "recoveryState", "workType", "deliverable", "owner", "participantSet", "sourceSet", "stage", "nextAction", "costState", "artifactState", "driveState", "providerRoute"],
   InterventionRequest: ["boundedSchema", "controller", "deadline", "revision", "consequence"],
-  ArtifactRevisionView: ["artifactRevision", "sourceProvenance", "outputProvenance", "reviewState", "verificationState"],
-  OutcomeRecordView: ["outcomeRevision", "evidenceRefs", "accountableHuman", "verificationState", "corrections"],
+  ArtifactRevisionView: ["artifactRevision", "sourceProvenance", "outputProvenance", "reviewState", "verificationState", "artifactType", "editability", "previewState", "driveState"],
+  OutcomeRecordView: ["outcomeRevision", "evidenceRefs", "accountableHuman", "verificationState", "corrections", "decisionState", "nextAction", "distributionState"],
   WorkRecordSection: ["sectionType", "evidenceRefs", "fieldController", "releaseState"],
   EvidenceCard: ["claimRef", "attestationRef", "approvalRef", "revision", "freshness", "why", "unknown"],
-  PublicWorkspaceView: ["workspaceProjection", "ownerRole", "moderatorRole", "participation", "retention", "moderationState", "publicationState"],
+  PublicWorkspaceView: ["workspaceProjection", "ownerRole", "moderatorRole", "participation", "retention", "moderationState", "publicationState", "workBridgeState", "eligibleInput", "releaseReview", "publicResult"],
   PublicWorkObjectView: ["objectType", "workspaceRevision", "objectRevision", "authorship", "provenance", "moderationState", "publicationState"],
   WorkstreamRow: ["chronologicalProjection", "mode", "why", "unknown", "observeState", "saveState"],
   PersonProfileView: ["personProjection", "evidence", "controls"],
@@ -87,7 +99,7 @@ const specificFields = {
 const enumFields = {
   dataState: exactStates, audience: ["private", "organization", "named_parties", "public"], trust: ["fictional_body_minimized"], actions: ["none"],
   listeningState: ["idle"], inputMode: ["voice_or_typed"], interruptionState: ["none"], deliveryState: ["current"], approvalState: ["human_required"],
-  providerState: ["not_called"], recoveryState: ["none"], reviewState: ["reviewed"], verificationState: ["partial", "human_reviewed"],
+  providerState: ["not_called"], recoveryState: ["none"], reviewState: ["reviewed", "pending_review"], verificationState: ["partial", "human_reviewed", "unverified"],
   sectionType: ["contributions"], releaseState: ["off"], freshness: ["current"], ownerRole: ["owner"], moderatorRole: ["moderator"],
   participation: ["application"], retention: ["90_days"], moderationState: ["parent_off"], publicationState: ["off"],
   objectType: ["EvidenceNote"], authorship: ["human"], mode: ["following"], observeState: ["off"], saveState: ["not_saved"],
@@ -97,6 +109,8 @@ const enumFields = {
 };
 const exactFieldValues = {
   accountableHuman: ["Alex"],
+  artifactState: ["draft_ready", "not_started", "outline_ready", "reviewed_ready"],
+  artifactType: ["presentation", "source_brief"],
   agentPrincipal: ["Scout"],
   agentProjection: ["fictional_agent_02"],
   approvalRef: ["fictional_approval_03"],
@@ -110,50 +124,69 @@ const exactFieldValues = {
   controller: ["Alex"],
   controls: ["view_as", "view_as_pause", "view_as_pause_export_delete"],
   corrections: ["none", "revision_03_superseded"],
-  currentActor: ["Scout"],
+  costState: ["approval_before_spend"],
+  currentActor: ["Alex", "Scout"],
   currentObjects: ["one_fictional_object"],
   deadline: ["fictional_15_minutes"],
   decisionDeadline: ["5_days"],
   delegation: ["one_private_thread", "private_only", "private_run"],
-  eventType: ["privacy_inventory", "session_admitted", "verification_partial"],
+  decisionState: ["human_review_complete", "human_review_required"],
+  deliverable: ["editable_presentation"],
+  distributionState: ["private_only"],
+  driveState: ["not_saved"],
+  editability: ["editable"],
+  eligibleInput: ["reviewed_work_record"],
+  eventType: ["privacy_inventory", "provider_route_declared", "session_admitted", "verification_partial"],
   evidence: ["released_only"],
   evidenceRefs: ["fictional_evidence_07"],
   fieldController: ["Alex"],
   humanPrincipal: ["Alex"],
   interpretation: ["accessible_realtime_collaborator"],
+  inputSet: ["three_fictional_facts"],
   noticeDeadline: ["1_business_day"],
   organizationProjection: ["fictional_org_03"],
-  outputProvenance: ["fictional_artifact"],
+  nextAction: ["approve_deck", "approve_exact_scope", "approve_story_direction", "inspect_sources_and_cost", "keep_private", "review_rendered_deck", "save_approved_revision", "wait_for_deck"],
+  outputProvenance: ["editable_presentation", "fictional_artifact"],
+  owner: ["Alex"],
   packageRuntime: ["declared_reference_runtime"],
   personProjection: ["fictional_person_04"],
+  participantSet: ["Alex_and_Scout"],
   policyBinding: ["fictional_policy_01"],
   proposalID: ["fictional_proposal_02"],
+  providerRoute: ["openai_only_not_called"],
+  previewState: ["available", "unavailable"],
   provenance: ["fictional_released_fields"],
+  publicResult: ["no_projection"],
   publicationRef: ["fictional_pub_04"],
   purpose: ["review_accessibility_method", "shared_methods"],
   recipientProjection: ["fictional_recipient_projection"],
   recordedDisclosure: ["fictional_disclosure_04"],
   relatedObjectRef: ["fictional_account_ref", "fictional_run_07", "fictional_session_ref"],
   roles: ["not_disclosed"],
-  scope: ["review_one_interaction"],
+  releaseReview: ["human_and_policy_required"],
+  scope: ["build_six_slide_deck"],
   senderProjection: ["fictional_sender_projection"],
   sessionBinding: ["fictional_session_ref"],
   sourceAuthority: ["fictional_private_source"],
   sourceClass: ["fictional_signal"],
-  sourceProvenance: ["human_reviewed"],
+  sourceProvenance: ["fictional_source_register", "human_reviewed"],
   sourceRef: ["body_free_ref_01"],
+  sourceSet: ["three_fictional_facts"],
   sponsor: ["Alex"],
+  stage: ["design_review", "human_review", "narrative_review", "scope_review"],
   unknown: ["availability", "device_acceptance"],
   unknowns: ["linked_person_review_pending"],
   verificationLimit: ["limited", "partial"],
   why: ["chosen_workspace", "matching_released_evidence", "named_party_review"],
+  workBridgeState: ["private_work_only"],
+  workType: ["presentation"],
   workspaceProjection: ["fictional_workspace_01"]
 };
 const exactJourneyRosters = {
   J1: ["SystemEvent"],
   J2: ["SignalControl", "HumanMessage", "SuggestedWorkCard"],
   J3: ["HumanMessage", "ArtifactRevisionView"],
-  J4: ["RunTimeline", "InterventionRequest", "AgentContribution", "SystemEvent", "OutcomeRecordView"],
+  J4: ["RunTimeline", "InterventionRequest", "AgentContribution", "ArtifactRevisionView", "SystemEvent", "OutcomeRecordView"],
   J5: ["WorkRecordSection", "EvidenceCard", "OutcomeRecordView"],
   J6: ["PublicWorkspaceView"],
   J7: ["PublicWorkObjectView"],
@@ -249,7 +282,7 @@ function componentRendererFailures(source) {
 
 assert(fixture.schema === "stride.pd0.reference-fixture.v1", "unknown fixture schema");
 assert(fixture.fictional === true, "fixture must be explicitly fictional");
-assert(exactKeys(fixture, ["schema", "generatedFor", "fictional", "contractManifest", "destinations", "journeyContracts", "principal", "featureGates", "statePrecedence", "states", "journeys"]), "fixture root has missing or unknown keys");
+assert(exactKeys(fixture, ["schema", "generatedFor", "fictional", "contractManifest", "destinations", "journeyContracts", "journeyPostimages", "principal", "featureGates", "statePrecedence", "states", "journeys"]), "fixture root has missing or unknown keys");
 assert(fixture.generatedFor === "PD0 reference evidence only", "fixture classification must remain browser-reference-only evidence");
 assert(JSON.stringify(fixture.contractManifest) === JSON.stringify(expectedManifest), "fixture contract manifest differs from the frozen binding");
 for (const [digestField, relativePath] of Object.entries(manifestFiles)) {
@@ -264,6 +297,7 @@ assert(JSON.stringify(fixture.destinations) === JSON.stringify(exactDestinations
 assert(exactKeys(fixture.principal, ["displayName", "organization", "session"]) && JSON.stringify(fixture.principal) === JSON.stringify({ displayName: "Alex", organization: "Northstar", session: "current reference session" }), "fictional principal shape differs from the closed fixture");
 assert(exactKeys(fixture.featureGates, ["PN1", "PN2", "PN3", "PN4", "PN5", "W5", "W6", "pn_moderation", "semantic_provider", "reranker"]), "feature-gate root has missing or unknown gates");
 assert(exactKeys(fixture.journeyContracts, Object.keys(journeyDestinations)), "journey-contract root must contain exact J1-J13");
+assert(exactKeys(fixture.journeyPostimages, ["J4"]) && JSON.stringify(fixture.journeyPostimages.J4) === JSON.stringify(expectedJ4Postimages), "J4 lifecycle postimages must equal the exact four-step contract");
 assert(sha256(JSON.stringify(fixture.journeyContracts)) === journeyContractDigest, "journey screen/action/transition/outcome contracts differ from the frozen reference");
 assert(sha256(JSON.stringify(fixture.journeys)) === journeyFixtureDigest, "journey fixture differs from the frozen reference");
 assert(fixture.journeys.length === 13 && fixture.journeys.every((journey, index) => journey.id === `J${index + 1}`), "fixture must contain ordered J1-J13");
@@ -319,6 +353,28 @@ for (const [type, field, bodyLikeToken] of [["HumanMessage", "humanPrincipal", "
 }
 assert(new Set(fixture.journeys.find(journey => journey.id === "J9").components.map(component => component.type)).size === 4, "J9 must keep four separate profile types");
 assert(JSON.stringify(fixture.journeys.find(journey => journey.id === "J13").components.map(component => component.type)) === JSON.stringify(["ModerationCaseView", "ConsensusDisplay"]), "J13 moderation and consensus must remain separate");
+const presentationJourney = fixture.journeys.find(journey => journey.id === "J4");
+const presentationRun = presentationJourney.components.find(component => component.type === "RunTimeline");
+const presentationArtifact = presentationJourney.components.find(component => component.type === "ArtifactRevisionView");
+assert(presentationJourney.name === "Build and review a presentation" && presentationRun.fields.workType === "presentation" && presentationRun.fields.providerRoute === "openai_only_not_called", "J4 must remain the exact fictional OpenAI-only presentation work prototype");
+assert(presentationArtifact.fields.artifactType === "presentation" && presentationArtifact.fields.editability === "editable" && presentationArtifact.fields.driveState === "not_saved", "J4 must preserve editable presentation and honest Drive state");
+for (const postimage of expectedJ4Postimages) {
+  const projected = structuredClone(presentationJourney.components);
+  const run = projected.find(component => component.type === "RunTimeline");
+  const artifact = projected.find(component => component.type === "ArtifactRevisionView");
+  const outcome = projected.find(component => component.type === "OutcomeRecordView");
+  Object.assign(run.fields, { stage: postimage.stage, currentActor: postimage.currentActor, nextAction: postimage.nextAction, artifactState: postimage.artifactState, driveState: postimage.driveState });
+  Object.assign(artifact.fields, { reviewState: postimage.artifactReviewState, previewState: postimage.artifactPreviewState, driveState: postimage.driveState });
+  Object.assign(outcome.fields, { decisionState: postimage.decisionState, nextAction: postimage.outcomeNextAction });
+  projected.find(component => component.type === "InterventionRequest").title = postimage.interventionTitle;
+  projected.find(component => component.type === "AgentContribution").title = postimage.agentTitle;
+  artifact.title = postimage.artifactTitle;
+  outcome.title = postimage.outcomeTitle;
+  assert(projected.every(component => componentFailures(component).length === 0), `J4 step ${postimage.step} projects an invalid typed postimage`);
+}
+assert(!/anthropic|claude|fable/i.test(JSON.stringify([fixture.journeyContracts.J2, fixture.journeyContracts.J3, fixture.journeyContracts.J4, presentationJourney])), "representative presentation prototype must not route or fall back to Anthropic");
+const networkWorkspace = fixture.journeys.find(journey => journey.id === "J6").components.find(component => component.type === "PublicWorkspaceView");
+assert(networkWorkspace.fields.workBridgeState === "private_work_only" && networkWorkspace.fields.eligibleInput === "reviewed_work_record" && networkWorkspace.fields.publicResult === "no_projection", "Network prototype must preserve the governed private Work to reviewed Work Record boundary");
 assert(!/IdentityEntry|ArtifactRevision(?!View)|OutcomeReview|WorkRecordEvidence|PublicWorkspaceProjection|PublicWorkObject(?!View)|WorkstreamItem|SettingsPolicyView|PublicPresenceInventory/.test(JSON.stringify(fixture)), "invented legacy component remains");
 
 assert(!/transition\s*:\s*all\b/i.test(css), "CSS must not use transition: all");
@@ -359,6 +415,13 @@ assert(/aria-current="step"/.test(js), "current step must use aria-current=step"
 assert(/flowStatus\.focus/.test(js) && /role="status"/.test(html), "flow transitions must announce and move focus to a stable status");
 assert(/announceContext\(`Selected/.test(js) && /announceContext\(`Resolved/.test(js), "journey, platform, and state changes must replace the live status");
 assert(/function escapeHTML/.test(js) && /escapeHTML\(component\.title\)/.test(js) && /escapeHTML\(value\)/.test(js) && /escapeHTML\(journey\.name\)/.test(js) && /escapeHTML\(state\.copy\)/.test(js) && /escapeHTML\(journey\.compositions/.test(js) && /escapeHTML\(gate\)/.test(js), "fixture-derived rendered content must pass through HTML escaping");
+assert(/function fixtureValue/.test(js) && /if \(preview\) return "field shape only · no current value"/.test(js) && /return escapeHTML\(labels\[component\.fields\[key\]\] \|\| humanize\(component\.fields\[key\]\)\)/.test(js), "prototype field values must be escaped and withheld in gated preview");
+assert(/function contractRows/.test(js) && /technical-contract/.test(js) && /Technical contract/.test(js), "dense implementation fields must remain available through progressive disclosure");
+assert(/delivery-stages/.test(js) && /Scope", "Research", "Story", "Design", "Review", "Drive/.test(js), "presentation work card must expose the exact delivery lifecycle");
+assert(/work-contract-grid/.test(js) && /Accountable owner/.test(js) && /Provider route/.test(js) && /Next action/.test(js), "work card must expose owner, participants, inputs, route, cost, and next action");
+assert(/work-network-bridge/.test(js) && /Private Work/.test(js) && /Reviewed evidence/.test(js) && /Work Record/.test(js) && /Network projection/.test(js), "Work and Network must share one governed lifecycle grammar");
+assert(/function projectedJourneyComponents/.test(js) && /journeyPostimages\?\.\[journey\.id\]\?\.\[stepIndex\]/.test(js) && /Object\.assign\(run\.fields/.test(js) && /Object\.assign\(artifact\.fields/.test(js) && /Object\.assign\(outcome\.fields/.test(js) && /interventionTitle/.test(js) && /agentTitle/.test(js) && /artifact\.title = postimage\.artifactTitle/.test(js) && /outcome\.title = postimage\.outcomeTitle/.test(js), "J4 visible cards and titles must consume one exact step-specific postimage");
+assert(/platform-iphone \.work-contract-grid/.test(css) && /platform-ipad \.semantic-grid/.test(css) && /family-run-timeline/.test(css), "representative Work prototype needs explicit iPhone and iPad composition rules");
 assert(/preview-start|preview-advance|preview-back|preview-resume|preview-restart/.test(js), "gated local preview state machine is incomplete");
 assert(/preview: false/.test(js) && /journey\.gates\.length && !appState\.preview\) return opaqueStateCard/.test(js), "gated child projection must be opaque unless local preview is explicit");
 assert(/currentContract\(\)/.test(js) && /currentSteps\(\)/.test(js) && /destination-nav/.test(html) && /data-destination/.test(js), "app must execute the exact IA destination and per-journey contract");

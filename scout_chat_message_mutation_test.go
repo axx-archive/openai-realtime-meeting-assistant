@@ -304,7 +304,7 @@ func TestScoutChatMessageReplyPersistsImmutableOriginalContext(t *testing.T) {
 		t.Fatalf("seed original: %v", err)
 	}
 	path := "/assistant/chat-threads/" + channel.ID + "/messages"
-	recorder := mutationRoute(t, http.MethodPost, path, `{"text":"I can own the run of show.","replyToMessageId":"original"}`, "aj@shareability.com")
+	recorder := mutationRoute(t, http.MethodPost, path, `{"text":"I can own the run of show.","replyToMessageId":"original","operationId":"reply-context-operation-0001"}`, "aj@shareability.com")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("reply status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -331,7 +331,7 @@ func TestScoutChatMessageReplyPersistsImmutableOriginalContext(t *testing.T) {
 		t.Fatalf("persisted reply snapshot=%+v", reply.ReplyTo)
 	}
 
-	missing := mutationRoute(t, http.MethodPost, path, `{"text":"orphan","replyToMessageId":"missing"}`, "aj@shareability.com")
+	missing := mutationRoute(t, http.MethodPost, path, `{"text":"orphan","replyToMessageId":"missing","operationId":"missing-reply-operation-0001"}`, "aj@shareability.com")
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing reply target status=%d body=%s", missing.Code, missing.Body.String())
 	}

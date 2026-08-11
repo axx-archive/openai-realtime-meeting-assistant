@@ -233,12 +233,15 @@ func TestBrainIntakeSkipAdvancesDoneCompletesAndFlushesKeyless(t *testing.T) {
 	}
 
 	// A completed intake thread is a normal private thread again: the next
-	// message routes through the ordinary model path, not the intake handler.
-	// Conversational Scout now fails honestly when its provider is unavailable;
-	// it must not replace that failure with unrelated memory-search output.
-	_, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "one more thing", nil, "")
-	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY is not configured") {
-		t.Fatalf("append post-completion error=%v, want keyless provider error", err)
+	// message routes through the ordinary conversation contract, not the intake
+	// handler. A keyless turn is preserved with an explicit unavailable outcome.
+	postResponse, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "one more thing", nil, "")
+	if err != nil {
+		t.Fatalf("append post-completion: %v", err)
+	}
+	postAnswer, ok := postResponse["answer"].(scoutChatMessageRecord)
+	if !ok || postAnswer.IntentOutcome != string(conversationIntentUnavailable) || postResponse["intentOutcome"] != string(conversationIntentUnavailable) {
+		t.Fatalf("post-completion response=%+v, want explicit unavailable", postResponse)
 	}
 	postSaved, _, readErr := kanbanApp.scoutChatThreadByID(user.Email, thread.ID)
 	if readErr != nil {

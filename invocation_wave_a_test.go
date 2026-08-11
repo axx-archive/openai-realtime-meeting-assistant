@@ -58,21 +58,21 @@ func TestCapabilitiesDigestCapsLengthAndNamesEveryRouterEnumId(t *testing.T) {
 
 // --- Item 1: offer-never-deny replaces the prohibition, keyed only -----------
 
-func TestAssistantQueryInstructionsOfferNeverDenyIsKeyGated(t *testing.T) {
+func TestAssistantQueryInstructionsConversationFirstIsKeyGated(t *testing.T) {
 	const oldProhibition = "Do not claim to run research, design, grill"
 
-	// Keyed: the pure prohibition is REPLACED by the offer-never-deny protocol
-	// and the capabilities digest.
-	t.Run("keyed offers, never denies", func(t *testing.T) {
+	// Keyed: the answer seat explains the separate server router and catalog
+	// without reviving a tool picker or claiming that chat text launched work.
+	t.Run("keyed explains conversation-first routing", func(t *testing.T) {
 		t.Setenv("OPENAI_API_KEY", "sk-openai-digest-test")
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		instructions := assistantQueryInstructions()
 		if strings.Contains(instructions, oldProhibition) {
 			t.Error("keyed instructions still carry the pure prohibition — it must be REPLACED by offer-never-deny")
 		}
-		for _, want := range []string{"offer to set it up", "never deny", packagingStudioProcessID} {
+		for _, want := range []string{"separate intent router starts private", "without presenting a tool picker", packagingStudioProcessID} {
 			if !strings.Contains(instructions, want) {
-				t.Errorf("keyed instructions missing %q (the offer protocol + digest must be present)", want)
+				t.Errorf("keyed instructions missing %q (the conversation contract + catalog must be present)", want)
 			}
 		}
 	})
@@ -191,10 +191,9 @@ func TestScoutGuardFullPackagingDoesNotOverTriggerStudio(t *testing.T) {
 
 // --- Items 2+3 end-to-end: the two-turn sim through the real chat seam --------
 
-// The full two-turn sim failure, driven through appendScoutChatThreadMessage
-// with a keyed router: the deterministic guard short-circuits BEFORE the model
-// turn on both turns, so the router model is never consulted, both turns commit
-// a packaging_studio proposal (never package_assembly), and neither launches.
+// The deterministic guard short-circuits before the model on both turns and
+// now starts the exact safe private Packaging Studio work directly. There is
+// no picker or second confirmation card.
 func TestScoutChatFlagshipTwoTurnRegressionFence(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "openai-router-test")
@@ -209,11 +208,10 @@ func TestScoutChatFlagshipTwoTurnRegressionFence(t *testing.T) {
 		return "", nil
 	})
 
-	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-		t.Fatal("a proposal must never launch")
-	}
-	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousStarter := startGoalThreadAsync
+	starts := 0
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) { starts++ }
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
 
 	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
@@ -224,36 +222,39 @@ func TestScoutChatFlagshipTwoTurnRegressionFence(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 
-	assertStudioProposal := func(turn string, response map[string]any) {
-		if _, launched := response["agentThread"]; launched {
-			t.Fatalf("%s: response keys=%v — NEVER silent-launch", turn, responseKeys(response))
-		}
-		proposal, ok := response["proposal"].(*scoutRouterProposal)
+	assertStudioLaunch := func(turn string, response map[string]any) {
+		launched, ok := response["agentThread"].(scoutAgentThread)
 		if !ok {
-			t.Fatalf("%s: proposal type=%T, want the armed *scoutRouterProposal (never a denial)", turn, response["proposal"])
+			t.Fatalf("%s: response keys=%v, want direct private work", turn, responseKeys(response))
 		}
-		if proposal.ToolID != packagingStudioProcessID {
-			t.Fatalf("%s: armed %q, want packaging_studio (never package_assembly)", turn, proposal.ToolID)
-		}
-		if proposal.GroupLabel != "End-to-end" {
-			t.Fatalf("%s: group label=%q, want End-to-end", turn, proposal.GroupLabel)
+		if launched.Artifact.Metadata["processId"] != packagingStudioProcessID || response["intentOutcome"] != string(conversationIntentStartPrivateWork) || response["proposal"] != nil {
+			t.Fatalf("%s: launched=%#v response=%#v", turn, launched, response)
 		}
 	}
 
 	// Turn 1: the outcome-phrased ask.
-	turn1, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "package this end to end, the full run", nil, "")
+	turn1Context := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "flagship-packaging-turn-0001", BodyDigest: sha256Hex([]byte("package this end to end, the full run")),
+	})
+	turn1, err := kanbanApp.appendScoutChatThreadMessage(turn1Context, user, private.ID, "package this end to end, the full run", nil, "")
 	if err != nil {
 		t.Fatalf("turn 1 append: %v", err)
 	}
-	assertStudioProposal("turn 1", turn1)
+	assertStudioLaunch("turn 1", turn1)
 
 	// Turn 2: the correction that named the process verbatim. It opens with "no,"
 	// but must RE-ROUTE, not deny.
-	turn2, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "no, the full Packaging Studio staged run", nil, "")
+	turn2Context := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "flagship-packaging-turn-0002", BodyDigest: sha256Hex([]byte("no, the full Packaging Studio staged run")),
+	})
+	turn2, err := kanbanApp.appendScoutChatThreadMessage(turn2Context, user, private.ID, "no, the full Packaging Studio staged run", nil, "")
 	if err != nil {
 		t.Fatalf("turn 2 append: %v", err)
 	}
-	assertStudioProposal("turn 2", turn2)
+	assertStudioLaunch("turn 2", turn2)
+	if starts != 2 {
+		t.Fatalf("goal starts=%d, want one per explicit turn", starts)
+	}
 }
 
 // --- Item 1 end-to-end: the capability question answers with an offer ---------
@@ -283,7 +284,7 @@ func TestCapabilityQuestionAnswerCarriesOfferNotDenial(t *testing.T) {
 	if strings.Contains(got.Instructions, "Do not claim to run research, design, grill") {
 		t.Error("the keyed answer prompt must NOT carry the pure prohibition — that is the denial the sim produced")
 	}
-	for _, want := range []string{"offer to set it up", "never deny", packagingStudioProcessID} {
+	for _, want := range []string{"server-owned deliverable contracts", "separate intent router starts private", packagingStudioProcessID} {
 		if !strings.Contains(got.Instructions, want) {
 			t.Errorf("keyed answer prompt missing %q — the brain must be told to offer the capability", want)
 		}

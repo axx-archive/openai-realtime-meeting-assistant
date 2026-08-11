@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,6 +18,48 @@ type strideE10MainTenantAuthorityResolver struct {
 	sessions      *sessionStore
 	organizations *OrganizationAuthorityService
 	now           func() time.Time
+}
+
+type strideE10HeldTenantAuthorityContextKey struct{}
+
+type strideE10HeldTenantAuthorityFence struct {
+	resolver             *strideE10MainTenantAuthorityResolver
+	converter            *StrideE10TenantConverter
+	principal            StrideE10TenantPrincipal
+	accountSubjectDigest string
+	snapshot             StrideE10TenantAuthoritySnapshot
+	now                  time.Time
+	active               atomic.Bool
+}
+
+func strideE10BindCurrentHeldTenantAuthority(ctx context.Context, converter *StrideE10TenantConverter, principal StrideE10TenantPrincipal, sessionHash string, surface StrideE10TenantSurface) (context.Context, func(), error) {
+	ctx = strideE10TenantContextWithSessionHash(ctx, sessionHash)
+	ctx = context.WithValue(ctx, strideE10TenantPrincipalContextKey{}, principal)
+	if converter == nil {
+		return ctx, func() {}, ErrStrideE10TenantAuthorityStale
+	}
+	resolver, ok := converter.resolver.(*strideE10MainTenantAuthorityResolver)
+	if !ok {
+		return ctx, func() {}, nil
+	}
+	now := time.Now().UTC()
+	if resolver.now != nil {
+		now = resolver.now().UTC()
+	}
+	snapshot, err := resolver.currentTenantAuthoritySnapshotLocked(sessionHash, now)
+	if err != nil {
+		return ctx, func() {}, err
+	}
+	verified, err := converter.principalFromSnapshot(snapshot, sessionHash, surface)
+	if err != nil || verified != principal {
+		return ctx, func() {}, ErrStrideE10TenantAuthorityStale
+	}
+	fence := &strideE10HeldTenantAuthorityFence{
+		resolver: resolver, converter: converter, principal: principal, snapshot: snapshot,
+		accountSubjectDigest: snapshot.Session.AccountSubjectDigest, now: now,
+	}
+	fence.active.Store(true)
+	return strideE10ContextWithHeldTenantAuthority(ctx, fence), func() { fence.active.Store(false) }, nil
 }
 
 func strideE10CreateAuthenticatedSession(email string) (string, error) {
@@ -72,28 +115,72 @@ func (r *strideE10MainTenantAuthorityResolver) WithCurrentTenantAuthority(ctx co
 	defer r.sessions.mu.Unlock()
 	r.organizations.mu.RLock()
 	defer r.organizations.mu.RUnlock()
+	snapshot, err := r.currentTenantAuthoritySnapshotLocked(sessionHash, now)
+	if err != nil {
+		return err
+	}
+	return use(snapshot)
+}
+
+func (r *strideE10MainTenantAuthorityResolver) currentTenantAuthoritySnapshotLocked(sessionHash string, now time.Time) (StrideE10TenantAuthoritySnapshot, error) {
 	record, ok := r.sessions.sessions[sessionHash]
 	if !ok || record.Kind != "" || !now.Before(record.Expires) || !strideIdentifier(record.PersonID) || !isHexDigest(record.AccountSubjectDigest) || record.AuthorityGeneration < 1 {
-		return ErrStrideE10TenantAuthorityStale
+		return StrideE10TenantAuthoritySnapshot{}, ErrStrideE10TenantAuthorityStale
 	}
 	person, ok := r.organizations.persons[record.PersonID]
 	if !ok || person.Validate() != nil || person.Status != "active" || person.AccountSubjectDigest != record.AccountSubjectDigest || r.organizations.accountPersons[record.AccountSubjectDigest] != record.PersonID {
-		return ErrStrideE10TenantAuthorityStale
+		return StrideE10TenantAuthoritySnapshot{}, ErrStrideE10TenantAuthorityStale
 	}
 	snapshot := StrideE10TenantAuthoritySnapshot{SessionHash: sessionHash, Session: record, Person: clonePersonPrincipal(person), Legacy: StrideE10LegacyPrincipalProjection{TenantID: canonicalTenantID(), AccountSubjectDigest: record.AccountSubjectDigest}, Generation: record.AuthorityGeneration}
 	zeroOrganization := record.ActiveOrganizationID == "" && record.OrganizationMembershipID == "" && record.OrganizationMembershipRev == 0 && record.ActiveOrganizationSessionRev == 0
 	if zeroOrganization {
 		snapshot.Legacy.TenantID = STRIDEGlobalPersonTenant
 	} else {
+		organization, organizationOK := r.organizations.organizations[record.ActiveOrganizationID]
 		membership, membershipOK := r.organizations.memberships[record.OrganizationMembershipID]
 		activeSession, sessionOK := r.organizations.sessions[sessionHash]
-		if !membershipOK || !sessionOK {
-			return ErrStrideE10TenantAuthorityStale
+		if !organizationOK || !membershipOK || !sessionOK {
+			return StrideE10TenantAuthoritySnapshot{}, ErrStrideE10TenantAuthorityStale
 		}
+		snapshot.Organization = cloneOrganization(organization)
 		snapshot.Membership = cloneOrganizationMembership(membership)
 		snapshot.ActiveSession = cloneActiveOrganizationSession(activeSession)
 	}
-	return use(snapshot)
+	return snapshot, nil
+}
+
+func strideE10ContextWithHeldTenantAuthority(ctx context.Context, fence *strideE10HeldTenantAuthorityFence) context.Context {
+	if ctx == nil || fence == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, strideE10HeldTenantAuthorityContextKey{}, fence)
+}
+
+func strideE10HeldTenantAuthorityFromContext(ctx context.Context) *strideE10HeldTenantAuthorityFence {
+	if ctx == nil {
+		return nil
+	}
+	fence, _ := ctx.Value(strideE10HeldTenantAuthorityContextKey{}).(*strideE10HeldTenantAuthorityFence)
+	if fence == nil || !fence.active.Load() {
+		return nil
+	}
+	return fence
+}
+
+// authorizesWebSocket is called only while resolver authority locks are held
+// by the outer effect. It validates another live session directly against
+// those fenced maps, avoiding a recursive resolver lock while preserving the
+// exact current-session check for every socket that receives the effect.
+func (fence *strideE10HeldTenantAuthorityFence) authorizesWebSocket(lease *strideE10TenantWebSocketLease) bool {
+	if fence == nil || !fence.active.Load() || fence.resolver == nil || fence.converter == nil || lease == nil || !lease.canonical || !validStrideE10SessionHash(lease.sessionHash) {
+		return false
+	}
+	snapshot, err := fence.resolver.currentTenantAuthoritySnapshotLocked(lease.sessionHash, fence.now)
+	if err != nil || snapshot.Session.AccountSubjectDigest != fence.accountSubjectDigest || snapshot.Session.PersonID != fence.principal.PersonID {
+		return false
+	}
+	principal, err := fence.converter.principalFromSnapshot(snapshot, lease.sessionHash, StrideE10TenantSurfaceWebSocket)
+	return err == nil && principal == lease.principal && principal.PersonID == fence.principal.PersonID && principal.TenantID == fence.principal.TenantID
 }
 
 func strideE10TenantContextWithSessionHash(ctx context.Context, sessionHash string) context.Context {
@@ -232,6 +319,10 @@ func (t *threadSafeWriter) ReadTenantMessage(ctx context.Context) (messageType i
 }
 
 func (t *threadSafeWriter) writeJSONWithTenantAuthority(value any) error {
+	return t.writeJSONWithTenantAuthorityContext(context.Background(), value)
+}
+
+func (t *threadSafeWriter) writeJSONWithTenantAuthorityContext(ctx context.Context, value any) error {
 	write := func() error {
 		t.Lock()
 		defer t.Unlock()
@@ -243,7 +334,16 @@ func (t *threadSafeWriter) writeJSONWithTenantAuthority(value any) error {
 	if t.tenantLease == nil {
 		return write()
 	}
-	err := t.tenantLease.withCurrent(context.Background(), write)
+	var err error
+	if fence := strideE10HeldTenantAuthorityFromContext(ctx); fence != nil {
+		if fence.authorizesWebSocket(t.tenantLease) {
+			err = write()
+		} else {
+			err = ErrStrideE10TenantAuthorityStale
+		}
+	} else {
+		err = t.tenantLease.withCurrent(context.Background(), write)
+	}
 	if strideE10TenantAuthorityUnavailable(err) {
 		_ = t.Conn.Close()
 	}

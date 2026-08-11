@@ -194,20 +194,39 @@ type AmbientReplayEngine struct {
 }
 
 func ambientReplayDefaultStages() []AmbientReplayStageSpec {
-	narrativeProvider, narrativeModel := providerOpenAI, meetingBrainModel()
-	if currentAnthropicAPIKey() != "" {
-		narrativeProvider, narrativeModel = providerAnthropic, chatModel()
-	}
 	return []AmbientReplayStageSpec{
 		{Name: "brain", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 32_000, OutputTokenCap: 2_400, CallCap: 1, CostMicrosCap: 1_000_000},
 		{Name: "decision", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 12_000, OutputTokenCap: 1_600, CallCap: 1, CostMicrosCap: 500_000},
 		{Name: "mission", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 12_000, OutputTokenCap: 1_600, CallCap: 1, CostMicrosCap: 500_000},
-		{Name: "narrative", Provider: narrativeProvider, Model: narrativeModel, PromptTokenCap: 12_000, OutputTokenCap: 4_000, CallCap: 1, CostMicrosCap: 1_000_000},
+		{Name: "narrative", Provider: providerOpenAI, Model: narrativeMaintainerModel(), PromptTokenCap: 12_000, OutputTokenCap: 4_000, CallCap: 1, CostMicrosCap: 1_000_000},
 		{Name: "meeting_digest", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 12_000, OutputTokenCap: 2_000, CallCap: 1, CostMicrosCap: 750_000},
 		{Name: "day_fold", Provider: "deterministic", Model: "meeting-digest-fold-v1", PromptTokenCap: 0, OutputTokenCap: 0, CallCap: 0, CostMicrosCap: 0, Deterministic: true},
 		{Name: "entity_ledger", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 8_000, OutputTokenCap: 1_600, CallCap: 1, CostMicrosCap: 500_000},
 		{Name: "company_digest", Provider: providerOpenAI, Model: meetingBrainModel(), PromptTokenCap: 12_000, OutputTokenCap: 2_000, CallCap: 1, CostMicrosCap: 750_000},
 	}
+}
+
+func ambientReplayStageMatchesCanonicalRoute(stage AmbientReplayStageSpec) bool {
+	for _, canonical := range ambientReplayDefaultStages() {
+		if stage == canonical {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAmbientReplayCanonicalStages(stages []AmbientReplayStageSpec) error {
+	if len(stages) == 0 || stages[0].Name != "brain" {
+		return ErrAmbientReplayDrift
+	}
+	seen := make(map[string]struct{}, len(stages))
+	for _, stage := range stages {
+		if _, duplicate := seen[stage.Name]; duplicate || !ambientReplayStageMatchesCanonicalRoute(stage) {
+			return ErrAmbientReplayDrift
+		}
+		seen[stage.Name] = struct{}{}
+	}
+	return nil
 }
 
 func (engine *AmbientReplayEngine) now() time.Time {
@@ -418,6 +437,13 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 	}
 	if status != "planned" || !now.Before(manifest.ExpiresAt) {
 		return AmbientReplayExecution{}, ErrAmbientReplayUnauthorized
+	}
+	// A digest proves the stored manifest was not modified; it does not make a
+	// now-retired provider/model assignment current policy. Reconcile every
+	// persisted stage against the compiled route matrix before any execution
+	// record or provider call is admitted.
+	if err := validateAmbientReplayCanonicalStages(manifest.Stages); err != nil {
+		return AmbientReplayExecution{}, err
 	}
 	if err := engine.Authority.Revalidate(ctx, manifest); err != nil {
 		return AmbientReplayExecution{}, fmt.Errorf("%w: %v", ErrAmbientReplayDrift, err)

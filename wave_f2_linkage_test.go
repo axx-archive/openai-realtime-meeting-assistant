@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// goalHTTPWithPackage POSTs an objective + package field through the real
-// /assistant/goal door as aj and returns the decoded thread/artifact payload.
+// goalHTTPWithPackage proves the retired direct goal door cannot be revived by
+// either legacy package field.
 func goalHTTPWithPackage(t *testing.T, field, packageID string) (int, meetingMemoryEntry) {
 	t.Helper()
 	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Package goal origin", scoutChatVisibilityPrivate)
@@ -56,11 +56,11 @@ func TestGoalHTTPEndpointThreadsPackage(t *testing.T) {
 	}
 
 	code, artifact := goalHTTPWithPackage(t, "package", pkg.ID)
-	if code != http.StatusAccepted {
-		t.Fatalf("status=%d, want %d", code, http.StatusAccepted)
+	if code != http.StatusGone {
+		t.Fatalf("status=%d, want %d", code, http.StatusGone)
 	}
-	if artifact.Metadata["packageId"] != pkg.ID {
-		t.Fatalf("launched goal packageId=%q, want %q (package linkage broken)", artifact.Metadata["packageId"], pkg.ID)
+	if artifact.ID != "" || len(kanbanApp.inFlightGoalsForUser("aj@shareability.com")) != 0 {
+		t.Fatalf("retired goal door launched package work: %#v", artifact)
 	}
 }
 
@@ -78,11 +78,11 @@ func TestGoalHTTPEndpointAcceptsPackageIdAlias(t *testing.T) {
 	}
 
 	code, artifact := goalHTTPWithPackage(t, "packageId", pkg.ID)
-	if code != http.StatusAccepted {
-		t.Fatalf("status=%d, want %d", code, http.StatusAccepted)
+	if code != http.StatusGone {
+		t.Fatalf("status=%d, want %d", code, http.StatusGone)
 	}
-	if artifact.Metadata["packageId"] != pkg.ID {
-		t.Fatalf("packageId alias not honored: got %q, want %q", artifact.Metadata["packageId"], pkg.ID)
+	if artifact.ID != "" || len(kanbanApp.inFlightGoalsForUser("aj@shareability.com")) != 0 {
+		t.Fatalf("retired goal door accepted packageId alias: %#v", artifact)
 	}
 }
 
@@ -102,8 +102,8 @@ func TestIndexTitleIsStride(t *testing.T) {
 	}
 }
 
-// The palette form must offer a package picker and both run paths must actually
-// forward the chosen (or default) package into runGoalPipeline's POST body.
+// The hidden legacy palette may retain its fixture fields, but the final shim
+// must discard them and re-enter natural-language routing.
 func TestPalettePackagePickerWired(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
@@ -163,10 +163,10 @@ func TestPalettePackagePickerWired(t *testing.T) {
 		t.Error("paletteSelectTool quick-run must link to the default package")
 	}
 
-	// runGoalPipeline must put the package on the POST body.
+	// The compatibility shim cannot transmit the package or call a launch door.
 	pipeline := functionBody(html, "async function runGoalPipeline(spec)")
-	if !strings.Contains(pipeline, "body.package = String(spec.package)") {
-		t.Error("runGoalPipeline must send spec.package to /assistant/goal")
+	if !strings.Contains(pipeline, "sendScoutChat(objective)") || strings.Contains(pipeline, "spec.package") || strings.Contains(pipeline, "/assistant/goal") {
+		t.Error("runGoalPipeline must discard legacy package selection and re-enter conversation")
 	}
 }
 

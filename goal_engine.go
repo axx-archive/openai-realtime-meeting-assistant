@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -89,6 +90,12 @@ type goalPlan struct {
 	Authority    string `json:"authority"`
 	PackageID    string `json:"packageId,omitempty"`
 	ToolTemplate string `json:"toolTemplate,omitempty"`
+	// RouteReceipt proves that any persisted tool/process selection was minted
+	// by the server-owned conversation router from an immutable chat turn. Old
+	// client-selected templates have no receipt and therefore cannot regain
+	// provider, model, output-contract, or tool authority after restart.
+	RouteReceipt  *goalRouteReceipt `json:"routeReceipt,omitempty"`
+	routeVerified bool              `json:"-"`
 	// ProcessID marks a process-driven goal (Wave 4 item 17): decompose does
 	// NOT free-form — it instantiates the ProcessDefinition's stages in order
 	// as this plan's subtasks, and the definition's budgets override the
@@ -394,21 +401,27 @@ func goalPlanTopoOrder(plan *goalPlan) error {
 // --- The engine --------------------------------------------------------------
 
 type goalEngine struct {
-	app         *kanbanBoardApp
-	responder   anthropicMessagesResponder
-	apiKey      func() string
-	model       string
-	reviewModel string
-	effort      string
-	maxTokens   int
-	concurrency int
-	timeout     time.Duration
-	now         func() time.Time
+	app *kanbanBoardApp
+	// responder is retained only as the injectable legacy test seam while the
+	// historical goal fixtures are migrated. Production engines leave it nil
+	// and use the OpenAI Responses seam below.
+	responder       anthropicMessagesResponder
+	openAIResponder openAITextResponder
+	apiKey          func() string
+	model           string
+	reviewModel     string
+	effort          string
+	reviewEffort    string
+	maxTokens       int
+	concurrency     int
+	timeout         time.Duration
+	now             func() time.Time
 	// expectedPersistHeader is armed only for the first synchronous persist of
 	// an authorized feedback resume. It closes the gap between the goal lock
 	// and unrelated artifact writers that do not take that lock.
 	expectedPersistHeader    *ArtifactAuthorizationHeader
 	expectedPersistBody      string
+	persistMetadata          map[string]string
 	conditionalPersistFailed bool
 	lastPersistedArtifact    meetingMemoryEntry
 }
@@ -417,17 +430,43 @@ var goalFeedbackAfterPersistProbe func()
 
 func newGoalEngine(app *kanbanBoardApp) *goalEngine {
 	return &goalEngine{
-		app:         app,
-		responder:   createAnthropicMessagesResponse,
-		apiKey:      currentAnthropicAPIKey,
-		model:       orchestratorModel(),
-		reviewModel: reviewModel(),
-		effort:      orchestratorEffort(),
-		maxTokens:   orchestratorMaxTokens(),
-		concurrency: goalSubtaskConcurrency(),
-		timeout:     orchestratorTimeout(),
-		now:         time.Now,
+		app: app,
+		openAIResponder: func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+			return createOpenAITextResponse(ctx, apiKey, request)
+		},
+		apiKey: func() string {
+			if app == nil {
+				return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+			}
+			return app.currentOpenAIAPIKey()
+		},
+		model:        openAIGoalModel(),
+		reviewModel:  openAIGoalReviewModel(),
+		effort:       defaultOpenAIGoalEffort,
+		reviewEffort: defaultOpenAIGoalReviewEffort,
+		maxTokens:    orchestratorMaxTokens(),
+		concurrency:  goalSubtaskConcurrency(),
+		timeout:      orchestratorTimeout(),
+		now:          time.Now,
 	}
+}
+
+const (
+	defaultOpenAIGoalModel        = "gpt-5.6-sol"
+	defaultOpenAIGoalReviewModel  = "gpt-5.6-sol"
+	defaultOpenAIGoalEffort       = "high"
+	defaultOpenAIGoalReviewEffort = "max"
+)
+
+// openAIGoalModel and openAIGoalReviewModel are intentionally closed to the
+// OpenAI model family. A stale Anthropic model name in deployment config must
+// not reactivate a retired provider route or create misleading provenance.
+func openAIGoalModel() string {
+	return defaultOpenAIGoalModel
+}
+
+func openAIGoalReviewModel() string {
+	return defaultOpenAIGoalReviewModel
 }
 
 func goalSubtaskConcurrency() int {
@@ -530,11 +569,17 @@ func goalUserCapLock(email string) *sync.Mutex {
 
 // resolvedTool returns the goal's tool template entry, if it carries one.
 func (e *goalEngine) resolvedTool(plan *goalPlan) (packagingTool, bool) {
+	if plan == nil || !plan.routeVerified {
+		return packagingTool{}, false
+	}
 	return toolByID(plan.ToolTemplate)
 }
 
 // resolvedProcess returns the goal's ProcessDefinition, if it is process-driven.
 func (e *goalEngine) resolvedProcess(plan *goalPlan) (ProcessDefinition, bool) {
+	if plan == nil || !plan.routeVerified {
+		return ProcessDefinition{}, false
+	}
 	return processByID(plan.ProcessID)
 }
 
@@ -680,9 +725,9 @@ type goalLaunchSpec struct {
 }
 
 // launchGoalThread creates the mode=goal thread/artifact with an initial plan
-// and drives the engine in the background. The engine only activates when
-// ANTHROPIC_API_KEY is present; keyless deploys are unchanged (the caller falls
-// back to today's launch_agent_thread path).
+// and drives the engine in the background. The engine activates only with the
+// OpenAI key used by the rest of Scout; Anthropic credentials never admit this
+// path.
 func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
@@ -691,7 +736,7 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	if objective == "" {
 		return scoutAgentThread{}, fmt.Errorf("goal objective is required")
 	}
-	if !hasAnthropicAPIKey() {
+	if strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
 		return scoutAgentThread{}, errAgentWorkerNotConfigured
 	}
 
@@ -752,6 +797,12 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 	if hasProcess {
 		plan.ProcessID = process.ID
+	}
+	if receipt, receiptErr := app.mintGoalRouteReceipt(&plan, spec.Origin); receiptErr == nil {
+		plan.RouteReceipt = &receipt
+		plan.routeVerified = true
+	} else if plan.ToolTemplate != "" || plan.ProcessID != "" {
+		return scoutAgentThread{}, receiptErr
 	}
 	raw, err := json.Marshal(plan)
 	if err != nil {
@@ -889,6 +940,10 @@ func (app *kanbanBoardApp) driveGoalLocked(parentID string) {
 		return
 	}
 	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		engine.fail(&plan, parentID, "saved goal route is unavailable: "+err.Error())
+		return
+	}
 	engine.applyProcessBudgets(&plan)
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
@@ -901,6 +956,15 @@ func (app *kanbanBoardApp) driveGoalLocked(parentID string) {
 // transition, until it reaches a terminal state, an approval stop, or a wait on
 // in-flight children. The caller must hold goalEngineLock(parentID).
 func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string) {
+	if err := e.prepareGoalRoute(plan, parentID); err != nil {
+		if e.app != nil && strings.TrimSpace(parentID) != "" {
+			e.fail(plan, parentID, "saved goal route is unavailable: "+err.Error())
+		} else if plan != nil {
+			plan.State = goalStateBlocked
+			plan.Blocker = "saved goal route is unavailable: " + err.Error()
+		}
+		return
+	}
 	for iteration := 0; iteration < goalDriveIterationCap; iteration++ {
 		switch plan.State {
 		case goalStateIdentify:
@@ -1031,6 +1095,11 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 	if def, ok := e.resolvedProcess(plan); ok {
 		return instantiateProcessPlan(def, plan)
 	}
+	tool, hasTool := e.resolvedTool(plan)
+	routeMode := "workflow"
+	if hasTool {
+		routeMode = normalizeAgentThreadMode(tool.Mode)
+	}
 	system := strings.Join([]string{
 		"You are Scout's goal decomposer for Stride. Break the goal into an ordered plan of independent subtasks.",
 		fmt.Sprintf("Return STRICT JSON only, no prose: {\"subtasks\":[{\"id\":\"st-1\",\"title\":\"...\",\"detail\":\"...\",\"mode\":\"research|design|grill|workflow|artifacts\",\"authority\":\"read_only|workspace_write\",\"dependsOn\":[]}]}."),
@@ -1043,7 +1112,7 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 	// master wrapper (grounded in Bonfire's own record) with the tool body and
 	// exact output contract, so the plan's terminal subtask produces that
 	// contract. The last subtask must emit the tool's exact output headings.
-	if tool, ok := e.resolvedTool(plan); ok {
+	if hasTool {
 		prompt := assembleToolPrompt(tool, e.toolPromptContextForPlan(plan, tool))
 		user += "\n\nThis goal runs the \"" + tool.Name + "\" tool. Decompose so the FINAL subtask produces its output contract exactly. The tool's full instructions and output contract:\n" + prompt
 	}
@@ -1065,7 +1134,9 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 	for index := range decoded.Subtasks {
 		st := &decoded.Subtasks[index]
 		st.ID = strings.TrimSpace(st.ID)
-		st.Mode = normalizeAgentThreadMode(st.Mode)
+		// The server-owned work contract, not the decomposer, fixes the execution
+		// lane. Legacy free-form goals use the closed workflow lane below.
+		st.Mode = routeMode
 		st.Authority = normalizeCodexJobAuthority(st.Authority)
 		st.Status = subtaskPending
 		if st.DependsOn == nil {
@@ -1088,6 +1159,25 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 // runner; everything else to the orchestrator. Concrete runner names are
 // stored so selectAgentRunner can honor them without a second mapping.
 func assignGoalRunners(plan *goalPlan) {
+	if plan == nil || !plan.routeVerified {
+		for index := range plan.Subtasks {
+			plan.Subtasks[index].Runner = agentRunnerStub
+		}
+		return
+	}
+	if tool, ok := toolByID(plan.ToolTemplate); ok && strings.TrimSpace(plan.ProcessID) == "" {
+		for index := range plan.Subtasks {
+			plan.Subtasks[index].Mode = normalizeAgentThreadMode(tool.Mode)
+			plan.Subtasks[index].Runner = selectedAgentRunnerName()
+		}
+		return
+	}
+	if _, ok := processByID(plan.ProcessID); !ok {
+		for index := range plan.Subtasks {
+			plan.Subtasks[index].Runner = agentRunnerStub
+		}
+		return
+	}
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
 		if goalSubtaskNeedsExecution(st) {
@@ -1170,6 +1260,21 @@ func (e *goalEngine) dispatchReady(plan *goalPlan, parentID string) {
 }
 
 func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID string) error {
+	if _, ok := e.resolvedProcess(plan); !ok {
+		tool, toolOK := e.resolvedTool(plan)
+		if toolOK {
+			// Rebind resumable legacy tool plans before dispatch. Stored model
+			// output cannot retain authority over the worker or provider lane.
+			st.Mode = normalizeAgentThreadMode(tool.Mode)
+			st.Runner = selectedAgentRunnerName()
+		} else {
+			// A legacy free-form goal has no server-owned downstream work
+			// contract. Keep its visible plan but dispatch only the unavailable
+			// stub; model-authored text cannot select a paid or mutable runner.
+			st.Mode = "workflow"
+			st.Runner = agentRunnerStub
+		}
+	}
 	query := st.Title
 	if strings.TrimSpace(st.Detail) != "" {
 		query += " — " + st.Detail
@@ -1207,6 +1312,22 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 		AssignedRunner: st.Runner,
 		OutputContract: stageContract,
 	}
+	var childOrigin map[string]string
+	if receipt := plan.RouteReceipt; receipt != nil && plan.routeVerified {
+		spec.SourceMessageID = receipt.SourceMessageID
+		spec.SourceMessageDigest = receipt.SourceMessageDigest
+		spec.SourceWindowDigest = receipt.SourceWindowDigest
+		spec.OperationID = receipt.OperationID
+		spec.OperationBodyDigest = receipt.OperationBodyDigest
+		spec.ParentGoalRouteDigest = receipt.Digest
+		childOrigin = map[string]string{
+			"originKind": receipt.OriginKind, "originId": receipt.OriginID,
+			"requestedBy": receipt.Requester, "sourceMessageId": receipt.SourceMessageID,
+			"sourceMessageDigest": receipt.SourceMessageDigest, "sourceWindowDigest": receipt.SourceWindowDigest,
+			"operationId": receipt.OperationID, "operationBodyDigest": receipt.OperationBodyDigest,
+			"approvedProposalId": receipt.ApprovedProposalID, "approvedEffectClass": receipt.ApprovedEffectClass,
+		}
+	}
 	// The deliverable-producing subtask carries the tool template so the model
 	// that actually WRITES the artifact receives the tool's full A++ prompt
 	// (role, evidence discipline, exact output contract, gate rubric) — the
@@ -1226,14 +1347,25 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	if plan.ProcessID != "" && st.Role == processRoleWriter {
 		spec.Deliverable = true
 	}
-	// Children deliver back through the fold + creator notification, not a room
-	// origin, so no origin metadata is stamped on the subtask thread.
-	thread, err := e.app.launchAgentThreadWithSpec(st.Mode, query, plan.CreatedBy, nil, spec)
+	// Goal children retain the parent's source authority for provider admission
+	// and revision, while goalParentId continues to suppress per-child creator
+	// notifications and private origin delivery remains a ref-only no-op.
+	thread, err := e.app.launchGoalAgentThreadScaffold(st.Mode, query, plan.CreatedBy, childOrigin, spec)
 	if err != nil {
 		return err
 	}
 	st.ThreadID = thread.ID
 	st.ArtifactID = thread.Artifact.ID
+	if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+		_, _, _ = e.app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "goal_route_quarantine", map[string]string{
+			"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "currentStage": "parent_reservation_failed",
+			"progressPercent": "0", "reviewGate": "blocked", "error": "goal child parent reservation was not durable",
+		})
+		return fmt.Errorf("goal child parent reservation was not durable; provider admission refused")
+	}
+	if err := e.app.activateReservedGoalAgentThread(thread, spec, plan.CreatedBy); err != nil {
+		return fmt.Errorf("goal child activation failed after parent reservation: %w", err)
+	}
 	return nil
 }
 
@@ -1244,6 +1376,9 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 // "" when the plan carries no resolvable tool (nothing is stamped). Deterministic
 // so a boot-time re-dispatch stamps the same subtask.
 func goalDeliverableSubtaskID(plan *goalPlan) string {
+	if plan == nil || !plan.routeVerified {
+		return ""
+	}
 	tool, ok := toolByID(plan.ToolTemplate)
 	if !ok || len(plan.Subtasks) == 0 {
 		return ""
@@ -1348,6 +1483,10 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	if !ok {
 		return
 	}
+	// This callback is a terminal seam for the supplied exact child. Its
+	// process-local recovery marker is no longer needed even when the parent was
+	// cancelled or later rejects a stale/unauthenticated callback.
+	app.forgetGoalChildStartedInProcess(child.ID)
 	// A cancelled parent folds nothing: a child already in flight finishes on
 	// its own (no preemption seam reaches into a child goroutine or a claimed
 	// sidecar job), but its completion must not mutate the plan or re-drive the
@@ -1357,6 +1496,10 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	}
 	complete := strings.EqualFold(strings.TrimSpace(status), codexJobStatusComplete)
 	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		engine.fail(&plan, parentID, "saved goal route is unavailable: "+err.Error())
+		return
+	}
 	engine.applyProcessBudgets(&plan)
 
 	// The single external_write commit_push child folds straight to the terminal
@@ -1384,6 +1527,10 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 			})
 			return
 		}
+		if err := app.verifyGoalChildRoute(child); err != nil {
+			log.Warnf("goal %s ignored unauthenticated commit callback child=%s: %v", parentID, child.ID, err)
+			return
+		}
 		childStatus := subtaskFailed
 		if complete {
 			childStatus = subtaskComplete
@@ -1396,7 +1543,14 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	if st == nil || st.Status != subtaskRunning {
 		return
 	}
-	st.ArtifactID = firstNonEmptyString(child.ID, st.ArtifactID)
+	if strings.TrimSpace(st.ArtifactID) == "" || strings.TrimSpace(child.ID) != strings.TrimSpace(st.ArtifactID) {
+		log.Warnf("goal %s ignored stale child callback subtask=%s child=%s current=%s", parentID, subtaskID, child.ID, st.ArtifactID)
+		return
+	}
+	if err := app.verifyGoalChildRoute(child); err != nil {
+		log.Warnf("goal %s ignored unauthenticated child callback subtask=%s child=%s: %v", parentID, subtaskID, child.ID, err)
+		return
+	}
 	if complete {
 		st.Status = subtaskComplete
 		// A dispatched writer stage's deliverable lands in the origin thread as
@@ -1439,6 +1593,7 @@ type goalPanelSpec struct {
 	Schema    string
 	Personas  []goalPanelPersona
 	Synthesis string // synthesis system prompt; "" falls back to the default
+	Review    bool   // route every persona and synthesis call through Sol/max review
 }
 
 // goalPanelVoice is one persona's raw reply (strict JSON by contract). A
@@ -1467,6 +1622,10 @@ func (e *goalEngine) runGoalPanel(ctx context.Context, spec goalPanelSpec) (goal
 		return goalPanelOutcome{}, fmt.Errorf("panel needs at least one persona")
 	}
 	outcome := goalPanelOutcome{Voices: make([]goalPanelVoice, len(spec.Personas))}
+	call := e.callModel
+	if spec.Review {
+		call = e.callReviewModel
+	}
 	var wg sync.WaitGroup
 	for index := range spec.Personas {
 		wg.Add(1)
@@ -1477,7 +1636,7 @@ func (e *goalEngine) runGoalPanel(ctx context.Context, spec goalPanelSpec) (goal
 			if schema := strings.TrimSpace(spec.Schema); schema != "" {
 				system += "\n\n" + schema
 			}
-			text, err := e.callModel(ctx, system, spec.Task)
+			text, err := call(ctx, system, spec.Task)
 			outcome.Voices[index] = goalPanelVoice{Persona: persona.Name, Text: text, Err: err}
 		}(index)
 	}
@@ -1502,7 +1661,7 @@ func (e *goalEngine) runGoalPanel(ctx context.Context, spec goalPanelSpec) (goal
 	}
 
 	synthesisSystem := firstNonEmptyString(strings.TrimSpace(spec.Synthesis), goalPanelDefaultSynthesisSystem)
-	synthesis, err := e.callModel(ctx, synthesisSystem, spec.Task+"\n\nThe panel's replies:\n\n"+strings.TrimSpace(replies.String()))
+	synthesis, err := call(ctx, synthesisSystem, spec.Task+"\n\nThe panel's replies:\n\n"+strings.TrimSpace(replies.String()))
 	if err != nil {
 		return outcome, fmt.Errorf("panel synthesis failed: %w", err)
 	}
@@ -3139,6 +3298,10 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	if plan.State != goalStateBlocked {
 		return fmt.Errorf("the goal is not blocked — nothing to resume")
 	}
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		return fmt.Errorf("saved goal route is unavailable: %w", err)
+	}
 	reset := 0
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
@@ -3152,7 +3315,6 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	if reset == 0 {
 		return fmt.Errorf("no blocked subtask to resume")
 	}
-	engine := newGoalEngine(app)
 	engine.applyProcessBudgets(&plan)
 	plan.State = goalStateExecute
 	engine.persist(&plan, parentID, "")
@@ -3191,6 +3353,10 @@ func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy str
 // snapshot into the goal lock. It revalidates the snapshot before decoding its
 // plan, and the engine's first persist conditionally consumes the same header.
 func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorized(parentSnapshot meetingMemoryEntry, resumedBy string, note string, deliverableArtifactID string) (scoutAgentThread, error) {
+	return app.resumeGoalWithFeedbackAuthorizedOperation(parentSnapshot, resumedBy, note, deliverableArtifactID, nil)
+}
+
+func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorizedOperation(parentSnapshot meetingMemoryEntry, resumedBy string, note string, deliverableArtifactID string, binding *conversationFollowUpBinding) (scoutAgentThread, error) {
 	parentID := strings.TrimSpace(parentSnapshot.ID)
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
@@ -3232,6 +3398,16 @@ func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorized(parentSnapshot meeti
 	engine := newGoalEngine(app)
 	engine.expectedPersistHeader = &expectedHeader
 	engine.expectedPersistBody = parent.Text
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		return scoutAgentThread{}, fmt.Errorf("saved goal route is unavailable: %w", err)
+	}
+	if binding != nil {
+		receipts, receiptErr := appendConversationFollowUpReceipt(parent.Metadata, *binding)
+		if receiptErr != nil {
+			return scoutAgentThread{}, receiptErr
+		}
+		engine.persistMetadata = map[string]string{conversationFollowUpReceiptMetadataKey: receipts}
+	}
 	engine.applyProcessBudgets(&plan)
 	resumedByName := firstNonEmptyString(strings.TrimSpace(resumedBy), "admin")
 	// Every branch MUTATES AND PERSISTS synchronously under this lock hold —
@@ -3449,6 +3625,9 @@ func (app *kanbanBoardApp) resumeApprovedGoalWithChoice(parentID string, approve
 		return fmt.Errorf("goal is not waiting on an approval gate")
 	}
 	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		return fmt.Errorf("saved goal route is unavailable: %w", err)
+	}
 	engine.applyProcessBudgets(&plan)
 	// A pending human_checkpoint owns the approval park; the external_write
 	// commit gate is only reachable once no checkpoint is waiting.
@@ -3721,7 +3900,8 @@ func (e *goalEngine) ensureGoalCommitChild(plan *goalPlan, parentID string, comm
 	childID := strings.TrimSpace(plan.Gate.CommitChildID)
 	threadID := goalCommitThreadID(plan)
 	body := buildGoalCommitScaffold(plan, command)
-	child, appended, _, err := e.app.createOSArtifactWithIDAndMetadataAcknowledged(childID, "workflow", command, body, plan.CreatedBy, map[string]string{
+	metadata := map[string]string{
+		"source":               "goal_commit",
 		"mode":                 "goal_commit",
 		"goalParentId":         parentID,
 		"goalSubtaskId":        goalCommitSubtaskID,
@@ -3729,7 +3909,15 @@ func (e *goalEngine) ensureGoalCommitChild(plan *goalPlan, parentID string, comm
 		"runnerJobId":          plan.Gate.CommitJobID,
 		"threadId":             threadID,
 		"goalCommitGeneration": strconv.Itoa(plan.CommitGeneration),
-	})
+	}
+	bindings := goalRouteChildBindingMetadata(plan)
+	if len(bindings) == 0 {
+		return meetingMemoryEntry{}, fmt.Errorf("external-write goal has no verified conversation route")
+	}
+	for key, value := range bindings {
+		metadata[key] = value
+	}
+	child, appended, _, err := e.app.createOSArtifactWithIDAndMetadataAcknowledged(childID, "workflow", command, body, plan.CreatedBy, metadata)
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
@@ -3751,6 +3939,9 @@ func (e *goalEngine) ensureGoalCommitChild(plan *goalPlan, parentID string, comm
 	}
 	if stamped := strings.TrimSpace(child.Metadata["goalCommitGeneration"]); stamped != "" && stamped != strconv.Itoa(plan.CommitGeneration) {
 		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s is bound to generation %s", childID, stamped)
+	}
+	if err := e.app.verifyGoalChildRoute(child); err != nil {
+		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s has no current goal authority: %w", childID, err)
 	}
 	return child, nil
 }
@@ -3833,6 +4024,11 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		"goalStatus":      status,
 		"reviewGate":      gate,
 		"progressPercent": strconv.Itoa(percent),
+	}
+	for key, value := range e.persistMetadata {
+		if strings.TrimSpace(value) != "" {
+			metadata[key] = value
+		}
 	}
 	// Publish the durable engine state and the thread surface in the SAME
 	// artifact revision. A checkpoint used to persist currentStage=approval
@@ -3978,11 +4174,10 @@ func (e *goalEngine) persistApprovalRequired(plan *goalPlan, parentID string) {
 // reconcileGoalThreadsAtBoot resumes every mode=goal artifact not in a terminal
 // (or approval-waiting) state. It mirrors the ambient-agent single-pass shape:
 // one scan at boot, fold any completed children, re-dispatch ready subtasks
-// idempotently, and drive from the earliest non-complete state. Skips when
-// keyless (the engine only activates with ANTHROPIC_API_KEY, so keyless deploys
-// are unchanged).
+// idempotently, and drive from the earliest non-complete state. Skips when the
+// OpenAI provider is unavailable; an Anthropic key alone never resumes work.
 func (app *kanbanBoardApp) reconcileGoalThreadsAtBoot() {
-	if app == nil || app.memory == nil || !hasAnthropicAPIKey() {
+	if app == nil || app.memory == nil || strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
 		return
 	}
 	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, goalReconcileScanLimit) {
@@ -4029,12 +4224,22 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 	if plan.Cancelled {
 		return
 	}
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		engine.fail(&plan, parentID, "saved goal route is unavailable: "+err.Error())
+		return
+	}
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
 		if st.Status != subtaskRunning {
 			continue
 		}
+		child, childFound := app.osArtifactByID(st.ArtifactID)
 		if childStatus, terminal := goalChildTerminalStatus(app, st.ArtifactID); terminal {
+			if !childFound || app.verifyGoalChildRoute(child) != nil {
+				engine.fail(&plan, parentID, "saved goal child authority is unavailable; nothing was replayed")
+				return
+			}
 			if childStatus == subtaskComplete {
 				st.Status = subtaskComplete
 			} else {
@@ -4042,11 +4247,42 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 			}
 			continue
 		}
-		// No live goroutine after restart and the child never finished: re-queue.
-		st.Status = subtaskReady
+		// A child reserved in the parent but never activated is safe to start on
+		// the exact same artifact after restart: no provider/effect seam was ever
+		// reachable. Once activation is durable, a nonterminal restart is
+		// ambiguous and must not be replayed.
+		if childFound && strings.TrimSpace(child.Metadata["goalChildActivationState"]) == goalChildActivationReserved {
+			if err := app.verifyGoalChildReservation(child); err != nil {
+				engine.fail(&plan, parentID, "saved goal child authority is unavailable; nothing was replayed")
+				return
+			}
+			thread := scoutAgentThread{
+				ID:   firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID),
+				Mode: normalizeAgentThreadMode(child.Metadata["mode"]), Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]),
+				Status: "running", Artifact: child, Actions: app.osAssistantActions(firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), child.Metadata["mode"], child),
+			}
+			spec := agentThreadGoalSpec{
+				ToolTemplate: child.Metadata["toolTemplate"], RequestedBy: child.Metadata["requestedBy"], ParentGoalID: parentID,
+			}
+			if err := app.activateReservedGoalAgentThread(thread, spec, plan.CreatedBy); err != nil {
+				engine.fail(&plan, parentID, "saved goal child activation failed; nothing was replayed")
+			}
+			return
+		}
+		if !childFound || app.verifyGoalChildRoute(child) != nil {
+			engine.fail(&plan, parentID, "saved goal child authority is unavailable; nothing was replayed")
+			return
+		}
+		if app.goalChildStartedInProcess(child.ID) {
+			// An earlier reconcile in this same boot already activated this exact
+			// child. Do not duplicate it or condemn its legitimate in-flight work.
+			// A real process restart has an empty map and fails closed below.
+			return
+		}
+		engine.fail(&plan, parentID, "goal child execution state is unknown after restart; nothing was replayed")
+		return
 	}
 
-	engine := newGoalEngine(app)
 	engine.applyProcessBudgets(&plan)
 	engine.persist(&plan, parentID, "")
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
@@ -4283,8 +4519,7 @@ func goalStatusLabel(state string) string {
 
 func (app *kanbanBoardApp) nowUnixNano() int64 { return time.Now().UnixNano() }
 
-// callModel is a single no-tools orchestrator model call returning the
-// concatenated text. It reuses the Wave-1 injectable anthropic responder.
+// callModel is a single no-tools OpenAI Responses orchestrator call.
 // Every callModel lane (decompose, panel, stage synthesis, report, verify)
 // bills to the goal_engine seat (W0 item 3).
 func (e *goalEngine) callModel(ctx context.Context, system string, user string) (string, error) {
@@ -4292,8 +4527,8 @@ func (e *goalEngine) callModel(ctx context.Context, system string, user string) 
 }
 
 // callReviewModel routes a call to the dedicated review model (Wave 3 item 16
-// — the per-subtask review and the ship gate read WHOLE artifact bodies, which
-// wants Opus-tier context at Opus rates, not the Fable ceiling). Orchestration
+// — the per-subtask review and the ship gate read WHOLE artifact bodies, so the
+// review lane remains independently configurable from orchestration). Orchestration
 // calls (decompose, panel, report, verify) stay on callModel. Same
 // env-with-override shape as the assignedRunner per-subtask pattern. Review
 // and gate scoring bill to the goal_review seat (W0 item 3).
@@ -4308,23 +4543,45 @@ func (e *goalEngine) callReviewModel(ctx context.Context, system string, user st
 func (e *goalEngine) callModelAs(ctx context.Context, model string, seat string, system string, user string) (string, error) {
 	apiKey := strings.TrimSpace(e.apiKey())
 	if apiKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY is not configured")
+		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
-	response, err := e.responder(ctx, apiKey, anthropicMessagesRequest{
-		Model:     model,
-		System:    system,
-		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(user)}}},
-		MaxTokens: e.maxTokens,
-		Effort:    e.effort,
-		Seat:      seat,
+	effort := e.effort
+	if seat == seatGoalReview {
+		effort = firstNonEmptyString(e.reviewEffort, defaultOpenAIGoalReviewEffort)
+	}
+	// Historical tests may still inject the legacy responder directly. No
+	// production constructor installs it, so this cannot become a provider
+	// fallback or an environment-controlled admission path.
+	if e.responder != nil {
+		response, err := e.responder(ctx, apiKey, anthropicMessagesRequest{
+			Model:     model,
+			System:    system,
+			Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(user)}}},
+			MaxTokens: e.maxTokens,
+			Effort:    effort,
+			Seat:      seat,
+		})
+		if err != nil {
+			return "", err
+		}
+		if response.StopReason == "refusal" {
+			return "", fmt.Errorf("orchestrator request was declined by safety classifiers")
+		}
+		return anthropicResponseText(response), nil
+	}
+	if e.openAIResponder == nil {
+		return "", fmt.Errorf("OpenAI goal responder is unavailable")
+	}
+	return e.openAIResponder(ctx, apiKey, openAITextRequest{
+		Model:           model,
+		Instructions:    system,
+		Input:           user,
+		ReasoningEffort: effort,
+		Verbosity:       "medium",
+		MaxOutputTokens: e.maxTokens,
+		Seat:            seat,
+		Workflow:        "goal_engine",
 	})
-	if err != nil {
-		return "", err
-	}
-	if response.StopReason == "refusal" {
-		return "", fmt.Errorf("orchestrator request was declined by safety classifiers")
-	}
-	return anthropicResponseText(response), nil
 }
 
 func anthropicResponseText(response anthropicMessagesResponse) string {

@@ -137,7 +137,7 @@ export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props
       ) : null}
       <View style={[styles.frame, { height: measuredHeight, maxHeight }]}>
         {showMentionOverlay ? (
-          <Animated.Text pointerEvents="none" style={[styles.overlay, { opacity: shimmer }]}>
+          <Animated.Text maxFontSizeMultiplier={2} pointerEvents="none" style={[styles.overlay, { opacity: shimmer }]}>
             {segments.map((segment, index) => segment.mention ? (
               <Text key={index}>
                 <Text style={styles.hiddenAt}>@</Text>
@@ -147,6 +147,7 @@ export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props
           </Animated.Text>
         ) : null}
         <TextInput
+          maxFontSizeMultiplier={2}
 		  ref={textInputRef}
           accessibilityLabel={accessibilityLabel}
           placeholder={placeholder}

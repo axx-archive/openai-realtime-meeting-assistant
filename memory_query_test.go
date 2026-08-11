@@ -26,13 +26,12 @@ func TestScoutRuntimeSelfKnowledgeUsesCurrentPinnedRoutes(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "medium")
 	instructions := strings.ToLower(assistantQueryInstructionsForCoreAvailability(true))
 	for _, required := range []string{
-		"answer model: gpt-answer-route",
-		"router model: gpt-router-route",
-		"extraction and attachment model: gpt-extraction-route",
-		"proactive-attention model: gpt-answer-route",
-		"text reasoning effort for answer, router, extraction/attachment, and proactive-attention: xhigh",
-		"voice model: gpt-realtime-route",
-		"voice reasoning effort: medium",
+		"answer model: gpt-5.6-terra at high",
+		"router model: gpt-5.6-luna at medium",
+		"extraction and attachment model: gpt-5.6-luna at medium",
+		"proactive-attention model: gpt-5.6-luna at medium",
+		"voice model: gpt-realtime-2.1",
+		"voice reasoning effort: high",
 		"separate server-resolved routes",
 		"not adaptive per question",
 	} {

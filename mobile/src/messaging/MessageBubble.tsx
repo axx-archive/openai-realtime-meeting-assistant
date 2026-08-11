@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useRef } from 'react';
+import { ActivityIndicator, Animated, findNodeHandle, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
 import { useMappingHelper } from '@shopify/flash-list';
 
-import type { ScoutFileAttachment, ScoutMessage } from '../api/types';
+import type { ScoutFileAttachment, ScoutMessage, ScoutWorkThreadRef } from '../api/types';
 import { authenticatedFileHeaders, authenticatedFileUrl } from '../files/fileActions';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
 import { LinkPreviewCard } from './LinkPreviewCard';
@@ -18,6 +18,17 @@ import {
   groupMessageReactions,
   parseMessageTextSegments,
 } from './messagePresentation';
+import {
+  safeWorkProgressNote,
+  workFamilyLabel,
+  workPhaseLabel,
+} from './workPresentation';
+
+// Work cards carry dense state and controls. Preserve substantial Dynamic Type
+// growth without letting the largest accessibility categories collapse a
+// family or action into one-character columns; the full copy remains in the
+// accessibility label and the Activity sheet.
+const workSurfaceMaxFontSizeMultiplier = 2;
 
 export type MessageBubbleProps = {
   message: ScoutMessage;
@@ -38,7 +49,7 @@ export type MessageBubbleProps = {
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
-  onOpenWorkArtifact?: (message: ScoutMessage) => void;
+  onOpenWorkArtifact?: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
   proposalObjective?: string;
   onChangeProposalObjective?: (message: ScoutMessage, objective: string) => void;
@@ -73,44 +84,64 @@ function timeOf(message: ScoutMessage): string {
   return at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function workThreadRef(message: ScoutMessage): { ref: ScoutWorkThreadRef; governedRecord: boolean } | null {
+  const kind = String(message.kind ?? '').toLowerCase();
+  if (kind === 'thread' && message.thread) return { ref: message.thread, governedRecord: false };
+  if ((kind !== 'work_result' && kind !== 'work_record') || !message.work) return null;
+  return {
+    governedRecord: true,
+    ref: {
+      id: message.work.runId || message.work.id,
+      mode: 'completed work',
+      query: message.work.title,
+      status: message.work.status,
+      artifactId: message.work.artifactId,
+      agentName: message.work.workerName,
+      currentStage: message.work.currentStage,
+      progressPercent: message.work.progressPercent,
+      progressNote: message.work.summary,
+      resultTitle: message.work.title,
+      resultPreview: message.work.summary,
+      provenance: message.work.providerExecutionFenced
+        ? 'Deterministic local · provider fenced'
+        : 'Provider-backed',
+    },
+  };
+}
+
 function workThreadPresentation(message: ScoutMessage) {
-  if (String(message.kind ?? '').toLowerCase() !== 'thread' || !message.thread) return null;
-  const status = String(message.thread.status ?? 'running').toLowerCase();
+  const work = workThreadRef(message);
+  if (!work) return null;
+  const ref = work.ref;
+  const status = String(ref.status ?? 'running').toLowerCase();
   const active = status === 'queued' || status === 'running';
-  const complete = status === 'complete' || status === 'published';
-	const followUpStatus = String(message.thread.followUpStatus ?? '').toLowerCase();
-	const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(message.thread.progressNote ?? ''))));
+  const complete = status === 'complete' || status === 'completed' || status === 'published';
+	const followUpStatus = String(ref.followUpStatus ?? '').toLowerCase();
+  const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(ref.progressNote ?? ''))));
   const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
   const needsInput = status === 'approval_required' || status === 'needs_input' || status === 'parked';
-  const stage = String(message.thread.currentStage ?? '').toLowerCase();
-  const progressPercent = Math.max(0, Math.min(100, Math.round(Number(message.thread.progressPercent ?? 0))));
-  const attentionReason = String(message.thread.attentionReason ?? '').toLowerCase();
+  const progressPercent = Math.max(0, Math.min(100, Math.round(Number(ref.progressPercent ?? 0))));
+  const attentionReason = String(ref.attentionReason ?? '').toLowerCase();
+  const family = workFamilyLabel(ref);
+  const basePhase = workPhaseLabel(ref);
   const phase = complete
     ? revisionNeedsAttention ? 'Delivered · revision needs attention' : 'Delivered'
-    : needsInput
-      ? 'Needs input'
-      : failed
-        ? 'Needs attention'
-        : /deliver|verify_goal_completed/u.test(stage)
-          ? 'Delivering'
-          : /gate|review|verif/u.test(stage)
-            ? 'Verifying'
-            : /build|draft|synth|execute|research|source|evidence/u.test(stage)
-              ? 'Gathering evidence'
-              : status === 'queued'
-                ? 'Queued'
-                : 'Understanding';
-  const agentName = String(message.thread.agentName ?? 'Scout').trim() || 'Scout';
+    : basePhase;
+  const agentName = String(ref.agentName ?? 'Scout').trim() || 'Scout';
   return {
+    ref,
+    governedRecord: work.governedRecord,
     active,
     complete,
     failed,
     needsInput,
     agentName,
-	delegatedBy: String(message.thread.delegatedBy ?? '').trim(),
+    delegatedBy: String(ref.delegatedBy ?? '').trim(),
+    family,
     phase,
-    mode: String(message.thread.mode ?? 'work').trim() || 'work',
-    query: String(message.thread.query ?? '').trim() || 'Scout workstream',
+    progressCopy: safeWorkProgressNote(ref.progressNote, phase),
+    mode: String(ref.mode ?? 'work').trim() || 'work',
+    query: String(ref.query ?? '').trim() || 'Scout workstream',
     progressPercent,
     attentionReason,
     attentionCopy: attentionReason === 'output_truncated'
@@ -196,12 +227,21 @@ export const MessageBubble = React.memo(function MessageBubble({
   workSaved = false,
   workDriveSaveAvailability = 'checking',
 }: MessageBubbleProps) {
+  const workDetailsTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
   const proposal = message.proposal;
-  const workProposal = String(proposal?.kind ?? '').toLowerCase() === 'workstream';
+  const proposalKind = String(proposal?.kind ?? '').toLowerCase();
   const proposalStatus = String(proposal?.status ?? '').toLowerCase();
+  const exactApproval = String(message.intentOutcome ?? proposal?.intentOutcome ?? '') === 'approval_required'
+    || String(proposal?.effectClass ?? '').trim() !== '';
+  const workProposal = Boolean(proposal) && (exactApproval || ['workstream', 'tool_run', 'goal_run'].includes(proposalKind));
   const proposalPending = workProposal && !proposalStatus;
+  const acceptedProposalLabel = proposalKind === 'workstream'
+    ? `${proposal?.agentName || 'Scout'} started this workstream`
+    : proposalKind === 'goal_run'
+      ? `${proposal?.agentName || 'Scout'} started this goal`
+      : `${proposal?.agentName || 'Scout'} started this work`;
   const rawBody = bodyOf(message);
   const body = rawBody || (!lifecycle?.active ? lifecycle?.fallbackText ?? '' : '');
   const messageKind = String(message.kind ?? '').toLowerCase();
@@ -333,7 +373,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 <View style={styles.workIcon}>
                   <SymbolView name={proposalStatus === 'accepted' ? 'checkmark.circle.fill' : 'xmark.circle'} tintColor={proposalStatus === 'accepted' ? colors.success : colors.text3} size={13} />
                 </View>
-                <Text style={styles.proposalCompactText}>{proposalStatus === 'accepted' ? `${proposal?.agentName || 'Scout'} started this research` : 'Proposed work dismissed'}</Text>
+                <Text style={styles.proposalCompactText}>{proposalStatus === 'accepted' ? acceptedProposalLabel : 'Proposed work dismissed'}</Text>
               </View>
             </View>
           ) : workProposal ? (
@@ -348,7 +388,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               {proposalPending ? (
                 <TextInput
                   accessibilityLabel={`${proposal?.agentName || 'Scout'} work objective`}
-                  editable={!resolvingProposal}
+                  editable={!resolvingProposal && !exactApproval}
                   multiline
                   onChangeText={(value) => onChangeProposalObjective?.(message, value)}
                   placeholder="What should Scout accomplish?"
@@ -361,7 +401,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               ) : (
                 <Text style={styles.proposalSummary}>{proposalObjective || proposal?.objective || proposal?.summary || body}</Text>
               )}
-              <Text style={styles.proposalSafety}>Nothing runs until you confirm.</Text>
+              <Text style={styles.proposalSafety}>{exactApproval ? 'Approval is bound to this exact request. Edit by sending a new message.' : 'Nothing runs until you confirm.'}</Text>
               {proposalPending ? (
                 <View style={styles.proposalActions}>
                   <Pressable
@@ -369,7 +409,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                     accessibilityLabel={`Run ${proposal?.agentName || 'agent'} work once`}
                     accessibilityState={{ disabled: resolvingProposal }}
                     disabled={resolvingProposal}
-                    onPress={() => onResolveProposal?.(message, 'accepted', String(proposalObjective ?? proposal?.objective ?? proposal?.summary ?? body).trim())}
+                    onPress={() => onResolveProposal?.(message, 'accepted', String(exactApproval ? (proposal?.objective ?? proposal?.summary ?? body) : (proposalObjective ?? proposal?.objective ?? proposal?.summary ?? body)).trim())}
                     style={({ pressed }) => [styles.proposalRun, (pressed || resolvingProposal) && styles.proposalPressed]}
                   >
                     {resolvingProposal ? <ActivityIndicator color={colors.onAccent} size="small" /> : <Text style={styles.proposalRunText}>Run once</Text>}
@@ -388,21 +428,28 @@ export const MessageBubble = React.memo(function MessageBubble({
               ) : null}
             </View>
           ) : workThread ? (
-            <View
-              accessibilityLabel={`${workThread.mode} workstream. ${workThread.label}. ${workThread.query}`}
-              accessibilityLiveRegion="polite"
-              style={styles.workCard}
-            >
+            <View style={styles.workCard}>
               <View style={styles.workHead}>
-                <View style={styles.workIdentity}>
+                <View
+                  accessible
+                  accessibilityRole="summary"
+                  accessibilityLabel={`${workThread.agentName}, ${workThread.family} workstream. ${workThread.query}`}
+                  style={styles.workIdentity}
+                >
                   <View style={styles.workIcon}>
                     <SymbolView name="flame.fill" tintColor={colors.emberText} size={13} />
                   </View>
-			      <Text style={styles.workKicker}>
-			        {workThread.agentName} · {workThread.mode}{workThread.delegatedBy ? ` · via ${workThread.delegatedBy}` : ''}
-			      </Text>
+			      <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workKicker}>
+				        {workThread.agentName} · {workThread.family}{workThread.delegatedBy ? ` · via ${workThread.delegatedBy}` : ''}
+				      </Text>
                 </View>
-			    <View style={[styles.workStatus, workThread.complete && styles.workStatusComplete, workThread.needsInput && styles.workStatusNeedsInput, workThread.failed && styles.workStatusFailed]}>
+			    <View
+                  accessible
+                  role="status"
+                  accessibilityLabel={`${workThread.family}: ${workThread.label}`}
+                  accessibilityLiveRegion="polite"
+                  style={[styles.workStatus, workThread.complete && styles.workStatusComplete, workThread.needsInput && styles.workStatusNeedsInput, workThread.failed && styles.workStatusFailed]}
+                >
                   {workThread.active ? <ActivityIndicator color={colors.emberText} size="small" /> : null}
                   {!workThread.active ? (
                     <SymbolView
@@ -411,52 +458,58 @@ export const MessageBubble = React.memo(function MessageBubble({
                       size={13}
                     />
                   ) : null}
-				  <Text style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
+				  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
-              <Text numberOfLines={2} style={styles.workQuery}>{String(message.thread?.resultTitle ?? '').trim() || workThread.query}</Text>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || workThread.query}</Text>
               {workThread.active ? (
-                <Text style={styles.workProgressCopy}>
-                  {workThread.phase}{workThread.progressPercent > 0 ? ` · ${workThread.progressPercent}%` : ''}
+                <Text
+                  accessibilityRole="progressbar"
+                  accessibilityValue={{ min: 0, max: 100, now: workThread.progressPercent }}
+                  maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier}
+                  style={styles.workProgressCopy}
+                >
+                  {workThread.progressCopy}{workThread.progressPercent > 0 ? ` · ${workThread.progressPercent}%` : ''}
                 </Text>
               ) : null}
-              {workThread.failed && workThread.attentionCopy ? <Text style={styles.workAttentionCopy}>{workThread.attentionCopy}</Text> : null}
-              {String(message.thread?.resultPreview ?? '').trim() ? <Text numberOfLines={3} style={styles.workPreview}>{String(message.thread?.resultPreview)}</Text> : null}
-              {String(message.thread?.provenance ?? '').trim() ? <Text numberOfLines={2} style={styles.workProvenance}>{String(message.thread?.provenance)}</Text> : null}
+              {workThread.failed && workThread.attentionCopy ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workAttentionCopy}>{workThread.attentionCopy}</Text> : null}
+              {String(workThread.ref.resultPreview ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={3} style={styles.workPreview}>{String(workThread.ref.resultPreview)}</Text> : null}
+              {String(workThread.ref.provenance ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={2} style={styles.workProvenance}>{String(workThread.ref.provenance)}</Text> : null}
               {workThread.complete ? (
                 <View style={styles.workResultActions}>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
-                    <Text style={styles.workResultPrimaryText}>Open</Text>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : workDriveSaveAvailability === 'available' ? 'Save deliverable to Drive' : workDriveSaveAvailability === 'checking' ? 'Checking Save to Drive availability' : 'Save to Drive unavailable'} accessibilityState={{ disabled: savingWork || workSaved || workDriveSaveAvailability !== 'available' }} disabled={savingWork || workSaved || workDriveSaveAvailability !== 'available'} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved || workDriveSaveAvailability !== 'available') && styles.workResultDisabled]}>
+                  {!workThread.governedRecord ? <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : workDriveSaveAvailability === 'available' ? 'Save deliverable to Drive' : workDriveSaveAvailability === 'checking' ? 'Checking Save to Drive availability' : 'Save to Drive unavailable'} accessibilityState={{ disabled: savingWork || workSaved || workDriveSaveAvailability !== 'available' }} disabled={savingWork || workSaved || workDriveSaveAvailability !== 'available'} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved || workDriveSaveAvailability !== 'available') && styles.workResultDisabled]}>
                     {savingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="externaldrive.fill" tintColor={colors.emberText} size={14} />}
-                    <Text style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : workDriveSaveAvailability === 'checking' ? 'Checking…' : workDriveSaveAvailability === 'unavailable' ? 'Unavailable' : 'Save'}</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Edit prompt and regenerate deliverable" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : workDriveSaveAvailability === 'checking' ? 'Checking…' : workDriveSaveAvailability === 'unavailable' ? 'Unavailable' : 'Save'}</Text>
+                  </Pressable> : null}
+                  {!workThread.governedRecord ? <Pressable accessibilityRole="button" accessibilityLabel="Edit prompt and regenerate deliverable" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
                     {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
-                    <Text style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Regenerate'}</Text>
-                  </Pressable>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Regenerate'}</Text>
+                  </Pressable> : null}
                 </View>
               ) : workThread.failed ? (
                 <View style={styles.workResultActions}>
-                  <Pressable accessibilityRole="button" accessibilityLabel="View research failure details" onPress={() => onOpenWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel={`View ${workThread.family.toLowerCase()} failure details`} onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="info.circle.fill" tintColor={colors.onAccent} size={14} />
-                    <Text style={styles.workResultPrimaryText}>View details</Text>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>View details</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Retry research" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Retry ${workThread.family.toLowerCase()}`} accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
                     {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
-                    <Text style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Retry research'}</Text>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Retry'}</Text>
                   </Pressable>
                 </View>
               ) : (
                 <Pressable
+                  ref={workDetailsTriggerRef}
                   accessibilityRole="button"
                   accessibilityLabel={`Open live work details. ${workThread.phase}${workThread.progressPercent > 0 ? `, ${workThread.progressPercent}% complete` : ''}`}
-                  onPress={() => onOpenWorkArtifact?.(message)}
+                  onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)}
                   style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
                 >
-                  <Text style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : 'Research in progress'}</Text>
+                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`}</Text>
                   <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
                 </Pressable>
               )}

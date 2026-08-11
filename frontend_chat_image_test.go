@@ -86,8 +86,8 @@ func TestIndexImageProposalCardNeverRunsGoalPipeline(t *testing.T) {
 		"const isImage = String(proposal.kind || '') === 'image'",
 		// the head names the concept render
 		"? 'Concept render'",
-		// no package field for an image render
-		"if (!isWorkstream && !isImage) {",
+		// no client-side package/tool chooser in the proposal card
+		"const fieldEls = {}",
 		// Run confirms via the proposal route (workstream/image branch) with the
 		// edited objective and returns — never reaching runGoalPipeline
 		"if (isWorkstream || isImage) {",
@@ -95,6 +95,10 @@ func TestIndexImageProposalCardNeverRunsGoalPipeline(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing image proposal-card hook %q", want)
 		}
+	}
+	card := functionBody(html, "function buildScoutProposalCardNode(message)")
+	if strings.Contains(card, "paletteBuildPackageField()") {
+		t.Fatal("image proposal card exposes a client-side package/tool chooser")
 	}
 	// The single-pass branch returns with only postScoutProposalAction (no
 	// runGoalPipeline) — pinned by the comment that rides it.

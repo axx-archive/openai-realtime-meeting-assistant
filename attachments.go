@@ -1088,6 +1088,29 @@ func (app *kanbanBoardApp) followUpAttachmentContentBlocksAuthorized(user *userA
 	})
 }
 
+// followUpOpenAIAttachmentContentAuthorized is the Responses-native twin of
+// followUpAttachmentContentBlocksAuthorized. It deliberately uses the
+// follow-up source contract (reserved by, or already committed for, the same
+// current human and destination) rather than the broader ordinary attachment
+// read contract. The source is checked before and after every blob read so a
+// revocation or audience change cannot turn queued bytes into a bearer grant.
+func (app *kanbanBoardApp) followUpOpenAIAttachmentContentAuthorized(user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) []openAIInputContent {
+	return openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		if !app.followUpAttachmentSourceAuthorized(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
+		if attachmentBlobReadAfterProbe != nil {
+			attachmentBlobReadAfterProbe(strings.TrimSpace(file.SourceID))
+		}
+		if err != nil || attachmentSourceRevision(strings.TrimSpace(file.Ref), meta) != strings.TrimSpace(file.SourceRevision) ||
+			!app.followUpAttachmentSourceAuthorized(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		return data, meta, true
+	})
+}
+
 // attachmentContentBlocksAuthorized reauthorizes the exact durable source
 // record immediately before and after every blob read. Bytes from a source
 // revoked, expired, or rebound during I/O are discarded before they can reach
@@ -1164,13 +1187,14 @@ func deriveAttachmentText(ctx context.Context, apiKey string, files []scoutChatF
 	ctx, cancel := context.WithTimeout(ctx, attachmentDeriveTimeout)
 	defer cancel()
 
+	recordConversationProviderCall(ctx)
 	transcript, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           scoutExtractionModel(),
 		Seat:            seatAttachments,
 		Workflow:        "attachment_extract",
 		Instructions:    attachmentDeriveInstructions,
 		Input:           "Transcribe the key facts, numbers, names, and claims in the attached files for the team's shared memory.",
-		ReasoningEffort: scoutReasoningEffort(),
+		ReasoningEffort: scoutExtractionReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: attachmentDeriveMaxTokens,
 		Attachments:     attachments,
@@ -1353,6 +1377,8 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	projected.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
 	for messageIndex := range projected.Messages {
 		original := thread.Messages[messageIndex]
+		projected.Messages[messageIndex].SourceOperationID = ""
+		projected.Messages[messageIndex].SourceOperationDigest = ""
 		if original.Reply != nil {
 			reply := *original.Reply
 			reply.LeaseID = ""

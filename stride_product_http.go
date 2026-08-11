@@ -667,7 +667,16 @@ func strideProductApprove(w http.ResponseWriter, r *http.Request, user *userAcco
 	thread, _, threadErr := kanbanApp.scoutChatThreadByID(user.Email, record.DestinationThreadID)
 	postAudience, postACLVersion, postAuthorityErr := strideProductProjectDestinationAuthority(thread)
 	if !record.CompletionPosted && threadErr == nil && postAuthorityErr == nil && record.DestinationAudience != nil && sameAudience(*record.DestinationAudience, postAudience) && record.DestinationACLVersion == postACLVersion {
-		message := scoutChatMessageRecord{ID: "stride-work-completion-" + temporalDigest(record.ID + "\x00" + record.RunID)[:20], Kind: "message", Role: "scout", AuthorName: "Scout", Text: fmt.Sprintf("%s is complete. %s\n\nArtifact: %s", record.Title, record.CompletionSummary, record.ArtifactHref), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		message := scoutChatMessageRecord{
+			ID: "stride-work-completion-" + temporalDigest(record.ID + "\x00" + record.RunID)[:20], Kind: "work_result", Role: "scout", AuthorName: "Scout",
+			Text: fmt.Sprintf("%s is complete. %s\n\nArtifact: %s", record.Title, record.CompletionSummary, record.ArtifactHref), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Work: &scoutChatWorkRecordRef{
+				ID: record.ID, RunID: record.RunID, Title: record.Title, Status: record.Status, WorkerName: "Scout",
+				CurrentStage: "Report ready", ProgressPercent: 100, Summary: record.CompletionSummary,
+				ArtifactID: record.ArtifactID, ArtifactHref: record.ArtifactHref, EvidenceHref: record.BrainHref,
+				ProviderExecutionFenced: record.ProviderExecutionFenced,
+			},
+		}
 		completionMessageCommitted := false
 		postErr := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeWork, func(ctx STRIDEProductContext) error {
 			return ctx.withWorkAuthority(principal, "completion_post", record, func() error {

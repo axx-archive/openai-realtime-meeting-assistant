@@ -547,7 +547,7 @@ const assistantCapabilitiesDigestMaxChars = 2400
 // ask than I can spin up" because :1153 told it only what it could NOT do).
 //
 // It is generated from buildToolsPayload() — the SAME single taxonomy source the
-// router enum (scoutRouterTools) and the palette read — so it can never drift
+// intent router and internal/admin fixtures read — so it can never drift
 // from what is actually launchable: the 12 registry tools plus every non-hidden
 // process (packaging_studio included, leading under "End-to-end"). One compact
 // line per capability: "Name — promise (id)". The id rides along so a length
@@ -555,7 +555,7 @@ const assistantCapabilitiesDigestMaxChars = 2400
 // sentinel has the ids in front of the model.
 func assistantCapabilitiesDigest() string {
 	var b strings.Builder
-	b.WriteString("# What this workspace can actually run (each is a confirmed, one-tap goal loop — you propose it, the user taps Run; nothing launches by itself):")
+	b.WriteString("# What this workspace can run from natural language (an explicit private request starts reversible within-budget work; governed effects stop for approval):")
 	for _, group := range buildToolsPayload() {
 		if len(group.Tools) == 0 {
 			continue
@@ -569,7 +569,7 @@ func assistantCapabilitiesDigest() string {
 		}
 		b.WriteString(strings.Join(parts, "; "))
 	}
-	b.WriteString("\nThree ways in: describe the work in chat, type / for the command lane, or tap + to browse the catalog.")
+	b.WriteString("\nThe person describes the outcome in ordinary language. Never ask them to choose a tool, template, model, provider, or deliverable type.")
 	return b.String()
 }
 

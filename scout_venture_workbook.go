@@ -245,6 +245,10 @@ func ventureWorkbookPreviewBody(objective string, preview ventureWorkbookPreview
 }
 
 func (app *kanbanBoardApp) createPrivateVentureWorkbook(threadID string, sourceMessageID string, objective string, user *userAccount) (scoutAgentThread, error) {
+	return app.createPrivateVentureWorkbookForOperation(threadID, sourceMessageID, objective, user, conversationTurnOperation{})
+}
+
+func (app *kanbanBoardApp) createPrivateVentureWorkbookForOperation(threadID string, sourceMessageID string, objective string, user *userAccount, operation conversationTurnOperation) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil || user == nil || normalizeAccountEmail(user.Email) == "" {
 		return scoutAgentThread{}, fmt.Errorf("workbook generation is unavailable")
 	}
@@ -252,6 +256,9 @@ func (app *kanbanBoardApp) createPrivateVentureWorkbook(threadID string, sourceM
 	if existing, found := app.osArtifactByID(artifactID); found {
 		if artifactType(existing) != artifactTypeWorkbook || existing.Metadata["artifactContract"] != ventureWorkbookContract || existing.Metadata["sourceMessageId"] != strings.TrimSpace(sourceMessageID) || existing.Metadata["originSurface"] != "chat:"+strings.TrimSpace(threadID) || normalizeAccountEmail(existing.Metadata["ownerEmail"]) != normalizeAccountEmail(user.Email) || strings.TrimSpace(existing.Metadata["query"]) != strings.TrimSpace(objective) {
 			return scoutAgentThread{}, fmt.Errorf("workbook operation conflicts with an existing artifact")
+		}
+		if operation.ID != "" && (existing.Metadata["operationId"] != operation.ID || existing.Metadata["operationBodyDigest"] != operation.BodyDigest) {
+			return scoutAgentThread{}, fmt.Errorf("workbook operation conflicts with its conversation binding")
 		}
 		return scoutAgentThread{ID: "agent-thread-workbook-" + strings.TrimPrefix(artifactID, "os-artifact-"), Mode: "artifacts", Query: strings.TrimSpace(objective), Status: artifactStatusComplete, Artifact: existing, Actions: app.osAssistantActions(objective, "artifacts", existing)}, nil
 	}
@@ -269,7 +276,13 @@ func (app *kanbanBoardApp) createPrivateVentureWorkbook(threadID string, sourceM
 		"type": artifactTypeWorkbook, "mode": "artifacts", "status": artifactStatusComplete, "published": "false", "publicationPolicy": ventureWorkbookPolicyLocked,
 		"source": "scout_thread", "sourceMessageId": strings.TrimSpace(sourceMessageID), "originSurface": "chat:" + strings.TrimSpace(threadID), "requestedBy": normalizeAccountEmail(user.Email), "ownerEmail": normalizeAccountEmail(user.Email), "visibility": "private",
 		"toolTemplate": ventureWorkbookToolID, "artifactContract": ventureWorkbookContract, "reviewGate": "passed", "progressPercent": "100", "providerCalls": "0", "generationMode": "deterministic_local_workbook",
+		"threadId": "agent-thread-workbook-" + strings.TrimPrefix(artifactID, "os-artifact-"), "threadQuery": strings.TrimSpace(objective), "threadStatus": artifactStatusComplete,
 		artifactAssetsMetadataKey: string(assets), ventureWorkbookPreviewKey: string(previewJSON), "driveFileName": preview.FileName,
+	}
+	if operation.ID != "" {
+		metadata["operationId"] = operation.ID
+		metadata["operationBodyDigest"] = operation.BodyDigest
+		metadata["originId"] = strings.TrimSpace(threadID)
 	}
 	artifact, _, _, err := app.createOSArtifactWithIDAndMetadataAcknowledged(artifactID, "artifacts", objective, ventureWorkbookPreviewBody(objective, preview), user.Name, metadata)
 	if err != nil {

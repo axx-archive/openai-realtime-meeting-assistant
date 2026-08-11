@@ -12,6 +12,7 @@ From the repository root:
 
 ```sh
 node docs/design/pd0-reference/validate.mjs
+node docs/design/pd0-reference/validate-rendered.mjs
 python3 -m http.server 18181 --directory docs/design/pd0-reference
 ```
 
@@ -28,6 +29,17 @@ does not embed a fallback.
   generic step script.
 - The platform switch changes shell density and information composition without
   changing the journey's semantic outcome.
+- J2–J4 now form one representative venture-work loop: a fictional investor
+  update becomes a private Suggested Work contract, retains its conversation
+  and source brief, then moves through an observable six-stage presentation
+  run into an editable deck, human review, and Drive state. The cards expose
+  accountable owner, participants, audience, sources, provider route, cost
+  boundary, current stage, next action, artifact status, and recovery state;
+  the reference never calls a provider or claims the deck was actually built.
+- J6 renders the other side of the same governed lifecycle—Private Work,
+  reviewed evidence, Work Record, release review, and Network projection—while
+  all Network parents remain false. Private conversation, run, and artifact
+  data never becomes a public fixture value or an available action.
 - HumanMessage, AgentContribution, and SystemEvent remain visibly distinct.
 - Governed Work Record, workspace, Work Object, Workstream, four-profile,
   Work Search/contact, agent, settings/public-presence, moderation, and consensus
@@ -67,9 +79,11 @@ does not embed a fallback.
   source-mutation negatives prove those structural boundaries remain distinct.
 - `fixture.json` embeds a closed manifest of the authoritative PD0 parity audit,
   semantic-system contract, reference-flow contract, primary-source research,
-  and PD0/PI0 checkpoint. The validator recomputes every SHA-256, verifies the
-  checkpoint's clean independent PD0 gate, and rejects root, state, journey,
-  composition, step, journey-contract, destination, or component drift.
+  PD0/PI0 checkpoint, comparative-product study, ChatGPT Work study, and its
+  body-minimized interaction manifest. The validator recomputes every SHA-256,
+  verifies the checkpoint's clean independent PD0 gate, and rejects root,
+  state, journey, composition, step, journey-contract, destination, component,
+  presentation-provider, editability, Drive-state, or Work-to-Network drift.
 - Each step exposes `aria-current="step"`. Because every transition replaces the
   action dock, focus moves to a stable live step-status element that announces
   Start, Advance, Back, Resume, terminal and Restart outcomes. Journey,
@@ -96,6 +110,10 @@ does not embed a fallback.
 - The iPhone/iPad modes are browser-rendered composition references, not native
   React Native code, simulator evidence, VoiceOver acceptance, Dynamic Type
   acceptance, Split View/Stage Manager proof, or real-device acceptance.
+- The presentation is a body-minimized interaction prototype, not a successful
+  provider run, editable PPTX acceptance, rendered slide-jury acceptance, or
+  production Drive-save receipt. Those remain separate OpenAI-only product
+  migration and deliverable-acceptance gates in the canonical Wave Plan.
 - Browser rendering is not WCAG, localization, performance-budget, Web Vitals,
   screen-reader, cache/purge, restart, or production security acceptance.
 - The fixture does not mint actions, search people, send contact requests, vote,
@@ -109,3 +127,6 @@ does not embed a fallback.
 - `styles.css` — code-native desktop/iPhone/iPad reference expressions.
 - `app.js` — local interaction and fail-closed rendering.
 - `validate.mjs` — dependency-free fixture and source-contract validator.
+- `validate-rendered.mjs` — exact source, screenshot SHA-256, PNG-dimension,
+  postimage, fail-closed Network, and evidence-class validator for the frozen
+  rendered prototype receipt.

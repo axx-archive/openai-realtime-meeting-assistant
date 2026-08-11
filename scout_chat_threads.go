@@ -24,6 +24,44 @@ const (
 	scoutChatMaxFileTextBytes   = 64 << 10
 )
 
+type scoutConversationMessageRequest struct {
+	Text               string                    `json:"text"`
+	Files              []scoutChatFileAttachment `json:"files"`
+	ReplyToMessageID   string                    `json:"replyToMessageId"`
+	FollowUpArtifactId string                    `json:"followUpArtifactId"`
+	ToolTemplate       string                    `json:"toolTemplate"`
+	OperationID        string                    `json:"operationId"`
+}
+
+func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Request) (scoutConversationMessageRequest, error) {
+	var payload scoutConversationMessageRequest
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit))
+	if err != nil {
+		return payload, err
+	}
+	object, err := decodeOpenAIToolArguments(raw)
+	if err != nil {
+		return payload, err
+	}
+	allowed := map[string]bool{
+		"text": true, "files": true, "replyToMessageId": true,
+		"followUpArtifactId": true, "toolTemplate": true, "operationId": true,
+	}
+	for key := range object {
+		if !allowed[key] {
+			return payload, fmt.Errorf("unknown conversation field %q", key)
+		}
+	}
+	normalized, err := json.Marshal(object)
+	if err != nil {
+		return payload, err
+	}
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		return payload, err
+	}
+	return payload, nil
+}
+
 // Chat has two surface modes with an optional explicit project membership:
 //
 //   - private = the owner + Scout, and NOBODY else. Enforced on every read by
@@ -176,6 +214,25 @@ type scoutChatThreadRef struct {
 	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
 	AttentionReason string  `json:"attentionReason,omitempty"`
 	StartedAt       string  `json:"startedAt,omitempty"`
+}
+
+// scoutChatWorkRecordRef is the conversation projection of a governed Work
+// Record. It keeps durable work truth in the chat message itself so web and
+// native clients render one rich result card instead of parsing prose or a raw
+// URL. The hrefs remain authenticated same-origin routes, never public links.
+type scoutChatWorkRecordRef struct {
+	ID                      string  `json:"id"`
+	RunID                   string  `json:"runId"`
+	Title                   string  `json:"title"`
+	Status                  string  `json:"status"`
+	WorkerName              string  `json:"workerName"`
+	CurrentStage            string  `json:"currentStage"`
+	ProgressPercent         float64 `json:"progressPercent"`
+	Summary                 string  `json:"summary"`
+	ArtifactID              string  `json:"artifactId"`
+	ArtifactHref            string  `json:"artifactHref"`
+	EvidenceHref            string  `json:"evidenceHref"`
+	ProviderExecutionFenced bool    `json:"providerExecutionFenced"`
 }
 
 func scoutChatThreadAttentionReason(metadata map[string]string) string {
@@ -344,14 +401,25 @@ var scoutChatReactionEmojis = map[string]bool{
 }
 
 type scoutChatMessageRecord struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	Role        string `json:"role"`
-	Text        string `json:"text,omitempty"`
-	CreatedAt   string `json:"createdAt"`
-	EditedAt    string `json:"editedAt,omitempty"`
-	AuthorName  string `json:"authorName,omitempty"`
-	AuthorEmail string `json:"authorEmail,omitempty"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	Role string `json:"role"`
+	// IntentOutcome is the server-owned five-way disposition for the human turn
+	// this message resolves. It makes reloads and cross-device rendering retain
+	// the same conversation/work/approval truth without trusting client state.
+	IntentOutcome string `json:"intentOutcome,omitempty"`
+	// SourceOperationID and SourceOperationDigest are durable, server-only
+	// replay bindings for an accepted cross-device turn (currently private
+	// Realtime voice). Viewer projections always remove them. They let a lost
+	// HTTP response find the already-committed conversation result without
+	// trusting a model- or client-selected tool.
+	SourceOperationID     string `json:"sourceOperationId,omitempty"`
+	SourceOperationDigest string `json:"sourceOperationDigest,omitempty"`
+	Text                  string `json:"text,omitempty"`
+	CreatedAt             string `json:"createdAt"`
+	EditedAt              string `json:"editedAt,omitempty"`
+	AuthorName            string `json:"authorName,omitempty"`
+	AuthorEmail           string `json:"authorEmail,omitempty"`
 	// Via marks messages relayed by a tool (e.g. "scout_voice" for
 	// post_to_channel from the private dashboard voice).
 	Via string `json:"via,omitempty"`
@@ -376,6 +444,11 @@ type scoutChatMessageRecord struct {
 	Reactions []scoutChatMessageReaction `json:"reactions,omitempty"`
 	ReplyTo   *scoutChatReplyRef         `json:"replyTo,omitempty"`
 	Thread    *scoutChatThreadRef        `json:"thread,omitempty"`
+	// Work is a governed result projection, separate from an in-flight agent
+	// thread and from the canonical professional Work Record. Clients render it
+	// as one compact completed-work card with stage, provenance, artifact, and
+	// evidence actions.
+	Work *scoutChatWorkRecordRef `json:"work,omitempty"`
 	// Proposal carries a router proposal card (Kind "proposal") — DATA the
 	// client renders as the confirmation trust surface, never an action. See
 	// the propose-confirm router in scout_chat.go.
@@ -503,6 +576,7 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 			Title          string                   `json:"title"`
 			Visibility     string                   `json:"visibility"`
 			Intake         string                   `json:"intake"`
+			OperationID    string                   `json:"operationId"`
 			OpeningMessage *scoutHomeOpeningMessage `json:"openingMessage"`
 		}{}
 		if r.Body != nil {
@@ -515,6 +589,10 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if payload.OpeningMessage != nil {
+			if strings.TrimSpace(payload.OperationID) != "" {
+				writeAuthError(w, http.StatusBadRequest, "openingMessage cannot be combined with operationId")
+				return
+			}
 			handleScoutHomeOpening(w, r, kanbanApp, user, payload.Title, payload.Visibility, payload.Intake, *payload.OpeningMessage)
 			return
 		}
@@ -523,21 +601,44 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		// rather than an empty thread. Any other intake value falls through to a
 		// normal create, so an unknown value can never silently arm the flow.
 		var thread scoutChatThreadRecord
+		created := true
 		var err error
 		if strings.EqualFold(strings.TrimSpace(payload.Intake), brainIntakeKind) {
+			if strings.TrimSpace(payload.OperationID) != "" {
+				writeAuthError(w, http.StatusBadRequest, "brain intake cannot be combined with operationId")
+				return
+			}
 			thread, err = kanbanApp.startBrainIntakeThread(user)
+		} else if strings.TrimSpace(payload.OperationID) != "" {
+			operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
+			if operationErr != nil {
+				writeAuthError(w, http.StatusBadRequest, "conversation operationId is invalid")
+				return
+			}
+			threadID := "scout-chat-create-" + digestBrainString(normalizeAccountEmail(user.Email) + "\x00" + operationID)[:24]
+			thread, created, err = kanbanApp.ensureScoutChatThread(threadID, user.Email, user.Name, payload.Title, payload.Visibility, nil)
 		} else {
 			thread, err = kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title, payload.Visibility)
 		}
 		if err != nil {
-			writeAuthError(w, http.StatusInternalServerError, err.Error())
+			status := http.StatusInternalServerError
+			if strings.TrimSpace(payload.OperationID) != "" {
+				status = http.StatusConflict
+			}
+			writeAuthError(w, status, err.Error())
 			return
 		}
 		// Fan the new thread out like the voice create path and renames do —
 		// without this, a channel created from the + button never reaches
 		// peers' sidebars until its first message forces a list refresh.
-		deliverScoutChatThreadMetadata(thread)
-		writeAuthJSON(w, http.StatusCreated, map[string]any{"ok": true, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		if created {
+			deliverScoutChatThreadMetadata(thread)
+		}
+		status := http.StatusCreated
+		if !created {
+			status = http.StatusOK
+		}
+		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
 	}
 }
 
@@ -671,31 +772,39 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 2 && parts[1] == "messages" && r.Method == http.MethodPost {
-		payload := struct {
-			Text               string                    `json:"text"`
-			Files              []scoutChatFileAttachment `json:"files"`
-			ReplyToMessageID   string                    `json:"replyToMessageId"`
-			FollowUpArtifactId string                    `json:"followUpArtifactId"`
-			ToolTemplate       string                    `json:"toolTemplate"`
-			OperationID        string                    `json:"operationId"`
-		}{}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
+		payload, err := decodeScoutConversationMessageRequest(w, r)
+		if err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		ctx := r.Context()
-		if strings.TrimSpace(payload.ToolTemplate) == ventureWorkbookToolID {
-			operationID, operationErr := normalizeVentureWorkbookOperationID(payload.OperationID)
-			if operationErr != nil {
-				writeAuthError(w, http.StatusBadRequest, operationErr.Error())
-				return
-			}
-			ctx = context.WithValue(ctx, ventureWorkbookOperationContextKey{}, operationID)
+		operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
+		if operationErr != nil {
+			writeAuthError(w, http.StatusBadRequest, "conversation operationId is required and must be valid")
+			return
 		}
-		response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ReplyToMessageID, payload.ToolTemplate)
+		body, bodyErr := canonicalJSON(map[string]any{
+			"threadId": threadID, "requester": normalizeAccountEmail(user.Email),
+			"text": payload.Text, "files": payload.Files,
+			"followUpArtifactId": payload.FollowUpArtifactId, "replyToMessageId": payload.ReplyToMessageID,
+		})
+		if bodyErr != nil {
+			writeAuthError(w, http.StatusBadRequest, "conversation request is invalid")
+			return
+		}
+		messageContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+		messageContext = withConversationTurnOperation(messageContext, conversationTurnOperation{
+			ID: operationID, BodyDigest: sha256Hex(append([]byte("conversation-http-turn/v1\x00"), body...)),
+		})
+		// toolTemplate is retained only as a decode-only compatibility field.
+		// Normal clients cannot arm work, authority, or an output contract with
+		// it; the five-way server router owns those decisions from natural text.
+		response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(messageContext, user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ReplyToMessageID, "")
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
+		}
+		if strings.TrimSpace(payload.ToolTemplate) != "" {
+			response["clientToolTemplateIgnored"] = true
 		}
 		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
 		return
@@ -1057,13 +1166,140 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 	return app.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, text, files, followUpArtifactID, "", "")
 }
 
-// appendScoutChatThreadMessageWithTool is appendScoutChatThreadMessage plus an
-// optional palette tool template. The palette's conversational tiles hand off
-// to the composer; carrying tool.id through the send is the §2 fidelity fix —
-// the same tool must produce the same contract-gated output from the talk-it-out
-// door as from the Run door.
+// appendScoutChatThreadMessageWithTool is a compatibility wrapper for callers
+// that still send a retired palette selection. The client value is ignored:
+// natural language enters the same server-owned five-way router as every other
+// turn and cannot choose a tool, output contract, or authority.
 func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, toolTemplate string) (map[string]any, error) {
-	return app.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, text, files, followUpArtifactID, "", toolTemplate)
+	return app.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, text, files, followUpArtifactID, "", "")
+}
+
+func (app *kanbanBoardApp) replayConversationTurnInThread(ctx context.Context, viewerEmail string, thread scoutChatThreadRecord, operation conversationTurnOperation) (map[string]any, bool, error) {
+	for _, message := range thread.Messages {
+		if message.SourceOperationID != operation.ID {
+			continue
+		}
+		if message.SourceOperationDigest != operation.BodyDigest {
+			return nil, true, fmt.Errorf("%w: conversation operation id was reused with different content", ErrSTRIDEConversationConflict)
+		}
+		for _, candidate := range thread.Messages {
+			if candidate.CausedByMessageID == message.ID && strings.TrimSpace(candidate.IntentOutcome) != "" {
+				response, err := app.committedConversationTurnResponse(ctx, viewerEmail, message, candidate, thread)
+				return response, true, err
+			}
+		}
+		if launched, found, launchErr := app.conversationWorkForOperation(viewerEmail, thread.ID, operation); launchErr != nil {
+			return nil, true, launchErr
+		} else if found {
+			card := conversationWorkReplayCard(message, launched)
+			saved, err := app.commitScoutChatThreadMessages(viewerEmail, thread.ID, card)
+			if err != nil {
+				return nil, true, &conversationWorkProjectionPendingError{err: err}
+			}
+			response, responseErr := app.committedConversationTurnResponse(ctx, viewerEmail, message, card, saved)
+			return response, true, responseErr
+		}
+		return nil, true, fmt.Errorf("conversation turn is durably pending reconciliation; no duplicate work was started")
+	}
+	return nil, false, nil
+}
+
+func (app *kanbanBoardApp) committedConversationTurnResponse(ctx context.Context, viewerEmail string, userMessage scoutChatMessageRecord, answer scoutChatMessageRecord, thread scoutChatThreadRecord) (map[string]any, error) {
+	response := map[string]any{
+		"ok": true, "message": userMessage, "answer": answer, "thread": thread,
+		"intentOutcome": answer.IntentOutcome, "replayed": true,
+	}
+	if answer.Proposal != nil {
+		response["proposal"] = answer.Proposal
+		response["approvalRequired"] = answer.IntentOutcome == string(conversationIntentApprovalRequired)
+	}
+	if answer.Thread != nil {
+		work := scoutAgentThread{ID: answer.Thread.ID, Mode: answer.Thread.Mode, Query: answer.Thread.Query, Status: answer.Thread.Status}
+		artifactID := strings.TrimSpace(answer.Thread.ArtifactID)
+		if artifactID == "" || app == nil || app.memory == nil {
+			return nil, fmt.Errorf("conversation work replay artifact is unavailable")
+		}
+		user := accountStore().findUser(viewerEmail)
+		header, found := app.memory.artifactAuthorizationHeaderByID(artifactID)
+		if user == nil || !found || !artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
+			return nil, fmt.Errorf("conversation work replay artifact is unavailable")
+		}
+		artifact, found := app.memory.artifactSnapshotIfHeaderMatches(artifactID, header)
+		if !found || artifact.Metadata["operationId"] != userMessage.SourceOperationID || artifact.Metadata["operationBodyDigest"] != userMessage.SourceOperationDigest || normalizeAccountEmail(artifact.Metadata["requestedBy"]) != normalizeAccountEmail(viewerEmail) || (artifact.Metadata["originId"] != thread.ID && artifact.Metadata["originSurface"] != "chat:"+thread.ID) {
+			return nil, fmt.Errorf("%w: conversation work replay binding changed", ErrSTRIDEConversationConflict)
+		}
+		if err := app.reconcileOpenAIToolConversationWork(ctx, artifact); err != nil {
+			return nil, &conversationWorkProjectionPendingError{err: err}
+		}
+		if refreshed, ok := app.osArtifactByID(artifactID); ok {
+			artifact = refreshed
+		}
+		work.Artifact = artifact
+		work.Actions = app.osAssistantActions(work.Query, work.Mode, artifact)
+		response["agentThread"] = work
+		response["artifact"] = artifact
+		response["actions"] = work.Actions
+	}
+	if answer.Image != nil || answer.ImageGeneration != nil {
+		response["imageGeneration"] = map[string]any{"status": firstNonEmptyString(answer.ImageGenerationStatus(), "complete"), "messageId": answer.ID}
+	}
+	return response, nil
+}
+
+func (message scoutChatMessageRecord) ImageGenerationStatus() string {
+	if message.ImageGeneration == nil {
+		return ""
+	}
+	return strings.TrimSpace(message.ImageGeneration.Status)
+}
+
+func (app *kanbanBoardApp) conversationWorkForOperation(viewerEmail string, threadID string, operation conversationTurnOperation) (scoutAgentThread, bool, error) {
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	var match scoutAgentThread
+	matches := 0
+	for _, entry := range app.memory.snapshot(0) {
+		metadata := entry.Metadata
+		if metadata["operationId"] != operation.ID || metadata["operationBodyDigest"] != operation.BodyDigest || metadata["originId"] != threadID || normalizeAccountEmail(metadata["requestedBy"]) != viewerEmail {
+			continue
+		}
+		workID := firstNonEmptyString(strings.TrimSpace(metadata["threadId"]), strings.TrimSpace(entry.ID))
+		mode := firstNonEmptyString(strings.TrimSpace(metadata["mode"]), "goal")
+		query := firstNonEmptyString(strings.TrimSpace(metadata["threadQuery"]), strings.TrimSpace(metadata["objective"]), strings.TrimSpace(metadata["query"]))
+		status := firstNonEmptyString(strings.TrimSpace(metadata["threadStatus"]), strings.TrimSpace(metadata["status"]), "running")
+		if workID == "" || query == "" {
+			continue
+		}
+		match = scoutAgentThread{ID: workID, Mode: mode, Query: query, Status: status, Artifact: entry}
+		matches++
+	}
+	if matches > 1 {
+		return scoutAgentThread{}, false, fmt.Errorf("%w: conversation operation owns multiple work records", ErrSTRIDEConversationConflict)
+	}
+	return match, matches == 1, nil
+}
+
+func conversationWorkReplayCard(userMessage scoutChatMessageRecord, launched scoutAgentThread) scoutChatMessageRecord {
+	label := assistantToolLabel(launched.Mode)
+	toolID := strings.TrimSpace(launched.Artifact.Metadata["toolTemplate"])
+	if process, ok := processByID(launched.Artifact.Metadata["processId"]); ok {
+		label = process.Title
+		toolID = process.ID
+	} else if tool, ok := toolByID(toolID); ok {
+		label = tool.Name
+	}
+	label = conversationWorkVisibleLabel(conversationWorkDecision{ToolID: toolID, Mode: launched.Mode, Kind: conversationWorkKind(firstNonEmptyString(launched.Artifact.Metadata["workKind"], string(conversationWorkGoal)))}, label)
+	createdAt := launched.Artifact.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	return scoutChatMessageRecord{
+		ID:   "scout-chat-message-work-" + sha256Hex([]byte(userMessage.ID + "\x00" + launched.ID))[:24],
+		Kind: "thread", Role: "scout", AuthorName: scoutParticipantName,
+		IntentOutcome: string(conversationIntentStartPrivateWork), CausedByMessageID: userMessage.ID,
+		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
+		CreatedAt: createdAt.Format(time.RFC3339Nano),
+		Thread:    &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID},
+	}
 }
 
 func scoutChatReplyRefFromThread(thread scoutChatThreadRecord, messageID string) (*scoutChatReplyRef, error) {
@@ -1105,6 +1341,22 @@ func scoutChatReplyTargetsScout(thread scoutChatThreadRecord, messageID string) 
 	return author == "" || strings.EqualFold(author, scoutParticipantName)
 }
 
+func scoutChatClarificationAlreadyAsked(thread scoutChatThreadRecord) bool {
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return false
+		}
+		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
+			return true
+		}
+		if message.Kind == "message" || message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+			return false
+		}
+	}
+	return false
+}
+
 const scoutDirectReplyNoResponseMarker = "<scout_no_response/>"
 
 func scoutDirectReplyResponseStyle(base string) string {
@@ -1112,12 +1364,29 @@ func scoutDirectReplyResponseStyle(base string) string {
 }
 
 func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, replyToMessageID string, toolTemplate string) (map[string]any, error) {
+	ctx, providerCallCounter := withConversationProviderCallCounter(ctx)
+	turnOperation := conversationTurnOperationFromContext(ctx)
+	if turnOperation.ID != "" || turnOperation.BodyDigest != "" {
+		operationID, operationErr := normalizeScoutIdempotencyKey(turnOperation.ID)
+		if operationErr != nil || !isHexDigest(turnOperation.BodyDigest) {
+			return nil, fmt.Errorf("conversation operation binding is invalid")
+		}
+		turnOperation.ID = operationID
+		operationLock := app.scoutChatThreadLock("conversation-operation-" + sha256Hex([]byte(normalizeAccountEmail(user.Email) + "\x00" + threadID + "\x00" + operationID))[:24])
+		operationLock.Lock()
+		defer operationLock.Unlock()
+	}
 	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
 	if err != nil {
 		return nil, err
 	}
 	if thread.ArchivedAt != "" {
 		return nil, fmt.Errorf("chat thread is archived")
+	}
+	if turnOperation.ID != "" {
+		if replay, found, replayErr := app.replayConversationTurnInThread(ctx, user.Email, thread, turnOperation); found || replayErr != nil {
+			return replay, replayErr
+		}
 	}
 	replyTo, err := scoutChatReplyRefFromThread(thread, replyToMessageID)
 	if err != nil {
@@ -1127,6 +1396,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 
 	now := time.Now().UTC()
 	messageID := fmt.Sprintf("scout-chat-message-%d", now.UnixNano())
+	if turnOperation.ID != "" || turnOperation.BodyDigest != "" {
+		messageID = "scout-chat-message-" + sha256Hex([]byte("conversation-turn/v1\x00" + normalizeAccountEmail(user.Email) + "\x00" + threadID + "\x00" + turnOperation.ID))[:24]
+	}
 	if strings.TrimSpace(toolTemplate) == ventureWorkbookToolID {
 		operationID := ventureWorkbookOperationIDFromContext(ctx)
 		if operationID == "" {
@@ -1171,9 +1443,18 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	coworkerProviderFenced := app.strideAgentDirectThreadProviderFenced(thread.ID)
 	coworkerProfile, coworkerProfileAvailable := app.strideAgentDirectThreadContext(thread.ID)
 	coworkerResearchBridge := coworkerProfileAvailable && containsSTRIDEID(coworkerProfile.Capabilities, "deep_research")
-	plainCoworkerThreadReply := coworkerResearchBridge && replyTo != nil && strings.TrimSpace(followUpArtifactID) == "" && strings.TrimSpace(toolTemplate) == ""
 	targetedAgent, targetedAgentMode, targetedAgentWork := app.strideTargetedAgentWorkRequest(thread, text, files, replyTo)
-	deferAttachmentDerivation := plainCoworkerThreadReply || (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout && !targetedAgentWork)
+	addressedAgent := targetedAgent
+	addressedAgentResolved := targetedAgentWork
+	if !addressedAgentResolved && coworkerProfileAvailable {
+		addressedAgent = coworkerProfile
+		addressedAgentResolved = true
+	}
+	visibleWorkerName := scoutParticipantName
+	if addressedAgentResolved && strings.TrimSpace(addressedAgent.DisplayName) != "" {
+		visibleWorkerName = addressedAgent.DisplayName
+	}
+	deferAttachmentDerivation := (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout && !targetedAgentWork)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -1206,6 +1487,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		CreatedAt:                     now.Format(time.RFC3339Nano),
 		AuthorName:                    scoutChatAuthorName(user),
 		AuthorEmail:                   normalizeAccountEmail(user.Email),
+		SourceOperationID:             turnOperation.ID,
+		SourceOperationDigest:         turnOperation.BodyDigest,
 		Files:                         files,
 		ReplyTo:                       replyTo,
 		attachmentDestinationRevision: attachmentDestinationRevision,
@@ -1241,7 +1524,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				messages[index].CausedByMessageID = userMessage.ID
 			}
 		}
-		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
+		saved, err := app.commitScoutChatThreadMessagesWithContext(ctx, user.Email, threadID, messages...)
 		if err == nil {
 			attachmentCommitted = true
 		}
@@ -1273,13 +1556,20 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			copy := *userMessage.ReplyTo
 			replyTo = &copy
 		}
+		pendingID := fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+		if turnOperation.ID != "" {
+			pendingID = "scout-chat-message-image-" + sha256Hex([]byte("conversation-image/v1\x00" + userMessage.ID + "\x00" + prompt))[:24]
+		}
 		pending := scoutChatMessageRecord{
-			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:      scoutChatMessageKindImagePending,
-			Role:      "scout",
-			Text:      "generating image…",
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			ReplyTo:   replyTo,
+			ID:                pendingID,
+			Kind:              scoutChatMessageKindImagePending,
+			Role:              "scout",
+			AuthorName:        visibleWorkerName,
+			IntentOutcome:     string(conversationIntentStartPrivateWork),
+			CausedByMessageID: userMessage.ID,
+			Text:              "generating image…",
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+			ReplyTo:           replyTo,
 			ImageGeneration: &scoutChatImageGenerationState{
 				Status:           scoutChatImageGenerationStatusGenerating,
 				Phase:            scoutChatImagePhaseQueued,
@@ -1302,11 +1592,21 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// Scout, a legacy launcher, attachment derivation, or any provider. E10 is
 	// the only wave allowed to admit an active, explicitly unfenced seat.
 	if coworkerProviderFenced && !coworkerResearchBridge {
-		saved, commitErr := commitUserMessage(userMessage)
+		name := firstNonEmptyString(strings.TrimSpace(coworkerProfile.DisplayName), "That agent")
+		unavailable := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+			AuthorName: name, IntentOutcome: string(conversationIntentUnavailable), CausedByMessageID: userMessage.ID,
+			Text:      name + " is unavailable for this turn because the assigned provider seat is not qualified. Nothing else was launched.",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, commitErr := commitUserMessage(userMessage, unavailable)
 		if commitErr != nil {
 			return nil, commitErr
 		}
+		response["answer"] = unavailable
 		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentUnavailable)
+		response["unavailable"] = map[string]any{"code": "agent_provider_unqualified", "message": unavailable.Text}
 		response["providerCalls"] = 0
 		response["providerExecutionFenced"] = true
 		return response, nil
@@ -1326,24 +1626,6 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return result, intakeErr
 	}
 
-	// The desktop context rail is a nested side conversation, not an implicit
-	// work launcher. A plain reply in a direct coworker thread persists with its
-	// immutable reply ancestry and stops here. Explicit artifact follow-up and
-	// tool-template controls still take their dedicated launch paths below.
-	// This boundary prevents acknowledgements, corrections, and comments from
-	// being misclassified as a fresh Colton research objective.
-	if plainCoworkerThreadReply {
-		saved, commitErr := commitUserMessage(userMessage)
-		if commitErr != nil {
-			return nil, commitErr
-		}
-		response["thread"] = saved
-		response["providerCalls"] = 0
-		response["providerExecutionFenced"] = true
-		response["routing"] = "thread_reply_only"
-		return response, nil
-	}
-
 	// File-dependent asks have a deterministic admission boundary. Seeing a
 	// filename is not the same as reading its contents: before Scout can answer,
 	// propose, or launch anything, resolve the current/recent attachment against
@@ -1356,6 +1638,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
 		if sourceNeed.Required && sourceNeed.Missing {
 			assistantMessage := scoutChatMissingSourceResponse(sourceNeed)
+			assistantMessage.IntentOutcome = string(conversationIntentUnavailable)
 			if coworkerResearchBridge {
 				assistantMessage.AuthorName = coworkerProfile.DisplayName
 			}
@@ -1367,75 +1650,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			response["answer"] = assistantMessage
 			response["thread"] = saved
 			response["dependencyRequired"] = true
+			response["intentOutcome"] = string(conversationIntentUnavailable)
 			response["providerCalls"] = 0
 			return response, nil
 		}
 		ctx = withAssistantContextRefs(ctx, sourceNeed.ContextRefs)
-	}
-
-	// A hired research coworker's model seat remains provider-fenced, but an
-	// explicit message in that coworker's private thread may use Scout's already
-	// approved read-only research runner. The persisted profile controls voice,
-	// identity, and active human-reviewed learning; the bridge grants no broader
-	// file, channel, provider-session, or external-write authority.
-	if coworkerResearchBridge {
-		if directResearchRequestNeedsInput(text, files, sourceNeed.ContextRefs) {
-			assistantMessage := scoutChatResearchInputRequest(coworkerProfile, time.Now().UTC())
-			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
-			if commitErr != nil {
-				return nil, commitErr
-			}
-			response["answer"] = assistantMessage
-			response["thread"] = saved
-			response["missingInput"] = true
-			response["dependencyRequired"] = true
-			response["providerCalls"] = 0
-			response["providerExecutionFenced"] = true
-			return response, nil
-		}
-		fileObjective := ""
-		if len(files) > 0 {
-			fileObjective = "Research " + firstNonBlank(strings.TrimSpace(files[0].Name), "the attached file")
-		}
-		objective := firstNonEmptyString(strings.TrimSpace(text), fileObjective, coworkerProfile.DisplayName+" research request")
-		spec := agentThreadGoalSpecForProfile(coworkerProfile, "")
-		spec.Objective = objective
-		spec.ToolTemplate = "deep_research"
-		spec.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
-		spec.OriginSurface = "chat:" + threadID
-		spec.RequestedBy = normalizeAccountEmail(user.Email)
-		spec.Authority = toolAuthorityReadOnly
-		agentThread, launchErr := app.launchAgentThreadWithSpec("research", objective, user.Name, map[string]string{
-			"originKind":  agentThreadOriginPrivateThread,
-			"originId":    threadID,
-			"requestedBy": normalizeAccountEmail(user.Email),
-		}, spec)
-		if launchErr != nil {
-			if _, commitErr := commitUserMessage(userMessage); commitErr != nil {
-				return nil, commitErr
-			}
-			return nil, launchErr
-		}
-		assistantMessage := scoutChatMessageRecord{
-			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "thread", Role: "scout",
-			AuthorName: coworkerProfile.DisplayName,
-			Text:       "I’m on it — I’m starting the research now, and I’ll bring the finished brief back here.",
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-			Thread:     scoutChatThreadRefForAgent(agentThread, coworkerProfile, ""),
-		}
-		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
-		if commitErr != nil {
-			return nil, commitErr
-		}
-		response["answer"] = assistantMessage
-		response["thread"] = saved
-		response["agentThread"] = agentThread
-		response["artifact"] = agentThread.Artifact
-		response["actions"] = agentThread.Actions
-		response["providerCalls"] = 0
-		response["providerExecutionFenced"] = true
-		response["executionBridge"] = "scout_read_only_research_runner"
-		return response, nil
 	}
 
 	// A follow-up reply re-runs an existing agent-thread artifact in place
@@ -1461,6 +1680,36 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		if err := app.artifactFollowUpRouteError(artifact); err != nil {
 			return nil, err
 		}
+		var followUpBinding *conversationFollowUpBinding
+		if turnOperation.ID != "" {
+			binding, bindingErr := newConversationFollowUpBinding(turnOperation, userMessage.ID, thread.ID, user.Email, artifact.ID)
+			if bindingErr != nil {
+				return nil, bindingErr
+			}
+			followUpBinding = &binding
+			if existing, found, lookupErr := app.conversationFollowUpForOperation(ctx, user, thread, binding); lookupErr != nil {
+				return nil, lookupErr
+			} else if found {
+				saved, refErr := app.commitScoutChatThreadArtifactRef(user.Email, threadID, app.scoutChatArtifactRefMessage(artifact))
+				if refErr != nil {
+					return nil, refErr
+				}
+				thread = saved
+				statusMessage := conversationFollowUpStatusMessage(userMessage, existing)
+				saved, commitErr := commitUserMessage(userMessage, statusMessage)
+				if commitErr != nil {
+					return nil, commitErr
+				}
+				response["answer"] = statusMessage
+				response["thread"] = saved
+				response["agentThread"] = existing
+				response["artifact"] = existing.Artifact
+				response["actions"] = existing.Actions
+				response["intentOutcome"] = string(conversationIntentStartPrivateWork)
+				response["reconciled"] = true
+				return response, nil
+			}
+		}
 		saved, err := app.commitScoutChatThreadArtifactRef(user.Email, threadID, app.scoutChatArtifactRefMessage(artifact))
 		if err != nil {
 			return nil, err
@@ -1470,7 +1719,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// Unattached channel messages posted after the last run become worker
 		// context alongside the explicit reply.
 		teamReplies := scoutChatRepliesSince(thread, completedAt)
-		agentThread, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(ctx, user, artifact, text, user.Name, teamReplies, thread, files, attachmentReservationID)
+		agentThread, err := app.dispatchAuthorizedArtifactFollowUpWithConversationOperation(ctx, user, artifact, text, user.Name, teamReplies, thread, files, attachmentReservationID, followUpBinding)
 		if err != nil {
 			// The reply is a real team answer even when the run cannot launch
 			// (e.g. a second teammate answering while a follow-up is already in
@@ -1494,12 +1743,19 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			version := firstNonEmptyString(strings.TrimSpace(agentThread.Artifact.Metadata["threadVersion"]), "2")
 			statusText = assistantToolLabel(agentThread.Mode) + " follow-up v" + version + " running — the card above will update"
 		}
+		statusMessageID := fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+		if turnOperation.ID != "" {
+			statusMessageID = "scout-chat-message-followup-" + sha256Hex([]byte(userMessage.ID + "\x00" + agentThread.Artifact.ID))[:24]
+		}
 		statusMessage := scoutChatMessageRecord{
-			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:      "message",
-			Role:      "scout",
-			Text:      statusText,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ID: statusMessageID, Kind: "message", Role: "scout",
+			IntentOutcome: string(conversationIntentStartPrivateWork), CausedByMessageID: userMessage.ID,
+			Text: statusText, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if conversationFollowUpBeforeCardCommitProbe != nil {
+			if probeErr := conversationFollowUpBeforeCardCommitProbe(agentThread); probeErr != nil {
+				return nil, fmt.Errorf("work launched but its chat projection needs reconciliation: %w", probeErr)
+			}
 		}
 		saved, err = commitUserMessage(userMessage, statusMessage)
 		if err != nil {
@@ -1510,6 +1766,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["agentThread"] = agentThread
 		response["artifact"] = agentThread.Artifact
 		response["actions"] = agentThread.Actions
+		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
 		return response, nil
 	}
 
@@ -1692,12 +1949,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if boardIntent := scoutChatBoardIntent(text); boardIntent != "" {
 		boardAction, replyText := app.scoutChatBoardActionForIntent(boardIntent)
 		assistantMessage := scoutChatMessageRecord{
-			ID:         fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:       "message",
-			Role:       "scout",
-			AuthorName: scoutParticipantName,
-			Text:       replyText,
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:              "message",
+			Role:              "scout",
+			AuthorName:        scoutParticipantName,
+			IntentOutcome:     string(conversationIntentConversationalReply),
+			CausedByMessageID: userMessage.ID,
+			Text:              replyText,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
 		if commitErr != nil {
@@ -1708,11 +1967,28 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["boardAction"] = boardAction
 		response["providerCalls"] = 0
 		response["providerExecutionFenced"] = true
+		response["intentOutcome"] = string(conversationIntentConversationalReply)
 		return response, nil
 	}
 
-	if richResponse, handled, richErr := app.handleExplicitSTRIDEScoutChatRichAction(ctx, user, thread, userMessage, commitUserMessage); handled {
-		return richResponse, richErr
+	if _, explicitRichAction := app.planExplicitSTRIDEScoutChatRichAction(ctx, user, thread, userMessage); explicitRichAction {
+		unavailable := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+			AuthorName: scoutParticipantName, IntentOutcome: string(conversationIntentUnavailable), CausedByMessageID: userMessage.ID,
+			Text:      "That channel action is unavailable until its governed tool contract is individually admitted. Nothing was posted.",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, commitErr := commitUserMessage(userMessage, unavailable)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = unavailable
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentUnavailable)
+		response["unavailable"] = map[string]any{"code": "tool_unadmitted", "message": unavailable.Text}
+		response["providerCalls"] = 0
+		response["providerExecutionFenced"] = true
+		return response, nil
 	}
 
 	intentQuery := scoutChatMessageModelText(userMessage)
@@ -1726,11 +2002,73 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// channels; public human conversation still bypasses this function above.
 	// Only the execution receipt earns completion language—ordinary app controls
 	// never become a Codex proposal, goal, or worker artifact.
-	var routedVerdict *scoutRouterVerdict
-	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || (scoutEngaged && (scoutMessageMayRequestNativeAction(text) || scoutChatImageRequestDetected(text))) {
-		routedVerdict = app.routeScoutChatTurnWithIntent(ctx, modelQuery, intentQuery, history)
+	modality := conversationTurnModalityFromContext(ctx)
+	addressedAgentID := ""
+	if addressedAgentResolved {
+		modality = conversationModalityDirectAgentChat
+		addressedAgentID = addressedAgent.AgentID
 	}
-	if routedVerdict != nil && routedVerdict.action != nil {
+	ownedPublicSuggestion := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
+		app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() &&
+		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork
+	routedIntent := conversationalReplyDecision(proposalSourceDeterministicGuard)
+	// A public addressed-agent work mention is governed by the existing
+	// channel/audience confirmation policy below. It still produces exactly one
+	// approval_required outcome, but it must not depend on a private classifier
+	// call before that deterministic public boundary can be enforced.
+	if !ownedPublicSuggestion && !targetedAgentWork {
+		intentText := strings.TrimSpace(text)
+		if intentText == "" {
+			intentText = intentQuery
+		}
+		intentTurn := conversationIntentTurn{
+			Text: intentText, AttachmentsContext: conversationAttachmentContext(files), ReplyContext: conversationReplyContext(replyTo),
+			Modality: modality, AddressedAgentID: addressedAgentID,
+			ClarificationAlreadyAsked: scoutChatClarificationAlreadyAsked(thread),
+		}
+		routerInput, inputErr := conversationIntentModelText(intentTurn)
+		if inputErr != nil {
+			routedIntent = unavailableConversationDecision("invalid_turn", inputErr.Error(), proposalSourceChatRouter)
+		} else {
+			routedIntent = app.routeConversationIntentWithInput(ctx, routerInput, intentTurn, history)
+		}
+	}
+	if addressedAgentResolved {
+		bindAddressedWork := func(work *conversationWorkDecision) bool {
+			if work == nil || work.Kind != conversationWorkWorkstream {
+				return false
+			}
+			if _, eligible := app.strideAgentContextForChatWork(addressedAgent.AgentID, thread, work.Mode); !eligible {
+				return false
+			}
+			work.AgentID = addressedAgent.AgentID
+			work.AgentName = addressedAgent.DisplayName
+			return true
+		}
+		switch routedIntent.Outcome {
+		case conversationIntentStartPrivateWork:
+			if !bindAddressedWork(routedIntent.Work) {
+				routedIntent = unavailableConversationDecision("agent_capability_unavailable", "That agent is not admitted for this work. Ask Scout to coordinate it or choose work that matches the agent's current capability.", proposalSourceChatRouter)
+			}
+		case conversationIntentApprovalRequired:
+			if routedIntent.Approval == nil || !bindAddressedWork(routedIntent.Approval.Work) {
+				routedIntent = unavailableConversationDecision("agent_capability_unavailable", "That agent is not admitted for this work. Ask Scout to coordinate it or choose work that matches the agent's current capability.", proposalSourceChatRouter)
+			}
+		}
+	}
+	// Work requested from a public/channel surface is never silently converted
+	// into a private launch. Preserve channel mention policy and hold the exact
+	// server-minted work at an audience-expansion confirmation boundary.
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
+		work := *routedIntent.Work
+		routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
+			EffectClass: "expanded_audience",
+			Summary:     "This channel request needs approval before Scout starts the held work.",
+			Work:        &work,
+		}, Source: routedIntent.Source}
+	}
+	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
+	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {
 		result, changed, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
 		answerText := ""
 		if actionErr != nil {
@@ -1742,12 +2080,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			}
 		}
 		assistantMessage := scoutChatMessageRecord{
-			ID:         fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:       "message",
-			Role:       "scout",
-			AuthorName: scoutParticipantName,
-			Text:       answerText,
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:              "message",
+			Role:              "scout",
+			AuthorName:        scoutParticipantName,
+			IntentOutcome:     string(conversationIntentApprovalRequired),
+			CausedByMessageID: userMessage.ID,
+			Text:              answerText,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
 		if commitErr != nil {
@@ -1756,6 +2096,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["answer"] = assistantMessage
 		response["thread"] = saved
 		response["nativeAction"] = map[string]any{"id": routedVerdict.action.ToolID, "ok": actionErr == nil, "receipt": result}
+		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
 		if result != nil {
 			response["actions"] = result["actions"]
 		}
@@ -1770,7 +2111,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// A model-routed image proposal is an execution instruction after the hidden
 	// prompt-optimization step, not a user-facing proposal card. This runs for a
 	// private Scout feed and for an explicit @Scout request in a public channel.
-	if routedVerdict != nil && routedVerdict.proposal != nil &&
+	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.proposal != nil &&
 		strings.EqualFold(strings.TrimSpace(routedVerdict.proposal.Kind), scoutRouterProposalKindImage) {
 		pending, saved, imageErr := startDirectImage(routedVerdict.proposal)
 		if imageErr != nil {
@@ -1785,6 +2126,71 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// The synchronous prompt-optimization router already made one provider
 		// call. The image call is asynchronous and records its own usage receipt.
 		response["providerCalls"] = 1
+		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
+		return response, nil
+	}
+
+	if routedIntent.Outcome == conversationIntentUnavailable && routedIntent.Unavailable != nil {
+		assistantMessage := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+			Text: routedIntent.Unavailable.Message, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = assistantMessage
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentUnavailable)
+		response["unavailable"] = map[string]any{"code": routedIntent.Unavailable.Code, "message": routedIntent.Unavailable.Message}
+		response["providerCalls"] = providerCallCounter.Calls
+		return response, nil
+	}
+
+	if routedIntent.Outcome == conversationIntentClarifyOnce {
+		choices := &scoutChatChoices{Question: routedIntent.Question, Options: routedIntent.Options, Query: intentQuery}
+		choicesMessage := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindChoices, Role: "scout",
+			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentClarifyOnce), Text: choices.Question,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Choices: choices,
+		}
+		saved, commitErr := commitUserMessage(userMessage, choicesMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = choicesMessage
+		response["choices"] = choices
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentClarifyOnce)
+		return response, nil
+	}
+
+	if routedIntent.Outcome == conversationIntentApprovalRequired && routedIntent.Approval != nil {
+		heldWork := *routedIntent.Approval.Work
+		heldWork.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
+		routedIntent.Approval.Work = &heldWork
+		proposal, proposalErr := scoutApprovalProposal(routedIntent, intentQuery)
+		if proposalErr != nil {
+			return nil, proposalErr
+		}
+		proposalMessage := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindProposal, Role: "scout",
+			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentApprovalRequired), Text: proposal.Summary,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Proposal: proposal,
+		}
+		saved, commitErr := commitUserMessage(userMessage, proposalMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		recordProposalEvent(proposalEventMinted, proposalMessage.ID, scoutChatProposalMintFields(
+			firstNonEmptyString(routedIntent.Source, proposalSourceChatRouter), threadID, userMessage.ID, proposal,
+		))
+		response["answer"] = proposalMessage
+		response["proposal"] = proposal
+		response["thread"] = saved
+		response["approvalRequired"] = true
+		response["intentOutcome"] = string(conversationIntentApprovalRequired)
 		return response, nil
 	}
 
@@ -1828,6 +2234,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["suggestion"] = suggestion
 		response["approvalRequired"] = true
 		response["providerCalls"] = 0
+		response["intentOutcome"] = string(conversationIntentApprovalRequired)
 		return response, nil
 	}
 
@@ -1848,34 +2255,37 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if mode == "" && sourceNeed.Required && sourceNeed.Work && len(sourceNeed.ContextRefs) > 0 {
 		mode = "research"
 	}
-	if mode != "" {
+	if mode != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		requestText := strings.TrimSpace(text)
 		objective := polishedWorkstreamObjective(requestText)
 		if targetedAgentWork && replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
 			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
 		}
 		proposal := &scoutRouterProposal{
-			Kind:        scoutRouterProposalKindWorkstream,
-			Mode:        mode,
-			AgentID:     targetedAgent.AgentID,
-			AgentName:   targetedAgent.DisplayName,
-			Objective:   objective,
-			Query:       requestText,
-			ContextRefs: encodeAssistantContextRefs(sourceNeed.ContextRefs),
-			Lane:        scoutProposalLane(mode, "", ""),
-			WeightLabel: scoutProposalWeightQuickPass,
-			Summary:     "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
+			Kind:          scoutRouterProposalKindWorkstream,
+			IntentOutcome: string(conversationIntentApprovalRequired),
+			EffectClass:   "expanded_audience",
+			Mode:          mode,
+			AgentID:       targetedAgent.AgentID,
+			AgentName:     targetedAgent.DisplayName,
+			Objective:     objective,
+			Query:         requestText,
+			ContextRefs:   encodeAssistantContextRefs(sourceNeed.ContextRefs),
+			Lane:          scoutProposalLane(mode, "", ""),
+			WeightLabel:   scoutProposalWeightQuickPass,
+			Summary:       "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
 		}
 		if targetedAgentWork {
 			proposal.Summary = "Scout prepared a bounded prompt for " + targetedAgent.DisplayName + ". Review or edit it before this runs once."
 		}
 		proposalMessage := scoutChatMessageRecord{
-			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:      scoutChatMessageKindProposal,
-			Role:      "scout",
-			Text:      proposal.Summary,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Proposal:  proposal,
+			ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:          scoutChatMessageKindProposal,
+			Role:          "scout",
+			IntentOutcome: string(conversationIntentApprovalRequired),
+			Text:          proposal.Summary,
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			Proposal:      proposal,
 		}
 		saved, err := commitUserMessage(userMessage, proposalMessage)
 		if err != nil {
@@ -1892,6 +2302,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["thread"] = saved
 		response["approvalRequired"] = true
 		response["providerCalls"] = 0
+		response["intentOutcome"] = string(conversationIntentApprovalRequired)
 		return response, nil
 	}
 
@@ -1907,60 +2318,44 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		modelQuery = app.prepareSTRIDECoworkerModelQuery(user, thread, userMessage, modelQuery)
 	}
 
-	// One routing turn for private threads (the typed twin of voice
-	// initiate_goal): the router may PROPOSE a tool run or a workstream, or
-	// ASK one clarifying question with quick-reply pills — both are DATA
-	// committed on the reply, NEVER a launch. The user's explicit confirm
-	// posts the identical spec the palette Run posts (POST /assistant/goal
-	// for tool runs, the proposal route for workstreams); a pill tap goes
-	// through the choice route, which at most ARMS a proposal card. Keyless
-	// deploys skip the turn inside routeScoutChatTurn and keep plain Q&A.
+	// The shared router has already returned exactly one outcome. Safe private
+	// work starts here from the server-owned work contract; no tool picker or
+	// second acceptance card sits between the request and its truthful work card.
 	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
-		if verdict := routedVerdict; verdict != nil {
-			if proposal := verdict.proposal; proposal != nil {
-				proposal.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
-				proposalMessage := scoutChatMessageRecord{
-					ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-					Kind:      scoutChatMessageKindProposal,
-					Role:      "scout",
-					Text:      proposal.Summary,
+		if routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
+			work := *routedIntent.Work
+			if addressedAgentResolved {
+				work.AgentID = addressedAgent.AgentID
+				work.AgentName = addressedAgent.DisplayName
+			}
+			reservedThread, reserveErr := commitUserMessage(userMessage)
+			if reserveErr != nil {
+				return nil, reserveErr
+			}
+			response["thread"] = reservedThread
+			launched, launchErr := app.startConversationPrivateWork(ctx, user, thread, userMessage, work, encodeAssistantContextRefs(sourceNeed.ContextRefs), routedIntent.Source, commitUserMessage)
+			if launchErr != nil {
+				var projectionPending *conversationWorkProjectionPendingError
+				if errors.As(launchErr, &projectionPending) {
+					return nil, launchErr
+				}
+				unavailable := scoutChatMessageRecord{
+					ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+					AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+					Text:      "I couldn't start that work safely: " + launchErr.Error() + ". Nothing else was launched.",
 					CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-					Proposal:  proposal,
 				}
-				saved, err := commitUserMessage(userMessage, proposalMessage)
-				if err != nil {
-					return nil, err
+				saved, commitErr := commitUserMessage(unavailable)
+				if commitErr != nil {
+					return nil, commitErr
 				}
-				// W0 item 7: one minted event per PERSISTED card, with message
-				// lineage — the proposal_id is the card's message id, which the
-				// resolve route later joins on. Source is the verdict's
-				// provenance stamp (chat_router or deterministic_guard).
-				recordProposalEvent(proposalEventMinted, proposalMessage.ID, scoutChatProposalMintFields(
-					verdict.source, threadID, userMessage.ID, proposal,
-				))
-				response["answer"] = proposalMessage
-				response["proposal"] = proposal
+				response["answer"] = unavailable
 				response["thread"] = saved
+				response["intentOutcome"] = string(conversationIntentUnavailable)
+				response["unavailable"] = map[string]any{"code": "launch_unavailable", "message": unavailable.Text}
 				return response, nil
 			}
-			if choices := verdict.choices; choices != nil {
-				choicesMessage := scoutChatMessageRecord{
-					ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-					Kind:      scoutChatMessageKindChoices,
-					Role:      "scout",
-					Text:      choices.Question,
-					CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-					Choices:   choices,
-				}
-				saved, err := commitUserMessage(userMessage, choicesMessage)
-				if err != nil {
-					return nil, err
-				}
-				response["answer"] = choicesMessage
-				response["choices"] = choices
-				response["thread"] = saved
-				return response, nil
-			}
+			return launched, nil
 		}
 		modelQuery = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, modelQuery)
 	}
@@ -1986,15 +2381,24 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	result, err := app.resolveAssistantQueryContextForUserWithAttachments(answerContext, user.Email, modelQuery, history, openAIAttachments)
 	if err != nil {
-		errorMessage := scoutChatMessageRecord{
-			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:      "message",
-			Role:      "error",
-			Text:      err.Error(),
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		unavailableMessage := scoutChatMessageRecord{
+			ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:          "message",
+			Role:          "scout",
+			AuthorName:    visibleWorkerName,
+			IntentOutcome: string(conversationIntentUnavailable),
+			Text:          "I couldn't answer safely right now. Your message is saved, and nothing else was launched.",
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		_, _ = commitUserMessage(userMessage, errorMessage)
-		return nil, err
+		saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = unavailableMessage
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentUnavailable)
+		response["unavailable"] = map[string]any{"code": "answer_unavailable", "message": unavailableMessage.Text}
+		return response, nil
 	}
 	answer := strings.TrimSpace(result.answer)
 	if replyTargetsScout && answer == scoutDirectReplyNoResponseMarker {
@@ -2005,17 +2409,20 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["thread"] = saved
 		response["scoutRead"] = true
 		response["scoutResponded"] = false
+		response["intentOutcome"] = string(conversationIntentConversationalReply)
 		return response, nil
 	}
 	if answer == "" {
 		answer = "no answer yet"
 	}
 	assistantMessage := scoutChatMessageRecord{
-		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-		Kind:      "message",
-		Role:      "scout",
-		Text:      answer,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+		Kind:          "message",
+		Role:          "scout",
+		AuthorName:    visibleWorkerName,
+		IntentOutcome: string(conversationIntentConversationalReply),
+		Text:          answer,
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		// Ask-the-thread citations. Grounded by provable quotation against the
 		// thread's own messages, never by "it was in my context window" — an
 		// answer that quotes nothing carries no chips, visibly, rather than
@@ -2029,6 +2436,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	app.maybeRecordScoutAgentMindPosition(saved, userMessage, assistantMessage)
 	response["answer"] = assistantMessage
 	response["thread"] = saved
+	response["intentOutcome"] = string(conversationIntentConversationalReply)
 	return response, nil
 }
 
@@ -2222,14 +2630,24 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 		return nil, false, nil
 	}
 	accepted := false
+	var acceptedProposal scoutRouterProposal
+	var acceptedReplyTo *scoutChatReplyRef
+	var acceptedSource scoutChatSourceBinding
 	var workMessage scoutChatMessageRecord
 	workMatches := 0
 	for _, message := range thread.Messages {
 		if message.ID == proposalMessageID && message.Proposal != nil && message.Proposal.Status == "accepted" {
-			if !strings.EqualFold(strings.TrimSpace(message.Proposal.Kind), scoutRouterProposalKindWorkstream) {
-				return nil, false, nil
-			}
 			accepted = true
+			acceptedProposal = *message.Proposal
+			if message.ReplyTo != nil {
+				copy := *message.ReplyTo
+				acceptedReplyTo = &copy
+			}
+			_, source, sourceErr := scoutChatSourceWindow(thread, message.CausedByMessageID)
+			if sourceErr != nil {
+				return nil, true, sourceErr
+			}
+			acceptedSource = source
 		}
 		if message.CausedByMessageID == proposalMessageID && message.Kind == "thread" && message.Thread != nil {
 			workMessage = message
@@ -2238,6 +2656,73 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 	}
 	if !accepted {
 		return nil, false, nil
+	}
+	if acceptedProposal.IntentOutcome != string(conversationIntentApprovalRequired) &&
+		!strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) {
+		return nil, false, nil
+	}
+	if workMatches > 1 {
+		return nil, true, fmt.Errorf("accepted work projection is ambiguous")
+	}
+	if workMatches == 0 && strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		response, resumeErr := app.startAcceptedPublicScoutWorkstream(context.Background(), user, thread, proposalMessageID, acceptedProposal, acceptedReplyTo, acceptedSource)
+		if resumeErr != nil {
+			return nil, true, resumeErr
+		}
+		response["reconciled"] = true
+		return response, true, nil
+	}
+	if workMatches == 0 && scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate &&
+		(strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) ||
+			(acceptedProposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
+				(strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindToolRun) ||
+					strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindGoalRun)))) {
+		operation, operationErr := conversationApprovedWorkOperation(threadID, user.Email, proposalMessageID, acceptedProposal)
+		if operationErr != nil {
+			return nil, true, operationErr
+		}
+		launched, found, launchLookupErr := app.conversationWorkForOperation(user.Email, threadID, operation)
+		if launchLookupErr != nil {
+			return nil, true, launchLookupErr
+		}
+		if found {
+			proposalMessage := scoutChatMessageRecord{ID: proposalMessageID}
+			workMessage = conversationWorkReplayCard(proposalMessage, launched)
+			if acceptedProposal.AgentID != "" && acceptedProposal.AgentName != "" {
+				workMessage.AuthorName = acceptedProposal.AgentName
+				workMessage.Thread = scoutChatThreadRefForAgent(launched, STRIDEProductAgentContextProfile{AgentID: acceptedProposal.AgentID, DisplayName: acceptedProposal.AgentName}, "")
+			}
+			thread, err = app.commitScoutChatThreadMessages(user.Email, threadID, workMessage)
+			if err != nil {
+				return nil, true, &conversationWorkProjectionPendingError{err: err}
+			}
+			workMatches = 1
+		} else {
+			work, workErr := conversationWorkFromScoutProposal(&acceptedProposal)
+			if workErr != nil {
+				return nil, true, workErr
+			}
+			if acceptedProposal.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(acceptedProposal.EffectClass) != "" {
+				work.ApprovedProposalID = proposalMessageID
+				work.ApprovedEffectClass = strings.TrimSpace(acceptedProposal.EffectClass)
+			}
+			proposalMessage := scoutChatMessageRecord{
+				ID: proposalMessageID, Kind: scoutChatMessageKindProposal, Role: "scout",
+				IntentOutcome: string(conversationIntentApprovalRequired),
+			}
+			response, resumeErr := app.startConversationPrivateWork(
+				withConversationTurnOperation(context.Background(), operation), user, thread, proposalMessage, work,
+				acceptedProposal.ContextRefs, proposalSourceChatRouter,
+				func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+					return app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
+				},
+			)
+			if resumeErr != nil {
+				return nil, true, resumeErr
+			}
+			response["reconciled"] = true
+			return response, true, nil
+		}
 	}
 	if workMatches != 1 || workMessage.Thread == nil {
 		return nil, true, fmt.Errorf("accepted work projection is unavailable")
@@ -2256,9 +2741,14 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 	if !ok {
 		return nil, true, fmt.Errorf("accepted work artifact is unavailable")
 	}
+	work := scoutAgentThread{
+		ID: workMessage.Thread.ID, Mode: workMessage.Thread.Mode, Query: workMessage.Thread.Query,
+		Status: workMessage.Thread.Status, Artifact: artifact,
+	}
+	work.Actions = app.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind), artifact)
 	return map[string]any{
 		"ok": true, "answer": workMessage, "thread": current, "artifact": artifact,
-		"actions":    app.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind), artifact),
+		"agentThread": work, "actions": work.Actions,
 		"reconciled": true,
 	}, true, nil
 }
@@ -2274,6 +2764,11 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	if messageID == "" {
 		return nil, fmt.Errorf("proposal message id is required")
 	}
+	if verb == "accepted" {
+		operationLock := app.scoutChatThreadLock("proposal-operation-" + sha256Hex([]byte(normalizeAccountEmail(user.Email) + "\x00" + threadID + "\x00" + messageID))[:24])
+		operationLock.Lock()
+		defer operationLock.Unlock()
+	}
 	// Source-bound work fails before the card is claimed if its exact Files or
 	// chat attachment has disappeared or lost readable content. This keeps the
 	// proposal pending so the user can restore the source and retry.
@@ -2285,6 +2780,33 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			}
 		}
 		return nil, err
+	}
+	acceptedObjective := strings.TrimSpace(pending.Objective)
+	exactApproval := pending.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(pending.EffectClass) != ""
+	if verb == "accepted" {
+		requestedObjective := trimForStorage(action.Objective, 4000)
+		if exactApproval && requestedObjective != "" && requestedObjective != acceptedObjective {
+			return nil, fmt.Errorf("the approved request changed; send the revised objective as a new message so Stride can classify and approve its exact effect")
+		}
+		if !exactApproval {
+			acceptedObjective = firstNonBlank(requestedObjective, acceptedObjective)
+		}
+		pending.Objective = acceptedObjective
+		if pending.IntentOutcome == string(conversationIntentApprovalRequired) && strings.EqualFold(strings.TrimSpace(pending.Kind), scoutRouterProposalKindNativeAction) {
+			return nil, fmt.Errorf("that native action is unavailable until its governed tool contract is individually admitted")
+		}
+		if exactApproval &&
+			(strings.EqualFold(strings.TrimSpace(pending.Kind), scoutRouterProposalKindToolRun) ||
+				strings.EqualFold(strings.TrimSpace(pending.Kind), scoutRouterProposalKindGoalRun) ||
+				strings.EqualFold(strings.TrimSpace(pending.Kind), scoutRouterProposalKindWorkstream)) {
+			work, workErr := conversationWorkFromScoutProposal(&pending)
+			if workErr != nil {
+				return nil, workErr
+			}
+			if strings.TrimSpace(pending.EffectClass) != "expanded_audience" && !conversationApprovedEffectMatches(work, pending.EffectClass) {
+				return nil, fmt.Errorf("the held approval effect no longer matches the exact request; send it again for a fresh approval")
+			}
+		}
 	}
 	if verb == "accepted" && !app.assistantContextRefsReadable(ctx, user, pending.ContextRefs) {
 		return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
@@ -2298,15 +2820,12 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			return nil, fmt.Errorf("proposal source message is unavailable")
 		}
 	}
-	selectedAgentProfile := STRIDEProductAgentContextProfile{}
-	selectedAgent := false
 	if verb == "accepted" && strings.TrimSpace(pending.AgentID) != "" {
 		proposalThread, _, threadErr := app.scoutChatThreadByID(user.Email, threadID)
 		if threadErr != nil {
 			return nil, threadErr
 		}
-		selectedAgentProfile, selectedAgent = app.strideAgentContextForChatWork(pending.AgentID, proposalThread, pending.Mode)
-		if !selectedAgent {
+		if _, eligible := app.strideAgentContextForChatWork(pending.AgentID, proposalThread, pending.Mode); !eligible {
 			return nil, fmt.Errorf("the selected agent is no longer eligible for this channel or work; update the assignment before confirming")
 		}
 	}
@@ -2314,7 +2833,7 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	// Atomically flip the still-pending card to its verdict and read back the
 	// stored proposal. A message that carries no proposal, or one already
 	// resolved, rejects HERE — before any signal is recorded or launch runs.
-	proposal, err := app.claimScoutChatProposal(threadID, user.Email, messageID, verb)
+	proposal, err := app.claimScoutChatProposal(threadID, user.Email, messageID, verb, acceptedObjective)
 	if err != nil {
 		return nil, err
 	}
@@ -2336,10 +2855,10 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 		"verdict":     resolution,
 		"proposal_id": messageID,
 	})
-	// The objective is the ONE field the card lets the user edit before
-	// confirming, so the request value wins over the stored one; kind, mode,
-	// toolId, and query always ride the stored record.
-	objective := firstNonBlank(strings.TrimSpace(action.Objective), strings.TrimSpace(proposal.Objective))
+	// The accepted objective was atomically written into the persisted proposal
+	// by claimScoutChatProposal. Retries and restarts therefore use the exact
+	// same accepted bytes; kind, mode, toolId, and query also ride that record.
+	objective := strings.TrimSpace(proposal.Objective)
 	app.recordSignalEvent(user.Name, signalEvent, valence, "", "", map[string]string{
 		"toolId":    firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode)),
 		"objective": objective,
@@ -2351,136 +2870,54 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	response := map[string]any{"ok": true}
 
 	if verb == "accepted" {
-		// Tier 1 only: the workstream confirm launches here — exactly the
-		// explicit single-shot path channels use. Tool runs (tool_run) and
-		// free-form goals (goal_run, card 088) launch via POST /assistant/goal
-		// from the card's Run button — a plain goal for goal_run, a
-		// toolTemplate goal for tool_run — so both fall through this switch and
-		// record their signal only; the card's Run stays the single launch door.
+		proposalThread, _, threadErr := app.scoutChatThreadByID(user.Email, threadID)
+		if threadErr != nil {
+			return nil, threadErr
+		}
+		if scoutChatThreadVisibility(proposalThread) == scoutChatVisibilityPrivate &&
+			(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) ||
+				(proposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
+					(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) ||
+						strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun)))) {
+			work, workErr := conversationWorkFromScoutProposal(&proposal)
+			if workErr != nil {
+				return nil, workErr
+			}
+			if proposal.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(proposal.EffectClass) != "" {
+				work.ApprovedProposalID = messageID
+				work.ApprovedEffectClass = strings.TrimSpace(proposal.EffectClass)
+			}
+			operation, operationErr := conversationApprovedWorkOperation(threadID, user.Email, messageID, proposal)
+			if operationErr != nil {
+				return nil, operationErr
+			}
+			launchContext := withConversationTurnOperation(ctx, operation)
+			proposalMessage := scoutChatMessageRecord{
+				ID: messageID, Kind: scoutChatMessageKindProposal, Role: "scout",
+				IntentOutcome: string(conversationIntentApprovalRequired),
+			}
+			return app.startConversationPrivateWork(
+				launchContext, user, proposalThread, proposalMessage, work,
+				proposal.ContextRefs, proposalSourceChatRouter,
+				func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+					return app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
+				},
+			)
+		}
+		if proposal.IntentOutcome == string(conversationIntentApprovalRequired) && strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindNativeAction) {
+			return nil, fmt.Errorf("that native action is unavailable until its governed tool contract is individually admitted")
+		}
+
+		if proposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
+			(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) || strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun)) {
+			return nil, fmt.Errorf("approved public deliverable work is unavailable until its governed audience-bound carrier is individually admitted")
+		}
+
+		// An accepted public-channel workstream uses the audience-bound adapter.
+		// It stamps the proposal-derived operation before provider admission, so
+		// an accepted-card retry reconstructs one run and one channel card.
 		if strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) {
-			mode := strings.ToLower(strings.TrimSpace(proposal.Mode))
-			switch mode {
-			case "research", "design", "grill", "workflow":
-			default:
-				return nil, fmt.Errorf("workstream mode must be research, design, grill, or workflow")
-			}
-			if objective == "" {
-				return nil, fmt.Errorf("workstream objective is required")
-			}
-			// W0 item 7: the confirm turned into a launch on this route (the
-			// workstream path is the one proposal kind THIS handler launches). The
-			// card id + chat_workstream path ride the spec so the single launched
-			// emitter (launchAgentThreadWithSpec's choke point) stamps them — no
-			// second emission here.
-			originKind := agentThreadOriginPrivateThread
-			thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
-			if err != nil {
-				return nil, err
-			}
-			if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-				originKind = agentThreadOriginChannel
-			}
-			if !app.assistantContextRefsReadable(ctx, user, proposal.ContextRefs) {
-				return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
-			}
-			spec := agentThreadGoalSpec{
-				ContextRefs: proposal.ContextRefs,
-				Launch: launchFunnelLineage{
-					ProposalID: messageID,
-					Path:       "chat_workstream",
-				},
-			}
-			if originKind == agentThreadOriginChannel {
-				spec.SourceMessageID = proposalSource.MessageID
-				spec.SourceMessageDigest = proposalSource.MessageDigest
-				spec.SourceWindowDigest = proposalSource.WindowDigest
-			}
-			delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
-			directlyTargeted := selectedAgent && strings.TrimSpace(proposal.AgentID) != ""
-			if directlyTargeted {
-				delegatedProfile, delegated = selectedAgentProfile, true
-				identity := agentThreadGoalSpecForProfile(delegatedProfile, "")
-				identity.ContextRefs = spec.ContextRefs
-				identity.Launch = spec.Launch
-				spec = identity
-			} else if mode == "research" {
-				delegatedProfile, delegated = app.stridePreferredResearchAgentContext()
-				if delegated {
-					identity := agentThreadGoalSpecForProfile(delegatedProfile, scoutParticipantName)
-					identity.ContextRefs = spec.ContextRefs
-					identity.Launch = spec.Launch
-					spec = identity
-				}
-			}
-			// A private-chat confirmation is source authority for a private
-			// deliverable, not merely a return address. Stamp the exact persisted
-			// thread and its current owner after any delegated-agent identity copy so
-			// the artifact authorizer can re-resolve that private topology. Public
-			// channels retain their existing organization/member semantics.
-			if originKind == agentThreadOriginPrivateThread {
-				spec.OriginSurface = "chat:" + thread.ID
-				spec.RequestedBy = normalizeAccountEmail(user.Email)
-				spec.Visibility = scoutChatVisibilityPrivate
-			}
-			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
-				"originKind":  originKind,
-				"originId":    threadID,
-				"requestedBy": normalizeAccountEmail(user.Email),
-			}, spec)
-			if err != nil {
-				return nil, err
-			}
-			assistantMessage := scoutChatMessageRecord{
-				ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:              "thread",
-				Role:              "scout",
-				Text:              assistantToolLabel(mode) + " workstream confirmed — running now",
-				CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-				CausedByMessageID: messageID,
-				ReplyTo:           proposalReplyTo,
-				Thread: &scoutChatThreadRef{
-					ID:         agentThread.ID,
-					Mode:       agentThread.Mode,
-					Query:      agentThread.Query,
-					Status:     agentThread.Status,
-					ArtifactID: agentThread.Artifact.ID,
-				},
-			}
-			if delegated {
-				if directlyTargeted {
-					assistantMessage.AuthorName = delegatedProfile.DisplayName
-					assistantMessage.Text = "I’m on it — the work is running now and I’ll bring the finished result back here"
-					assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, "")
-				} else {
-					assistantMessage.Text = "I tapped " + delegatedProfile.DisplayName + " for this — research is running now and the finished brief will land here"
-					assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, scoutParticipantName)
-				}
-			}
-			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
-			if err != nil {
-				return nil, err
-			}
-			// The worker starts before this card commit. It may already have
-			// persisted a newer running/terminal postimage, so reconcile from the
-			// current artifact rather than leaving the launch snapshot stranded.
-			current, reconcileErr := app.reconcileScoutChatThreadRefAfterCommit(user.Email, threadID, agentThread.ID, agentThread.Artifact.ID)
-			if reconcileErr != nil {
-				return nil, fmt.Errorf("work launched but its chat projection needs reconciliation: %w", reconcileErr)
-			}
-			if current.ID != "" {
-				saved = current
-				for _, currentMessage := range saved.Messages {
-					if currentMessage.ID == assistantMessage.ID {
-						assistantMessage = currentMessage
-						break
-					}
-				}
-			}
-			response["answer"] = assistantMessage
-			response["thread"] = saved
-			response["agentThread"] = agentThread
-			response["artifact"] = agentThread.Artifact
-			response["actions"] = agentThread.Actions
+			return app.startAcceptedPublicScoutWorkstream(ctx, user, proposalThread, messageID, proposal, proposalReplyTo, proposalSource)
 		}
 		// Concept render (card 096): the confirm is the explicit generate. The
 		// image call runs 30-90s, so NEVER inside this HTTP request — commit an
@@ -2829,7 +3266,7 @@ func (app *kanbanBoardApp) pendingScoutChatProposal(threadID string, viewerEmail
 // status — first verdict wins; a replay or double-post rejects), stamps the
 // verdict, persists, and returns a copy of the stored proposal record. The
 // caller acts on that record, never on request-body fields.
-func (app *kanbanBoardApp) claimScoutChatProposal(threadID string, viewerEmail string, messageID string, status string) (scoutRouterProposal, error) {
+func (app *kanbanBoardApp) claimScoutChatProposal(threadID string, viewerEmail string, messageID string, status string, acceptedObjective string) (scoutRouterProposal, error) {
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -2848,6 +3285,13 @@ func (app *kanbanBoardApp) claimScoutChatProposal(threadID string, viewerEmail s
 		}
 		if message.Proposal.Status != "" {
 			return scoutRouterProposal{}, fmt.Errorf("proposal was already %s", message.Proposal.Status)
+		}
+		if status == "accepted" {
+			acceptedObjective = strings.TrimSpace(acceptedObjective)
+			if acceptedObjective == "" {
+				return scoutRouterProposal{}, fmt.Errorf("proposal objective is required")
+			}
+			message.Proposal.Objective = acceptedObjective
 		}
 		message.Proposal.Status = status
 		thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -2909,11 +3353,15 @@ func (app *kanbanBoardApp) updateScoutChatThreadRefs(agentThreadID string, statu
 // artifact state and project that exact status; never replay the launch-time
 // snapshot supplied by the caller.
 func (app *kanbanBoardApp) reconcileScoutChatThreadRefAfterCommit(ownerEmail, threadID, agentThreadID, artifactID string) (scoutChatThreadRecord, error) {
+	return app.reconcileScoutChatThreadRefAfterCommitWithContext(context.Background(), ownerEmail, threadID, agentThreadID, artifactID)
+}
+
+func (app *kanbanBoardApp) reconcileScoutChatThreadRefAfterCommitWithContext(ctx context.Context, ownerEmail, threadID, agentThreadID, artifactID string) (scoutChatThreadRecord, error) {
 	artifact, ok := app.osArtifactByID(strings.TrimSpace(artifactID))
 	if ok {
 		status := strings.ToLower(strings.TrimSpace(agentThreadStatusValue(artifact)))
 		if status != "" {
-			if err := app.commitScoutChatThreadRefStatus(threadID, ownerEmail, agentThreadID, status, artifact.ID); err != nil {
+			if err := app.commitScoutChatThreadRefStatusWithContext(ctx, threadID, ownerEmail, agentThreadID, status, artifact.ID); err != nil {
 				return scoutChatThreadRecord{}, err
 			}
 		}
@@ -2947,6 +3395,16 @@ func scoutChatThreadHasArtifactRef(thread scoutChatThreadRecord, artifactID stri
 }
 
 func scoutChatWorkLabel(metadata map[string]string) string {
+	toolID := firstNonEmptyString(strings.TrimSpace(metadata["processId"]), strings.TrimSpace(metadata["toolTemplate"]))
+	if toolID != "" {
+		fallback := "Work"
+		if process, ok := processByID(toolID); ok {
+			fallback = process.Title
+		} else if tool, ok := toolByID(toolID); ok {
+			fallback = tool.Name
+		}
+		return conversationWorkVisibleLabel(conversationWorkDecision{ToolID: toolID}, fallback)
+	}
 	label := "Work"
 	switch strings.ToLower(strings.TrimSpace(metadata["mode"])) {
 	case "research":
@@ -3187,6 +3645,10 @@ func scoutChatArtifactMatchesDurableProjection(artifact meetingMemoryEntry, ref 
 // matching message ref in one chat thread through the same lock + re-read +
 // save path as commitScoutChatThreadMessages.
 func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, ownerEmail string, agentThreadID string, status string, artifactID string) error {
+	return app.commitScoutChatThreadRefStatusWithContext(context.Background(), threadID, ownerEmail, agentThreadID, status, artifactID)
+}
+
+func (app *kanbanBoardApp) commitScoutChatThreadRefStatusWithContext(ctx context.Context, threadID string, ownerEmail string, agentThreadID string, status string, artifactID string) error {
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -3263,7 +3725,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 		return nil
 	}
 	for _, message := range changed {
-		deliverScoutChatThreadUpdate(thread, message)
+		deliverScoutChatThreadUpdateWithContext(ctx, thread, message)
 	}
 	return nil
 }
@@ -3382,16 +3844,14 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 	refArtifactID := artifact.ID
 	refStatus := firstNonEmptyString(agentThreadStatusValue(artifact), "complete")
 	droppedTitle := firstNonEmptyString(refQuery, "deliverable")
-	if artifact.Metadata["source"] != "scout_thread" {
-		if goalID := artifactGoalParentID(artifact); goalID != "" {
-			refMode = "goal"
-			refID = goalID
-			refArtifactID = goalID
-			if parent, ok := app.osArtifactByID(goalID); ok {
-				refID = firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadId"]), goalID)
-				refQuery = firstNonEmptyString(strings.TrimSpace(parent.Metadata["title"]), refQuery)
-				refStatus = firstNonEmptyString(agentThreadStatusValue(parent), refStatus)
-			}
+	if goalID := artifactGoalParentID(artifact); goalID != "" {
+		refMode = "goal"
+		refID = goalID
+		refArtifactID = goalID
+		if parent, ok := app.osArtifactByID(goalID); ok {
+			refID = firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadId"]), goalID)
+			refQuery = firstNonEmptyString(strings.TrimSpace(parent.Metadata["title"]), refQuery)
+			refStatus = firstNonEmptyString(agentThreadStatusValue(parent), refStatus)
 		}
 	}
 	return scoutChatMessageRecord{
@@ -3417,6 +3877,10 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 // card (renderActiveScoutThread keys cards by artifact id). Returns the saved
 // thread either way.
 func (app *kanbanBoardApp) commitScoutChatThreadArtifactRef(viewerEmail string, threadID string, message scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	return app.commitScoutChatThreadArtifactRefWithContext(context.Background(), viewerEmail, threadID, message)
+}
+
+func (app *kanbanBoardApp) commitScoutChatThreadArtifactRefWithContext(ctx context.Context, viewerEmail string, threadID string, message scoutChatMessageRecord) (scoutChatThreadRecord, error) {
 	if message.Thread == nil || strings.TrimSpace(message.Thread.ArtifactID) == "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("artifact ref message requires a thread ref")
 	}
@@ -3436,7 +3900,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadArtifactRef(viewerEmail string, 
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	deliverScoutChatThreadUpdate(thread, message)
+	deliverScoutChatThreadUpdateWithContext(ctx, thread, message)
 	return thread, nil
 }
 
@@ -3446,6 +3910,10 @@ func (app *kanbanBoardApp) commitScoutChatThreadArtifactRef(viewerEmail string, 
 // store (another writer may have appended while this caller's model call ran),
 // append, and save. Model/agent calls stay outside the lock.
 func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, threadID string, messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	return app.commitScoutChatThreadMessagesWithContext(context.Background(), viewerEmail, threadID, messages...)
+}
+
+func (app *kanbanBoardApp) commitScoutChatThreadMessagesWithContext(ctx context.Context, viewerEmail string, threadID string, messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
 	if len(messages) == 0 {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat thread commit requires a message")
 	}
@@ -3503,7 +3971,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, thr
 	}
 	for _, message := range messages {
 		app.observeSTRIDETeamChatMessage(thread, message, "message", "")
-		deliverScoutChatThreadUpdate(thread, message)
+		deliverScoutChatThreadUpdateWithContext(ctx, thread, message)
 	}
 	app.rebuildPrivateConversationContinuity(thread, "message")
 	return thread, nil
@@ -4741,15 +5209,23 @@ func (app *kanbanBoardApp) broadcastScoutChatThreadUpdate(thread scoutChatThread
 // live route at all — chat_thread broadcasts are public-only and the 12s
 // chat poll skips its fetch while the office socket is up.
 func deliverScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+	deliverScoutChatThreadUpdateWithContext(context.Background(), thread, message)
+}
+
+func deliverScoutChatThreadUpdateWithContext(ctx context.Context, thread scoutChatThreadRecord, message scoutChatMessageRecord) {
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		kanbanApp.broadcastScoutChatThreadUpdate(thread, message)
 		return
 	}
-	kanbanApp.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, message)
+	kanbanApp.sendScoutChatThreadUpdateToViewerWithContext(ctx, thread.OwnerEmail, thread, message)
 }
 
 func (app *kanbanBoardApp) sendScoutChatThreadUpdateToViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) {
-	sendKanbanEventToUser(viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayload(viewerEmail, thread, message))
+	app.sendScoutChatThreadUpdateToViewerWithContext(context.Background(), viewerEmail, thread, message)
+}
+
+func (app *kanbanBoardApp) sendScoutChatThreadUpdateToViewerWithContext(ctx context.Context, viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+	sendKanbanEventToUserWithContext(ctx, viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayload(viewerEmail, thread, message))
 }
 
 // deliverScoutChatThreadDeletion routes a message removal the same way
@@ -5353,7 +5829,11 @@ func updateScoutChatThreadSummary(thread *scoutChatThreadRecord, userMessage sco
 	if strings.TrimSpace(thread.Title) == "" || thread.Title == "Scout" || thread.Title == "New Scout thread" {
 		thread.Title = scoutChatThreadTitle(userMessage)
 	}
-	thread.Preview = firstNonEmptyString(strings.TrimSpace(assistantMessage.Text), scoutChatThreadPreview(*thread))
+	preview := strings.TrimSpace(assistantMessage.Text)
+	if oneOf(assistantMessage.Kind, "work_result", "work_record") && assistantMessage.Work != nil {
+		preview = firstNonEmptyString(strings.TrimSpace(assistantMessage.Work.Summary), strings.TrimSpace(assistantMessage.Work.Title))
+	}
+	thread.Preview = firstNonEmptyString(preview, scoutChatThreadPreview(*thread))
 }
 
 func scoutChatThreadTitle(message scoutChatMessageRecord) string {
@@ -5369,7 +5849,13 @@ func scoutChatThreadTitle(message scoutChatMessageRecord) string {
 
 func scoutChatThreadPreview(thread scoutChatThreadRecord) string {
 	for index := len(thread.Messages) - 1; index >= 0; index-- {
-		if text := strings.TrimSpace(thread.Messages[index].Text); text != "" {
+		message := thread.Messages[index]
+		if oneOf(message.Kind, "work_result", "work_record") && message.Work != nil {
+			if preview := firstNonEmptyString(strings.TrimSpace(message.Work.Summary), strings.TrimSpace(message.Work.Title)); preview != "" {
+				return trimForStorage(preview, 140)
+			}
+		}
+		if text := strings.TrimSpace(message.Text); text != "" {
 			return trimForStorage(text, 140)
 		}
 	}

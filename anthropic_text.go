@@ -7,13 +7,10 @@ import (
 	"strings"
 )
 
-// Chat surfaces migrate to Sonnet 5 (packaging-os-analysis §1 role matrix,
-// Wave 2 item 7): scout chat Q&A, the memory Q&A path, and agent-thread
-// follow-ups ride claude-sonnet-5 whenever an Anthropic key is present, and
-// keep today's gpt-5.5 Responses path byte-for-byte when it is not — keyless
-// deploys are unchanged. This file is the small text-in/text-out wrapper over
-// the EXISTING Messages wire layer in agent_runner_anthropic.go (request
-// marshaling + SSE accumulation); it adds no new wire code.
+// RETIRED COMPATIBILITY ONLY. No product constructor or normal route calls
+// this Anthropic-shaped text seam. It remains compiled so historical receipts
+// and deterministic wire fixtures stay readable while every new assignment
+// fails closed at admittedAgentRunnerName.
 const (
 	defaultChatModel = "claude-sonnet-5"
 	// agentThreadWorkerAnthropic mirrors agentThreadWorkerOpenAI
@@ -26,11 +23,7 @@ const (
 	anthropicFollowUpMaxTokens = 3000
 )
 
-// chatModel is the conversational-surface model, distinct from the
-// orchestrator's (orchestratorModel) and the ambient workers'
-// (meetingBrainModel) dials. Chat is a worker seat under the routing doctrine
-// (agent_runner_anthropic.go: Sonnet/Opus tier only, never Haiku), so the env
-// dial rides the same guard as the orchestrator/review/fallback dials.
+// chatModel exists only for the retired compatibility fixtures in this file.
 func chatModel() string {
 	return doctrineModelOrDefault("BONFIRE_CHAT_MODEL", defaultChatModel)
 }
@@ -44,11 +37,8 @@ type anthropicTextRequest struct {
 	Input        string
 	Effort       string
 	MaxTokens    int
-	// Attachments are pre-built image/document content blocks (card 085,
-	// attachmentContentBlocks) placed BEFORE the text block in the single
-	// user turn — the documented block order for vision/document requests.
-	// The keyless OpenAI fallback paths never see this field, so keyless
-	// deploys keep today's text-only behavior byte-for-byte.
+	// Attachments retain the historical test fixture's pre-built content-block
+	// shape; active OpenAI paths use openAIInputContent instead.
 	Attachments []json.RawMessage
 	// Seat tags this call's usage-ledger entry (W0 item 3): a seat* constant
 	// from usage_ledger.go — the text helper's callers own their tag

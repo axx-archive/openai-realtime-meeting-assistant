@@ -188,6 +188,7 @@ func TestArtifactDriveSaveHoldsCurrentSessionAuthorityThroughReceiptAndFinalEffe
 	snapshot.SessionHash = sessionHash
 	snapshot.ActiveSession.SessionSubjectDigest = sessionHash
 	snapshot.Session.ActiveOrganizationID = ref.TenantID
+	snapshot.Organization.Header.ID = ref.TenantID
 	snapshot.Membership.Header.TenantID = ref.TenantID
 	snapshot.Membership.OrganizationID = ref.TenantID
 	snapshot.ActiveSession.OrganizationID = ref.TenantID

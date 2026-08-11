@@ -367,6 +367,32 @@ func TestAmbientReplayDriftStopsBeforeNextProviderAndPersistsReceipt(t *testing.
 	}
 }
 
+func TestAmbientReplayPersistedOpenAIModelDriftStopsBeforeProvider(t *testing.T) {
+	engine, _, store, manifest := replayPlanForTest(t, []string{"brain"})
+	tampered := manifest
+	tampered.Stages = append([]AmbientReplayStageSpec(nil), manifest.Stages...)
+	tampered.Stages[0].Model = "gpt-5.5"
+	digest, err := ambientReplayManifestDigest(tampered)
+	if err != nil {
+		t.Fatalf("digest tampered manifest: %v", err)
+	}
+	tampered.Digest = digest
+	store.manifests[digest] = tampered
+	store.status[digest] = "planned"
+	runner := &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}}
+	engine.Runner = runner
+
+	if _, err := engine.Execute(context.Background(), digest, tampered.AuthorizedBy); !errors.Is(err, ErrAmbientReplayDrift) {
+		t.Fatalf("persisted model drift err=%v, want drift", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("provider calls=%d, want zero", runner.calls)
+	}
+	if store.status[digest] != "planned" {
+		t.Fatalf("status=%q, want untouched planned manifest", store.status[digest])
+	}
+}
+
 func TestAmbientReplayCeilingFailsClosedAndRestartIsIdempotent(t *testing.T) {
 	engine, _, store, manifest := replayPlanForTest(t, []string{"brain"})
 	engine.Runner = &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}, usage: AmbientReplayUsage{Calls: 2}}
@@ -654,14 +680,14 @@ func TestAmbientReplayTenantIsPinnedAndNarrativeRouteMatchesProvider(t *testing.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	stages := ambientReplayDefaultStages()
 	narrative := stages[3]
-	if narrative.Name != "narrative" || narrative.Provider != providerOpenAI || narrative.Model != meetingBrainModel() {
+	if narrative.Name != "narrative" || narrative.Provider != providerOpenAI || narrative.Model != narrativeMaintainerModel() {
 		t.Fatalf("keyless narrative=%+v", narrative)
 	}
 	t.Setenv("ANTHROPIC_API_KEY", "test-key-never-used")
 	stages = ambientReplayDefaultStages()
 	narrative = stages[3]
-	if narrative.Provider != providerAnthropic || narrative.Model != chatModel() || narrative.Model == meetingBrainModel() {
-		t.Fatalf("anthropic narrative=%+v", narrative)
+	if narrative.Provider != providerOpenAI || narrative.Model != narrativeMaintainerModel() {
+		t.Fatalf("installed Anthropic key changed narrative route=%+v", narrative)
 	}
 }
 

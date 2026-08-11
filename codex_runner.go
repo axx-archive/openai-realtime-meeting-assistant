@@ -23,6 +23,8 @@ const (
 
 	defaultCodexExecTimeout        = 20 * time.Minute
 	defaultCodexExecMaxOutputBytes = 256 * 1024
+	defaultCodexExecModel          = "gpt-5.6-sol"
+	defaultCodexExecReasoning      = "high"
 )
 
 const codexExecutionProductionEnabled = false
@@ -137,8 +139,12 @@ func codexExecConfigFromEnv() codexExecConfig {
 		Sandbox:        normalizeCodexSandbox(getenvDefault("BONFIRE_CODEX_SANDBOX", "workspace-write")),
 		ApprovalPolicy: normalizeCodexApprovalPolicy(getenvDefault("BONFIRE_CODEX_APPROVAL_POLICY", "never")),
 		Profile:        strings.TrimSpace(os.Getenv("BONFIRE_CODEX_PROFILE")),
-		Model:          strings.TrimSpace(os.Getenv("BONFIRE_CODEX_MODEL")),
-		Reasoning:      normalizeCodexReasoningEffort(getenvDefault("BONFIRE_CODEX_REASONING_EFFORT", "high")),
+		// The provider/model/effort contract is server-owned. Environment,
+		// clients, persisted jobs, and model output cannot select it. A future
+		// xhigh security/release-critical lane needs an explicit server-side job
+		// classification and its own qualification; it is not a config override.
+		Model:          defaultCodexExecModel,
+		Reasoning:      defaultCodexExecReasoning,
 		Timeout:        durationEnv("BONFIRE_CODEX_TIMEOUT", defaultCodexExecTimeout, 30*time.Second),
 		MaxOutputBytes: maxOutputBytes,
 		Search:         boolEnv("BONFIRE_CODEX_SEARCH"),
@@ -166,15 +172,6 @@ func normalizeCodexApprovalPolicy(value string) string {
 		return "on-request"
 	default:
 		return "never"
-	}
-}
-
-func normalizeCodexReasoningEffort(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "minimal", "low", "medium", "high", "xhigh":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "high"
 	}
 }
 
@@ -440,10 +437,8 @@ func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt
 
 	// W0-5 lane metering (seat codex): the Codex CLI reports no token usage in
 	// its exec output, so each job records a duration-only entry (Estimated —
-	// wall-clock, not wire-reported usage) under whatever model the job pinned.
-	// An empty BONFIRE_CODEX_MODEL records model "" and trips the pricing
-	// table's price_missing tripwire — exactly the unpinned-fossil visibility
-	// the master plan wants. This meters the local_exec path; sidecar-queued
+	// wall-clock, not wire-reported usage) under the server-pinned model. This
+	// meters the local_exec path; sidecar-queued
 	// jobs run in the codex-runner container and land through their callback
 	// seam.
 	started := time.Now()

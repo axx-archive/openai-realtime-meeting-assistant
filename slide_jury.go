@@ -29,6 +29,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -240,7 +241,9 @@ func capSlideJuryPages(pages []slideJuryPage) ([]slideJuryPage, string) {
 
 // --- The jury run ----------------------------------------------------------------
 
-// withSlideJuryPageBlocks wraps a responder so the page blocks are spliced
+// withSlideJuryPageBlocks wraps the retired Anthropic-shaped test responder so
+// historical fixtures can still exercise the page-block helper. Production
+// juries use the OpenAI Responses wrapper below.
 // into the FIRST user message of every outgoing request — images first, task
 // text after, per the vision guidance. This is how the jury's images ride the
 // raw-content seam through runGoalPanel unchanged: the panel primitive stays
@@ -261,6 +264,16 @@ func withSlideJuryPageBlocks(base anthropicMessagesResponder, pageBlocks []json.
 			break
 		}
 		request.Messages = messages
+		return base(ctx, apiKey, request)
+	}
+}
+
+func withSlideJuryOpenAIPageContent(base openAITextResponder, pageContent []openAIInputContent) openAITextResponder {
+	return func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+		attachments := make([]openAIInputContent, 0, len(pageContent)+len(request.Attachments))
+		attachments = append(attachments, pageContent...)
+		attachments = append(attachments, request.Attachments...)
+		request.Attachments = attachments
 		return base(ctx, apiKey, request)
 	}
 }
@@ -310,10 +323,12 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 			len(capped), len(assets), anthropicMaxRequestImages, anthropicMaxRequestImageBytes>>20)
 	}
 
-	pageBlocks := make([]json.RawMessage, 0, 2*len(capped))
+	pageContent := make([]openAIInputContent, 0, 2*len(capped))
 	for _, page := range capped {
-		pageBlocks = append(pageBlocks, anthropicTextBlock(fmt.Sprintf("Rendered page %d of %d:", page.Number, len(assets))))
-		pageBlocks = append(pageBlocks, anthropicImageBlock("image/jpeg", page.Data))
+		pageContent = append(pageContent,
+			openAIInputContent{Type: "input_text", Text: fmt.Sprintf("Rendered page %d of %d:", page.Number, len(assets))},
+			openAIInputContent{Type: "input_image", ImageURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(page.Data)},
+		)
 	}
 
 	deckTitle := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), "the shipped deck")
@@ -326,12 +341,13 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 	}
 
 	engine := newGoalEngine(app)
-	engine.responder = withSlideJuryPageBlocks(engine.responder, pageBlocks)
+	engine.openAIResponder = withSlideJuryOpenAIPageContent(engine.openAIResponder, pageContent)
 	outcome, err := engine.runGoalPanel(ctx, goalPanelSpec{
 		Task:      strings.Join(taskLines, "\n"),
 		Schema:    slideJurySchema,
 		Personas:  slideJuryPersonas(),
 		Synthesis: slideJurySynthesisSystem,
+		Review:    true,
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, fmt.Errorf("slide jury panel: %w", err)

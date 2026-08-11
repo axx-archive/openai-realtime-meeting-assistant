@@ -184,7 +184,7 @@ func TestScoutProactiveConsultIsOneNonVisibleReceiptAndNeverLaunches(t *testing.
 	}
 }
 
-func TestScoutProactiveClassifierUsesLunaMaxAndConstitution(t *testing.T) {
+func TestScoutProactiveClassifierUsesLunaMediumAndConstitution(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	candidate := scoutProactiveCandidate{
 		Thread:  scoutChatThreadRecord{ID: "ball-dogs", Title: "Ball Dogs"},
@@ -198,8 +198,8 @@ func TestScoutProactiveClassifierUsesLunaMaxAndConstitution(t *testing.T) {
 	if err != nil || decision.Decision != "no_action" {
 		t.Fatalf("decision=%+v err=%v", decision, err)
 	}
-	if captured.Model != scoutChatModel() || captured.ReasoningEffort != scoutReasoningEffort() || captured.Seat != seatProactiveAttention || captured.Workflow != "scout_proactive_attention" || captured.JSONSchema == nil {
-		t.Fatalf("proactive request=%+v, want Luna/max strict proactive seat", captured)
+	if captured.Model != scoutRouterModel() || captured.ReasoningEffort != scoutRouterReasoningEffort() || captured.Seat != seatProactiveAttention || captured.Workflow != "scout_proactive_attention" || captured.JSONSchema == nil {
+		t.Fatalf("proactive request=%+v, want Luna/medium strict proactive seat", captured)
 	}
 	if !strings.Contains(captured.Instructions, "Be a brilliant coworker") || !strings.Contains(captured.Instructions, "Use no_action often") {
 		t.Fatalf("proactive instructions=%q, missing coworker/no-action contract", captured.Instructions)

@@ -101,7 +101,7 @@ type meetingSpecialistRealtimeDialer func(context.Context, string, http.Header) 
 func defaultOffMeetingSpecialistRealtimeConfig() MeetingSpecialistRealtimeConfig {
 	return MeetingSpecialistRealtimeConfig{
 		Model:           meetingSpecialistRealtimeModel,
-		ReasoningEffort: "high",
+		ReasoningEffort: realtimeRoomReasoningEffort(),
 		Voice:           defaultRealtimeVoice,
 		MaxOutputTokens: 256,
 		InputMode:       MeetingSpecialistRealtimeInputDirectPCM,
@@ -145,7 +145,7 @@ func (config MeetingSpecialistRealtimeConfig) validate(launch MeetingSpecialistL
 	if !config.Enabled {
 		return ErrMeetingSpecialistProviderDisabled
 	}
-	if config.APIKey == "" || config.ResolveBrief == nil || config.SafetyIdentifier != "" && !isHexDigest(config.SafetyIdentifier) || config.Model != meetingSpecialistRealtimeModel || !oneOf(config.ReasoningEffort, "low", "medium", "high") ||
+	if config.APIKey == "" || config.ResolveBrief == nil || config.SafetyIdentifier != "" && !isHexDigest(config.SafetyIdentifier) || config.Model != meetingSpecialistRealtimeModel || config.ReasoningEffort != realtimeRoomReasoningEffort() ||
 		config.Voice == "" || config.MaxOutputTokens <= 0 || config.MaxOutputTokens > 4096 ||
 		config.MaxOutputTokens > launch.Context.TokenBudget || config.MaxOutputTokens > launch.ApprovalLimits.TokenBudget ||
 		config.MaxContextBytes <= 0 || config.MaxContextBytes > meetingSpecialistRealtimeMaxContextBytes ||

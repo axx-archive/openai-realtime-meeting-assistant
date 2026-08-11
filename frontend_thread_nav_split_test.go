@@ -132,6 +132,7 @@ func TestIndexComposerDestinationGuard(t *testing.T) {
 	}
 	for _, want := range []string{
 		"everyone in the office",
+		"project members only",
 		"private to you",
 		"scout-chat-destination--channel",
 		"setAttribute('aria-label'",
@@ -139,6 +140,9 @@ func TestIndexComposerDestinationGuard(t *testing.T) {
 		if !strings.Contains(renderBody, want) {
 			t.Errorf("renderScoutChatDestination body missing %q", want)
 		}
+	}
+	if !strings.Contains(renderBody, "const isTeam = chatThreadIsTeam(thread)") {
+		t.Error("composer destination must distinguish the whole-office Table from a member-restricted project")
 	}
 
 	// the active-thread render pass must keep the guard in lockstep
@@ -149,5 +153,70 @@ func TestIndexComposerDestinationGuard(t *testing.T) {
 	headBody := functionBody(html, "function syncChatConvoHeader()")
 	if !strings.Contains(headBody, "renderScoutChatDestination()") {
 		t.Error("syncChatConvoHeader must sync the destination guard")
+	}
+}
+
+func TestIndexAgentMessagesGroupByStampedIdentityNotSharedScoutRole(t *testing.T) {
+	html := readIndexForThreadNavSplit(t)
+	body := functionBody(html, "function scoutChatMessageRecordNode(message)")
+	if body == "" {
+		t.Fatal("could not extract scoutChatMessageRecordNode body")
+	}
+	if !strings.Contains(body, "authorEmail || authorName.toLowerCase() || kind") {
+		t.Fatal("agent-authored messages without a human email must group by stamped author name")
+	}
+	if strings.Contains(body, "const followKey = `${kind}|${authorEmail || kind}`") {
+		t.Fatal("shared scout-role grouping collapses distinct agent identities")
+	}
+}
+
+func TestIndexCompletedWorkIsClearedBeforeThreadRerender(t *testing.T) {
+	html := readIndexForThreadNavSplit(t)
+	body := functionBody(html, "function clearScoutChatThreadNodes()")
+	if !strings.Contains(body, ".scout-chat-work-record") {
+		t.Fatal("governed completed-work cards must be cleared before a thread rerender to prevent duplicate results")
+	}
+}
+
+func TestIndexCompletedWorkRendersGovernedFieldsAndStructuredViewer(t *testing.T) {
+	html := readIndexForThreadNavSplit(t)
+	body := functionBody(html, "function scoutChatMessageRecordNode(message)")
+	if !strings.Contains(body, "recordKind === 'work_result' || recordKind === 'work_record'") || !strings.Contains(body, "scoutChatWorkRecordNode(message)") {
+		t.Fatal("structured completed work must bypass the ordinary raw message body")
+	}
+	workBody := functionBody(html, "function scoutChatWorkRecordNode(message)")
+	for _, expected := range []string{"workerName", "progressPercent", "artifactHref", "evidenceHref", "providerExecutionFenced"} {
+		if !strings.Contains(workBody, expected) {
+			t.Fatalf("completed-work card is missing governed field %q", expected)
+		}
+	}
+	if strings.Contains(workBody, "document.createElement('a')") || strings.Contains(workBody, ".href =") || strings.Contains(workBody, "Artifact:") {
+		t.Fatal("completed-work card must not navigate to or expose a raw endpoint")
+	}
+	viewer := functionBody(html, "async function openGovernedWorkResource(href, work, resourceKind, returnFocus)")
+	for _, expected := range []string{"fetch(path, { cache: 'no-store'", "payload?.artifact", "payload?.evidence", "Approved outcome", "Verified source", "Source remains verified"} {
+		if !strings.Contains(viewer, expected) {
+			t.Fatalf("structured completed-work viewer is missing %q", expected)
+		}
+	}
+}
+
+func TestCompletedWorkThreadPreviewUsesStructuredSummary(t *testing.T) {
+	workMessage := scoutChatMessageRecord{
+		Kind: "work_result",
+		Text: "Artifact: /api/stride/v1/work/runs/raw-internal-path/artifact",
+		Work: &scoutChatWorkRecordRef{Title: "Launch brief", Summary: "Evidence-linked launch brief is ready.", Status: "completed"},
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{workMessage}}
+	preview := scoutChatThreadPreview(thread)
+	if preview != "Evidence-linked launch brief is ready." {
+		t.Fatalf("structured completed-work preview=%q", preview)
+	}
+	if strings.Contains(preview, "/api/") {
+		t.Fatal("thread rail leaked an internal artifact path")
+	}
+	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, workMessage)
+	if thread.Preview != "Evidence-linked launch brief is ready." || strings.Contains(thread.Preview, "/api/") {
+		t.Fatalf("committed completed-work preview=%q", thread.Preview)
 	}
 }

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_conversation_first_five_way_router",
+  "observedAt": "2026-08-11T01:56:55Z",
+  "status": "five_way_router_independent_critic_pass_full_go_and_mobile_suites_not_green",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false
+  },
+  "claims": {
+    "outcomes": [
+      "conversational_reply",
+      "clarify_once",
+      "start_private_work",
+      "approval_required",
+      "unavailable"
+    ],
+    "acceptedSurfaces": [
+      "private_scout_text",
+      "direct_eligible_agent_text",
+      "composer_dictation",
+      "private_realtime_voice"
+    ],
+    "exactlyOneServerOwnedOutcomePerAcceptedTurn": true,
+    "namedAgentIdentityNeverExpandsCapability": true,
+    "approvalBodyAndEffectClassImmutable": true,
+    "approvalEffectClassReDerivedAtAcceptance": true,
+    "ordinaryClientToolTemplateAuthority": false,
+    "legacyDirectLaunchEndpoints": "retired_or_server_ignored",
+    "visibleToolOrDeliverablePicker": false,
+    "restartReentersNaturalLanguageRouter": true,
+    "operationAndReplayIdentity": "deterministic_exact_once_with_lost_response_and_restart_recovery",
+    "providerCallTelemetry": "counts_attachment_extraction_and_router_attempts",
+    "presentationFailureFixture": "one_premium_presentation_work_card_no_packaging_studio_process_dump_or_duplicate",
+    "secureFourToolCarrierState": "default_off_unregistered_and_unwired",
+    "providerCallsByVerification": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "conversation_intent.go": "bd551bdcb5b3d27a3d170912fe98562b2e563402d2f340d6c7343ee4fd556343",
+    "conversation_work_launch.go": "300bc5fd329fed88867c59ae1bca1c4137ee508c16c91c8d7410ecfed1b6744a",
+    "scout_openai_routes.go": "a453c452225151b2ff9cbb43738d26a6cbca0b8802b853bcbc08c4d8cca0de22",
+    "scout_chat.go": "f1fefa450372755d54654894c4df3dddb4afe92787bdfba3fd90c7def043bc26",
+    "scout_chat_threads.go": "dbfbb5d9c857bc0b2115e20f3b7f06a7b4ddbc44fe729ceef41b7c3868ed6f78",
+    "attachments.go": "f0bd092c72cd8b5005132f6f1b4e288dba99084a1c6c3a28d1d0d60758fb5426",
+    "main.go": "3dcca9b442d8c4ff1aa2ae2bcc7ccddd6c317eed62f0988a3cbe36f286823d21",
+    "index.html": "783e9c18291d4f9d91ab97572b63828caf312bca323bd883275e47f3b7179a90",
+    "mobile/src/messaging/MessageBubble.tsx": "ea78c65fb2feec2b61324d8e842ada8c056f8d2ed3192d86ecdb8d0ade44bd17"
+  },
+  "selectedTestFileSha256": {
+    "conversation_intent_test.go": "3e407e1ef86cd392fb60e1d3c9facc4a57038537dd3ac7b5a17c5b33e38104aa",
+    "scout_chat_agent_bridge_test.go": "8b51693055ae38ea39e583b41b50d78d54946ac7798154ec685ff0dafe098e28",
+    "attachments_test.go": "73c9f8904854e2e3b3e69df84b0f35ca149a8925223d2bd4f0ec250df4b21705",
+    "assistant_http_test.go": "ac4efb8f797429a40ba8183a81d4dbf4b73e252d322ce5ab7bb5ba4ea2ddbc5e",
+    "acceptance_test.go": "08d9ede504cf7b47a5c515a1c06432e2cf4934ba1594e48a6b6e743299313001",
+    "wave11_palette_test.go": "611e1dfc83efcd263cc87fed96de84b0b2274dc32f02c53b0c6620c1be2a1ed4",
+    "wave_f2_linkage_test.go": "5d5266b2cd734d4d4285367cdaa7edee8b0f85b8e18b769adc8db6732c905965",
+    "frontend_goal_proposal_test.go": "47b73ca5746304faadcf1f1c565eb9855c3f564d334f2a039dde42339ef734dd",
+    "mobile/src/__tests__/threadReplySurface.test.ts": "d65b43726a35b68bd1b1d133b39ed5808fe0e844557eabb82b2289e006c2b50c",
+    "mobile/src/__tests__/audioFocusConsumers.test.ts": "7accb496b1e731ba9ade488ffe327d4f16623935d7815ffc3dcba835e5a290bf"
+  },
+  "verification": {
+    "focusedNormal": "PASS",
+    "focusedRace": "PASS_26.332s",
+    "earlierBroadRace": "PASS_28.118s",
+    "mobileTypecheck": "PASS",
+    "nativeApprovalKinds": "PASS_3_of_3",
+    "goVetAll": "PASS",
+    "formatAndDiffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "productionBoundaryRehashed": true,
+      "finding": "no_material_blocker_for_the_bounded_default_off_conversation_first_router"
+    },
+    "fullGo": {
+      "verdict": "RED_ON_PRIOR_ROUTER_BOUNDARY",
+      "durationSeconds": 500.591,
+      "note": "router-specific legacy failures found by that run were repaired and rechecked, but no current-boundary full-suite green claim is made; remaining failures require reconciliation"
+    },
+    "fullMobile": {
+      "verdict": "RED",
+      "note": "focused conversation and approval tests plus typecheck pass; broader native source-contract failures remain for PD1 and full-suite reconciliation"
+    }
+  },
+  "openGates": [
+    "remaining_openai_only_provider_lanes_and_exact_model_effort_matrix",
+    "current_boundary_full_go_and_full_mobile_green",
+    "secure_four_tool_concrete_backends_managed_custody_and_router_wiring",
+    "successful_live_openai_document_presentation_and_mixed_package",
+    "rendered_web_iphone_ipad_and_physical_device_acceptance",
+    "reviewed_commit_push_release_deploy_and_activation"
+  ],
+  "exclusions": {
+    "providerQualified": false,
+    "productionEnabled": false,
+    "liveDeliverableAccepted": false,
+    "presentationAccepted": false,
+    "deviceAccepted": false,
+    "publicNetworkEnabled": false,
+    "collectionEnabled": false,
+    "wholeLedgerComplete": false
+  }
+}

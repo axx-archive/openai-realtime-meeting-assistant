@@ -246,9 +246,15 @@ func TestStrideE10MainResolverHoldsExactActiveOrganizationThroughUse(t *testing.
 		t.Fatal(err)
 	}
 	organizationID, membershipID := "organization-active-resolver", "membership-active-resolver"
+	organization := Organization{
+		Header: organizationTestHeader(STRIDEGlobalPersonTenant, organizationID, 1, STRIDEContractOrganization, '7', now.Add(-time.Hour)),
+		Name:   "Active Resolver Organization", Slug: "active-resolver-organization", Status: "active", Discoverability: "private",
+		CreatorPersonID: person.Header.ID, PolicyRevision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
 	membership := organizationTestMembership(membershipID, person.Header.ID, organizationID, "admin", 4, now.Add(-time.Hour), "membership-owner-resolver")
 	hash := sha256Hex([]byte("active-resolver-session"))
 	activeSession := ActiveOrganizationSession{Header: organizationTestHeader(STRIDEGlobalPersonTenant, "active-session-resolver", 9, STRIDEContractActiveOrganizationSession, '9', now.Add(-time.Hour)), SessionSubjectDigest: hash, PersonID: person.Header.ID, OrganizationID: organizationID, MembershipID: membershipID, MembershipRevision: membership.Header.Revision, SessionRevision: 9, Status: "active", BoundAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
+	organizations.organizations[organizationID] = organization
 	organizations.memberships[membershipID] = membership
 	organizations.sessions[hash] = activeSession
 	sessions := &sessionStore{sessions: map[string]sessionRecord{hash: {Email: "active@example.com", Expires: activeSession.ExpiresAt, PersonID: person.Header.ID, ActiveOrganizationID: organizationID, OrganizationMembershipID: membershipID, OrganizationMembershipRev: membership.Header.Revision, ActiveOrganizationSessionRev: activeSession.SessionRevision, AccountSubjectDigest: digest, AuthorityGeneration: 11}}}

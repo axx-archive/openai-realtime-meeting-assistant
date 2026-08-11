@@ -192,8 +192,8 @@ func TestRealtimeProposeCodexTaskToolContract(t *testing.T) {
 		}
 	}
 
-	if !privateRealtimeVoiceToolAllowed("propose_codex_task") {
-		t.Fatal("private realtime voice must allow propose_codex_task")
+	if privateRealtimeVoiceToolAllowed("propose_codex_task") || !privateRealtimeVoiceServerActionAllowed("propose_codex_task") {
+		t.Fatal("proposal executor must remain server-compatible but absent from the model voice surface")
 	}
 	foundPrivate := false
 	for _, tool := range app.privateRealtimeVoiceTools() {
@@ -201,15 +201,15 @@ func TestRealtimeProposeCodexTaskToolContract(t *testing.T) {
 			foundPrivate = true
 		}
 	}
-	if !foundPrivate {
-		t.Fatal("privateRealtimeVoiceTools must expose the propose_codex_task schema")
+	if foundPrivate {
+		t.Fatal("privateRealtimeVoiceTools must not expose propose_codex_task before individual admission")
 	}
 
 	if !strings.Contains(app.sessionInstructions(), "propose_codex_task") {
 		t.Fatal("room session instructions must mention propose_codex_task")
 	}
-	if !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "propose_codex_task") {
-		t.Fatal("private voice instructions must mention propose_codex_task")
+	if strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "propose_codex_task") {
+		t.Fatal("private voice instructions must not advertise propose_codex_task")
 	}
 
 	// Private path: the proposal records the requesting account, never

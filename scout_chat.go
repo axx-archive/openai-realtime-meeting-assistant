@@ -264,8 +264,9 @@ const (
 	// remaining a small Luna turn.
 	scoutRouterMaxTokens = 1200
 
-	scoutRouterProposalKindToolRun    = "tool_run"
-	scoutRouterProposalKindWorkstream = "workstream"
+	scoutRouterProposalKindToolRun      = "tool_run"
+	scoutRouterProposalKindWorkstream   = "workstream"
+	scoutRouterProposalKindNativeAction = "native_action"
 	// scoutRouterProposalKindGoalRun is the free-form multi-step goal proposal
 	// (card 088 propose_goal): a real build/ship OBJECTIVE that spans several
 	// deliverables and matches NO single registry tool. Its confirm rides the
@@ -320,12 +321,9 @@ const (
 	// actually take.
 	signalEventRouterChoiceSelected = "router_choice_selected"
 
-	// Router eval-funnel verdicts (W0 item 6, docs/model-routing-master-plan):
-	// the fields["verdict"] vocabulary on evalKindRouterOutcome events. Exactly
-	// one outcome event per routing turn — proposed_tool / choice_pills /
-	// inline / deterministic_guard — plus the confirm-funnel pair stamped when
-	// a persisted card resolves, so acceptance rate and the mint→confirm join
-	// are computable from the eval ledger alone.
+	// Historical router verdicts remain readable for old ledger rows. New
+	// accepted turns record one of the exact five conversationIntentOutcome
+	// values; confirm/dismiss events remain resolution events, not turn outcomes.
 	routerVerdictProposedTool       = "proposed_tool"
 	routerVerdictChoicePills        = "choice_pills"
 	routerVerdictNativeAction       = "native_action"
@@ -341,7 +339,8 @@ const (
 // time, not a turn, so it must never inflate "turns".
 func isRouterRoutingVerdict(verdict string) bool {
 	switch verdict {
-	case routerVerdictProposedTool, routerVerdictChoicePills, routerVerdictNativeAction, routerVerdictInline, routerVerdictDeterministicGuard:
+	case routerVerdictProposedTool, routerVerdictChoicePills, routerVerdictNativeAction, routerVerdictInline, routerVerdictDeterministicGuard,
+		string(conversationIntentConversationalReply), string(conversationIntentClarifyOnce), string(conversationIntentStartPrivateWork), string(conversationIntentApprovalRequired), string(conversationIntentUnavailable):
 		return true
 	default:
 		return false
@@ -357,7 +356,7 @@ func routerModel() string {
 // routerEffort is retained for older evaluation call sites. The OpenAI route
 // and its action-classification twin share Scout's explicit reasoning dial.
 func routerEffort() string {
-	return scoutReasoningEffort()
+	return scoutRouterReasoningEffort()
 }
 
 // scoutRouterProposal is the wire/storage shape of one proposal card: enough
@@ -365,11 +364,16 @@ func routerEffort() string {
 // fields, target package, authority class, weight label) and for the confirm
 // tap to post the identical spec the palette Run posts.
 type scoutRouterProposal struct {
-	Kind       string `json:"kind"` // tool_run | workstream
-	ToolID     string `json:"toolId,omitempty"`
-	ToolName   string `json:"toolName,omitempty"`
-	GroupLabel string `json:"groupLabel,omitempty"`
-	Mode       string `json:"mode,omitempty"` // workstream proposals only
+	Kind string `json:"kind"` // native_action | tool_run | workstream | goal_run
+	// IntentOutcome distinguishes a consequential approval card from historical
+	// propose-confirm compatibility records. The server stamps it; clients may
+	// resolve the stored card by id but cannot supply or alter the held work.
+	IntentOutcome string `json:"intentOutcome,omitempty"`
+	EffectClass   string `json:"effectClass,omitempty"`
+	ToolID        string `json:"toolId,omitempty"`
+	ToolName      string `json:"toolName,omitempty"`
+	GroupLabel    string `json:"groupLabel,omitempty"`
+	Mode          string `json:"mode,omitempty"` // workstream proposals only
 	// AgentID/AgentName bind a targeted @Agent work request to the exact hired
 	// seat selected when the proposal was minted. The confirm route trusts the
 	// persisted id, never client-supplied identity, and reauthorizes it before
@@ -665,6 +669,7 @@ var scoutRouterImagePhrases = []string{
 	"make a graphic",
 	"generate a graphic",
 	"create a graphic",
+	"whip up",
 	"render an image",
 	"render a picture",
 	"render a visual",
@@ -794,11 +799,34 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 // lineage to the router, but that envelope must never become an image prompt,
 // proposal objective, or native-action query when the router is unavailable.
 func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, modelText string, intentText string, history []scoutChatTurn) *scoutRouterVerdict {
-	if app == nil {
+	decision := app.routeConversationIntentWithInput(ctx, modelText, conversationIntentTurn{
+		Text: intentText, Modality: conversationModalityScoutChat,
+	}, history)
+	verdict, err := scoutRouterVerdictFromConversationIntent(decision, intentText)
+	if err != nil {
 		return nil
 	}
+	return verdict
+}
+
+func (app *kanbanBoardApp) routeConversationIntent(ctx context.Context, turn conversationIntentTurn, history []scoutChatTurn) conversationIntentDecision {
+	modelText, err := conversationIntentModelText(turn)
+	if err != nil {
+		return unavailableConversationDecision("invalid_turn", err.Error(), proposalSourceChatRouter)
+	}
+	return app.routeConversationIntentWithInput(ctx, modelText, turn, history)
+}
+
+// routeConversationIntentWithInput is the one server-owned classifier used by
+// every accepted natural-language surface. modelText may carry additional
+// server-resolved thread lineage, but intentText remains the exact human ask
+// used by deterministic safety guards and degraded-path decisions.
+func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context, modelText string, turn conversationIntentTurn, history []scoutChatTurn) conversationIntentDecision {
+	if app == nil {
+		return unavailableConversationDecision("assistant_unavailable", "Scout is unavailable right now.", proposalSourceChatRouter)
+	}
 	modelText = strings.TrimSpace(modelText)
-	intentText = strings.TrimSpace(intentText)
+	intentText := strings.TrimSpace(turn.Text)
 	if intentText == "" {
 		intentText = modelText
 	}
@@ -806,12 +834,18 @@ func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, mod
 	apiKey := strings.TrimSpace(app.apiKey)
 	app.mu.Unlock()
 	if apiKey == "" {
-		return nil // keyless: plain Q&A — never a proposal, never an error
+		decision := conversationalReplyDecision(proposalSourceChatRouter)
+		if scoutTurnAppearsWorkShaped(intentText) {
+			decision = unavailableConversationDecision("provider_unavailable", "I can talk this through, but the private work runtime is unavailable right now.", proposalSourceChatRouter)
+		}
+		recordConversationIntentOutcome(decision, map[string]any{"degraded": "provider_unconfigured"})
+		return decision
 	}
 	imageRequest := openAIImageGenerationAvailable() && scoutChatImageRequestDetected(intentText)
 	if !imageRequest && scoutChatInlineAnalysisRequest(intentText) {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictInline, "reason": "source_analysis"})
-		return nil
+		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
+		return decision
 	}
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
@@ -820,88 +854,116 @@ func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, mod
 	// informed prompt interpretation before the app starts generation.
 	if !imageRequest {
 		if verdict := deterministicRouterGuard(intentText); verdict != nil {
-			recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-				"verdict": routerVerdictDeterministicGuard,
-			})
-			return verdict
+			work, err := conversationWorkFromScoutProposal(verdict.proposal)
+			if err != nil {
+				return unavailableConversationDecision("output_contract_unavailable", "That work does not have an accepted output contract yet.", verdict.source)
+			}
+			decision := conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: verdict.source}
+			if requiredEffect := conversationWorkRequiredEffectClass(work, ""); requiredEffect != "" {
+				decision = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{EffectClass: requiredEffect, Summary: "This governed action needs approval before it can run.", Work: &work}, Source: verdict.source}
+			}
+			recordConversationIntentOutcome(decision, map[string]any{"guard": proposalSourceDeterministicGuard})
+			return decision
 		}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	recordCapabilityPoll(capabilityTypedScoutRouter, time.Now().UTC())
+	recordConversationProviderCall(ctx)
+	model, effort := routerModel(), routerEffort()
+	if imageRequest {
+		model, effort = scoutImageDirectionModel(), scoutImageDirectionReasoningEffort()
+	}
 	response, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
-		Model:           routerModel(),
+		Model:           model,
 		Seat:            seatRouter,
 		Workflow:        "scout_route",
 		Instructions:    scoutRouterInstructions(),
 		Input:           scoutRouterInput(modelText, history),
-		ReasoningEffort: scoutReasoningEffort(),
+		ReasoningEffort: effort,
 		Verbosity:       "low",
 		MaxOutputTokens: scoutRouterMaxTokens,
 		JSONSchema:      scoutRouterJSONSchema(),
 	})
 	if err != nil {
-		log.Errorf("Scout router turn failed (degrading to inline answer): %v", err)
+		log.Errorf("Scout router turn failed: %v", err)
 		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-			"verdict":  routerVerdictInline,
-			"degraded": "router_error", "provider": providerOpenAI, "model": routerModel(),
-		})
+		decision := conversationalReplyDecision(proposalSourceChatRouter)
 		if imageRequest {
-			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+			decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
+		} else if scoutTurnAppearsWorkShaped(intentText) {
+			decision = unavailableConversationDecision("router_unavailable", "I couldn't safely determine the work route, so nothing started.", proposalSourceChatRouter)
 		}
-		return nil
+		recordConversationIntentOutcome(decision, map[string]any{"degraded": "router_error", "provider": providerOpenAI, "model": routerModel()})
+		return decision
 	}
 	output, err := decodeOpenAIScoutRouterOutput(response)
 	if err != nil {
 		recordRouterParseFailure("strict_route")
 		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
-		})
+		decision := conversationalReplyDecision(proposalSourceChatRouter)
 		if imageRequest {
-			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+			decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
+		} else if scoutTurnAppearsWorkShaped(intentText) {
+			decision = unavailableConversationDecision("router_output_invalid", "I couldn't safely determine the work route, so nothing started.", proposalSourceChatRouter)
 		}
-		return nil
+		recordConversationIntentOutcome(decision, map[string]any{"degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel()})
+		return decision
 	}
-	verdict, err := scoutRouterVerdictFromOpenAI(output, intentText)
+	decision, err := scoutConversationIntentFromOpenAI(output, intentText)
 	if err != nil {
 		recordRouterParseFailure(strings.TrimSpace(output.Route))
 		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
-		})
+		decision := conversationalReplyDecision(proposalSourceChatRouter)
 		if imageRequest {
-			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+			decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
+		} else if scoutTurnAppearsWorkShaped(intentText) {
+			decision = unavailableConversationDecision("router_output_invalid", "I couldn't safely determine the work route, so nothing started.", proposalSourceChatRouter)
 		}
-		return nil
+		recordConversationIntentOutcome(decision, map[string]any{"degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel()})
+		return decision
 	}
 	recordCapabilitySuccess(capabilityTypedScoutRouter, time.Now().UTC())
+	if turn.ClarificationAlreadyAsked && decision.Outcome == conversationIntentClarifyOnce {
+		decision = unavailableConversationDecision("clarification_exhausted", "I still don't have enough information to start safely. Add the missing source, audience, or constraint and try again.", proposalSourceChatRouter)
+	}
 	// An explicit image ask is a hard intent boundary. If the router returned a
 	// non-image route, keep the direct image behavior and use the ask as the
 	// conservative prompt fallback; a stray action/proposal must not steal it.
-	if imageRequest && (verdict == nil || verdict.proposal == nil || verdict.proposal.Kind != scoutRouterProposalKindImage) {
-		return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+	if imageRequest && (decision.Outcome != conversationIntentStartPrivateWork || decision.Work == nil || decision.Work.Kind != conversationWorkImage) {
+		decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
 	}
-	if verdict != nil && verdict.choices != nil {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-			"verdict": routerVerdictChoicePills,
-		})
-		return verdict
+	recordConversationIntentOutcome(decision, nil)
+	return decision
+}
+
+func recordConversationIntentOutcome(decision conversationIntentDecision, fields map[string]any) {
+	if fields == nil {
+		fields = map[string]any{}
 	}
-	if verdict != nil && verdict.action != nil {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictNativeAction, "action": verdict.action.ToolID})
-		return verdict
+	fields["verdict"] = string(decision.Outcome)
+	if source := strings.TrimSpace(decision.Source); source != "" {
+		fields["source"] = source
 	}
-	if verdict != nil && verdict.proposal != nil {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictProposedTool, "kind": verdict.proposal.Kind})
-		return verdict
+	recordEvalEvent(seatRouter, evalKindRouterOutcome, fields)
+}
+
+func scoutTurnAppearsWorkShaped(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	if normalized == "" || scoutChatInlineAnalysisRequest(normalized) {
+		return false
 	}
-	recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-		"verdict": routerVerdictInline,
-	})
-	return nil
+	for _, phrase := range []string{
+		"research", "create", "build", "draft", "write", "make", "generate", "design",
+		"model", "package", "revise", "redline", "translate", "regenerate", "schedule",
+		"send", "publish", "delete", "deploy", "update the", "move the", "save the",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func scoutChatInlineAnalysisRequest(text string) bool {

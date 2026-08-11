@@ -98,7 +98,7 @@ func TestTasteAnalystSkipsBelowMinBatch(t *testing.T) {
 	recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, map[string]string{"removedSections": "Intro"})
 	recordTasteTestSignal(t, app, "AJ", signalEventSurveyOff, map[string]string{"note": "too breathless"})
 
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder should not run below the min signal batch")
 		return "", nil
 	}); err != nil {
@@ -116,12 +116,12 @@ func TestTasteAnalystWritesEvidenceCitedProfileAndStampsSignals(t *testing.T) {
 	first := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, map[string]string{"removedSections": "Intro"})
 	second := recordTasteTestSignal(t, app, "AJ", signalEventSurveyOff, map[string]string{"note": "too breathless"})
 
-	err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
-		if request.Model != "claude-sonnet-5" {
-			t.Fatalf("model=%q, want claude-sonnet-5", request.Model)
+	err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Model != meetingBrainModel() {
+			t.Fatalf("model=%q, want %s", request.Model, meetingBrainModel())
 		}
-		if request.Effort != "medium" {
-			t.Fatalf("effort=%q, want medium", request.Effort)
+		if request.ReasoningEffort != "high" {
+			t.Fatalf("effort=%q, want high", request.ReasoningEffort)
 		}
 		if !strings.Contains(request.Input, first.ID) || !strings.Contains(request.Input, second.ID) {
 			t.Fatalf("input missing the signal window: %s", request.Input)
@@ -186,7 +186,7 @@ func TestTasteAnalystUpdatesLivingProfileInPlace(t *testing.T) {
 	t.Setenv("TASTE_ANALYST_MIN_SIGNALS", "1")
 
 	first := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, nil)
-	responder := func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		return tasteTestResponse(t, tasteWindowIDsFromInput(request.Input), nil), nil
 	}
 	if err := app.runTasteAnalystOnce(context.Background(), "test-key", responder); err != nil {
@@ -198,7 +198,7 @@ func TestTasteAnalystUpdatesLivingProfileInPlace(t *testing.T) {
 	}
 
 	second := recordTasteTestSignal(t, app, "AJ", signalEventSurveyOff, map[string]string{"note": "kill the buzzwords"})
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if strings.Contains(request.Input, first.ID+" |") {
 			t.Fatalf("second pass re-consumed the distilled signal %s: %s", first.ID, request.Input)
 		}
@@ -241,7 +241,7 @@ func TestTasteAnalystWeeklyPassRunsBelowMinBatch(t *testing.T) {
 	t.Setenv("TASTE_ANALYST_MIN_SIGNALS", "1")
 
 	seed := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, nil)
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return tasteTestResponse(t, []string{seed.ID}, nil), nil
 	}); err != nil {
 		t.Fatalf("seed pass: %v", err)
@@ -256,7 +256,7 @@ func TestTasteAnalystWeeklyPassRunsBelowMinBatch(t *testing.T) {
 	t.Setenv("TASTE_ANALYST_MIN_SIGNALS", "15")
 	late := recordTasteTestSignal(t, app, "AJ", signalEventSurveyOff, nil)
 
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder should not run: below batch and the profile is fresh")
 		return "", nil
 	}); err != nil {
@@ -267,7 +267,7 @@ func TestTasteAnalystWeeklyPassRunsBelowMinBatch(t *testing.T) {
 	if _, _, err := app.memory.updateOSArtifactMetadata(profile.ID, map[string]string{tasteProfileDistilledAtKey: staleStamp}); err != nil {
 		t.Fatalf("backdate distilledAt: %v", err)
 	}
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return tasteTestResponse(t, []string{late.ID}, nil), nil
 	}); err != nil {
 		t.Fatalf("weekly pass: %v", err)
@@ -291,7 +291,7 @@ func TestTasteAnalystPerUserIsolation(t *testing.T) {
 		t.Fatalf("record actorless signal: %v", err)
 	}
 
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		ids := tasteWindowIDsFromInput(request.Input)
 		if strings.Contains(request.Input, "# Teammate\nAJ") {
 			if len(ids) != 1 || ids[0] != ajSignal.ID {
@@ -326,11 +326,11 @@ func TestTasteAnalystPerUserIsolation(t *testing.T) {
 	}
 }
 
-// Keyless: no ANTHROPIC_API_KEY means the worker silently never starts (the
+// Keyless: no OpenAI key means the worker silently never starts (the
 // goal-engine posture) — including through the registration seam.
 func TestTasteAnalystKeylessNoOp(t *testing.T) {
 	app := tasteTestApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 
 	app.startTasteAnalystWorker("")
 	app.ensureTasteAnalystStarted()
@@ -346,7 +346,7 @@ func TestTasteAnalystKeylessNoOp(t *testing.T) {
 
 func TestAmbientAgentRegistrationStartsTasteAnalyst(t *testing.T) {
 	app := tasteTestApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
 
 	// The brain worker registering (JoinConferenceRoom's path) brings the
 	// analyst up alongside on its own key.
@@ -369,7 +369,7 @@ func TestTasteAnalystSkipsWithoutAdvancingOnBadOutput(t *testing.T) {
 
 	signal := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, nil)
 
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return "Here is my analysis of AJ's taste in prose.", nil
 	}); err == nil {
 		t.Fatal("non-JSON pass must report a rejected output")
@@ -378,7 +378,7 @@ func TestTasteAnalystSkipsWithoutAdvancingOnBadOutput(t *testing.T) {
 		t.Fatal("profile written from non-JSON output")
 	}
 
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return `{"profile": "## Voice & style\n- Claims with no receipts."}`, nil
 	}); err == nil {
 		t.Fatal("uncited pass must report a rejected output")
@@ -388,7 +388,7 @@ func TestTasteAnalystSkipsWithoutAdvancingOnBadOutput(t *testing.T) {
 	}
 
 	// The window is intact: a good pass still consumes the same signal.
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return tasteTestResponse(t, []string{signal.ID}, nil), nil
 	}); err != nil {
 		t.Fatalf("good pass: %v", err)
@@ -406,7 +406,7 @@ func TestTasteAnalystDropsInventedProposals(t *testing.T) {
 	t.Setenv("TASTE_ANALYST_MIN_SIGNALS", "1")
 
 	signal := recordTasteTestSignal(t, app, "AJ", signalEventArtifactEdited, nil)
-	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
+	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return tasteTestResponse(t, []string{signal.ID}, []tasteLedgerProposal{
 			{Kind: "candidate", Text: "Invented rule.", Evidence: []string{"signal-made-up-1"}},
 			{Kind: "supersession", Text: "Supersede a ghost.", Supersedes: "decision-does-not-exist", Evidence: []string{signal.ID}},

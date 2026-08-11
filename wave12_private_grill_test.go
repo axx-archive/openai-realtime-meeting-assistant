@@ -9,10 +9,10 @@ import (
 
 // --- Allowlist: the two new tools in, the five room-only tools still out ------
 
-func TestPrivateGrillAllowlistIncludesNewToolsExcludesRoomOnly(t *testing.T) {
+func TestPrivateGrillExecutorsRemainServerOnly(t *testing.T) {
 	for _, name := range []string{"start_private_grill", "end_private_grill"} {
-		if !privateRealtimeVoiceToolAllowed(name) {
-			t.Errorf("private voice should allow %q", name)
+		if privateRealtimeVoiceToolAllowed(name) || !privateRealtimeVoiceServerActionAllowed(name) {
+			t.Errorf("private grill executor %q was not fenced behind the server", name)
 		}
 	}
 	// The room-only set is unchanged: session/recording controls and the SHARED
@@ -24,15 +24,15 @@ func TestPrivateGrillAllowlistIncludesNewToolsExcludesRoomOnly(t *testing.T) {
 	}
 }
 
-func TestPrivateGrillToolSchemasExposedNotRoomOnly(t *testing.T) {
+func TestPrivateGrillToolSchemasNotModelExposed(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	names := map[string]bool{}
 	for _, tool := range app.privateRealtimeVoiceTools() {
 		names[asString(tool["name"])] = true
 	}
 	for _, want := range []string{"start_private_grill", "end_private_grill"} {
-		if !names[want] {
-			t.Errorf("privateRealtimeVoiceTools() missing schema for %q", want)
+		if names[want] {
+			t.Errorf("privateRealtimeVoiceTools() exposed unadmitted schema %q", want)
 		}
 	}
 	for _, forbidden := range []string{"start_grill_session", "end_grill_session", "set_recording"} {

@@ -3,12 +3,80 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// assertIndexAppliesOSEventAttemptsOnce executes the exact web-client key and
+// router functions embedded in index.html. It proves that a process-restart
+// retry with the same durable deliveryId is one logical client application.
+// Native clients do not consume this office os_event channel; their thread
+// truth arrives through the separate chat snapshot/event paths.
+func assertIndexAppliesOSEventAttemptsOnce(t *testing.T, rawAttempts []string) {
+	t.Helper()
+	if len(rawAttempts) < 2 {
+		t.Fatalf("need at least two physical attempts, got %d", len(rawAttempts))
+	}
+	events := make([]json.RawMessage, 0, len(rawAttempts))
+	for _, raw := range rawAttempts {
+		var envelope struct {
+			Event string          `json:"event"`
+			Data  json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(raw), &envelope); err != nil || envelope.Event != osEventName || !json.Valid(envelope.Data) {
+			t.Fatalf("invalid OS event attempt event=%q err=%v raw=%q", envelope.Event, err, raw)
+		}
+		events = append(events, append(json.RawMessage(nil), envelope.Data...))
+	}
+	encodedEvents, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(rawHTML)
+	keyStart := strings.Index(html, "function osEventsKey(event)")
+	keyEnd := strings.Index(html[keyStart:], "// Rich-consumer fetches coalesce")
+	routeStart := strings.Index(html, "function osEventsRoute(event)")
+	routeEnd := strings.Index(html[routeStart:], "// ===== Wave 8:")
+	if keyStart < 0 || keyEnd < 0 || routeStart < 0 || routeEnd < 0 {
+		t.Fatal("could not extract exact OS event client functions")
+	}
+	keyFunction := html[keyStart : keyStart+keyEnd]
+	routeFunction := html[routeStart : routeStart+routeEnd]
+	script := strings.Join([]string{
+		"const osEventsSeen = new Map()",
+		"const osEventsSeenCap = 512",
+		"const osEventsBriefCounts = { artifact_completed: 0, artifact_progress: 0, package_advanced: 0, proposal: 0, notification: 0, channel_post: 0, quarantine_change: 0 }",
+		"let logicalApplications = 0",
+		"function osEventsRefetchBoard() {}",
+		"function scheduleArtifactProgressRefresh() {}",
+		"function osEventsRefetchPackages() {}",
+		"function scheduleMissionNarrativeRefresh() {}",
+		"function loadDealRooms() {}",
+		"function osEventsDispatchHandlers() { logicalApplications += 1 }",
+		"let intelLoadedAt = 0",
+		"const settingsRegion = null",
+		"const settingsActiveSection = ''",
+		keyFunction,
+		routeFunction,
+		"const attempts = " + string(encodedEvents),
+		"for (const event of attempts) osEventsRoute(event)",
+		"const briefApplications = Object.values(osEventsBriefCounts).reduce((sum, value) => sum + value, 0)",
+		"if (logicalApplications !== 1 || osEventsSeen.size !== 1 || briefApplications !== 1) {",
+		"  throw new Error(JSON.stringify({ logicalApplications, seen: osEventsSeen.size, briefApplications }))",
+		"}",
+	}, "\n")
+	if output, err := exec.Command("node", "--input-type=module", "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("functional OS event deliveryId client gate failed: %v\n%s", err, output)
+	}
+}
 
 // waitForOSEvent reads kanban envelopes on conn until it sees an os_event of
 // the requested kind, then returns the decoded event. The office replay and

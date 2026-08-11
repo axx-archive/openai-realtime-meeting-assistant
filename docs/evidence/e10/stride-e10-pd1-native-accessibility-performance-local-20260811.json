@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_native_accessibility_orientation_performance_checkpoint",
+  "observedAt": "2026-08-11T16:02:29Z",
+  "status": "bounded_native_accessibility_orientation_performance_independent_critic_pass",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "9d299c686ee8eb43b167d33d4856a8c96f092f0fc6b1eeff4fb10d56bb4b4814",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "orientationConfiguration": "native_configuration_admits_portrait_and_landscape_on_iphone_and_ipad_without_requiring_ipad_full_screen",
+    "idiomAwareShell": "iphone_never_renders_the_ipad_sidebar_and_normal_ipad_landscape_retains_list_conversation_and_detail_panes",
+    "largeTextAdaptation": "accessibility_xxxl_collapses_sidebar_and_conversation_rail_before_content_clips",
+    "workInteraction": "work_card_activity_and_composer_remain_distinct_readable_and_reachable_in_the_accepted_simulator_views",
+    "keyboardLayout": "software_keyboard_landscape_capture_preserves_activity_and_all_composer_controls",
+    "accessibilitySource": "activity_modal_isolates_accessibility_content_moves_focus_to_its_title_and_restores_focus_to_the_invoker_in_source",
+    "listPerformanceSource": "channel_list_is_virtualized_with_stable_recycling_and_one_shared_clock_only_while_active_work_exists",
+    "webFocusSource": "recurring_work_cards_preserve_stable_focus_and_expose_human_readable_activity_labels",
+    "defaultOff": true
+  },
+  "selectedFileSha256": {
+    "mobile/app.config.ts": "c01e0dd92c7a47dac3a702d62e9663d76054a93ac88f6f7cd001d52f46be3e5a",
+    "mobile/ios/Stride/Info.plist": "221b2a46dff7741d091f5ce822a979c1b6a2d99c878216a17b1f42ca249410cd",
+    "mobile/src/messaging/threadWorkspaceLayout.ts": "6b9a07b810c70c38cc25a7c70c4d7cb0708c471414709db2859deecedf7a9b43",
+    "mobile/src/screens/ThreadScreen.tsx": "e2aee811f6a762379f51b557b6ef8858aa3e4a29fa4d88a66e0bceca4226ab8e",
+    "mobile/src/screens/DeckScreen.tsx": "eaa667a283914494b0b9be62421c0c429dbc9599caa4d579d4bdfee71ced5c8a",
+    "mobile/src/messaging/MessageBubble.tsx": "5d7ddcec126405fe0606c4389e6c0ddd743fbfeedd5b2b29297f0fcdbb1aa9f9",
+    "mobile/src/messaging/LongMessageSheet.tsx": "0c0bd1ebd64ff4316c61df20d613cb467f3555730a50e6684e0b2e59196cb8f9",
+    "mobile/src/messaging/channelListPerformance.ts": "8cff0bc458f2eeac06b9f3da309fa01b9980e467bf106bcc6a53b7fa94630842",
+    "mobile/src/messaging/ChannelList.tsx": "9ae485c890b08c4ee040587456bb3c73b0ee85d0a9425f4108796c6917328cb9",
+    "mobile/src/messaging/MentionComposerInput.tsx": "cb6f61f3f6e6e979a57452b2945a65d617eea0337690b764f95bff1389308999",
+    "mobile/src/navigation/nativeShellModel.ts": "6606a012fbc8138172c4aca077aea956020e4b3d755e0954a3d884793a66cbd3",
+    "mobile/src/navigation/NativeUniversalShell.tsx": "5daa0bb67f149d855113e197ec0800b532f12e32b96c5a74e6c8db0657769223",
+    "mobile/src/__tests__/workAccessibilityPerformance.test.ts": "7099ac684f6831c42c68e5519d1b177852835a9bc6d8fc2fd2a138b4c750021a",
+    "mobile/src/__tests__/nativeUniversalShell.test.ts": "5d8643676fc3ba3359b8bf53b0fec9fd8793e5ce82b962e2f28e45d4dc7b853f",
+    "index.html": "059a350824140d823dd76b47dcc773a4254a3c7bba48337cf9be834880943825",
+    "frontend_design_polish_wave_test.go": "d3160f6ce3a6013395522810fda7c43935129524aa4b13df391b7c73f7231cf5"
+  },
+  "simulatorBuild": {
+    "configuration": "Release",
+    "sdk": "iphonesimulator26.5",
+    "path": "/tmp/stride-pd1-accessibility-native-derived.WIwpEy/Build/Products/Release-iphonesimulator/Stride.app",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "expoConfigBuildNumber": "53",
+    "apiBaseUrl": "http://127.0.0.1:19092",
+    "webAppUrl": "http://127.0.0.1:19092",
+    "orientation": "default",
+    "supportsTablet": true,
+    "mainJsBundleSha256": "5260af2845d7cba750eaa47c7f9915d3db488861c00f5d82fb494079c7429010",
+    "infoPlistSha256": "614191eb66225aaebf074ea54fa9a1f14f1384359b58acd435c9daca8fff830f",
+    "expoAppConfigSha256": "d22a7de65ba18262ee9f794fce270a73c5092d683ee845b39d4ef65a8fc36fac",
+    "productionUrlFoundInBundle": false,
+    "installedOn": [
+      "iPhone 17 Pro simulator",
+      "iPad Pro 13-inch M5 simulator"
+    ],
+    "buildVerdict": "PASS"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "native_iphone_portrait_accessibility_xxxl",
+      "device": "iPhone 17 Pro simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-accessibility-iphone-portrait-axxxl-accepted-final.jpeg",
+      "sha256": "22d8ee10242f96fe20a617cd3b5cadb1a600f8dd5e0dcca73eab1d126d84a1b8",
+      "width": 456,
+      "height": 972
+    },
+    {
+      "surface": "native_iphone_landscape_accessibility_xxxl_software_keyboard",
+      "device": "iPhone 17 Pro simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-accessibility-iphone-landscape-axxxl-keyboard-accepted.jpeg",
+      "sha256": "8045d846b999da2ff3aba0552d1e15cbecb0c32caa8a2ded9daf2950586f1351",
+      "width": 910,
+      "height": 518,
+      "note": "activity_and_composer_are_visible;_work_card_is_above_the_captured_viewport_but_reachable_in_the_virtualized_list"
+    },
+    {
+      "surface": "native_ipad_portrait_accessibility_xxxl",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-accessibility-ipad-portrait-axxxl-accepted-exact.jpeg",
+      "sha256": "93457f9ff6e8fd9f6e17c7a5a42bd45a946f845f7f317f6b7683150334a8cb4d",
+      "width": 710,
+      "height": 975
+    },
+    {
+      "surface": "native_ipad_landscape_accessibility_xxxl",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-accessibility-ipad-landscape-axxxl-accepted.jpeg",
+      "sha256": "d9bbacf065493e9dfcce79657d0e670ebb9a8dfbef92afa6bcf80d759169ff64",
+      "width": 922,
+      "height": 763
+    },
+    {
+      "surface": "native_ipad_landscape_default_text_three_pane",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-accessibility-ipad-landscape-default-accepted.jpeg",
+      "sha256": "f39bb92ab50777bd9da4489da6a73ccb3c86bdbb2a9918bbaf3b496cab057723",
+      "width": 922,
+      "height": 763
+    }
+  ],
+  "verification": {
+    "fullMobile": "PASS_499_of_499",
+    "mobileTypecheck": "PASS",
+    "focusedGoNormal": "PASS_0.602s",
+    "focusedGoRace": "PASS_2.641s",
+    "releaseSimulatorBuild": "PASS",
+    "loopbackRenderedHarness": "PASS_1201.43s",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "focusedNative": "PASS_15_of_15",
+      "focusedGoNormal": "PASS",
+      "focusedGoRace": "PASS",
+      "mobileTypecheck": "PASS",
+      "diffCheck": "PASS",
+      "sourceRenderedAndInstalledBuildHashesRevalidated": true,
+      "scope": "bounded_local_default_off_native_accessibility_orientation_keyboard_layout_and_list_performance_source_checkpoint"
+    }
+  },
+  "operationalBoundary": {
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "collection": 0,
+    "supersededScreenshotsRejected": true,
+    "acceptedScreenshotsUseExactLoopbackBuild": true
+  },
+  "openGates": [
+    "rendered_desktop_acceptance_for_the_added_recurring_families",
+    "functional_voiceover_traversal_on_real_simulator_or_physical_device_accessibility_runtime",
+    "actual_ipad_split_view_layout_and_interaction",
+    "pointer_hover_focus_and_activation",
+    "full_keyboard_access_tab_order_shortcuts_and_cmd_enter",
+    "measured_runtime_scroll_timer_render_and_memory_performance",
+    "physical_iphone_and_ipad_acceptance",
+    "real_provider_backed_artifacts_previews_drive_release_and_production_acceptance"
+  ],
+  "exclusions": {
+    "functionalVoiceOverAccepted": false,
+    "actualSplitViewAccepted": false,
+    "pointerAccepted": false,
+    "fullKeyboardAccessAccepted": false,
+    "measuredRuntimePerformanceAccepted": false,
+    "physicalDeviceAccepted": false,
+    "desktopAcceptedByThisReceipt": false,
+    "providerCalled": false,
+    "driveAccepted": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

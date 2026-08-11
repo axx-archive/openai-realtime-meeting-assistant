@@ -1288,7 +1288,7 @@ func TestNoSidecarTasteAndHouseSpecialtiesResumeTheirDurableCursors(t *testing.T
 		t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
 		seed := newKanbanBoardApp()
 		consumed := recordTasteTestSignal(t, seed, "AJ", signalEventArtifactEdited, map[string]string{"removedSections": "Intro"})
-		if err := seed.runTasteAnalystOnce(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		if err := seed.runTasteAnalystOnce(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			return tasteTestResponse(t, []string{consumed.ID}, nil), nil
 		}); err != nil {
 			t.Fatalf("seed taste profile: %v", err)
@@ -1302,7 +1302,7 @@ func TestNoSidecarTasteAndHouseSpecialtiesResumeTheirDurableCursors(t *testing.T
 		if !tasteAnalystWorkDue(restarted, time.Now().UTC()) {
 			t.Fatal("pending Taste signal was lost across no-sidecar restart")
 		}
-		if err := restarted.runTasteAnalystOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		if err := restarted.runTasteAnalystOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 			ids := tasteWindowIDsFromInput(request.Input)
 			if len(ids) != 1 || ids[0] != pending.ID {
 				t.Fatalf("Taste resumed window=%v, want only %s", ids, pending.ID)
@@ -1323,7 +1323,7 @@ func TestNoSidecarTasteAndHouseSpecialtiesResumeTheirDurableCursors(t *testing.T
 		t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
 		seed := newKanbanBoardApp()
 		published := seedHouseStyleSourceArtifact(t, seed)
-		if err := seed.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+		if err := seed.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
 			return houseStyleTestBody(published.ID), nil
 		}); err != nil {
 			t.Fatalf("seed House Style: %v", err)
@@ -1337,7 +1337,7 @@ func TestNoSidecarTasteAndHouseSpecialtiesResumeTheirDurableCursors(t *testing.T
 		if !houseStyleWorkDue(restarted, time.Now().UTC()) {
 			t.Fatal("pending House binder was lost across no-sidecar restart")
 		}
-		if err := restarted.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		if err := restarted.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 			if !strings.Contains(request.Input, binder.ID) {
 				t.Fatalf("House resumed prompt omitted pending binder: %s", request.Input)
 			}

@@ -70,15 +70,20 @@ export function DeckScreen({ route }: Props) {
         })}
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.body}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {segment === 'threads' ? <ChannelList /> : null}
-        {segment === 'rooms' ? <RoomsSegment /> : null}
-        {segment === 'work' ? <WorkSegment /> : null}
-      </ScrollView>
+      {segment === 'threads' ? (
+        <View style={styles.threadList}>
+          <ChannelList />
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {segment === 'rooms' ? <RoomsSegment /> : null}
+          {segment === 'work' ? <WorkSegment /> : null}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -220,6 +225,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[1],
     paddingBottom: space[10],
   },
+  threadList: { flex: 1, minHeight: 0, paddingHorizontal: space[1] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

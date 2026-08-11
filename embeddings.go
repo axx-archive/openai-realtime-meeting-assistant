@@ -579,13 +579,11 @@ func classifyEmbeddingProviderFailure(err error) embeddingProviderFailureClass {
 }
 
 // ---------------------------------------------------------------------------
-// Config (env surface documented in deploy/digitalocean/.env.example)
+// Config. The exact embedding model is server-owned; operational cadence,
+// breaker, and storage controls remain environment-configurable.
 // ---------------------------------------------------------------------------
 
 func embeddingModel() string {
-	if model := strings.TrimSpace(os.Getenv("EMBEDDINGS_MODEL")); model != "" {
-		return model
-	}
 	return defaultEmbeddingModel
 }
 

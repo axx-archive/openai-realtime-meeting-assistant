@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_openai_four_tool_carrier",
+  "observedAt": "2026-08-10T23:03:53Z",
+  "status": "secure_four_tool_carrier_verified_five_way_router_and_live_backends_pending",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false
+  },
+  "design": {
+    "path": "docs/evidence/e10/stride-e10-openai-function-tool-loop-design-20260810.md",
+    "sha256": "c5363c31441441e92162e7af0adb00ae9196334c4f9d9068e20c86505f667786"
+  },
+  "claims": {
+    "runner": "openai_responses_gpt_5_6_terra_high",
+    "manifestDigest": "215a734ddc6d56b991b3d5a185bc50881f18dbbc3263f312318791bf83c7735a",
+    "admittedTools": [
+      "report_goal_state",
+      "answer_memory_question",
+      "create_artifact",
+      "update_artifact"
+    ],
+    "allOtherTools": "explicitly_unavailable",
+    "providerState": "store_false_exact_manual_replay",
+    "parallelToolCalls": false,
+    "authority": "held_through_effect_final_use_and_fan_out",
+    "journal": "authenticated_encrypted_monotonic_cas_and_descriptor_relative",
+    "effectIdentity": "immutable_operation_with_retained_rotation_aliases",
+    "turnLimit": "durable_16_provider_turns_across_restart",
+    "networkBoundary": "shared_ai_provider_transport",
+    "defaultOff": true,
+    "registered": false,
+    "providerCalls": 0,
+    "productEffects": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "openai_tool_contract.go": "7d83e74f9b2694e2159c0d3bd5b000eea9566a803f9e827e1b64bafd57de8795",
+    "openai_tool_contract_test.go": "a074838d3c2fd2ff047308b0e67107cc5def758a81632449289bd7366930fc83",
+    "openai_tool_effects.go": "1c7bd0880a1ae8bfff70f598ba89eadc28ea1c5bfa09d054b84063880653dda0",
+    "openai_tool_journal.go": "7fa12e8e86053183d81a7d0d3568608cd410ea8e08bec48b30a287958e316262",
+    "openai_tool_journal_test.go": "8028d40c8ad7f0b8b76ef27347f10f65ab5dca26ed897eee970351dcc1afa539",
+    "openai_tool_loop.go": "9c97e5957175ef2edf2fcacbf545a7e213857ca860ce455efb41a7a02d28bcca",
+    "openai_tool_loop_test.go": "125be441482fbb22aa0512890e35695213683e6a8d97b86a499151025c185667",
+    "openai_tool_responses.go": "e7ddec61ad7b72b2c771aa3b3ee33328ad3de8feeeb077535dbaab4e9de45993",
+    "openai_tool_responses_test.go": "780de2e187bf408497b98d612b3f4999cbab0c9b748a2dd1b2db93dda01c5235",
+    "provider_clients_test.go": "3022680d126f7e83ee6dc7ed51978b4357f1494a504d7c6137ae8fc6af5f212e",
+    "stride_e9_founder_graph_test.go": "f680b5d91a9dca6e881acd28c9a912c230cc25939454c86b53200d8a7229173d"
+  },
+  "verification": {
+    "focusedNormal": "PASS",
+    "focusedRace": "PASS",
+    "providerSourceInventory": "PASS",
+    "founderGraphCompatibility": "PASS",
+    "websocketRestartIceRateLimitedCount5": "PASS_14.971s",
+    "goVetAll": "PASS",
+    "formatAndDiffCheck": "PASS",
+    "fullGo": {
+      "root": "PASS_482.378s",
+      "nonRootPackages": "PASS"
+    },
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "boundaryRehashedBeforeAndAfter": true,
+      "finding": "no_material_blocker_for_default_off_carrier_or_five_way_router_wiring"
+    }
+  },
+  "openGates": [
+    "five_way_conversation_first_router_and_shared_text_voice_scout_direct_agent_contract",
+    "concrete_production_authority_and_four_tool_effect_backends",
+    "managed_key_and_storage_installation",
+    "exact_openai_project_billing_cost_and_provider_call_authority",
+    "live_route_integration_and_acceptance",
+    "reviewed_commit_push_deploy_and_activation"
+  ],
+  "exclusions": {
+    "providerQualified": false,
+    "productionEnabled": false,
+    "liveToolParityAccepted": false,
+    "presentationAccepted": false,
+    "deviceAccepted": false,
+    "publicNetworkEnabled": false,
+    "collectionEnabled": false
+  }
+}

@@ -65,8 +65,10 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 		"Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left))",
 		"const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'",
 		"if (appShell?.dataset.tool === 'chat') syncToolTopbar()",
+		"scoutPrivatePane.dataset.audience = isChannel ? 'channel' : 'private'",
+		`#chatTool .chat-conversation[data-audience="private"] .scout-chat-form`,
 		"? `Channel chat ${chatThreadDisplayTitle(thread)}`",
-		"start the conversation — @scout can help when you want it.",
+		"Message the team. Mention @Scout when you want help.",
 		"scoutChatThread.querySelector('.scout-chat-brain-chip')",
 		"'.scout-chat-empty, .scout-chat-brain-chip, .scout-starters'",
 		"function desktopChatUnreadBoundaryNode()",
@@ -245,7 +247,7 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 		t.Fatal("desktop thread composer does not mirror the channel composer language")
 	}
 	for _, want := range []string{
-		"Connection interrupted — your reply is still here. Try again.",
+		"operationId: replyAttempt.operationId",
 		"Service briefly unavailable — your reply is still here. Check the thread, then try again.",
 		"Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.",
 		"chatContextReplySend.disabled = false",
@@ -324,7 +326,7 @@ func TestDesktopThreadReplyRailMatchesFeedMediaAndComposerCapabilities(t *testin
 		`id="chatContextReplyPending"`,
 		"function addPendingDesktopReplyFiles()",
 		"pendingDesktopReplyFiles.push(await scoutChatFilePayload(file))",
-		"JSON.stringify({ text, files, replyToMessageId: state.rootMessageId })",
+		"JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })",
 		"up to 6 files per reply",
 	} {
 		if !strings.Contains(html, want) {
@@ -608,7 +610,9 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		"run stopped before delivery",
 		"compactArtifactPreview(String(artifact?.text",
 		"researchArtifactSources(artifact)",
-		"metadata?.reasoningEffort",
+		"desktopWorkFamily",
+		"desktopSafeWorkNote",
+		"Governance and provenance",
 		"desktopSaveToDriveControl(artifact)",
 		"artifactPdfControl(artifact",
 		"'Regenerate'",
@@ -616,6 +620,12 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("desktop work context is missing live terminal reconciliation %q", want)
+		}
+	}
+	context := functionBody(html, "function renderDesktopWorkContext(")
+	for _, forbidden := range []string{"orchestratorModel", "reasoningEffort", "artifact ${ref.artifactId", "run ${ref.id"} {
+		if strings.Contains(context, forbidden) {
+			t.Fatalf("desktop work context exposes server-owned runtime detail %q", forbidden)
 		}
 	}
 	workerStart := strings.Index(html, "function artifactWorkerLabel(entry)")

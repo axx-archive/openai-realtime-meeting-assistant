@@ -25,7 +25,7 @@ test('a long-pressed chat attachment exposes explicit named Drive save', () => {
 
   assert.match(bubble, /onLongPress\?\.\(message, own, \{ file, index \}\)/);
   assert.match(actions, /Save to Drive/);
-  assert.match(screen, /defaultName=\{attachmentSaveTarget\?\.file\.name \?\? 'Attachment'\}/);
+  assert.match(screen, /defaultName=\{attachmentSaveTarget\?\.file\.name \?\? ["']Attachment["']\}/);
   assert.match(screen, /sourceFileId = `\$\{route\.params\.threadId\}:\$\{messageID\}:\$\{target\.index\}`/);
   assert.match(client, /saveChatAttachmentToFiles/);
   assert.match(client, /body: \{ sourceFileId, fileName, folderId \}/);

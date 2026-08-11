@@ -11,9 +11,8 @@ import (
 
 // --- Allowlist include / exclude --------------------------------------------
 
-func TestPrivateVoiceAllowlistIncludesParityTools(t *testing.T) {
-	included := []string{
-		// grown parity set
+func TestPrivateVoiceLegacyParityToolsAreServerOnly(t *testing.T) {
+	serverOnly := []string{
 		"update_artifact", "publish_artifact",
 		"create_ticket", "move_ticket", "update_ticket", "add_tags",
 		"add_key_date", "remove_key_dates", "delete_ticket", "undo_delete_ticket",
@@ -22,9 +21,9 @@ func TestPrivateVoiceAllowlistIncludesParityTools(t *testing.T) {
 		// unchanged
 		"control_app", "answer_memory_question", "post_to_channel",
 	}
-	for _, name := range included {
-		if !privateRealtimeVoiceToolAllowed(name) {
-			t.Errorf("private voice should allow %q", name)
+	for _, name := range serverOnly {
+		if privateRealtimeVoiceToolAllowed(name) || !privateRealtimeVoiceServerActionAllowed(name) {
+			t.Errorf("private voice legacy tool %q was not fenced behind the server", name)
 		}
 	}
 
@@ -38,18 +37,18 @@ func TestPrivateVoiceAllowlistIncludesParityTools(t *testing.T) {
 	}
 }
 
-func TestPrivateVoiceToolSchemasMatchAllowlist(t *testing.T) {
+func TestPrivateVoiceToolSchemasExposeOnlyConversationRoute(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	names := map[string]bool{}
 	for _, tool := range app.privateRealtimeVoiceTools() {
 		names[asString(tool["name"])] = true
 	}
-	for _, want := range []string{"read_thread_aloud", "start_chat_as_user", "initiate_goal", "update_artifact", "delete_ticket"} {
+	for _, want := range []string{"route_conversation_turn", "do_nothing"} {
 		if !names[want] {
 			t.Errorf("privateRealtimeVoiceTools() missing schema for %q", want)
 		}
 	}
-	for _, forbidden := range []string{"set_recording", "archive_meeting", "start_grill_session"} {
+	for _, forbidden := range []string{"read_thread_aloud", "start_chat_as_user", "initiate_goal", "update_artifact", "delete_ticket", "set_recording", "archive_meeting", "start_grill_session"} {
 		if names[forbidden] {
 			t.Errorf("privateRealtimeVoiceTools() must not expose room-only %q", forbidden)
 		}
@@ -220,21 +219,11 @@ func TestGoalHTTPEndpointLaunchesAsRequesterNoExternalWrite(t *testing.T) {
 	rec := httptest.NewRecorder()
 	assistantGoalHandler(rec, req)
 
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusAccepted)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status=%d body=%s, want retired client-selected goal boundary", rec.Code, rec.Body.String())
 	}
-	var payload struct {
-		Thread   scoutAgentThread   `json:"thread"`
-		Artifact meetingMemoryEntry `json:"artifact"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload.Artifact.Metadata["requestedBy"] != "aj@shareability.com" {
-		t.Fatalf("goal launched as %q, want aj@shareability.com", payload.Artifact.Metadata["requestedBy"])
-	}
-	if payload.Artifact.Metadata["authority"] == codexJobAuthorityExternalWrite {
-		t.Fatalf("goal HTTP door yielded external_write authority")
+	if len(kanbanApp.inFlightGoalsForUser("aj@shareability.com")) != 0 {
+		t.Fatal("retired goal boundary launched work")
 	}
 }
 
@@ -254,8 +243,8 @@ func TestGoalHTTPEndpointRejectsEmptyObjective(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	assistantGoalHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d, want 400 for empty objective", rec.Code)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status=%d, want 410 for every legacy goal payload", rec.Code)
 	}
 }
 
@@ -280,10 +269,9 @@ func TestIndexHasScoutParityMarkers(t *testing.T) {
 		"scout-chat-msg__via",
 		"via Scout",
 		"postedOnBehalfOf",
-		// /goal text door
+		// legacy /goal shorthand, routed as ordinary conversation
 		"function parseGoalCommand",
 		"function launchGoalFromComposer",
-		"'/assistant/goal'",
 		// narration rhythm
 		"scoutActionNarration",
 	} {
@@ -304,5 +292,9 @@ func TestIndexHasScoutParityMarkers(t *testing.T) {
 		if !strings.Contains(sendBody, want) {
 			t.Errorf("sendScoutChatFromForm does not call %q — the /goal door is not wired into the send path", want)
 		}
+	}
+	launchBody := functionBody(html, "async function launchGoalFromComposer(objective)")
+	if !strings.Contains(launchBody, "sendScoutChat(objective)") || strings.Contains(launchBody, "runGoalPipeline") || strings.Contains(launchBody, "/assistant/goal") {
+		t.Error("legacy /goal shorthand must enter the shared conversation router")
 	}
 }

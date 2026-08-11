@@ -174,9 +174,9 @@ func TestPortfolioHealthStaleFirstWithDials(t *testing.T) {
 	}
 }
 
-func TestPortfolioHealthToolIsPrivateAllowlistedAndKeylessSafe(t *testing.T) {
-	if !privateRealtimeVoiceToolAllowed("portfolio_health") {
-		t.Fatal("portfolio_health must be private-voice allowlisted")
+func TestPortfolioHealthToolIsServerOwnedAndKeylessSafe(t *testing.T) {
+	if privateRealtimeVoiceToolAllowed("portfolio_health") || !privateRealtimeVoiceServerActionAllowed("portfolio_health") {
+		t.Fatal("portfolio_health executor must be server-owned and absent from the model voice surface")
 	}
 	app := newIsolatedKanbanBoardApp(t)
 	result, changed, err := app.portfolioHealthTool()

@@ -1,0 +1,110 @@
+{
+  "schema": "stride.pd0.chatgpt_workstream_interaction_manifest.v1",
+  "status": "body_minimized_read_only_interaction_evidence",
+  "observedDate": "2026-08-10",
+  "platform": "authenticated ChatGPT web on macOS",
+  "method": "read-only in-app browser navigation plus accessibility/DOM snapshot inspection",
+  "mutationBoundary": {
+    "promptsSubmitted": 0,
+    "conversationBodiesOpened": 0,
+    "projectBodiesOpened": 0,
+    "filesUploaded": 0,
+    "servicesConnected": 0,
+    "tasksCreatedEditedPausedOrDeleted": 0,
+    "accountSettingsChanged": 0
+  },
+  "privacyBoundary": {
+    "conversationNamesRetained": false,
+    "projectNamesRetained": false,
+    "fileNamesRetained": false,
+    "taskNamesRetained": false,
+    "messageOrFileBodiesRetained": false,
+    "identifiersOrCredentialsRetained": false
+  },
+  "observations": [
+    {
+      "id": "CHATGPT-WORK-WEB-20260810-01",
+      "surface": "ChatGPT Work launch",
+      "url": "https://chatgpt.com/",
+      "interactionJob": "inspect how a substantial work request is scoped before launch",
+      "observedControls": [
+        "Chat and Work surface selection",
+        "outcome-oriented Work composer",
+        "model and effort control",
+        "project chooser",
+        "plugins entry",
+        "separate Work usage control",
+        "add-files-and-capabilities menu"
+      ],
+      "capabilityMenuCategoriesObserved": [
+        "computer upload",
+        "Library",
+        "image generation",
+        "visualization",
+        "web search",
+        "connected plugins including Drive"
+      ],
+      "officialCrossCheck": "https://learn.chatgpt.com/docs/get-started-with-work"
+    },
+    {
+      "id": "CHATGPT-LIBRARY-WEB-20260810-02",
+      "surface": "Library",
+      "url": "https://chatgpt.com/library",
+      "interactionJob": "inspect how outputs persist outside one transcript",
+      "observedControls": [
+        "search",
+        "All Images and Documents views",
+        "name modified and size metadata",
+        "upload",
+        "new folder",
+        "new note"
+      ],
+      "officialCrossCheck": "https://learn.chatgpt.com/docs/get-started-with-work"
+    },
+    {
+      "id": "CHATGPT-SCHEDULED-WEB-20260810-03",
+      "surface": "Scheduled",
+      "url": "https://chatgpt.com/scheduled",
+      "interactionJob": "inspect how recurring work is created and managed",
+      "observedControls": [
+        "active filter",
+        "schedule-task composer",
+        "cadence and next-run metadata",
+        "pause",
+        "edit",
+        "more actions",
+        "suggested recurring-work templates"
+      ],
+      "officialCrossCheck": "https://learn.chatgpt.com/docs/automations"
+    },
+    {
+      "id": "CHATGPT-PLUGINS-WEB-20260810-04",
+      "surface": "Plugins and Skills directory",
+      "url": "https://chatgpt.com/plugins",
+      "interactionJob": "inspect how reusable capabilities are discovered and attached to work",
+      "observedControls": [
+        "Plugins and Skills tabs",
+        "plugin search",
+        "installed capabilities",
+        "categorized capability directory",
+        "reusable Skills empty-state guidance"
+      ],
+      "deliverableCapabilitiesObserved": [
+        "documents",
+        "presentations",
+        "spreadsheets",
+        "PDF",
+        "design",
+        "data and analytics",
+        "communication"
+      ],
+      "officialCrossCheck": "https://learn.chatgpt.com/docs/get-started-with-work"
+    }
+  ],
+  "limitations": [
+    "This manifest binds body-minimized interaction observations rather than screenshot pixels.",
+    "It does not prove native iPhone or iPad behavior.",
+    "It does not prove provider output quality, task completion, artifact editing, or background execution.",
+    "Official documentation controls platform-specific behavior when it differs from the rendered web shell."
+  ]
+}

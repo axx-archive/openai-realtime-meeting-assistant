@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestSTRIDEScoutRichActionsRunThroughActualPublicChatTurnWithoutProvider(t *testing.T) {
+func TestSTRIDEScoutRichActionsRemainUnavailableUntilIndividuallyAdmitted(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	fixture := newSTRIDECoworkerTestFixture(t)
@@ -45,43 +44,11 @@ func TestSTRIDEScoutRichActionsRunThroughActualPublicChatTurnWithoutProvider(t *
 		t.Fatalf("actual file chat turn: %v", err)
 	}
 	fileAnswer, ok := fileResponse["answer"].(scoutChatMessageRecord)
-	selectedFile, selected := fileResponse["file"].(assistantFileRecord)
-	if !ok || !selected || selectedFile.ID != "drive_launch_brief" || len(fileAnswer.Files) != 1 || fileAnswer.Files[0].Ref != ref || fileAnswer.Files[0].SourceID == "" || fileAnswer.Files[0].SourceRevision == "" {
+	if !ok || fileAnswer.IntentOutcome != string(conversationIntentUnavailable) || len(fileAnswer.Files) != 0 {
 		t.Fatalf("file answer=%+v response=%+v", fileAnswer, fileResponse)
 	}
-	if fileResponse["responseMode"] != STRIDEScoutResponseFileCard || fileResponse["providerCalls"] != 0 || fileResponse["providerExecutionFenced"] != true {
-		t.Fatalf("file action did not report deterministic fence: %+v", fileResponse)
-	}
-
-	gifResponse, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, fixture.table.ID, "@scout respond with a facepalm GIF because that was ridiculous", nil, "")
-	if err != nil {
-		t.Fatalf("actual GIF chat turn: %v", err)
-	}
-	gifAnswer, ok := gifResponse["answer"].(scoutChatMessageRecord)
-	if !ok || len(gifAnswer.Files) != 1 || gifAnswer.Files[0].Kind != "gif" || gifAnswer.Files[0].Mime != "image/gif" || !strings.HasPrefix(gifAnswer.Via, "stride_coworker_gif:") {
-		t.Fatalf("GIF answer=%+v response=%+v", gifAnswer, gifResponse)
-	}
-	gifMeta, ok := gifResponse["gif"].(map[string]any)
-	if !ok || gifMeta["provider"] != "local_fixture" || gifResponse["responseMode"] != STRIDEScoutResponseGIFOnly || gifResponse["providerCalls"] != 0 || gifResponse["providerExecutionFenced"] != true {
-		t.Fatalf("GIF action did not remain local and fenced: %+v", gifResponse)
-	}
-
-	// A bounded social question may select one safe local reaction from the
-	// immediately preceding human turn. The prompt itself supplies no semantic
-	// hint, and the conversational provider remains fenced.
-	if _, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, fixture.table.ID, "We can skip QA and deploy on Friday. What could go wrong?", nil, ""); err != nil {
-		t.Fatalf("context message: %v", err)
-	}
-	contextualResponse, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, fixture.table.ID, "@scout what did you think of that?", nil, "")
-	if err != nil {
-		t.Fatalf("contextual GIF chat turn: %v", err)
-	}
-	contextualAnswer, ok := contextualResponse["answer"].(scoutChatMessageRecord)
-	contextualMeta, hasContextualMeta := contextualResponse["gif"].(map[string]any)
-	if !ok || len(contextualAnswer.Files) != 1 || contextualAnswer.Files[0].Name != "facepalm.gif" || contextualAnswer.Files[0].Kind != "gif" ||
-		!hasContextualMeta || contextualMeta["provider"] != "local_fixture" || contextualResponse["responseMode"] != STRIDEScoutResponseGIFOnly ||
-		contextualResponse["providerCalls"] != 0 || contextualResponse["providerExecutionFenced"] != true {
-		t.Fatalf("contextual GIF was not one safe local reaction: answer=%+v response=%+v", contextualAnswer, contextualResponse)
+	if fileResponse["intentOutcome"] != string(conversationIntentUnavailable) || fileResponse["file"] != nil || fileResponse["providerCalls"] != 0 || fileResponse["providerExecutionFenced"] != true {
+		t.Fatalf("unadmitted file action did not fail closed: %+v", fileResponse)
 	}
 	if providerCalls != 0 {
 		t.Fatalf("rich action called conversational provider %d times", providerCalls)
@@ -91,17 +58,8 @@ func TestSTRIDEScoutRichActionsRunThroughActualPublicChatTurnWithoutProvider(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(current.Messages) < 7 || current.Messages[len(current.Messages)-1].ID != contextualAnswer.ID {
-		t.Fatalf("rich responses were not durably posted in the end-user thread: %+v", current.Messages)
-	}
-	contextualCount := 0
-	for _, message := range current.Messages {
-		if message.ID == contextualAnswer.ID {
-			contextualCount++
-		}
-	}
-	if contextualCount != 1 {
-		t.Fatalf("contextual GIF count=%d, want exactly one", contextualCount)
+	if len(current.Messages) != 2 || current.Messages[1].ID != fileAnswer.ID {
+		t.Fatalf("unavailable response was not durably posted exactly once: %+v", current.Messages)
 	}
 
 	ordinary := scoutChatMessageRecord{ID: "ordinary", Role: "user", Text: "@scout what did you think of that meeting?", AuthorEmail: fixture.user.Email, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}

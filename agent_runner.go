@@ -711,16 +711,13 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 		return
 	}
 	// Registration seam for the taste analyst (taste_analyst.go): the analyst
-	// is per-user and Anthropic-keyed, so it cannot ride this generic
-	// OpenAI-keyed loop — instead it registers alongside the first ambient
-	// agent of the boot (the brain worker, from JoinConferenceRoom), on its own
-	// key gate. Keyless (no ANTHROPIC_API_KEY) it silently never starts.
+	// is per-user and rides the founder-approved OpenAI key already admitted by
+	// this generic ambient loop. A legacy Anthropic credential is irrelevant.
 	if agent.name != tasteAnalystAgentName {
-		app.ensureTasteAnalystStarted()
-		// The House-Style Distiller (house_style.go) rides the same seam: the
-		// seventh instance, per-office and Anthropic-keyed, so it registers
-		// alongside on its own key gate too. Keyless it silently never starts.
-		app.ensureHouseStyleDistillerStarted()
+		app.ensureTasteAnalystStarted(apiKey)
+		// The House-Style Distiller (house_style.go) rides the same OpenAI seam:
+		// the seventh instance, per-office, using the already-admitted key.
+		app.ensureHouseStyleDistillerStarted(apiKey)
 		// The Embedding Maintainer (embeddings.go, study §6 item 2.4) rides the
 		// same seam: it is OpenAI-keyed like this loop, so it registers with the
 		// key this seam already proved non-empty above. It builds the in-process

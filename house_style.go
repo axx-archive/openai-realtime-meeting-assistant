@@ -24,9 +24,9 @@ package main
 // rule. The distiller only READS signals; stamping distilledInto belongs to
 // the per-user analyst windows and is never done here.
 //
-// Model: the Anthropic text helper (anthropic_text.go) at effort medium — the
-// house style is a judgment surface. Keyless (no ANTHROPIC_API_KEY): the
-// worker never starts, silently, like the goal engine and the taste analyst.
+// Model: the founder-approved OpenAI Terra/high lane. An installed Anthropic
+// key cannot change admission or routing; without an OpenAI key the worker
+// remains unavailable and consumes no cursor.
 //
 // Guardrails (spec §5): bias to under-claim — six people is thin data — and
 // the pass is SKIPPED (cursor untouched, retried next tick) when the output is
@@ -50,7 +50,7 @@ const (
 	houseStyleAgentName       = "house_style_distiller"
 	defaultHouseStyleInterval = time.Hour
 	houseStyleRequestTimeout  = 2 * time.Minute
-	houseStyleEffort          = "medium"
+	houseStyleEffort          = "high"
 	houseStyleMaxOutputTokens = 3000
 	// houseStyleMonthlyStale is the monthly override: absent a fresh binder,
 	// a pass still runs once the living style is at least this old.
@@ -122,7 +122,7 @@ func houseStyleArtifactSuccessAt(entry meetingMemoryEntry) (time.Time, bool) {
 // startAmbientAgent (agent_runner.go), alongside the taste analyst: when the
 // brain worker registers at room join, the distiller registers on its own key.
 // Idempotent via the agent bookkeeping map.
-func (app *kanbanBoardApp) ensureHouseStyleDistillerStarted() {
+func (app *kanbanBoardApp) ensureHouseStyleDistillerStarted(admittedKeys ...string) {
 	if app == nil {
 		return
 	}
@@ -132,12 +132,18 @@ func (app *kanbanBoardApp) ensureHouseStyleDistillerStarted() {
 	if registered {
 		return
 	}
-	app.startHouseStyleDistillerWorker(currentAnthropicAPIKey())
+	apiKey := ""
+	if len(admittedKeys) > 0 {
+		apiKey = strings.TrimSpace(admittedKeys[0])
+	}
+	if apiKey == "" {
+		apiKey = app.currentOpenAIAPIKey()
+	}
+	app.startHouseStyleDistillerWorker(apiKey)
 }
 
 // startHouseStyleDistillerWorker registers the per-office distiller loop.
-// Keyless (no ANTHROPIC_API_KEY) it silently never starts — the goal-engine
-// posture; the rest of the OS is untouched.
+// Keyless OpenAI it silently never starts; the rest of the OS is untouched.
 func (app *kanbanBoardApp) startHouseStyleDistillerWorker(apiKey string) {
 	agent := houseStyleDistillerAgent()
 	if app == nil || app.memory == nil || strings.TrimSpace(apiKey) == "" || boolEnv(agent.disabledEnv) {
@@ -194,17 +200,17 @@ func (app *kanbanBoardApp) runHouseStyleDistillerLoop(agent ambientAgentConfig, 
 
 // runHouseStyleDistillerOnce is one whole gated pass, serialized by the
 // per-agent run-lock so overlapping ticks never distill the same window twice.
-func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKey string, responder anthropicTextResponder) error {
+func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKey string, responder openAITextResponder) error {
 	_, err := app.runHouseStyleDistillerOnceResult(ctx, apiKey, responder)
 	return err
 }
 
-func (app *kanbanBoardApp) runHouseStyleDistillerOnceResult(ctx context.Context, apiKey string, responder anthropicTextResponder) (bool, error) {
+func (app *kanbanBoardApp) runHouseStyleDistillerOnceResult(ctx context.Context, apiKey string, responder openAITextResponder) (bool, error) {
 	if app == nil || app.memory == nil {
 		return false, nil
 	}
 	if responder == nil {
-		responder = createAnthropicTextResponse
+		responder = createOpenAITextResponse
 	}
 	agent := houseStyleDistillerAgent()
 
@@ -233,12 +239,15 @@ func (app *kanbanBoardApp) runHouseStyleDistillerOnceResult(ctx context.Context,
 		priorBody = style.Text
 	}
 	requestCtx, cancelRequest := context.WithTimeout(ctx, agent.requestTimeout)
-	output, err := responder(requestCtx, apiKey, anthropicTextRequest{
-		Model:        chatModel(),
-		Instructions: houseStyleDistillerInstructions(),
-		Input:        buildHouseStyleDistillerInput(priorBody, sources, now),
-		Effort:       houseStyleEffort,
-		MaxTokens:    houseStyleMaxOutputTokens,
+	output, err := responder(requestCtx, apiKey, openAITextRequest{
+		Model:           meetingBrainModel(),
+		Instructions:    houseStyleDistillerInstructions(),
+		Input:           buildHouseStyleDistillerInput(priorBody, sources, now),
+		ReasoningEffort: houseStyleEffort,
+		Verbosity:       "medium",
+		MaxOutputTokens: houseStyleMaxOutputTokens,
+		Seat:            seatHouseStyle,
+		Workflow:        "house_style_distiller",
 	})
 	cancelRequest()
 	if err != nil {
@@ -261,8 +270,8 @@ func (app *kanbanBoardApp) runHouseStyleDistillerOnceResult(ctx context.Context,
 
 	metadataUpdates := map[string]string{
 		tasteProfileDistilledAtKey: now.Format(time.RFC3339Nano),
-		"source":                   agentThreadWorkerAnthropic,
-		"model":                    chatModel(),
+		"source":                   agentThreadWorkerOpenAI,
+		"model":                    meetingBrainModel(),
 	}
 	if sources.latestBinderID != "" {
 		metadataUpdates[houseStyleCursorKey] = sources.latestBinderID

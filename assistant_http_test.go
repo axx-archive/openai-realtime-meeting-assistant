@@ -234,7 +234,7 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 	for _, name := range []string{"set_voice_control", "set_recording"} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"name":%q,"arguments":{"enabled":true}}`, name)))
+			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"callId":"call-direct-rejected","name":%q,"arguments":{"enabled":true}}`, name)))
 			req.Header.Set("Content-Type", "application/json")
 			for _, cookie := range cookies {
 				req.AddCookie(cookie)
@@ -267,7 +267,7 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 			if len(payload.Actions) != 0 {
 				t.Fatalf("actions=%#v, want none for rejected private realtime tool %q", payload.Actions, name)
 			}
-			want := fmt.Sprintf("private Realtime voice cannot use %q", name)
+			want := fmt.Sprintf("private Realtime voice capability %q is unavailable", name)
 			if !strings.Contains(payload.Result.Error, want) {
 				t.Fatalf("error=%q, want %q", payload.Result.Error, want)
 			}
@@ -366,7 +366,7 @@ func TestAssistantQueryClarifiesAmbiguousFollowUpWithoutBoardLeak(t *testing.T) 
 	}
 }
 
-func TestAssistantQueryShapesOSModesWithoutModelKey(t *testing.T) {
+func TestAssistantQueryIgnoresLegacyModeAndCreatesNoArtifact(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -397,34 +397,15 @@ func TestAssistantQueryShapesOSModesWithoutModelKey(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Mode != "grill" || payload.Source != "grill" {
-		t.Fatalf("payload mode/source=%q/%q, want grill/grill", payload.Mode, payload.Source)
+	if payload.Mode != "chat" || payload.Source != "assistant" {
+		t.Fatalf("payload mode/source=%q/%q, want server-owned chat/assistant", payload.Mode, payload.Source)
 	}
-	for _, want := range []string{"Grill mode scorecard", "Final score:", "Tough questions"} {
-		if !strings.Contains(payload.Answer, want) {
-			t.Fatalf("grill answer missing %q: %s", want, payload.Answer)
-		}
-	}
-
-	artifacts := kanbanApp.osArtifactsSnapshot(10)
-	if len(artifacts) != 1 {
-		t.Fatalf("artifacts=%d, want 1 saved grill artifact", len(artifacts))
-	}
-	if artifacts[0].Kind != meetingMemoryKindOSArtifact || artifacts[0].Metadata["mode"] != "grill" {
-		t.Fatalf("artifact kind/mode=%q/%q, want os_artifact/grill", artifacts[0].Kind, artifacts[0].Metadata["mode"])
-	}
-	if !strings.Contains(artifacts[0].Text, "Grill mode scorecard") {
-		t.Fatalf("artifact text=%q, want scorecard", artifacts[0].Text)
-	}
-	if payload.Artifact.ID == "" {
-		t.Fatalf("response missing saved artifact: %#v", payload)
-	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want chat open_tool for grill artifact %q", payload.Actions, payload.Artifact.ID)
+	if payload.Artifact.ID != "" || len(kanbanApp.osArtifactsSnapshot(10)) != 0 {
+		t.Fatalf("legacy mode created durable work: payload=%#v artifacts=%#v", payload, kanbanApp.osArtifactsSnapshot(10))
 	}
 }
 
-func TestAssistantQueryCreatesCodexWorkflowArtifact(t *testing.T) {
+func TestAssistantQueryCannotSelectWorkflowOutputContract(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -455,25 +436,14 @@ func TestAssistantQueryCreatesCodexWorkflowArtifact(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Mode != "workflow" || payload.Source != "workflow" {
-		t.Fatalf("payload mode/source=%q/%q, want workflow/workflow", payload.Mode, payload.Source)
+	if payload.Mode != "chat" || payload.Source != "assistant" || payload.Artifact.ID != "" {
+		t.Fatalf("legacy workflow selector crossed the chat boundary: %#v", payload)
 	}
-	for _, want := range []string{"Codex goal workflow", "Identify and set goal", "Gate before shipping", "Codex handoff"} {
-		if !strings.Contains(payload.Answer, want) {
-			t.Fatalf("workflow answer missing %q: %s", want, payload.Answer)
-		}
+	if len(kanbanApp.osArtifactsSnapshot(10)) != 0 {
+		t.Fatalf("legacy workflow selector created an artifact: %#v", kanbanApp.osArtifactsSnapshot(10))
 	}
-	if payload.Artifact.ID == "" || payload.Artifact.Metadata["mode"] != "workflow" {
-		t.Fatalf("response artifact=%#v, want saved workflow artifact", payload.Artifact)
-	}
-	if payload.Artifact.Metadata["workflow"] != "codex_goal_loop" || payload.Artifact.Metadata["codexRunner"] != "not_connected" {
-		t.Fatalf("workflow metadata=%v, want codex workflow scaffold", payload.Artifact.Metadata)
-	}
-	if !strings.Contains(payload.Artifact.Metadata["workflowStages"], "verify_goal_completed") {
-		t.Fatalf("workflowStages=%q, want verify stage", payload.Artifact.Metadata["workflowStages"])
-	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want chat open_tool for workflow artifact %q", payload.Actions, payload.Artifact.ID)
+	if hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
+		t.Fatalf("legacy workflow selector exposed an artifact action: %#v", payload.Actions)
 	}
 }
 
@@ -874,7 +844,7 @@ func TestShouldServeIndexHTMLGatesAPIishPaths(t *testing.T) {
 	}
 }
 
-func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
+func TestAssistantThreadsHandlerIsRetiredForAdmin(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
@@ -895,38 +865,17 @@ func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 
 	assistantThreadsHandler(recorder, req)
 
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusAccepted)
+	if recorder.Code != http.StatusGone {
+		t.Fatalf("status=%d body=%s, want retired direct-launch boundary", recorder.Code, recorder.Body.String())
 	}
-	var payload struct {
-		Thread   scoutAgentThread    `json:"thread"`
-		Artifact meetingMemoryEntry  `json:"artifact"`
-		Actions  []osAssistantAction `json:"actions"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.Thread.ID == "" || payload.Thread.Status != "running" {
-		t.Fatalf("thread=%#v, want running thread", payload.Thread)
-	}
-	if payload.Artifact.Kind != meetingMemoryKindOSArtifact || payload.Artifact.Metadata["source"] != "scout_thread" || payload.Artifact.Metadata["status"] != "running" {
-		t.Fatalf("artifact=%#v, want running scout thread artifact", payload.Artifact)
-	}
-	if payload.Artifact.Metadata["agentLoop"] != "realtime_controlled_workforce" || payload.Artifact.Metadata["progressPercent"] != "35" {
-		t.Fatalf("artifact metadata=%v, want realtime workforce progress metadata", payload.Artifact.Metadata)
-	}
-	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Artifact.Text, "Goal workflow") {
-		t.Fatalf("artifact text=%q, want thread scaffold", payload.Artifact.Text)
-	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want chat open action for research artifact", payload.Actions)
+	if len(kanbanApp.osArtifactsSnapshot(10)) != 0 {
+		t.Fatalf("retired /assistant/threads created work: %#v", kanbanApp.osArtifactsSnapshot(10))
 	}
 }
 
-// Artifact bodies belong to the whole signed-in team: a non-admin launcher
-// gets the full scaffold back, plus the tool origin stamp used by
-// close-the-loop delivery.
-func TestAssistantThreadsHandlerServesFullArtifactToNonAdminUser(t *testing.T) {
+// Retirement is role-independent: a non-admin cannot revive the client-selected
+// mode boundary either.
+func TestAssistantThreadsHandlerIsRetiredForNonAdminUser(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
@@ -947,27 +896,11 @@ func TestAssistantThreadsHandlerServesFullArtifactToNonAdminUser(t *testing.T) {
 
 	assistantThreadsHandler(recorder, req)
 
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusAccepted)
+	if recorder.Code != http.StatusGone {
+		t.Fatalf("status=%d body=%s, want retired direct-launch boundary", recorder.Code, recorder.Body.String())
 	}
-	var payload struct {
-		Thread   scoutAgentThread   `json:"thread"`
-		Artifact meetingMemoryEntry `json:"artifact"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.Artifact.ID == "" || payload.Thread.Artifact.ID == "" {
-		t.Fatalf("artifact ids missing: %#v", payload)
-	}
-	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Thread.Artifact.Text, "Scout work thread") {
-		t.Fatalf("non-admin artifact text=%q thread text=%q, want full bodies", payload.Artifact.Text, payload.Thread.Artifact.Text)
-	}
-	if payload.Artifact.Metadata["restricted"] != "" {
-		t.Fatalf("metadata=%v, want no restricted marker anywhere", payload.Artifact.Metadata)
-	}
-	if payload.Artifact.Metadata["originKind"] != agentThreadOriginTool {
-		t.Fatalf("originKind=%q, want %q stamped at launch", payload.Artifact.Metadata["originKind"], agentThreadOriginTool)
+	if len(kanbanApp.osArtifactsSnapshot(10)) != 0 {
+		t.Fatalf("retired /assistant/threads created non-admin work: %#v", kanbanApp.osArtifactsSnapshot(10))
 	}
 }
 
@@ -1010,6 +943,7 @@ func TestAssistantChatThreadsKeepLegacyInlineAttachmentsEphemeral(t *testing.T) 
 
 	messageBody := fmt.Sprintf(`{
 		"text":"Use this for the campaign plan",
+		"operationId":"assistant-http-attachment-message-0001",
 		"files":[{"name":"brief.txt","kind":"text/plain","size":42,"text":"Audience: rodeo creators\nBudget: 12k"}]
 	}`)
 	messageReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+createPayload.Thread.ID+"/messages", strings.NewReader(messageBody))

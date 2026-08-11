@@ -40,7 +40,7 @@ func TestArtifactActionHTTPHoldChoiceKeepsGoalParked(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	installFakeChildRunner(t)
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{
 		Objective:    "Probe the HTTP hold door",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_probe",
@@ -96,7 +96,7 @@ func TestArtifactActionHTTPReviseChoiceRequeuesTarget(t *testing.T) {
 	launched := installFakeChildRunner(t)
 	registerReviseProbeForTest(t, "process_http_revise_probe")
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{
 		Objective:    "Probe the HTTP revise door",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_http_revise_probe",

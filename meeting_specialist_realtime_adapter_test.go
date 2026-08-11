@@ -253,7 +253,7 @@ func TestMeetingSpecialistRealtimeBriefUsesBoundedNoToolServerConfig(t *testing.
 		t.Fatalf("unbounded session config=%v", session)
 	}
 	reasoning := session["reasoning"].(map[string]any)
-	if reasoning["effort"] != "high" || int64(session["max_output_tokens"].(float64)) != 256 {
+	if reasoning["effort"] != "medium" || int64(session["max_output_tokens"].(float64)) != 256 {
 		t.Fatalf("reasoning/budget config=%v", session)
 	}
 	input := session["audio"].(map[string]any)["input"].(map[string]any)

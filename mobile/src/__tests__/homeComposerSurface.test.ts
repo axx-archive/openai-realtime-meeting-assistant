@@ -6,15 +6,10 @@ import test from 'node:test';
 
 const mobileRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const canvas = readFileSync(path.join(mobileRoot, 'src', 'screens', 'CanvasScreen.tsx'), 'utf8');
-const client = readFileSync(path.join(mobileRoot, 'src', 'api', 'client.ts'), 'utf8');
-
-test('home sends one idempotent opening turn and navigates without a message deep link', () => {
-  assert.match(client, /headers: buildIdempotencyHeaders\(idempotencyKey\)/);
-  assert.match(canvas, /api\.createScoutThread\([\s\S]*sessionToken,[\s\S]*body,[\s\S]*idempotencyKey/);
-  const acceptance = canvas.slice(canvas.indexOf('if (result.accepted)'), canvas.indexOf('} else {', canvas.indexOf('if (result.accepted)')));
-  assert.match(acceptance, /setComposerDraft\(''\)/);
-  assert.match(acceptance, /navigation\.navigate\('Thread'/);
-  assert.doesNotMatch(acceptance, /messageId/);
+test('home is voice-first and delegates typed conversation creation to Work', () => {
+  assert.match(canvas, /usePersonalRealtime/);
+  assert.match(canvas, /<StrideCradle/);
+  assert.doesNotMatch(canvas, /api\.createScoutThread|Message Scout|composerDock|useComposerDictation/);
 });
 
 test('the home surface does not render a question-answer transcript', () => {

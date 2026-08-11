@@ -26,8 +26,8 @@ func TestMeetingBoardWorkerAppliesSummaryUpdatesAndWritesArtifact(t *testing.T) 
 	}
 
 	entry, err := app.runMeetingBoardOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.Model != "gpt-board" {
-			t.Fatalf("model=%q, want gpt-board", request.Model)
+		if request.Model != meetingBrainModel() {
+			t.Fatalf("model=%q, want %s", request.Model, meetingBrainModel())
 		}
 		if !strings.Contains(request.Input, "brain-1") || !strings.Contains(request.Input, card.ID) {
 			t.Fatalf("board worker input missing summary or card context: %s", request.Input)
@@ -488,8 +488,8 @@ func TestMeetingBoardWorkerEmitsParseFailureEvent(t *testing.T) {
 		t.Fatalf("parse_failure events=%d, want 1", len(events))
 	}
 	fields := events[0]["fields"].(map[string]any)
-	if fields["seat"] != seatBoard || fields["model"] != "gpt-board" {
-		t.Fatalf("parse_failure fields=%v, want seat=board model=gpt-board", fields)
+	if fields["seat"] != seatBoard || fields["model"] != meetingBrainModel() {
+		t.Fatalf("parse_failure fields=%v, want seat=board model=%s", fields, meetingBrainModel())
 	}
 }
 

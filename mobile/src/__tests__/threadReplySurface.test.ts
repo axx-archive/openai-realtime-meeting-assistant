@@ -43,7 +43,7 @@ test('thread replies use a native dismissible page sheet with their own composer
   assert.match(screenSource, /addGiphyGif\(gif, attachmentTarget\)/);
   assert.match(sheetSource, /onLongPress=\{onLongPress\}/);
   assert.match(sheetSource, /\{actionOverlay\}/);
-  assert.match(screenSource, /actionOverlay=\{\(/);
+  assert.match(screenSource, /actionOverlay=\{\s*<>/);
   assert.match(screenSource, /renderLongMessageSheet\(true\)/);
   assert.match(screenSource, /renderMessageActionSheet\(true\)/);
   assert.match(screenSource, /\{threadContextRoot \? null : renderMessageActionSheet\(\)\}/);
@@ -60,7 +60,7 @@ test('thread replies use a native dismissible page sheet with their own composer
 });
 
 test('reply summaries resolve current participant avatars instead of initials-only placeholders', () => {
-  assert.match(screenSource, /participantByEmail\.get\(String\(reply\.authorEmail/);
+  assert.match(screenSource, /participantByEmail\.get\(\s*String\(reply\.authorEmail/);
   assert.match(screenSource, /avatarDataURL: replyParticipant\.avatarDataURL/);
   assert.match(screenSource, /Array\.from\(participantByEmail\.values\(\)\)/);
 });
@@ -104,4 +104,30 @@ test('reply-origin agent proposals can be confirmed or dismissed in the native t
   assert.match(sheetSource, /onResolveProposal=\{onResolveProposal\}/);
   assert.match(screenSource, /api\.resolveScoutProposal\(/);
   assert.match(apiSource, /chat-threads\/\$\{encodeURIComponent\(threadId\)\}\/proposal/);
+});
+
+test('governed proposal approval is bound to the exact server-held objective', () => {
+  assert.match(bubbleSource, /const exactApproval = String\(message\.intentOutcome \?\? proposal\?\.intentOutcome \?\? ''\) === 'approval_required'[\s\S]*proposal\?\.effectClass/u);
+  assert.match(bubbleSource, /editable=\{!resolvingProposal && !exactApproval\}/u);
+  assert.match(bubbleSource, /exactApproval \? \(proposal\?\.objective \?\? proposal\?\.summary \?\? body\)/u);
+  assert.match(bubbleSource, /Approval is bound to this exact request\. Edit by sending a new message\./u);
+});
+
+test('native approval controls admit held workstream, goal, and registry-tool cards', () => {
+  assert.match(bubbleSource, /\['workstream', 'tool_run', 'goal_run'\]\.includes\(proposalKind\)/u);
+  assert.match(bubbleSource, /proposalKind === 'goal_run'[\s\S]*started this goal/u);
+  assert.match(bubbleSource, /workProposal \? \([\s\S]*proposalPending[\s\S]*Run once/u);
+});
+
+test('governed completed work uses the rich card and authenticated product artifact path', () => {
+  assert.match(bubbleSource, /kind !== 'work_result' && kind !== 'work_record'/u);
+  assert.match(bubbleSource, /mode: 'completed work'/u);
+  assert.match(bubbleSource, /status === 'complete' \|\| status === 'completed' \|\| status === 'published'/u);
+  assert.match(bubbleSource, /Deterministic local · provider fenced/u);
+  assert.match(bubbleSource, /!workThread\.governedRecord \? <Pressable[^>]*accessibilityLabel=\{workSaved/u);
+  assert.match(bubbleSource, /!workThread\.governedRecord \? <Pressable[^>]*accessibilityLabel="Edit prompt and regenerate deliverable"/u);
+  assert.match(screenSource, /api\.strideWorkArtifact\([\s\S]*governedWork\.artifactHref/u);
+  assert.ok(apiSource.includes('/^\\/api\\/stride\\/v1\\/work\\/runs\\/[a-z0-9_-]+\\/artifact$/u'));
+  assert.match(screenSource, /Approved outcome\\n/u);
+  assert.match(screenSource, /Verified source\\n/u);
 });

@@ -76,9 +76,6 @@ type dictationTranscriptionField struct {
 // live transcript lane: that lane can validly use a Realtime-only model such as
 // gpt-realtime-whisper, which the file endpoint rejects.
 func dictationTranscriptionModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")); model != "" {
-		return model
-	}
 	return defaultDictationTranscriptionModel
 }
 

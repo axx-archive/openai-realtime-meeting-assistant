@@ -251,7 +251,7 @@ func assertSeededFlawReachesReviewer(t *testing.T, app *kanbanBoardApp, tool pac
 		}, nil
 	}
 
-	plan := &goalPlan{Objective: "produce a data-room-ready " + tool.Name, ToolTemplate: tool.ID}
+	plan := &goalPlan{Objective: "produce a data-room-ready " + tool.Name, ToolTemplate: tool.ID, routeVerified: true}
 	st := &goalSubtask{ID: "st-1", Title: "produce the " + tool.Name, ArtifactID: artifact.ID}
 	verdict, _, _ := engine.reviewOneSubtask(context.Background(), plan, st)
 
@@ -295,8 +295,9 @@ func TestGenerationHopDeliverableSubtaskCarriesToolPrompt(t *testing.T) {
 
 	// A tool-templated plan: a research subtask feeds the one-pager sink.
 	plan := &goalPlan{
-		ToolTemplate: "one_pager",
-		Objective:    "Package the Aurora IP into an investor one-pager",
+		ToolTemplate:  "one_pager",
+		routeVerified: true,
+		Objective:     "Package the Aurora IP into an investor one-pager",
 		Subtasks: []goalSubtask{
 			{ID: "st-1", Title: "research the market", Mode: "research", DependsOn: []string{}},
 			{ID: "st-2", Title: "write the one-pager", Mode: "artifacts", DependsOn: []string{"st-1"}},
@@ -363,7 +364,7 @@ func TestFlywheelWritesFireOnToolTemplatedCompletion(t *testing.T) {
 	})
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Write the Aurora one-pager",
 		CreatedBy:    "aj@shareability.com",
 		PackageID:    pkg.ID,
@@ -497,7 +498,7 @@ func TestGoalDoorsResolveToolTemplate(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 
 	// A known tool id reaches the plan and the artifact metadata.
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Write the Aurora one-pager",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "one_pager",
@@ -555,7 +556,7 @@ func TestExternalWriteGatedToolForcesApproval(t *testing.T) {
 			Content:    []json.RawMessage{mockAnthropicTextBlock(`{"safe":true,"external_write_required":false,"command":"","reason":"looks fine"}`)},
 		}, nil
 	}
-	plan := &goalPlan{Objective: "send the LP update", ToolTemplate: "investor_update_memo", Authority: codexJobAuthorityWorkspaceWrite, Gate: goalGate{Status: "pending"}}
+	plan := &goalPlan{Objective: "send the LP update", ToolTemplate: "investor_update_memo", Authority: codexJobAuthorityWorkspaceWrite, Gate: goalGate{Status: "pending"}, routeVerified: true}
 	engine.gate(context.Background(), plan)
 	if !plan.Gate.ApprovalRequired {
 		t.Fatal("external-write-gated tool did not force the approval gate")

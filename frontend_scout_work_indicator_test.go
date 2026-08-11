@@ -40,10 +40,9 @@ func TestScoutWorkStatusIsVisibleOnDesktopAndMobile(t *testing.T) {
 	}
 	for _, want := range []string{
 		"workThreadPresentation",
-		"Gathering evidence",
 		"Deliverable ready",
 		"Open live work details",
-		"Research in progress",
+		"workThread.family",
 		"accessibilityLabel=\"Open deliverable\"",
 		"Save deliverable to Drive",
 		"Edit prompt and regenerate deliverable",
@@ -54,6 +53,15 @@ func TestScoutWorkStatusIsVisibleOnDesktopAndMobile(t *testing.T) {
 	} {
 		if !strings.Contains(string(mobile), want) {
 			t.Fatalf("mobile work indicator missing %q", want)
+		}
+	}
+	presentation, err := os.ReadFile("mobile/src/messaging/workPresentation.ts")
+	if err != nil {
+		t.Fatalf("read shared native work presentation: %v", err)
+	}
+	for _, want := range []string{"workFamilyLabel", "workPhaseLabel", "Gathering evidence", "Building", "safeWorkProgressNote"} {
+		if !strings.Contains(string(presentation), want) {
+			t.Fatalf("shared native work presentation missing %q", want)
 		}
 	}
 }
@@ -73,20 +81,20 @@ func TestDesktopAndNativeWorkPhasesSeparateResearchFromBuilding(t *testing.T) {
 	desktopText := string(desktop)
 	for _, want := range []string{
 		"if (/research|source|evidence/.test(current)) return { label: 'Gathering evidence', index: 1 }",
-		"if (/build|draft|synth|execute|codex/.test(current)) return { label: 'Building', index: 2 }",
+		"if (/build|draft|synth|execute|codex|assembl|compos|prepar/.test(current)) return { label: 'Building', index: 2 }",
 	} {
 		if !strings.Contains(desktopText, want) {
 			t.Fatalf("desktop phase contract missing %q", want)
 		}
 	}
-	native, err := os.ReadFile("mobile/src/screens/ThreadScreen.tsx")
+	native, err := os.ReadFile("mobile/src/messaging/workPresentation.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
 	nativeText := string(native)
 	for _, want := range []string{
 		"if (/research|source|evidence/u.test(stage)) return 'Gathering evidence';",
-		"if (/build|draft|synth|execute|codex/u.test(stage)) return 'Building';",
+		"if (/build|draft|synth|execute|codex|assembl|compos|prepar/u.test(stage)) return 'Building';",
 	} {
 		if !strings.Contains(nativeText, want) {
 			t.Fatalf("native phase contract missing %q", want)

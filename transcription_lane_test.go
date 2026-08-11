@@ -264,8 +264,8 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 	if source := entry.Metadata["source"]; source != "transcript_lane" {
 		t.Fatalf("source=%q, want transcript_lane", source)
 	}
-	if model := entry.Metadata["model"]; model != "gpt-realtime-whisper" {
-		t.Fatalf("model=%q, want gpt-realtime-whisper", model)
+	if model := entry.Metadata["model"]; model != defaultTranscriptionLaneModel {
+		t.Fatalf("model=%q, want %s", model, defaultTranscriptionLaneModel)
 	}
 }
 

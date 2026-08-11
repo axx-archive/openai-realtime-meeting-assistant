@@ -1,20 +1,16 @@
 package main
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-// Wave 11 (Spectacular OS) — quick-select tool palette + /goal running-state
-// cards + return-to-origin card. These markers pin the load-bearing wiring so a
-// refactor that severs a door, the stage rail, the trust line, or the event
-// consumer fails CI. Seams are scoped to their real function bodies (the Wave 6
-// lesson: a substring-anywhere check passes even against dead code).
+// Wave 11 legacy registry/admin fixtures + /goal running-state cards and
+// return-to-origin card. The normal product is conversation-first: these tests
+// pin the registry and work-card contracts while proving the client cannot
+// select or transmit a tool template.
 
 func readIndexForPalette(t *testing.T) string {
 	t.Helper()
@@ -171,8 +167,6 @@ func TestIndexHasPaletteMarkers(t *testing.T) {
 
 	// Structural + style presence (namespaced, per monolith discipline).
 	for _, want := range []string{
-		`id="scoutChatToolsBtn"`,
-		`class="scout-chat-tools"`,
 		".palette__sheet",
 		".palette__tile",
 		".palette__well",
@@ -198,51 +192,39 @@ func TestIndexHasPaletteMarkers(t *testing.T) {
 	}
 }
 
-// The palette must open from BOTH the + Tools button and the "/" first-char
-// trigger — wired inside their real handlers, not merely defined.
-func TestPaletteOpensFromBothDoors(t *testing.T) {
+// The legacy palette may remain for controlled fixtures, but normal people get
+// no tool button, slash palette, or client-selected capability.
+func TestNormalComposerHasNoToolPaletteDoors(t *testing.T) {
 	html := readIndexForPalette(t)
-
-	if !strings.Contains(html, "scoutChatToolsBtn?.addEventListener('click', () => openToolPalette('button'))") {
-		t.Error("the + Tools button is not wired to openToolPalette")
-	}
-	if !strings.Contains(html, "openToolPalette('slash'") {
-		t.Error("the \"/\" first-char trigger is not wired to openToolPalette")
-	}
-
-	// The slash door lives inside the composer's input handler, and it must not
-	// swallow the /goal command (siblings, not rivals).
-	if !strings.Contains(html, "const isGoalDoor = /^\\/goal(\\s|$)/i.test(value)") {
-		t.Error("the slash door must recognize and defer to the /goal command")
+	for _, forbidden := range []string{
+		`id="scoutChatToolsBtn"`,
+		`aria-label="Run a task or tool"`,
+		"scoutChatToolsBtn?.addEventListener",
+		"openToolPalette('slash'",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("normal composer still exposes client tool selection %q", forbidden)
+		}
 	}
 }
 
-// runGoalPipeline is the single POST every door converges on, and it must carry
-// the toolTemplate so the engine applies the tool's prompt body.
-func TestRunGoalPipelinePostsToolTemplate(t *testing.T) {
+// The legacy helper is a compatibility shim only: it must re-enter ordinary
+// conversation and cannot post any client-selected launch contract.
+func TestRunGoalPipelineReentersConversationRouter(t *testing.T) {
 	html := readIndexForPalette(t)
 	body := functionBody(html, "async function runGoalPipeline(spec)")
 	if body == "" {
 		t.Fatal("index.html missing runGoalPipeline")
 	}
-	for _, want := range []string{
-		"'/assistant/goal'",
-		"body.toolTemplate = String(spec.toolTemplate)",
-		"originSurface",
-		"upsertGoalCardNode(",
-	} {
+	for _, want := range []string{"sendScoutChat(objective)"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("runGoalPipeline missing %q — the palette/goal contract is broken", want)
+			t.Errorf("runGoalPipeline missing %q — the conversation router migration is broken", want)
 		}
 	}
-
-	// The palette Run passes the tool id as the template.
-	sel := functionBody(html, "function paletteSelectTool(tool, options)")
-	if sel == "" {
-		t.Fatal("index.html missing paletteSelectTool")
-	}
-	if !strings.Contains(sel, "toolTemplate: tool.id") {
-		t.Error("paletteSelectTool (run-with-defaults) must launch with toolTemplate: tool.id")
+	for _, forbidden := range []string{"/assistant/goal", "fetch(", "body.", "originSurface", "upsertGoalCardNode(", "body.toolTemplate", "body.authorityHint", "spec.toolTemplate", "spec.authorityHint"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("runGoalPipeline still transmits client authority %q", forbidden)
+		}
 	}
 }
 
@@ -313,27 +295,15 @@ func TestGoalLaunchPersistsOriginSurface(t *testing.T) {
 	}
 	originSurface := "chat:" + thread.ID
 
-	body, _ := json.Marshal(map[string]any{"objective": "map the fintech landscape", "originSurface": originSurface})
-	req := httptest.NewRequest(http.MethodPost, "/assistant/goal", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "http://localhost")
-	req.Host = "localhost"
-	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
-		req.AddCookie(cookie)
+	launched, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+		Objective: "map the fintech landscape", CreatedBy: "aj@shareability.com",
+		Origin: map[string]string{"originSurface": originSurface},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	rec := httptest.NewRecorder()
-	assistantGoalHandler(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Artifact meetingMemoryEntry `json:"artifact"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload.Artifact.Metadata["originSurface"] != originSurface {
-		t.Fatalf("goal artifact originSurface=%q, want %s — the return card cannot route without it", payload.Artifact.Metadata["originSurface"], originSurface)
+	if launched.Artifact.Metadata["originSurface"] != originSurface {
+		t.Fatalf("goal artifact originSurface=%q, want %s — the return card cannot route without it", launched.Artifact.Metadata["originSurface"], originSurface)
 	}
 }
 
@@ -370,61 +340,28 @@ func TestGoalCompletionEventCarriesOriginSurface(t *testing.T) {
 	}
 }
 
-// --- Fidelity fix: the conversational door carries tool.id ------------------
+// --- Conversation-first transport owns no tool authority --------------------
 
-// paletteConversationalHandoff used to drop the tool template, so deep_research
-// launched contract-gated from Run and generic from the composer. The handoff
-// must arm tool.id and the send path must carry it to the server.
-func TestPaletteConversationalHandoffCarriesToolTemplate(t *testing.T) {
+func TestNormalComposerNeverCarriesToolTemplate(t *testing.T) {
 	html := readIndexForPalette(t)
-
-	hand := functionBody(html, "function paletteConversationalHandoff(tool)")
-	if hand == "" {
-		t.Fatal("index.html missing paletteConversationalHandoff")
-	}
-	if !strings.Contains(hand, "pendingScoutToolTemplate = { toolId: tool.id") {
-		t.Error("paletteConversationalHandoff must arm pendingScoutToolTemplate = {toolId, name, threadId} — otherwise the talk-it-out door drops the tool contract")
-	}
-	if !strings.Contains(hand, "threadId: activeScoutThreadId") {
-		t.Error("the armed template must be scoped to the thread it was armed in — an unscoped template hijacks sends in other threads")
-	}
-	if !strings.Contains(hand, "renderScoutFollowUpTarget()") {
-		t.Error("paletteConversationalHandoff must render the armed chip — an invisible armed template cannot be dismissed")
-	}
-
-	// The composer send captures-and-clears the armed template (one send only),
-	// dropping a template armed for another thread instead of firing it here.
 	send := functionBody(html, "function sendScoutChat(text)")
 	if send == "" {
 		t.Fatal("index.html missing sendScoutChat")
 	}
-	for _, want := range []string{"pendingScoutToolTemplate.threadId === activeScoutThreadId", "pendingScoutToolTemplate = null", "sendScoutChatViaOffice(trimmed, files, toolTemplate)"} {
-		if !strings.Contains(send, want) {
-			t.Errorf("sendScoutChat missing %q — the armed tool template does not ride the send (thread-scoped, one send only)", want)
-		}
+	if strings.Contains(send, "toolTemplate") || !strings.Contains(send, "sendScoutChatViaOffice(trimmed, files)") {
+		t.Fatal("sendScoutChat must forward only natural-language text/files")
 	}
-
-	// The armed intent dies wherever the user walks away from it: thread
-	// switch, composer emptied, palette re-open, and the Run door.
-	renderThread := functionBody(html, "function renderActiveScoutThread()")
-	if !strings.Contains(renderThread, "pendingScoutToolTemplate.threadId !== activeScoutThreadId") {
-		t.Error("renderActiveScoutThread must drop a tool template armed for another thread")
-	}
-	chips := functionBody(html, "function renderScoutFollowUpTarget()")
-	if !strings.Contains(chips, "pendingScoutToolTemplate") || !strings.Contains(chips, "Clear armed tool") {
-		t.Error("renderScoutFollowUpTarget must render a visible, dismissible chip for the armed tool template")
-	}
-
-	// The office POST forwards toolTemplate on the wire and treats it as
-	// explicit engagement (no @scout needed, like a follow-up target).
-	office := functionBody(html, "async function sendScoutChatViaOffice(text, files = [], toolTemplate = '')")
+	office := functionBody(html, "async function sendScoutChatViaOffice(text, files = [])")
 	if office == "" {
-		t.Fatal("index.html missing sendScoutChatViaOffice(text, files, toolTemplate)")
+		t.Fatal("index.html missing conversation-only sendScoutChatViaOffice")
 	}
-	for _, want := range []string{"? { text, files, toolTemplate }", "const requestBody = JSON.stringify(messagePayload)", "body: requestBody", "Boolean(toolTemplate)"} {
+	for _, want := range []string{"const requestBody = JSON.stringify(messagePayload)", "body: requestBody", "messagePayload.operationId"} {
 		if !strings.Contains(office, want) {
-			t.Errorf("sendScoutChatViaOffice missing %q — toolTemplate does not reach the messages POST", want)
+			t.Errorf("sendScoutChatViaOffice missing replay-safe transport %q", want)
 		}
+	}
+	if strings.Contains(office, "toolTemplate") {
+		t.Error("normal message transport still contains client toolTemplate authority")
 	}
 }
 

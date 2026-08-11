@@ -144,6 +144,7 @@ type StrideE10TenantAuthoritySnapshot struct {
 	SessionHash   string
 	Session       sessionRecord
 	Person        PersonPrincipal
+	Organization  Organization
 	Membership    OrganizationMembership
 	ActiveSession ActiveOrganizationSession
 	Legacy        StrideE10LegacyPrincipalProjection
@@ -389,6 +390,7 @@ func (c *StrideE10TenantConverter) principalFromSnapshot(snapshot StrideE10Tenan
 	}
 	session := snapshot.Session
 	person := snapshot.Person
+	organization := snapshot.Organization
 	membership := snapshot.Membership
 	activeSession := snapshot.ActiveSession
 	if snapshot.SessionHash != sessionHash || snapshot.Generation == 0 || session.Kind != "" || !now.Before(session.Expires) ||
@@ -397,12 +399,13 @@ func (c *StrideE10TenantConverter) principalFromSnapshot(snapshot StrideE10Tenan
 	}
 	zeroOrganization := session.ActiveOrganizationID == "" && session.OrganizationMembershipID == "" && session.OrganizationMembershipRev == 0 && session.ActiveOrganizationSessionRev == 0
 	if zeroOrganization {
-		if !oneOf(string(surface), string(StrideE10TenantSurfaceAuthSession), string(StrideE10TenantSurfaceHTTP)) || membership != (OrganizationMembership{}) || activeSession != (ActiveOrganizationSession{}) {
+		if !oneOf(string(surface), string(StrideE10TenantSurfaceAuthSession), string(StrideE10TenantSurfaceHTTP)) || organization != (Organization{}) || membership != (OrganizationMembership{}) || activeSession != (ActiveOrganizationSession{}) {
 			return StrideE10TenantPrincipal{}, ErrStrideE10TenantAuthorityStale
 		}
 		return StrideE10TenantPrincipal{TenantID: STRIDEGlobalPersonTenant, PersonID: session.PersonID, AuthorityGeneration: snapshot.Generation}, nil
 	}
-	if !strideIdentifier(session.ActiveOrganizationID) || !strideIdentifier(session.OrganizationMembershipID) ||
+	if !strideIdentifier(session.ActiveOrganizationID) || !strideIdentifier(session.OrganizationMembershipID) || organization.Validate() != nil ||
+		organization.Status != "active" || organization.Header.ID != session.ActiveOrganizationID ||
 		session.OrganizationMembershipRev < 1 || session.ActiveOrganizationSessionRev < 1 || membership.Validate() != nil ||
 		membership.Status != "active" || membership.EndedAt != nil || membership.Header.ID != session.OrganizationMembershipID ||
 		membership.Header.Revision != session.OrganizationMembershipRev || membership.PersonID != session.PersonID ||

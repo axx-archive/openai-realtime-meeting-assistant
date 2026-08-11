@@ -66,14 +66,14 @@ test('native relationship memory uses authenticated private control endpoints', 
   const client = source('src', 'api', 'client.ts');
   const types = source('src', 'api', 'types.ts');
 
-  assert.match(client, /strideRelationshipMemory\(sessionToken: string\)/);
+  assert.match(client, /strideRelationshipMemory\(\s*sessionToken: string,?\s*\)/);
   assert.match(client, /strideSetRelationshipConsent/);
   assert.match(client, /strideRememberRelationship/);
 	assert.match(client, /strideImportRelationships/);
 	assert.match(client, /relationships\/import/);
   assert.match(client, /strideCorrectRelationship/);
   assert.match(client, /strideForgetRelationship/);
-  assert.match(client, /scope: 'private'/);
+  assert.match(client, /scope: ["']private["']/);
   assert.doesNotMatch(client, /strideRememberRelationship[\s\S]{0,500}threadId/);
   assert.match(types, /export type StrideRelationshipMemoryResponse/);
   assert.match(types, /scope: 'private' \| 'shared'/);

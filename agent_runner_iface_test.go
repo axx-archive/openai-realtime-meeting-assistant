@@ -40,9 +40,9 @@ func TestSelectedAgentRunnerNameMatrix(t *testing.T) {
 		want        string
 	}{
 		{"default keyless falls back to openai_text", nil, false, agentRunnerOpenAIText},
-		{"default with anthropic key is orchestrator", map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerAnthropicFable},
-		{"explicit anthropic keyless degrades to openai_text", map[string]string{"BONFIRE_AGENT_RUNNER": "anthropic_fable"}, false, agentRunnerOpenAIText},
-		{"explicit fable alias with key", map[string]string{"BONFIRE_AGENT_RUNNER": "fable", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerAnthropicFable},
+		{"anthropic key cannot change the default", map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerOpenAIText},
+		{"explicit anthropic is retired", map[string]string{"BONFIRE_AGENT_RUNNER": "anthropic_fable"}, false, agentRunnerStub},
+		{"fable alias stays retired even with a key", map[string]string{"BONFIRE_AGENT_RUNNER": "fable", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerStub},
 		{"explicit openai overrides key", map[string]string{"BONFIRE_AGENT_RUNNER": "openai_text", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerOpenAIText},
 		{"explicit codex is closed", map[string]string{"BONFIRE_AGENT_RUNNER": "codex", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerStub},
 		{"invented environment gate cannot enable Codex", map[string]string{"BONFIRE_AGENT_RUNNER": "codex", "BONFIRE_CODEX_EXECUTION_ENABLED": "true"}, false, agentRunnerStub},
@@ -69,21 +69,61 @@ func TestSelectedAgentRunnerNameMatrix(t *testing.T) {
 	}
 }
 
-func TestResearchRunnerIsAlwaysOpenAISolHigh(t *testing.T) {
+func TestResearchLaneIsSolHighAndPersistedRunnerFailsClosed(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
 	app := newIsolatedKanbanBoardApp(t)
 	thread := scoutAgentThread{Mode: "research", Artifact: meetingMemoryEntry{Metadata: map[string]string{"assignedRunner": agentRunnerCodexSidecar}}}
 	job := app.newAgentJob(thread)
-	if runner := app.selectAgentRunner(job, nil); runner.Name() != agentRunnerOpenAIText {
-		t.Fatalf("research runner=%q, want %q", runner.Name(), agentRunnerOpenAIText)
+	if runner := app.selectAgentRunner(job, nil); runner.Name() != agentRunnerStub {
+		t.Fatalf("persisted execution assignment runner=%q, want fail-closed %q", runner.Name(), agentRunnerStub)
 	}
 	if got := agentThreadTextModel(thread); got != defaultResearchModel {
 		t.Fatalf("research model=%q, want %q", got, defaultResearchModel)
 	}
 	if got := agentThreadTextReasoningEffort(thread); got != defaultResearchReasoningEffort {
 		t.Fatalf("research effort=%q, want %q", got, defaultResearchReasoningEffort)
+	}
+}
+
+func TestOpenAITextRunnerFailsClosedWithoutToolIndependence(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerOpenAIText)
+	app := newIsolatedKanbanBoardApp(t)
+	ordinary := app.newAgentJob(scoutAgentThread{Mode: "design", Artifact: meetingMemoryEntry{Metadata: map[string]string{}}})
+	if runner := app.selectAgentRunner(ordinary, nil); runner.Name() != agentRunnerStub {
+		t.Fatalf("ordinary tool-dependent runner=%q, want explicit unavailable stub", runner.Name())
+	}
+	processWriter := app.newAgentJob(scoutAgentThread{Mode: "design", Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"goalParentId": "goal-1", "goalSubtaskId": "writer", "goalDeliverable": "true",
+		"outputContract": "packaging_deck_v1", "assignedRunner": agentRunnerOpenAIText,
+	}}})
+	if runner := app.selectAgentRunner(processWriter, nil); runner.Name() != agentRunnerOpenAIText {
+		t.Fatalf("pre-grounded process writer=%q, want OpenAI", runner.Name())
+	}
+	if got := agentThreadTextModel(processWriter.thread); got != defaultResearchModel {
+		t.Fatalf("pre-grounded process writer model=%q, want Sol %q", got, defaultResearchModel)
+	}
+	if got := agentThreadTextReasoningEffort(processWriter.thread); got != defaultResearchReasoningEffort {
+		t.Fatalf("pre-grounded process writer effort=%q, want %q", got, defaultResearchReasoningEffort)
+	}
+	imageDirector := processWriter
+	imageDirector.thread.Artifact.Metadata = cloneStringMap(processWriter.thread.Artifact.Metadata)
+	imageDirector.thread.Artifact.Metadata["outputContract"] = packagingStudioImageryDirectionContract
+	if got := agentThreadTextModel(imageDirector.thread); got != defaultScoutImageDirectionModel {
+		t.Fatalf("image-direction writer model=%q, want Terra %q", got, defaultScoutImageDirectionModel)
+	}
+	if got := agentThreadTextReasoningEffort(imageDirector.thread); got != defaultScoutImageDirectionEffort {
+		t.Fatalf("image-direction writer effort=%q, want %q", got, defaultScoutImageDirectionEffort)
+	}
+	for _, alias := range []string{agentRunnerAnthropicFable, "anthropic", "fable"} {
+		persistedAnthropic := processWriter
+		persistedAnthropic.thread.Artifact.Metadata = cloneStringMap(processWriter.thread.Artifact.Metadata)
+		persistedAnthropic.thread.Artifact.Metadata["assignedRunner"] = alias
+		if runner := app.selectAgentRunner(persistedAnthropic, nil); runner.Name() != agentRunnerStub {
+			t.Fatalf("persisted Anthropic alias %q runner=%q, want fail-closed stub", alias, runner.Name())
+		}
 	}
 }
 
@@ -96,7 +136,7 @@ func TestSelectedExecutionRunnerNameMatrix(t *testing.T) {
 	}{
 		{"default is closed", "", false, agentRunnerStub},
 		{"explicit codex local is closed", "codex_local", false, agentRunnerStub},
-		{"explicit fable", "fable", false, agentRunnerAnthropicFable},
+		{"explicit fable is retired", "fable", false, agentRunnerStub},
 		{"none maps to stub", "none", false, agentRunnerStub},
 		{"unknown is closed", "wat", false, agentRunnerStub},
 		{"legacy unit gate reaches sidecar", "", true, agentRunnerCodexSidecar},
@@ -223,26 +263,18 @@ func TestDrainAgentProgressSurfacesTerminalError(t *testing.T) {
 	}
 }
 
-// reviewModel resolves the dedicated reviewer/ship-gate model: Opus by default
-// (reviews read whole artifacts; that wants Opus-tier context, not the Fable
-// ceiling), env-overridable like every other model dial.
-func TestReviewModelDefaultAndOverride(t *testing.T) {
+// reviewModel is fixed to the founder-approved OpenAI review seat.
+func TestReviewModelIsServerOwnedOpenAI(t *testing.T) {
 	t.Setenv("BONFIRE_REVIEW_MODEL", "")
 	if got := reviewModel(); got != defaultReviewModel {
 		t.Fatalf("reviewModel()=%q, want the default %q", got, defaultReviewModel)
 	}
-	if defaultReviewModel != "claude-opus-4-8" {
-		t.Fatalf("defaultReviewModel=%q, want claude-opus-4-8 (Wave 3 item 16)", defaultReviewModel)
+	if defaultReviewModel != "gpt-5.6-sol" {
+		t.Fatalf("defaultReviewModel=%q, want gpt-5.6-sol", defaultReviewModel)
 	}
 	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-sonnet-5")
-	if got := reviewModel(); got != "claude-sonnet-5" {
-		t.Fatalf("reviewModel()=%q, want the env override", got)
-	}
-	// The judging seat is a worker seat under the routing doctrine: a haiku id
-	// on the dial is refused and the Opus default stands (never Haiku).
-	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-haiku-4-5")
 	if got := reviewModel(); got != defaultReviewModel {
-		t.Fatalf("reviewModel() with haiku=%q, want the %s doctrine default", got, defaultReviewModel)
+		t.Fatalf("retired provider env changed reviewModel=%q, want %s", got, defaultReviewModel)
 	}
 }
 

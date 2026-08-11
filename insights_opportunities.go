@@ -117,9 +117,9 @@ func (m InsightsOpportunitiesRunMetadata) Validate(route InsightsOpportunitiesSt
 
 func insightsOpportunitiesStaticRoute() InsightsOpportunitiesStaticRoute {
 	return InsightsOpportunitiesStaticRoute{
-		Orchestration: InsightsOpportunitiesRouteSeat{Purpose: "orchestration", Model: "claude-fable-5", Effort: "high"},
-		Generation:    InsightsOpportunitiesRouteSeat{Purpose: "generation", Model: "claude-fable-5", Effort: "high"},
-		Review:        InsightsOpportunitiesRouteSeat{Purpose: "review", Model: "claude-opus-4-8"},
+		Orchestration: InsightsOpportunitiesRouteSeat{Purpose: "orchestration", Model: "gpt-5.6-sol", Effort: "high"},
+		Generation:    InsightsOpportunitiesRouteSeat{Purpose: "generation", Model: "gpt-5.6-sol", Effort: "high"},
+		Review:        InsightsOpportunitiesRouteSeat{Purpose: "review", Model: "gpt-5.6-sol", Effort: "max"},
 	}
 }
 

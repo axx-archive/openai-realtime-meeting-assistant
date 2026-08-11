@@ -3,14 +3,42 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type openAIResponsesTestTransport struct {
+	target *url.URL
+}
+
+func (transport openAIResponsesTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request == nil || request.URL == nil || request.URL.String() != defaultOpenAIResponsesBaseURL+"/responses" {
+		return nil, fmt.Errorf("unexpected OpenAI Responses test target")
+	}
+	clone := request.Clone(request.Context())
+	redirected := *request.URL
+	redirected.Scheme = transport.target.Scheme
+	redirected.Host = transport.target.Host
+	clone.URL = &redirected
+	return http.DefaultTransport.RoundTrip(clone)
+}
+
+func routeOpenAIResponsesToTestServer(t *testing.T, rawURL string) {
+	t.Helper()
+	target, err := url.Parse(rawURL)
+	if err != nil || target == nil || !testLoopbackHost(target.Hostname()) {
+		t.Fatalf("invalid OpenAI Responses test server %q: %v", rawURL, err)
+	}
+	restore := sharedAIProviderHTTPTransport.swap(openAIResponsesTestTransport{target: target})
+	t.Cleanup(restore)
+}
 
 // openAIResponsesLedgerDir points the ledger at a temp dir and freezes its
 // clock on 2026-07-11 so every entry lands in a deterministic daily file.
@@ -32,10 +60,10 @@ func TestCreateOpenAITextResponseSendsStrictSchemaAndRejectsTruncation(t *testin
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		w.Write([]byte(`{"status":"incomplete","service_tier":"priority","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"{\"meetingId\":\"cut"}]}],"usage":{"input_tokens":10,"output_tokens":5}}`))
+		w.Write([]byte(`{"model":"gpt-5.5","status":"incomplete","service_tier":"priority","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"{\"meetingId\":\"cut"}]}],"usage":{"input_tokens":10,"output_tokens":5}}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model:       "gpt-5.5",
@@ -72,10 +100,10 @@ func TestCreateOpenAITextResponseSendsStrictSchemaAndRejectsTruncation(t *testin
 func TestCreateOpenAITextResponseBooksWireSuccessBeforeOutputValidation(t *testing.T) {
 	dir := openAIResponsesLedgerDir(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"not json"}]}],"usage":{"input_tokens":7,"output_tokens":2}}`))
+		w.Write([]byte(`{"model":"gpt-5.5","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"not json"}]}],"usage":{"input_tokens":7,"output_tokens":2}}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.5", Seat: seatMeetingDigest, Input: "digest",
@@ -93,21 +121,72 @@ func TestCreateOpenAITextResponseBooksWireSuccessBeforeOutputValidation(t *testi
 	}
 }
 
-func TestOpenAIResponsesURLDefaultAndOverride(t *testing.T) {
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", "")
+func TestOpenAIResponsesURLIgnoresLegacyOverride(t *testing.T) {
+	t.Setenv("OPENAI_RESPONSES_BASE_URL", "https://attacker.example/v1")
 	if got := openAIResponsesURL(); got != "https://api.openai.com/v1/responses" {
-		t.Fatalf("default responses URL=%q, want the unchanged api.openai.com wire endpoint", got)
+		t.Fatalf("responses URL=%q, want the fixed api.openai.com endpoint", got)
 	}
+}
 
-	// The override is a BASE url; the /responses path is appended, trailing
-	// slashes tolerated (W1 item 14: gateway/Venice shelf-readiness).
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", "https://gateway.example/v1")
-	if got := openAIResponsesURL(); got != "https://gateway.example/v1/responses" {
-		t.Fatalf("override responses URL=%q, want https://gateway.example/v1/responses", got)
+func TestCreateOpenAITextResponseRejectsMissingOrMismatchedProviderModel(t *testing.T) {
+	dir := openAIResponsesLedgerDir(t)
+	responses := []string{
+		`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"missing"}]}],"usage":{"input_tokens":3,"output_tokens":1}}`,
+		`{"model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"wrong"}]}],"usage":{"input_tokens":3,"output_tokens":1}}`,
 	}
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", "https://gateway.example/v1/")
-	if got := openAIResponsesURL(); got != "https://gateway.example/v1/responses" {
-		t.Fatalf("trailing-slash override URL=%q, want https://gateway.example/v1/responses", got)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(responses[calls]))
+		calls++
+	}))
+	defer server.Close()
+	routeOpenAIResponsesToTestServer(t, server.URL)
+
+	for range responses {
+		capture := &openAIResponseReceiptCapture{}
+		_, err := createOpenAITextResponseHTTP(withOpenAIResponseReceiptCapture(context.Background(), capture), "test-key", openAITextRequest{Model: "gpt-5.6-terra", Input: "hello"})
+		if reason, ok := openAIOutputRejectionReason(err); !ok || reason != "provider_model_mismatch" {
+			t.Fatalf("error=%v reason=%q ok=%v, want provider-model mismatch", err, reason, ok)
+		}
+		if _, _, _, observed := capture.snapshot(); observed {
+			t.Fatal("mismatched provider model produced an accepted receipt")
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("provider calls=%d, want 2", calls)
+	}
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 2 {
+		t.Fatalf("usage rows=%d, want 2", len(rows))
+	}
+	for _, row := range rows {
+		if row["wire_success"] != true || row["output_failure_reason"] != "provider_model_mismatch" {
+			t.Fatalf("model-mismatch ledger row=%v", row)
+		}
+		if _, accepted := row["accepted_output"]; accepted {
+			t.Fatalf("model mismatch was marked accepted: %v", row)
+		}
+	}
+}
+
+func TestCreateOpenAITextResponseRejectsLegacyGPT56EffortsBeforeNetwork(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	routeOpenAIResponsesToTestServer(t, server.URL)
+	for _, effort := range []string{"minimal", "ultra", "turbo"} {
+		_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{Model: "gpt-5.6-terra", Input: "hello", ReasoningEffort: effort})
+		if err == nil || !strings.Contains(err.Error(), "not admitted") {
+			t.Fatalf("effort=%q err=%v, want fail-closed admission error", effort, err)
+		}
+	}
+	for _, effort := range []string{"none", "low", "medium", "high", "xhigh", "max"} {
+		if !validOpenAIReasoningEffort(effort) {
+			t.Fatalf("approved effort %q rejected", effort)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls=%d, want zero for rejected efforts", calls)
 	}
 }
 
@@ -118,10 +197,10 @@ func TestCreateOpenAITextResponsePlacesResponsesAttachmentsBeforeText(t *testing
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		w.Write([]byte(`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"read it"}]}]}`))
+		w.Write([]byte(`{"model":"gpt-5.6-terra","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"read it"}]}]}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.6-terra",
@@ -168,6 +247,7 @@ func TestCreateOpenAITextResponseDecodesUsageAndRecordsSeatEntry(t *testing.T) {
 		// Real Responses API wire shape: input_tokens INCLUSIVE of the cached
 		// reads under input_tokens_details.cached_tokens.
 		w.Write([]byte(`{
+			"model": "gpt-5.5",
 			"output": [{"type": "message", "content": [{"type": "output_text", "text": "hello books"}]}],
 			"usage": {
 				"input_tokens": 100,
@@ -179,7 +259,7 @@ func TestCreateOpenAITextResponseDecodesUsageAndRecordsSeatEntry(t *testing.T) {
 		}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.5",
@@ -192,8 +272,8 @@ func TestCreateOpenAITextResponseDecodesUsageAndRecordsSeatEntry(t *testing.T) {
 	if text != "hello books" {
 		t.Fatalf("text=%q, want hello books", text)
 	}
-	if gotPath != "/responses" {
-		t.Fatalf("wire path=%q, want /responses appended to the base override", gotPath)
+	if gotPath != "/v1/responses" {
+		t.Fatalf("wire path=%q, want the fixed /v1/responses endpoint", gotPath)
 	}
 	if gotAuth != "Bearer test-key" {
 		t.Fatalf("auth header=%q, want Bearer test-key", gotAuth)
@@ -232,10 +312,10 @@ func TestCreateOpenAITextResponseRecordsUntaggedSeat(t *testing.T) {
 	dir := openAIResponsesLedgerDir(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":10,"output_tokens":2}}`))
+		w.Write([]byte(`{"model":"gpt-5.5","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":10,"output_tokens":2}}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	if _, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{Model: "gpt-5.5", Input: "hi"}); err != nil {
 		t.Fatalf("createOpenAITextResponseHTTP: %v", err)
@@ -258,7 +338,7 @@ func TestCreateOpenAITextResponseRecordsErrorEntryOnFailure(t *testing.T) {
 		w.Write([]byte(`{"error": {"message": "rate_limit reached"}}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.5",
@@ -295,6 +375,7 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 		}
 		w.Write([]byte(`{
 			"id":"resp_web_search_test",
+			"model":"gpt-5.5",
 			"status":"completed",
 			"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"The official release confirms the feature.","annotations":[
 				{"type":"url_citation","url":"https://docs.example.com/releases/2026","title":"Official 2026 release"},
@@ -303,7 +384,7 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 		}`))
 	}))
 	defer server.Close()
-	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.5", Input: "verify the current release", EnableWebSearch: true,

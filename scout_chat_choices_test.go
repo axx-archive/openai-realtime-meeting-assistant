@@ -97,11 +97,11 @@ func TestScoutChatRouterOffersChoicesNeverLaunches(t *testing.T) {
 			t.Fatal("a choices turn must not also run the Q&A path")
 		}
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Route: "choices", Question: "do you want outline work, or the deck built end to end?",
+			Outcome: string(conversationIntentClarifyOnce), Question: "do you want outline work, or the deck built end to end?",
 			Options: []openAIScoutRouterOption{
-				{Label: "tighten the outline", ToolID: "deck_outline"},
-				{Label: "full packaging run", Reply: "run the full packaging build from the outline", ToolID: "packaging_studio"},
-				{Label: "phantom pill", ToolID: "not_a_tool"},
+				{Label: "tighten the outline", Reply: "tighten the outline"},
+				{Label: "full packaging run", Reply: "run the full packaging build from the outline"},
+				{Label: "talk it through", Reply: "talk it through"},
 				{Label: "option five"},
 			},
 		}), nil
@@ -134,14 +134,14 @@ func TestScoutChatRouterOffersChoicesNeverLaunches(t *testing.T) {
 	if len(choices.Options) != 4 {
 		t.Fatalf("options=%#v, want blank labels dropped and the card capped at 4", choices.Options)
 	}
-	if choices.Options[0].ToolID != "deck_outline" || choices.Options[1].ToolID != "packaging_studio" {
-		t.Fatalf("options=%#v, want the registry tool arms preserved", choices.Options)
+	if choices.Options[0].ToolID != "" || choices.Options[1].ToolID != "" {
+		t.Fatalf("options=%#v, clarify replies must never carry tool selectors", choices.Options)
 	}
 	if choices.Options[1].Reply != "run the full packaging build from the outline" {
 		t.Fatalf("options[1]=%#v, want the crafted reply preserved", choices.Options[1])
 	}
-	if choices.Options[2].Label != "phantom pill" || choices.Options[2].ToolID != "" {
-		t.Fatalf("options[2]=%#v — an unknown tool_id must degrade to a plain reply pill", choices.Options[2])
+	if choices.Options[2].Label != "talk it through" || choices.Options[2].ToolID != "" {
+		t.Fatalf("options[2]=%#v", choices.Options[2])
 	}
 
 	answer, ok := response["answer"].(scoutChatMessageRecord)
@@ -375,17 +375,15 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			kanbanApp.apiKey = "openai-router-test"
 			t.Cleanup(func() { kanbanApp = previousApp })
 
-			previousRunner := startAgentThreadAsync
-			startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-				t.Fatal("a proposal must never launch")
-			}
-			t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+			previousStarter := startGoalThreadAsync
+			startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+			t.Cleanup(func() { startGoalThreadAsync = previousStarter })
 
 			var routed openAITextRequest
 			swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 				routed = request
 				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-					Route: "tool_run", ToolID: scenario.toolID, Objective: scenario.objective,
+					Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: scenario.toolID, Objective: scenario.objective,
 				}), nil
 			})
 
@@ -397,37 +395,38 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create private thread: %v", err)
 			}
-			response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, scenario.utterance, nil, "")
+			ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+				ID: "router-scenario-" + sha256Hex([]byte(scenario.name))[:24], BodyDigest: sha256Hex([]byte(scenario.utterance)),
+			})
+			response, err := kanbanApp.appendScoutChatThreadMessage(ctx, user, private.ID, scenario.utterance, nil, "")
 			if err != nil {
 				t.Fatalf("append scenario message: %v", err)
 			}
 
 			// The intent map rides the system prompt — that is what makes these
 			// phrasings route well on the live model.
-			for _, anchor := range []string{"Intent map", "deck_outline", "brand_design_brief", "packaging_studio", "offer_choices"} {
+			for _, anchor := range []string{"Intent map", "deck_outline", "brand_design_brief", "packaging_studio", "clarify_once"} {
 				if !strings.Contains(routed.Instructions, anchor) {
 					t.Fatalf("router system prompt missing intent-map anchor %q", anchor)
 				}
 			}
 
-			if _, launched := response["agentThread"]; launched {
-				t.Fatalf("response keys=%v — NEVER silent-launch", responseKeys(response))
-			}
-			proposal, ok := response["proposal"].(*scoutRouterProposal)
+			launched, ok := response["agentThread"].(scoutAgentThread)
 			if !ok {
-				t.Fatalf("proposal type=%T, want *scoutRouterProposal — %q must survive validation", response["proposal"], scenario.toolID)
+				t.Fatalf("agentThread type=%T, want direct launch for %q", response["agentThread"], scenario.toolID)
 			}
-			if proposal.ToolID != scenario.toolID || proposal.ToolName != scenario.wantName || proposal.GroupLabel != scenario.wantGroup {
-				t.Fatalf("proposal=%#v, want %s / %s / %s", proposal, scenario.toolID, scenario.wantName, scenario.wantGroup)
+			if launched.Artifact.Metadata["toolTemplate"] != scenario.toolID && launched.Artifact.Metadata["processId"] != scenario.toolID {
+				t.Fatalf("launch metadata=%#v, want %s", launched.Artifact.Metadata, scenario.toolID)
 			}
-			if proposal.Objective != scenario.objective {
-				t.Fatalf("objective=%q, want the routed objective", proposal.Objective)
+			if launched.Query != canonicalizeBoardText(scenario.objective) {
+				t.Fatalf("objective=%q, want the routed objective", launched.Query)
 			}
-			if !strings.Contains(proposal.Summary, scenario.wantInWord) {
-				t.Fatalf("summary=%q, want %q named", proposal.Summary, scenario.wantInWord)
+			answer, ok := response["answer"].(scoutChatMessageRecord)
+			if !ok || answer.Thread == nil || strings.TrimSpace(answer.Thread.Status) == "" {
+				t.Fatalf("answer=%#v, want truthful work card", response["answer"])
 			}
-			if proposal.Query != scenario.utterance {
-				t.Fatalf("query=%q, want the utterance for the Tier-0 escape", proposal.Query)
+			if response["intentOutcome"] != string(conversationIntentStartPrivateWork) || response["proposal"] != nil {
+				t.Fatalf("response=%#v", response)
 			}
 		})
 	}

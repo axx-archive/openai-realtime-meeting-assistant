@@ -1,0 +1,161 @@
+{
+  "schema": "stride.e10.pd0.work-network-prototype-rendered.v1",
+  "observedAt": "2026-08-10T17:14:42Z",
+  "status": "DETERMINISTIC_BROWSER_REFERENCE_PASS_NATIVE_AND_PRODUCT_MIGRATION_PENDING",
+  "classification": "body_minimized_fictional_loopback_reference_only",
+  "sourceBoundary": {
+    "files": {
+      "docs/design/pd0-reference/README.md": "feedfbb3d6c7d72ad8e7601834ff2eb0d23e7f970ab9af1281f5f49ce2b182a4",
+      "docs/design/pd0-reference/index.html": "325c84565fe531ff056d5b1501bcb6fb539add4f65c66b7d9f9c2a87f6a0e65d",
+      "docs/design/pd0-reference/styles.css": "7a2e11c9b4c137f891a3ea533eb66f336db7dfad3cc1ead628e47d22de1b8652",
+      "docs/design/pd0-reference/app.js": "d15747a9cb502a5e497a353a2bcbd988c310ce56fa7fd4a4cae5c884e2f1d01d",
+      "docs/design/pd0-reference/fixture.json": "a1bed59ad4c6708f7fb02abd16ab151eceab355cf4de50b5d8f5e06ed77e8c95",
+      "docs/design/pd0-reference/validate.mjs": "1c9d7a5ece302f17a54a2bb6e782bed32dd14a6ce6636676258f41a96f655fc4",
+      "docs/design/pd0-reference/validate-rendered.mjs": "c61a68b5504a7949851feb3d20942ee393066fa2796786cd414d9f161d6e3094"
+    },
+    "designEvidence": {
+      "comparativeStudySha256": "1e781de1ddbc10eeb051680e54e6a08a4c763d547135dece1c638a193e8cf786",
+      "chatgptWorkstreamStudySha256": "7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4",
+      "chatgptInteractionManifestSha256": "98027ae638ee1f0742725754cbdddfc0e7e8642cf990bd43958208bed82048fe"
+    }
+  },
+  "validation": {
+    "command": "node docs/design/pd0-reference/validate.mjs",
+    "result": "PASS",
+    "journeys": 13,
+    "destinations": 5,
+    "states": 19,
+    "componentTypes": 23,
+    "gatesDefaultFalse": 10,
+    "mutationNegatives": 40,
+    "boundArtifacts": 8,
+    "externalCalls": 0,
+    "renderedCommand": "node docs/design/pd0-reference/validate-rendered.mjs",
+    "renderedResult": "PASS",
+    "dimensionsVerified": 4,
+    "screenshotSha256Verified": 4
+  },
+  "workPrototype": {
+    "journey": "J4 Build and review a presentation",
+    "request": "fictional Northstar investor update",
+    "deliverable": "editable six-slide presentation",
+    "lifecycle": [
+      "Scope",
+      "Research",
+      "Story",
+      "Design",
+      "Review",
+      "Drive"
+    ],
+    "visibleContract": [
+      "accountable owner",
+      "participants",
+      "private audience",
+      "source set",
+      "OpenAI-only route with no provider call in reference",
+      "approval-before-spend boundary",
+      "current stage",
+      "next action",
+      "artifact state",
+      "Drive state"
+    ],
+    "interaction": "Start then advance three times to Work Human review",
+    "assertions": {
+      "stageCount": 6,
+      "editableDeckPreviewCount": 1,
+      "stepPostimages": [
+        "Scope review · Inspect sources + cost · Review approved scope · Artifact not started",
+        "Narrative review · Approve story direction · Story outline · Outline ready",
+        "Design review · Review rendered deck · Narrative approved · Draft ready · Human review pending",
+        "Human review · Save approved revision · Narrative approved · Reviewed and ready · Human review complete"
+      ],
+      "backRestoresExactPriorPostimage": true,
+      "recoveryPreservesExactCurrentPostimage": true,
+      "terminalRemovesMutableRunCard": true,
+      "restartReturnsToIdleThenExactStepZero": true,
+      "technicalFieldsProgressivelyDisclosed": true,
+      "driveActionVisible": true,
+      "documentHorizontalOverflow": 0,
+      "providerCalls": 0,
+      "writes": 0
+    }
+  },
+  "networkPrototype": {
+    "journey": "J6 Create a Public Workspace",
+    "lifecycle": [
+      "Private Work",
+      "Reviewed evidence",
+      "Work Record",
+      "Release review",
+      "Network projection"
+    ],
+    "initialTypedChildCards": 0,
+    "resolvedState": "feature_off",
+    "explicitLayoutPreview": true,
+    "previewValues": "field shape only; no current value",
+    "providerCalls": 0,
+    "writes": 0
+  },
+  "renderedEvidence": [
+    {
+      "surface": "Work presentation",
+      "platformExpression": "desktop",
+      "viewport": "1440x1000",
+      "capture": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/stride-pd0-work-network-prototype-20260810/work-presentation-desktop-1440x1000.png",
+      "pixelSize": "1440x2551",
+      "sha256": "7080c5f5bb2021a0c92bb1cc75c521f5cd6165990fe05a73afa6b1eefe3b699f"
+    },
+    {
+      "surface": "Work presentation",
+      "platformExpression": "iPhone",
+      "viewport": "430x932",
+      "capture": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/stride-pd0-work-network-prototype-20260810/work-presentation-iphone-430x932.png",
+      "pixelSize": "430x3993",
+      "sha256": "c9ab15b09479c39c400353225cda11a42216cb5b1cd6f74ba6280f4e3a385e72"
+    },
+    {
+      "surface": "Work presentation",
+      "platformExpression": "iPad",
+      "viewport": "1180x820",
+      "capture": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/stride-pd0-work-network-prototype-20260810/work-presentation-ipad-1180x820.png",
+      "pixelSize": "1180x2690",
+      "sha256": "930700a51b712926bb22bfae51f2fa781900b4f49f03ad8628911c530d85e75e"
+    },
+    {
+      "surface": "Work to Network bridge",
+      "platformExpression": "desktop",
+      "viewport": "1440x1000",
+      "capture": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/stride-pd0-work-network-prototype-20260810/network-bridge-desktop-1440x1000.png",
+      "pixelSize": "1440x1786",
+      "sha256": "e7822252cea1bfbabfc2fc76328aa8bef4609853a4badd897b074e42bc2da88b"
+    }
+  ],
+  "acceptance": {
+    "workAndNetworkFeelLikeOneLifecycle": true,
+    "humanAgentAndSystemSemanticsRemainDistinct": true,
+    "privateWorkDoesNotBecomePublicContent": true,
+    "desktopIPhoneIPadExpressionsUseOneSemanticFixture": true,
+    "openAIOnlyPresentationDirectionVisible": true,
+    "independentCritic": {
+      "agent": "/root/w0_plan_audit",
+      "verdict": "PASS",
+      "reviewedReceiptSha256": "b55f7c67c702f491f6dacd2d258cfac0dea5f191e9ea41ab5931624f272af4da",
+      "evidence": "receipt_sidecar_JSON_diff_validators_source_and_capture_hashes_dimensions_postimages_back_recovery_terminal_restart_network_fail_closed_exclusions_PASS"
+    }
+  },
+  "exclusions": {
+    "productImplementation": false,
+    "nativeReactAcceptance": false,
+    "physicalIPhone": false,
+    "physicalIPad": false,
+    "voiceOver": false,
+    "dynamicType": false,
+    "splitViewStageManager": false,
+    "successfulOpenAIPresentationRun": false,
+    "editablePPTXAcceptance": false,
+    "slideJuryAcceptance": false,
+    "driveWriteReceipt": false,
+    "publication": false,
+    "activation": false
+  }
+}

@@ -271,8 +271,34 @@ function renderProjection(journey, state, stepIndex) {
   }
   if (state.id === "terminal") return `<article class="semantic-card wide completion-card"><div class="card-meta"><span class="principal system">SystemEvent</span><span>fictional completion</span></div><h2>${escapeHTML(journey.name)} complete</h2><p>${escapeHTML(currentContract().terminalOutcome)} It created no authority, provider work, persistence, or external effect.</p></article>`;
   if (!projectionStates.has(state.id)) return opaqueStateCard(state, state.id === "idle" ? "Start the fictional journey" : "Reference projection held");
-  const visibleCount = Math.max(1, Math.ceil((stepIndex + 1) / currentSteps().length * journey.components.length));
-  return journey.components.slice(0, visibleCount).map(component => componentCard(component, false)).join("");
+  const projected = projectedJourneyComponents(journey, stepIndex);
+  const visibleCount = Math.max(1, Math.ceil((stepIndex + 1) / currentSteps().length * projected.length));
+  return projected.slice(0, visibleCount).map(component => componentCard(component, false)).join("");
+}
+
+function projectedJourneyComponents(journey, stepIndex) {
+  const postimage = appState.fixture.journeyPostimages?.[journey.id]?.[stepIndex];
+  if (!postimage) return journey.components;
+  const projected = structuredClone(journey.components);
+  const run = projected.find(component => component.type === "RunTimeline");
+  const artifact = projected.find(component => component.type === "ArtifactRevisionView");
+  const outcome = projected.find(component => component.type === "OutcomeRecordView");
+  Object.assign(run.fields, {
+    stage: postimage.stage, currentActor: postimage.currentActor, nextAction: postimage.nextAction,
+    artifactState: postimage.artifactState, driveState: postimage.driveState
+  });
+  Object.assign(artifact.fields, {
+    reviewState: postimage.artifactReviewState, previewState: postimage.artifactPreviewState,
+    driveState: postimage.driveState
+  });
+  Object.assign(outcome.fields, {
+    decisionState: postimage.decisionState, nextAction: postimage.outcomeNextAction
+  });
+  projected.find(component => component.type === "InterventionRequest").title = postimage.interventionTitle;
+  projected.find(component => component.type === "AgentContribution").title = postimage.agentTitle;
+  artifact.title = postimage.artifactTitle;
+  outcome.title = postimage.outcomeTitle;
+  return projected;
 }
 
 function opaqueStateCard(state, title) {
@@ -283,9 +309,10 @@ function componentCard(component, preview) {
   const family = semanticFamilyByType[component.type];
   if (!family) return opaqueStateCard({ id: "unavailable", copy: "The semantic component contract is unavailable." }, "Unknown semantic component");
   const actorClass = component.type === "HumanMessage" ? "human" : component.type === "AgentContribution" || component.type === "AgentProfileView" ? "agent" : component.type === "SystemEvent" ? "system" : "governed";
+  const spanClass = ["SuggestedWorkCard", "RunTimeline", "ArtifactRevisionView", "PublicWorkspaceView"].includes(component.type) ? "wide" : "";
   const rows = semanticFieldRows(component, preview);
   const body = semanticComponentBody(component, family, rows, preview);
-  return `<article class="semantic-card typed-card family-${escapeHTML(family)} ${preview ? "preview-card" : ""}" data-component-type="${escapeHTML(component.type)}" data-semantic-family="${escapeHTML(family)}"><div class="card-meta"><span class="principal ${actorClass}">${escapeHTML(component.type)}</span><span>${preview ? "nonauthoritative preview" : "fictional typed fixture"}</span></div><h2>${preview ? `Layout: ${escapeHTML(component.type)}` : escapeHTML(component.title)}</h2>${body}${preview ? "" : `<div class="trust-strip"><span>Why can I see this?</span><span>What is unknown?</span><span>View provenance</span></div>`}</article>`;
+  return `<article class="semantic-card typed-card family-${escapeHTML(family)} ${spanClass} ${preview ? "preview-card" : ""}" data-component-type="${escapeHTML(component.type)}" data-semantic-family="${escapeHTML(family)}"><div class="card-meta"><span class="principal ${actorClass}">${escapeHTML(component.type)}</span><span>${preview ? "nonauthoritative preview" : "fictional typed fixture"}</span></div><h2>${preview ? `Layout: ${escapeHTML(component.type)}` : escapeHTML(component.title)}</h2>${body}${preview ? "" : `<div class="trust-strip"><span>Why can I see this?</span><span>What is unknown?</span><span>View provenance</span></div>`}</article>`;
 }
 
 function semanticFieldRows(component, preview) {
@@ -297,16 +324,16 @@ function semanticComponentBody(component, family, rows, preview) {
   switch (component.type) {
     case "SignalControl": return `<section class="semantic-structure signal-console"><p class="semantic-mark">${marker}</p><div class="signal-orbit" aria-hidden="true"><i></i><i></i><i></i></div><dl class="field-list">${rows}</dl></section>`;
     case "HumanMessage": return `<section class="semantic-structure message-bubble human-bubble"><p class="semantic-mark">Human-authored message</p><dl class="field-list">${rows}</dl></section>`;
-    case "AgentContribution": return `<section class="semantic-structure agent-attribution"><header><span>Agent output</span><span>Accountable human required</span></header><dl class="field-list">${rows}</dl></section>`;
-    case "SystemEvent": return `<section class="semantic-structure system-ledger"><span class="ledger-node" aria-hidden="true"></span><div><p class="semantic-mark">Non-social system fact</p><dl class="field-list">${rows}</dl></div></section>`;
-    case "SuggestedWorkCard": return `<section class="semantic-structure suggestion-contract"><header><span>Proposed scope</span><span>Human decision</span></header><div class="decision-boundary"><strong>No run yet</strong><span>Approve or dismiss exact revision</span></div><dl class="field-list">${rows}</dl></section>`;
-    case "RunTimeline": return `<section class="semantic-structure run-track"><ol aria-label="Run phases"><li>Queued</li><li>Current actor</li><li>Verification</li></ol><dl class="field-list">${rows}</dl></section>`;
-    case "InterventionRequest": return `<section class="semantic-structure intervention-boundary"><p class="semantic-mark">Bounded human intervention</p><div class="choice-slot">One closed choice · exact consequence</div><dl class="field-list">${rows}</dl></section>`;
-    case "ArtifactRevisionView": return `<section class="semantic-structure artifact-sheet"><header><span>Source provenance</span><span>Revision</span><span>Review</span></header><div class="artifact-page" aria-label="Artifact revision structure"></div><dl class="field-list">${rows}</dl></section>`;
-    case "OutcomeRecordView": return `<section class="semantic-structure outcome-verdict"><div class="outcome-axis"><span>Evidence</span><span>Human review</span><span>Verification</span></div><dl class="field-list">${rows}</dl></section>`;
+    case "AgentContribution": return `<section class="semantic-structure agent-attribution"><header><span>Agent output</span><span>Accountable human required</span></header>${contractRows(rows, preview)}</section>`;
+    case "SystemEvent": return `<section class="semantic-structure system-ledger"><span class="ledger-node" aria-hidden="true"></span><div><p class="semantic-mark">Non-social system fact</p>${contractRows(rows, preview)}</div></section>`;
+    case "SuggestedWorkCard": return `<section class="semantic-structure suggestion-contract"><header><span>Proposed private work</span><span>Human decision required</span></header><div class="work-contract-grid" aria-label="Suggested Work contract"><div><span>Deliverable</span><strong>${fixtureValue(component, "deliverable", preview)}</strong></div><div><span>Owner</span><strong>${fixtureValue(component, "owner", preview)}</strong></div><div><span>Participants</span><strong>${fixtureValue(component, "participantSet", preview)}</strong></div><div><span>Inputs</span><strong>${fixtureValue(component, "inputSet", preview)}</strong></div><div><span>Cost boundary</span><strong>${fixtureValue(component, "costState", preview)}</strong></div><div><span>Next decision</span><strong>${fixtureValue(component, "nextAction", preview)}</strong></div></div><div class="decision-boundary"><strong>No run yet</strong><span>Approve, edit, or dismiss this exact revision</span></div>${contractRows(rows, preview)}</section>`;
+    case "RunTimeline": return `<section class="semantic-structure run-track"><div class="work-card-heading"><div><p class="semantic-mark">Private Work · observable run</p><strong>${fixtureValue(component, "deliverable", preview)}</strong></div><span>${fixtureValue(component, "stage", preview)}</span></div><div class="work-contract-grid" aria-label="Current work context"><div><span>Accountable owner</span><strong>${fixtureValue(component, "owner", preview)}</strong></div><div><span>Participants</span><strong>${fixtureValue(component, "participantSet", preview)}</strong></div><div><span>Sources</span><strong>${fixtureValue(component, "sourceSet", preview)}</strong></div><div><span>Provider route</span><strong>${fixtureValue(component, "providerRoute", preview)}</strong></div><div><span>Cost</span><strong>${fixtureValue(component, "costState", preview)}</strong></div><div><span>Next action</span><strong>${fixtureValue(component, "nextAction", preview)}</strong></div></div><ol class="delivery-stages" aria-label="Presentation delivery stages">${runPhaseItems(component, preview)}</ol><div class="artifact-status-line"><span>Artifact · ${fixtureValue(component, "artifactState", preview)}</span><span>Drive · ${fixtureValue(component, "driveState", preview)}</span></div>${contractRows(rows, preview)}</section>`;
+    case "InterventionRequest": return `<section class="semantic-structure intervention-boundary"><p class="semantic-mark">Bounded human intervention</p><div class="choice-slot">One closed choice · exact consequence</div>${contractRows(rows, preview)}</section>`;
+    case "ArtifactRevisionView": return `<section class="semantic-structure artifact-sheet"><header><span>${fixtureValue(component, "artifactType", preview)}</span><span>Revision ${fixtureValue(component, "artifactRevision", preview)}</span><span>${fixtureValue(component, "reviewState", preview)}</span></header><div class="artifact-page ${component.fields.artifactType === "presentation" ? "presentation-page" : "source-page"} ${component.fields.previewState === "unavailable" ? "artifact-unavailable" : ""}" aria-label="${component.fields.artifactType === "presentation" ? "Editable presentation preview structure" : "Source brief structure"}"><span></span><span></span><span></span></div><div class="artifact-status-line"><span>${fixtureValue(component, "editability", preview)}</span><span>Preview · ${fixtureValue(component, "previewState", preview)}</span><span>Drive · ${fixtureValue(component, "driveState", preview)}</span></div>${contractRows(rows, preview)}</section>`;
+    case "OutcomeRecordView": return `<section class="semantic-structure outcome-verdict"><div class="outcome-axis"><span>Evidence</span><span>Human decision</span><span>Distribution</span></div><div class="decision-summary"><strong>${fixtureValue(component, "decisionState", preview)}</strong><span>${fixtureValue(component, "nextAction", preview)}</span><span>${fixtureValue(component, "distributionState", preview)}</span></div>${contractRows(rows, preview)}</section>`;
     case "WorkRecordSection": return `<section class="semantic-structure record-section"><aside>Private Work Record</aside><div><p class="semantic-mark">Section controller and release state</p><dl class="field-list">${rows}</dl></div></section>`;
     case "EvidenceCard": return `<section class="semantic-structure evidence-chain"><ol aria-label="Evidence lineage"><li>Claim</li><li>Attestation</li><li>Approval</li></ol><dl class="field-list">${rows}</dl></section>`;
-    case "PublicWorkspaceView": return `<section class="semantic-structure workspace-outline"><nav aria-label="Workspace structure">Purpose · Participation · Moderation</nav><dl class="field-list">${rows}</dl></section>`;
+    case "PublicWorkspaceView": return `<section class="semantic-structure workspace-outline"><p class="semantic-mark">One governed Work-to-Network lifecycle</p><ol class="work-network-bridge" aria-label="Private work to Network release"><li>Private Work</li><li>Reviewed evidence</li><li>Work Record</li><li>Release review</li><li>Network projection</li></ol><div class="decision-boundary"><strong>${fixtureValue(component, "publicationState", preview)}</strong><span>${fixtureValue(component, "releaseReview", preview)}</span></div><nav aria-label="Workspace structure">Purpose · Participation · Moderation</nav><dl class="field-list">${rows}</dl></section>`;
     case "PublicWorkObjectView": return `<section class="semantic-structure work-object-document"><header>Typed public object</header><div class="object-provenance">Authorship → provenance → release</div><dl class="field-list">${rows}</dl></section>`;
     case "WorkstreamRow": return `<section class="semantic-structure chronological-row"><time>09:44</time><div><p class="semantic-mark">Chronological, not ranked</p><dl class="field-list">${rows}</dl></div></section>`;
     case "PersonProfileView": return `<section class="semantic-structure profile-person"><div class="profile-avatar" aria-hidden="true">P</div><div><p class="semantic-mark">Person · opted-in fields</p><dl class="field-list">${rows}</dl></div></section>`;
@@ -324,6 +351,34 @@ function semanticComponentBody(component, family, rows, preview) {
 
 function semanticFamilyLabel(family) {
   return humanize(family).replaceAll("-", " ");
+}
+
+function fixtureValue(component, key, preview) {
+  if (preview) return "field shape only · no current value";
+  const labels = {
+    Alex_and_Scout: "Alex + Scout", approval_before_spend: "Approval before spend", approve_exact_scope: "Approve exact scope",
+    approve_story_direction: "Approve story direction", draft_ready: "Draft ready", editable_presentation: "Editable presentation",
+    human_and_policy_required: "Human + policy review required", human_review_complete: "Human review complete",
+    human_review_required: "Human review required", keep_private: "Keep private", narrative_review: "Narrative review",
+    no_projection: "No public projection", not_saved: "Not saved", not_started: "Not started", openai_only_not_called: "OpenAI only · no provider call",
+    outline_ready: "Outline ready",
+    pending_review: "Pending review", private_only: "Private only", reviewed_work_record: "Reviewed Work Record",
+    reviewed_ready: "Reviewed · ready", review_rendered_deck: "Review rendered deck", save_approved_revision: "Save approved revision",
+    scope_review: "Scope review", design_review: "Design review", human_review: "Human review", inspect_sources_and_cost: "Inspect sources + cost",
+    three_fictional_facts: "3 fictional source facts", unavailable: "Unavailable", wait_for_deck: "Wait for deck", approve_deck: "Approve deck"
+  };
+  return escapeHTML(labels[component.fields[key]] || humanize(component.fields[key]));
+}
+
+function contractRows(rows, preview) {
+  return preview ? `<dl class="field-list">${rows}</dl>` : `<details class="technical-contract"><summary>Technical contract</summary><dl class="field-list">${rows}</dl></details>`;
+}
+
+function runPhaseItems(component, preview) {
+  const phases = ["Scope", "Research", "Story", "Design", "Review", "Drive"];
+  const stageIndex = { scope_review: 0, narrative_review: 2, design_review: 3, human_review: 4 };
+  const current = stageIndex[component.fields.stage] ?? 0;
+  return phases.map((phase, index) => `<li class="${index < current ? "complete" : index === current ? "current" : "pending"}"><span>${index < current ? "Complete" : index === current ? "Now" : "Next"}</span><strong>${preview ? "Stage" : escapeHTML(phase)}</strong></li>`).join("");
 }
 
 function renderActions(journey, state, stepIndex) {

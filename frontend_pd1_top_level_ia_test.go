@@ -47,10 +47,14 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	}
 	for _, marker := range []string{
 		`aria-label="Primary"`,
-		`aria-current="page" tabindex="0">Home`,
-		`aria-current="false" tabindex="-1">Work`,
+		`data-pd1-destination="Home" aria-current="page" tabindex="0"`,
+		`data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
 		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Work', 'Network', 'Work Search', 'You'])`,
-		`aria-label="Work tools"`,
+		`aria-label="Application navigation"`,
+		`id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces"`,
+		`role="menuitemradio" tabindex="-1" data-tool="chat"`,
+		`if (button.getAttribute('role') === 'menuitemradio') button.setAttribute('aria-checked', active ? 'true' : 'false')`,
+		`#appShell:not([data-pd1-destination="Work"]) .work-tool-menu`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("missing governed IA marker %q", marker)
@@ -132,12 +136,29 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	}
 }
 
-func TestPD1WorkRailIsContextualAndResearchCardsRemainTruthful(t *testing.T) {
+func TestPD1SignInRestoresTheCanonicalDestinationForTheCurrentPath(t *testing.T) {
+	html := pd1Index(t)
+	handler := pd1Slice(t, html, `async function signInToOffice()`, `async function signInWithPasskey()`)
+	if !strings.Contains(handler, `renderLoginMode()`) || !strings.Contains(handler, `syncAuthenticatedShell()`) {
+		t.Fatal("sign-in must render auth state and restore the canonical path destination")
+	}
+	if strings.Contains(handler, `setActiveTool('office')`) {
+		t.Fatal("sign-in must not override /work or another canonical destination with Home")
+	}
+}
+
+func TestPD1GlobalRailAndContextualWorkMenuRemainTruthful(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
-		`#appShell:not([data-pd1-destination="Work"]) .tool-rail { display: none !important; }`,
-		`toolRail.hidden = !workContext`,
-		`toolRail.inert = !workContext`,
+		`#appShell:not([data-pd1-destination="Work"]) .work-tool-menu { display: none !important; }`,
+		`toolRail.hidden = !shellVisible`,
+		`toolRail.inert = !shellVisible`,
+		`function setWorkToolMenuOpen(open, options = {})`,
+		`workDestinationButton.setAttribute('aria-expanded', next ? 'true' : 'false')`,
+		`class="tool-rail__utilities" aria-label="Account and display controls"`,
+		`<span class="tool-rail__label">Notifications</span>`,
+		`<span class="tool-rail__label">Appearance</span>`,
+		`#appShell.is-authed .tool-rail__utilities .tool-rail__label`,
 		`.scout-chat-thread > .scout-chat-research[data-state="complete"]`,
 		`flex: 0 0 auto`,
 		`function researchArtifactCurrentSourceSummary(entry)`,
@@ -163,22 +184,24 @@ func TestPD1WorkRailIsContextualAndResearchCardsRemainTruthful(t *testing.T) {
 func TestPD1KeyboardFocusResponsiveAndMotionContracts(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
-		`if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return`,
+		`const horizontal = window.matchMedia('(max-width: 640px)').matches`,
+		`const previousKey = horizontal ? 'ArrowLeft' : 'ArrowUp'`,
+		`const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown'`,
 		`button.focus()`,
 		`button.tabIndex = current ? 0 : -1`,
 		`button.setAttribute('aria-current', current ? 'page' : 'false')`,
-		`min-width: 40px`,
-		`min-height: 40px`,
+		`min-height: 46px`,
 		`min-height: 44px`,
 		`@media (max-width: 760px)`,
-		`.pd1-primary-nav { order: 20; flex: 1 0 100%; justify-content: flex-start; }`,
+		`.pd1-primary-nav { flex-direction: row; width: auto; gap: 4px; }`,
+		`setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })`,
 		`.pd1-primary-nav *, .pd1-destination-surface * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("PD1 interaction/polish contract missing %q", marker)
 		}
 	}
-	css := pd1Slice(t, html, `/* PD1: one governed top-level IA.`, `@media (prefers-reduced-motion: reduce)`)
+	css := pd1Slice(t, html, `/* PD1 shell: one global rail owns the product grammar.`, `@media (prefers-reduced-motion: reduce)`)
 	if strings.Contains(css, "transition: all") || strings.Contains(css, "will-change") {
 		t.Fatal("PD1 shell uses prohibited broad transition/compositing hint")
 	}
@@ -202,6 +225,13 @@ const projectionRequests = [];
 const server = http.createServer((req, res) => {
   if (req.url === '/public/composer-dictation.js') { res.writeHead(200, {'content-type':'application/javascript'}); return res.end(''); }
   if (req.url === '/auth/me') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic'})); }
+  if (req.url === '/api/stride/v1/mobile/surfaces/organizations') {
+    res.writeHead(200, {'content-type':'application/json'});
+    return res.end(JSON.stringify({availability:'available',surface:'organizations',revision:1,items:[
+      {id:'membership-current',title:'Synthetic Lab',status:'current',kind:'organization-summary',detail:{kind:'organization-summary',activeCount:2,capacity:3,pendingCount:0,isCurrent:true,role:'owner'},actions:[]},
+      {id:'membership-other',title:'Another Studio',status:'active',kind:'organization-summary',detail:{kind:'organization-summary',activeCount:2,capacity:3,pendingCount:0,isCurrent:false,role:'member'},actions:[]},
+    ]}));
+  }
   if (req.url.startsWith('/api/stride/')) { projectionRequests.push(req.url); res.writeHead(503, {'content-type':'application/json'}); return res.end('{}'); }
   if (req.url.startsWith('/api/') || req.url.startsWith('/assistant/') || req.url.startsWith('/notifications') || req.url.startsWith('/rooms') || req.url.startsWith('/artifacts')) { res.writeHead(404, {'content-type':'application/json'}); return res.end('{}'); }
   res.writeHead(200, {'content-type':'text/html; charset=utf-8'}); res.end(html);
@@ -214,11 +244,33 @@ const server = http.createServer((req, res) => {
   page.on('pageerror', error => console.error('pageerror:', error.message));
   await page.goto(base + '/', {waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
+  await page.waitForTimeout(250);
+  await page.waitForFunction(() => document.getElementById('topbarOrganizationName').textContent === 'Synthetic Lab');
+  const shellChrome = await page.evaluate(() => ({
+    railWidth: document.getElementById('toolRail').getBoundingClientRect().width,
+    navInsideRail: document.getElementById('toolRail').contains(document.getElementById('pd1PrimaryNav')),
+    navInsideHeader: document.querySelector('.topbar')?.contains(document.getElementById('pd1PrimaryNav')),
+    organizationText: document.getElementById('topbarOrganizationSwitcher').innerText.trim(),
+    organizationChildCount: document.getElementById('topbarOrganizationSwitcher').children.length,
+  }));
+  assert.deepEqual(shellChrome, {railWidth:136,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:2});
+  await page.click('#topbarOrganizationSwitcher');
+  assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);
+  assert.deepEqual(await page.locator('#topbarOrganizationMenu [role="menuitemradio"]').evaluateAll(items => items.map(item => ({name:item.innerText.trim(),current:item.getAttribute('aria-checked')}))), [{name:'Synthetic Lab',current:'true'},{name:'Another Studio',current:'false'}]);
+  assert.equal(await page.locator('#topbarOrganizationCreate').innerText(), 'Create organization');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'topbarOrganizationSwitcher');
+  await page.click('#topbarOrganizationSwitcher');
+  await page.click('#topbarOrganizationMenu [role="menuitemradio"]:has-text("Another Studio")');
+  await page.waitForFunction(() => document.getElementById('settingsRegion').classList.contains('visible') && !document.querySelector('.settings-body > section[data-settings-section="organizations"]').hidden);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('settingsRegion').classList.contains('visible'));
   await page.evaluate(() => { const marker=document.createElement('span'); marker.id='pd1-thread-continuity'; document.getElementById('scoutChatThread').append(marker); });
   projectionRequests.length = 0;
   await page.click('#pd1PrimaryNav [data-pd1-destination="Network"]');
   await page.waitForFunction(() => location.pathname === '/network' && document.activeElement?.textContent === 'The public network is off.');
-  assert.equal(await page.locator('#toolRail').evaluate(el => el.hidden && el.inert && getComputedStyle(el).display === 'none'), true);
+  assert.equal(await page.locator('#toolRail').evaluate(el => !el.hidden && !el.inert && getComputedStyle(el).display !== 'none'), true);
+  assert.equal(await page.locator('#workToolMenu').evaluate(el => el.hidden), true);
   assert.deepEqual(projectionRequests.filter(url => /network|search|contact|public/i.test(url)), []);
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work Search"]');
   await page.waitForFunction(() => location.pathname === '/work-search');
@@ -255,16 +307,39 @@ const server = http.createServer((req, res) => {
   assert.ok(projectionRequests.some(url => url.includes('/mobile/surfaces/network-draft')), 'private network draft remains the sole admitted network child');
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.waitForFunction(() => location.pathname === '/work' && document.querySelector('#toolRail').hidden === false);
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
+  assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
+  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Meetings','Conversations','Work library','Projects','Memory','Files','Agent team']);
+  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(7).fill({role:'menuitemradio',tabIndex:-1}));
+  assert.equal(await page.locator('#workToolMenu [data-tool="chat"]').getAttribute('aria-checked'), 'true');
+  const utilities = await page.locator('.tool-rail__utilities').evaluate(el => ({
+    labels:Array.from(el.querySelectorAll('.tool-rail__label')).filter(label => label.offsetParent !== null).map(label => label.textContent.trim()),
+    width:el.getBoundingClientRect().width,
+    rows:Array.from(el.querySelectorAll(':scope > .tool-rail__tool, :scope > .tool-rail__account')).filter(row => row.offsetParent !== null).map(row => row.getBoundingClientRect().width)
+  }));
+  assert.deepEqual(utilities.labels, ['Notifications','Appearance','Synthetic']);
+  assert.ok(utilities.width >= 110); assert.ok(utilities.rows.every(width => width === utilities.width));
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Work');
   await page.evaluate(() => { window.__pd1Close = window.closeStrideContributionSurface; window.closeStrideContributionSurface = () => false; });
   await page.click('#pd1PrimaryNav [data-pd1-destination="Network"]');
   assert.equal(new URL(page.url()).pathname, '/work');
   await page.evaluate(() => { window.closeStrideContributionSurface = window.__pd1Close; });
   await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Network');
+  await page.keyboard.press('ArrowUp');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Work');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Meetings');
+  assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({width:320,height:700});
+  const responsive = await page.locator('#pd1PrimaryNav').evaluate(el => ({direction:getComputedStyle(el).flexDirection, fits:document.documentElement.scrollWidth <= innerWidth, exact:el.scrollWidth === el.clientWidth}));
+  assert.equal(responsive.direction, 'row'); assert.equal(responsive.fits, true); assert.equal(responsive.exact, true);
+  await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Network');
-  await page.setViewportSize({width:320,height:700});
-  const responsive = await page.locator('#pd1PrimaryNav').evaluate(el => ({overflow:getComputedStyle(el).overflowX, fits:document.documentElement.scrollWidth <= innerWidth, scrollable:el.scrollWidth >= el.clientWidth}));
-  assert.equal(responsive.overflow, 'auto'); assert.equal(responsive.fits, true); assert.equal(responsive.scrollable, true);
   await page.setViewportSize({width:1280,height:800});
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
   const card = await page.evaluate(() => {

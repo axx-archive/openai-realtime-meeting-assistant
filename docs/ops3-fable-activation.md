@@ -1,4 +1,10 @@
-# OPS-3 runbook — activate Fable on the live VPS
+# OPS-3 runbook — activate Fable on the live VPS (superseded; do not execute)
+
+> **SUPERSEDED 2026-08-10:** AJ selected OpenAI for every provider-backed
+> product lane. This file is retained as historical evidence only. Do not add
+> an Anthropic key, select `anthropic_fable`, restart a service, or follow any
+> activation command below. The controlling resume authority is
+> `docs/plans/stride-next-evolution-master-plan.md`.
 
 > **STATUS: NOT YET EXECUTED.** This runbook, the `.env.example` block, and the
 > compose/README notes are the *preparation* for OPS-3 — they do not close it.

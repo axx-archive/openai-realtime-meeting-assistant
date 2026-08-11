@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -129,8 +128,8 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A2: the board step emits structured tool calls with exact args — the
 		// work low reasoning effort punishes most (dropped card_ids, invented
-		// statuses). The shared maximum-by-default brain dial buys reliable
-		// argument fidelity for this state-changing step.
+		// statuses). The server-pinned Terra/high route buys reliable argument
+		// fidelity for this state-changing step.
 		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 1200,
@@ -453,10 +452,6 @@ func meetingBoardToolAllowed(toolName string) bool {
 }
 
 func meetingBoardModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_BOARD_MODEL")); model != "" {
-		return model
-	}
-
 	return meetingBrainModel()
 }
 

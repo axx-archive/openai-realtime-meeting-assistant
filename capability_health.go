@@ -560,7 +560,7 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 	return out
 }
 
-func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady, anthropicReady bool) map[string]any {
+func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady bool) map[string]any {
 	workers := map[string]any{}
 	add := func(key string, agent ambientAgentConfig, provider string, ready bool) {
 		workers[key] = ambientWorkerCapabilitySnapshot(agent, now, provider, ready)
@@ -569,19 +569,15 @@ func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady, anthropicReady
 	add("board", meetingBoardAgent(), providerOpenAI, openAIReady)
 	add("missionIntel", missionIntelligenceAgent(), providerOpenAI, openAIReady)
 	add("decisionLedger", decisionLedgerAgent(), providerOpenAI, openAIReady)
-	if anthropicReady {
-		add("narrative", narrativeMaintainerAgent(), providerAnthropic, true)
-	} else {
-		add("narrative", narrativeMaintainerAgent(), providerOpenAI, openAIReady)
-	}
+	add("narrative", narrativeMaintainerAgent(), providerOpenAI, openAIReady)
 	add("meetingDigest", meetingDigestAgent(), providerOpenAI, openAIReady)
 	add("dayDigest", dayDigestAgent(), providerOpenAI, openAIReady)
 	add("entityLedger", entityLedgerAgent(), providerOpenAI, openAIReady)
 	add("companyDigest", companyDigestAgent(), providerOpenAI, openAIReady)
 	add("researchSuggestion", researchSuggestionAgent(), providerOpenAI, openAIReady)
 	add("slopClassifier", slopClassifierAgent(), providerOpenAI, openAIReady)
-	add("tasteAnalyst", tasteAnalystAgent(), providerAnthropic, anthropicReady)
-	add("houseStyle", houseStyleDistillerAgent(), providerAnthropic, anthropicReady)
+	add("tasteAnalyst", tasteAnalystAgent(), providerOpenAI, openAIReady)
+	add("houseStyle", houseStyleDistillerAgent(), providerOpenAI, openAIReady)
 	return workers
 }
 
@@ -631,7 +627,6 @@ func roomScoutCapabilityRows(app *kanbanBoardApp) ([]map[string]any, bool) {
 
 func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	providerReady := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
-	anthropicReady := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != ""
 	degraded := []string{}
 
 	roomVoice := capabilityEvidence(capabilityRoomVoice, now, 5*time.Minute)
@@ -732,7 +727,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	if brain["status"] == "degraded" {
 		degraded = append(degraded, "brain")
 	}
-	ambientWorkers := ambientWorkersCapabilitySnapshot(now, providerReady, anthropicReady)
+	ambientWorkers := ambientWorkersCapabilitySnapshot(now, providerReady)
 	for key, raw := range ambientWorkers {
 		worker, _ := raw.(map[string]any)
 		if worker["status"] == "degraded" {

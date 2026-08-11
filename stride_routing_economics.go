@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -182,6 +183,9 @@ func validateE8RouteShape(route E8RouteDescriptor) error {
 	if !strideIdentifier(route.Seat) || !oneOf(route.Provider, providerOpenAI, providerAnthropic, "codex") || !strideIdentifier(route.Model) ||
 		!oneOf(route.Effort, "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra") ||
 		!isHexDigest(route.PromptDigest) || !isHexDigest(route.SchemaDigest) || !isHexDigest(route.SafetyDigest) || !strideIdentifier(route.RouteRevision) || !isHexDigest(route.PriceRevisionDigest) {
+		return ErrE8RoutingInvalid
+	}
+	if strings.HasPrefix(strings.ToLower(route.Model), "gpt-5.6") && !validOpenAIReasoningEffort(route.Effort) {
 		return ErrE8RoutingInvalid
 	}
 	if route.ProgrammaticTools && (!route.ReadOnlyTools || !route.StrictOutputSchema) ||
@@ -652,7 +656,7 @@ func E8PreparedRoutingEconomicsManifest() (E8RoutingEconomicsManifest, error) {
 		return NewE8RouteDescriptor(E8RouteDescriptor{Seat: seat, Provider: provider, Model: model, Effort: effort, PromptDigest: hash(seat + ":prompt:v1"), SchemaDigest: hash(seat + ":schema:v1"), SafetyDigest: hash(seat + ":safety:v1"), RouteRevision: seat + "-incumbent-r1", PriceRevisionDigest: prices.Digest, StrictOutputSchema: true, ReadOnlyTools: true})
 	}
 	routes := make([]E8RouteDescriptor, 0, 7)
-	for _, spec := range [][4]string{{seatBrain, providerOpenAI, "gpt-5.6-luna", "max"}, {seatBoard, providerOpenAI, "gpt-5.6-luna", "max"}, {seatOrchestrator, providerOpenAI, "gpt-5.6-sol", "medium"}, {seatReview, providerAnthropic, "claude-opus-4-8", "high"}, {seatCodex, "codex", "gpt-5.6-sol", "high"}, {seatVoiceRoom, providerOpenAI, "gpt-realtime-2.1", "high"}, {seatTranscriptionLane, providerOpenAI, "gpt-transcribe", "none"}} {
+	for _, spec := range [][4]string{{seatBrain, providerOpenAI, "gpt-5.6-terra", "high"}, {seatBoard, providerOpenAI, "gpt-5.6-terra", "high"}, {seatOrchestrator, providerOpenAI, "gpt-5.6-sol", "high"}, {seatReview, providerOpenAI, "gpt-5.6-sol", "max"}, {seatCodex, "codex", "gpt-5.6-sol", "high"}, {seatVoiceRoom, providerOpenAI, "gpt-realtime-2.1", "medium"}, {seatTranscriptionLane, providerOpenAI, "gpt-transcribe", "none"}} {
 		route, routeErr := newRoute(spec[0], spec[1], spec[2], spec[3])
 		if routeErr != nil {
 			return E8RoutingEconomicsManifest{}, routeErr
@@ -680,7 +684,7 @@ func E8PreparedRoutingEconomicsManifest() (E8RoutingEconomicsManifest, error) {
 		kind     E8ExperimentKind
 		change   func(*E8RouteDescriptor)
 	}{
-		{"brain-terra-model", seatBrain, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-5.6-terra" }},
+		{"brain-luna-model", seatBrain, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-5.6-luna" }},
 		{"board-sol-model", seatBoard, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-5.6-sol" }},
 		{"orchestrator-low-reasoning", seatOrchestrator, E8ExperimentReasoning, func(r *E8RouteDescriptor) { r.Effort = "low" }},
 		{"critic-xhigh-reasoning", seatReview, E8ExperimentReasoning, func(r *E8RouteDescriptor) { r.Effort = "xhigh" }},

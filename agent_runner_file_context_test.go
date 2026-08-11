@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -29,7 +28,7 @@ func agentRunnerACLThreadFixture(t *testing.T) (*kanbanBoardApp, scoutAgentThrea
 	}
 	thread := scoutAgentThread{
 		ID:    "agent-thread-research-acl",
-		Mode:  "design",
+		Mode:  "research",
 		Query: "Synthesize the attached Country+Golf brief into a positioning concept",
 		Artifact: meetingMemoryEntry{
 			ID: "os-artifact-agent-runner-acl",
@@ -96,38 +95,33 @@ func TestOpenAIRunnerReauthorizesExactFileContextAtProviderAdmission(t *testing.
 	assertAgentRunnerACLRevocation(t, run, &providerCalls)
 }
 
-func TestAnthropicRunnerReauthorizesExactFileContextAtProviderAdmission(t *testing.T) {
+func TestAnthropicRunnerIsRetiredBeforeProviderAdmission(t *testing.T) {
 	clearAgentRunnerEnv(t)
-	app, thread, revoke := agentRunnerACLThreadFixture(t)
+	app, thread, _ := agentRunnerACLThreadFixture(t)
+	thread.Artifact.Metadata["assignedRunner"] = agentRunnerAnthropicFable
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
 	previous := createAnthropicMessagesResponse
 	providerCalls := 0
-	createAnthropicMessagesResponse = func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	createAnthropicMessagesResponse = func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		providerCalls++
-		encoded, _ := json.Marshal(request.Messages)
-		prompt := string(encoded)
-		if !strings.Contains(prompt, agentRunnerACLFileBody) || !strings.Contains(prompt, "Country Golf Brief.pdf") {
-			t.Fatalf("Anthropic prompt did not receive authorized exact File context:\n%s", prompt)
-		}
-		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Country+Golf research\n\nVerified.")}}, nil
+		return anthropicMessagesResponse{}, errors.New("retired Anthropic runner reached provider")
 	}
 	t.Cleanup(func() { createAnthropicMessagesResponse = previous })
-	run := func() error {
-		_, err := app.produceAgentThreadArtifactWithWorker(context.Background(), thread, nil)
-		return err
+	_, err := app.produceAgentThreadArtifactWithWorker(context.Background(), thread, nil)
+	if !errors.Is(err, errAgentWorkerNotConfigured) {
+		t.Fatalf("retired Anthropic runner err=%v, want explicit unavailable worker", err)
 	}
-	if err := run(); err != nil || providerCalls != 1 {
-		t.Fatalf("authorized Anthropic run calls=%d err=%v", providerCalls, err)
+	if providerCalls != 0 {
+		t.Fatalf("retired Anthropic provider calls=%d, want 0", providerCalls)
 	}
-	revoke()
-	assertAgentRunnerACLRevocation(t, run, &providerCalls)
 }
 
 func TestCodexRunnerReauthorizesExactFileContextAtProviderAdmission(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	enableCodexExecutionForTest(t)
 	app, thread, revoke := agentRunnerACLThreadFixture(t)
+	thread.Artifact.Metadata["assignedRunner"] = agentRunnerCodexLocal
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerCodexLocal)
 	previous := runCodexExecCommand
 	providerCalls := 0
@@ -154,6 +148,7 @@ func TestCodexSidecarDefersFileBodyAndReauthorizesAgainAtClaim(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	enableCodexExecutionForTest(t)
 	app, thread, revoke := agentRunnerACLThreadFixture(t)
+	thread.Artifact.Metadata["assignedRunner"] = agentRunnerCodexSidecar
 	queueDir := t.TempDir()
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerCodexSidecar)
 	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)

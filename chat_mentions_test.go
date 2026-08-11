@@ -207,8 +207,11 @@ func TestScoutChatChannelScoutMentionAnswersAndUserMentionNotifies(t *testing.T)
 
 	modelCalls := 0
 	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		modelCalls++
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
+		}
 		return "Scout answer from the channel.", nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
@@ -226,8 +229,8 @@ func TestScoutChatChannelScoutMentionAnswersAndUserMentionNotifies(t *testing.T)
 	if err != nil {
 		t.Fatalf("append mention message: %v", err)
 	}
-	if modelCalls != 1 {
-		t.Fatalf("modelCalls=%d, want 1 for the @scout mention", modelCalls)
+	if modelCalls != 2 {
+		t.Fatalf("modelCalls=%d, want one bounded route plus one answer", modelCalls)
 	}
 	answer, ok := response["answer"].(scoutChatMessageRecord)
 	if !ok || answer.Role != "scout" || !strings.Contains(answer.Text, "Scout answer") {

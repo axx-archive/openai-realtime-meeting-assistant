@@ -162,54 +162,40 @@ func TestNarrativeMaintainerCreatesUpdatesAndExpiresDossiers(t *testing.T) {
 	}
 }
 
-// The maintainer's effort rides the doctrine floor (agent_runner_anthropic.go):
-// default medium — the summarization-maintenance level — low/minimal clamp UP,
-// above-floor values pass through, junk falls back to the floor. No hardcoded
-// "low" survives anywhere on this seat.
-func TestNarrativeMaintainerEffortFloor(t *testing.T) {
+// The maintainer is pinned to the founder-approved high reasoning lane.
+func TestNarrativeMaintainerEffortIsServerOwnedHigh(t *testing.T) {
 	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "")
-	if got := narrativeMaintainerEffort(); got != doctrineEffortFloor {
-		t.Fatalf("narrativeMaintainerEffort() default=%q, want the %s doctrine floor", got, doctrineEffortFloor)
-	}
-	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "low")
-	if got := narrativeMaintainerEffort(); got != "medium" {
-		t.Fatalf("narrativeMaintainerEffort() with low=%q, want medium (doctrine floor)", got)
-	}
-	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "minimal")
-	if got := narrativeMaintainerEffort(); got != "medium" {
-		t.Fatalf("narrativeMaintainerEffort() with minimal=%q, want medium (doctrine floor)", got)
-	}
-	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "High")
-	if got := narrativeMaintainerEffort(); got != "high" {
-		t.Fatalf("narrativeMaintainerEffort() with high=%q, want high (above the floor passes through)", got)
-	}
-	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "galactic")
-	if got := narrativeMaintainerEffort(); got != doctrineEffortFloor {
-		t.Fatalf("narrativeMaintainerEffort() with junk=%q, want the %s floor fallback", got, doctrineEffortFloor)
+	for _, configured := range []string{"", "low", "minimal", "ultra", "galactic"} {
+		t.Setenv("NARRATIVE_MAINTAINER_EFFORT", configured)
+		if got := narrativeMaintainerEffort(); got != "high" {
+			t.Fatalf("configured=%q effort=%q, want fixed high", configured, got)
+		}
 	}
 }
 
-// The keyed-Anthropic pass sends the floored effort on the wire — never the
-// pre-doctrine hardcoded "low" the review caught.
-func TestNarrativeMaintainerAnthropicEffortNeverLow(t *testing.T) {
+// An installed Anthropic key cannot change the OpenAI narrative route.
+func TestNarrativeMaintainerInstalledAnthropicKeyCannotChangeRoute(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
-	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "")
 	app := newIsolatedKanbanBoardApp(t)
 	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung pitch.", nil); err != nil || !appended {
 		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
 	}
 
-	gotEffort := ""
+	anthropicCalls := 0
 	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
-		gotEffort = request.Effort
+		anthropicCalls++
 		return `{"narratives":[]}`, nil
 	})
-	runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
-		t.Fatal("keyed-Anthropic pass must not ride the OpenAI responder")
-		return "", nil
+	openAICalls := 0
+	runNarrativeMaintainerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		openAICalls++
+		if request.Model != narrativeMaintainerModel() || request.ReasoningEffort != "high" {
+			t.Fatalf("route=%q/%q, want %s/high", request.Model, request.ReasoningEffort, narrativeMaintainerModel())
+		}
+		return `{"narratives":[]}`, nil
 	})
-	if gotEffort != doctrineEffortFloor {
-		t.Fatalf("Anthropic effort=%q, want the %s doctrine floor (never low)", gotEffort, doctrineEffortFloor)
+	if openAICalls != 1 || anthropicCalls != 0 {
+		t.Fatalf("provider calls openai=%d anthropic=%d, want 1/0", openAICalls, anthropicCalls)
 	}
 }
 
@@ -228,8 +214,8 @@ func TestNarrativeMaintainerColdStartEmptyPassAdvancesCursor(t *testing.T) {
 	passes := 0
 	empty := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		passes++
-		if request.ReasoningEffort != doctrineEffortFloor {
-			t.Fatalf("keyless effort=%q, want the %s doctrine floor (never low)", request.ReasoningEffort, doctrineEffortFloor)
+		if request.ReasoningEffort != "high" {
+			t.Fatalf("keyless effort=%q, want high", request.ReasoningEffort)
 		}
 		return `{"narratives":[]}`, nil
 	}
@@ -339,7 +325,7 @@ func TestNarrativeMaintainerSkipsUnparseableOutput(t *testing.T) {
 	}
 }
 
-func TestNarrativeAnthropicOutageOpensCircuitWithoutAdvancingRawCursor(t *testing.T) {
+func TestNarrativeOpenAIOutageOpensCircuitWithoutAdvancingRawCursor(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 	app := newIsolatedKanbanBoardApp(t)
 	if _, appended, err := app.memory.appendBrainWriteUp("brain-anthropic-outage", "## Overview\nSamsung pitch must survive.", nil); err != nil || !appended {
@@ -347,16 +333,12 @@ func TestNarrativeAnthropicOutageOpensCircuitWithoutAdvancingRawCursor(t *testin
 	}
 
 	calls := 0
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		calls++
-		return "", &anthropicProviderFailure{err: errors.New("anthropic unavailable")}
-	})
 	agent := narrativeMaintainerAgent()
 	key := ambientAgentKey(agent.name, officeRoomID)
 	for attempt := 0; attempt < ambientProviderMaxWindowAttempts+2; attempt++ {
 		_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-openai-key", func(context.Context, string, openAITextRequest) (string, error) {
-			t.Fatal("Anthropic-keyed narrative unexpectedly used OpenAI")
-			return "", nil
+			calls++
+			return "", &openAIProviderFailure{err: errors.New("openai unavailable")}
 		}, 1, officeRoomID)
 		if attempt < ambientProviderMaxWindowAttempts {
 			if err == nil || !isProviderInvocationFailure(err) {
@@ -371,7 +353,7 @@ func TestNarrativeAnthropicOutageOpensCircuitWithoutAdvancingRawCursor(t *testin
 		expireAmbientAgentBackoffForTest(app, key)
 	}
 	if calls != ambientProviderMaxWindowAttempts {
-		t.Fatalf("Anthropic calls=%d, want %d bounded calls", calls, ambientProviderMaxWindowAttempts)
+		t.Fatalf("OpenAI calls=%d, want %d bounded calls", calls, ambientProviderMaxWindowAttempts)
 	}
 	app.mu.Lock()
 	failure := app.agentFailures[key]

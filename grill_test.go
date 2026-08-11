@@ -449,31 +449,31 @@ func TestGrillTopObjectionsParsesLatestVersionOnly(t *testing.T) {
 // system prompt so tests can assert each seat saw its OWN prior objections.
 func installGrillPanelResponder(t *testing.T, seedInvestorJSON string, preparedReaderJSON string) *[]string {
 	t.Helper()
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	var mu sync.Mutex
 	systems := &[]string{}
-	original := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = original })
-	createAnthropicMessagesResponse = func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	original := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = original })
+	createOpenAITextResponse = func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 		if apiKey != "test-key" {
 			t.Errorf("apiKey=%q, want test-key", apiKey)
 		}
 		text := ""
 		switch {
-		case strings.Contains(request.System, defaultGrillPersona):
+		case strings.Contains(request.Instructions, defaultGrillPersona):
 			text = seedInvestorJSON
-		case strings.Contains(request.System, defaultPrivateGrillPersona):
+		case strings.Contains(request.Instructions, defaultPrivateGrillPersona):
 			text = preparedReaderJSON
-		case strings.Contains(request.System, "synthesizing Bonfire's red-team panel"):
-			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("Sharpest unresolved objection, one line.")}}, nil
+		case strings.Contains(request.Instructions, "synthesizing Bonfire's red-team panel"):
+			return "Sharpest unresolved objection, one line.", nil
 		default:
-			t.Errorf("unexpected system prompt: %q", request.System)
-			return anthropicMessagesResponse{}, fmt.Errorf("unexpected system prompt")
+			t.Errorf("unexpected system prompt: %q", request.Instructions)
+			return "", fmt.Errorf("unexpected system prompt")
 		}
 		mu.Lock()
-		*systems = append(*systems, request.System)
+		*systems = append(*systems, request.Instructions)
 		mu.Unlock()
-		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+		return text, nil
 	}
 	return systems
 }
@@ -747,12 +747,12 @@ func TestGrillRegrillGateHoldsTwiceThenForceAccepts(t *testing.T) {
 // scorecard and the dial exactly as before (the sidecar-absence degrade rule).
 func TestCloseGrillObjectionLoopKeylessIsNoop(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	original := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = original })
-	createAnthropicMessagesResponse = func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	t.Setenv("OPENAI_API_KEY", "")
+	original := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = original })
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
 		t.Error("keyless grill loop must make no model calls")
-		return anthropicMessagesResponse{}, fmt.Errorf("keyless")
+		return "", fmt.Errorf("keyless")
 	}
 
 	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")

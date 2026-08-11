@@ -6,6 +6,7 @@ import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   NATIVE_SHELL_SIDEBAR_MIN_WIDTH,
+  NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE,
   createNativeShellSelectionCoordinator,
   nativeShellDestinationForRoute,
   nativeShellDestinations,
@@ -33,6 +34,9 @@ test('available width, including orientation and split view resizing, selects co
   assert.equal(nativeShellLayout(NATIVE_SHELL_SIDEBAR_MIN_WIDTH - 1), 'compact');
   assert.equal(nativeShellLayout(NATIVE_SHELL_SIDEBAR_MIN_WIDTH), 'sidebar');
   assert.equal(nativeShellLayout(1024), 'sidebar');
+  assert.equal(nativeShellLayout(1024, true, NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE - 0.01), 'sidebar');
+  assert.equal(nativeShellLayout(1024, true, NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE), 'compact');
+  assert.equal(nativeShellLayout(874, false), 'compact');
   assert.equal(nativeShellLayout(Number.NaN), 'compact');
 });
 
@@ -45,6 +49,7 @@ test('mounted shell press preserves its navigator child through destination, ful
   const testGlobal = globalThis as typeof globalThis & {
     __nativeShellWidth?: number;
     __nativeShellInsets?: { top: number; right: number; bottom: number; left: number };
+    __nativeShellFontScale?: number;
     __nativeShellAnnouncements?: string[];
   };
   registerHooks({
@@ -56,7 +61,7 @@ test('mounted shell press preserves its navigator child through destination, ful
     },
     load(url, context, nextLoad) {
       const modules: Record<string, string> = {
-        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1}; export const Platform={OS:'ios'}; export const DynamicColorIOS=value=>value.light; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message)}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844});`,
+        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>value.light; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message)}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
         'native-shell-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'native-shell-stub:react-native-safe-area-context': `export const useSafeAreaInsets=()=>globalThis.__nativeShellInsets||({top:0,right:0,bottom:0,left:0});`,
       };
@@ -65,6 +70,7 @@ test('mounted shell press preserves its navigator child through destination, ful
     },
   });
   testGlobal.__nativeShellWidth = 390;
+  testGlobal.__nativeShellFontScale = 1;
   testGlobal.__nativeShellInsets = { top: 47, right: 0, bottom: 34, left: 0 };
   testGlobal.__nativeShellAnnouncements = [];
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -149,18 +155,22 @@ test('deep destinations preserve their owning top-level context', () => {
   assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'you');
 });
 
-test('focused Scout, meeting, auth, and web flows remain full-screen', () => {
-  for (const route of ['Login', 'Thread', 'Room', 'CreateRoom', 'OSWeb'] as const) {
+test('focused flows hide compact chrome while iPad threads may retain only the sidebar', () => {
+  for (const route of ['Login', 'Thread', 'Room', 'CreateRoom', 'NewConversation', 'OSWeb'] as const) {
     assert.equal(nativeShellVisibleForRoute(route), false, route);
   }
   assert.equal(nativeShellVisibleForRoute('Canvas'), true);
   assert.equal(nativeShellVisibleForRoute('NetworkHome'), true);
+  const root = source('src', 'navigation', 'RootNavigator.tsx');
+  assert.match(root, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && activeRoute === 'Thread'\)\}/);
+  assert.match(root, /presentation: 'card'/);
+  assert.doesNotMatch(root, /presentation: 'fullScreenModal'/);
 });
 
 test('compact and iPad compositions are accessible, touch-safe, and resize-driven', () => {
   const shell = source('src', 'navigation', 'NativeUniversalShell.tsx');
   assert.match(shell, /useWindowDimensions\(\)/);
-  assert.match(shell, /nativeShellLayout\(width\)/);
+  assert.match(shell, /nativeShellLayout\(width, Platform\.OS !== 'ios' \|\| Platform\.isPad, fontScale\)/);
   assert.match(shell, /accessibilityRole="tablist"/);
   assert.match(shell, /accessibilityRole="tab"/);
   assert.match(shell, /accessibilityState=\{\{ selected \}\}/);

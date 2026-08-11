@@ -295,10 +295,14 @@ func TestVentureWorkbookPreviewUsesWorkbookKickerAndNeverOffersPreviewPDF(t *tes
 	if !strings.Contains(text, "metadata?.type || '').trim() !== 'workbook'") {
 		t.Fatal("workbook preview incorrectly offers markdown-PDF export")
 	}
-	for _, binding := range []string{"toolTemplate === 'economics_waterfall'", "messagePayload.operationId", "response = await postMessage()"} {
+	for _, binding := range []string{"messagePayload.operationId", "const requestBody = JSON.stringify(messagePayload)", "response = await postMessage()"} {
 		if !strings.Contains(text, binding) {
 			t.Fatalf("workbook transport missing stable replay binding %q", binding)
 		}
+	}
+	office := functionBody(text, "async function sendScoutChatViaOffice(text, files = [])")
+	if strings.Contains(office, "toolTemplate") {
+		t.Fatal("normal workbook request transport must not select the internal workbook template")
 	}
 }
 
@@ -374,16 +378,30 @@ func TestVentureWorkbookGenerationLockCardinalityIsBoundedPerThread(t *testing.T
 func TestVentureWorkbookPostArtifactFailureRestartAndLostResponseReplay(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-router-test"
 	previousApp := kanbanApp
 	kanbanApp = app
-	t.Cleanup(func() { kanbanApp = previousApp; ventureWorkbookBeforeChatCommitProbe = nil })
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		conversationWorkBeforeCardCommitProbe = nil
+	})
+	routerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
+		routerCalls++
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: ventureWorkbookToolID, Objective: "Durable venture model",
+		}), nil
+	})
 	user := accountStore().findUser("aj@shareability.com")
 	thread, err := app.createScoutChatThread(user.Email, user.Name, "Durable workbook", "")
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	cookies := loginAs(t, user.Email, "B0NFIRE!")
-	body := `{"text":"Durable venture model","toolTemplate":"economics_waterfall","operationId":"workbook-operation-restart-0001"}`
+	body := `{"text":"Build a durable financial model","operationId":"workbook-operation-restart-0001"}`
 	postBody := func(requestBody string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(requestBody))
 		request.Header.Set("Content-Type", "application/json")
@@ -395,20 +413,20 @@ func TestVentureWorkbookPostArtifactFailureRestartAndLostResponseReplay(t *testi
 		return response
 	}
 	post := func() *httptest.ResponseRecorder { return postBody(body) }
-	missingOperation := postBody(`{"text":"Durable venture model","toolTemplate":"economics_waterfall"}`)
-	if missingOperation.Code != http.StatusBadRequest || len(app.osArtifactsSnapshot(0)) != 0 {
-		t.Fatalf("missing operation status=%d artifacts=%d", missingOperation.Code, len(app.osArtifactsSnapshot(0)))
+	missingOperation := postBody(`{"text":"Build a durable financial model"}`)
+	if missingOperation.Code != http.StatusBadRequest || len(app.osArtifactsSnapshot(0)) != 0 || routerCalls != 0 {
+		t.Fatalf("missing operation status=%d artifacts=%d routerCalls=%d", missingOperation.Code, len(app.osArtifactsSnapshot(0)), routerCalls)
 	}
-	ventureWorkbookBeforeChatCommitProbe = func() error { return io.ErrUnexpectedEOF }
+	conversationWorkBeforeCardCommitProbe = func(scoutAgentThread) error { return io.ErrUnexpectedEOF }
 	failed := post()
-	if failed.Code == http.StatusOK || !strings.Contains(failed.Body.String(), "needs reconciliation") {
+	if failed.Code == http.StatusOK || !strings.Contains(failed.Body.String(), "pending reconciliation") {
 		t.Fatalf("failed status=%d body=%s", failed.Code, failed.Body.String())
 	}
-	if len(app.osArtifactsSnapshot(0)) != 1 {
+	if len(app.osArtifactsSnapshot(0)) != 1 || routerCalls != 1 {
 		t.Fatalf("post-artifact failure artifacts=%d want 1 recoverable", len(app.osArtifactsSnapshot(0)))
 	}
 	currentThread, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
-	if err != nil || len(currentThread.Messages) != 0 {
+	if err != nil || len(currentThread.Messages) != 1 {
 		t.Fatalf("failed commit thread=%#v err=%v", currentThread.Messages, err)
 	}
 
@@ -417,7 +435,7 @@ func TestVentureWorkbookPostArtifactFailureRestartAndLostResponseReplay(t *testi
 		t.Fatalf("restart memory: %v", err)
 	}
 	app.memory = reloaded
-	ventureWorkbookBeforeChatCommitProbe = nil
+	conversationWorkBeforeCardCommitProbe = nil
 	recovered := post()
 	if recovered.Code != http.StatusOK {
 		t.Fatalf("recovery status=%d body=%s", recovered.Code, recovered.Body.String())
@@ -430,7 +448,7 @@ func TestVentureWorkbookPostArtifactFailureRestartAndLostResponseReplay(t *testi
 	if err := json.Unmarshal(recovered.Body.Bytes(), &recoveredPayload); err != nil {
 		t.Fatalf("decode recovery: %v", err)
 	}
-	if recoveredPayload.Replayed || len(recoveredPayload.Thread.Messages) != 2 || len(app.osArtifactsSnapshot(0)) != 1 {
+	if !recoveredPayload.Replayed || len(recoveredPayload.Thread.Messages) != 2 || len(app.osArtifactsSnapshot(0)) != 1 || routerCalls != 1 {
 		t.Fatalf("recovery payload=%#v artifacts=%d", recoveredPayload, len(app.osArtifactsSnapshot(0)))
 	}
 
@@ -449,8 +467,8 @@ func TestVentureWorkbookPostArtifactFailureRestartAndLostResponseReplay(t *testi
 	if !replayPayload.Replayed || replayPayload.Artifact.ID != recoveredPayload.Artifact.ID || len(replayPayload.Thread.Messages) != 2 || len(app.osArtifactsSnapshot(0)) != 1 {
 		t.Fatalf("lost-response replay=%#v recovered=%#v artifacts=%d", replayPayload, recoveredPayload, len(app.osArtifactsSnapshot(0)))
 	}
-	conflict := postBody(`{"text":"Different objective","toolTemplate":"economics_waterfall","operationId":"workbook-operation-restart-0001"}`)
-	if conflict.Code == http.StatusOK || len(app.osArtifactsSnapshot(0)) != 1 {
+	conflict := postBody(`{"text":"Different objective","operationId":"workbook-operation-restart-0001"}`)
+	if conflict.Code != http.StatusConflict || len(app.osArtifactsSnapshot(0)) != 1 || routerCalls != 1 {
 		t.Fatalf("operation reuse conflict status=%d artifacts=%d", conflict.Code, len(app.osArtifactsSnapshot(0)))
 	}
 }

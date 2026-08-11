@@ -13,7 +13,7 @@ test('long-press message actions expose a real clipboard copy path', () => {
   assert.match(sheet, /accessibilityLabel="Copy message"/);
   assert.match(sheet, /onPress=\{onCopy\}/);
   assert.match(thread, /Clipboard\.setStringAsync\(text\)/);
-  assert.match(thread, /onCopy=\{\(\) => \{ if \(actionMessage\) copyMessage\(actionMessage\.message\); \}\}/);
+  assert.match(thread, /onCopy=\{\(\) => \{\s*if \(actionMessage\) copyMessage\(actionMessage\.message\);\s*\}\}/);
   assert.match(source('src', 'messaging', 'MessageBubble.tsx'), /name: 'longpress', label: 'Show message actions'/);
 });
 
@@ -83,19 +83,19 @@ test('private thread names save inline on Done or blur', () => {
   assert.match(list, /returnKeyType="done"/);
   assert.match(list, /api\.updateScoutThread\(sessionToken, threadID, \{ title \}\)/);
   assert.match(thread, /onLongPress=\{beginThreadTitleRename\}/);
-  assert.match(thread, /name: 'longpress', label: 'Rename thread'/);
-  assert.match(thread, /disabled=\{loading \|\| threadVisibility !== 'private'\}/);
-  assert.match(thread, /onBlur=\{\(\) => \{ void commitThreadTitleRename\(\); \}\}/);
-  assert.match(thread, /onSubmitEditing=\{\(\) => \{ void commitThreadTitleRename\(\); \}\}/);
+  assert.match(thread, /name: ["']longpress["'], label: ["']Rename thread["']/);
+  assert.match(thread, /disabled=\{loading \|\| threadVisibility !== ["']private["']\}/);
+  assert.match(thread, /onBlur=\{\(\) => \{\s*void commitThreadTitleRename\(\);\s*\}\}/);
+  assert.match(thread, /onSubmitEditing=\{\(\) => \{\s*void commitThreadTitleRename\(\);\s*\}\}/);
   assert.match(thread, /navigation\.setParams\(\{ title \}\)/);
 });
 
-test('only private Scout composers claim Scout-directed dictation context', () => {
+test('only private thread composers claim Scout-directed dictation context', () => {
   const canvas = source('src', 'screens', 'CanvasScreen.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
   const room = source('src', 'components', 'RoomConversationSheet.tsx');
 
-  assert.match(canvas, /useComposerDictation\(\{\s*context: 'scout'/);
-  assert.match(thread, /context: threadVisibility === 'private' \? 'scout' : 'chat'/);
+  assert.doesNotMatch(canvas, /useComposerDictation/);
+  assert.match(thread, /context: threadVisibility === ["']private["'] \? ["']scout["'] : ["']chat["']/);
   assert.doesNotMatch(room, /context: 'scout'/);
 });

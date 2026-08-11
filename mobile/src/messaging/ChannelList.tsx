@@ -1,16 +1,24 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
-import type { ScoutMessage, ScoutThread } from '../api/types';
+import type { ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { RootStackParamList } from '../navigation/types';
 import { SymbolView } from 'expo-symbols';
 import { colors, radius, space, type } from '../theme/tokens';
-import { channelDisplayName, isBonfireChat, pinBonfireChatFirst } from './channelPresentation';
+import { channelDisplayName, isBonfireChat } from './channelPresentation';
+import { THREAD_LARGE_TEXT_FONT_SCALE } from './threadWorkspaceLayout';
+import {
+  channelActiveWork,
+  channelListRows,
+  channelThreadAccessibilityLabel,
+  type ChannelActiveWork,
+} from './channelListPerformance';
 
 /**
  * The Threads segment — design §14.
@@ -22,7 +30,20 @@ import { channelDisplayName, isBonfireChat, pinBonfireChatFirst } from './channe
 
 type ChannelNav = NativeStackNavigationProp<RootStackParamList>;
 
+type ChannelListProps = {
+  onOpenThread?: (thread: ScoutThread) => void;
+  selectedThreadId?: string;
+};
+
 /* channel-terminal-preview-contract:start */
+function terminalPreviewHasActiveWork(thread: ScoutThread): boolean {
+  const activeStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked']);
+  return (Array.isArray(thread.messages) ? thread.messages : []).some((message) => (
+    Boolean(message.thread)
+      && activeStatuses.has(String(message.thread?.status ?? '').toLowerCase())
+  ));
+}
+
 function ordinaryPreview(thread: ScoutThread): string {
   const last = thread.lastMessage?.text || thread.preview || '';
   return String(last).replace(/\s+/g, ' ').trim();
@@ -40,20 +61,6 @@ function timeAgo(raw: unknown): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-const activeWorkStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked']);
-
-type ActiveWork = { message: ScoutMessage; work: NonNullable<ScoutMessage['thread']> };
-
-function activeWork(thread: ScoutThread): ActiveWork | null {
-  const messages = Array.isArray(thread.messages) ? thread.messages : [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message.thread || !activeWorkStatuses.has(String(message.thread.status ?? '').toLowerCase())) continue;
-    return { message, work: message.thread };
-  }
-  return null;
-}
-
 function boundedResearchSourceSummary(raw: unknown): string | null {
   const value = String(raw ?? '').replace(/\s+/g, ' ').trim();
   const match = /^Research delivered · ([1-9][0-9]{0,4}) cited source (link|links) · ([1-9][0-9]{0,4}) (domain|domains)$/u.exec(value);
@@ -69,7 +76,7 @@ export function channelTerminalPreview(thread: ScoutThread): string {
   const fallback = ordinaryPreview(thread);
   // Concurrent work is real state. A completed historical card must never
   // replace the timer/copy for any work item the server still marks active.
-  if (activeWork(thread)) return 'Scout is working';
+  if (terminalPreviewHasActiveWork(thread)) return 'Scout is working';
 
   const messages = Array.isArray(thread.messages) ? thread.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -96,16 +103,11 @@ export function channelTerminalPreview(thread: ScoutThread): string {
 }
 /* channel-terminal-preview-contract:end */
 
-const ActiveWorkTimer = React.memo(function ActiveWorkTimer({ active }: { active: ActiveWork }) {
-  const [clock, setClock] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+const ActiveWorkTimer = React.memo(function ActiveWorkTimer({ active, clock }: { active: ChannelActiveWork; clock: number }) {
   return (
-    <View accessibilityLabel={`${String(active.work.agentName ?? 'Scout')} is working`} style={styles.workTimer}>
+    <View accessible={false} style={styles.workTimer}>
       <View style={styles.workDot} />
-      <Text style={styles.workTime}>{workElapsed(active.work.startedAt ?? active.message.createdAt, clock)}</Text>
+      <Text maxFontSizeMultiplier={2} style={styles.workTime}>{workElapsed(active.work.startedAt ?? active.message.createdAt, clock)}</Text>
     </View>
   );
 });
@@ -120,7 +122,7 @@ function workElapsed(raw: unknown, now: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-export function ChannelList() {
+export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps = {}) {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const navigation = useNavigation<ChannelNav>();
@@ -130,8 +132,13 @@ export function ChannelList() {
   const [editingThreadID, setEditingThreadID] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const renameInFlightRef = useRef<string | null>(null);
   const longPressedThreadRef = useRef<string | null>(null);
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale >= THREAD_LARGE_TEXT_FONT_SCALE;
+  const rows = useMemo(() => channelListRows(threads), [threads]);
+  const hasActiveWork = useMemo(() => threads.some((thread) => Boolean(channelActiveWork(thread))), [threads]);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -155,6 +162,14 @@ export function ChannelList() {
   useEffect(() => {
     if (office.event === 'chat_thread') void load();
   }, [load, office.event, office.version]);
+
+  // One shared clock updates only the virtualized visible rows. A timer per
+  // active thread scales linearly with the company and wakes offscreen work.
+  useEffect(() => {
+    if (!hasActiveWork) return undefined;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [hasActiveWork]);
 
   const beginRename = useCallback((thread: ScoutThread) => {
     if (thread.visibility === 'public') return;
@@ -216,30 +231,35 @@ export function ChannelList() {
     return <Text style={styles.empty}>No threads yet. Hold the mic and say something.</Text>;
   }
 
-  const orderedThreads = pinBonfireChatFirst(threads);
-  const sections = [
-    { label: 'CHANNELS', threads: orderedThreads.filter((thread) => thread.visibility === 'public') },
-    { label: 'PRIVATE', threads: orderedThreads.filter((thread) => thread.visibility !== 'public') },
-  ].filter((section) => section.threads.length > 0);
-
   return (
-    <View>
+    <View style={styles.listRoot}>
       {renameError ? <Text accessibilityRole="alert" style={styles.renameError}>{renameError}</Text> : null}
-      {sections.map((section) => (
-        <View key={section.label} style={styles.section}>
-          <Text accessibilityRole="header" style={styles.sectionLabel}>{section.label}</Text>
-          {section.threads.map((thread) => {
+      <FlashList
+        data={rows}
+        extraData={{ clock, editingThreadID, largeText, selectedThreadId, titleDraft }}
+        keyExtractor={(row) => row.id}
+        getItemType={(row) => row.kind}
+        maxItemsInRecyclePool={32}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.listContent}
+        renderItem={({ item }) => {
+          if (item.kind === 'section') {
+            return <Text accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.sectionLabel}>{item.label}</Text>;
+          }
+          const thread = item.thread;
             const body = channelTerminalPreview(thread);
             const unread = Math.max(0, Number(thread.unreadCount ?? 0));
             const threadID = String(thread.id);
             const editing = editingThreadID === threadID;
-            const working = activeWork(thread);
+            const working = channelActiveWork(thread);
             const bonfire = isBonfireChat(thread);
             return (
               <Pressable
                 key={threadID}
                 accessibilityRole="button"
-                accessibilityLabel={`${channelDisplayName(thread)}${bonfire ? ', pinned channel' : ''}`}
+                accessibilityState={{ selected: selectedThreadId === threadID }}
+                accessibilityLabel={channelThreadAccessibilityLabel(thread, working)}
                 accessibilityHint={thread.visibility === 'public' ? undefined : 'Touch and hold to rename this thread'}
                 onLongPress={thread.visibility === 'public' ? undefined : () => beginRename(thread)}
                 onPress={() => {
@@ -251,12 +271,19 @@ export function ChannelList() {
                     Keyboard.dismiss();
                     return;
                   }
-                  navigation.navigate('Thread', {
-                    threadId: threadID,
-                    title: channelDisplayName(thread),
-                  });
+                  if (onOpenThread) onOpenThread(thread);
+                  else {
+                    navigation.replace('Thread', {
+                      threadId: threadID,
+                      title: channelDisplayName(thread),
+                    });
+                  }
                 }}
-                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.row,
+                  selectedThreadId === threadID && styles.selected,
+                  pressed && styles.pressed,
+                ]}
               >
                 <View style={styles.rowText}>
                   {editing ? (
@@ -277,7 +304,7 @@ export function ChannelList() {
                     />
                   ) : (
                     <View style={styles.nameRow}>
-                      <Text style={[styles.name, bonfire && styles.nameBonfire]} numberOfLines={1}>
+                      <Text maxFontSizeMultiplier={2} style={[styles.name, bonfire && styles.nameBonfire]} numberOfLines={largeText ? 2 : 1}>
                         {channelDisplayName(thread)}
                       </Text>
                       {bonfire ? (
@@ -288,29 +315,30 @@ export function ChannelList() {
                     </View>
                   )}
                   {body ? (
-                    <Text style={styles.preview} numberOfLines={1}>
+                    <Text maxFontSizeMultiplier={2} style={styles.preview} numberOfLines={largeText ? 2 : 1}>
                       {body}
                     </Text>
                   ) : null}
                 </View>
                 <View style={styles.meta}>
-                  {working ? <ActiveWorkTimer active={working} /> : <Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>}
+                  {working ? <ActiveWorkTimer active={working} clock={clock} /> : <Text maxFontSizeMultiplier={2} style={styles.time}>{timeAgo(thread.updatedAt)}</Text>}
                   {unread > 0 ? (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+                    <View style={[styles.unreadBadge, largeText && styles.unreadBadgeLarge]}>
+                      <Text maxFontSizeMultiplier={2} style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
                     </View>
                   ) : null}
                 </View>
               </Pressable>
             );
-          })}
-        </View>
-      ))}
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1, minHeight: 0 },
+  listContent: { paddingBottom: space[8] },
   loading: { paddingVertical: space[8] },
   section: { gap: 1 },
   sectionLabel: {
@@ -330,6 +358,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   pressed: { backgroundColor: colors.accentSoft },
+  selected: { backgroundColor: colors.accentSoft },
   rowText: { flex: 1, gap: 2 },
   nameRow: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7 },
   name: {
@@ -371,13 +400,15 @@ const styles = StyleSheet.create({
 	meta: { alignItems: 'flex-end', gap: space[1] },
 	unreadBadge: {
 		minWidth: 20,
-		height: 20,
+		minHeight: 20,
+		paddingVertical: 2,
 		paddingHorizontal: 6,
 		borderRadius: radius.full,
 		backgroundColor: colors.ember,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
+	unreadBadgeLarge: { minWidth: 28, minHeight: 28, paddingVertical: 4 },
 	unreadText: { ...type.label, color: colors.onAccent, fontSize: 10, lineHeight: 12 },
   empty: {
     ...type.bodySm,

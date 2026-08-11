@@ -920,17 +920,29 @@ func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text 
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(nil, id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(nil, "", "", "", id, title, text, updatedBy, metadataUpdates)
 }
 
 // updateOSArtifactWithMetadataIfHeaderMatches is the authorized-write seam:
 // the security projection comparison and mutation happen under the same store
 // lock, so a caller can never authorize revision N and overwrite revision N+1.
 func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(&expected, id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(&expected, "", "", "", id, title, text, updatedBy, metadataUpdates)
 }
 
-func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderAndPostimageMatch(expected ArtifactAuthorizationHeader, expectedPostimage string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedPostimage), "", "", id, title, text, updatedBy, metadataUpdates)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderAndToolPreimagesMatch(expected ArtifactAuthorizationHeader, expectedSemanticPostimage, expectedFullPreimage string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), "", id, title, text, updatedBy, metadataUpdates)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderToolPreimagesAndStoreGenerationMatch(expected ArtifactAuthorizationHeader, expectedSemanticPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), strings.TrimSpace(expectedStoreGeneration), id, title, text, updatedBy, metadataUpdates)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -945,6 +957,12 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if expectedStoreGeneration != "" {
+		currentGeneration, err := openAIToolProductStoreGenerationLocked(store)
+		if err != nil || currentGeneration != expectedStoreGeneration {
+			return meetingMemoryEntry{}, false, nil
+		}
+	}
 
 	index := -1
 	for candidateIndex, entry := range store.entries {
@@ -961,6 +979,18 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
 		if !artifactAuthorizationHeaderEqual(*expected, current) {
 			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+	}
+	if expectedPostimage != "" {
+		currentPostimage, err := openAIToolProductSemanticPostimageDigest(store.entries[index], "")
+		if err != nil || currentPostimage != expectedPostimage {
+			return cloneMemoryEntry(store.entries[index]), false, nil
+		}
+	}
+	if expectedFullPreimage != "" {
+		currentPreimage, err := openAIToolArtifactPostimageDigest(store.entries[index])
+		if err != nil || currentPreimage != expectedFullPreimage {
+			return cloneMemoryEntry(store.entries[index]), false, nil
 		}
 	}
 
@@ -1045,11 +1075,20 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 // whatever is passed). Text, title, updatedBy, and updatedAt are untouched —
 // this is a bookkeeping stamp, not an edit.
 func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactMetadataExpected(nil, id, metadataUpdates)
+	return store.updateOSArtifactMetadataExpected(nil, nil, id, metadataUpdates)
 }
 
 func (store *meetingMemoryStore) updateOSArtifactMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactMetadataExpected(&expected, id, metadataUpdates)
+	return store.updateOSArtifactMetadataExpected(&expected, nil, id, metadataUpdates)
+}
+
+// updateOSArtifactMetadataIfHeaderAndMetadataMatch is the durable state-CAS
+// seam for crash-recoverable workers. Capability/header equality alone cannot
+// serialize bookkeeping transitions because ordinary metadata does not change
+// an ArtifactAuthorizationHeader. The exact expected key/value pairs are
+// therefore compared under the same store lock as the persisted mutation.
+func (store *meetingMemoryStore) updateOSArtifactMetadataIfHeaderAndMetadataMatch(expected ArtifactAuthorizationHeader, expectedMetadata map[string]string, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactMetadataExpected(&expected, expectedMetadata, id, metadataUpdates)
 }
 
 // restoreOSArtifactMetadataIfHeaderMatches is a compensation-only seam. It
@@ -1107,7 +1146,7 @@ func (store *meetingMemoryStore) restoreOSArtifactMetadataIfHeaderMatches(expect
 	return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
 }
 
-func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *ArtifactAuthorizationHeader, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -1134,6 +1173,12 @@ func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *Arti
 		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
 		if !artifactAuthorizationHeaderEqual(*expected, current) {
 			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+	}
+	for rawKey, rawValue := range expectedMetadata {
+		key := strings.TrimSpace(rawKey)
+		if key == "" || store.entries[index].Metadata[key] != strings.TrimSpace(rawValue) {
+			return cloneMemoryEntry(store.entries[index]), false, nil
 		}
 	}
 

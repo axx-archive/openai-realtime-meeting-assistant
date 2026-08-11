@@ -77,6 +77,11 @@ func (s *strideE10TenantTestSink) all() []StrideE10TenantDiscrepancyReceipt {
 
 func strideE10TenantTestSnapshot(now time.Time) StrideE10TenantAuthoritySnapshot {
 	const sessionHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	organization := Organization{
+		Header: STRIDEContractHeader{TenantID: STRIDEGlobalPersonTenant, ID: "org-one", Revision: 7, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractOrganization, ContentDigest: strings.Repeat("a", 64), CreatedAt: now.Add(-2 * time.Hour)},
+		Name:   "Org One", Slug: "org-one", Status: "active", Discoverability: "private", CreatorPersonID: "person-one", PolicyRevision: 1,
+		CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
 	membership := OrganizationMembership{
 		Header: STRIDEContractHeader{
 			TenantID: "org-one", ID: "membership-one", Revision: 4,
@@ -102,8 +107,9 @@ func strideE10TenantTestSnapshot(now time.Time) StrideE10TenantAuthoritySnapshot
 			ActiveOrganizationID: "org-one", OrganizationMembershipID: "membership-one",
 			OrganizationMembershipRev: 4, ActiveOrganizationSessionRev: 9,
 		},
-		Person:     PersonPrincipal{Header: STRIDEContractHeader{TenantID: STRIDEGlobalPersonTenant, ID: "person-one", Revision: 1, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractPersonPrincipal, ContentDigest: strings.Repeat("e", 64), CreatedAt: now.Add(-2 * time.Hour)}, AccountSubjectDigest: strings.Repeat("d", 64), Status: "active", RecoveryRevision: 1, CustodyRevision: 1},
-		Membership: membership, ActiveSession: activeSession,
+		Person:       PersonPrincipal{Header: STRIDEContractHeader{TenantID: STRIDEGlobalPersonTenant, ID: "person-one", Revision: 1, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractPersonPrincipal, ContentDigest: strings.Repeat("e", 64), CreatedAt: now.Add(-2 * time.Hour)}, AccountSubjectDigest: strings.Repeat("d", 64), Status: "active", RecoveryRevision: 1, CustodyRevision: 1},
+		Organization: organization,
+		Membership:   membership, ActiveSession: activeSession,
 		Legacy:     StrideE10LegacyPrincipalProjection{TenantID: "org-one", AccountSubjectDigest: strings.Repeat("d", 64)},
 		Generation: 12,
 	}
@@ -118,6 +124,7 @@ func TestStrideE10TenantZeroOrganizationIsClosedPersonOnlyCapability(t *testing.
 	snapshot.Session.OrganizationMembershipID = ""
 	snapshot.Session.OrganizationMembershipRev = 0
 	snapshot.Session.ActiveOrganizationSessionRev = 0
+	snapshot.Organization = Organization{}
 	snapshot.Membership = OrganizationMembership{}
 	snapshot.ActiveSession = ActiveOrganizationSession{}
 	snapshot.Legacy.TenantID = STRIDEGlobalPersonTenant

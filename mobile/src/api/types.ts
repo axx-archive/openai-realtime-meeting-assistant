@@ -120,6 +120,21 @@ export type ScoutWorkThreadRef = {
   provenance?: string;
 };
 
+export type ScoutWorkRecordRef = {
+  id: string;
+  runId: string;
+  title: string;
+  status: string;
+  workerName: string;
+  currentStage: string;
+  summary: string;
+  progressPercent: number;
+  artifactId: string;
+  artifactHref: string;
+  evidenceHref: string;
+  providerExecutionFenced: boolean;
+};
+
 export type ArtifactDispositionRef = {
   tenantId: string;
   artifactId: string;
@@ -212,6 +227,7 @@ export type ScoutMessage = {
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
   thread?: ScoutWorkThreadRef;
+  work?: ScoutWorkRecordRef;
   image?: ScoutImageRef;
   imageGeneration?: ScoutImageGeneration;
   [key: string]: unknown;
@@ -693,6 +709,22 @@ export type StrideWorkMutationResponse = {
   providerCalls?: 0;
   inputTokens?: 0;
   outputTokens?: 0;
+};
+
+export type StrideWorkArtifactResponse = {
+  ok: boolean;
+  artifact: {
+    id: string;
+    title: string;
+    summary: string;
+    approvedOutcome: string;
+    sourceSnippet: string;
+    sourceHref: string;
+    destinationThreadId: string;
+    providerExecutionFenced: boolean;
+    reportAvailable?: boolean;
+    [key: string]: unknown;
+  };
 };
 
 export type BoardCardInput = {

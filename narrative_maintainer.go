@@ -16,15 +16,13 @@ package main
 // latest. Expired versions stay on disk — the dossier's own history is never
 // deleted, just hidden from recall.
 //
-// Model seam: Sonnet fronts the maintainer whenever an Anthropic key is
-// present (the answer engine's split in memory_query.go); keyless-Anthropic
-// rides the chassis's OpenAI responder, and a fully keyless deploy simply
-// never starts the agent — mission intelligence's degraded posture.
+// Model seam: the maintainer is pinned to the founder-approved OpenAI
+// Sol/high lane. An installed Anthropic key cannot alter admission or route;
+// a keyless OpenAI deploy keeps the generic ambient chassis fail closed.
 
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -34,6 +32,7 @@ import (
 
 const (
 	narrativeMaintainerAgentName       = "narrative maintainer"
+	defaultNarrativeMaintainerModel    = "gpt-5.6-sol"
 	defaultNarrativeMaintainerInterval = 10 * time.Minute
 	narrativeMaintainerRequestTimeout  = 90 * time.Second
 	// narrativeBodyMaxChars caps one dossier body (runes): enough for the
@@ -54,6 +53,13 @@ const (
 	// artifact kind, so the cursors never collide.
 	narrativeCursorKey = "throughBrainId"
 )
+
+// narrativeMaintainerModel is server-owned. Narrative and founder-facing
+// recommendation use Sol; no environment, client, persisted assignment, or
+// model output may select the provider/model pair.
+func narrativeMaintainerModel() string {
+	return defaultNarrativeMaintainerModel
+}
 
 func narrativeMaintainerAgent() ambientAgentConfig {
 	return ambientAgentConfig{
@@ -86,18 +92,11 @@ func (app *kanbanBoardApp) startNarrativeMaintainerWorker(apiKey string) {
 	}
 }
 
-// narrativeMaintainerEffort is the maintainer's thinking depth on both model
-// paths (the Sonnet call and the keyless-OpenAI fallback). Default medium —
-// the doctrine floor (agent_runner_anthropic.go): a summarization-maintenance
-// seat needs no orchestrator-grade depth, but no surface ever runs below
-// medium. A configured dial below the floor clamps UP with a logged warning,
-// the orchestratorEffort/deliverableEffort idiom.
+// narrativeMaintainerEffort is server-owned. Narrative and founder-facing
+// recommendation use the approved high-reasoning lane; environment or model
+// output cannot lower or widen it.
 func narrativeMaintainerEffort() string {
-	effort, clamped := flooredEffort(os.Getenv("NARRATIVE_MAINTAINER_EFFORT"), doctrineEffortFloor)
-	if clamped {
-		log.Warnf("NARRATIVE_MAINTAINER_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
-	}
-	return effort
+	return "high"
 }
 
 // narrativeUpdatePayload is one storyline update in the maintainer's strict
@@ -291,33 +290,18 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	}
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	input := contextApp.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
-	model := meetingBrainModel()
+	model := narrativeMaintainerModel()
 	effort := narrativeMaintainerEffort()
-	var text string
-	var err error
-	// Sonnet fronts the maintainer whenever an Anthropic key is present (the
-	// memory_query.go split); keyless-Anthropic keeps the chassis's OpenAI
-	// responder path so keyless deploys degrade exactly like mission intel.
-	if anthropicKey := currentAnthropicAPIKey(); anthropicKey != "" {
-		model = chatModel()
-		text, err = createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
-			Model:        model,
-			Instructions: narrativeMaintainerInstructions(),
-			Input:        input,
-			Effort:       effort,
-			MaxTokens:    4000,
-		})
-	} else {
-		text, err = responder(ctx, apiKey, openAITextRequest{
-			Model:           model,
-			Seat:            seatNarrative,
-			Instructions:    narrativeMaintainerInstructions(),
-			Input:           input,
-			ReasoningEffort: effort,
-			Verbosity:       "low",
-			MaxOutputTokens: 4000,
-		})
-	}
+	text, err := responder(ctx, apiKey, openAITextRequest{
+		Model:           model,
+		Seat:            seatNarrative,
+		Workflow:        "narrative_maintainer",
+		Instructions:    narrativeMaintainerInstructions(),
+		Input:           input,
+		ReasoningEffort: effort,
+		Verbosity:       "low",
+		MaxOutputTokens: 4000,
+	})
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
@@ -325,8 +309,6 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	if !ok {
 		// Never persist unparseable output: the cursor stays put, so the next
 		// pass retries with more input (the mission-intel contract).
-		// model here is whichever provider actually wrote the output (Sonnet
-		// when keyed, the OpenAI brain model keyless).
 		recordEvalEvent(seatNarrative, evalKindParseFailure, map[string]any{"seat": seatNarrative, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", narrativeMaintainerAgentName)
 		return meetingMemoryEntry{}, &ambientAgentHoldError{err: &ambientOutputRejection{agent: narrativeMaintainerAgentName, reason: "non_json"}}

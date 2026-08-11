@@ -71,6 +71,25 @@ func (routes goalResponderRoutes) responder(t *testing.T) anthropicMessagesRespo
 	}
 }
 
+func (routes goalResponderRoutes) openAIResponder(t *testing.T) openAITextResponder {
+	t.Helper()
+	legacy := routes.responder(t)
+	return func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+		response, err := legacy(ctx, apiKey, anthropicMessagesRequest{
+			Model:     request.Model,
+			System:    request.Instructions,
+			Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(request.Input)}}},
+			MaxTokens: request.MaxOutputTokens,
+			Effort:    request.ReasoningEffort,
+			Seat:      request.Seat,
+		})
+		if err != nil {
+			return "", err
+		}
+		return anthropicResponseText(response), nil
+	}
+}
+
 type capturedChild struct {
 	threadID  string
 	subtaskID string
@@ -136,9 +155,13 @@ func installFakeChildRunner(t *testing.T) *[]capturedChild {
 func installFakeResponder(t *testing.T, routes goalResponderRoutes) {
 	t.Helper()
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	original := createAnthropicMessagesResponse
 	t.Cleanup(func() { createAnthropicMessagesResponse = original })
 	createAnthropicMessagesResponse = routes.responder(t)
+	originalOpenAI := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = originalOpenAI })
+	createOpenAITextResponse = routes.openAIResponder(t)
 	// launchGoalThread starts the engine on its own goroutine; the tests drive
 	// it synchronously instead so assertions are deterministic.
 	originalStart := startGoalThreadAsync
@@ -152,6 +175,35 @@ func installFakeResponder(t *testing.T, routes goalResponderRoutes) {
 	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
 		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
 	}
+}
+
+// installLegacyGoalResponder keeps the historical Anthropic-shaped fixtures
+// useful while production goal calls are OpenAI Responses-native. It adapts
+// only inside tests; no production constructor exposes a provider fallback.
+func installLegacyGoalResponder(t *testing.T, responder anthropicMessagesResponder) {
+	t.Helper()
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	originalAnthropic := createAnthropicMessagesResponse
+	originalOpenAI := createOpenAITextResponse
+	createAnthropicMessagesResponse = responder
+	createOpenAITextResponse = func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+		response, err := responder(ctx, apiKey, anthropicMessagesRequest{
+			Model:     request.Model,
+			System:    request.Instructions,
+			Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(request.Input)}}},
+			MaxTokens: request.MaxOutputTokens,
+			Effort:    request.ReasoningEffort,
+			Seat:      request.Seat,
+		})
+		if err != nil {
+			return "", err
+		}
+		return anthropicResponseText(response), nil
+	}
+	t.Cleanup(func() {
+		createAnthropicMessagesResponse = originalAnthropic
+		createOpenAITextResponse = originalOpenAI
+	})
 }
 
 func waitForGoalStage(t *testing.T, app *kanbanBoardApp, parentID string, want string) goalPlan {
@@ -288,7 +340,7 @@ func TestGoalEngineHappyPathReachesVerified(t *testing.T) {
 	})
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Package the Aurora IP for investors", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Package the Aurora IP for investors", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -348,7 +400,7 @@ func TestGoalEngineRespectsConcurrencyCap(t *testing.T) {
 		mu.Unlock()
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Run four independent research probes", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Run four independent research probes", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -376,17 +428,17 @@ func TestGoalLaunchEnforcesPerUserInFlightCap(t *testing.T) {
 	// Fill the default cap of 2 (startGoalThreadAsync is stubbed to a no-op, so
 	// both goals park in a non-terminal stage). The second launch uses a
 	// differently-cased email — same account, same bucket.
-	first, err := app.launchGoalThread(goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com"})
+	first, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("first launch: %v", err)
 	}
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Draft the Vega one-pager", CreatedBy: "AJ@Shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Draft the Vega one-pager", CreatedBy: "AJ@Shareability.com"}); err != nil {
 		t.Fatalf("second launch: %v", err)
 	}
 
 	// The third launch breaches the cap with the typed refusal naming both
 	// in-flight goals (id+title) in a speakable sentence.
-	_, err = app.launchGoalThread(goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"})
+	_, err = launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"})
 	var capErr *errGoalUserCapExceeded
 	if !errors.As(err, &capErr) {
 		t.Fatalf("third launch err=%v, want errGoalUserCapExceeded", err)
@@ -404,14 +456,14 @@ func TestGoalLaunchEnforcesPerUserInFlightCap(t *testing.T) {
 	}
 
 	// A different account has its own bucket — never blocked by someone else's.
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Independent objective", CreatedBy: "sam@shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Independent objective", CreatedBy: "sam@shareability.com"}); err != nil {
 		t.Fatalf("different user hit someone else's cap: %v", err)
 	}
 
 	// Driving the first goal to a terminal stage frees the slot.
 	app.runGoalThread(first.Artifact.ID)
 	waitForGoalStage(t, app, first.Artifact.ID, goalStateVerified)
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"}); err != nil {
 		t.Fatalf("launch after a goal completed still capped: %v", err)
 	}
 }
@@ -419,7 +471,7 @@ func TestGoalLaunchEnforcesPerUserInFlightCap(t *testing.T) {
 func TestGoalLaunchPreservesDisplayNameAndCanonicalPrincipal(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{})
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective: "Prepare the company brief",
 		CreatedBy: "AJ",
 		Origin:    map[string]string{"requestedBy": "AJ@Shareability.com"},
@@ -461,7 +513,7 @@ func TestGoalLaunchUserCapHoldsUnderConcurrentLaunches(t *testing.T) {
 		}
 		go func(index int, email string) {
 			defer wg.Done()
-			_, err := app.launchGoalThread(goalLaunchSpec{Objective: fmt.Sprintf("Concurrent objective %d", index), CreatedBy: email})
+			_, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: fmt.Sprintf("Concurrent objective %d", index), CreatedBy: email})
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -492,10 +544,10 @@ func TestGoalLaunchUserCapEnvOverride(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	t.Setenv("BONFIRE_GOAL_USER_CAP", "1")
 
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Only goal allowed", CreatedBy: "aj@shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Only goal allowed", CreatedBy: "aj@shareability.com"}); err != nil {
 		t.Fatalf("first launch under cap=1: %v", err)
 	}
-	_, err := app.launchGoalThread(goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"})
+	_, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"})
 	var capErr *errGoalUserCapExceeded
 	if !errors.As(err, &capErr) {
 		t.Fatalf("second launch err=%v, want errGoalUserCapExceeded under BONFIRE_GOAL_USER_CAP=1", err)
@@ -506,7 +558,7 @@ func TestGoalLaunchUserCapEnvOverride(t *testing.T) {
 
 	// Raising the cap admits the same launch immediately.
 	t.Setenv("BONFIRE_GOAL_USER_CAP", "3")
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"}); err != nil {
 		t.Fatalf("launch under raised cap: %v", err)
 	}
 }
@@ -534,30 +586,11 @@ func TestGoalHTTPEndpointReturns429WhenUserCapExceeded(t *testing.T) {
 		return rec
 	}
 
-	if rec := post("Package the Aurora IP"); rec.Code != http.StatusAccepted {
-		t.Fatalf("first launch status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusAccepted)
+	if rec := post("Package the Aurora IP"); rec.Code != http.StatusGone {
+		t.Fatalf("retired goal door status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusGone)
 	}
-	rec := post("One goal too many")
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusTooManyRequests)
-	}
-	var payload struct {
-		OK       bool              `json:"ok"`
-		Error    string            `json:"error"`
-		Cap      int               `json:"cap"`
-		InFlight []goalInFlightRef `json:"inFlight"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode 429 body: %v (%s)", err, rec.Body.String())
-	}
-	if payload.OK || payload.Cap != 1 || len(payload.InFlight) != 1 {
-		t.Fatalf("429 body=%+v, want ok=false cap=1 one in-flight goal", payload)
-	}
-	if payload.InFlight[0].ID == "" || !strings.Contains(payload.InFlight[0].Title, "Package the Aurora IP") {
-		t.Fatalf("429 in-flight ref missing id/title: %+v", payload.InFlight)
-	}
-	if !strings.Contains(payload.Error, "Package the Aurora IP") {
-		t.Fatalf("429 error does not name the blocking goal: %q", payload.Error)
+	if got := len(kanbanApp.inFlightGoalsForUser("aj@shareability.com")); got != 0 {
+		t.Fatalf("retired goal door launched %d goals", got)
 	}
 }
 
@@ -571,7 +604,7 @@ func TestGoalEngineReviewFailBlocksAfterRevisionBound(t *testing.T) {
 	})
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the flawless draft", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Produce the flawless draft", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -606,7 +639,7 @@ func TestGoalEngineExternalWriteStopsAtApprovalWithoutLaunchingCommit(t *testing
 	})
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Build and deploy the release to production", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build and deploy the release to production", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -650,7 +683,7 @@ func TestResumeApprovedGoalRefusesWithoutApprovalRecord(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 
 	// A plain running goal (no approval gate) must not be resumable into commit.
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Write a research brief", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Write a research brief", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -669,7 +702,7 @@ func TestResumeApprovedGoalEnqueuesExternalWriteJobAfterApproval(t *testing.T) {
 	})
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Ship the fix to production", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Ship the fix to production", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -740,7 +773,7 @@ func TestGoalDecomposeRejectsMalformedThenNeedsAttention(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{decompose: "not json at all, just prose"})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Do the thing", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Do the thing", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -765,11 +798,18 @@ func TestAssignGoalRunners(t *testing.T) {
 		{ID: "st-2", Title: "Implement the fix and run the tests", Mode: "workflow"},
 	}}
 	assignGoalRunners(plan)
-	if plan.Subtasks[0].Runner != selectedAgentRunnerName() {
-		t.Fatalf("research subtask runner=%q, want orchestrator %q", plan.Subtasks[0].Runner, selectedAgentRunnerName())
+	for _, subtask := range plan.Subtasks {
+		if subtask.Runner != agentRunnerStub {
+			t.Fatalf("uncontracted subtask %s runner=%q, want fail-closed stub", subtask.ID, subtask.Runner)
+		}
 	}
-	if plan.Subtasks[1].Runner != agentRunnerCodexSidecar {
-		t.Fatalf("shell subtask runner=%q, want execution runner", plan.Subtasks[1].Runner)
+
+	toolPlan := &goalPlan{ToolTemplate: "deep_research", routeVerified: true, Subtasks: []goalSubtask{
+		{ID: "st-1", Title: "Implement the fix and run the tests", Mode: "workflow"},
+	}}
+	assignGoalRunners(toolPlan)
+	if toolPlan.Subtasks[0].Mode != "research" || toolPlan.Subtasks[0].Runner != selectedAgentRunnerName() {
+		t.Fatalf("server-owned research tool route=%s/%s, want research/%s", toolPlan.Subtasks[0].Mode, toolPlan.Subtasks[0].Runner, selectedAgentRunnerName())
 	}
 }
 
@@ -799,41 +839,52 @@ func TestGoalChildAuthorityClampsToParent(t *testing.T) {
 func TestReconcileGoalThreadResumesInFlightPlan(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{})
+	parentThread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatalf("launch source-bound parent: %v", err)
+	}
+	parent := parentThread.Artifact
+	plan := mustGoalPlan(t, app, parent.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	receipt := plan.RouteReceipt
+	childSpec := agentThreadGoalSpec{
+		Objective: "Market map", RequestedBy: receipt.Requester, Authority: codexJobAuthorityReadOnly,
+		ParentGoalID: parent.ID, SubtaskID: "st-1", AssignedRunner: agentRunnerOpenAIText,
+		SourceMessageID: receipt.SourceMessageID, SourceMessageDigest: receipt.SourceMessageDigest,
+		SourceWindowDigest: receipt.SourceWindowDigest, OperationID: receipt.OperationID,
+		OperationBodyDigest: receipt.OperationBodyDigest, ParentGoalRouteDigest: receipt.Digest,
+	}
+	originalAgentStart := startAgentThreadAsync
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = originalAgentStart })
+	childThread, err := app.launchGoalAgentThreadScaffold("research", "Market map", "tester", goalRouteChildBindingMetadata(&plan), childSpec)
+	if err != nil {
+		t.Fatalf("create governed child: %v", err)
+	}
+	plan.State = goalStateExecute
+	plan.Subtasks = []goalSubtask{
+		{ID: "st-1", Title: "Market map", Mode: "research", Runner: agentRunnerOpenAIText, Authority: codexJobAuthorityReadOnly, Status: subtaskRunning, ArtifactID: childThread.Artifact.ID, ThreadID: childThread.ID, Attempts: 1},
+		{ID: "st-2", Title: "One-pager", Mode: "design", Runner: agentRunnerOpenAIText, Authority: codexJobAuthorityWorkspaceWrite, DependsOn: []string{"st-1"}, Status: subtaskPending},
+	}
+	if persisted := engine.persist(&plan, parent.ID, ""); persisted.ID == "" {
+		t.Fatal("persist governed in-flight parent")
+	}
+	if err := app.activateReservedGoalAgentThread(childThread, childSpec, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = app.updateOSArtifactWithMetadata(childThread.Artifact.ID, "", "the market map output", "tester", map[string]string{
+		"threadStatus": codexJobStatusComplete, "status": codexJobStatusComplete,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startAgentThreadAsync = originalAgentStart
 	launched := installFakeChildRunner(t)
-
-	// A completed child artifact for st-1 (as if it finished before the crash).
-	child, _, err := app.createOSArtifactWithMetadata("research", "Market map", "the market map output", "tester", map[string]string{
-		"threadStatus": "complete",
-		"status":       "complete",
-	})
-	if err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-
-	// An in-flight plan: st-1 running with a now-terminal child, st-2 pending on it.
-	plan := goalPlan{
-		PlanVersion:  goalPlanVersion,
-		GoalID:       "agent-thread-goal-resume",
-		Objective:    "Package the Aurora IP",
-		CreatedBy:    "aj@shareability.com",
-		Authority:    codexJobAuthorityWorkspaceWrite,
-		State:        goalStateExecute,
-		Gate:         goalGate{Status: "pending"},
-		Verification: goalVerification{Verdict: "pending"},
-		Subtasks: []goalSubtask{
-			{ID: "st-1", Title: "Market map", Mode: "research", Authority: codexJobAuthorityReadOnly, Status: subtaskRunning, ArtifactID: child.ID, Attempts: 1},
-			{ID: "st-2", Title: "One-pager", Mode: "design", Authority: codexJobAuthorityWorkspaceWrite, DependsOn: []string{"st-1"}, Status: subtaskPending},
-		},
-	}
-	raw, _ := json.Marshal(plan)
-	parent, _, err := app.createOSArtifactWithMetadata("workflow", plan.Objective, buildGoalScaffold(plan), "aj@shareability.com", map[string]string{
-		"mode":         "goal",
-		"goalPlan":     string(raw),
-		"currentStage": goalStateExecute,
-	})
-	if err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
 
 	app.reconcileGoalThread(parent.ID)
 
@@ -978,12 +1029,21 @@ func TestGoalEngineCodexSubtaskFoldsViaCallback(t *testing.T) {
 	t.Setenv("BONFIRE_EXECUTION_RUNNER", "codex_sidecar")
 	t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
 	installFakeResponder(t, goalResponderRoutes{
-		// A shell-flavored subtask so assignGoalRunners routes it to the
-		// execution runner (codex_sidecar), exercising the queued path.
-		decompose: `{"subtasks":[{"id":"st-1","title":"Implement the fix and run the tests","mode":"workflow","authority":"workspace_write","dependsOn":[]}]}`,
+		// The server-authored process below owns the execution classification;
+		// free-form model output is no longer allowed to select this runner.
+	})
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID: "process_codex_callback_probe", Version: 1, Title: "Codex callback probe", Hidden: true,
+		Authority: codexJobAuthorityWorkspaceWrite,
+		Stages: []ProcessStage{{
+			ID: "st-1", Title: "Implement the fix and run the tests", Role: processRoleWriter,
+			Mode: "workflow", PromptBody: "Implement the bounded fixture and run its tests.",
+		}},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Fix the failing build", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Fix the failing build", CreatedBy: "aj@shareability.com", ToolTemplate: "process_codex_callback_probe",
+	})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1028,7 +1088,7 @@ func TestGoalEngineCommitPushIsIdempotentAcrossRestart(t *testing.T) {
 	})
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Ship the fix to production", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Ship the fix to production", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1087,7 +1147,7 @@ func TestGoalExternalWriteApprovalPersistFailureQueuesNothing(t *testing.T) {
 	})
 	folds := installAwaitableChildRunner(t, "release notes")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Ship only after durable approval", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Ship only after durable approval", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1127,7 +1187,7 @@ func TestGoalCommitReservationCrashResumesExactlyOnce(t *testing.T) {
 	})
 	folds := installAwaitableChildRunner(t, "release notes")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Resume the exact reserved push", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Resume the exact reserved push", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1199,7 +1259,7 @@ func TestGoalCommitReservationCrashResumesExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestGoalCommitAdoptsLegacyEnqueueBeforeParentStampCrash(t *testing.T) {
+func TestGoalCommitQuarantinesLegacyEnqueueBeforeParentStampCrash(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	queueDir := t.TempDir()
 	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
@@ -1209,7 +1269,7 @@ func TestGoalCommitAdoptsLegacyEnqueueBeforeParentStampCrash(t *testing.T) {
 	})
 	folds := installAwaitableChildRunner(t, "release notes")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Adopt the old crash-window push", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Adopt the old crash-window push", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1235,24 +1295,22 @@ func TestGoalCommitAdoptsLegacyEnqueueBeforeParentStampCrash(t *testing.T) {
 		t.Fatalf("create legacy orphan child: %v", err)
 	}
 	legacyThread := scoutAgentThread{ID: goalCommitThreadID(&plan), Mode: "workflow", Query: command, Artifact: legacyChild}
-	result, err := app.enqueueCodexAgentThreadJob(legacyThread, codexJobAuthorityExternalWrite)
-	if err != nil {
-		t.Fatalf("enqueue legacy orphan job: %v", err)
+	_, err = app.enqueueCodexAgentThreadJob(legacyThread, codexJobAuthorityExternalWrite)
+	if err == nil {
+		t.Fatal("unbound legacy commit child reached the sidecar queue")
 	}
 	if current, _ := app.osArtifactByID(legacyChild.ID); current.Metadata["runnerJobId"] != "" {
 		t.Fatalf("legacy crash window unexpectedly stamped runnerJobId=%q", current.Metadata["runnerJobId"])
 	}
-	legacyJobID := result.Metadata["runnerJobId"]
-
 	restarted := newKanbanBoardApp()
 	restarted.reconcileGoalThread(thread.Artifact.ID)
 	restarted.reconcileGoalThread(thread.Artifact.ID)
-	if got := countQueueJobs(t, queueDir); got != 1 {
-		t.Fatalf("legacy crash recovery queued %d jobs, want the original one only", got)
+	if got := countQueueJobs(t, queueDir); got != 0 {
+		t.Fatalf("legacy crash recovery queued %d jobs, want fail-closed zero", got)
 	}
 	reloaded := mustGoalPlan(t, restarted, thread.Artifact.ID)
-	if reloaded.Gate.CommitChildID != legacyChild.ID || reloaded.Gate.CommitJobID != legacyJobID {
-		t.Fatalf("legacy orphan was not adopted: child=%q/%q job=%q/%q", reloaded.Gate.CommitChildID, legacyChild.ID, reloaded.Gate.CommitJobID, legacyJobID)
+	if reloaded.State != goalStateBlocked || !strings.Contains(reloaded.Blocker, "operator reconciliation") || reloaded.Gate.CommitChildID != "" || reloaded.Gate.CommitJobID != "" {
+		t.Fatalf("legacy orphan was not quarantined: state=%q blocker=%q child=%q job=%q", reloaded.State, reloaded.Blocker, reloaded.Gate.CommitChildID, reloaded.Gate.CommitJobID)
 	}
 }
 
@@ -1371,25 +1429,27 @@ func TestGoalCommitLegacyQueueDiscoveryZeroMatchesRequiresOperatorReconciliation
 func TestGoalCommitLatePriorGenerationCallbackCannotFinishCurrentReship(t *testing.T) {
 	t.Setenv("USAGE_LEDGER_PATH", t.TempDir())
 	app := newIsolatedKanbanBoardApp(t)
-	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Current reship", "body", "tester", map[string]string{"mode": "goal"})
+	installFakeResponder(t, goalResponderRoutes{})
+	parentThread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Ship revision two", CreatedBy: "aj@shareability.com", Authority: codexJobAuthorityExternalWrite,
+	})
 	if err != nil {
-		t.Fatalf("create parent: %v", err)
+		t.Fatalf("launch source-bound parent: %v", err)
 	}
-	plan := goalPlan{
-		PlanVersion:      goalPlanVersion,
-		GoalID:           "late-callback-goal",
-		Objective:        "Ship revision two",
-		CreatedBy:        "aj@shareability.com",
-		State:            goalStateCommit,
-		CommitGeneration: 2,
-		Gate: goalGate{
-			Status:        "passed",
-			CommitChildID: "current-generation-child",
-			CommitJobID:   "current-generation-job",
-		},
-		Verification: goalVerification{Verdict: "pending"},
+	parent := parentThread.Artifact
+	plan := mustGoalPlan(t, app, parent.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parent.ID); err != nil {
+		t.Fatal(err)
 	}
-	if persisted := newGoalEngine(app).persist(&plan, parent.ID, "body"); persisted.ID == "" {
+	plan.State = goalStateCommit
+	plan.CommitGeneration = 2
+	plan.Gate = goalGate{
+		Status: "passed", ReviewedBy: "aj@shareability.com", Command: plan.Objective,
+		CommitChildID: "current-generation-child", CommitJobID: "current-generation-job",
+	}
+	plan.Verification = goalVerification{Verdict: "pending"}
+	if persisted := engine.persist(&plan, parent.ID, "body"); persisted.ID == "" {
 		t.Fatal("persist current generation")
 	}
 	oldChild := meetingMemoryEntry{ID: "old-generation-child", Metadata: map[string]string{
@@ -1402,10 +1462,15 @@ func TestGoalCommitLatePriorGenerationCallbackCannotFinishCurrentReship(t *testi
 		t.Fatalf("late prior-generation callback terminalized current run: state=%q child=%q job=%q verdict=%q", afterOld.State, afterOld.Gate.CommitChildID, afterOld.Gate.CommitJobID, afterOld.Verification.Verdict)
 	}
 
-	currentChild := meetingMemoryEntry{ID: plan.Gate.CommitChildID, Metadata: map[string]string{
-		"runnerJobId":          plan.Gate.CommitJobID,
-		"goalCommitGeneration": "2",
-	}}
+	currentMetadata := goalRouteChildBindingMetadata(&plan)
+	for key, value := range map[string]string{
+		"source": "goal_commit", "mode": "goal_commit", "goalParentId": parent.ID, "goalSubtaskId": goalCommitSubtaskID,
+		"authority": codexJobAuthorityExternalWrite, "runnerJobId": plan.Gate.CommitJobID,
+		"goalCommitGeneration": "2", "threadId": goalCommitThreadID(&plan), "query": plan.Gate.Command,
+	} {
+		currentMetadata[key] = value
+	}
+	currentChild := meetingMemoryEntry{ID: plan.Gate.CommitChildID, Metadata: currentMetadata}
 	app.foldGoalChildCompletion(parent.ID, goalCommitSubtaskID, currentChild, codexJobStatusComplete)
 	afterCurrent := mustGoalPlan(t, app, parent.ID)
 	if afterCurrent.State != goalStateVerified || afterCurrent.Verification.Verdict != goalReviewPass {
@@ -1532,7 +1597,7 @@ func TestGoalEngineSalvagesBlockedDeliverableIntoPackage(t *testing.T) {
 	longBody := "# Aurora One-Pager\n\n" + strings.Repeat("A substantial, contract-bearing paragraph of the one-pager deliverable. ", 20)
 	folds := installAwaitableChildRunner(t, longBody)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com", PackageID: pkg.ID})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com", PackageID: pkg.ID})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1624,9 +1689,7 @@ func TestGoalEngineRequeuePreservesVerifiedSibling(t *testing.T) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -1637,7 +1700,7 @@ func TestGoalEngineRequeuePreservesVerifiedSibling(t *testing.T) {
 	}
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two independent probes", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Two independent probes", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1728,9 +1791,7 @@ func TestGoalReviewAndGateReadFullArtifactBody(t *testing.T) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -1763,7 +1824,7 @@ func TestGoalReviewAndGateReadFullArtifactBody(t *testing.T) {
 		}()
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two evidence probes", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Two evidence probes", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1887,7 +1948,7 @@ func TestGoalEngineNotifiesCreatorOnceOnTerminal(t *testing.T) {
 	})
 	folds := installAwaitableChildRunner(t, "subtask output")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two probes", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Two probes", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -1963,9 +2024,7 @@ func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -2001,7 +2060,7 @@ func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
 		}()
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2114,9 +2173,7 @@ func TestGoalLawSweepMissingHeadingSkipsReviewerModel(t *testing.T) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -2160,7 +2217,7 @@ func TestGoalLawSweepMissingHeadingSkipsReviewerModel(t *testing.T) {
 		}()
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2232,9 +2289,7 @@ func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -2275,7 +2330,7 @@ func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.
 		}()
 	}
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2373,7 +2428,7 @@ func TestGoalCancelMidExecuteHaltsDispatchAndFoldsAreNoOps(t *testing.T) {
 	})
 	children := installRecordingChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Three probes to abandon", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Three probes to abandon", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2440,7 +2495,7 @@ func TestGoalCancelEmitsNegativeMisfireSignal(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	installRecordingChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Deep research misfire", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Deep research misfire", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2486,11 +2541,11 @@ func TestGoalCancelFreesUserCapHeadroom(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	t.Setenv("BONFIRE_GOAL_USER_CAP", "1")
 
-	first, err := app.launchGoalThread(goalLaunchSpec{Objective: "Wrong launch", CreatedBy: "aj@shareability.com"})
+	first, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Wrong launch", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("first launch: %v", err)
 	}
-	_, err = app.launchGoalThread(goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"})
+	_, err = launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"})
 	var capErr *errGoalUserCapExceeded
 	if !errors.As(err, &capErr) {
 		t.Fatalf("second launch err=%v, want errGoalUserCapExceeded before the cancel", err)
@@ -2502,7 +2557,7 @@ func TestGoalCancelFreesUserCapHeadroom(t *testing.T) {
 	if inFlight := app.inFlightGoalsForUser("aj@shareability.com"); len(inFlight) != 0 {
 		t.Fatalf("in-flight goals after cancel=%d, want 0: %+v", len(inFlight), inFlight)
 	}
-	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"}); err != nil {
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"}); err != nil {
 		t.Fatalf("launch after cancel still capped: %v", err)
 	}
 }
@@ -2513,7 +2568,7 @@ func TestGoalCancelRefusesVerifiedGoal(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Finish cleanly", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Finish cleanly", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2538,7 +2593,7 @@ func TestGoalCancelHTTPAuthorization(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	installRecordingChildRunner(t)
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{Objective: "Joel's goal", CreatedBy: "joel@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{Objective: "Joel's goal", CreatedBy: "joel@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -2589,7 +2644,7 @@ func TestGoalCancelHTTPAuthorization(t *testing.T) {
 
 	// The admin can cancel someone else's goal (admin-equivalent, mirroring the
 	// approval gate's authorization).
-	second, err := kanbanApp.launchGoalThread(goalLaunchSpec{Objective: "Joel's second goal", CreatedBy: "joel@shareability.com"})
+	second, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{Objective: "Joel's second goal", CreatedBy: "joel@shareability.com"})
 	if err != nil {
 		t.Fatalf("second launch: %v", err)
 	}
@@ -2903,9 +2958,7 @@ func TestGoalSaveWhatWorkedDistillsLessonsAndEmitsSignal(t *testing.T) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
 
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -2918,7 +2971,7 @@ func TestGoalSaveWhatWorkedDistillsLessonsAndEmitsSignal(t *testing.T) {
 	// reviewer model (revise -> pass) is what drives the lessons.
 	folds := installAwaitableChildRunner(t, strings.Join(toolContractHeadings["research_brief_v2"], "\n"))
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -3045,18 +3098,17 @@ func TestToolPromptContextForPlanCarriesPinnedProfile(t *testing.T) {
 
 // --- Review-model split (Wave 3 item 16) ---------------------------------------
 
-// Per-subtask review and the ship gate route to BONFIRE_REVIEW_MODEL while
-// orchestration (decompose, report, verify) stays on the orchestrator model —
-// the reviewer reads whole artifacts, which wants Opus context, not the Fable
-// ceiling.
+// Per-subtask review and the ship gate use Sol/max while orchestration stays
+// on Sol/high. Environment model dials cannot change the founder-owned route.
 func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
+	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "")
-	t.Setenv("BONFIRE_REVIEW_MODEL", "review-model-x")
+	t.Setenv("OPENAI_GOAL_MODEL", "gpt-5.6-terra")
+	t.Setenv("OPENAI_GOAL_REVIEW_MODEL", "gpt-5.6-sol")
 
 	var mu sync.Mutex
 	models := map[string]string{}
+	efforts := map[string]string{}
 	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		if apiKey != "test-key" {
 			t.Fatalf("apiKey=%q, want test-key", apiKey)
@@ -3085,12 +3137,11 @@ func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
 		}
 		mu.Lock()
 		models[stage] = request.Model
+		efforts[stage] = request.Effort
 		mu.Unlock()
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
-	originalResp := createAnthropicMessagesResponse
-	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
-	createAnthropicMessagesResponse = responder
+	installLegacyGoalResponder(t, responder)
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
@@ -3101,7 +3152,7 @@ func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
 	}
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Route review to the review model", CreatedBy: "aj@shareability.com"})
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Route review to the review model", CreatedBy: "aj@shareability.com"})
 	if err != nil {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
@@ -3111,13 +3162,13 @@ func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, stage := range []string{"review", "gate"} {
-		if models[stage] != "review-model-x" {
-			t.Fatalf("%s model=%q, want the review model", stage, models[stage])
+		if models[stage] != defaultOpenAIGoalReviewModel || efforts[stage] != defaultOpenAIGoalReviewEffort {
+			t.Fatalf("%s route=%q/%q, want %s/%s", stage, models[stage], efforts[stage], defaultOpenAIGoalReviewModel, defaultOpenAIGoalReviewEffort)
 		}
 	}
 	for _, stage := range []string{"decompose", "report", "verify"} {
-		if models[stage] != orchestratorModel() {
-			t.Fatalf("%s model=%q, want the orchestrator model %q", stage, models[stage], orchestratorModel())
+		if models[stage] != defaultOpenAIGoalModel || efforts[stage] != defaultOpenAIGoalEffort {
+			t.Fatalf("%s route=%q/%q, want %s/%s", stage, models[stage], efforts[stage], defaultOpenAIGoalModel, defaultOpenAIGoalEffort)
 		}
 	}
 }
@@ -3139,7 +3190,7 @@ func TestProcessGoalInstantiatesStagesParksAndResumesWithChoice(t *testing.T) {
 	})
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the process runtime",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_probe",
@@ -3246,7 +3297,7 @@ func TestProcessCheckpointChoiceFeedsNextStageInput(t *testing.T) {
 		},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Choose and write a direction",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_choice_probe",
@@ -3301,7 +3352,7 @@ func TestProcessRenderStageSkipsDisclosedWhenSidecarAbsent(t *testing.T) {
 		},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Draft and export the probe deck",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_render_probe",
@@ -3334,7 +3385,7 @@ func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	})
 	launched := installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the failing gate",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_probe",
@@ -3407,7 +3458,7 @@ func TestProcessCheckpointReviseRequeuesTargetAndReparks(t *testing.T) {
 	launched := installFakeChildRunner(t)
 	registerReviseProbeForTest(t, "process_revise_probe")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the revise teeth",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_revise_probe",
@@ -3473,7 +3524,7 @@ func TestProcessCheckpointReviseBudgetSpentFallsBackDisclosed(t *testing.T) {
 	launched := installFakeChildRunner(t)
 	registerReviseProbeForTest(t, "process_revise_budget_probe")
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the revise budget",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_revise_budget_probe",
@@ -3524,7 +3575,7 @@ func TestProcessCheckpointHoldKeepsGoalParkedUntilProceed(t *testing.T) {
 	installFakeResponder(t, goalResponderRoutes{})
 	installFakeChildRunner(t)
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the hold teeth",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_probe",
@@ -3612,7 +3663,7 @@ func TestProcessPanelStageRunsInlineThroughRunGoalPanel(t *testing.T) {
 		},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Draft and judge the probe pitch",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_panel_probe",
@@ -3666,7 +3717,7 @@ func TestProcessBudgetsOverrideEngineDefaults(t *testing.T) {
 	}
 	registerProcessDefinitionForTest(t, def)
 
-	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose}
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan under the budget: %v", err)
 	}
@@ -3711,7 +3762,7 @@ func TestResumeBlockedGoalResetsAndRedrives(t *testing.T) {
 	launched := installFakeChildRunner(t)
 	registerReviseProbeForTest(t, "process_resume_probe")
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{
 		Objective:    "Probe the blocked-resume door",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_resume_probe",
@@ -3777,7 +3828,7 @@ func TestResumeGoalWithFeedbackReopensVerifiedGoal(t *testing.T) {
 	startGoalFeedbackResumeAsync = func(run func()) { pendingDrive = run }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousResume })
 
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, kanbanApp, goalLaunchSpec{
 		Objective:    "Probe the completed-goal re-open door",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_reopen_probe",
@@ -3989,7 +4040,7 @@ func TestLaunchSubtaskStampsOutputContractOnChild(t *testing.T) {
 		},
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Probe the contract stamp",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: "process_contract_stamp_probe",
@@ -4039,6 +4090,58 @@ func TestGoalEngineCallsCarrySeatTags(t *testing.T) {
 	}
 	if models[0] != "claude-fable-5" || models[1] != "claude-opus-4-8" {
 		t.Fatalf("models=%v, want the orchestrator then the review model", models)
+	}
+}
+
+func TestGoalEngineProductionRouteUsesOpenAIResponsesOnly(t *testing.T) {
+	t.Setenv("OPENAI_GOAL_MODEL", "gpt-5.6-terra")
+	t.Setenv("OPENAI_GOAL_REVIEW_MODEL", "gpt-5.6-sol")
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
+	engine := newGoalEngine(nil)
+	engine.apiKey = func() string { return "openai-test-key" }
+	var requests []openAITextRequest
+	engine.openAIResponder = func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
+		if apiKey != "openai-test-key" {
+			t.Fatalf("apiKey=%q, want OpenAI key", apiKey)
+		}
+		requests = append(requests, request)
+		return "ok", nil
+	}
+	if _, err := engine.callModel(context.Background(), "orchestrate", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.callReviewModel(context.Background(), "review", "artifact"); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests=%d, want two OpenAI calls", len(requests))
+	}
+	if requests[0].Model != defaultOpenAIGoalModel || requests[0].ReasoningEffort != defaultOpenAIGoalEffort || requests[0].Seat != seatGoalEngine || requests[0].Workflow != "goal_engine" {
+		t.Fatalf("orchestrator request=%+v", requests[0])
+	}
+	if requests[1].Model != defaultOpenAIGoalReviewModel || requests[1].ReasoningEffort != defaultOpenAIGoalReviewEffort || requests[1].Seat != seatGoalReview || requests[1].Workflow != "goal_engine" {
+		t.Fatalf("review request=%+v", requests[1])
+	}
+}
+
+func TestGoalOpenAIModelDialsRejectRetiredProviderNames(t *testing.T) {
+	t.Setenv("OPENAI_GOAL_MODEL", "claude-fable-5")
+	t.Setenv("OPENAI_GOAL_REVIEW_MODEL", "claude-opus-4-8")
+	if got := openAIGoalModel(); got != defaultOpenAIGoalModel {
+		t.Fatalf("goal model=%q, want closed OpenAI default %q", got, defaultOpenAIGoalModel)
+	}
+	if got := openAIGoalReviewModel(); got != defaultOpenAIGoalReviewModel {
+		t.Fatalf("review model=%q, want closed OpenAI default %q", got, defaultOpenAIGoalReviewModel)
+	}
+}
+
+func TestGoalLaunchDoesNotAdmitAnthropicCredential(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = ""
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
+	if _, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "must stay closed"}); !errors.Is(err, errAgentWorkerNotConfigured) {
+		t.Fatalf("launch error=%v, want unavailable with Anthropic-only credentials", err)
 	}
 }
 

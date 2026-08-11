@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from 'react';
-import { api, BonfireApiError } from '../api/client';
-import type { ScoutMessage } from '../api/types';
-import { useAuth } from '../auth/AuthContext';
+import { useCallback, useRef, useState } from "react";
+import { api, BonfireApiError } from "../api/client";
+import type { ScoutMessage } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
+import { createConversationOperationId } from "../conversations/newConversation";
 
 /**
  * The conversation loop — design §5.
@@ -23,15 +24,15 @@ export type ConversationTurn = {
 };
 
 function scoutReply(messages: ScoutMessage[] | undefined): string {
-  if (!messages?.length) return '';
+  if (!messages?.length) return "";
   // The answer is the last non-user message the server appended for this turn.
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === 'user') continue;
-    const text = String(message.text ?? message.content ?? '').trim();
+    if (message.role === "user") continue;
+    const text = String(message.text ?? message.content ?? "").trim();
     if (text) return text;
   }
-  return '';
+  return "";
 }
 
 export function useScoutConversation() {
@@ -41,6 +42,9 @@ export function useScoutConversation() {
   const [turn, setTurn] = useState<ConversationTurn | null>(null);
   const [error, setError] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
+  const sendAttemptRef = useRef<{ text: string; operationId: string } | null>(
+    null,
+  );
 
   const start = useCallback(() => {
     setOpen(true);
@@ -68,21 +72,44 @@ export function useScoutConversation() {
       if (!text || !sessionToken) return;
       setThinking(true);
       setError(null);
-      setTurn({ question: text, answer: '' });
+      setTurn({ question: text, answer: "" });
       try {
         if (!threadIdRef.current) {
-          const title = text.length > 54 ? `${text.slice(0, 51).trimEnd()}…` : text;
-          const created = await api.createScoutThread(sessionToken, { title, visibility: 'private' });
-          const id = String(created.thread?.id ?? '');
-          if (!id) throw new Error('Scout did not open a thread.');
+          const title =
+            text.length > 54 ? `${text.slice(0, 51).trimEnd()}…` : text;
+          const created = await api.createScoutThread(sessionToken, {
+            title,
+            visibility: "private",
+          });
+          const id = String(created.thread?.id ?? "");
+          if (!id) throw new Error("Scout did not open a thread.");
           threadIdRef.current = id;
         }
-        const response = await api.sendScoutMessage(sessionToken, threadIdRef.current, text);
-        const answer = scoutReply(response.thread?.messages ?? response.messages);
+        const attempt =
+          sendAttemptRef.current?.text === text
+            ? sendAttemptRef.current
+            : { text, operationId: createConversationOperationId() };
+        sendAttemptRef.current = attempt;
+        const response = await api.sendScoutMessage(
+          sessionToken,
+          threadIdRef.current,
+          text,
+          [],
+          "",
+          attempt.operationId,
+        );
+        sendAttemptRef.current = null;
+        const answer = scoutReply(
+          response.thread?.messages ?? response.messages,
+        );
         setTurn({ question: text, answer });
       } catch (err) {
-        setError(err instanceof BonfireApiError ? err.message : 'Scout could not answer that.');
-        setTurn((previous) => (previous ? { ...previous, answer: '' } : null));
+        setError(
+          err instanceof BonfireApiError
+            ? err.message
+            : "Scout could not answer that.",
+        );
+        setTurn((previous) => (previous ? { ...previous, answer: "" } : null));
       } finally {
         setThinking(false);
       }

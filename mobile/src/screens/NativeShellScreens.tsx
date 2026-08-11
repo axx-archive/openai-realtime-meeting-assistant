@@ -16,6 +16,7 @@ type Destination = {
 };
 
 const workDestinations: Destination[] = [
+  { route: 'NewConversation', label: 'New conversation', detail: 'Start a private Scout chat or a public channel.', icon: 'square.and.pencil' },
   { route: 'Deck', label: 'Threads, rooms, and work', detail: 'Return to the live company deck.', icon: 'bubble.left.and.bubble.right.fill' },
   { route: 'Board', label: 'Board', detail: 'Cards, decisions, and delivery.', icon: 'rectangle.3.group.fill' },
   { route: 'Files', label: 'Files', detail: 'Documents and artifacts from the work.', icon: 'folder.fill' },

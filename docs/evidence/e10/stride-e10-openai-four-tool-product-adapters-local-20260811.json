@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_openai_four_tool_product_adapters_and_router_binding",
+  "observedAt": "2026-08-11T09:31:12Z",
+  "status": "secure_four_tool_product_adapters_default_off_independent_critic_pass_full_go_and_mobile_green",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false
+  },
+  "claims": {
+    "admittedTools": [
+      "report_goal_state",
+      "answer_memory_question",
+      "create_artifact",
+      "update_artifact"
+    ],
+    "allOtherTools": "explicitly_unavailable",
+    "concreteAdapters": "authority_bound_product_backends_with_authenticated_preimage_postimage_reconciliation_and_final_use",
+    "routerBinding": "server_owned_conversation_route_with_persisted_source_operation_and_capability_provenance",
+    "journal": "authenticated_encrypted_monotonic_cas_descriptor_relative_restart_replay",
+    "operationIdentity": "immutable_with_authenticated_rotation_aliases_and_durable_turn_limit",
+    "authority": "held_through_provider_admission_effect_terminal_projection_and_fan_out",
+    "artifactFence": "exact_revision_digest_and_authenticated_successor_chain",
+    "memoryFence": "exact_source_high_water_held_through_provider_admission_and_terminal_use",
+    "projection": "signed_pending_outbox_stable_delivery_id_byte_exact_restart_retry_and_one_web_logical_application",
+    "nativeProjectionScope": "native_thread_truth_uses_separate_chat_snapshot_and_event_paths_not_web_office_os_event",
+    "providerState": "openai_responses_store_false_exact_manual_replay",
+    "defaultOff": true,
+    "providerCallsByVerification": 0,
+    "productionMutations": 0,
+    "managedKeyInstallations": 0,
+    "liveActivations": 0
+  },
+  "selectedFileSha256": {
+    "openai_tool_contract.go": "7d83e74f9b2694e2159c0d3bd5b000eea9566a803f9e827e1b64bafd57de8795",
+    "openai_tool_effects.go": "733c10573aa1623d55d94751980f8b5c74eac02b5951ca286e23bcb62721148b",
+    "openai_tool_journal.go": "7003123e3ee01c73345d78a9b28f98009945d44236ad471404b6200dbaa4f265",
+    "openai_tool_loop.go": "ddcd72d90e774cfa55d005da380fbf8e8c42c56370b9dbdf03d0700f99551911",
+    "openai_tool_product_runtime.go": "6411f72b777f52fac60d5b1ccfede50330ce96f66f6322eac93d51c37cae5afe",
+    "openai_tool_responses.go": "e7ddec61ad7b72b2c771aa3b3ee33328ad3de8feeeb077535dbaab4e9de45993",
+    "openai_tool_activation.go": "80cfeb643571c0c311b8bb8ab5246e3dadd7149620049b200bda41c49ca9d564",
+    "conversation_work_launch.go": "686a21d00380e53dfc66f301cf488343fc1e1ac372783b91c7db7fe6044be6f6",
+    "agent_thread_runner.go": "2fd813bea7ea08037301100e3feb1f94f49723d0c8d4a031f70107590a0c7d5f",
+    "stride_e10_tenant_main_runtime.go": "45a3f0c75d9a610cdb54e363e6a6a59f828469c212d078dd903ba6b7d77cc804",
+    "memory.go": "d8481ed2c8265f07ea27fa199d4f372328ed3dfb118b91735e7b2fef8f81147a",
+    "kanban.go": "0c6bf5219d2b4c63e27396c4ba2f7aa6624128eea8412f4bd6e1d1a1a0fa74fe",
+    "office_events.go": "bfd27daa91c0f53127c6a15660c46c5bf44e199e4289a65bf3d9180a3f003b17",
+    "index.html": "df87bd802749a3e3c59725d5636e7a6c66d0b527dbdfdea1fbc43af71706905b"
+  },
+  "selectedTestFileSha256": {
+    "openai_tool_contract_test.go": "a074838d3c2fd2ff047308b0e67107cc5def758a81632449289bd7366930fc83",
+    "openai_tool_journal_test.go": "8028d40c8ad7f0b8b76ef27347f10f65ab5dca26ed897eee970351dcc1afa539",
+    "openai_tool_loop_test.go": "aa54f26a8d4073be48f6c3effd116d0480efb84849ac96afd27cb8d8cb4914fc",
+    "openai_tool_product_runtime_test.go": "2f73f93998a2e7655438683bfbaef765485a9195e9ea9c1a74f3df6ab3b19c3a",
+    "openai_tool_responses_test.go": "780de2e187bf408497b98d612b3f4999cbab0c9b748a2dd1b2db93dda01c5235",
+    "office_events_test.go": "e8c7872a8ea41237e8c9adf20fc99a8075d1e0db2c245f4ab9907b036cb01b28",
+    "stride_e10_tenant_main_runtime_test.go": "3a75c3066a12a173ce2e5b3b5f49d57d607a2958ac289c6ce3cb6317e793f1a4",
+    "stride_artifact_drive_save_test.go": "854f9dd8893f840cd6a636b1f895fd787f6e292b5ad66d36d7c1d02f998ffc12"
+  },
+  "verification": {
+    "focusedNormal": "PASS",
+    "focusedRace": "PASS_81.987s",
+    "projectionProcessRestartNormal": "PASS_3.864s",
+    "projectionProcessRestartRace": "PASS_33.295s",
+    "providerSourceInventory": "PASS",
+    "goVetAll": "PASS",
+    "formatAndDiffCheck": "PASS",
+    "fullGo": {
+      "root": "PASS_515.862s",
+      "allCommandAndInternalPackages": "PASS"
+    },
+    "fullMobile": {
+      "tests": "PASS_488_of_488",
+      "typecheck": "PASS"
+    },
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "productionBoundaryRehashed": true,
+      "fullSuiteFixtureBoundaryRehashed": true,
+      "finding": "no_material_issue_for_default_off_secure_four_tool_product_adapter_checkpoint"
+    }
+  },
+  "openGates": [
+    "managed_mac_aead_effect_key_service_installation_and_rotation_custody",
+    "exact_openai_project_billing_cost_caps_and_provider_spend_authority",
+    "reviewed_clean_commit_push_release_deploy_restart_and_live_activation",
+    "live_provider_route_receipts_and_current_production_readback",
+    "rendered_pd1_desktop_iphone_ipad_acceptance",
+    "successful_live_openai_document_presentation_and_mixed_package_acceptance",
+    "physical_device_service_cohort_publication_collection_and_soak_obligations"
+  ],
+  "exclusions": {
+    "providerQualified": false,
+    "productionEnabled": false,
+    "liveToolParityAccepted": false,
+    "presentationAccepted": false,
+    "renderedProductAccepted": false,
+    "deviceAccepted": false,
+    "publicNetworkEnabled": false,
+    "collectionEnabled": false,
+    "wholeLedgerComplete": false
+  }
+}

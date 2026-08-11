@@ -26,7 +26,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,6 +314,7 @@ const (
 // workflowRunEntry is the W0 item-8 provenance record: who kicked what from
 // where, under which approval lane, on which runner seats, and how it ended.
 type workflowRunEntry struct {
+	IdempotencyKey  string   `json:"idempotency_key,omitempty"`
 	WorkflowID      string   `json:"workflow_id"`
 	WorkflowVersion string   `json:"workflow_version,omitempty"`
 	TriggerSurface  string   `json:"trigger_surface"` // triggerSurface* constant
@@ -338,6 +341,66 @@ func recordWorkflowRun(entry workflowRunEntry) {
 		TS: now, Type: telemetryTypeWorkflowRun, Kind: entry.Outcome,
 		Fields: map[string]any{"run": entry},
 	})
+}
+
+// recordWorkflowRunOnce is the durable provenance seam for recoverable secure
+// activations. The deterministic key is searched and appended under the same
+// ledger mutex across every rotated eval file, so a crash after provenance but
+// before worker creation cannot produce a second visible launch row.
+func recordWorkflowRunOnce(entry workflowRunEntry) error {
+	if !usageLedgerEnabled() {
+		return errors.New("workflow provenance ledger is disabled")
+	}
+	entry.IdempotencyKey = strings.TrimSpace(entry.IdempotencyKey)
+	if entry.IdempotencyKey == "" {
+		return errors.New("workflow provenance idempotency key is required")
+	}
+	now := usageLedgerNow().UTC()
+	payload := telemetryEvent{TS: now, Type: telemetryTypeWorkflowRun, Kind: entry.Outcome, Fields: map[string]any{"run": entry}}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	needle, err := json.Marshal(entry.IdempotencyKey)
+	if err != nil {
+		return err
+	}
+	needle = append([]byte(`"idempotency_key":`), needle...)
+	directory := usageLedgerDir()
+	path := filepath.Join(directory, evalLedgerFilePrefix+"-"+now.Format("2006-01-02")+".jsonl")
+
+	usageLedgerMu.Lock()
+	defer usageLedgerMu.Unlock()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	files, err := filepath.Glob(filepath.Join(directory, evalLedgerFilePrefix+"-*.jsonl"))
+	if err != nil {
+		return err
+	}
+	for _, candidate := range files {
+		raw, readErr := os.ReadFile(candidate)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(raw, needle) {
+			return nil
+		}
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, writeErr := file.Write(data)
+	if writeErr == nil {
+		writeErr = file.Sync()
+	}
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 // ---------------------------------------------------------------------------

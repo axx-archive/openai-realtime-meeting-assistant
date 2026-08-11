@@ -17,28 +17,16 @@ import (
 	"time"
 )
 
-// --- Model + effort routing doctrine (founder directive, 2026-07-07) ----------
+// --- RETIRED HISTORICAL PROVIDER CONTRACT -----------------------------------
 //
-// Fable 5 (claude-fable-5) is the orchestrator: it plans, fans out, and
-// verifies. Worker seats — review/gate, chat, follow-ups, refusal fallback —
-// are Sonnet/Opus tier ONLY (claude-sonnet-5 / claude-opus-4-8); Haiku is
-// never an acceptable model for any reasoning seat, and the env dials below
-// refuse a haiku id rather than honoring it (doctrineModelOrDefault).
+// These types and wire helpers remain solely for historical receipt decoding
+// and deterministic compatibility tests. No production constructor admits
+// them; explicit or persisted Anthropic runner assignments fail closed before
+// this file can be reached. Do not use these model/effort accessors for new
+// work.
 //
-// Effort floor: no Anthropic surface runs below "medium" — the founder saw
-// orchestratorEffort=low stamped on his research runs and low-depth reasoning
-// on founder-facing work is a doctrine violation, not a cost win. The
-// orchestrator DEFAULTS to "high" (Anthropic's own guidance for long-horizon
-// agentic work); a configured value below medium clamps UP to medium with a
-// logged warning (flooredEffort). Within these floors, the Fable
-// orchestrator's own judgment governs how hard it works a given turn.
-//
-// Sanctioned future seam (designed, NOT built): the orchestrator delegating
-// scoped subtasks to Sonnet 5 workers — Anthropic's published multi-agent
-// pattern (Fable plans and fans out, Sonnet workers execute well-scoped
-// subtasks, escalate hard calls back up). When that fan-out lands it routes
-// through the same doctrineModelOrDefault guard, so the never-Haiku and
-// effort-floor rules bind worker seats automatically.
+// The legacy effort floor and model accessors below are frozen evidence
+// compatibility, not a sanctioned future seam or a deployable route.
 const (
 	defaultAnthropicMessagesURL = "https://api.anthropic.com/v1/messages"
 	anthropicAPIVersion         = "2023-06-01"

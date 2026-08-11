@@ -28,8 +28,8 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	if !ok {
 		t.Fatal("session reasoning config missing")
 	}
-	if effort := reasoning["effort"]; effort != "low" {
-		t.Fatalf("room reasoning effort=%v, want low", effort)
+	if effort := reasoning["effort"]; effort != "medium" {
+		t.Fatalf("room reasoning effort=%v, want medium", effort)
 	}
 
 	audio := session["audio"].(map[string]any)
@@ -108,69 +108,12 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	if !ok || len(tools) == 0 {
 		t.Fatalf("private dashboard Realtime voice tools=%T, want constrained OS tool list", session["tools"])
 	}
-	// Wave 6 ("she can do it all"): private Scout drives the board and edits
-	// artifacts on the user's behalf, plus the new parity tools. The room-only
-	// set below stays excluded because it mutates the shared room.
+	// E10 conversation-first admission: the model may submit natural language
+	// or explicitly discard noise. It cannot select a product tool, template,
+	// provider, authority, audience, or mutation.
 	allowed := map[string]bool{
-		"control_app":            true,
-		"create_artifact":        true,
-		"update_artifact":        true,
-		"publish_artifact":       true,
-		"launch_agent_thread":    true,
-		"answer_memory_question": true,
-		"propose_codex_task":     true,
-		"create_ticket":          true,
-		"move_ticket":            true,
-		"update_ticket":          true,
-		"add_tags":               true,
-		"add_key_date":           true,
-		"remove_key_dates":       true,
-		"delete_ticket":          true,
-		"undo_delete_ticket":     true,
-		"create_package":         true,
-		"attach_to_package":      true,
-		"advance_package_stage":  true,
-		"portfolio_health":       true,
-		"send_notification":      true,
-		"post_to_channel":        true,
-		"create_channel":         true,
-		"start_chat_as_user":     true,
-		"read_thread_aloud":      true,
-		"initiate_goal":          true,
-		// Wave 12: private grill is a client-driven session.update swap, private
-		// only. The room grill (start_grill_session/end_grill_session) stays
-		// room-only below.
-		"start_private_grill":     true,
-		"end_private_grill":       true,
-		"meeting_recap":           true,
-		"catch_me_up":             true,
-		"meeting_interval_recall": true,
-		// Track-2 Wave 6: read-only cross-meeting recall — the private user
-		// owns their own catch-up briefings and drill-downs.
-		"cross_meeting_briefing": true,
-		"get_meeting_detail":     true,
-		"do_nothing":             true,
-		// fiscal.ai grounding: only the typed, spoken-ready pair rides voice;
-		// fiscal_api_docs / fiscal_data_query stay orchestrator-only (too heavy).
-		"company_financial_snapshot": true,
-		"financial_comps":            true,
-		// Files organization is requester-scoped (organize_files resolves the
-		// caller's own file view), so private dashboard voice carries it.
-		"organize_files": true,
-		// Explicit-save gate (card-110): save a finished deliverable onto the
-		// Files surface; attribution carries the requester.
-		"save_to_files": true,
-		// Deliberate-write path (memory study 2.1): file an author-certain note
-		// into company memory; the private user owns filing their own notes.
-		"note_for_the_record": true,
-		// Requester-bound Chat and Drive controls are private-user actions. They
-		// are appended only to this session and never leak into shared room voice.
-		"archive_channel":    true,
-		"rename_channel":     true,
-		"create_file_folder": true,
-		"rename_file_folder": true,
-		"delete_file_folder": true,
-		"delete_file":        true,
+		"route_conversation_turn": true,
+		"do_nothing":              true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
@@ -182,11 +125,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	for missing := range allowed {
 		t.Fatalf("private dashboard Realtime voice missing OS tool %q", missing)
 	}
-	// Room controls take over the SHARED room realtime session/recording; the
-	// private dashboard voice must never see them.
-	for _, roomOnly := range []string{"start_grill_session", "end_grill_session", "set_voice_control", "set_recording", "archive_meeting"} {
-		if privateRealtimeVoiceToolAllowed(roomOnly) {
-			t.Fatalf("private realtime voice must not allow room-only tool %q", roomOnly)
+	for _, directTool := range []string{"launch_agent_thread", "initiate_goal", "delete_ticket", "post_to_channel", "create_artifact", "answer_memory_question", "start_private_grill", "set_voice_control"} {
+		if privateRealtimeVoiceToolAllowed(directTool) {
+			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
 	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
@@ -196,18 +137,13 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	for _, want := range []string{
 		"private Stride voice assistant",
 		"outside the video room",
-		"Do not describe yourself as the shared room Scout",
-		// Wave 6: the boundary is now "on the user's behalf; not the room's
-		// shared voice", board mutation is allowed, external writes stay gated,
-		// and disclosure is mandatory when posting as the user.
-		"You MAY update the shared Kanban board on the user's behalf",
-		"you are NOT the room's shared voice",
-		"External writes",
-		"stay gated",
-		"disclosure is mandatory",
-		"Use launch_agent_thread",
+		"You are NOT the room's shared voice",
+		"call route_conversation_turn exactly once",
+		"conversational_reply, clarify_once, start_private_work, approval_required, or unavailable",
+		"never choose a tool, deliverable template, model, provider",
+		"Direct board, artifact, channel, file, memory",
 		"Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information",
-		"do not volunteer board status for unclear follow-ups like \"what?\"",
+		"Do not volunteer board status for unclear follow-ups like \"what?\"",
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
@@ -286,13 +222,13 @@ func TestNormalizeRealtimeSDPRequiresValidSessionDescription(t *testing.T) {
 	}
 }
 
-func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
+func TestRealtimeReasoningIsServerOwnedWhileVADRemainsConfigurable(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "xhigh")
 	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "semantic_vad")
 	t.Setenv("OPENAI_REALTIME_VAD_EAGERNESS", "low")
 
-	if effort := realtimeReasoningEffort(); effort != "xhigh" {
-		t.Fatalf("reasoning effort=%q, want xhigh", effort)
+	if effort := realtimeReasoningEffort(); effort != "high" {
+		t.Fatalf("reasoning effort=%q, want fixed high", effort)
 	}
 	turnDetection := realtimeTurnDetectionConfig()
 	if vadType := turnDetection["type"]; vadType != "semantic_vad" {
@@ -816,11 +752,11 @@ func TestRealtimePublishArtifactMarksDashboardMetadata(t *testing.T) {
 	}
 }
 
-func TestRealtimeReasoningEffortAcceptsMinimal(t *testing.T) {
+func TestRealtimeReasoningEffortRejectsLegacyMinimal(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "minimal")
 
-	if effort := realtimeReasoningEffort(); effort != "minimal" {
-		t.Fatalf("reasoning effort=%q, want minimal", effort)
+	if effort := realtimeReasoningEffort(); effort != "high" {
+		t.Fatalf("reasoning effort=%q, want fixed high", effort)
 	}
 }
 
@@ -1090,33 +1026,32 @@ func realtimeLedgerSetup(t *testing.T) string {
 	return dir
 }
 
-func TestRealtimeSessionConfigGatesTranscriptionPromptByModel(t *testing.T) {
+func TestRealtimeSessionConfigPinsLiveTranscriptionModel(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	// Whisper family: prompt + noise_reduction must be ABSENT — sending them
-	// is rejected live and breaks the whole voice session (the 2026-07-08
-	// prod incident class).
+	// A stale environment value cannot move the live-session transcription
+	// lane away from gpt-live-transcribe or suppress its vocabulary hints.
 	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
 	session := app.sessionConfig("gpt-realtime-2")
 	input := session["audio"].(map[string]any)["input"].(map[string]any)
 	if _, present := input["noise_reduction"]; present {
-		t.Fatalf("noise_reduction sent to a whisper-family transcription model: %v", input)
+		t.Fatalf("unqualified noise_reduction sent to live transcription model: %v", input)
 	}
 	transcription := input["transcription"].(map[string]any)
-	if _, present := transcription["prompt"]; present {
-		t.Fatalf("prompt sent to a whisper-family transcription model: %v", transcription)
+	if _, present := transcription["prompt"]; !present {
+		t.Fatalf("vocabulary prompt missing from fixed live transcription model: %v", transcription)
 	}
-	if model := transcription["model"]; model != "gpt-realtime-whisper" {
-		t.Fatalf("transcription.model=%v, want gpt-realtime-whisper", model)
+	if model := transcription["model"]; model != defaultRealtimeTranscriptionModel {
+		t.Fatalf("transcription.model=%v, want %s", model, defaultRealtimeTranscriptionModel)
 	}
 
-	// The gpt-4o transcription family keeps the full vocabulary config.
+	// A second legacy override is ignored identically.
 	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
 	session = app.sessionConfig("gpt-realtime-2")
 	input = session["audio"].(map[string]any)["input"].(map[string]any)
-	noiseReduction, ok := input["noise_reduction"].(map[string]any)
-	if !ok || noiseReduction["type"] != "near_field" {
-		t.Fatalf("noise_reduction missing for gpt-4o-transcribe: %v", input["noise_reduction"])
+	transcription = input["transcription"].(map[string]any)
+	if transcription["model"] != defaultRealtimeTranscriptionModel {
+		t.Fatalf("legacy override changed transcription=%v", transcription)
 	}
 	transcription = input["transcription"].(map[string]any)
 	prompt, ok := transcription["prompt"].(string)
@@ -1171,7 +1106,7 @@ func TestUsesAdvancedCommandProfileMatchesRealtime2Family(t *testing.T) {
 	}
 }
 
-func TestWarnRealtimeVoiceSessionNoVocabEmitsFunnelEvent(t *testing.T) {
+func TestHostileRealtimeTranscriptionEnvCannotTriggerNoVocabRoute(t *testing.T) {
 	dir := realtimeLedgerSetup(t)
 
 	// A prompt-accepting model stays silent.
@@ -1181,20 +1116,12 @@ func TestWarnRealtimeVoiceSessionNoVocabEmitsFunnelEvent(t *testing.T) {
 		t.Fatalf("no event expected for a prompt-accepting model (stat err=%v)", err)
 	}
 
-	// A whisper-family pin screams once per session create.
+	// A stale whisper-family environment pin cannot move the server-owned live
+	// transcription lane, so it cannot create a misleading degradation event.
 	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
 	warnRealtimeVoiceSessionNoVocab("room")
-	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 eval row, got %d", len(rows))
-	}
-	row := rows[0]
-	if row["type"] != telemetryTypeEval || row["kind"] != evalKindNoVocabWarning || row["lane"] != seatTranscriptionSession {
-		t.Fatalf("wrong event shape: %v", row)
-	}
-	fields := row["fields"].(map[string]any)
-	if fields["model"] != "gpt-realtime-whisper" || fields["surface"] != "room" {
-		t.Fatalf("wrong fields: %v", fields)
+	if _, err := os.Stat(filepath.Join(dir, "eval-2026-07-11.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("hostile env triggered a no-vocab event (stat err=%v)", err)
 	}
 }
 
@@ -1207,27 +1134,13 @@ func TestValidateRealtimeConfigWarnings(t *testing.T) {
 		t.Fatalf("defaults should validate clean, got %v", warnings)
 	}
 
-	// Whisper lane pin: vocabulary warning (the model itself is priced).
+	// Stale model and effort dials are ignored; effective server-owned routes
+	// remain valid and emit no misleading warnings.
 	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")
-	warnings := validateRealtimeConfig()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "domain-vocabulary") || !strings.Contains(warnings[0], "OPENAI_TRANSCRIPT_MODEL") {
-		t.Fatalf("whisper lane pin warnings=%v, want one no-vocab warning", warnings)
-	}
-	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "")
-
-	// A typo'd realtime model id has no pricing-table row.
 	t.Setenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2migthy")
-	warnings = validateRealtimeConfig()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "pricing-table") || !strings.Contains(warnings[0], "OPENAI_REALTIME_MODEL") {
-		t.Fatalf("typo'd realtime model warnings=%v, want one pricing warning", warnings)
-	}
-	t.Setenv("OPENAI_REALTIME_MODEL", "")
-
-	// Out-of-enum effort silently falls back to the default — warn loudly.
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "turbo")
-	warnings = validateRealtimeConfig()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "OPENAI_REALTIME_REASONING_EFFORT") {
-		t.Fatalf("effort warnings=%v, want one enum warning", warnings)
+	if warnings := validateRealtimeConfig(); len(warnings) != 0 {
+		t.Fatalf("ignored legacy dials changed effective validation: %v", warnings)
 	}
 }
 
@@ -1241,8 +1154,8 @@ func TestTelemetryLaneSnapshotReportsLaneModels(t *testing.T) {
 	if snapshot["realtime_model"] != "gpt-realtime-2.1" || snapshot["realtime_reasoning_effort"] != "high" {
 		t.Fatalf("realtime config wrong: %v", snapshot)
 	}
-	if snapshot["transcription_lane_model"] != "gpt-realtime-whisper" || snapshot["transcription_lane_vocab"] != false {
-		t.Fatalf("whisper lane must report vocab OFF: %v", snapshot)
+	if snapshot["transcription_lane_model"] != defaultTranscriptionLaneModel || snapshot["transcription_lane_vocab"] != true {
+		t.Fatalf("committed transcription lane wrong: %v", snapshot)
 	}
 	if snapshot["voice_transcription_model"] != "gpt-live-transcribe" || snapshot["voice_transcription_vocab"] != true {
 		t.Fatalf("voice transcription lane wrong: %v", snapshot)

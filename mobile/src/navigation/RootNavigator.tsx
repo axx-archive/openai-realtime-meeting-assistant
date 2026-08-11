@@ -17,6 +17,7 @@ import { OSWebScreen } from '../screens/OSWebScreen';
 import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
+import { NewConversationScreen } from '../screens/NewConversationScreen';
 import { AlertsScreen } from '../screens/AlertsScreen';
 import { AgentTeamScreen } from '../screens/AgentTeamScreen';
 import {
@@ -223,6 +224,7 @@ export function RootNavigator() {
     <View style={styles.root}>
       <NativeUniversalShell
         active={activeShellDestination}
+        keepSidebarForFocusedRoute={Boolean(user && sessionToken && activeRoute === 'Thread')}
         visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
         onSelect={selectShellDestination}
       >
@@ -258,11 +260,12 @@ export function RootNavigator() {
               name="Thread"
               component={ThreadScreen}
               options={{
-                // Threads are working surfaces, never another sheet stacked on
-                // top of the Deck sheet. Full-screen presentation removes the
-                // rounded-sheet cap and dimmed strip visible when entering a
-                // thread from the Threads segment.
-                presentation: 'fullScreenModal',
+                // A thread is a normal working destination, not another sheet.
+                // Keeping it in the stack lets the iPad retain the universal
+                // STRIDE sidebar plus its contextual conversation list. The
+                // compact shell is still hidden on iPhone, so the phone remains
+                // a focused full-screen conversation.
+                presentation: 'card',
                 animation: 'simple_push',
               }}
             />
@@ -272,6 +275,11 @@ export function RootNavigator() {
               name="CreateRoom"
               component={CreateRoomScreen}
               options={{ presentation: 'formSheet' }}
+            />
+            <Stack.Screen
+              name="NewConversation"
+              component={NewConversationScreen}
+              options={{ presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
             />
             <Stack.Screen
               name="OSWeb"

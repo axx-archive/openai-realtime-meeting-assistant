@@ -858,8 +858,8 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 	if !ready {
 		return skip(fmt.Sprintf("the deck's PDF export did not complete within the %s wait window — no rendered page images landed", slideJuryWaitTimeout()))
 	}
-	if !hasAnthropicAPIKey() {
-		return skip("no Anthropic key is configured (keyless deploy) — the jury seats cannot see")
+	if strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
+		return skip("no OpenAI key is configured (providerless deploy) — the jury seats cannot see")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), orchestratorTimeout())

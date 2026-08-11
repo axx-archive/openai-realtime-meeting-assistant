@@ -182,8 +182,8 @@ func TestNoteForTheRecordRegisteredInDispatchTables(t *testing.T) {
 	if !inMasterList {
 		t.Fatal("note_for_the_record missing from kanbanTools()")
 	}
-	if !privateRealtimeVoiceToolAllowed("note_for_the_record") {
-		t.Fatal("note_for_the_record not allowed on the private voice surface")
+	if privateRealtimeVoiceToolAllowed("note_for_the_record") || !privateRealtimeVoiceServerActionAllowed("note_for_the_record") {
+		t.Fatal("note_for_the_record must remain server-compatible but absent from the model voice surface")
 	}
 	if !orchestratorToolAllowlist["note_for_the_record"] {
 		t.Fatal("note_for_the_record missing from the orchestrator allowlist")

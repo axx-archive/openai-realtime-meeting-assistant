@@ -126,12 +126,15 @@ func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 		"lastRefId",
 		"jump to the card",
 		"scrollIntoView",
-		"goalCardNodeFor(artifact)",
-		"delete card.dataset.goalGhostThreadId",
+		"scoutDesktopGoalWorkCardNode(message, artifact)",
+		".scout-chat-work-card[data-work-artifact-id=",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scoutGoalRefRecordNode body missing %q", want)
 		}
+	}
+	if strings.Contains(body, "goalCardNodeFor(artifact)") {
+		t.Error("responsive conversation refs must not fall back to the legacy goal/runtime card")
 	}
 	// the rebuild pass detaches cached cards and re-mounts this thread's own
 	render := functionBody(html, "function renderActiveScoutThread()")

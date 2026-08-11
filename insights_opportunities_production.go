@@ -289,7 +289,12 @@ func (verifier *productionInsightsAuthorizationVerifier) VerifyInsightsOpportuni
 	return nil
 }
 
-type anthropicInsightsOpportunitiesProvider struct{ Sources *MeetingMemoryBrainAdapter }
+type openAIInsightsOpportunitiesProvider struct {
+	Sources        *MeetingMemoryBrainAdapter
+	Responder      openAITextResponder
+	APIKey         func() string
+	RequireReceipt bool
+}
 
 type insightsGeneratedPayload struct {
 	ReportID string `json:"reportId"`
@@ -307,7 +312,7 @@ type insightsReviewPayload struct {
 	Findings  []InsightsOpportunitiesCriticFinding `json:"findings"`
 }
 
-func (provider *anthropicInsightsOpportunitiesProvider) evidencePrompt(ctx context.Context, request InsightsOpportunitiesRequest) ([]map[string]any, error) {
+func (provider *openAIInsightsOpportunitiesProvider) evidencePrompt(ctx context.Context, request InsightsOpportunitiesRequest) ([]map[string]any, error) {
 	if provider == nil || provider.Sources == nil {
 		return nil, ErrInsightsOpportunitiesUnavailable
 	}
@@ -326,51 +331,158 @@ func (provider *anthropicInsightsOpportunitiesProvider) evidencePrompt(ctx conte
 	return result, nil
 }
 
-func callAnthropicInsightsJSON(ctx context.Context, seat InsightsOpportunitiesRouteSeat, usageSeat, system string, input any, output any) (InsightsOpportunitiesProviderExecution, error) {
+func insightsStringArraySchema() map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+}
+
+func insightsOpenAIJSONSchema(purpose string) *openAIJSONSchema {
+	stringField := func() map[string]any { return map[string]any{"type": "string"} }
+	array := insightsStringArraySchema
+	var schema map[string]any
+	switch purpose {
+	case "orchestration":
+		schema = map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{"focus": array(), "constraints": array()},
+			"required":   []string{"focus", "constraints"},
+		}
+	case "generation":
+		claim := map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{"claimId": stringField(), "text": stringField(), "evidenceIds": array()},
+			"required":   []string{"claimId", "text", "evidenceIds"},
+		}
+		opportunity := map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"opportunityId": stringField(), "claimIds": array(), "evidenceIds": array(),
+				"confidence":         map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"counterevidenceIds": array(), "expectedImpact": stringField(),
+				"recommendedNextAction": stringField(), "proposedOwner": stringField(),
+				"decisionStatus": map[string]any{"type": "string", "enum": []string{insightsDecisionProposed}},
+			},
+			"required": []string{"opportunityId", "claimIds", "evidenceIds", "confidence", "counterevidenceIds", "expectedImpact", "recommendedNextAction", "proposedOwner", "decisionStatus"},
+		}
+		schema = map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"reportId":      stringField(),
+				"claims":        map[string]any{"type": "array", "items": claim},
+				"opportunities": map[string]any{"type": "array", "items": opportunity},
+			},
+			"required": []string{"reportId", "claims", "opportunities"},
+		}
+	case "review":
+		finding := map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"targetType": map[string]any{"type": "string", "enum": []string{insightsTargetClaim, insightsTargetOpportunity}},
+				"targetId":   stringField(), "verdict": map[string]any{"type": "string", "enum": []string{insightsCriticAccept, insightsCriticRevise, insightsCriticReject}},
+				"evidenceIds": array(), "missingEvidence": array(), "counterevidenceIds": array(), "requiredActions": array(),
+			},
+			"required": []string{"targetType", "targetId", "verdict", "evidenceIds", "missingEvidence", "counterevidenceIds", "requiredActions"},
+		}
+		schema = map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"verdictId": stringField(),
+				"outcome":   map[string]any{"type": "string", "enum": []string{insightsCriticAccept, insightsCriticRevise, insightsCriticReject}},
+				"findings":  map[string]any{"type": "array", "items": finding},
+			},
+			"required": []string{"verdictId", "outcome", "findings"},
+		}
+	default:
+		return nil
+	}
+	return &openAIJSONSchema{Name: "insights_opportunities_" + purpose, Description: "Strict server-owned Insights and Opportunities " + purpose + " output.", Schema: schema}
+}
+
+func boundedInsightsTokenCount(value int64) int {
+	if value <= 0 {
+		return 0
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if value > maxInt {
+		return int(maxInt)
+	}
+	return int(value)
+}
+
+func (provider *openAIInsightsOpportunitiesProvider) callJSON(ctx context.Context, seat InsightsOpportunitiesRouteSeat, usageSeat, system string, input any, output any) (InsightsOpportunitiesProviderExecution, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return InsightsOpportunitiesProviderExecution{}, err
 	}
-	response, err := createAnthropicMessagesResponse(ctx, currentAnthropicAPIKey(), anthropicMessagesRequest{
-		Model: seat.Model, System: system, Messages: []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(string(raw))}}},
-		MaxTokens: 8192, Effort: seat.Effort, Seat: usageSeat, ThreadID: "insights-opportunities",
+	if provider == nil {
+		return InsightsOpportunitiesProviderExecution{}, ErrInsightsOpportunitiesUnavailable
+	}
+	responder := provider.Responder
+	if responder == nil {
+		responder = createOpenAITextResponse
+	}
+	apiKey := ""
+	if provider.APIKey != nil {
+		apiKey = strings.TrimSpace(provider.APIKey())
+	}
+	if apiKey == "" {
+		return InsightsOpportunitiesProviderExecution{}, ErrInsightsOpportunitiesUnavailable
+	}
+	capture := &openAIResponseReceiptCapture{}
+	responseText, err := responder(withOpenAIResponseReceiptCapture(ctx, capture), apiKey, openAITextRequest{
+		Model: seat.Model, Instructions: system, Input: string(raw), ReasoningEffort: seat.Effort,
+		Verbosity: "low", MaxOutputTokens: 8192, Seat: usageSeat,
+		Workflow: "insights_opportunities_" + seat.Purpose, JSONSchema: insightsOpenAIJSONSchema(seat.Purpose),
+		ValidateOutput: func(text string) error {
+			return decodeInsightsStrict([]byte(text), output, "OpenAI insights JSON")
+		},
 	})
 	if err != nil {
 		return InsightsOpportunitiesProviderExecution{}, err
 	}
-	if response.Model != seat.Model || response.StopReason != "end_turn" || strings.TrimSpace(response.ID) == "" {
-		return InsightsOpportunitiesProviderExecution{}, errors.New("Anthropic response did not complete on the pinned model")
-	}
-	text := anthropicResponseText(response)
-	if err := decodeInsightsStrict([]byte(text), output, "Anthropic insights JSON"); err != nil {
+	if err := decodeInsightsStrict([]byte(responseText), output, "OpenAI insights JSON"); err != nil {
 		return InsightsOpportunitiesProviderExecution{}, err
 	}
+	requestID, model, usage, observed := capture.snapshot()
+	if provider.RequireReceipt && (!observed || requestID == "" || model != seat.Model) {
+		return InsightsOpportunitiesProviderExecution{}, errors.New("OpenAI response receipt is missing or does not match the pinned model")
+	}
+	if !observed {
+		requestID = "injected_" + sha256Hex(append(append([]byte{}, raw...), []byte(responseText)...))[:24]
+		model = seat.Model
+	}
+	inputTokens := usage.InputTokens - usage.InputTokensDetails.CachedTokens
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
 	return InsightsOpportunitiesProviderExecution{
-		Provider: "anthropic", Model: response.Model, Effort: seat.Effort, Request: response.ID,
-		Usage:    InsightsOpportunitiesUsage{InputTokens: response.Usage.InputTokens + response.Usage.CacheCreationInputTokens, CachedInputTokens: response.Usage.CacheReadInputTokens, OutputTokens: response.Usage.OutputTokens},
-		Metadata: map[string]string{"cacheCreationInputTokens": fmt.Sprint(response.Usage.CacheCreationInputTokens)},
+		Provider: providerOpenAI, Model: model, Effort: seat.Effort, Request: requestID,
+		Usage: InsightsOpportunitiesUsage{
+			InputTokens:       boundedInsightsTokenCount(inputTokens),
+			CachedInputTokens: boundedInsightsTokenCount(usage.InputTokensDetails.CachedTokens),
+			OutputTokens:      boundedInsightsTokenCount(usage.OutputTokens),
+		},
 	}, nil
 }
 
-func (provider *anthropicInsightsOpportunitiesProvider) Orchestrate(ctx context.Context, request InsightsOpportunitiesRequest, prior *InsightsOpportunitiesReport, verdict *InsightsOpportunitiesCriticVerdict) (InsightsOpportunitiesOrchestrationPlan, InsightsOpportunitiesProviderExecution, error) {
+func (provider *openAIInsightsOpportunitiesProvider) Orchestrate(ctx context.Context, request InsightsOpportunitiesRequest, prior *InsightsOpportunitiesReport, verdict *InsightsOpportunitiesCriticVerdict) (InsightsOpportunitiesOrchestrationPlan, InsightsOpportunitiesProviderExecution, error) {
 	evidence, err := provider.evidencePrompt(ctx, request)
 	if err != nil {
 		return InsightsOpportunitiesOrchestrationPlan{}, InsightsOpportunitiesProviderExecution{}, err
 	}
 	var plan InsightsOpportunitiesOrchestrationPlan
-	execution, err := callAnthropicInsightsJSON(ctx, insightsOpportunitiesStaticRoute().Orchestration, seatOrchestrator,
+	execution, err := provider.callJSON(ctx, insightsOpportunitiesStaticRoute().Orchestration, seatOrchestrator,
 		"Return only strict JSON with focus[] and constraints[]. Plan an evidence-grounded Insights & Opportunities report. Never introduce evidence IDs absent from the input.",
 		map[string]any{"request": request.EvidenceSnapshot.Query, "coverage": request.RecallCoverage, "evidence": evidence, "priorReport": prior, "priorCritic": verdict}, &plan)
 	return plan, execution, err
 }
 
-func (provider *anthropicInsightsOpportunitiesProvider) Generate(ctx context.Context, request InsightsOpportunitiesRequest, plan InsightsOpportunitiesOrchestrationPlan, revision int, prior *InsightsOpportunitiesReport, verdict *InsightsOpportunitiesCriticVerdict) (InsightsOpportunitiesReport, InsightsOpportunitiesProviderExecution, error) {
+func (provider *openAIInsightsOpportunitiesProvider) Generate(ctx context.Context, request InsightsOpportunitiesRequest, plan InsightsOpportunitiesOrchestrationPlan, revision int, prior *InsightsOpportunitiesReport, verdict *InsightsOpportunitiesCriticVerdict) (InsightsOpportunitiesReport, InsightsOpportunitiesProviderExecution, error) {
 	evidence, err := provider.evidencePrompt(ctx, request)
 	if err != nil {
 		return InsightsOpportunitiesReport{}, InsightsOpportunitiesProviderExecution{}, err
 	}
 	var payload insightsGeneratedPayload
-	execution, err := callAnthropicInsightsJSON(ctx, insightsOpportunitiesStaticRoute().Generation, seatDeliverable,
+	execution, err := provider.callJSON(ctx, insightsOpportunitiesStaticRoute().Generation, seatDeliverable,
 		"Return only strict JSON: reportId, claims[{claimId,text,evidenceIds}], opportunities[{opportunityId,claimIds,evidenceIds,confidence,counterevidenceIds,expectedImpact,recommendedNextAction,proposedOwner,decisionStatus}]. Cite only supplied evidence IDs. decisionStatus must be proposed.",
 		map[string]any{"revision": revision, "plan": plan, "evidence": evidence, "priorReport": prior, "priorCritic": verdict}, &payload)
 	if err != nil {
@@ -389,13 +501,13 @@ func (provider *anthropicInsightsOpportunitiesProvider) Generate(ctx context.Con
 	return report, execution, nil
 }
 
-func (provider *anthropicInsightsOpportunitiesProvider) Review(ctx context.Context, request InsightsOpportunitiesRequest, report InsightsOpportunitiesReport) (InsightsOpportunitiesCriticVerdict, InsightsOpportunitiesProviderExecution, error) {
+func (provider *openAIInsightsOpportunitiesProvider) Review(ctx context.Context, request InsightsOpportunitiesRequest, report InsightsOpportunitiesReport) (InsightsOpportunitiesCriticVerdict, InsightsOpportunitiesProviderExecution, error) {
 	evidence, err := provider.evidencePrompt(ctx, request)
 	if err != nil {
 		return InsightsOpportunitiesCriticVerdict{}, InsightsOpportunitiesProviderExecution{}, err
 	}
 	var payload insightsReviewPayload
-	execution, err := callAnthropicInsightsJSON(ctx, insightsOpportunitiesStaticRoute().Review, seatReview,
+	execution, err := provider.callJSON(ctx, insightsOpportunitiesStaticRoute().Review, seatReview,
 		"Return only strict JSON: verdictId, outcome, findings[]. Supply exactly one finding for every claim and opportunity. Outcome is accept, revise, or reject; unsupported or conflicted assertions cannot be accepted.",
 		map[string]any{"report": report, "evidence": evidence}, &payload)
 	return InsightsOpportunitiesCriticVerdict{VerdictID: payload.VerdictID, Outcome: payload.Outcome, Findings: payload.Findings}, execution, err
@@ -406,7 +518,7 @@ func configureProductionInsightsOpportunitiesExecutor(app *kanbanBoardApp) error
 		return nil
 	}
 	runtime := currentCanonicalRuntime()
-	if app == nil || app.memory == nil || runtime == nil || runtime.postgres == nil || currentAnthropicAPIKey() == "" {
+	if app == nil || app.memory == nil || runtime == nil || runtime.postgres == nil || app.currentOpenAIAPIKey() == "" {
 		return ErrInsightsOpportunitiesUnavailable
 	}
 	runStore, err := OpenInsightsOpportunitiesRunStore(filepath.Join(runtime.dataDir, "insights-opportunities-runs.jsonl"))
@@ -420,7 +532,7 @@ func configureProductionInsightsOpportunitiesExecutor(app *kanbanBoardApp) error
 	purge := &PostgresPurgeGenerationResolver{pool: runtime.postgres.pool}
 	kernel := AuthorizationKernel{Store: runtime.postgres}
 	sources := &MeetingMemoryBrainAdapter{Memory: app.memory, Objects: aclBrainCurrentObjectResolver{Store: runtime.postgres}, Kernel: kernel, Purge: purge, Consent: appBrainSourceConsentVerifier{App: app}, Now: func() time.Time { return time.Now().UTC() }}
-	provider := &anthropicInsightsOpportunitiesProvider{Sources: sources}
+	provider := &openAIInsightsOpportunitiesProvider{Sources: sources, Responder: createOpenAITextResponse, APIKey: app.currentOpenAIAPIKey, RequireReceipt: true}
 	installInsightsOpportunitiesExecutor(&InsightsOpportunitiesExecutor{Store: runStore, Kernel: kernel, Purge: purge, Evidence: sources, Verifier: verifier, Generation: provider, Review: provider, Writer: appInsightsOpportunitiesWorkspaceWriter{app: app, sources: sources, postgres: runtime.postgres}})
 	return nil
 }

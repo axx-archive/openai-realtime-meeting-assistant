@@ -78,7 +78,7 @@ func TestScoutRouterRequestUsesStrictTerraSeat(t *testing.T) {
 			t.Fatalf("apiKey=%q, want OpenAI router key", apiKey)
 		}
 		got = request
-		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
 	})
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		t.Fatal("Anthropic router must not run")
@@ -94,10 +94,10 @@ func TestScoutRouterRequestUsesStrictTerraSeat(t *testing.T) {
 	if got.Model != defaultScoutRouterModel {
 		t.Fatalf("model=%q, want %s", got.Model, defaultScoutRouterModel)
 	}
-	if got.MaxOutputTokens != scoutRouterMaxTokens || got.ReasoningEffort != scoutReasoningEffort() || got.Seat != seatRouter || got.Workflow != "scout_route" {
-		t.Fatalf("router request=%+v, want Luna/max strict seat", got)
+	if got.MaxOutputTokens != scoutRouterMaxTokens || got.ReasoningEffort != scoutRouterReasoningEffort() || got.Seat != seatRouter || got.Workflow != "scout_route" {
+		t.Fatalf("router request=%+v, want Luna/medium strict seat", got)
 	}
-	if got.JSONSchema == nil || !strings.Contains(got.Instructions, "comps_precedent") || !strings.Contains(got.Instructions, "under-routes is trusted") {
+	if got.JSONSchema == nil || !strings.Contains(got.Instructions, "comps_precedent") || !strings.Contains(got.Instructions, "clarify_once") {
 		t.Fatalf("router instructions/schema missing registry or trust contract: %+v", got)
 	}
 }
@@ -119,38 +119,38 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 		wantParseTool string
 	}{
 		{
-			name: "model proposal records proposed_tool",
+			name: "model work records start_private_work",
 			response: openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-				Route: "workstream", Mode: "research", Objective: "map the rodeo creator market",
+				Outcome: string(conversationIntentStartPrivateWork), Route: "workstream", Mode: "research", Objective: "map the rodeo creator market",
 			}),
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictProposedTool,
+			wantVerdict:   string(conversationIntentStartPrivateWork),
 			wantSource:    proposalSourceChatRouter,
 		},
 		{
 			name: "clarifying question records choice_pills",
 			response: openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-				Route: "choices", Question: "outline work, or the deck built out?",
+				Outcome: string(conversationIntentClarifyOnce), Question: "outline work, or the deck built out?",
 				Options: []openAIScoutRouterOption{
 					{Label: "tighten the outline", Reply: "tighten it"},
 					{Label: "build the deck", Reply: "build it"},
 				},
 			}),
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictChoicePills,
+			wantVerdict:   string(conversationIntentClarifyOnce),
 			wantSource:    proposalSourceChatRouter,
 		},
 		{
-			name:          "plain answer records inline",
-			response:      openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}),
+			name:          "plain answer records conversational reply",
+			response:      openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}),
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictInline,
+			wantVerdict:   string(conversationIntentConversationalReply),
 		},
 		{
 			name:          "undecodable strict output records parse failure",
 			response:      `{"route":`,
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictInline,
+			wantVerdict:   string(conversationIntentConversationalReply),
 			wantDegraded:  "router_parse_error",
 			wantParseTool: "strict_route",
 		},
@@ -158,22 +158,22 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 			name:          "unknown route records validation failure",
 			response:      openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "invented"}),
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictInline,
+			wantVerdict:   string(conversationIntentConversationalReply),
 			wantDegraded:  "router_parse_error",
 			wantParseTool: "invented",
 		},
 		{
-			name:          "wire error degrades to inline with the degraded stamp",
+			name:          "wire error degrades to conversational reply for discussion",
 			responderErr:  errors.New("529 overloaded"),
 			wantWireCalls: 1,
-			wantVerdict:   routerVerdictInline,
+			wantVerdict:   string(conversationIntentConversationalReply),
 			wantDegraded:  "router_error",
 		},
 		{
 			name:          "deterministic guard commits before the wire",
 			text:          "package this end to end",
 			wantWireCalls: 0,
-			wantVerdict:   routerVerdictDeterministicGuard,
+			wantVerdict:   string(conversationIntentStartPrivateWork),
 			wantSource:    proposalSourceDeterministicGuard,
 		},
 	}
@@ -271,7 +271,8 @@ func TestScoutChatProposalLifecycleEvents(t *testing.T) {
 			t.Fatalf("unexpected workflow %q", request.Workflow)
 		}
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Route: "workstream", Mode: "research", Objective: "map the rodeo creator market",
+			Outcome: string(conversationIntentApprovalRequired), Route: "workstream", Mode: "research", Objective: "run the material-spend rodeo creator market study",
+			EffectClass: "material_spend", Message: "Approve the material-spend research run?",
 		}), nil
 	})
 
@@ -283,7 +284,7 @@ func TestScoutChatProposalLifecycleEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create private thread: %v", err)
 	}
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "dig into the rodeo creator market", nil, "")
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "run the expensive rodeo creator market study", nil, "")
 	if err != nil {
 		t.Fatalf("append routed message: %v", err)
 	}
@@ -423,9 +424,9 @@ func TestScoutChatProposalDismissRecordsResolvedNeverLaunched(t *testing.T) {
 	}
 }
 
-// A guard-committed card carries deterministic_guard provenance on its minted
-// event — the model never ran, and the funnel must say so.
-func TestScoutChatDeterministicGuardMintCarriesGuardSource(t *testing.T) {
+// A deterministic guard starts safe private work without a model call or
+// proposal mint, while retaining guard provenance on the five-way outcome.
+func TestScoutChatDeterministicGuardDirectLaunchCarriesGuardSource(t *testing.T) {
 	setupAuthTestEnv(t)
 	dir := ledgerTestDir(t)
 	t.Setenv("OPENAI_API_KEY", "openai-router-test")
@@ -438,6 +439,9 @@ func TestScoutChatDeterministicGuardMintCarriesGuardSource(t *testing.T) {
 		t.Fatal("the deterministic guard must commit before any wire call")
 		return "", nil
 	})
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
 
 	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
@@ -447,27 +451,26 @@ func TestScoutChatDeterministicGuardMintCarriesGuardSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create private thread: %v", err)
 	}
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "package this end to end", nil, "")
+	ctx := withConversationTurnOperation(context.Background(), conversationTurnOperation{
+		ID: "router-guard-direct-launch-0001", BodyDigest: sha256Hex([]byte("package this end to end")),
+	})
+	response, err := kanbanApp.appendScoutChatThreadMessage(ctx, user, private.ID, "package this end to end", nil, "")
 	if err != nil {
 		t.Fatalf("append guard message: %v", err)
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
-	if len(saved.Messages) != 2 || saved.Messages[1].Proposal == nil {
-		t.Fatalf("messages=%#v, want user turn + guard-committed card", saved.Messages)
+	if len(saved.Messages) != 2 || saved.Messages[1].Thread == nil || saved.Messages[1].IntentOutcome != string(conversationIntentStartPrivateWork) {
+		t.Fatalf("messages=%#v, want user turn + direct work card", saved.Messages)
 	}
 
 	events := readRouterLedgerEvents(t, dir)
 	minted := filterLedgerEvents(events, telemetryTypeProposal, proposalEventMinted)
-	if len(minted) != 1 {
-		t.Fatalf("minted events=%d, want exactly one", len(minted))
-	}
-	mintFields := ledgerEventFields(minted[0])
-	if mintFields["source"] != proposalSourceDeterministicGuard || mintFields["proposal_id"] != saved.Messages[1].ID {
-		t.Fatalf("mint fields=%v, want deterministic_guard provenance on the card id", mintFields)
+	if len(minted) != 0 {
+		t.Fatalf("minted events=%d, direct work must not mint a proposal", len(minted))
 	}
 	outcomes := filterLedgerEvents(events, telemetryTypeEval, evalKindRouterOutcome)
-	if len(outcomes) != 1 || ledgerEventFields(outcomes[0])["verdict"] != routerVerdictDeterministicGuard {
-		t.Fatalf("outcomes=%v, want one deterministic_guard verdict", outcomes)
+	if len(outcomes) != 1 || ledgerEventFields(outcomes[0])["verdict"] != string(conversationIntentStartPrivateWork) || ledgerEventFields(outcomes[0])["source"] != proposalSourceDeterministicGuard {
+		t.Fatalf("outcomes=%v, want one start_private_work verdict with guard provenance", outcomes)
 	}
 }
 

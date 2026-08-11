@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_desktop_shell_navigation_organization_and_theme_checkpoint",
+  "observedAt": "2026-08-11T17:11:54Z",
+  "status": "bounded_desktop_shell_redesign_rendered_and_independent_critic_pass",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "9ee5732d4b4cfa0022099e506eb8527096da2511e91edc18fcb77f4457819f69",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "founderDirection": {
+    "globalNavigation": "one_labeled_destination_rail_with_no_duplicate_top_navigation",
+    "contextHeader": "one_quiet_header_for_organization_and_current_context_not_a_second_destination_system",
+    "organizationClosedState": "current_organization_name_and_subtle_disclosure_only",
+    "organizationOpenState": "current_and_other_memberships_plus_create_organization_routed_through_governed_settings",
+    "utilityPresentation": "notifications_appearance_and_profile_are_one_labeled_bottom_group_not_floating_icons",
+    "themeStandard": "light_and_dark_are_equal_acceptance_surfaces",
+    "referenceStandard": "continue_native_chatgpt_slack_and_buzz_study_and_exceed_their_interaction_quality"
+  },
+  "claims": {
+    "primaryDestinations": [
+      "Home",
+      "Work",
+      "Network",
+      "Work Search",
+      "You"
+    ],
+    "workSpaces": [
+      "Meetings",
+      "Conversations",
+      "Work library",
+      "Projects",
+      "Memory",
+      "Files",
+      "Agent team"
+    ],
+    "keyboardNavigation": "up_down_home_end_on_vertical_desktop_rail_and_left_right_home_end_on_horizontal_responsive_rail",
+    "workMenuAccessibility": "menuitemradio_semantics_exact_checked_state_roving_focus_escape_restore_and_keyboard_focus_first",
+    "organizationAuthority": "menu_open_and_other_membership_selection_do_not_mutate_active_organization_and_route_to_governed_settings",
+    "utilityGrouping": "full_width_labeled_rows_with_a_single_separator_and_no_orphaned_glyphs",
+    "workCardUsability": "two_line_title_and_minimum_forty_pixel_activity_action_preserved_at_representative_desktop_widths",
+    "runtimeVocabularyHidden": true,
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "index.html": "0789285b1521ea9cdbedeb93bc7f9ade0757589abd0414ef0548075824d7153c",
+    "frontend_pd1_top_level_ia_test.go": "47f20c0d4fbbab807c52e9439035361276116657583bb287b0e93dedcd501d29",
+    "frontend_design_polish_wave_test.go": "7e52bb60d7dab5864fa127ad7499c6f06f0336143fa0c43bfbcd9b40fc34a241",
+    "frontend_latency_test.go": "74e8286cc5efdddfdc18a04f39a066f223e98b9e8cbf2c66f39b0bba492278b0",
+    "frontend_scout_work_indicator_test.go": "06a712e47d56800a1c9f7fbcf863732bf2f21e9742cfaa37358c080fcfadec29",
+    "frontend_shell_identity_test.go": "fc2e18b4783800681ae0ab71ec111634e68f8c49a85461b96e19681756b41668",
+    "frontend_stride_w2_surfaces_test.go": "5d9cb6f328ae0b26cf26c90263736d94ae902e7ecc711008be4dc36752b41ab6",
+    "stride_e10_agentic_lab_test.go": "4b74a51cf42359119cfbda947d8e0f46f4a8ace1cfa4947cc064f39b8d2cefc7"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "desktop_light_shell_and_labeled_utilities",
+      "path": "/tmp/stride-pd1-shell-redesign-1180-utilities-fixed.png",
+      "sha256": "2c2b8d9034bc1034ec6fda0950cba5c2254703e4ecf31dd411ccde58fcffb9e3",
+      "width": 1180,
+      "height": 820
+    },
+    {
+      "surface": "desktop_dark_shell_and_labeled_utilities",
+      "path": "/tmp/stride-pd1-shell-redesign-1440-dark-utilities-fixed.png",
+      "sha256": "1973b2816354de8ae17657e9ec09a2134f4617581cbbc3ad03a798dcb2ea54fd",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "surface": "desktop_light_organization_menu",
+      "path": "/tmp/stride-pd1-organization-menu-1440-utilities-fixed.png",
+      "sha256": "4a32a1cec5cf3d5d518a638bab5fd975f168431f2d566a61b6294a5577468753",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "surface": "desktop_light_utility_capture_hygiene_only",
+      "path": "/tmp/stride-pd1-shell-redesign-1440-utilities-fixed.png",
+      "sha256": "bc6a28acc36ee61daf0c0e041242735e1c543a8d0f3df7af70aa5b4ee5034d05",
+      "width": 1440,
+      "height": 864,
+      "note": "browser_capture_places_the_app_in_a_smaller_upper_left_window;_not_used_as_full_viewport_sizing_acceptance"
+    }
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS_5.448s",
+    "focusedGoRace": "PASS_16.351s",
+    "releaseBoundaryFocusedNormal": "PASS_0.757s",
+    "releaseBoundaryFocusedRace": "PASS_2.191s",
+    "fullGo": "PASS_root_519.185s_and_all_cmd_internal_packages_2026-08-11T17:51:04Z",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_499_of_499",
+    "mobileTypecheck": "PASS",
+    "diffCheck": "PASS",
+    "gofmtDiff": "clean",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "firstVerdict": "REVISE_vertical_keyboard_and_work_menu_semantics",
+      "repair": "responsive_orientation_keys_menuitemradio_checked_state_keyboard_focus_first_and_labeled_utility_group",
+      "finalVerdict": "PASS",
+      "focusedNormal": "PASS_0.641s",
+      "focusedRace": "PASS_2.239s",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_pd1_desktop_shell_navigation_organization_utility_and_theme_checkpoint"
+    },
+    "releaseBoundaryCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "firstVerdict": "REVISE_bind_pending_operation_guard_to_exact_organization_settings_helper",
+      "repair": "slice_exact_helper_body_and_require_guard_inside_it",
+      "finalVerdict": "PASS",
+      "productionSourceUnchanged": true,
+      "testHashesRevalidated": true
+    }
+  },
+  "operationalBoundary": {
+    "localLoopbackOnly": true,
+    "syntheticOrganizationProjectionOnly": true,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "collection": 0,
+    "releaseRequestedAfterCheckpoint": true,
+    "releaseAcceptanceRequiresReviewedCommitFullSuitesExactArchiveActivationAndLiveVerification": true
+  },
+  "openGates": [
+    "remaining_every_surface_pd1_migration",
+    "functional_voiceover",
+    "remaining_dynamic_type_spectrum",
+    "actual_ipad_split_view",
+    "pointer_and_full_keyboard_access",
+    "measured_runtime_performance",
+    "physical_iphone_and_ipad_acceptance",
+    "actual_provider_backed_deliverables_previews_drive_and_revisions",
+    "whole_e10_ledger"
+  ],
+  "exclusions": {
+    "wholePD1Complete": false,
+    "physicalDeviceAccepted": false,
+    "providerCalled": false,
+    "productionAccepted": false,
+    "wholeLedgerComplete": false
+  }
+}

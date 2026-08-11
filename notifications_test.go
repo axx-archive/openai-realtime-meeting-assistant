@@ -266,8 +266,8 @@ func TestRealtimeSendNotificationToolContract(t *testing.T) {
 		}
 	}
 
-	if !privateRealtimeVoiceToolAllowed("send_notification") {
-		t.Fatal("private realtime voice must allow send_notification")
+	if privateRealtimeVoiceToolAllowed("send_notification") || !privateRealtimeVoiceServerActionAllowed("send_notification") {
+		t.Fatal("notification executor must remain server-compatible but absent from the model voice surface")
 	}
 	foundPrivate := false
 	for _, tool := range app.privateRealtimeVoiceTools() {
@@ -275,15 +275,15 @@ func TestRealtimeSendNotificationToolContract(t *testing.T) {
 			foundPrivate = true
 		}
 	}
-	if !foundPrivate {
-		t.Fatal("privateRealtimeVoiceTools must expose the send_notification schema")
+	if foundPrivate {
+		t.Fatal("privateRealtimeVoiceTools must not expose send_notification before individual admission")
 	}
 
 	if !strings.Contains(app.sessionInstructions(), "send_notification") {
 		t.Fatal("room session instructions must mention send_notification")
 	}
-	if !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "send_notification") {
-		t.Fatal("private voice instructions must mention send_notification")
+	if strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "send_notification") {
+		t.Fatal("private voice instructions must not advertise send_notification")
 	}
 }
 
@@ -760,8 +760,8 @@ func TestSendNotificationDeliverAfterMeeting(t *testing.T) {
 	if !strings.Contains(app.sessionInstructions(), "after_meeting") {
 		t.Fatal("room session instructions must teach deliver after_meeting")
 	}
-	if !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "after_meeting") {
-		t.Fatal("private voice instructions must teach deliver after_meeting")
+	if strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "after_meeting") || !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "route_conversation_turn") {
+		t.Fatal("private voice must route natural language through the shared conversation contract, not advertise send_notification fields")
 	}
 }
 

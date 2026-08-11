@@ -2045,7 +2045,7 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 
 	payload := struct {
 		Query   string                 `json:"query"`
-		Mode    string                 `json:"mode"`
+		Mode    string                 `json:"mode"` // compatibility-only; server ignored
 		History []scoutChatTurnPayload `json:"history"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
@@ -2059,7 +2059,10 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := normalizeOSAssistantMode(payload.Mode)
+	// This legacy query seam is conversational recall only. Older clients may
+	// still send mode, but it cannot select an output contract or create a
+	// durable artifact; all new work enters through the five-way chat router.
+	mode := "chat"
 	principal := kanbanApp.recallPrincipalForMemberRoom(user.Email, kanbanApp.memberCurrentRoom(user.Email))
 	modelQuery := kanbanApp.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
 	result, err := kanbanApp.resolveAssistantQueryContextForPrincipalWithAttachments(r.Context(), principal, user.Email, modelQuery, scoutChatHistoryFromPayload(payload.History), nil)
@@ -2084,21 +2087,7 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 		"mode":         mode,
 		"user":         user.Name,
 	}
-	var artifact meetingMemoryEntry
-	if mode != "chat" {
-		var appended bool
-		var artifactErr error
-		artifact, appended, artifactErr = kanbanApp.createOSArtifact(mode, result.query, result.answer, user.Name)
-		if artifactErr != nil {
-			log.Errorf("Failed to save OS artifact for %s: %v", user.Email, artifactErr)
-			response["artifactSaved"] = false
-			response["artifactError"] = artifactErr.Error()
-		} else if strings.TrimSpace(artifact.ID) != "" {
-			response["artifact"] = artifact
-			response["artifactSaved"] = appended
-		}
-	}
-	response["actions"] = kanbanApp.osAssistantActions(result.query, mode, artifact)
+	response["actions"] = kanbanApp.osAssistantActions(result.query, mode, meetingMemoryEntry{})
 
 	writeAuthJSON(w, http.StatusOK, response)
 }
@@ -2123,38 +2112,15 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := struct {
-		Query string `json:"query"`
-		Mode  string `json:"mode"`
-	}{}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
-		writeAuthError(w, http.StatusBadRequest, "could not read assistant thread request")
-		return
-	}
-
-	thread, err := kanbanApp.launchAgentThreadWithOrigin(payload.Mode, payload.Query, user.Name, map[string]string{
-		"originKind":  agentThreadOriginTool,
-		"requestedBy": normalizeAccountEmail(user.Email),
-	})
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	writeAuthJSON(w, http.StatusAccepted, map[string]any{
-		"ok":       true,
-		"thread":   thread,
-		"artifact": thread.Artifact,
-		"actions":  thread.Actions,
+	writeAuthJSON(w, http.StatusGone, map[string]any{
+		"ok": false, "error": "direct mode-selected work launch was retired; send the request in a conversation",
+		"conversationPath": "/assistant/chat-threads",
 	})
 }
 
-// assistantGoalHandler is the /goal text door: the composer's "/goal
-// <objective>" parser and (later) the quick-select palette POST here to emit the
-// SAME goal spec the voice initiate_goal tool does. The goal always launches as
-// the signed-in requester, and it can NEVER set external_write — that authority
-// is earned only at the ship gate with admin approval. Same origin+session
-// gates as assistantThreadsHandler.
+// assistantGoalHandler is a compatibility tombstone. Client-selected goal,
+// authority, package, and output-contract launch was retired in favor of the
+// five-way natural-language conversation router.
 func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -2175,76 +2141,9 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := struct {
-		Objective     string `json:"objective"`
-		Package       string `json:"package"`
-		PackageID     string `json:"packageId"`
-		ToolTemplate  string `json:"toolTemplate"`
-		AuthorityHint string `json:"authorityHint"`
-		OriginSurface string `json:"originSurface"`
-	}{}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
-		writeAuthError(w, http.StatusBadRequest, "could not read goal request")
-		return
-	}
-	if strings.TrimSpace(payload.Objective) == "" {
-		writeAuthError(w, http.StatusBadRequest, "objective is required")
-		return
-	}
-
-	// Clamp authority exactly like the voice tool: never external_write.
-	authority := codexJobAuthorityWorkspaceWrite
-	if strings.EqualFold(strings.TrimSpace(payload.AuthorityHint), "read_only") {
-		authority = codexJobAuthorityReadOnly
-	}
-
-	origin := map[string]string{}
-	if surface := strings.TrimSpace(payload.OriginSurface); surface != "" {
-		origin["originSurface"] = surface
-	}
-
-	// The palette Run form and the voice initiate_goal path both send "package";
-	// accept "packageId" as an alias so the binder/library doors can reuse the
-	// same door without a second field name.
-	packageID := strings.TrimSpace(payload.Package)
-	if packageID == "" {
-		packageID = strings.TrimSpace(payload.PackageID)
-	}
-
-	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
-		Objective:    payload.Objective,
-		CreatedBy:    user.Email,
-		Authority:    authority,
-		PackageID:    packageID,
-		ToolTemplate: strings.TrimSpace(payload.ToolTemplate),
-		Origin:       origin,
-	})
-	if err != nil {
-		if errors.Is(err, errAgentWorkerNotConfigured) {
-			writeAuthError(w, http.StatusServiceUnavailable, "the goal engine is not configured here")
-			return
-		}
-		// Per-user in-flight cap: 429 with the blocking goals (id+title) so the
-		// UI can render "finish these first" instead of a bare failure.
-		var capErr *errGoalUserCapExceeded
-		if errors.As(err, &capErr) {
-			writeAuthJSON(w, http.StatusTooManyRequests, map[string]any{
-				"ok":       false,
-				"error":    capErr.Error(),
-				"cap":      capErr.Cap,
-				"inFlight": capErr.Goals,
-			})
-			return
-		}
-		writeAuthError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	writeAuthJSON(w, http.StatusAccepted, map[string]any{
-		"ok":       true,
-		"thread":   thread,
-		"artifact": thread.Artifact,
-		"actions":  thread.Actions,
+	writeAuthJSON(w, http.StatusGone, map[string]any{
+		"ok": false, "error": "direct goal launch was retired; send the objective in a conversation",
+		"conversationPath": "/assistant/chat-threads",
 	})
 }
 
@@ -2537,23 +2436,29 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := struct {
-		Name      string         `json:"name"`
-		Arguments map[string]any `json:"arguments"`
-	}{}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+	rawPayload, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	payload, decodeErr := decodeOpenAIToolArguments(rawPayload)
+	if readErr != nil || decodeErr != nil || len(payload) != 3 {
+		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
+		return
+	}
+	callID, callIDOK := payload["callId"].(string)
+	name, nameOK := payload["name"].(string)
+	arguments, argumentsOK := payload["arguments"].(map[string]any)
+	if !callIDOK || !nameOK || !argumentsOK {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
 		return
 	}
 
-	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceTool(user.Email, payload.Name, payload.Arguments)
+	voiceContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceModelTool(voiceContext, user.Email, callID, name, arguments)
 	ok := err == nil
 	if err != nil {
 		result = map[string]any{
 			"ok":    false,
 			"error": err.Error(),
 		}
-		log.Errorf("Private Realtime tool %q failed for %s: %v", payload.Name, user.Email, err)
+		log.Errorf("Private Realtime tool %q failed for %s: %v", name, user.Email, err)
 	}
 
 	// RW1 (kanban-card-108): a private-dashboard Scout-voice board mutation has
@@ -2568,7 +2473,7 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	if changed {
 		broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
 		broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
-		kanbanApp.refreshRealtimeBoardContext(payload.Name)
+		kanbanApp.refreshRealtimeBoardContext(name)
 	}
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{

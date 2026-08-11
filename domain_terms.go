@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"regexp"
 	"strings"
 )
@@ -162,10 +161,6 @@ func expandRecallSynonyms(queryTokens []string) []string {
 }
 
 func realtimeTranscriptionModel() string {
-	if model := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL")); model != "" {
-		return model
-	}
-
 	return defaultRealtimeTranscriptionModel
 }
 

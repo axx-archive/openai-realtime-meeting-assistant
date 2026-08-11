@@ -1574,9 +1574,9 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	// job with a wall-clock defer (codex_runner.go), but sidecar-queued jobs run
 	// in the codex-runner container and terminate through THIS callback, so the
 	// codex seat only books the sidecar lane if we meter it here. Mirror the
-	// local entry — duration-only, Estimated, model from BONFIRE_CODEX_MODEL so
-	// an unpinned fossil still trips price_missing — deriving duration from the
-	// artifact's launch stamp. Gate on the terminal statuses AND `changed` so a
+	// local entry — duration-only, Estimated, under the server-pinned Codex
+	// model — deriving duration from the artifact's launch stamp. Gate on the
+	// terminal statuses AND `changed` so a
 	// retried callback cannot double-meter (the notify/deliver guards below do
 	// the same). Non-blocking and error-safe, like every recordLLMUsage caller.
 	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
@@ -1584,7 +1584,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		if changed {
 			usageEntry := llmUsageEntry{
 				Provider:  providerOpenAI,
-				Model:     strings.TrimSpace(os.Getenv("BONFIRE_CODEX_MODEL")),
+				Model:     defaultCodexExecModel,
 				Seat:      seatCodex,
 				ThreadID:  firstNonEmptyString(strings.TrimSpace(payload.ThreadID), strings.TrimSpace(existing.Metadata["threadId"])),
 				Estimated: true,

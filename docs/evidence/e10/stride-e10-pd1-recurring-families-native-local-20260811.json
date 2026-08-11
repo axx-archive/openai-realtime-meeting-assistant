@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_native_recurring_families_rendered_checkpoint",
+  "observedAt": "2026-08-11T13:56:37Z",
+  "status": "bounded_native_research_design_financial_model_journeys_independent_critic_pass",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "0f5421c562b1b99423ecc18e56dafa3e4f08f2d65cc706cb756d6407eac4a13e",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "fixture": {
+    "organization": "STRIDE Agentic Lab",
+    "humanMembers": 1,
+    "humanOwner": "AJ",
+    "recurringThreads": [
+      {
+        "family": "Presentation",
+        "title": "Pitch the STRIDE platform",
+        "request": "Scout can you make a 10 slide deck pitching me this platform?",
+        "visiblePhase": "Understanding",
+        "visibleProgressPercent": 4,
+        "visibleProgressNote": "Shaping the deck brief"
+      },
+      {
+        "family": "Research",
+        "title": "Research the agentic work market",
+        "request": "Scout, research the market for AI-native team workspaces and ground it in reliable sources.",
+        "visiblePhase": "Gathering evidence",
+        "visibleProgressPercent": 28,
+        "visibleProgressNote": "Gathering reliable sources"
+      },
+      {
+        "family": "Design",
+        "title": "Design the STRIDE launch image",
+        "request": "Scout, create a launch image and visual direction for STRIDE.",
+        "visiblePhase": "Building",
+        "visibleProgressPercent": 46,
+        "visibleProgressNote": "Building the first draft"
+      },
+      {
+        "family": "Financial model",
+        "title": "Model STRIDE's operating plan",
+        "request": "Scout, build a three-year financial model and operating forecast for STRIDE.",
+        "visiblePhase": "Verifying",
+        "visibleProgressPercent": 72,
+        "visibleProgressNote": "Checking the work"
+      }
+    ],
+    "intentOutcome": "start_private_work",
+    "assistantMessagesPerThread": 1,
+    "messagesPerThreadAfterRestart": 2,
+    "visibleWorker": "Scout",
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionData": 0
+  },
+  "claims": {
+    "conversationFirst": "each_natural_language_request_projects_exactly_one_matching_recurring_work_card",
+    "humanGrammar": "reviewed_family_phase_progress_and_governance_copy_only",
+    "iPhone": "research_card_activity_affordance_and_composer_are_distinct_safe_area_aware_and_unobstructed",
+    "iPad": "four_recurring_private_threads_remain_readable_in_stable_list_and_selected_detail_grammar",
+    "restart": "all_four_threads_restore_exactly_two_messages_and_unchanged_progress_without_duplicate_or_provider_session",
+    "runtimeSuppression": "no_tool_provider_model_run_artifact_template_or_raw_stage_identifiers_render",
+    "defaultOff": true
+  },
+  "selectedFileSha256": {
+    "stride_e10_agentic_lab_test.go": "588e8411e61b790b4c2db11dc6a5be6fad49d142a0224540481a45a4445b11ea",
+    "mobile/src/messaging/workPresentation.ts": "16551d57ad30389570e63a50938cad50a44eaa5b67f608c916675bbae4c6671e",
+    "mobile/src/messaging/MessageBubble.tsx": "577a21b2b452acd2af2ac0b8336662f413df85fcc3ce942dbe1bc91bc20bd998",
+    "mobile/src/screens/ThreadScreen.tsx": "db92035e53bc73e693819600ee9f1794f058e1dc4ba3b54f8e268627a8616148"
+  },
+  "simulatorBuild": {
+    "configuration": "Release",
+    "sdk": "iphonesimulator26.5",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "infoPlistBundleVersion": "52",
+    "expoConfigBuildNumber": "53",
+    "apiBaseUrl": "http://127.0.0.1:19092",
+    "mainJsBundleSha256": "7583d4ff3d833afe78d43d93f730b7dd5ae6ab91063959237c8e26fa4fe03731",
+    "expoAppConfigSha256": "19a3f12d7837c762e39db9e872b08b75770aac4465e6725d65b2ce27dcea7072",
+    "infoPlistSha256": "82d111d26cb97feed048af2db0e856c8ef2e425da381d3168a4a619c54d22cfc",
+    "mobileSourceUnchangedFromAcceptedPresentationBuild": true,
+    "buildVerdict": "PASS"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "native_iphone_research_work_card",
+      "device": "iPhone 17 Pro simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-recurring-research-iphone.png",
+      "sha256": "ff9889a8ca221c8a9bb812ac1c9d93c74bedf9823a286ad1537d91ee5b908e78",
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "surface": "native_ipad_design_list_detail_work_card",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-recurring-design-ipad.png",
+      "sha256": "1b6f6ee8954b0f9d5017154aa303f63170255009cc1c948eeed67ee3a31a5d5b",
+      "width": 2064,
+      "height": 2752
+    },
+    {
+      "surface": "native_ipad_financial_model_list_detail_work_card",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-recurring-financial-model-ipad.png",
+      "sha256": "62d8643cd429fc690d8d85e0de647b363362c7e907187d9c1ccfe2ec2f44ef34",
+      "width": 2064,
+      "height": 2752
+    }
+  ],
+  "verification": {
+    "focusedAgenticLabGoNormal": "PASS_2.367s",
+    "focusedAgenticLabGoRace": "PASS_12.716s",
+    "fullMobile": "PASS_495_of_495_on_unchanged_mobile_source",
+    "mobileTypecheck": "PASS_on_unchanged_mobile_source",
+    "releaseSimulatorBuild": "PASS_on_unchanged_mobile_source",
+    "renderHarnessTermination": "EXPECTED_OPERATOR_INTERRUPT_AFTER_RENDER_CAPTURE_NO_SOURCE_ASSERTION_FAILURE",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "focusedGoNormal": "PASS_2.323s",
+      "focusedGoRace": "PASS_12.898s",
+      "focusedNative": "PASS_9_of_9",
+      "directFamilyPhaseTokenProbe": "PASS",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_native_research_design_financial_model_journeys"
+    }
+  },
+  "openGates": [
+    "complete_remaining_advertised_family_interactions_including_documents_meeting_recaps_revisions_scheduled_work_code_handoffs_and_mixed_packages",
+    "complete_full_pd1_rendered_accessibility_dynamic_type_voiceover_orientation_split_view_pointer_hardware_keyboard_and_performance_matrix",
+    "generate_and_accept_real_openai_authored_cited_research_image_xlsx_financial_model_and_presentation_artifacts",
+    "exercise_attachments_reply_context_revision_restart_and_lost_response_with_real_provider_backed_work",
+    "accept_rich_preview_truthful_progress_final_artifact_and_drive_save_on_web_iphone_and_ipad_where_applicable",
+    "qualify_exact_provider_project_budget_and_cost_caps_before_paid_calls",
+    "physical_iphone_ipad_current_release_and_production_acceptance"
+  ],
+  "exclusions": {
+    "providerCalled": false,
+    "actualResearchGenerated": false,
+    "actualImageGenerated": false,
+    "actualFinancialModelGenerated": false,
+    "actualPresentationGenerated": false,
+    "artifactPreviewAccepted": false,
+    "driveAccepted": false,
+    "physicalDeviceAccepted": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

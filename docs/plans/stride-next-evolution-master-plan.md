@@ -1,5 +1,11 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
+> **Controlling status and resume authority:** the 2026-08-10 founder
+> reconciliation checkpoint below is the only current resume state. The legacy
+> synopsis between this notice and that checkpoint, plus every later section
+> explicitly labeled historical or superseded, is retained as evidence history
+> and must not be executed as a current queue.
+
 **Status:** E10-W0 through E10-W3 are independently
 `deterministic_verified` for their named evidence classes. E10-W4's private
 person/organization/session, Contribution Review, Work Record, and private
@@ -50,8 +56,9 @@ web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
-The current serving release remains unqualified externally. The current
-post-release observation records exact release
+The historical post-release observation below is superseded by the 2026-08-10
+founder reconciliation checkpoint for mutable generation/high-water values. It
+recorded exact release
 `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, bundle
 `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
 ledger generation 58, and W4 generation 157. Production `/readyz` truthfully
@@ -103,14 +110,652 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## 2026-08-09 unified E10 reconciliation and public-network revision 2
+## 2026-08-10 founder reconciliation checkpoint — controlling resume state
 
-This is the controlling goal and resume ledger. Later sections retain the
-decision history and exact evidence that produced the current state; headings
-that previously said “active” are historical unless this section points to
-them. A design, source file, route, test stub, migration, agent report, or local
-PASS is never promoted to implemented, deployed, activated, rendered,
-device-accepted, or externally accepted without the matching evidence.
+This checkpoint re-baselines the same E10 goal; it does not create another
+roadmap or implementation owner. Earlier sections remain evidence and decision
+history. When an older "current", "active", "not started", tester, consent,
+build, release, or resume statement conflicts with this checkpoint, that older
+statement is historical until it is explicitly revalidated.
+
+### End objective
+
+Complete the original E0-E10 meeting, voice, chat, Scout, artifact/Drive,
+organization, agent/workforce, orchestration, security, resilience, and release
+obligations; evolve them into **the network where work happens**; and prove one
+cohesive product across desktop web, native iPhone, and native iPad. Private
+conversation must become governed action, attributable artifacts, reviewed
+outcomes, and person-controlled Work Records before any deliberately released
+public projection becomes a collaboration or discovery surface. Humans retain
+identity, consent, employment/legal authority, governance, and accountability.
+Agents remain visible sponsored contributors with machine identity,
+delegation, provenance, bounded capabilities, and anti-synthetic-consensus
+controls; they never become interchangeable with people.
+
+The experience must be the best place for a team to wield bounded
+super-intelligence: ordinary conversation, meetings, sources, reasoning,
+decisions, delegated work, contributions and finished artifacts compound into
+one searchable governed work graph instead of disappearing across disconnected
+tools. “Captures everything and does everything” means complete advertised
+workflows with attributable evidence, continuity and intervention—not hidden
+surveillance, unbounded authority, fabricated certainty or automatic public
+exposure. Because humans navigate work visually, premium coherent interaction
+quality is a functional acceptance requirement, not a cosmetic follow-up.
+
+The goal also includes the active comparative-product-design study, one shared
+STRIDE information architecture and design system, representative Work and
+Network loops, and PI0 proof instrumentation before any pilot collection.
+Default-off code, migrations, validators, clients, routes, or UI carriers are
+interim fail-closed infrastructure wherever the intended product says the
+capability must ultimately be operational; they are not product completion.
+
+### Exact current evidence boundary
+
+- Local source is commit `a3c8d30711680d71c5902952f0d763996ce67576`
+  with an uncommitted mobile Home/Work/New Conversation correction and unrelated
+  `stride-site/`; these bytes are **in progress**, not released evidence.
+- Read-only production observation at 2026-08-10 08:58 PT proves release
+  `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, ledger generation 58,
+  bundle `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
+  retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`, public health/readiness
+  HTTP 200, and W4 schema 2/generation 163 with the exact six private features.
+  W5 and W6 are unconfigured/uninstalled; all MyMind, publication, search,
+  contact, semantic-provider, and public-network switches remain false.
+- The same readback reports canonical shadow 30,580 versus reconciled 8,532,
+  degraded ambient workers, local unencrypted backup ring seven, offsite
+  dormant, restore unverified, and external release attestation absent. Those
+  are open gates, not healthy-completion evidence.
+- Build 53 evidence in
+  `docs/evidence/e10/stride-e10-w7-ios-build53-testflight-20260810.json`
+  proves the exact signed carrier is Apple `VALID`, approved, unexpired, and in
+  Team (Expo) plus Bonfire. Physical iPhone/iPad acceptance remains open.
+- The founder states that Tyler is resolved, every current platform user
+  consents, and AJ is platform owner with authority to make the intended
+  features operational. This closes the need to ask AJ for broad product
+  direction, but remains `founder_authorized_readback_pending` until the exact
+  tester relationship and durable per-user/current-policy consent records are
+  read back. It does not create missing managed keys, external services,
+  provider credit/budget, independent security/privacy/DR evidence, or physical
+  device results.
+- At 2026-08-10 17:48 PT the founder granted broad end-to-end action authority
+  (“permission for all, anything and everything”), including implementation,
+  testing, the agentic-company fixture, release preparation and eventual
+  activation when the canonical gates pass. Do not repeatedly reopen those
+  decisions. This authorization still cannot invent an exact provider project
+  or dollar cap, turn an unclear deletion target into a recoverable one, merge
+  unrelated dirty-tree work, supply missing credentials/managed services, or
+  substitute permission for tests, current production readback, reviewed exact
+  release evidence, retained rollback and required independent acceptance.
+- At 2026-08-11 the founder explicitly requested that the current improved
+  interim state be committed, pushed, shipped through the exact-release path
+  and made live before PD1 is complete, then that work resume from this same
+  ledger. This is the separate action-time authority for the reviewed current
+  release only. It does not authorize weakening a red test or critic, merging
+  `stride-site/` or other unrelated bytes, skipping the exact archive/rollback/
+  verifier ceremony, calling a paid provider without an exact cap, activating
+  collection/publication/cohorts, mutating production data, or claiming that
+  the interim release completes PD1/E10.
+- The pre-release read-only production baseline at 2026-08-11 10:09 PT still
+  serves exact release `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, bundle
+  `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
+  ledger generation 58 and retained rollback
+  `2f8f62d20a47482c12329f1d434c99ccb911eb6f`. Application and renderer are
+  healthy, Caddy and the named production data volume are present, and public
+  health/readiness return HTTP 200. Canonical shadow is still non-required and
+  unhealthy at dirty/high-water 31,962 versus reconciled/checkpoint 8,532;
+  off/blocked children remain open and no production data was changed by the
+  readback.
+- The founder's 2026-08-10 controlling provider decision is **OpenAI for every
+  provider-backed product lane**, including research, documents, presentations,
+  images, mixed packages, voice/STT, routing, and any separately qualified
+  search/rerank path. No new Anthropic product-generation or presentation retry
+  is authorized. Existing Anthropic `low_credit` failures are historical
+  evidence only. Implementation must inventory and replace remaining Anthropic
+  routes/config/copy, preserve deterministic/providerless paths, bind exact
+  OpenAI project/model/route/cost receipts, and re-run each affected acceptance
+  cell; the provider decision does not turn a feature on or make an untested
+  OpenAI result complete.
+- The exact read-only route matrix is frozen at
+  `docs/evidence/e10/stride-e10-openai-provider-route-inventory-20260810.md`
+  (current one-way SHA-256 `3b01623eb60093fce9a5f8334e24ca485a411fd87f80a8edc38a7360b98fc0b1`;
+  independent critic PASS against reviewed SHA-256
+  `39a629362c45fef94e63a88bafcaaacf21b8bfdfa234fdcabf1e16a55f388c0b`).
+  It confirms Scout/research/images/voice/STT/embeddings are already OpenAI,
+  workbook/package compile/render are deterministic, and the remaining
+  blocking product routes at that observation boundary were the Anthropic-hard
+  goal engine, generic follow-up attachment parity, multimodal slide jury,
+  house style/taste, narrative, and default-off Insights/Opportunities. The
+  inventory passed an independent critic. The reconciled local conversion and
+  runtime gate is frozen at
+  `docs/evidence/e10/stride-e10-openai-provider-consolidation-local-20260810.json`
+  (SHA-256
+  `9c83c4b13bb590a639e33b4a26af3ba1742a6efbfbcee7221911449f3efca044`):
+  every founder-approved local provider/model/effort lane, including
+  house-style/taste, narrative, default-off Insights/Opportunities, document
+  and presentation authorship, image direction, Sol/max final review and the
+  rendered slide jury, now passes exact model binding and no-Anthropic
+  negatives. Client/model/environment/persisted-legacy inputs cannot widen the
+  provider, model, effort, output contract or tool. Goal-child launch and
+  restart now persist and revalidate the exact current child before any
+  provider admission. Exact focused normal/race tests, all 488 native tests,
+  native typecheck, `go vet ./...`, all Go packages and an independent critic
+  pass. Deterministic compile/render remains providerless. This proves dirty,
+  local, default-off source only; it authorizes no provider call or production
+  mutation and leaves managed custody, live paid deliverables, Drive/device
+  acceptance, release and activation open.
+- The default-off secure four-tool carrier is now frozen at
+  `docs/evidence/e10/stride-e10-openai-four-tool-carrier-local-20260810.json`
+  (SHA-256
+  `7064ee32f298cda9611645f2113196d79ffc30b1b1ea5f1ac51464fe09c8efd2`).
+  Exact-source focused normal/race, provider-network inventory, `go vet`, the
+  full root and remaining Go packages, restart/rotation/tamper/concurrency
+  negatives and an independent security critic pass. This proves the isolated,
+  unregistered carrier and journal only: no provider call, production effect,
+  managed-key installation, concrete live backend, route activation, commit,
+  push or deployment occurred. The exact next ready implementation is the
+  five-way conversation-first router on top of this fail-closed foundation.
+- The bounded five-way conversation-first router is now frozen at
+  `docs/evidence/e10/stride-e10-conversation-first-router-local-20260810.json`
+  (SHA-256
+  `10948ff1db135ce7de47ebaa7cee0c01f711daf653a26de94a27a4393baf2db9`).
+  Exact focused normal/race tests, mobile typecheck and native approval-kind
+  tests, `go vet`, diff checks and an independent critic pass. The exact
+  approval body/effect class is immutable and re-derived at acceptance; named
+  agents cannot widen capability; attachment extraction and routing provider
+  attempts are truthfully counted; legacy direct-launch doors are retired or
+  server-ignored; and normal web/native interaction no longer exposes a tool
+  or deliverable picker. This is a local/default-off runtime gate, not product
+  or release completion. The reconciled provider/runtime receipt `9c83c4b1...`
+  now proves all Go packages, 488/488 native tests, native typecheck and the
+  exact provider/restart critic gate green without weakening this router.
+  The concrete four-tool product adapter checkpoint is frozen at
+  `docs/evidence/e10/stride-e10-openai-four-tool-product-adapters-local-20260811.json`
+  (SHA-256
+  `20ebacf8474772f56770f2dd9f652642cb10a96678e904c94093bbeb182abeb5`).
+  `report_goal_state`, `answer_memory_question`, `create_artifact` and
+  `update_artifact` now bind to governed product services under the exact
+  server-owned conversation route and frozen journal. Authenticated effect,
+  projection and final-use receipts fence exact artifact revisions and memory
+  high-water; restart/replay, lost response, key rotation, tamper, concurrency,
+  terminal projection and source-drift negatives pass. The signed pending
+  projection outbox reuses one stable delivery ID and byte-exact payload after
+  process death; the exact web router applies that retry once. The native
+  clients receive thread truth through their separate chat snapshot/event path,
+  so this web-office-event proof does not claim rendered native acceptance.
+  Focused normal/race gates, provider-source inventory, `go vet ./...`, all Go
+  packages (root `515.862s`), 488/488 native tests, native typecheck and a fresh
+  independent security critic pass on exact rehashed bytes. The adapter remains
+  local, dirty and default-off: verification made zero provider calls and zero
+  production mutations, and installed no managed keys. No commit, push,
+  deployment, live activation, rendered product, paid deliverable or device
+  acceptance is claimed. The exact next safe action is the serialized PD1
+  desktop/iPhone/iPad product migration and PI0-A baseline design, with PN1
+  remaining default-off behind both.
+- The first serialized PD1 representative-company slice is frozen at
+  `docs/evidence/e10/stride-e10-pd1-agentic-lab-local-20260811.json`
+  (SHA-256
+  `8e6a7b4c474293f7be876b2dc0c54c675ba5ff6333e135b5d0f88f321a7a7677`).
+  The local/default-off STRIDE Agentic Lab has AJ as its only human member and
+  owner plus three visibly distinct agent principals. Providerless normal
+  interaction covers suggested work, exact approval, one completed-work card,
+  authenticated structured Open, revision, synthetic meeting/transcript,
+  corrected learning, agent pause/revocation, chat deletion, restart and
+  purge. Ordinary AI output is truthfully labeled `completed work`; it is not
+  falsely promoted to a canonical Work Record. A separate AJ-governed private
+  contribution flow proves exact released fields, active signed attestation,
+  private projection, correction/revocation and restart. Desktop, iPhone and
+  iPad rendered captures, focused normal/race, `go vet ./...`, 492/492 native
+  tests, native typecheck, iOS Release simulator build, all Go packages (root
+  `568.089s`) and an independent product/design critic pass. The first full Go
+  attempt honestly failed only three stale navigation-label assertions; those
+  test-only expectations were updated to the current Meetings, Conversations,
+  Work library, Projects and Work navigation labels before the exact green
+  rerun. Verification made zero provider calls and zero external or production
+  effects. This accepts only the bounded synthetic journey, not whole PD1,
+  live provider work, presentations, Drive, physical devices or release.
+- The founder-directed native desktop reference study has a body-minimized
+  partial receipt at
+  `docs/evidence/e10/stride-e10-pd1-native-reference-study-local-20260811.json`
+  (SHA-256
+  `2d030367eff7ce503d20f374ba325b9255860e2ce7840035656a40a2dd740627`).
+  Native Buzz 0.5.5 was observed read-only and supports conversation-first
+  participation, recognizable agent citizenship, one evolving work card and a
+  secondary provenance/memory/runtime inspector. Provider/model plumbing,
+  infrastructure lifecycle verbs, ungoverned memory and repeated process prose
+  remain rejected. Native ChatGPT 26.803.41515 UI inspection was unavailable
+  because it is the protected host running this task; Slack web inspection was
+  unavailable because the authenticated tab was owned by the active test
+  browser session. Neither was substituted, bypassed or guessed. Complete the
+  missing observations only from a privacy-safe synthetic capture/separate
+  host and a released synthetic Slack tab; ready PD1 implementation continues
+  from the accepted PD0 and Buzz evidence meanwhile.
+- The explicit presentation process-dump rejection journey and reusable
+  recurring-work presentation grammar are frozen at
+  `docs/evidence/e10/stride-e10-pd1-recurring-work-grammar-local-20260811.json`
+  (SHA-256
+  `e9f5a2d75345d209e803b4a3d88b397fd0684e0bcafd1a705c4041cf672da6a4`).
+  The founder's exact ten-slide request now classifies once as
+  `start_private_work`, launches once under replay/concurrent duplicates and
+  renders one evolving `Presentation` card rather than repeated Packaging
+  Studio/process prose. Desktop and 430-pixel responsive web renders prove the
+  compact card, persistent inline activity and secondary desktop governance
+  inspector. Web and native share the same small recurring-family and
+  human-phase grammar; only eight reviewed progress phrases may cross the
+  presentation boundary and every unknown model/run/artifact/tool string fails
+  closed to the stable phase. Focused normal/race, `go vet ./...`, 495/495
+  native tests, native typecheck, all Go packages and a fresh independent
+  product/design critic pass on exact rehashed bytes. Verification made zero
+  provider calls and zero production/external effects. This accepts the
+  bounded in-progress interaction grammar only: native iPhone/iPad rendered
+  presentation acceptance and an actual OpenAI-authored editable PPTX/PDF/
+  notes/citations/review/revision/Drive package remain open.
+- The same bounded in-progress presentation journey is now rendered and frozen
+  on native iPhone and iPad at
+  `docs/evidence/e10/stride-e10-pd1-native-presentation-rendered-local-20260811.json`
+  (SHA-256
+  `dfdf214d403bee772ab0c3367b416fe6ceff7268755cee872abd99415d00c6ed`).
+  A normal authenticated Agentic Lab private thread contains AJ's exact deck
+  request and one Scout-authored `Presentation` card at the human phase
+  `Understanding`, 4% complete, with the reviewed copy `Shaping the deck
+  brief`. iPhone proves distinct safe-area card, persistent activity bar,
+  native activity sheet and composer; iPad proves stable Work navigation,
+  conversation list and selected-thread detail with the same native activity
+  sheet. The providerless fixture restores exactly two messages and the same
+  progress without duplication. Release-simulator build, focused normal/race,
+  495/495 native tests, typecheck, diff check and a fresh independent critic
+  pass on exact rehashed source and renders. This closes only the native
+  rendering cell for this in-progress presentation grammar: no provider was
+  called, no deck/PPTX/PDF/Drive artifact exists, no physical device or live
+  release was accepted, and whole PD1/E10 remain open.
+- The accepted recurring-work grammar now continues through native Research,
+  Design and Financial model journeys at
+  `docs/evidence/e10/stride-e10-pd1-recurring-families-native-local-20260811.json`
+  (SHA-256
+  `0623cceef41efde5f7a49fcedc686262cc45af43053560b779b9268e887262fd`).
+  Three natural-language requests each create exactly one matching Scout work
+  card: Research at `Gathering evidence`/28%, Design at `Building`/46%, and
+  Financial model at `Verifying`/72%. iPhone proves the research card,
+  activity affordance and composer remain distinct and safe-area aware; iPad
+  proves all four recurring private threads remain readable in the stable
+  list/detail grammar as Design and Financial model progress. Restart restores
+  exactly the two-message thread and unchanged progress for Presentation plus
+  all three added families with zero provider session or duplicate. Focused
+  normal/race, the unchanged 495/495 native/typecheck/Release-simulator source
+  boundary, direct family/phase/token probes, diff check and a fresh independent
+  critic pass on exact rehashed bytes and renders. This is interaction evidence
+  only: no research, image, workbook/model, presentation or Drive artifact was
+  generated or accepted, and the remaining family/accessibility/device/release
+  gates stay open.
+- The bounded interaction grammar now covers the complete twelve-family
+  recurring-work fixture in
+  `docs/evidence/e10/stride-e10-pd1-remaining-families-native-local-20260811.json`
+  (SHA-256
+  `b07b46a7b756f4b409b44dedaa8f11e1b23380ae4b8208b354478f50b1d02959`).
+  Document, Meeting recap, Revision, Scheduled work, Build/execution handoff,
+  Mixed package, Data visualization and Project plan join Presentation,
+  Research, Design and Financial model under one server-classified premium
+  card grammar. Web and native share the exact priority, human phase, terminal
+  status and allowlisted progress vocabulary; an immutable run identity keeps
+  one card as a material artifact is attached. The providerless Agentic Lab
+  restores all twelve two-message threads without duplication. Eight new
+  simulated iPhone/iPad captures, focused normal/race, 495/495 native,
+  typecheck, Release simulator build, exact hash/diff checks and an independent
+  critic pass after two material repair rounds. This remains interaction-only
+  evidence: it generates no deliverable, preview or Drive save and accepts no
+  physical device, release or production behavior. During the first simulator
+  setup, a Release build accidentally inherited `https://thebonfire.xyz`; AJ
+  credentials were entered on the iPhone simulator and the production thread
+  list was read before both simulator apps were terminated. No message, work
+  launch or content edit was observed, but an authentication session may have
+  been created and absence of every production mutation is not proved. The
+  accepted captures are from the subsequent explicitly verified loopback
+  rebuild; no cleanup/revocation or other production mutation was attempted.
+- The founder-directed desktop shell correction is frozen at
+  `docs/evidence/e10/stride-e10-pd1-desktop-shell-redesign-local-20260811.json`
+  (SHA-256
+  `e4fb1548c65e92591ec21ca515f86621f398eef5b9c0c249307b612f5e0a1f7a`).
+  Desktop now has one labeled Home / Work / Network / Work Search / You rail,
+  one quiet contextual header, no duplicate top destination pills, and one
+  subordinate Work menu. The organization control's closed state is only the
+  current organization name plus disclosure; its menu reveals memberships and
+  **Create organization**, while other/create actions route through governed
+  settings without directly switching or mutating authority. Notifications,
+  Appearance and the signed-in profile form one separated labeled utility
+  group rather than floating glyphs. Vertical and responsive keyboard
+  navigation, coherent Work menu radio semantics/focus, 1180 light, 1440 dark
+  and organization-menu renders, focused normal/race, `go vet ./...`, 499/499
+  native tests, native typecheck and an independent design critic pass. This
+  accepts the bounded local desktop shell only; functional/device
+  accessibility, actual deliverables/previews/Drive, physical devices, full
+  PD1 and production observation remain open until their exact gates pass.
+
+### Founder-approved OpenAI model and reasoning matrix
+
+AJ approved this exact target matrix on 2026-08-10. It governs every future
+provider-backed product call; a client field, model output, persisted legacy
+assignment, installed Anthropic key, or environment typo cannot widen it.
+OpenAI generative/inference routes use only the named lane below. Fiscal and
+other separately governed source systems remain non-generative evidence/data
+egress; XLSX/PDF/HTML compilation, ACL, consent, publication, Drive, receipts,
+rendering and purge remain deterministic/providerless.
+
+| Product lane | Approved model and reasoning | Current migration truth |
+|---|---|---|
+| Scout intent routing and extraction | `gpt-5.6-luna` / `medium` | local exact route passes; serving release and latency/intent acceptance remain unverified |
+| Scout conversational answer | `gpt-5.6-terra` / `high` | local exact route and no-work false-positive contracts pass; serving conversation-quality acceptance remains |
+| Proactive attention and lightweight suggestions | `gpt-5.6-luna` / `medium` | local exact route passes; serving interruption-quality acceptance remains |
+| Company brain, memory extraction and digests | `gpt-5.6-terra` / `high` | local exact route passes; source/claim fidelity and deletion/rebuild live parity remain |
+| Board interpretation and structured changes | `gpt-5.6-terra` / `high` | local exact route passes; live authority/operation acceptance remains |
+| Deep research and cited investment work | `gpt-5.6-sol` / `high` | local exact route passes; live current-generation acceptance remains |
+| Ordinary function-tool work | `gpt-5.6-terra` / `high` | default-off carrier/journal, four concrete product adapters, router binding and exact restart/final-use gates pass locally; managed custody, live qualification and activation remain pending |
+| Complex goals and deliverable orchestration | `gpt-5.6-sol` / `high` | local exact route, route provenance and restart fencing pass; not deployed/activated |
+| Final review, ship gate and rendered slide jury | `gpt-5.6-sol` / `max` | separate local server-owned review/jury route passes; live rendered acceptance remains |
+| Documents, presentations, mixed packages and final narrative | `gpt-5.6-sol` / `high`, then Sol / `max` final review | local exact author/review routes and no-fallback negatives pass; successful live deliverables remain open |
+| Image prompt direction | `gpt-5.6-terra` / `high` | local exact imagery-direction route passes; generation remains `gpt-image-2` quality `high`; live acceptance remains |
+| Realtime voice | `gpt-realtime-2.1` / `high` private, `medium` shared room | local exact private/shared routes pass; live voice/device qualification remains |
+| Transcription and dictation | `gpt-live-transcribe` for live session input; `gpt-transcribe` for committed lane and files | specialized models; no text reasoning dial |
+| Semantic recall | `text-embedding-3-small` | specialized embedding model; no text reasoning dial |
+| House style and background taste extraction | `gpt-5.6-terra` / `high` | local exact OpenAI-only route passes; live acceptance remains |
+| Final design judgment, narrative and founder-facing recommendation | `gpt-5.6-sol` / `high` | local exact OpenAI-only route passes; live acceptance remains |
+| Codex implementation handoff | `gpt-5.6-sol` / `high`; `xhigh` only for server-classified security/release-critical work | local route is fixed Sol/high and separately fenced; no broad `xhigh` admission or activation is claimed |
+
+GPT-5.6 text routes accept only the documented `none`, `low`, `medium`,
+`high`, `xhigh`, and `max` efforts; the legacy `minimal` and `ultra` aliases
+must be rejected for this family. Escalation is server-owned by exact job type,
+risk and review stage. A user phrase such as “think harder,” a model request,
+or a client payload can never select Sol/max or expand spend/authority.
+
+### Conversation-first work and deliverable contract
+
+The product has one conversational entry grammar across text and voice. A user
+does not choose a tool, template or deliverable tile before speaking or typing.
+Web, iPhone and iPad send only the natural-language turn, attachments, reply
+context and—when explicitly chosen—the addressed agent. Voice commits an
+authoritative transcript into the same routing contract. `toolTemplate`,
+process ID, model, reasoning, authority, output type and provider are
+server-minted results, never client authority.
+
+The server makes exactly one bounded decision for every accepted turn:
+
+1. `conversational_reply` — answer directly when the user is asking, reacting,
+   brainstorming, recalling, refining, or discussing without requesting a
+   durable output or action;
+2. `clarify_once` — ask one short conversational question when audience,
+   source, output, material assumption or action authority is genuinely needed;
+3. `start_private_work` — an explicit request to research, create, analyze,
+   draft, model, design, package, revise or regenerate is sufficient approval
+   for a private, reversible, within-budget WorkRun; the UI immediately shows
+   one truthful work card rather than a tool chooser or second acceptance card;
+4. `approval_required` — external send/publication, irreversible deletion,
+   expanded audience, material provider spend, production/repository mutation,
+   or another separately governed effect stops at an exact confirmation card;
+5. `unavailable` — missing capability, authority, source, provider, custody or
+   accepted output contract is stated plainly and launches nothing.
+
+Directly addressing Scout or a named agent fixes the visible worker identity;
+it does not let the client select capabilities. An unaddressed private turn
+routes through Scout. Public/channel turns preserve mention and participation
+policy so agents do not answer every human conversation. Scout may delegate to
+a qualified coworker, but the delegation and child work card are visible and
+carry the lesser authority. The same utterance, attachments and current
+authority must produce the same intent class across typed text, composer
+dictation, private Realtime voice and direct named-agent chat.
+
+Visible quick-select palettes, “choose a tool” composer state, deliverable-type
+tabs, client-supplied `toolTemplate`, and a center/global create action that
+binds a hidden tool are migration debt. Remove them from normal web/native
+interaction. Internal registries/templates remain server-owned output contracts
+and test/admin fixtures only. New Conversation may select people/channel and
+audience, never a tool or model.
+
+Presentation, image/design, research and financial-modeling work are recurring
+first-class specialist lanes, not obscure templates a person must discover.
+The intended product includes a visible Presentation specialist/agent; the
+current `packaging_studio` process, deck contracts and slide jury are
+behind-the-scenes implementation machinery and do **not** prove that product
+agent complete. A natural request may address Scout or the relevant specialist,
+but the server still selects the output contract, provider, model, effort and
+authority. No recurring-work shortcut may reintroduce a deliverable picker.
+
+The closed acceptance catalog covers every advertised venture-work family:
+
+| Family | Required canonical outputs and preview | Current state / remaining proof |
+|---|---|---|
+| Conversation, recall, brainstorming and quick explanation | bounded chat answer with sources when used; no false work card | **In Progress** — core chat exists; cross-modality intent corpus and Luna→Terra migration pending |
+| Deep research, market map, diligence and competitive analysis | source-bound rich report, citation/domain receipt, export/Drive | **Verified Complete** only for prior bounded research evidence; fresh approved-model web/iPhone/iPad matrix pending |
+| Memo, one-pager, brief, strategy, IC and board document | editable canonical document plus DOCX/PDF export and rich preview | **In Progress** — text artifact path exists; OpenAI live run, DOCX/PDF and native acceptance pending |
+| Presentation, pitch deck and narrative slides | editable slide source, native PPTX, PDF, rendered page previews, notes and visual-jury receipt | **In Progress** — deterministic HTML/PDF and local OpenAI jury contracts exist; native PPTX and successful live OpenAI/device/Drive proof are not complete |
+| Image, brand direction, concept render and design board | high-quality PNG/JPEG, prompt/provenance, inline preview, regenerate and Drive | **Verified Complete** only for prior bounded image/readback evidence; current-generation and physical-device matrix pending |
+| Spreadsheet, business model, cap table, unit economics and scenario analysis | formula-driven XLSX, assumptions/evidence sheets, typed preview and Drive | **Verified Complete** only for deterministic venture-workbook scope; broader scenario/import/edit/device cases pending |
+| Data table, chart and visualization | source-bound table plus reusable chart/image and workbook/document embedding | **Not Started** as a complete advertised family |
+| Meeting recap, briefing, decision log and action plan | source-linked document/work objects with exact meeting window | **In Progress** — foundations exist; conversational-vs-work and export/device matrix pending |
+| Artifact revision, redline, summarize, translate and regenerate | new revision linked to prior artifact; old revision retained; exact diff/status | **In Progress** — regenerate/follow-up foundations exist; document/deck/sheet/image parity pending |
+| Project plan, task board and operating plan | governed board/work objects and outcome receipt, not a prose-only claim | **In Progress** — board tools exist; new conversational router/journal admission pending |
+| Mixed investor or diligence package | manifest-bound research + memo + deck + workbook + imagery + source register; atomic package preview/export | **In Progress** — Packaging Studio foundations exist; successful OpenAI-only live package and platform parity pending |
+| Scheduled or recurring private work | visible schedule, next run, pause/cancel, per-run WorkRun/artifact receipts | **In Progress** — study/design evidence exists; product acceptance pending |
+| Code, repository, browser, deployment or external execution handoff | explicit scoped handoff, approval/authority gate and execution receipt; never impersonated by Scout | **In Progress** — Codex lane remains separately fenced and GPT-5.6 migration pending |
+
+Acceptance is a cross-product matrix, not one happy path. Every family runs by
+natural text, composer dictation/private voice, direct Scout request and direct
+eligible agent request; with and without attachments; initial request,
+clarification, progress, intervention, cancellation, retry, restart, revision,
+Open, Save/Drive and honest failure. It proves no visible tool preselection,
+no false conversational/work classification, no duplicate provider/effect,
+truthful stage and next action, body-minimized list preview, exact worker and
+model provenance, and equivalent web/iPhone/iPad capability or an explicit
+accepted deferral. Paid/live cells remain separately budgeted and receipted.
+
+### Canonical obligation inventory
+
+`Verified Complete` below always means complete only for the named evidence
+class. A row may therefore contain a verified foundation while its product
+activation remains `In Progress` or `Blocked/External Gate`.
+
+| Obligation | Canonical state | Controlling evidence or exact remaining proof |
+|---|---|---|
+| E0-E9 original foundations (each of E0, E1, E2, E3, E4, E5, E6, E7, E8, and E9) | **Verified Complete** | complete only for each named deterministic/local/default-off class in §18 and its receipts/tests; live models, real media, paid pilots, physical devices, production HA/DR, and soak remain in W5-W8 rather than being inherited as complete |
+| E10 overall | **In Progress** | W0-W4 foundations/private scope are proven; W5-W8, PD/PI/PN product, device, service, resilience, cohort, and soak obligations below remain |
+| W0 authority freeze | **Verified Complete** | `docs/evidence/e10/stride-e10-w0-freeze-20260808.json` plus critic PASS |
+| W1 canonical identity/org/session/network authority | **Verified Complete** | complete for the default-off authority class in `stride-e10-w1-authority-20260808.json`; migrations 14-16, normal/race/PostgreSQL/vet and critic PASS |
+| W2 private product carriers | **Verified Complete** | complete for the bounded/local carrier class in `stride-e10-w2-product-20260808.json`; registered W1-backed web/native evidence; not revision-2 public product acceptance |
+| W3 tenant/shadow rehearsal | **Verified Complete** | complete for the offline/shadow class in `stride-e10-w3-tenant-shadow-migration-20260808.json`; production global cutover is not complete |
+| W4 Bonfire private authority | **Verified Complete** | complete for the production private scope in the current live release/readiness above; seven people/memberships, AJ sole owner, canonical sessions, exact six W4 features; canonical shadow promotion remains excluded |
+| W5 private MyMind custody | **Blocked/External Gate** | compiled/default-off carrier and mTLS client receipts pass, but no installed independent service, managed keys/high-water/destruction/restore, durable consent readback, or live custody cohort |
+| W6 Work Search/contact and provider qualification | **Blocked/External Gate** | deterministic policy/client receipts pass, but no installed service, keys/purge executor, current five-person/two-reviewer qualification, signed approvers/corpus, or activated routes |
+| W7 native/privacy/resilience | **In Progress** | read-only CLI and Build 53 TestFlight evidence pass; physical iPhone+iPad, VoiceOver/Dynamic Type/privacy, restrictive TURN, four-root offsite restore, HA and independent attestation are external gates |
+| W8 ordered activation/soak | **Not Started** | validators pass only; needs exact signed W5-W7/rollback results, five ordered kill-switch cohorts, unchanged-release >=24h and >=10 sittings |
+| E10-R0 routing/causal deletion | **Verified Complete** | complete for the historical released scope in the AmbientMind nested ledger R0 receipt/release evidence |
+| E10-R1 meeting intelligence replay | **Blocked/External Gate** | planner/executor foundation exists; production planning/replay remains fail-closed without authenticated source/rollback authority |
+| E10-R2 canonical AmbientMind projection | **Blocked/External Gate** | typed source/cursor authority absent; current canonical shadow is unhealthy and not product authority |
+| E10-R3a/R3b people and multi-org productization | **Superseded** | W1-W4 receipts and live W4 authority replace the old `not_started` rows |
+| E10-R3c MyMind | **Superseded** | W5 is the controlling blocked custody/activation wave |
+| E10-R4 continuity/three-mind context | **In Progress** | continuity corrections are released; real MyMind/AmbientMind envelope waits on R2/W5 authority and real-surface acceptance |
+| E10-R5 AgentMind candor/proactivity | **In Progress** | released source-linked/default-off foundations; provider qualification, policy corpus and rendered active-mode acceptance remain |
+| E10-R6 Marketplace/team-agent onboarding | **In Progress** | review-required lifecycle and receipts exist; product preview parity, package compiler/readiness and real provider activation remain |
+| E10-R7 one result flow/Open/Save/Discard | **In Progress** | web Open/PDF/Save/regenerate and workbook/Drive evidence exist; discard activation, native generic Save activation and physical-device acceptance remain |
+| E10-R8 Work Search/attention/contribution | **In Progress** | surveillance ranking removed; cited search, attention and contribution attestations wait on R2/R5/W6 |
+| E10-R9 Work Record/network | **Superseded** | W0-W6 plus PN0-PN5 are controlling; private Work Record is live under W4; public projection/search/contact follow PN/W6 gates |
+| PN0 public-network constitution revision 2 | **In Progress** | the normative source receipt `stride-e10-pn0-normative-inputs-20260809.json` is verified supporting evidence; exact legal/privacy/moderation/appeal/incident owners and policy signatures remain external |
+| PD0 comparative study/design thesis | **In Progress** | cross-product study `stride-e10-pd0-comparative-design-study-20260810.md` SHA-256 `1e781de1ddbc10eeb051680e54e6a08a4c763d547135dece1c638a193e8cf786` has independent design critic PASS; the ChatGPT Workstream study/interaction manifest also have exact independent critic PASS against reviewed SHAs `5bd071db...` / `98027ae6...`; current one-way study receipt SHA-256 `7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4`; the representative Work presentation and fail-closed Work→Network browser references have independent critic PASS against reviewed receipt SHA `b55f7c67...`, with current one-way receipt `stride-e10-pd0-work-network-prototype-rendered-20260810.json` SHA-256 `8e920a826e5890f15c9e44df0b78a2a1c1c7b4268dd89207b0ce98b3fe59f720`; native/product/device migration remains |
+| PD1 unified product migration | **In Progress** | bounded shell/Scout, local Agentic Lab and recurring-work grammar receipts pass. Agentic Lab proves a synthetic one-human/three-agent company, truthful completed-work versus governed Work Record semantics, authenticated Open, private attestation lifecycle and rendered desktop/iPhone/iPad. Receipt `e9f5a2d7...` closes the exact presentation process-dump rejection and one evolving desktop/430-responsive card/inspector grammar with shared fail-closed native family/phase copy; receipt `dfdf214d...` renders and independently accepts that same in-progress card/activity journey on native iPhone and iPad; receipt `0623ccee...` extends the accepted native one-request/one-card grammar through Research, Design and Financial model; receipt `b07b46a7...` completes the bounded twelve-family web/native interaction grammar, providerless restart and eight additional iPhone/iPad captures while preserving one card across material-artifact attachment; receipt `ff80a903...` adds the bounded simulated orientation, Accessibility XXXL, software-keyboard, accessibility-source and list-performance checkpoint; receipt `e4fb1548...` accepts one global desktop destination rail, quiet organization/context header, governed name-only organization chooser, labeled bottom utilities, responsive keyboard semantics and light/dark rendered parity, with the exact release-boundary full Go suite and independent repaired-test critic green. The broader every-surface rendered migration, missing native ChatGPT/Slack observations, actual provider-backed artifacts/previews/Drive, functional/device accessibility and measured performance, physical devices, exact interim release observation and whole-PD1 evidence remain open |
+| PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
+| PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
+| PI0-B pilot evidence/collection gate | **Not Started** | requires PI0-A baseline, PN1 and accepted PD1 pilot surfaces before any real collection |
+| PN2 signed-in human pilot | **Blocked/External Gate** | founder consent declaration is recorded, but PN1/PD1/PI0-B, durable consent readback, two workspaces, moderation and signed product/privacy/legal policy remain |
+| PN3 Explore | **Not Started** | blocked on accepted PN2 and object-only/provenance/revocation evidence |
+| PN4 sponsored public agent | **Not Started** | blocked on PN3 plus sponsor/delegation/anti-consensus/safety evidence |
+| PN5 open-web read | **Blocked/External Gate** | legal/privacy/moderation, crawler/cache purge, incident response, accessibility and PN4 acceptance required |
+| AJA private research/image/workbook/Drive | **Verified Complete** | complete only for the bounded desktop/readback scope in `stride-e10-pd1-aja-postrelease-matrix-20260810.json`; does not prove every agent/platform or a fresh current-generation provider run |
+| Documents, presentation slides and mixed package | **In Progress** | prior Anthropic `low_credit` attempts are historical and must not be retried; local authoring, attachment, revision, restart, Sol/max review and multimodal slide-jury contracts are OpenAI-only and critic-passed in receipt `9c83c4b1...`, while the default-off four-tool carrier is independently verified in `7064ee32...`; concrete backends/live parity plus a successful OpenAI document/editable-PPTX deck/mixed package with rich web/iPhone/iPad preview and Drive acceptance remain required |
+| Conversation-first intent and deliverable routing | **In Progress** | the bounded local/default-off five-way router passes exact focused/race tests and independent critic in receipt `10948ff1...`: text, dictation/private voice, Scout and direct eligible-agent turns share the server-owned outcomes; normal clients cannot select tools/output contracts/authority; approvals bind exact immutable objective/effect; restart/replay and named-agent capability stay fenced. Receipt `9c83c4b1...` adds all-Go, 488/488 native, typecheck, provider-matrix and exact goal-child restart PASS; receipt `20ebacf8...` adds the four concrete product adapters; `e9f5a2d7...` proves the exact presentation request becomes one evolving work card; `dfdf214d...` accepts the bounded native iPhone/iPad presentation projection; `0623ccee...` extends the providerless contract through Research, Design and Financial model; and `b07b46a7...` completes the bounded twelve-family one-request/one-card interaction grammar with exact restart and stable pre/post-artifact identity. Managed key custody, release/live provider activation and the full provider-backed deliverable/device evidence remain open, so this row is not globally complete |
+| Complete venture deliverable catalog | **In Progress** | research/image/workbook have bounded prior evidence, and receipt `b07b46a7...` accepts only the interaction grammar for all twelve recurring families: Presentation, Research, Design, Financial model, Document, Meeting recap, Revision, Scheduled work, Build, Mixed package, Data visualization and Project plan. Actual provider-backed cited research/document/image/XLSX/PPTX/PDF/chart/mixed artifacts, attachment/reply/revision/translation/regeneration/scheduling/execution behavior, previews and Drive remain incomplete at their exact web/iPhone/iPad/live evidence classes |
+| Mobile Home/Work/new conversation correction | **In Progress** | receipt `ff80a903...` accepts a bounded loopback simulator slice for iPhone/iPad orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source focus/isolation, virtualized channel lists and a single shared active-work clock after exact rendered and independent-critic gates; functional VoiceOver, the remaining Dynamic Type spectrum, actual Split View, pointer, Full Keyboard Access, measured runtime performance, reviewed commit/release and physical devices remain |
+| Tyler/TestFlight and all-user consent | **In Progress** | founder authorization is recorded; exact ASC tester relation and durable current-policy consent records remain readback gates |
+
+### Dependency-ordered remaining waves and stop/resume points
+
+One Product Design/implementation owner owns the target thesis, IA, semantic
+system, and serialized integration across overlapping web/mobile code. Bounded
+read-only research and independent critics may run concurrently and hand back
+artifacts; they do not edit the product or create competing systems.
+
+| Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
+|---|---|---|---|
+| 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 38-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
+| 1 — complete | **PD0 representative browser prototype and system freeze**, single Product Design owner. The comparative study, ChatGPT Workstream extension, Work presentation lifecycle and fail-closed Work→Network bridge passed independent critics. | exact studies/manifests; 13-journey validator; four synchronized J4 postimages; desktop/430 iPhone/1180 iPad reference captures; screenshot SHA/dimension verifier; Network value withholding; independent critic PASS | complete only for the bounded browser-reference class; no native/product/device/provider/Drive/publication/activation claim |
+| 2 — complete for the local/default-off class | **OpenAI-only conversational work runtime**, one provider/runtime owner. Inventory, function-tool design `c5363c31...`, isolated carrier `7064ee32...`, five-way router `10948ff1...`, complete local provider/model/restart gate `9c83c4b1...` and concrete adapter receipt `20ebacf8...` are independently accepted on exact dirty bytes. `report_goal_state`, `answer_memory_question`, `create_artifact` and `update_artifact` bind to governed product services under the frozen journal; every other tool is unavailable. | exact approved model/effort map; natural text/voice/Scout/direct-agent intent corpus; five server outcomes; exact tool authority/restart/final-use journal; tool-specific pre/post/reconcile/final-use and projection tests; no visible/client tool preselection; no-Anthropic negatives; full Go `515.862s`; 488/488 native tests and typecheck; provider receipts and independent critics | deterministic/providerless paths stay intact; four-tool integration remains default-off; managed custody and live activation remain gated; zero provider calls and zero production mutations in verification; no activation until exact project/cost authority and reviewed release receipts |
+| 3 — in progress | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and independent critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; and `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity. The exact full Go release gate now passes after superseded shell assertions were reconciled to the accepted semantics and independently re-gated. Ship this materially better interim state under the explicit 2026-08-11 release authority, then resume the remaining every-surface migration without overlapping implementation ownership. The post-release resume point is functional VoiceOver, the remaining Dynamic Type spectrum, actual Split View, pointer, Full Keyboard Access, measured runtime performance and physical-device acceptance. Actual deliverables/previews/Drive remain in the provider-backed AJA matrix. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible work-card stages/interventions; every deliverable preview/Drive; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; independent critic | retain the current production release/Build 53 until the exact candidate is independently accepted; activate only the reviewed archive with retained rollback and verifier agreement; fixture data stays synthetic/local |
+| 4 — next | **PI0-A baseline and installation design**, instrumentation owner; no collection. | signed baseline, event/schema/source digests, off/no-byte parity, privacy/export/purge/restore tests, critic | collection and emitters remain off; remove candidate installation without touching source data |
+| 5 — next | **PN1 safe projections default off**, PN authority owner after PD0+PI0-A. | migrations/PG, current-authority/CAS/ACL, purge/rebuild/restore, fixture render and critic; every PN switch false | drop candidate projections through governed rollback; private W4 remains authority |
+| 6 — later | **W5/W6 external services and qualification**, custody and qualification owners. | managed services/keys/high-water/purge, durable current consent, five profiles/two reviewers, signed product/privacy/legal policy, current health/rollback | keep MyMind/publication/search/contact/provider switches off; exact service/key rollback |
+| 7 — later | **AJA conversation/deliverable/device matrix**, one reviewed exact release. | every advertised family in the closed catalog invoked by natural text, voice, Scout and direct eligible agent; conversational-vs-work truth; successful OpenAI research/document/image/workbook/PPTX presentation/chart/mixed package; previews/status/revisions/Drive on web+iPhone+iPad; real iPhone+iPad accessibility/background; honest provider receipts | retained exact release/Build; provider calls stop at budget/cost fence; no fake completion, visible tool preselection or Anthropic retry |
+| 8 — later | **PI0-B + PN2-PN5**, cohort/activation owners. | private dashboards/collection receipt, ordered human pilot, Explore, sponsored agent, open-web moderation/cache purge; independent critics | per-capability kill switches and purge; no universe-wide activation |
+| 9 — final | **W7/W8 resilience and soak**, release operator plus independent observer. | restrictive network, four-root encrypted offsite restore, HA/rollback, external attestation, exact final fixture, five cohorts, >=24h/10 sittings | retained prior release/images/data authority; any mismatch or prohibited leakage rolls back and stops |
+| 10 — post-E10 next | **Physical iPhone messaging-reference study**, Product Design owner, only after every order 0-9 obligation is accepted. Observe the founder's installed ChatGPT iPhone and Slack iPhone apps plus iMessage as the hybrid personal/multiplayer reference; compare them with the accepted desktop findings and turn the evidence into the next STRIDE chat/thread design decision. | founder-connected physical iPhone; exact app/version/device context; bounded journey manifest; screenshots/notes with private content minimized; comparative decision package covering personal continuity, group participation, agent/work state, attachments, notifications, reply/reaction grammar, handoff and accessibility; independent design critic | observational only; no account/message/contact mutation, no product edit, and no reopening accepted E10 scope during the study; unavailable until the founder connects and authorizes inspection of the physical phone |
+
+Founder-directed PD1 reference study: before the serialized product migration,
+observe the **native ChatGPT macOS app (not ChatGPT web)** as the primary desktop
+reference for surfacing active work, reasoning/progress, thread continuity,
+artifacts, intervention and agent state. Compare it with the native Buzz macOS
+app and Slack web in the founder's existing Chrome session. Translate the
+findings into STRIDE's private personal chats and threads as an exceptional
+multiplayer AI-work experience without importing another product's authority,
+memory or collaboration model. This is bounded observational design research;
+one Product Design/implementation owner still owns the resulting system and an
+independent design critic gates adoption. Continue the comparison throughout
+PD1 across every meaningful navigation, conversation, work, artifact,
+notification, attachment, revision, approval, collaboration, settings,
+accessibility and recovery surface rather than treating the first study as a
+one-time look. Inspect both light and dark appearances. The acceptance standard
+is a more coherent, useful and premium STRIDE experience than native ChatGPT,
+Slack and Buzz—not visual imitation or parity with their authority models. Any
+app that cannot be safely inspected remains an explicit smallest-reference gate
+rather than a guessed behavior.
+
+Founder-supplied native failure reference at 2026-08-10 17:32 PT: a 589x1280
+iPhone capture (source attachment SHA-256
+`7f5de9ec176c2bf4ba947055ded3edaa313c25717c2a46ecc5506bccc26f7e1e`)
+shows the request “Scout can you make a 10 slide deck pitching me this
+platform?” followed by a long internal “Packaging Studio staged process”
+description, then “make me that,” then a near-duplicate process description.
+There is no truthful work launch, active presentation card, stage/progress,
+artifact preview or next action. This is an explicit PD1 rejection fixture,
+not an accepted degraded state. The repaired experience must infer the
+presentation lane from natural language, respond once and compactly in the
+addressed worker's voice, start one private reversible workstream when source
+and authority are sufficient, and immediately surface one live card that
+evolves through research/story/design/build/review to editable PPTX, PDF,
+previews, notes, citations and Drive actions. Internal names such as
+`packaging_studio`, template IDs, routing logic and routine checkpoints stay
+behind the scenes; approval appears only for a genuinely governed effect or
+meaningful human intervention. The same no-process-dump/no-duplicate standard
+applies to recurring image/design, research and financial-model work.
+
+Founder-directed all-agentic company fixture: create a synthetic **STRIDE
+Agentic Lab** organization with AJ as the sole human owner/governor and an
+otherwise agent-only workforce. It is a cross-cutting acceptance fixture, not
+a second roadmap, a fake cohort or permission to create production state. Start
+locally/default-off with synthetic source material and no real-user data,
+external send, publication, provider spend or cohort enrollment. Exercise
+ordinary onboarding, private and group conversation, agent presence and
+addressability, workstream launch/delegation/intervention, agent-authored
+meeting sessions and explicitly machine-attributed transcripts, verified
+contributions, Work Records, memory/recall, attachments, artifacts/revisions,
+approvals, Work Search, Work-to-Network projection, correction/revocation,
+restart/replay and deletion/purge. Agents never masquerade as humans or ratify
+their own authority; AJ owns consent, governance and consequential approvals.
+The fixture passes only through normal rendered desktop/iPhone/iPad interaction
+plus API/ledger evidence, with a premium-UI design critic; seeded JSON, source
+tests or invisible scaffolding alone do not count. A live organization,
+provider-backed run or enrollment remains a separate action-time authority.
+
+Founder-directed post-E10 mobile reference study: after every existing E10
+implementation, release, device, service, cohort, resilience and soak
+obligation above is accepted, inspect the founder-connected **physical iPhone**
+versions of ChatGPT and Slack and compare them with iMessage. Treat iMessage as
+the hybrid reference between a private personal thread and a multiplayer
+messaging surface. Study how each handles continuity, group participation,
+agent/work visibility, attachments, replies/reactions, notifications, handoff
+and accessibility, then produce the next STRIDE personal-chat/thread design
+decision. This stage may not start early, does not reopen already accepted E10
+work, and remains at an external device/inspection-authority gate until the
+founder connects the phone at the end.
+
+### Now / next / later
+
+- **Now:** the isolated authority-filtered carrier, five-way
+  text/voice/Scout/direct-agent router, exact founder provider/model matrix,
+  goal-route restart fence, four concrete product adapters and bounded
+  synthetic Agentic Lab journey now pass their exact local/default-off gates
+  and independent critics in receipts `7064ee32...`, `10948ff1...`,
+  `9c83c4b1...`, `20ebacf8...`, `8e6a7b4c...`, `e9f5a2d7...`,
+  `dfdf214d...`, `0623ccee...`, `b07b46a7...`, `ff80a903...` and
+  `e4fb1548...`. Agentic Lab proves one
+  truthful completed-work/Open/private-contribution slice across rendered
+  desktop/iPhone/iPad with zero provider or external effects; it does not make
+  PD1 or E10 complete. The explicit presentation process-dump rejection is now
+  closed for the bounded desktop/430-responsive and simulated native iPhone/
+  iPad interaction classes: one natural request becomes one evolving
+  Presentation card, and its inspector/activity copy fails closed against
+  runtime identifiers. Receipt `b07b46a7...` now extends the same bounded
+  one-request/one-card, human-phase and providerless-restart gate through all
+  twelve recurring families, including Document, Meeting recap, Revision,
+  Scheduled work, Build/execution handoff, Mixed package, Data visualization
+  and Project plan; it does not accept any actual artifact. Receipt
+  `ff80a903...` additionally accepts only the loopback simulator/source slice
+  for orientation, Accessibility XXXL adaptive layout, software-keyboard
+  coexistence, accessibility focus/isolation and virtualized-list/shared-clock
+  architecture. Receipt `e4fb1548...` accepts the redesigned one-rail desktop
+  shell, quiet header, governed name-only organization chooser, labeled utility
+  group, responsive keyboard semantics and light/dark render parity. Under the
+  founder's explicit 2026-08-11 interim-release authority, the exact full Go
+  release gate is green (`go test ./... -count=1`, root `519.185s`, every
+  command/internal package passed) after the superseded shell assertions were
+  reconciled and independently re-gated. The exact next ready action is one
+  reviewed commit, branch/main push,
+  exact clean archive build/activation with retained rollback, and live
+  health/readiness/render verification. No red test or critic may be waived;
+  `stride-site/` and unrelated dirty bytes remain excluded. After verified
+  activation, resume functional VoiceOver, the remaining Dynamic Type spectrum,
+  actual Split View, pointer, Full Keyboard Access, measured runtime performance
+  and physical-device acceptance. The native reference study is honestly partial:
+  Buzz is observed, while native ChatGPT and Slack remain at the smallest
+  inspection gates recorded in `2d030367...`; do not pause other ready PD1 work
+  or guess their behavior. In parallel only where file ownership is disjoint,
+  complete PI0-A baseline/installation design with collection off. Preserve the
+  exact approval, replay, client-authority, named-agent, provider/model,
+  source-revision and child-restart boundaries; every non-admitted tool remains
+  unavailable. The reviewed interim release is authorized; no production
+  provider call, managed-key installation, production data mutation,
+  publication, collection, cohort or provider-spend action is authorized by
+  that release request.
+- **Next:** after exact live release verification, complete the remaining every-surface rendered PD1 journeys and the
+  functional/device accessibility and measured-performance matrix, finish the PI0-A baseline, then build and
+  gate PN1 default-off authority. Actual editable-PPTX presentation acceptance
+  stays in the later AJA deliverable/device matrix after exact provider budget
+  and release authority are available.
+- **Later:** install/qualify W5-W6 external services, complete the real AJA
+  deliverable/device matrix (including a successful presentation), then run
+  PI0-B/PN pilots, resilience acceptance, and the final W8 soak.
+- **Post-E10 next:** only after the entire preceding ledger is accepted, perform
+  the physical-iPhone ChatGPT/Slack/iMessage comparative study and independently
+  gate the resulting next-stage STRIDE chat/thread design decision.
+
+No additional founder product-direction or provider-choice permission is
+presently required. OpenAI is controlling and Anthropic product-generation is
+superseded. Exact per-route cost caps/receipts, managed service/key custody, independent
+privacy/security/DR approvals, device evidence, and cohort ceremonies remain
+action-time or evidence gates. Only the exact reviewed interim release ceremony
+described above is currently authorized.
+
+## Historical 2026-08-09 unified E10 reconciliation and public-network revision 2 — superseded
+
+This was the controlling goal and resume ledger at its observation boundary.
+It is retained as decision/evidence history, but the 2026-08-10 founder
+reconciliation checkpoint above is now the sole resume authority. A design,
+source file, route, test stub, migration, agent report, or local PASS is never
+promoted to implemented, deployed, activated, rendered, device-accepted, or
+externally accepted without the matching evidence.
 
 Normative inputs:
 
@@ -332,6 +977,44 @@ Public Workspace; inspect provenance; person/organization/workspace/agent
 profiles; offer help/collaborate; Work Search/contact; agent attribution and
 controls; settings/privacy; failure/revocation.
 
+#### Founder comparative-design evidence gate
+
+Before the target system is frozen, PD0 must inspect the strongest real
+accessible rendered experiences for ChatGPT, Claude, Buzz, and other genuinely
+relevant AI, social, and collaboration products across desktop plus available
+iPhone/iPad references. Marketing screenshots alone do not pass. Each observed
+pattern is bound to product, platform, access date, exact interaction job, and
+supporting screenshot or interaction evidence, then classified `adopt`,
+`adapt`, or `reject` with rationale. Inaccessible apps/accounts/screens are
+recorded as unavailable and request the smallest missing reference; the study
+never guesses or mutates user data.
+
+The comparative packet covers navigation placement/hierarchy, information
+density, workspace/thread/channel/profile/feed patterns, composers and agent
+affordances, transitions, responsive/adaptive behavior, spatial use,
+authorship/provenance, trust and recovery. It separates durable principles from
+trade dress and rejects copied icons, layouts, branded component anatomy,
+popularity mechanics, or patterns that violate voice-first Signal, verified
+contribution, human/agent citizenship, privacy, or authority boundaries. Every
+adopted/adapted conclusion maps to the parity audit, semantic contract,
+representative journey, migration owner, and acceptance test.
+
+The deeper authenticated/body-minimized ChatGPT Workstream extension is frozen
+at `docs/evidence/e10/stride-e10-pd0-chatgpt-workstream-study-20260810.md`.
+Current one-way receipt SHA-256 is
+`7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4`;
+its independent critic PASS is bound to reviewed study SHA-256
+`5bd071dbc68252bebfeb81dead39c411a95abc68e0f59e5daac26e0a1fa93687`
+and exact interaction manifest SHA-256
+`98027ae638ee1f0742725754cbdddfc0e7e8642cf990bd43958208bed82048fe`.
+It binds the Chat-versus-outcome distinction, project/source context,
+long-running steering, cross-chat Library, scheduled work, plugins/skills,
+first-class deliverables, and the multiplayer STRIDE adaptation. Its product
+handoff requires scoped context at launch, a durable Work Object and Run,
+honest stage/next-action/intervention/recovery cards, governed Artifact/Drive,
+and an explicit Work Record bridge into Network rather than a second chat or
+generic feed universe.
+
 The required parity matrix enumerates every current and planned surface on
 desktop web, native iPhone, and native iPad with exactly one status per platform:
 `equivalent_capability`, `intentional_platform_expression`, or
@@ -354,6 +1037,41 @@ Platform-native expression:
   keyboard/focus/shortcuts, pointer/hover/context menus, drag/drop, native
   share/files, safe areas, connect/disconnect/resume, and no stretched phone
   cards, gratuitous whitespace, or web fallback.
+
+#### Unified system and representative prototype gate
+
+One named Product Design implementation owner freezes the thesis, IA, semantic
+system, and serialized integration. Web/native/iPhone/iPad/accessibility/trust
+roles are adapter and evidence reviewers, not competing IA owners. The design
+packet must define one navigation grammar, typography/color/material/motion
+language, identity/provenance system, and surface taxonomy spanning global
+shell, contextual navigation, work canvas, inspector/sheet/popover,
+immersive/full-screen work, trust disclosure, and transient/recovery states.
+Motion communicates voice state, navigation continuity, pending effects, and
+recovery only, with reduced-motion equivalents; it never signals popularity or
+hides authority changes.
+
+Two end-to-end prototypes are mandatory on desktop web, native iPhone, and
+native iPad using the same semantic fixture/state model:
+
+| Prototype | Required journey | Hard boundary |
+|---|---|---|
+| Work | Signal/conversation -> Suggested Work -> run/intervention -> artifact -> review/verification -> Work Record | private authority, explicit agent attribution, offline/retry/revocation, no publication |
+| Network | private draft -> Public Workspace/typed Work Object -> Workstream/provenance/profile -> offer help or purpose-bound contact | fixture-only/default-off until independently authorized; moderation and publication parents remain unavailable |
+
+The rendered audit compares current and target STRIDE side by side at web
+1024/1280/1440/1728, representative compact/large iPhone layouts, and iPad
+compact/medium/expanded portrait/landscape/Split View/Stage Manager. It covers
+normal, loading, empty, offline, stale, unavailable, revoked, pending, failed,
+and restored states plus back/forward/reload/deep-link, resize/orientation,
+interruption/resume, continuation, keyboard/focus, pointer/hover, touch,
+Dynamic Type, VoiceOver, and reduced motion. PASS requires zero duplicate
+global shells, one stable destination/action vocabulary, legible human/agent/
+system authorship and audience/provenance, preserved state across permitted
+transitions, no hidden route/platform fallback, and no Work-to-Network
+"universe switch." Screenshots/video support the evidence; interaction logs,
+state assertions, accessibility results, and an independent design critic are
+controlling.
 
 PD1 acceptance requires normal interaction rather than static screenshots:
 navigation, scrolling, loading, transitions, keyboard/focus, hover, touch
@@ -555,7 +1273,11 @@ collection, and public agent participation stay off until their exact signed
 gate. Disablement and rollback must preserve private work and body-free lineage
 while purging derived eligibility.
 
-### Resume Here — compact completed evidence and exact next action
+### Historical Resume Here — superseded; do not execute as the current queue
+
+This subsection preserves the exact evidence and intended next action at its
+observation boundary. The 2026-08-10 founder reconciliation checkpoint above
+replaces every imperative or mutable current-state statement below.
 
 Preserve W0-W4 and W5-W8 deterministic receipts at their named evidence class;
 do not reset progress to zero. Revision 2 does not change W4 private authority,
@@ -566,7 +1288,7 @@ evidence wherever the public-network or unified-platform claim is new.
 Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
-remains untracked and excluded. The current production boundary is exact commit
+remains untracked and excluded. At that historical checkpoint, the production boundary was exact commit
 `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, ledger generation 58, with
 retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`. W4 private
 authority is live at schema 2/generation 157; W5, W6, and every public network
@@ -656,7 +1378,7 @@ exact production commit
 retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`, desktop AJA
 research/image/workbook and Drive evidence, Build 52 EAS/ASC/IPA evidence, and
 the explicit failed/open cells. W4 private authority is live; W5/W6/public paths
-remain off. The immediate next product actions are: fund or deliberately reroute
+remain off. The then-immediate product actions were: fund or deliberately reroute
 the Anthropic document/deck lane under separate spend authority; enroll Tyler
 using his exact Apple Account email and run physical iPhone plus iPad acceptance;
 and separately decide whether to activate the receipt-backed native Save-only
@@ -864,7 +1586,7 @@ complete only at the scope named; local implementation is not release proof.
   backed browser QA pass. Earlier static fixture screenshots remain labeled
   static; the canonical receipt binds the later registered-live captures.
 
-**Historical exact resume point — superseded by Resume Here above:** before W4,
+**Historical exact resume point — superseded by the 2026-08-10 founder reconciliation checkpoint above:** before W4,
 the next instruction was to request and, only if separately granted, execute
 **E10-W4** against the independently verified W0 freeze and W1-W3 receipts.
 The generation-30 `d4c827c...` private proof and Builds 48/49 are retained only
@@ -1151,9 +1873,14 @@ risk.
 
 ### MVP surfaces and APIs
 
-- Top-bar organization switcher: current organization/role, up to three active
-  memberships, pending badges, **Create organization**, **Join organization**,
-  and an honest `3 of 3` state. Zero-membership accounts enter this chooser.
+- Top-bar organization switcher: the closed control shows only the current
+  organization name and a subtle disclosure. Its menu may reveal up to three
+  active memberships plus **Create organization**; role, pending state,
+  capacity, **Join organization**, leave and administration stay in governed
+  Settings > Organizations rather than crowding the global header. A
+  zero-membership account enters the chooser. The menu consumes only the
+  current server projection and never turns a cosmetic client selection into
+  tenant authority.
 - Settings > Organizations: switch, leave, pending requests, capacity, and role.
   Organization > People/Requests is owner/admin-only, with approve/deny,
   role/removal, ownership transfer, conflict explanations, and an audit trail.
@@ -3829,11 +4556,11 @@ or a qualifying earlier-wave receipt:
 ## 18. Historical wave and resume evidence
 
 This section preserves the pre-revision-2 resume record for provenance. It is
-superseded as current execution authority by **Resume Here — compact completed
-evidence and exact next action** above; its evidence classifications remain
-valid only at the scopes they name.
+superseded as current execution authority by the **2026-08-10 founder
+reconciliation checkpoint** above; its evidence classifications remain valid
+only at the scopes they name.
 
-**Current wave:** E10-W5-W8 external qualification and acceptance after the
+**Historical wave at that boundary:** E10-W5-W8 external qualification and acceptance after the
 default-off carrier and migration 17 production rollout. E10-W0 through E10-W3
 are `deterministic_verified`; W4 is `production_private_live`; W5-W8
 deterministic implementations are shipped but their external gates remain

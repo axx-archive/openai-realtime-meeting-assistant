@@ -31,22 +31,26 @@ test('terminal work opens from the authorized read and receipts only mutating Sa
   assert.match(bubble, /Save to Drive unavailable/);
   assert.match(screen, /fileName: normalizedName/);
   assert.match(client, /assistant\/threads\/follow-up/);
-  assert.doesNotMatch(screen, /## Work log|Source trail and review receipts|progressPercent/);
+  assert.doesNotMatch(screen, /## Work log|Source trail and review receipts/);
   assert.match(bubble, /workProgressCopy/);
   assert.match(bubble, /progressPercent/);
 });
 
-test('running and failed research expose honest progress and recovery actions', () => {
+test('running and failed work exposes family-aware progress and recovery actions', () => {
   assert.doesNotMatch(bubble, /if \(workThread\?\.active\) return null/);
   assert.match(bubble, /output_truncated/);
   assert.match(bubble, /before a deliverable could be accepted/);
   assert.match(bubble, /View details/);
-  assert.match(bubble, /Retry research/);
+	assert.match(bubble, /Retry \$\{workThread\.family\.toLowerCase\(\)\}/);
+	assert.match(bubble, /workThread\.agentName} · \{workThread\.family/);
+	assert.match(bubble, /workThread\.progressCopy/);
 	assert.doesNotMatch(bubble, /review the draft|partial draft/iu);
   assert.match(bubble, /accessible=\{!\(workProposal \|\| workThread\)\}/);
   assert.match(bubble, /Open live work details/);
-  assert.match(bubble, /started this research/);
+  assert.match(bubble, /started this (?:workstream|goal|work)/);
   assert.doesNotMatch(bubble, /Confirmed · launched once/);
+	assert.doesNotMatch(screen, /Current stage: \$\{currentStage\}/);
+	assert.match(screen, /safeWorkProgressNote\(note, phase\)/);
 });
 
 test('a failed revision stays openable but is labeled honestly', () => {
@@ -59,10 +63,10 @@ test('a failed revision stays openable but is labeled honestly', () => {
 test('Drive browse and hash search mint exact destination-bound grants', () => {
   assert.match(attachmentSheet, /Browse Drive/);
   assert.match(composer, /activeDocumentQuery\(nextValue\)/);
-  assert.match(screen, /onDocumentQuery=\{\(query\) => openDrivePicker\('message', query, true\)\}/);
-  assert.match(screen, /onBrowseDrive=\{\(query = ''\) => openDrivePicker\('reply', query, true\)\}/);
+  assert.match(screen, /onDocumentQuery=\{\(query\) =>\s*openDrivePicker\(["']message["'], query, true\)\s*\}/);
+  assert.match(screen, /onBrowseDrive=\{\(query = ["']["']\) => openDrivePicker\(["']reply["'], query, true\)\}/);
   assert.match(client, /assistant\/attachments\/from-file/);
-  assert.match(client, /!attachment\?\.ref \|\| !attachment\.mime \|\| !attachment\.sourceId \|\| !attachment\.sourceRevision/);
+  assert.match(client, /!attachment\?\.ref\s*\|\|\s*!attachment\.mime\s*\|\|\s*!attachment\.sourceId\s*\|\|\s*!attachment\.sourceRevision/);
   assert.doesNotMatch(screen, /downloadUrl.*sourceId|file\.name.*sourceRevision/);
 });
 
@@ -71,5 +75,5 @@ test('Drive file management puts rename in the vertical-dot menu', () => {
   assert.match(files, /verticalEllipsis/);
   assert.match(files, /'Rename', 'Move'/);
   assert.match(files, /api\.renameFile\(sessionToken, file\.id, name\)/);
-  assert.match(client, /method: 'PATCH', body: \{ id, name \}/);
+  assert.match(client, /method: ["']PATCH["'],\s*body: \{ id, name \}/);
 });

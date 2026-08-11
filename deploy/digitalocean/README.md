@@ -31,13 +31,8 @@ Edit `.env`:
 
 ```bash
 OPENAI_API_KEY=sk-proj-...
-OPENAI_REALTIME_MODEL=gpt-realtime-2.1
-OPENAI_REALTIME_REASONING_EFFORT=high
 OPENAI_REALTIME_VAD_TYPE=server_vad
-OPENAI_REALTIME_TRANSCRIPTION_MODEL=gpt-live-transcribe
 MEETING_TRANSCRIPT_LANE_ENABLED=true
-OPENAI_TRANSCRIPT_MODEL=gpt-transcribe
-OPENAI_DICTATION_TRANSCRIPT_MODEL=gpt-transcribe
 MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io
@@ -47,16 +42,6 @@ BONFIRE_CANONICAL_DATABASE_URL=postgres://bonfire:<same-password>@canonical-post
 BONFIRE_CANONICAL_TENANT_ID=bonfire
 BONFIRE_CANONICAL_MODE=shadow
 MEETING_BRAIN_INTERVAL=5m
-OPENAI_BRAIN_MODEL=gpt-5.6-luna
-OPENAI_BRAIN_REASONING_EFFORT=max
-OPENAI_RESEARCH_MODEL=gpt-5.6-sol
-OPENAI_RESEARCH_REASONING_EFFORT=high
-OPENAI_BOARD_MODEL=gpt-5.6-terra
-OPENAI_SUGGESTION_MODEL=gpt-5.6-luna
-OPENAI_SCOUT_ROUTER_MODEL=gpt-5.6-luna
-OPENAI_SCOUT_CHAT_MODEL=gpt-5.6-luna
-OPENAI_SCOUT_EXTRACTION_MODEL=gpt-5.6-luna
-OPENAI_SCOUT_REASONING_EFFORT=max
 MEETING_BRAIN_BACKFILL=false
 MEETING_TIME_ZONE=America/Los_Angeles
 PION_NAT1TO1_IP=<droplet-public-ip>
@@ -69,13 +54,14 @@ MEETING_TURN_REALM=<domain>
 MEETING_HOST=<droplet-public-ip>.nip.io
 ```
 
-Research and deep-research deliverables resolve through the dedicated
-`OPENAI_RESEARCH_MODEL` and `OPENAI_RESEARCH_REASONING_EFFORT` accessors and
-are pinned above to Sol/high. The ambient brain and ordinary marketplace-worker
-fleet remain independently pinned to Luna/max through `OPENAI_BRAIN_MODEL` and
-`OPENAI_BRAIN_REASONING_EFFORT`; changing the research seat must never silently
-up-route that fleet. The OpenAI worker does not consume the job-level
-`BONFIRE_DELIVERABLE_EFFORT` value.
+The OpenAI provider/model/reasoning matrix is compiled into the server and is
+not deployment configuration: Luna/medium routing and extraction,
+Terra/high conversation/brain/board/house-style/taste/tool work, Sol/high
+research/orchestration/narrative/deliverables, Sol/max final review, Realtime
+2.1 at private high/shared medium, GPT Live Transcribe for live input,
+GPT Transcribe for committed/file input, GPT Image 2 high, and
+text-embedding-3-small. Stale model/effort variables are ignored and should be
+removed from the live environment rather than copied into a new release.
 
 Codex-style server-side execution is disabled in the production-style Compose
 candidate. The former reusable `codex-runner` image/profile was not a qualified
@@ -105,7 +91,10 @@ BONFIRE_WORKFLOW_TICKER_MAX_PER_PASS=2   # max launches per tick
 
 Its live config and last-pass counters appear under `checks.agents.workflowTicker` in `/readyz`.
 
-To activate the Fable 5 orchestrator (goals, grill reports, packaging deliverables) once a live `ANTHROPIC_API_KEY` is available, follow the Anthropic block in `.env.example` and the step-by-step runbook in `docs/ops3-fable-activation.md` (env lines, restart, and the `/assistant/goal` liveness check). This does not activate Codex execution.
+Do not install or activate an Anthropic/Fable route. Provider-backed product
+work is OpenAI-only, with model and reasoning assignments owned by the server.
+`docs/ops3-fable-activation.md` is retained solely as superseded operational
+history and must not be executed.
 
 For a real domain, set `MEETING_HOST` to the domain after creating an A record that points at the Droplet.
 

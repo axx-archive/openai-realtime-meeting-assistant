@@ -105,6 +105,9 @@ func (runner *productionAmbientReplayStageRunner) RunAmbientReplayStage(ctx cont
 	if !ambientReplayStageInManifest(manifest, stage) {
 		return AmbientReplayStageResult{}, ErrAmbientReplayInvalid
 	}
+	if !ambientReplayStageMatchesCanonicalRoute(stage) {
+		return AmbientReplayStageResult{}, ErrAmbientReplayDrift
+	}
 	if err := validateAmbientReplayStageInput(manifest, input); err != nil {
 		return AmbientReplayStageResult{}, err
 	}
@@ -347,20 +350,15 @@ func (runner *productionAmbientReplayStageRunner) respond(ctx context.Context, r
 	if stage.Provider == "deterministic" {
 		return "", AmbientReplayUsage{}, ErrAmbientReplayInvalid
 	}
+	if stage.Provider != providerOpenAI {
+		// Historical manifests remain decodable evidence, but no new replay may
+		// admit a retired provider route.
+		return "", AmbientReplayUsage{}, ErrAmbientReplayUnavailable
+	}
 	apiKey := ""
 	runner.app.mu.Lock()
 	apiKey = runner.app.apiKey
 	runner.app.mu.Unlock()
-	if stage.Provider == providerAnthropic {
-		text, err := createAnthropicTextResponse(ctx, currentAnthropicAPIKey(), anthropicTextRequest{
-			Model: stage.Model, Instructions: request.Instructions, Input: request.Input,
-			Effort: request.ReasoningEffort, MaxTokens: request.MaxOutputTokens, Seat: request.Seat,
-		})
-		if err != nil {
-			return "", AmbientReplayUsage{}, err
-		}
-		return text, ambientReplayEstimatedUsage(request, text), nil
-	}
 	if runner.responder == nil {
 		runner.responder = createOpenAITextResponse
 	}

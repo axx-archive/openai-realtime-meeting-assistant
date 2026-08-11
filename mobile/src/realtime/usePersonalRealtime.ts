@@ -259,6 +259,7 @@ export function usePersonalRealtime(options: {
       ) return;
       const response = await api.realtimeTool(
         sessionToken,
+        call.callId,
         call.name,
         argumentsValue,
         toolAbortController.signal,

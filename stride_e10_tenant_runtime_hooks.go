@@ -65,7 +65,11 @@ func withStrideE10TenantRequestUse(request *http.Request, surface StrideE10Tenan
 		func(principal StrideE10TenantPrincipal) error {
 			bound := principal
 			canonical := context.WithValue(ctx, strideE10TenantSurfaceContextKey{}, surface)
-			canonical = context.WithValue(canonical, strideE10TenantPrincipalContextKey{}, bound)
+			canonical, release, err := strideE10BindCurrentHeldTenantAuthority(canonical, currentStrideE10TenantRuntimeConverter(), bound, strideE10SessionHashFromRequest(request), surface)
+			if err != nil {
+				return err
+			}
+			defer release()
 			return use(canonical, &bound)
 		})
 }

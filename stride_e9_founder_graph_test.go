@@ -374,10 +374,10 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	}
 
 	// The founder can send Mary a real authenticated message in her private
-	// direct thread. With providers fenced, a reply is neither required nor
-	// evidence here; the durable human message is the product contract. Private
-	// direct material must not silently enter the shared conversation ledger or
-	// mint a Suggested Work record.
+	// direct thread. A fenced provider seat must return one truthful named
+	// unavailable outcome without a provider call or work launch. Private direct
+	// material must not silently enter the shared conversation ledger or mint a
+	// Suggested Work record.
 	sharedEventsBeforeDirect := 0
 	if err := app.strideRuntime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
 		snapshot, err := domains.ConversationLedger.Snapshot()
@@ -390,8 +390,8 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	directMessageText := "Mary, please review the Dog Perfect launch positioning and keep every public claim evidence-backed."
-	directPost := e9DecodeFounder[e9FounderChatResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodPost, "/assistant/chat-threads/"+hired.Seat.DirectThreadID+"/messages", ajCookies, map[string]any{"text": directMessageText}, ""), http.StatusOK))
-	if !directPost.OK || directPost.Message.ID == "" || directPost.Message.Role != "user" || directPost.Message.AuthorEmail != "aj@shareability.com" || directPost.Message.Text != directMessageText || scoutChatThreadVisibility(directPost.Thread) != scoutChatVisibilityPrivate || directPost.Answer.ID != "" || directPost.ProviderCalls != 0 || !directPost.ProviderExecutionFenced {
+	directPost := e9DecodeFounder[e9FounderChatResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodPost, "/assistant/chat-threads/"+hired.Seat.DirectThreadID+"/messages", ajCookies, map[string]any{"text": directMessageText, "operationId": "e9-direct-agent-message-0001"}, ""), http.StatusOK))
+	if !directPost.OK || directPost.Message.ID == "" || directPost.Message.Role != "user" || directPost.Message.AuthorEmail != "aj@shareability.com" || directPost.Message.Text != directMessageText || scoutChatThreadVisibility(directPost.Thread) != scoutChatVisibilityPrivate || directPost.Answer.ID == "" || directPost.Answer.Role != "scout" || directPost.Answer.AuthorName != "Mary" || directPost.Answer.IntentOutcome != string(conversationIntentUnavailable) || directPost.Answer.CausedByMessageID != directPost.Message.ID || !strings.Contains(directPost.Answer.Text, "assigned provider seat is not qualified") || directPost.ProviderCalls != 0 || !directPost.ProviderExecutionFenced {
 		t.Fatalf("authenticated Mary direct message=%+v", directPost)
 	}
 	directAfterMessage, _, err := app.scoutChatThreadByID("aj@shareability.com", hired.Seat.DirectThreadID)
@@ -688,9 +688,21 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"usePersonalRealtime", "useComposerDictation", "stopVoiceForComposer", "The cradle has one stable meaning", "composerDictation.commit()"} {
+	for _, required := range []string{"usePersonalRealtime", "The cradle has one stable meaning"} {
 		if !bytes.Contains(canvasSource, []byte(required)) {
 			t.Fatalf("mobile Canvas composer source is missing %q", required)
+		}
+	}
+	if bytes.Contains(canvasSource, []byte("useComposerDictation")) {
+		t.Fatal("mobile Canvas must keep the Home cradle voice-first and leave dictation to conversation threads")
+	}
+	threadSource, err := os.ReadFile(filepath.Join("mobile", "src", "screens", "ThreadScreen.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"useComposerDictation", "onTranscript: ({ text }) => {", "void send(text);", `accessibilityLabel="Dictate a message"`} {
+		if !bytes.Contains(threadSource, []byte(required)) {
+			t.Fatalf("mobile thread composer source is missing %q", required)
 		}
 	}
 

@@ -437,7 +437,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	}
 	answer, err := createOpenAITextResponse(ctx, apiKey, request)
 	if reason, rejected := openAIOutputRejectionReason(err); rejected && reason == "max_output_truncation" {
-		// Luna/max can legitimately spend much of the output allowance on
+		// Terra/high can legitimately spend much of the output allowance on
 		// reasoning before emitting visible text. Retry once with the same fixed
 		// reasoning policy and a larger output envelope; this is budget recovery,
 		// not an unreported change of model or reasoning effort.
@@ -1438,8 +1438,8 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 	if coreAvailable {
 		lines = append(lines,
 			"This answer seat is conversational and cannot mutate Stride or launch work. Native app actions are handled before this answer is called; never promise that a later confirmation will execute an app control from this answer path.",
-			"The capabilities below are deliverable workflows that the separate router may propose for confirmation. When the user asks what work is available, describe them accurately, but do not describe ordinary in-app controls as goal loops or claim that a workflow has launched without a launch receipt.",
-			"When a request maps to a capability on that list, or the user asks whether you can do something on it, say yes plainly, name the capability, and offer to set it up for confirmation; never say that work on this list is beyond this chat, and never deny a capability that is on it. The separate router creates the proposal, and nothing launches without its explicit confirmation receipt.",
+			"The capabilities below are server-owned deliverable contracts. The separate intent router starts private, reversible, within-budget work directly from an explicit natural-language request; it asks once only for a genuinely missing input, holds publication/external sending/deletion/audience expansion/production or repository mutation/material spend for approval, and reports unsupported work as unavailable.",
+			"When the user asks what work is available, describe it accurately without presenting a tool picker. Never claim that work started without a durable work-card receipt, and never tell the user to choose a tool, model, template, or deliverable type.",
 			assistantCapabilitiesDigest(),
 		)
 	} else {
@@ -1453,8 +1453,8 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 
 func scoutRuntimeSelfKnowledge() string {
 	return fmt.Sprintf(
-		"Runtime self-knowledge: answer model: %s. Router model: %s. Extraction and attachment model: %s. Proactive-attention model: %s. Text reasoning effort for answer, router, extraction/attachment, and proactive-attention: %s. Voice model: %s. Voice reasoning effort: %s. These are separate server-resolved routes; equal values do not imply one shared route. Text reasoning effort is fixed by current server configuration, not adaptive per question. Other coworker and workflow calls use their own server-pinned seat and effort. When asked about model or reasoning configuration, report these server-supplied facts exactly and never infer a different setting from how difficult the question feels.",
-		scoutChatModel(), scoutRouterModel(), scoutExtractionModel(), scoutChatModel(), scoutReasoningEffort(), realtimeModel(), realtimeReasoningEffort(),
+		"Runtime self-knowledge: answer model: %s at %s. Router model: %s at %s. Extraction and attachment model: %s at %s. Proactive-attention model: %s at %s. Voice model: %s. Voice reasoning effort: %s. These are separate server-resolved routes; equal values do not imply one shared route. Reasoning effort is fixed by exact server-owned job type, not adaptive per question or selectable by a client, user phrase, model output, or persisted assignment. Other coworker and workflow calls use their own server-pinned seat and effort. When asked about model or reasoning configuration, report these server-supplied facts exactly and never infer a different setting from how difficult the question feels.",
+		scoutChatModel(), scoutReasoningEffort(), scoutRouterModel(), scoutRouterReasoningEffort(), scoutExtractionModel(), scoutExtractionReasoningEffort(), scoutRouterModel(), scoutRouterReasoningEffort(), realtimeModel(), realtimeReasoningEffort(),
 	)
 }
 

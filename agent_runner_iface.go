@@ -24,11 +24,9 @@ type AgentJob struct {
 	Origin      map[string]string // originKind/originId/originMeetingId (delivery)
 	RequestedBy string            // signed-in email; provenance + authority checks
 
-	// Effort / MaxTokens override the runner's env defaults for THIS job. The
-	// /goal engine stamps a heavier budget on the deliverable subtask (via the
-	// goalDeliverable metadata flag) so the contract-bearing artifact does not
-	// truncate. Zero/empty means "use the runner default", so every other job is
-	// unchanged.
+	// Effort / MaxTokens are retained only for historical Anthropic-run receipt
+	// decoding and its isolated tests. Active OpenAI/Codex routes ignore them;
+	// model and reasoning are selected by the server-owned job lane.
 	Effort    string
 	MaxTokens int
 
@@ -70,18 +68,17 @@ type AgentProgress struct {
 }
 
 // AgentRunner is the one seam. RunJob is non-blocking: it returns a channel of
-// progress the engine drains onto the artifact. The codex sidecar provider
-// emits one {queued} progress then closes; its HTTP callback lands the terminal
-// state through the existing artifact-update path. The in-process anthropic
-// provider streams execute → review → gate transitions as they happen.
+// progress the engine drains onto the artifact. Active admission is limited to
+// the OpenAI text runner or an independently fenced Codex adapter; historical
+// Anthropic assignments resolve to the unavailable stub.
 type AgentRunner interface {
 	Name() string
 	Capabilities() AgentCapabilities
 	RunJob(ctx context.Context, job AgentJob) (<-chan AgentProgress, error)
 }
 
-// Runner name constants. These are the values BONFIRE_AGENT_RUNNER /
-// BONFIRE_EXECUTION_RUNNER resolve to.
+// Runner name constants include historical persisted labels for decode and
+// fail-closed compatibility.
 const (
 	agentRunnerAnthropicFable = "anthropic_fable"
 	agentRunnerCodexSidecar   = "codex_sidecar"
@@ -90,20 +87,12 @@ const (
 	agentRunnerStub           = "stub"
 )
 
-// defaultReviewModel is the dedicated reviewer/ship-gate model (Wave 3 item
-// 16). Reviews read WHOLE artifact bodies (goalReviewArtifactBody), so the
-// judging seat wants Opus-tier context at Opus rates rather than the Fable
-// ceiling, while orchestration (decompose/report/verify) stays on the
-// orchestrator model.
-const defaultReviewModel = "claude-opus-4-8"
+// defaultReviewModel is the founder-approved final review/ship-gate model.
+// The actual goal engine also pins max reasoning for this seat.
+const defaultReviewModel = "gpt-5.6-sol"
 
-// reviewModel resolves the reviewer/gate model — the review-side twin of the
-// per-subtask runner override above: env-with-default, resolved once at engine
-// construction and routed per call (goal_engine.callReviewModel). The judging
-// seat is a worker seat under the routing doctrine (Sonnet/Opus tier only,
-// never Haiku), so the dial rides the doctrine guard.
 func reviewModel() string {
-	return doctrineModelOrDefault("BONFIRE_REVIEW_MODEL", defaultReviewModel)
+	return defaultReviewModel
 }
 
 // newAgentJob derives an AgentJob from a launched thread. It reads the additive
@@ -159,24 +148,16 @@ func agentJobOrigin(meta map[string]string) map[string]string {
 // back-compat aliases and the keyless fallback. It is a pure function (no app)
 // so the selection matrix is testable without a live board.
 //
-// Default: anthropic_fable when ANTHROPIC_API_KEY is set, else the bounded
-// text worker. Legacy Codex env aliases resolve to the stub while E9 keeps the
-// production admission gate compile-time closed.
+// Default: the bounded OpenAI Responses worker. Anthropic aliases are retired
+// and fail closed through the stub; the presence of an Anthropic credential
+// must never alter provider selection.
 func selectedAgentRunnerName() string {
 	explicit := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_AGENT_RUNNER")))
 	switch explicit {
 	case "":
-		if hasAnthropicAPIKey() {
-			return agentRunnerAnthropicFable
-		}
 		return legacyWorkerRunnerName()
 	case agentRunnerAnthropicFable, "anthropic", "fable":
-		if hasAnthropicAPIKey() {
-			return agentRunnerAnthropicFable
-		}
-		// Keyless fallback: an anthropic request without the key would 503;
-		// degrade to today's worker so the shell stays up.
-		return legacyWorkerRunnerName()
+		return agentRunnerStub
 	case agentRunnerCodexSidecar, "codex", "codex_exec", "sidecar":
 		if !codexExecutionEnabled() {
 			return agentRunnerStub
@@ -224,7 +205,7 @@ func selectedExecutionRunnerName() string {
 		}
 		return agentRunnerCodexLocal
 	case agentRunnerAnthropicFable, "anthropic", "fable":
-		return agentRunnerAnthropicFable
+		return agentRunnerStub
 	case "none":
 		return agentRunnerStub
 	case "", agentRunnerCodexSidecar, "codex", "sidecar":
@@ -245,23 +226,26 @@ func selectedExecutionRunnerName() string {
 // exactly as produceAgentThreadArtifact did.
 func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextResponder) AgentRunner {
 	name := selectedAgentRunnerName()
-	// Research is an OpenAI execution seat. It must not inherit the legacy
-	// Anthropic orchestrator merely because an Anthropic key is present in the
-	// process environment; provenance shown to the user must match Sol/high.
-	if normalizeAgentThreadMode(job.Mode) == "research" {
-		name = agentRunnerOpenAIText
-	}
 	// A /goal subtask carries the concrete runner its capability match assigned
 	// (assignGoalRunners). Honoring it routes shell/repo subtasks to the
 	// execution runner while everything else stays on the orchestrator. Only
 	// goal children set this key, so non-goal threads are unchanged.
-	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" && normalizeAgentThreadMode(job.Mode) != "research" {
+	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" {
 		name = override
+	} else if normalizeAgentThreadMode(job.Mode) == "research" {
+		// Research is an OpenAI execution seat. It must not inherit a deployment
+		// default merely because a legacy credential is present. An explicit
+		// retired persisted assignment above still fails closed.
+		name = agentRunnerOpenAIText
 	}
 	name = admittedAgentRunnerName(name)
+	if name == agentRunnerOpenAIText && !openAITextJobIsToolIndependent(job) {
+		if app != nil && app.openAIToolRuntime != nil && app.openAIToolRuntime.Enabled && app.openAIToolRuntime.Carrier != nil && app.openAIToolRuntime.Carrier.Enabled {
+			return &openAIToolProductRunner{app: app, runtime: app.openAIToolRuntime}
+		}
+		return &stubAgentRunner{}
+	}
 	switch name {
-	case agentRunnerAnthropicFable:
-		return newAnthropicFableRunner(app)
 	case agentRunnerCodexSidecar:
 		return &codexSidecarAgentRunner{app: app, local: false}
 	case agentRunnerCodexLocal:
@@ -273,10 +257,31 @@ func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextR
 	}
 }
 
+// openAITextJobIsToolIndependent names the exact work that can honestly use
+// the current single-response writer without the retired Bonfire function
+// loop. Research has its own hosted read-only web-search contract. A process
+// writer is admitted only when the durable goal stage carries a concrete
+// output contract and all prior-stage inputs were assembled into its prompt.
+// Ordinary chat work, free-form goals, and direct tools remain unavailable
+// until the OpenAI function-tool loop reaches authority/capability parity.
+func openAITextJobIsToolIndependent(job AgentJob) bool {
+	if normalizeAgentThreadMode(job.Mode) == "research" {
+		return true
+	}
+	metadata := job.thread.Artifact.Metadata
+	return strings.TrimSpace(metadata["goalParentId"]) != "" &&
+		strings.TrimSpace(metadata["goalSubtaskId"]) != "" &&
+		strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") &&
+		strings.TrimSpace(metadata["outputContract"]) != ""
+}
+
 // admittedAgentRunnerName is the final runner-selection choke point. Legacy
 // env aliases and persisted assignedRunner metadata cannot bypass the E9
 // compile-time closure even if an earlier resolver regresses.
 func admittedAgentRunnerName(name string) string {
+	if name == agentRunnerAnthropicFable {
+		return agentRunnerStub
+	}
 	if (name == agentRunnerCodexSidecar || name == agentRunnerCodexLocal) && !codexExecutionEnabled() {
 		return agentRunnerStub
 	}
@@ -285,15 +290,12 @@ func admittedAgentRunnerName(name string) string {
 
 // resolveAssignedRunnerName validates a per-subtask runner override against the
 // known runner names; an unknown/empty value returns "" so the env-selected
-// default stands. The anthropic path still degrades keyless (an anthropic
-// override with no key would 503) by falling back to the legacy worker.
+// default stands. Retired Anthropic assignments fail closed rather than
+// executing or silently changing to a less-capable OpenAI path.
 func resolveAssignedRunnerName(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case agentRunnerAnthropicFable:
-		if hasAnthropicAPIKey() {
-			return agentRunnerAnthropicFable
-		}
-		return legacyWorkerRunnerName()
+	case agentRunnerAnthropicFable, "anthropic", "fable":
+		return agentRunnerStub
 	case agentRunnerCodexSidecar:
 		if !codexExecutionEnabled() {
 			return agentRunnerStub
@@ -375,8 +377,4 @@ func drainAgentProgress(out <-chan AgentProgress, onProgress func(AgentProgress)
 		}
 	}
 	return result, runErr
-}
-
-func hasAnthropicAPIKey() bool {
-	return strings.TrimSpace(currentAnthropicAPIKey()) != ""
 }

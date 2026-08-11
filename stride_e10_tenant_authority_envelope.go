@@ -139,6 +139,34 @@ func MintStrideE10TenantAuthorityEnvelopeForSurface(ctx context.Context, convert
 	return envelope, nil
 }
 
+func mintStrideE10TenantAuthorityEnvelopeFromHeldContext(ctx context.Context, surface StrideE10TenantSurface, purpose string, expiresAt time.Time) (StrideE10TenantAuthorityEnvelope, error) {
+	runtime := strideE10CurrentTenantEnvelopeRuntime()
+	fence := strideE10HeldTenantAuthorityFromContext(ctx)
+	sessionSubjectDigest := strideE10TenantSessionHashFromContext(ctx)
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	now := time.Now().UTC()
+	prefix := map[StrideE10TenantSurface]string{StrideE10TenantSurfaceWorkQueue: strideE10TenantAuthorityPurposeCodexJobPrefix, StrideE10TenantSurfaceScout: strideE10TenantAuthorityPurposeScoutPrefix, StrideE10TenantSurfaceBrain: strideE10TenantAuthorityPurposeBrainPrefix}[surface]
+	if runtime == nil || runtime.keys == nil || fence == nil || !canonical || principal != fence.principal || sessionSubjectDigest != fence.snapshot.SessionHash || prefix == "" || !strings.HasPrefix(purpose, prefix) || !isHexDigest(strings.TrimPrefix(purpose, prefix)) || !now.Before(expiresAt.UTC()) || expiresAt.UTC().After(now.Add(strideE10TenantAuthorityEnvelopeMaxTTL)) {
+		return StrideE10TenantAuthorityEnvelope{}, ErrStrideE10TenantAuthorityStale
+	}
+	key, err := runtime.keys.CurrentStrideE10TenantAuthorityEnvelopeKey(ctx)
+	if err != nil || !validStrideE10TenantEnvelopeKey(key) {
+		return StrideE10TenantAuthorityEnvelope{}, ErrStrideE10TenantAuthorityInvalid
+	}
+	envelope := StrideE10TenantAuthorityEnvelope{
+		Version: strideE10TenantAuthorityEnvelopeVersion, PersonID: principal.PersonID,
+		OrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID,
+		MembershipRevision: principal.OrganizationMembershipRev, SessionSubjectDigest: sessionSubjectDigest,
+		SessionRevision: principal.ActiveOrganizationSessionRev, AuthorityGeneration: principal.AuthorityGeneration,
+		Surface: surface, Purpose: purpose, ExpiresAt: expiresAt.UTC(), KeyID: key.ID, KeyVersion: key.Version,
+	}
+	envelope.MAC = strideE10TenantEnvelopeMAC(key, envelope)
+	if envelope.validateShape(now) != nil {
+		return StrideE10TenantAuthorityEnvelope{}, ErrStrideE10TenantAuthorityInvalid
+	}
+	return envelope, nil
+}
+
 func strideE10TenantActionPurpose(prefix string, values ...string) string {
 	raw, _ := json.Marshal(values)
 	sum := sha256.Sum256(raw)
@@ -167,6 +195,15 @@ func StrideE10TenantAuthorityPurposeForCodexJob(artifactID, threadID, mode, quer
 }
 
 func withStrideE10TenantEnvelopeAuthority(ctx context.Context, envelope *StrideE10TenantAuthorityEnvelope, surface StrideE10TenantSurface, now time.Time, effect func(StrideE10TenantPrincipal) error) error {
+	if effect == nil {
+		return ErrStrideE10TenantAuthorityInvalid
+	}
+	return withStrideE10TenantEnvelopeAuthorityContext(ctx, envelope, surface, now, func(_ context.Context, principal StrideE10TenantPrincipal) error {
+		return effect(principal)
+	})
+}
+
+func withStrideE10TenantEnvelopeAuthorityContext(ctx context.Context, envelope *StrideE10TenantAuthorityEnvelope, surface StrideE10TenantSurface, now time.Time, effect func(context.Context, StrideE10TenantPrincipal) error) error {
 	converter := currentStrideE10TenantRuntimeConverter()
 	if converter == nil || converter.gate == nil || !converter.gate.Enabled() || converter.mode != StrideE10TenantConversionCutover || envelope == nil || effect == nil || !oneOf(string(surface), string(StrideE10TenantSurfaceWorkQueue), string(StrideE10TenantSurfaceWorker), string(StrideE10TenantSurfaceScout), string(StrideE10TenantSurfaceBrain)) {
 		return ErrStrideE10TenantAuthorityStale
@@ -177,6 +214,13 @@ func withStrideE10TenantEnvelopeAuthority(ctx context.Context, envelope *StrideE
 	if (surface == StrideE10TenantSurfaceWorker && envelope.Surface != StrideE10TenantSurfaceWorkQueue) || (surface != StrideE10TenantSurfaceWorker && envelope.Surface != surface) {
 		return ErrStrideE10TenantAuthorityStale
 	}
+	if fence := strideE10HeldTenantAuthorityFromContext(ctx); fence != nil && fence.converter == converter && fence.snapshot.SessionHash == envelope.SessionSubjectDigest {
+		principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+		if !canonical || principal != fence.principal || principal.PersonID != envelope.PersonID || principal.ActiveOrganizationID != envelope.OrganizationID || principal.OrganizationMembershipID != envelope.MembershipID || principal.OrganizationMembershipRev != envelope.MembershipRevision || principal.ActiveOrganizationSessionRev != envelope.SessionRevision || principal.AuthorityGeneration != envelope.AuthorityGeneration {
+			return ErrStrideE10TenantAuthorityStale
+		}
+		return effect(ctx, principal)
+	}
 	resolution, err := converter.Resolve(ctx, surface, envelope.SessionSubjectDigest)
 	if err != nil || resolution.Capability == nil {
 		return ErrStrideE10TenantAuthorityStale
@@ -185,7 +229,12 @@ func withStrideE10TenantEnvelopeAuthority(ctx context.Context, envelope *StrideE
 		if !converter.gate.Enabled() || principal.PersonID != envelope.PersonID || principal.ActiveOrganizationID != envelope.OrganizationID || principal.OrganizationMembershipID != envelope.MembershipID || principal.OrganizationMembershipRev != envelope.MembershipRevision || principal.ActiveOrganizationSessionRev != envelope.SessionRevision || principal.AuthorityGeneration != envelope.AuthorityGeneration {
 			return ErrStrideE10TenantAuthorityStale
 		}
-		return effect(principal)
+		bound, release, err := strideE10BindCurrentHeldTenantAuthority(ctx, converter, principal, envelope.SessionSubjectDigest, surface)
+		if err != nil {
+			return err
+		}
+		defer release()
+		return effect(bound, principal)
 	})
 }
 

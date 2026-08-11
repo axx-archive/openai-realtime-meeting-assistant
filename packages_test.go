@@ -631,9 +631,8 @@ func mustFindPackage(t *testing.T, app *kanbanBoardApp, id string) venturePackag
 	return record
 }
 
-// The three Scout tools ride the shared dispatch and the private voice
-// allowlists, with the same schema/allowlist/dispatch contract as
-// propose_codex_task.
+// The three Scout tools retain server executors while the E10 conversation
+// router removes their schemas from the model-controlled private voice surface.
 func TestPackageToolsContract(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -646,8 +645,8 @@ func TestPackageToolsContract(t *testing.T) {
 		if !strings.Contains(toolsJSON, `"name":"`+name+`"`) {
 			t.Fatalf("kanbanTools missing %s", name)
 		}
-		if !privateRealtimeVoiceToolAllowed(name) {
-			t.Fatalf("%s must be allowed on the private voice surface", name)
+		if privateRealtimeVoiceToolAllowed(name) || !privateRealtimeVoiceServerActionAllowed(name) {
+			t.Fatalf("%s was not fenced behind the server", name)
 		}
 	}
 	if !strings.Contains(toolsJSON, `"package_id":{"description":"id or exact name of the venture package this task belongs to; omit if none."`) {
@@ -658,14 +657,15 @@ func TestPackageToolsContract(t *testing.T) {
 		t.Fatalf("marshal private tools: %v", err)
 	}
 	for _, name := range []string{"create_package", "attach_to_package", "advance_package_stage"} {
-		if !strings.Contains(string(rawPrivate), `"name":"`+name+`"`) {
-			t.Fatalf("private voice session must expose %s", name)
+		if strings.Contains(string(rawPrivate), `"name":"`+name+`"`) {
+			t.Fatalf("private voice session exposed unadmitted %s", name)
 		}
 	}
-	for _, instructions := range []string{app.privateRealtimeVoiceSessionInstructions(), app.sessionInstructions()} {
-		if !strings.Contains(instructions, "create_package / attach_to_package / advance_package_stage") {
-			t.Fatal("both voice instruction strings must teach the package tools")
-		}
+	if strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "create_package / attach_to_package / advance_package_stage") {
+		t.Fatal("private voice instructions advertised direct package tools")
+	}
+	if !strings.Contains(app.sessionInstructions(), "create_package / attach_to_package / advance_package_stage") {
+		t.Fatal("room voice instructions lost its separately governed package contract")
 	}
 
 	// shared dispatch: create → attach → advance, attributed to Scout.

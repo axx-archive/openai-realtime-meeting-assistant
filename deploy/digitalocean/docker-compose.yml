@@ -11,10 +11,10 @@ services:
         BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-unqualified}
         BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-unqualified}
         BONFIRE_BUILD_INPUT_MANIFEST_SHA256: ${BONFIRE_BUILD_INPUT_MANIFEST_SHA256:-unqualified}
-    # .env carries every runtime key into the app container, including the
-    # OPS-3 Fable activation set (ANTHROPIC_API_KEY, BONFIRE_AGENT_RUNNER,
-    # BONFIRE_ORCHESTRATOR_*/BONFIRE_DELIVERABLE_* dials). Do not move those
-    # into an `environment:` block here — .env is the single source of truth.
+    # .env carries runtime secrets into the app container. Current
+    # provider-backed product work is OpenAI-only and its model/reasoning map is
+    # server-owned; stale Anthropic/runner dials are ignored or fail closed.
+    # Do not move secrets into an `environment:` block here.
     env_file:
       - ${BONFIRE_BASE_ENV_FILE:-.env}
     environment:

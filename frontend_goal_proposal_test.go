@@ -2,9 +2,8 @@ package main
 
 // Card 088 frontend contract: the free-form goal proposal card (kind goal_run)
 // and the 069 governance-lane caption. A goal_run renders like the
-// conversational branch — one editable objective + a package field — and its
-// Run converges on runGoalPipeline with NO toolTemplate (a plain goal), so it
-// reuses the single /assistant/goal door rather than forking a bespoke fetch.
+// conversational branch. Governed approval renders the persisted objective
+// read-only so accepting cannot expand its effect class.
 
 import (
 	"os"
@@ -34,15 +33,16 @@ func TestIndexGoalRunProposalCard(t *testing.T) {
 		// the governance-lane caption + its label mapping
 		"scout-proposal-card__lane",
 		"function scoutProposalLaneLabel(lane)",
+		"const isExactApproval = String(proposal.intentOutcome || message.intentOutcome || '') === 'approval_required' || Boolean(String(proposal.effectClass || '').trim())",
+		"objectiveInput.readOnly = isExactApproval",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing goal_run/lane hook %q", want)
 		}
 	}
 
-	// Scope the card body and prove a goal_run does NOT take the workstream/image
-	// proposal route (which never runs a pipeline) — it must fall through to
-	// runGoalPipeline. isGoal is deliberately absent from that gate.
+	// Scope the card body and prove all branches accept through the proposal
+	// route and none starts a second client-owned goal pipeline.
 	cardStart := strings.Index(html, "function buildScoutProposalCardNode(message)")
 	cardEnd := strings.Index(html, "function markProposalCardResolved")
 	if cardStart < 0 || cardEnd < 0 || cardEnd <= cardStart {
@@ -50,17 +50,15 @@ func TestIndexGoalRunProposalCard(t *testing.T) {
 	}
 	cardBody := html[cardStart:cardEnd]
 	if !strings.Contains(cardBody, "if (isWorkstream || isImage) {") {
-		t.Fatal("the Run branch must gate only workstream/image on the proposal route so a goal_run falls through to runGoalPipeline")
+		t.Fatal("the specialized workstream/image proposal route is missing")
 	}
-	if strings.Contains(cardBody, "if (isWorkstream || isImage || isGoal)") {
-		t.Fatal("a goal_run must NOT take the workstream/image proposal route — it launches via runGoalPipeline")
+	if !strings.Contains(cardBody, "isExactApproval ? proposal.objective") {
+		t.Fatal("governed approval must post the exact persisted objective")
 	}
-	// The package field renders for a goal (it can target a package binder), so
-	// its gate must not exclude isGoal.
-	if !strings.Contains(cardBody, "if (!isWorkstream && !isImage) {") {
-		t.Fatal("the package field must render for tool runs and goals alike")
+	if strings.Contains(cardBody, "paletteBuildPackageField()") {
+		t.Fatal("goal proposal exposes a client-owned package/tool picker")
 	}
-	if !strings.Contains(cardBody, "runGoalPipeline({") {
-		t.Fatal("the card's Run must converge on runGoalPipeline")
+	if strings.Contains(cardBody, "runGoalPipeline({") || strings.Contains(cardBody, "toolTemplate: String(proposal.toolId") {
+		t.Fatal("goal proposal forks into a second client-selected launch")
 	}
 }

@@ -137,6 +137,12 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID st
 	if err := app.artifactFollowUpRouteError(artifact); err != nil {
 		return scoutAgentThread{}, err
 	}
+	if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" && artifact.Metadata["source"] == "scout_thread" {
+		if err := app.verifyGoalChildRoute(artifact); err != nil {
+			return scoutAgentThread{}, err
+		}
+		return app.resumeGoalWithFeedback(parentID, requestedBy, replyText, artifact.ID)
+	}
 	if artifact.Metadata["source"] == "scout_thread" {
 		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachmentScope)
 	}
@@ -144,9 +150,30 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID st
 }
 
 func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx context.Context, user *userAccount, artifact meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) (scoutAgentThread, error) {
+	return app.dispatchAuthorizedArtifactFollowUpWithConversationOperation(ctx, user, artifact, replyText, requestedBy, teamReplies, destination, files, reservationID, nil)
+}
+
+func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithConversationOperation(ctx context.Context, user *userAccount, artifact meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string, binding *conversationFollowUpBinding) (scoutAgentThread, error) {
 	artifact, ok := app.revalidateArtifactSnapshot(artifact)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
+	}
+	if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" && artifact.Metadata["source"] == "scout_thread" {
+		if err := app.verifyGoalChildRoute(artifact); err != nil {
+			return scoutAgentThread{}, err
+		}
+		parent, parentOK := authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
+		if !parentOK {
+			return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
+		}
+		plan, planOK := decodeGoalPlan(parent.Metadata["goalPlan"])
+		if !planOK || plan.Cancelled {
+			return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
+		}
+		if binding != nil {
+			return app.resumeGoalWithFeedbackAuthorizedOperation(parent, requestedBy, replyText, artifact.ID, binding)
+		}
+		return app.resumeGoalWithFeedbackAuthorized(parent, requestedBy, replyText, artifact.ID)
 	}
 	if artifact.Metadata["source"] == "scout_thread" {
 		if err := app.artifactFollowUpRouteError(artifact); err != nil {
@@ -164,6 +191,10 @@ func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx
 				files:         append([]scoutChatFileAttachment(nil), files...),
 			}
 		}
+		if binding != nil {
+			runID := "agent-thread-followup-" + sha256Hex([]byte(binding.OperationID))[:24]
+			return app.launchAgentThreadFollowUpWithTenantAuthoritySnapshot(artifact, replyText, firstNonEmptyString(requesterEmail, requestedBy), teamReplies, attachmentScope, runID, nil, binding)
+		}
 		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, firstNonEmptyString(requesterEmail, requestedBy), teamReplies, attachmentScope)
 	}
 	parentID := artifactGoalParentID(artifact)
@@ -177,6 +208,9 @@ func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx
 	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
 	if !ok || plan.Cancelled {
 		return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
+	}
+	if binding != nil {
+		return app.resumeGoalWithFeedbackAuthorizedOperation(parent, requestedBy, replyText, artifact.ID, binding)
 	}
 	return app.resumeGoalWithFeedbackAuthorized(parent, requestedBy, replyText, artifact.ID)
 }
@@ -198,6 +232,9 @@ func (app *kanbanBoardApp) revalidateArtifactSnapshot(expected meetingMemoryEntr
 // deliverable is droppable, feedback just cannot land right now.
 func (app *kanbanBoardApp) artifactFollowUpRouteError(artifact meetingMemoryEntry) error {
 	if artifact.Metadata["source"] == "scout_thread" {
+		if strings.TrimSpace(artifact.Metadata["goalParentId"]) != "" {
+			return app.verifyGoalChildRoute(artifact)
+		}
 		return nil
 	}
 	goalID := artifactGoalParentID(artifact)
@@ -241,7 +278,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 	if strideE10TenantCutoverEnabled() {
 		return scoutAgentThread{}, ErrStrideE10TenantAuthorityStale
 	}
-	return app.launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected, replyText, requestedBy, teamReplies, attachmentScope, "", nil)
+	return app.launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected, replyText, requestedBy, teamReplies, attachmentScope, "", nil, nil)
 }
 
 func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthority(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope, runID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
@@ -260,7 +297,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthority(expected
 	return thread, err
 }
 
-func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope, reservedRunID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope, reservedRunID string, envelope *StrideE10TenantAuthorityEnvelope, binding *conversationFollowUpBinding) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -279,6 +316,9 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(
 	}
 	if artifact.Metadata["source"] != "scout_thread" {
 		return scoutAgentThread{}, fmt.Errorf("follow-ups only run on agent thread reports")
+	}
+	if strings.TrimSpace(artifact.Metadata["goalParentId"]) != "" {
+		return scoutAgentThread{}, fmt.Errorf("goal child feedback must resume its governed parent workstream")
 	}
 	requesterAccount, requesterOK := authenticatedRequester(requestedBy)
 	if !requesterOK {
@@ -354,10 +394,19 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(
 		"followUpStartedAt": now,
 		"followUpError":     "",
 	}
+	if binding != nil {
+		receipts, receiptErr := appendConversationFollowUpReceipt(artifact.Metadata, *binding)
+		if receiptErr != nil {
+			return scoutAgentThread{}, receiptErr
+		}
+		runningMetadata[conversationFollowUpReceiptMetadataKey] = receipts
+	}
 	if envelope != nil {
-		if persistErr := app.persistStrideE10ScoutAuthority(runID, envelope); persistErr != nil {
+		persistedEnvelope, persistErr := app.persistStrideE10ScoutAuthority(runID, envelope)
+		if persistErr != nil {
 			return scoutAgentThread{}, persistErr
 		}
+		envelope = persistedEnvelope
 		runningMetadata["tenantAuthorityRef"] = runID
 	}
 	for _, key := range agentThreadProfileMetadataKeys {
@@ -474,7 +523,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 		}
 		run.thread = freshThread
 		instructions := app.agentThreadFollowUpInstructionsForThread(run.thread, run.version)
-		var providerAttachments []json.RawMessage
+		var openAIAttachments []openAIInputContent
 		if run.attachmentScope != nil && len(run.attachmentScope.files) > 0 {
 			requester := accountStore().findUser(run.requesterEmail)
 			if requester == nil {
@@ -487,49 +536,33 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			// Construct provider bytes only after the provider-time authority
 			// check. The reader rechecks each source around I/O, then the final
 			// fence below catches revocation or audience changes during the read.
-			providerAttachments = app.followUpAttachmentContentBlocksAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID)
+			openAIAttachments = app.followUpOpenAIAttachmentContentAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID)
 			if !app.followUpAttachmentSourcesAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID) {
 				return "", fmt.Errorf("attachment authorization changed before the workstream could read it; attach the file again")
 			}
 		}
 		var raw string
 		var responderErr error
-		// Sonnet 5 fronts follow-ups whenever an Anthropic key is present
-		// (packaging-os §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps
-		// the gpt-5.5 responder path below byte-for-byte.
-		if anthropicKey := currentAnthropicAPIKey(); anthropicKey != "" && normalizeAgentThreadMode(run.thread.Mode) != "research" {
-			worker = agentThreadWorkerAnthropic
-			workerBoundary = "anthropic_messages_artifact_writer"
-			raw, responderErr = createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
-				Model:        chatModel(),
-				Instructions: instructions,
-				Input:        run.input,
-				Effort:       "low",
-				MaxTokens:    anthropicFollowUpMaxTokens,
-				Attachments:  providerAttachments,
-			})
-		} else {
-			apiKey := app.currentOpenAIAPIKey()
-			if strings.TrimSpace(apiKey) == "" {
-				return "", fmt.Errorf("OPENAI_API_KEY is not configured")
-			}
-			liveWebSearch := agentThreadUsesLiveWebSearch(run.thread)
-			raw, responderErr = responder(ctx, apiKey, openAITextRequest{
-				Model: agentThreadTextModel(run.thread),
-				// Keyless-fallback twin: same seat as the keyed follow-up
-				// path, provider openai recorded at the wire seam (W0 item 4).
-				Seat:            seatFollowup,
-				Instructions:    instructions,
-				Input:           run.input,
-				ReasoningEffort: agentThreadTextReasoningEffort(run.thread),
-				Verbosity:       "medium",
-				MaxOutputTokens: agentThreadMaxOutputTokensForThread(run.thread),
-				EnableWebSearch: liveWebSearch,
-				ValidateOutput: func(text string) error {
-					return validateAgentThreadTerminalArtifact(run.thread, text)
-				},
-			})
+		apiKey := app.currentOpenAIAPIKey()
+		if strings.TrimSpace(apiKey) == "" {
+			return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 		}
+		liveWebSearch := agentThreadUsesLiveWebSearch(run.thread)
+		raw, responderErr = responder(ctx, apiKey, openAITextRequest{
+			Model:           agentThreadTextModel(run.thread),
+			Seat:            seatFollowup,
+			Workflow:        firstNonEmptyString(strings.TrimSpace(run.thread.Artifact.Metadata["toolTemplate"]), "agent_thread_followup_"+normalizeAgentThreadMode(run.thread.Mode)),
+			Instructions:    instructions,
+			Input:           run.input,
+			Attachments:     openAIAttachments,
+			ReasoningEffort: agentThreadTextReasoningEffort(run.thread),
+			Verbosity:       "medium",
+			MaxOutputTokens: agentThreadMaxOutputTokensForThread(run.thread),
+			EnableWebSearch: liveWebSearch,
+			ValidateOutput: func(text string) error {
+				return validateAgentThreadTerminalArtifact(run.thread, text)
+			},
+		})
 		if responderErr != nil {
 			return "", responderErr
 		}

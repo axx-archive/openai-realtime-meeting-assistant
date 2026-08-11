@@ -11,7 +11,7 @@ const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...
 
 test('thread dictation holds locally, then uses the normal message send path once', () => {
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
-  assert.match(thread, /onTranscript: \(\{ text \}\) => \{ void send\(text\); \}/);
+  assert.match(thread, /onTranscript: \(\{ text \}\) => \{\s*void send\(text\);\s*\}/u);
   assert.match(thread, /useComposerDictation/);
   assert.match(thread, /accessibilityLabel="Dictate a message"/);
   assert.match(thread, /if \(dictationCanCommit\) void dictation\.commit\(\);/);
@@ -22,7 +22,7 @@ test('thread dictation holds locally, then uses the normal message send path onc
   assert.doesNotMatch(thread, /Stop dictation/);
 });
 
-test('Canvas keeps live Scout and recorded composer dictation distinct', () => {
+test('Canvas keeps live Scout singular and leaves dictation to conversation screens', () => {
   const canvas = source('src', 'screens', 'CanvasScreen.tsx');
   assert.match(canvas, /usePersonalRealtime/);
   assert.match(canvas, /realtime\.enabled/);
@@ -77,11 +77,7 @@ test('Canvas keeps live Scout and recorded composer dictation distinct', () => {
   assert.match(realtime, /cleanupScope !== 'owned'[\s\S]*deactivateVideoMeeting\(expectedMediaSessionGeneration\)/);
   assert.match(realtime, /cleanupScope === 'detached'[\s\S]*mediaSessionGenerationRef\.current === null/);
   assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
-  assert.match(canvas, /useComposerDictation/);
-  assert.match(canvas, /accessibilityLabel="Message Scout"/);
-  assert.match(canvas, /accessibilityLabel="Dictate a message"/);
-  assert.match(canvas, /composerDictation\.commit\(\)/);
-  assert.match(canvas, /submitComposerText\(text\)/);
+  assert.doesNotMatch(canvas, /useComposerDictation|Message Scout|composerDictation|submitComposerText/);
   const config = source('src', 'config.ts');
   assert.match(config, /EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true'/);
   const eas = JSON.parse(source('eas.json')) as {

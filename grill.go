@@ -687,7 +687,7 @@ func buildPrivateGrillReportQuery(packageName string, persona string, reason str
 // through the gate primitive — the readiness dial moves only on VERIFIED fixes.
 // Runs on the grill-delta watcher, downstream of the existing grill
 // agent-thread filing, so both grill seams (room and private) converge here.
-// KEYLESS (no ANTHROPIC_API_KEY) the loop is a silent no-op — the scorecard
+// PROVIDERLESS (no OPENAI_API_KEY) the loop is a silent no-op — the scorecard
 // files and the dial behaves exactly as before, mirroring how every agentic
 // surface degrades when its runner is absent.
 
@@ -798,8 +798,9 @@ func (app *kanbanBoardApp) closeGrillObjectionLoop(artifact meetingMemoryEntry, 
 		// No package identity, no ledger lineage to close against.
 		return artifact
 	}
-	if !hasAnthropicAPIKey() {
-		// Keyless degrade: today's behavior, exactly (the codex-sidecar-absence rule).
+	if strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
+		// Providerless degrade: the grill itself remains available, but the
+		// objection panel cannot claim a reviewed result.
 		return artifact
 	}
 

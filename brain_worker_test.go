@@ -116,8 +116,8 @@ func TestMeetingBrainWorkerWritesSummaryForNewTranscripts(t *testing.T) {
 	}
 
 	entry, err := app.runMeetingBrainOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.Model != "gpt-5.5" {
-			t.Fatalf("model=%q, want gpt-5.5", request.Model)
+		if request.Model != meetingBrainModel() || request.ReasoningEffort != meetingBrainReasoningEffort() {
+			t.Fatalf("route=%q/%q, want %s/%s", request.Model, request.ReasoningEffort, meetingBrainModel(), meetingBrainReasoningEffort())
 		}
 		if !strings.Contains(request.Input, "Tom: Boot Barn meeting went well.") {
 			t.Fatalf("brain input missing attributed transcript: %s", request.Input)

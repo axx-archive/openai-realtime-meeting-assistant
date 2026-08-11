@@ -105,26 +105,208 @@ func TestDiscoveryStartersSeeded(t *testing.T) {
 	if !strings.Contains(empty, "buildScoutStarterRow()") {
 		t.Error("ensureScoutChatEmptyState must seed starters on the private empty state")
 	}
+	for _, want := range []string{"What do you want to accomplish?", "Scout can answer, start private work, or ask for approval when it actually matters."} {
+		if !strings.Contains(empty, want) {
+			t.Errorf("private empty state missing conversation-first copy %q", want)
+		}
+	}
 	// The starters must lifecycle with the empty state (torn down together when
 	// a message arrives), not linger orphaned.
 	if !strings.Contains(html, "'.scout-chat-empty, .scout-starters'") {
 		t.Error("starters are not removed alongside .scout-chat-empty — they will orphan after the first message")
 	}
-	// Starters route to the catalog (the tool palette), covering the headline runs.
+	// Starters place ordinary recurring requests in the composer; they never
+	// select a capability or expose internal process names.
 	row := functionBody(html, "function buildScoutStarterRow(")
-	for _, want := range []string{"packaging studio", "deck outline", "deep research", "grill", "openToolPalette("} {
+	for _, want := range []string{"Create a polished 10-slide pitch deck", "Research ", "Build a financial model", "Design ", "scout-starter__label", "scout-starter__example", "scoutChatInput.value = s.prompt"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("buildScoutStarterRow missing %q", want)
 		}
 	}
+	for _, forbidden := range []string{"packaging studio", "openToolPalette(", "Browse all tasks"} {
+		if strings.Contains(row, forbidden) {
+			t.Errorf("buildScoutStarterRow exposes internal tool choice %q", forbidden)
+		}
+	}
 }
 
-func TestDiscoveryComposerHintsLauncher(t *testing.T) {
+func TestDiscoveryComposerInvitesNaturalLanguage(t *testing.T) {
 	html := readIndexForComposerPolish(t)
-	if !strings.Contains(html, "`ask ${directAgent || 'Scout'}, or tap + to run a task`") {
-		t.Error("composer placeholder no longer hints the task launcher")
+	if !strings.Contains(html, "`ask ${directAgent || 'Scout'} anything`") {
+		t.Error("composer placeholder must invite ordinary conversation and work")
 	}
-	if !strings.Contains(html, `aria-label="Run a task or tool"`) {
-		t.Error("the '+' tools button is not labeled as a task launcher")
+	if strings.Contains(html, `aria-label="Run a task or tool"`) {
+		t.Error("normal composer exposes a tool picker")
+	}
+}
+
+func TestPD1PresentationRejectionFixtureRendersOneConversationAndOneWorkState(t *testing.T) {
+	html := readIndexForComposerPolish(t)
+	fixture := functionBody(html, "function pd1PresentationWorkFixtureThread(")
+	for _, want := range []string{
+		"pd1PresentationFixture", "Can you make a 10 slide deck pitching me this platform?",
+		"Create a polished 10-slide pitch deck for the STRIDE platform", "Presentation in progress",
+		"intentOutcome: 'start_private_work'", "kind: 'thread'", "mode: 'goal'",
+	} {
+		if !strings.Contains(fixture, want) {
+			t.Errorf("PD1 rendered presentation fixture missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Packaging Studio", "staged process", "human checkpoint", "toolTemplate"} {
+		if strings.Contains(fixture, forbidden) {
+			t.Errorf("PD1 rendered presentation fixture leaks internal process copy %q", forbidden)
+		}
+	}
+	if strings.Count(fixture, "kind: 'thread'") != 1 {
+		t.Fatalf("PD1 presentation fixture must contain one work card, got %d", strings.Count(fixture, "kind: 'thread'"))
+	}
+	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "progressbar", "openDesktopWorkContext", "Private, durable work", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
+		if !strings.Contains(renderer, want) {
+			t.Errorf("compact presentation work card missing %q", want)
+		}
+	}
+	if strings.Contains(renderer, "packaging_studio") || strings.Contains(renderer, "Packaging Studio") {
+		t.Fatal("compact presentation work card exposes internal process identity")
+	}
+	responsive := functionBody(html, "function scoutGoalRefRecordNode(")
+	for _, want := range []string{"scoutDesktopGoalWorkCardNode(message, artifact)", ".scout-chat-work-card[data-work-artifact-id="} {
+		if !strings.Contains(responsive, want) {
+			t.Errorf("responsive presentation work card missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"goalCardNodeFor(artifact)", "goal loop"} {
+		if strings.Contains(responsive, forbidden) {
+			t.Errorf("responsive presentation path exposes legacy runtime UI %q", forbidden)
+		}
+	}
+	cleanup := functionBody(html, "function clearScoutChatThreadNodes(")
+	if !strings.Contains(cleanup, ".scout-chat-work-card") {
+		t.Fatal("compact presentation work card is not retired before a thread rebuild and can duplicate")
+	}
+}
+
+func TestPD1RecurringWorkUsesOnePremiumPresentationGrammar(t *testing.T) {
+	html := readIndexForComposerPolish(t)
+	family := functionBody(html, "function desktopWorkFamily(")
+	for _, want := range []string{"Financial model", "Presentation", "Design", "Research", "Document", "Meeting recap", "Revision", "Scheduled work", "Build", "Mixed package", "Data visualization", "Project plan"} {
+		if !strings.Contains(family, want) {
+			t.Errorf("desktop work family grammar missing %q", want)
+		}
+	}
+	phase := functionBody(html, "function desktopWorkPhase(")
+	if !strings.Contains(phase, "build|draft|synth|execute|codex|assembl|compos|prepar") {
+		t.Fatal("desktop work phase grammar must map assemble/compose/prepare stages to Building like native")
+	}
+	for _, want := range []string{"ref?.currentStage", "'completed'", "'needs_attention'"} {
+		if !strings.Contains(phase, want) {
+			t.Errorf("desktop work phase grammar is not aligned with the thread/native projection: missing %q", want)
+		}
+	}
+	threadProjection := functionBody(html, "function scoutThreadFromChatMessage(")
+	for _, want := range []string{"governedWorkThread", "start_private_work", "projectedArtifactId"} {
+		if !strings.Contains(threadProjection, want) {
+			t.Errorf("conversation-owned work without a material artifact cannot reach the premium card: missing %q", want)
+		}
+	}
+	threadRenderer := functionBody(html, "function scoutChatMessageRecordNode(")
+	if !strings.Contains(threadRenderer, "String(message.intentOutcome || '') === 'start_private_work'") {
+		t.Fatal("desktop must route every server-classified private work thread through the premium family card")
+	}
+	premiumCard := functionBody(html, "function scoutGoalRefRecordNode(")
+	for _, want := range []string{
+		"desktopWorkCardIdentity(message?.thread, artifact)",
+		"desktopWorkCardIdentity(candidate?.thread, null)",
+		"Artifact identity remains for Open/Save only",
+	} {
+		if !strings.Contains(premiumCard, want) {
+			t.Errorf("artifact attachment can split one evolving work card: missing %q", want)
+		}
+	}
+	if strings.Contains(premiumCard, "candidate?.thread?.artifactId || (String(candidate?.intentOutcome") {
+		t.Fatal("artifactless conversation work must still collapse repeated projections to one evolving premium card")
+	}
+	identity := functionBody(html, "function desktopWorkCardIdentity(")
+	if !strings.Contains(identity, "ref?.id || ref?.artifactId || artifact?.id") {
+		t.Fatal("work-card identity must prefer immutable run identity before the attached material artifact")
+	}
+	safeNote := functionBody(html, "function desktopSafeWorkNote(")
+	for _, approved := range []string{"shaping the deck brief", "gathering reliable sources", "building the first draft", "checking the work", "preparing your deliverable", "waiting for your input", "ready for review", "saving the final deliverable", "drafting the document", "turning the meeting into decisions", "preparing the revision", "setting the schedule", "preparing the handoff", "assembling the package", "building the visualization", "mapping the plan"} {
+		if !strings.Contains(safeNote, approved) {
+			t.Errorf("desktop progress sanitizer does not admit reviewed copy %q", approved)
+		}
+	}
+	if !strings.Contains(safeNote, "approvedNotes[value.toLowerCase()] || fallback") {
+		t.Fatal("desktop progress sanitizer must fail closed to the stable phase for every unreviewed note")
+	}
+	if strings.Contains(safeNote, "return exposesRuntime ? fallback : value") {
+		t.Fatal("desktop progress sanitizer still relies on a bypassable runtime-token denylist")
+	}
+	context := functionBody(html, "function renderDesktopWorkContext(")
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "Governance and provenance", "routing, authority and output contracts server-managed"} {
+		if !strings.Contains(context, want) {
+			t.Errorf("desktop work inspector missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"orchestratorModel", "reasoningEffort", "`run ${ref.id", "artifact ${ref.artifactId", "stage ${artifact?.metadata?.currentStage"} {
+		if strings.Contains(context, forbidden) {
+			t.Errorf("desktop work inspector exposes internal runtime marker %q", forbidden)
+		}
+	}
+}
+
+func TestPD1RecurringWorkAccessibilityAndLiveFocusContract(t *testing.T) {
+	html := readIndexForComposerPolish(t)
+	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
+	for _, want := range []string{
+		"aria-live", "aria-atomic", "role', 'progressbar'", "aria-valuenow",
+		"View ${family} activity, ${phase.label}", "focus-visible",
+	} {
+		if !strings.Contains(renderer, want) && !strings.Contains(html, want) {
+			t.Errorf("desktop work card accessibility contract missing %q", want)
+		}
+	}
+	focusSnapshot := functionBody(html, "function scoutWorkCardFocusSnapshot(")
+	for _, want := range []string{"document.activeElement", ".scout-chat-work-card__open", "workArtifactId"} {
+		if !strings.Contains(focusSnapshot, want) {
+			t.Errorf("work-card focus snapshot missing %q", want)
+		}
+	}
+	focusRestore := functionBody(html, "function restoreScoutWorkCardFocus(")
+	for _, want := range []string{"data-work-artifact-id", ".scout-chat-work-card__open", "preventScroll: true"} {
+		if !strings.Contains(focusRestore, want) {
+			t.Errorf("work-card live-rerender focus restore missing %q", want)
+		}
+	}
+	activeRender := functionBody(html, "function renderActiveScoutThread(")
+	for _, want := range []string{"scoutWorkCardFocusSnapshot()", "restoreScoutWorkCardFocus(focusedWorkCardId)"} {
+		if !strings.Contains(activeRender, want) {
+			t.Errorf("active thread render does not preserve focused work control: missing %q", want)
+		}
+	}
+	if !strings.Contains(html, "event.key === 'Escape' && !chatContextRail?.hidden") || !strings.Contains(html, "closeDesktopChatContext()") {
+		t.Fatal("desktop work inspector must close on Escape and use the existing focus-return contract")
+	}
+}
+
+func TestOrganizationSwitcherKeepsClosedStateQuietAndMovesChoicesIntoMenu(t *testing.T) {
+	html := readIndexForComposerPolish(t)
+	body := functionBody(html, "function renderOrganizationSwitcher(")
+	for _, want := range []string{"organizationProjectionAvailable", "const currentLabel", "organizationName.textContent = currentLabel", "organizationMenuItems.replaceChildren()", "role', 'menuitemradio'"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("organization chooser contract missing %q", want)
+		}
+	}
+	switcher := pd1Slice(t, html, `<button id="topbarOrganizationSwitcher"`, `</button>`)
+	for _, forbidden := range []string{"topbarOrganizationRole", "topbarOrganizationCount", "topbarOrganizationPending", "organization-label", "organization-meta"} {
+		if strings.Contains(switcher, forbidden) {
+			t.Errorf("closed organization chooser still exposes dense metadata %q", forbidden)
+		}
+	}
+	if !strings.Contains(switcher, `id="topbarOrganizationName"`) || !strings.Contains(switcher, `aria-haspopup="menu"`) {
+		t.Fatal("closed organization chooser must expose only the current name and menu disclosure")
+	}
+	if !strings.Contains(html, `id="topbarOrganizationCreate"`) || !strings.Contains(html, `Create organization`) {
+		t.Fatal("organization menu must expose the create-organization action")
 	}
 }

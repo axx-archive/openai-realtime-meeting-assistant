@@ -545,11 +545,11 @@ func TestScoutChatRouterImageResultStartsDirectGeneration(t *testing.T) {
 	}
 	t.Cleanup(func() { startScoutChatImageAsyncWithPending = previousRunner })
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.ReasoningEffort != scoutReasoningEffort() {
-			t.Fatalf("prompt optimizer reasoning effort=%q, want %q", request.ReasoningEffort, scoutReasoningEffort())
+		if request.Model != scoutImageDirectionModel() || request.ReasoningEffort != scoutImageDirectionReasoningEffort() {
+			t.Fatalf("prompt optimizer route=%q/%q, want %q/%q", request.Model, request.ReasoningEffort, scoutImageDirectionModel(), scoutImageDirectionReasoningEffort())
 		}
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Route: "image", Prompt: "a rooftop crowd of the crew mid-laugh, hats in the air", Title: "Rooftop celebration",
+			Outcome: string(conversationIntentStartPrivateWork), Route: "image", Prompt: "a rooftop crowd of the crew mid-laugh, hats in the air", Title: "Rooftop celebration",
 		}), nil
 	})
 
@@ -690,7 +690,7 @@ func TestScoutChatImageFallbackGeneratesWhenRouterUnavailable(t *testing.T) {
 	}
 }
 
-func TestScoutChatImagePublicFallbackUsesAuthoredIntentNotContextEnvelope(t *testing.T) {
+func TestScoutChatImagePublicRouterFailureLaunchesNothing(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "test-image-key")
 	previousApp := kanbanApp
@@ -729,13 +729,12 @@ func TestScoutChatImagePublicFallbackUsesAuthoredIntentNotContextEnvelope(t *tes
 	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, request, nil, ""); err != nil {
 		t.Fatalf("append public image ask: %v", err)
 	}
-	if captured.Prompt != request {
-		t.Fatalf("public fallback prompt=%q, want exact authored intent %q", captured.Prompt, request)
+	if captured.Prompt != "" {
+		t.Fatalf("public router failure launched image prompt=%q", captured.Prompt)
 	}
-	for _, forbidden := range []string{"Shared channel turn", "author_principal", "channel_norm", "message_id"} {
-		if strings.Contains(captured.Prompt, forbidden) {
-			t.Fatalf("public fallback prompt leaked structured router metadata %q: %s", forbidden, captured.Prompt)
-		}
+	saved, _, readErr := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+	if readErr != nil || len(saved.Messages) != 2 || saved.Messages[1].IntentOutcome != string(conversationIntentApprovalRequired) || saved.Messages[1].Proposal == nil {
+		t.Fatalf("saved=%#v err=%v, want public-audience approval and no image call", saved.Messages, readErr)
 	}
 }
 

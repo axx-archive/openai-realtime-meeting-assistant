@@ -1835,10 +1835,12 @@ func strideAgentProfileAllowsChatThread(profile STRIDEProductAgentContextProfile
 	return false
 }
 
-// strideAgentContextForChatWork is the confirmation-time ACL/capability gate
-// for a targeted chat proposal. Research uses the same bounded Scout research
-// runner as direct hired-coworker threads; the coworker's own provider remains
-// fenced and the runner reauthorizes the profile again before provider use.
+// strideAgentContextForChatWork is the launch-time ACL/capability gate for
+// public targeted proposals and private direct-agent turns. A private thread
+// admits only the exact signed agent bound to that DirectThreadID; a public
+// thread still requires an explicit current membership. Research uses the same
+// bounded Scout runner while the coworker's own provider remains fenced, and
+// the runner reauthorizes the profile again before provider use.
 func (app *kanbanBoardApp) strideAgentContextForChatWork(agentID string, thread scoutChatThreadRecord, mode string) (STRIDEProductAgentContextProfile, bool) {
 	agentID = strings.TrimSpace(agentID)
 	if app == nil || app.strideRuntime == nil || agentID == "" {
@@ -1846,12 +1848,19 @@ func (app *kanbanBoardApp) strideAgentContextForChatWork(agentID string, thread 
 	}
 	var profile STRIDEProductAgentContextProfile
 	found := false
-	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-		profile, found = ctx.Product.agentContextProfile(agentID)
-		return nil
-	})
-	if err != nil || !found || !strideAgentProfileAllowsChatThread(profile, thread) {
-		return STRIDEProductAgentContextProfile{}, false
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate {
+		profile, found = app.strideAgentDirectThreadContext(thread.ID)
+		if !found || profile.AgentID != agentID {
+			return STRIDEProductAgentContextProfile{}, false
+		}
+	} else {
+		err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+			profile, found = ctx.Product.agentContextProfile(agentID)
+			return nil
+		})
+		if err != nil || !found || !strideAgentProfileAllowsChatThread(profile, thread) {
+			return STRIDEProductAgentContextProfile{}, false
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "research":

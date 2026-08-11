@@ -42,6 +42,30 @@ var scoutNativeActionSpecs = []scoutNativeActionSpec{
 	{ID: "send_notification", Description: "Create a Stride notification. fields: text, kind (info, task, agent, chat, alert), audience (me or everyone), optional tool and deliver.", Required: []string{"text", "kind", "audience"}, Allowed: []string{"text", "kind", "audience", "tool", "deliver"}},
 }
 
+// scoutNativeActionApprovalClass is the server-owned effect boundary for the
+// five-outcome router. A model may describe an action, but it cannot downgrade
+// publication, external sending, deletion, or audience expansion into a
+// private reversible effect.
+func scoutNativeActionApprovalClass(toolID string, fields map[string]string) string {
+	switch strings.ToLower(strings.TrimSpace(toolID)) {
+	case "delete_ticket", "delete_file_folder", "delete_file", "archive_channel":
+		return "deletion"
+	case "post_to_channel":
+		return "external_send"
+	case "create_channel", "rename_channel":
+		return "expanded_audience"
+	case "send_notification":
+		if !strings.EqualFold(strings.TrimSpace(fields["audience"]), "me") {
+			return "external_send"
+		}
+	}
+	return ""
+}
+
+func scoutNativeActionRequiresApproval(toolID string, fields map[string]string) bool {
+	return scoutNativeActionApprovalClass(toolID, fields) != ""
+}
+
 // privateScoutNativeToolDefinitions are requester-dependent controls that must
 // never leak into the shared-room Realtime session (which has no single actor).
 // Typed @Scout actions use the same executors below with the authenticated

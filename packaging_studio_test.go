@@ -62,7 +62,7 @@ func TestPackagingStudioDefinitionValidates(t *testing.T) {
 
 	// It instantiates into a plan the runtime accepts — the free-form cap (6)
 	// never applies; only the authored budget admits the full pipeline.
-	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose}
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan(packaging_studio): %v", err)
 	}
@@ -513,11 +513,12 @@ func TestPackagingStudioFounderWordsReachGate(t *testing.T) {
 
 	const founderPhrase = "we are the last honest voice in this category"
 	plan := &goalPlan{
-		PlanVersion: goalPlanVersion,
-		ProcessID:   def.ID,
-		Objective:   "Package the venture. The founder says verbatim: \"" + founderPhrase + "\".",
-		Authority:   codexJobAuthorityWorkspaceWrite,
-		State:       goalStateDecompose,
+		PlanVersion:   goalPlanVersion,
+		ProcessID:     def.ID,
+		routeVerified: true,
+		Objective:     "Package the venture. The founder says verbatim: \"" + founderPhrase + "\".",
+		Authority:     codexJobAuthorityWorkspaceWrite,
+		State:         goalStateDecompose,
 	}
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
@@ -628,7 +629,7 @@ func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, package
 		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Package the venture. The founder says verbatim: \"" + studioTestFounderPhrase + "\".",
 		CreatedBy:    "aj@shareability.com",
 		PackageID:    packageID,
@@ -992,11 +993,11 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 	// Jury-shaped system prompts answer with jury material; everything else
 	// keeps flowing to the studio routes fake installed by the drive helper.
 	var juryMu sync.Mutex
-	var juryRequests []anthropicMessagesRequest
+	var juryRequests []openAITextRequest
 	wrapJuryResponder := func() {
-		prior := createAnthropicMessagesResponse
-		createAnthropicMessagesResponse = func(ctx context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-			system := strings.ToLower(request.System)
+		prior := createOpenAITextResponse
+		createOpenAITextResponse = func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+			system := strings.ToLower(request.Instructions)
 			if !strings.Contains(system, "slide jury") {
 				return prior(ctx, apiKey, request)
 			}
@@ -1007,7 +1008,7 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 			if strings.Contains(system, "slide jury synthesizer") {
 				text = mergedScoreboard
 			}
-			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+			return text, nil
 		}
 	}
 
@@ -1077,15 +1078,15 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 
 	// Every jury call — the 3 seats AND the synthesis — saw ALL page images.
 	juryMu.Lock()
-	requests := append([]anthropicMessagesRequest(nil), juryRequests...)
+	requests := append([]openAITextRequest(nil), juryRequests...)
 	juryMu.Unlock()
 	if len(requests) != 4 {
 		t.Fatalf("jury made %d model calls, want 4 (3 seats + synthesis)", len(requests))
 	}
 	for index, request := range requests {
 		images := 0
-		for _, raw := range request.Messages[0].Content {
-			if decodeAnthropicBlock(raw).Type == "image" {
+		for _, content := range request.Attachments {
+			if content.Type == "input_image" {
 				images++
 			}
 		}
@@ -1163,11 +1164,11 @@ func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
 	// restores the seam), so the redo prompt is on the record.
 	var promptsMu sync.Mutex
 	var writePrompts []string
-	inner := createAnthropicMessagesResponse
-	createAnthropicMessagesResponse = func(ctx context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		if strings.Contains(strings.ToLower(request.System), "process stage synthesizer") {
+	inner := createOpenAITextResponse
+	createOpenAITextResponse = func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+		if strings.Contains(strings.ToLower(request.Instructions), "process stage synthesizer") {
 			promptsMu.Lock()
-			writePrompts = append(writePrompts, anthropicRequestText(request))
+			writePrompts = append(writePrompts, request.Input)
 			promptsMu.Unlock()
 		}
 		return inner(ctx, apiKey, request)
@@ -1177,7 +1178,7 @@ func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
 		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
 	})
 
-	thread, err := app.launchGoalThread(goalLaunchSpec{
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
 		Objective:    "Package the venture. The founder says verbatim: \"" + studioTestFounderPhrase + "\".",
 		CreatedBy:    "aj@shareability.com",
 		ToolTemplate: packagingStudioProcessID,
@@ -1313,14 +1314,15 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createVenturePackage: %v", err)
 	}
-	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("createScoutChatThread: %v", err)
 	}
 
 	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, pkg.ID, nil, map[string]string{
-		"originKind": agentThreadOriginChannel,
-		"originId":   channel.ID,
+		"originKind":  agentThreadOriginPrivateThread,
+		"originId":    channel.ID,
+		"requestedBy": "aj@shareability.com",
 	})
 	// Parked at ship approval: NO manifest yet — the card is the resolution's.
 	if manifests := studioManifestMessages(t, app, channel.ID); len(manifests) != 0 {
@@ -1445,13 +1447,14 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 // afterwards posts the shipped card, share now live.
 func TestPackagingStudioShipManifestHeldVariant(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("createScoutChatThread: %v", err)
 	}
 	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, "", nil, map[string]string{
-		"originKind": agentThreadOriginChannel,
-		"originId":   channel.ID,
+		"originKind":  agentThreadOriginPrivateThread,
+		"originId":    channel.ID,
+		"requestedBy": "aj@shareability.com",
 	})
 
 	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "hold the package"); err != nil {

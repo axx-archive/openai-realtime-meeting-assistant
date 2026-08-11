@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_recurring_work_presentation_grammar_rendered_checkpoint",
+  "observedAt": "2026-08-11T13:25:40Z",
+  "status": "bounded_presentation_rejection_journey_and_shared_recurring_work_grammar_independent_critic_pass_full_go_mobile_and_static_gates_green",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "58da72aaf85b48e4ebb96bb3ebd9b5dd24b80f11729e0a26f18a45776bbd839a",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "exactDeckRequest": "Can you make a 10 slide deck pitching me this platform?",
+    "routerOutcome": "start_private_work",
+    "launchCardinality": "one_private_work_launch_and_one_evolving_card_under_normal_replay_and_concurrent_duplicate",
+    "visibleFamily": "Presentation",
+    "visiblePhaseGrammar": [
+      "Understanding",
+      "Gathering evidence",
+      "Building",
+      "Verifying",
+      "Delivering",
+      "Needs input",
+      "Needs attention",
+      "Delivered"
+    ],
+    "recurringFamilies": [
+      "Presentation",
+      "Design",
+      "Research",
+      "Financial model",
+      "Document",
+      "Meeting recap",
+      "Build",
+      "Scheduled work"
+    ],
+    "responsiveWeb": "one_compact_work_card_with_persistent_inline_activity_at_430_css_pixels",
+    "desktopWeb": "one_compact_work_card_with_secondary_activity_and_governance_inspector",
+    "nativeSource": "shared_family_phase_and_fail_closed_progress_copy_consumed_by_message_card_and_thread_activity_surface",
+    "progressCopy": "only_eight_exact_reviewed_human_phrases_are_admitted_all_unknown_text_falls_back_to_stable_phase",
+    "internalVocabularyHidden": [
+      "process_and_template_ids",
+      "provider_and_model",
+      "reasoning_effort",
+      "tool_names",
+      "run_and_artifact_ids",
+      "raw_stage_and_snake_case_runtime_tokens"
+    ],
+    "defaultOff": true,
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionMutations": 0,
+    "realUserData": 0
+  },
+  "selectedFileSha256": {
+    "index.html": "252b3fbb7e502e3633a2f56c7a19210188bd913b522852d3e467ac662857d179",
+    "frontend_design_polish_wave_test.go": "f0d13aab26bfc51043c662fc7c7612fb05ea22a8d0738c86c7d2be11387f3e9e",
+    "frontend_goal_thread_cards_test.go": "cfbb7e829fb09f1858b69dca6db1476845a9276b80310b5076ff6ed92e37dd0f",
+    "frontend_desktop_chat_quality_test.go": "ed9a9d5ad9297229e79bbffa90cfb9709985eb5091d6fc351b26374ab85759d6",
+    "frontend_scout_work_indicator_test.go": "566515df0e4240a44dfde97018574979189d14282e3c6e7df1473bb39a4d4e80",
+    "conversation_intent.go": "bd551bdcb5b3d27a3d170912fe98562b2e563402d2f340d6c7343ee4fd556343",
+    "conversation_intent_test.go": "47ceb4e86f74c5a68d5ae4c4312923b5e7792f15601971180a97b0b1dfa519e6",
+    "mobile/src/messaging/workPresentation.ts": "16551d57ad30389570e63a50938cad50a44eaa5b67f608c916675bbae4c6671e",
+    "mobile/src/messaging/MessageBubble.tsx": "577a21b2b452acd2af2ac0b8336662f413df85fcc3ce942dbe1bc91bc20bd998",
+    "mobile/src/screens/ThreadScreen.tsx": "db92035e53bc73e693819600ee9f1794f058e1dc4ba3b54f8e268627a8616148",
+    "mobile/src/__tests__/workPresentation.test.ts": "6f9531d84a76a5e7d0d30fb838c62aabfaf511205a32459dde466a57db49033c",
+    "mobile/src/__tests__/nativeDriveWorkUx.test.ts": "ee8cf1d9d8f270a00d0ee23b9c5372c4e8e3cf779e4396eabce450bce78f5d9a"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "desktop_presentation_work_card",
+      "path": "/tmp/stride-pd1-presentation-desktop.png",
+      "sha256": "1b17484fbe30d5b39c6d9b6e30995323426e5ff06274f18fa0dd2e869b0dafb8",
+      "width": 2056,
+      "height": 1234
+    },
+    {
+      "surface": "desktop_presentation_activity_inspector",
+      "path": "/tmp/stride-pd1-presentation-desktop-activity.png",
+      "sha256": "e5e96002965a69f2fea8a2496ff0199410e1f89baa488249c96223a065e654cf",
+      "width": 2056,
+      "height": 1234
+    },
+    {
+      "surface": "responsive_web_430_presentation_work_card",
+      "path": "/tmp/stride-pd1-presentation-responsive-web-430.png",
+      "sha256": "091991f789294daf12e1da1463821d839a946960a9777594eb4337715332b20d",
+      "width": 430,
+      "height": 932
+    },
+    {
+      "surface": "responsive_web_430_persistent_inline_activity",
+      "path": "/tmp/stride-pd1-presentation-responsive-web-430-activity.png",
+      "sha256": "355d235f45880983b5901ba7f18e7b191d042c2fb9c357061dd0667184b0b6e0",
+      "width": 430,
+      "height": 932
+    }
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS",
+    "focusedGoRace": "PASS",
+    "goVetAll": "PASS",
+    "diffCheck": "PASS",
+    "mobileTypecheck": "PASS",
+    "fullMobile": "PASS_495_of_495",
+    "firstFullGoAttempt": "RED_three_stale_source_contract_assertions_expected_retired_runtime_metadata_and_duplicated_native_phase_implementation",
+    "staleAssertionRepair": "test_only_expectations_now_require_hidden_runtime_metadata_and_one_shared_native_work_grammar",
+    "repairedFocusedFrontend": "PASS",
+    "fullGo": "PASS_all_packages_no_fail_actions_on_exact_postrepair_source",
+    "renderedDesktopAndResponsiveWeb": "PASS_for_this_bounded_in_progress_journey",
+    "nativeRenderedPresentationJourney": "NOT_RUN_open_gate",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "firstVerdict": "REVISE_bypassable_progress_note_denylist",
+      "repair": "exact_reviewed_copy_allowlist_with_fail_closed_phase_fallback",
+      "finalVerdict": "PASS",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_pd1_recurring_work_presentation_grammar"
+    }
+  },
+  "openGates": [
+    "render_the_same_presentation_request_and_activity_surface_in_native_iphone_and_ipad",
+    "complete_every_remaining_pd1_surface_and_accessibility_performance_cell",
+    "produce_a_successful_openai_authored_editable_pptx_pdf_notes_citations_previews_review_revision_and_drive_package",
+    "exercise_attachments_reply_context_restart_lost_response_and_revision_on_web_iphone_ipad",
+    "qualify_current_provider_project_budget_and_cost_receipts_before_any_paid_call",
+    "physical_iphone_ipad_release_and_live_production_acceptance"
+  ],
+  "exclusions": {
+    "providerCalled": false,
+    "actualPresentationGenerated": false,
+    "pptxAccepted": false,
+    "pdfAccepted": false,
+    "driveAccepted": false,
+    "nativeRenderedAccepted": false,
+    "physicalDeviceAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

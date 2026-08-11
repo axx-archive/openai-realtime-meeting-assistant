@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_native_presentation_rendered_checkpoint",
+  "observedAt": "2026-08-11T13:42:54Z",
+  "status": "bounded_native_iphone_ipad_in_progress_presentation_journey_independent_critic_pass",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "c4c9e2b1ea46696ad57782e8b53a5a11f0570f94673d6a7c96fbf9ecabd6e913",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "fixture": {
+    "organization": "STRIDE Agentic Lab",
+    "humanMembers": 1,
+    "humanOwner": "AJ",
+    "thread": "Pitch the STRIDE platform",
+    "request": "Scout can you make a 10 slide deck pitching me this platform?",
+    "assistantMessages": 1,
+    "intentOutcome": "start_private_work",
+    "visibleWorker": "Scout",
+    "visibleFamily": "Presentation",
+    "visiblePhase": "Understanding",
+    "visibleProgressPercent": 4,
+    "visibleProgressNote": "Shaping the deck brief",
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionData": 0
+  },
+  "claims": {
+    "authenticatedCarrier": "normal_native_login_and_authenticated_chat_thread_projection",
+    "iPhone": "one_request_one_compact_evolving_presentation_card_persistent_activity_bar_and_native_activity_sheet",
+    "iPad": "stable_work_navigation_conversation_list_selected_thread_detail_and_native_activity_sheet",
+    "safeAreaAndComposer": "card_activity_and_composer_are_distinct_readable_and_unobstructed",
+    "activityCopy": "reviewed_human_progress_only",
+    "restart": "exact_two_message_thread_and_same_progress_restore_without_duplicate",
+    "defaultOff": true
+  },
+  "selectedFileSha256": {
+    "stride_e10_agentic_lab_test.go": "a0c3c810b9c63b39135742654da1433be2bf2f6cf434b3a9b3e15f150f87433c",
+    "mobile/src/messaging/workPresentation.ts": "16551d57ad30389570e63a50938cad50a44eaa5b67f608c916675bbae4c6671e",
+    "mobile/src/messaging/MessageBubble.tsx": "577a21b2b452acd2af2ac0b8336662f413df85fcc3ce942dbe1bc91bc20bd998",
+    "mobile/src/screens/ThreadScreen.tsx": "db92035e53bc73e693819600ee9f1794f058e1dc4ba3b54f8e268627a8616148"
+  },
+  "simulatorBuild": {
+    "configuration": "Release",
+    "sdk": "iphonesimulator26.5",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "infoPlistBundleVersion": "52",
+    "expoConfigBuildNumber": "53",
+    "apiBaseUrl": "http://127.0.0.1:19092",
+    "mainJsBundleSha256": "7583d4ff3d833afe78d43d93f730b7dd5ae6ab91063959237c8e26fa4fe03731",
+    "expoAppConfigSha256": "19a3f12d7837c762e39db9e872b08b75770aac4465e6725d65b2ce27dcea7072",
+    "infoPlistSha256": "82d111d26cb97feed048af2db0e856c8ef2e425da381d3168a4a619c54d22cfc",
+    "buildVerdict": "PASS"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "native_iphone_presentation_work_card",
+      "device": "iPhone 17 Pro simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-presentation-iphone.png",
+      "sha256": "531ed077ada19f12353c52c393e29b5275136502695861d9530a40d52163d257",
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "surface": "native_iphone_presentation_activity_sheet",
+      "device": "iPhone 17 Pro simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-presentation-iphone-activity.png",
+      "sha256": "5cec1c811fa8cb23ba67dab079a6d454653457974d162213ab189faa31c4e467",
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "surface": "native_ipad_presentation_list_detail_work_card",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-presentation-ipad.png",
+      "sha256": "3c2ac169e9b004095d9eaa2371c1c2e3390326214501dcd536dd00a8b0403a27",
+      "width": 2064,
+      "height": 2752
+    },
+    {
+      "surface": "native_ipad_presentation_activity_sheet",
+      "device": "iPad Pro 13-inch M5 simulator",
+      "os": "iOS 26.5",
+      "path": "/tmp/stride-pd1-presentation-ipad-activity.png",
+      "sha256": "93287942ecb8c25e9cb7440672258ac6fda7182fd3fdaad58555e202f3559dbf",
+      "width": 2064,
+      "height": 2752
+    }
+  ],
+  "verification": {
+    "focusedAgenticLabGoNormal": "PASS",
+    "focusedAgenticLabGoRace": "PASS",
+    "fullMobile": "PASS_495_of_495",
+    "mobileTypecheck": "PASS",
+    "releaseSimulatorBuild": "PASS",
+    "renderHarnessTermination": "EXPECTED_GO_TEST_TIMEOUT_AFTER_RENDER_CAPTURE_NO_SOURCE_ASSERTION_FAILURE",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_native_iphone_ipad_in_progress_presentation_journey"
+    }
+  },
+  "openGates": [
+    "carry_the_accepted_card_and_activity_grammar_through_research_image_design_and_financial_model_journeys",
+    "complete_remaining_pd1_rendered_accessibility_dynamic_type_voiceover_orientation_split_view_pointer_and_keyboard_matrix",
+    "generate_and_accept_a_real_openai_authored_editable_pptx_pdf_notes_citations_previews_review_revision_and_drive_package",
+    "exercise_attachments_reply_context_revision_restart_and_lost_response_with_real_provider_backed_presentation_work",
+    "qualify_exact_provider_project_budget_and_cost_caps_before_paid_calls",
+    "physical_iphone_ipad_current_release_and_production_acceptance"
+  ],
+  "exclusions": {
+    "providerCalled": false,
+    "actualPresentationGenerated": false,
+    "pptxAccepted": false,
+    "pdfAccepted": false,
+    "driveAccepted": false,
+    "physicalDeviceAccepted": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

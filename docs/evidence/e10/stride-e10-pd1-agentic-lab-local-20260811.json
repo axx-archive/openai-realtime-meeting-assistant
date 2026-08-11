@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_default_off_pd1_agentic_lab_and_completed_work_rendered_checkpoint",
+  "observedAt": "2026-08-11T12:25:37Z",
+  "status": "bounded_agentic_lab_completed_work_and_private_contribution_lifecycle_independent_critic_pass_full_go_mobile_and_simulator_green",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "a3c8d30711680d71c5902952f0d763996ce67576",
+    "canonicalPlanSha256BeforeCheckpoint": "727605ce190b1ba66255ddd32150e5d35e9cb23f6280ee4f85c38fdd578784cd",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "fixture": "local_synthetic_stride_agentic_lab",
+    "organization": "aj_is_the_only_human_member_and_owner_with_three_distinct_agent_principals",
+    "agents": [
+      "Mary",
+      "Colton",
+      "Jules"
+    ],
+    "workJourney": "providerless_suggested_work_to_destination_to_exact_approval_to_work_run_to_artifact_to_revision",
+    "meetingJourney": "synthetic_agent_participation_with_explicit_machine_attribution_and_transcript_evidence",
+    "governanceJourney": "corrected_agent_learning_paused_and_revoked_agent_chat_delete_restart_and_purge",
+    "completedWorkSemantics": "ordinary_ai_deliverable_is_completed_work_not_a_canonical_work_record",
+    "privateWorkRecordEvidence": "separate_aj_governed_verified_claim_exact_field_release_signed_attestation_private_projection_and_revocation_lifecycle",
+    "networkState": "draft_unlisted_private",
+    "desktopOpen": "authenticated_allowlisted_structured_viewer_not_raw_json_navigation",
+    "nativeOpen": "authenticated_structured_artifact_viewer_on_iphone_and_ipad",
+    "visibleStage": "Report ready",
+    "defaultOff": true,
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionMutations": 0,
+    "realUserData": 0
+  },
+  "selectedFileSha256": {
+    "stride_e10_agentic_lab_test.go": "afe529b28f4a747d01788e75b1cdf969e39d539462dc4d4d30080d0ae3d8ce98",
+    "stride_product_http.go": "9c62c96462b8367e7a7972db96b80236f4d37c88d13ca66ee067fcb6faa2b5d7",
+    "scout_chat_threads.go": "4afbf06fd6c291a684f34a5ef5a9eb535d9b8f6ecb23094fc2a09afd5677deaf",
+    "index.html": "b1615c06febf4fba71c3e859582233da307093aaae9ecad5eb25af93fb61cd82",
+    "frontend_thread_nav_split_test.go": "3129b3f6fe723959ec04dc3f1acf4569ba27c2f6fd9bfd9cd9094d2e195fdbab",
+    "frontend_files_surface_test.go": "5db46c9ba84bd188dd4d0f0104029d88c97170f4e35f34bb4ae6aca3dd34e986",
+    "frontend_latency_test.go": "ad1e52e4290d979c2a5e3b82b3a9f152870620ddefb32ffb2e2ea53cb0a4fa82",
+    "mobile/src/messaging/MessageBubble.tsx": "24868995684839fc7ce370ea82f806c06fa9ba87e8c33aa35e75c54f3f3f2989",
+    "mobile/src/screens/ThreadScreen.tsx": "1e59cbf7e10e30f1a9e0cb04746726bc66b5a71e68fb2b08cf1f92fed2008277",
+    "mobile/src/__tests__/threadReplySurface.test.ts": "e9ee8bcb90bfccae70117ace07ed50f072b871235f597abcbb7ddc259c1fe236",
+    "mobile/src/api/types.ts": "62c1d421baba168f3c43d0779b3fc983d001b57552d00029a064aa8c64abdb15",
+    "mobile/src/api/client.ts": "03fe84369c1cdb47415bba14296bf2274c7c9be905452deaa1a30f664790be64"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "desktop_completed_work_card",
+      "path": "/tmp/stride-agentic-lab-completed-work-desktop.png",
+      "sha256": "579a520f05789d88d2e26150c82dbe03d607c8192212e474f7b1424dd0d141d2",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "surface": "desktop_authenticated_open",
+      "path": "/tmp/stride-agentic-lab-completed-work-desktop-open.png",
+      "sha256": "cd3207710285eaa1a81a6310aaf1054ec4ff1cc61ea99e04ae2ec90616df8cc2",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "surface": "desktop_authenticated_source",
+      "path": "/tmp/stride-agentic-lab-completed-work-desktop-source.png",
+      "sha256": "261405ecdc4f9f1e8a0ce97e4c418c562536e9ca2e0d11c11e9df15eeeb6ea51",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "surface": "iphone_completed_work_card",
+      "path": "/tmp/stride-agentic-lab-iphone-completed-work-current.png",
+      "sha256": "1f77bf979b9dd4377d0b6e8a705902dcf52ecf364eb20dab7f438915d5e5bd17",
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "surface": "iphone_authenticated_open",
+      "path": "/tmp/stride-agentic-lab-iphone-completed-work-open-current.png",
+      "sha256": "304ec9a530d532cf0c7c6fa8ba272f39445af1fcbf3b8e1ff0bea165b4110d53",
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "surface": "ipad_completed_work_card",
+      "path": "/tmp/stride-agentic-lab-ipad-completed-work-current.png",
+      "sha256": "0547a59014d9e15e3763522eb6dc94cf65426ae562ade32db46ea09224ab29ec",
+      "width": 2064,
+      "height": 2752
+    },
+    {
+      "surface": "ipad_authenticated_open",
+      "path": "/tmp/stride-agentic-lab-ipad-completed-work-open-current.png",
+      "sha256": "9267a115bd3b607abfaec48a0265807511e73fd3cbbe919cdd2636928c6f8332",
+      "width": 2064,
+      "height": 2752
+    }
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS",
+    "focusedGoRace": "PASS",
+    "goVetAll": "PASS",
+    "diffCheck": "PASS",
+    "mobileTypecheck": "PASS",
+    "fullMobile": "PASS_492_of_492",
+    "iosReleaseSimulatorBuild": {
+      "verdict": "PASS",
+      "artifact": "/tmp/stride-agentic-lab-derived/Build/Products/Release-iphonesimulator/Stride.app"
+    },
+    "renderedDesktopIPhoneIPad": "PASS_for_this_bounded_journey",
+    "firstFullGoAttempt": "RED_only_three_stale_frontend_assertions_expected_retired_labels",
+    "staleAssertionRepair": "test_only_current_meetings_conversations_work_library_projects_and_work_navigation_labels",
+    "repairedFocusedFrontend": "PASS",
+    "fullGo": {
+      "command": "go test ./... -count=1",
+      "root": "PASS_568.089s",
+      "allCommandAndInternalPackages": "PASS"
+    },
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "verdict": "PASS",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "synthetic_default_off_agentic_lab_completed_work_and_private_contribution_lifecycle"
+    }
+  },
+  "openGates": [
+    "broader_pd1_every_surface_parity_and_accessibility_performance_matrix",
+    "live_provider_backed_deliverable_runs_and_current_route_receipts",
+    "successful_openai_editable_pptx_pdf_notes_citations_review_revision_and_drive_acceptance",
+    "real_drive_save_and_all_advertised_deliverable_families",
+    "physical_iphone_ipad_and_background_accessibility_acceptance",
+    "production_release_and_current_live_readback",
+    "public_network_collection_cohort_service_resilience_and_soak_obligations"
+  ],
+  "exclusions": {
+    "productionOrganizationCreated": false,
+    "providerQualified": false,
+    "liveRunAccepted": false,
+    "presentationAccepted": false,
+    "driveAccepted": false,
+    "physicalDeviceAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

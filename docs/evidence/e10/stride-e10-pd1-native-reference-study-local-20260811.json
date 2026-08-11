@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "bounded_read_only_pd1_native_desktop_reference_study_partial",
+  "observedAt": "2026-08-11T12:25:37Z",
+  "status": "buzz_observed_native_chatgpt_and_slack_ui_inspection_unavailable_no_substitution",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "repoFilesChangedByStudy": 0,
+    "externalStateChangedByStudy": 0
+  },
+  "observations": {
+    "nativeChatGPT": {
+      "path": "/Applications/ChatGPT.app",
+      "bundleIdentifier": "com.openai.codex",
+      "version": "26.803.41515",
+      "uiInspection": "unavailable_protected_native_host_running_this_task",
+      "webSubstituted": false,
+      "protectionBypassed": false
+    },
+    "nativeBuzz": {
+      "version": "0.5.5",
+      "approximateViewport": "1224x768",
+      "uiInspection": "observed_agent_directory_and_profile_tabs",
+      "restoredState": "Channels_profile_tab",
+      "patterns": [
+        "stable_search_inbox_agents_channels_and_direct_messages_rail",
+        "recognizable_agent_identity_and_first_class_agent_teams",
+        "secondary_info_runtime_channels_and_memory_inspector",
+        "visible_runtime_instruction_effort_source_and_participation_signals",
+        "restrained_app_like_materials_and_spacing"
+      ]
+    },
+    "slackWeb": {
+      "authenticatedChromeTabPresent": true,
+      "uiInspection": "unavailable_tab_owned_by_active_stride_test_browser_session",
+      "sessionTakenOver": false
+    }
+  },
+  "designDecisions": {
+    "adopt": [
+      "conversation_primary_with_provenance_memory_participation_and_runtime_in_inspector",
+      "humans_and_agents_as_recognizable_thread_citizens_with_unmistakable_agent_labeling",
+      "one_compact_evolving_work_card_with_worker_stage_progress_intervention_artifact_and_next_action",
+      "agent_teams_as_governed_participation_not_tool_picker",
+      "participants_artifacts_sources_approvals_and_continuity_travel_with_the_thread",
+      "desktop_and_ipad_list_conversation_inspector_and_iphone_single_details_control",
+      "concise_progress_and_decision_summaries_not_chain_of_thought"
+    ],
+    "reject": [
+      "ordinary_user_provider_model_and_configuration_plumbing",
+      "start_respawn_or_other_infrastructure_lifecycle_verbs",
+      "agents_admin_dashboard_as_default_work_surface",
+      "ungoverned_agent_memory",
+      "repeated_process_prose_in_place_of_one_evolving_work_card"
+    ]
+  },
+  "futureInspectionGates": [
+    "privacy_safe_native_chatgpt_synthetic_thread_recording_or_separate_host_inspection",
+    "released_slack_chrome_session_with_synthetic_channel_for_read_only_inspection"
+  ],
+  "exclusions": {
+    "nativeChatGPTJourneyObserved": false,
+    "slackJourneyObserved": false,
+    "comparativeStudyComplete": false,
+    "productAcceptanceClaimed": false
+  }
+}

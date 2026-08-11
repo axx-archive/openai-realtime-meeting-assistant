@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -12,15 +12,19 @@ import {
 type Props = {
   active: NativeShellDestination;
   children: React.ReactNode;
+  keepSidebarForFocusedRoute?: boolean;
   visible: boolean;
   onSelect: (destination: (typeof nativeShellDestinations)[number]) => void;
 };
 
-export function NativeUniversalShell({ active, children, visible, onSelect }: Props) {
-  const { width } = useWindowDimensions();
+export function NativeUniversalShell({ active, children, keepSidebarForFocusedRoute = false, visible, onSelect }: Props) {
+  const { width, fontScale } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const layout = nativeShellLayout(width);
-  const sidebar = visible && layout === 'sidebar';
+  // An iPhone in landscape is wide, but it is not an iPad workspace. Keep the
+  // focused conversation full-width instead of turning 874pt into a 248pt
+  // desktop rail. Real iPads still adapt by width for Split View.
+  const layout = nativeShellLayout(width, Platform.OS !== 'ios' || Platform.isPad, fontScale);
+  const sidebar = (visible || keepSidebarForFocusedRoute) && layout === 'sidebar';
   const compact = visible && layout === 'compact';
   return (
     <View style={styles.root}>
@@ -36,8 +40,8 @@ export function NativeUniversalShell({ active, children, visible, onSelect }: Pr
           accessibilityRole="tablist"
           style={[styles.sidebar, { paddingTop: Math.max(insets.top, space[4]), paddingBottom: Math.max(insets.bottom, space[4]) }]}
         >
-          <Text accessibilityRole="header" style={styles.sidebarBrand}>STRIDE</Text>
-          <Text style={styles.sidebarContext}>The network where work happens</Text>
+          <Text accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.sidebarBrand}>STRIDE</Text>
+          <Text maxFontSizeMultiplier={2} style={styles.sidebarContext}>The network where work happens</Text>
           <View style={styles.sidebarItems}>
             {nativeShellDestinations.map((destination) => (
               <ShellItem key={destination.id} compact={false} destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />

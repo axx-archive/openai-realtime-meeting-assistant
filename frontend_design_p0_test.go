@@ -83,8 +83,8 @@ func TestDesignP0HeaderSpeaksToReader(t *testing.T) {
 	}
 
 	worker := functionBody(html, "function artifactWorkerLabel(")
-	if !strings.Contains(worker, "claude · fable 5") {
-		t.Error("artifactWorkerLabel must speak the model in the reader's voice (claude · fable 5), never a raw worker slug")
+	if !strings.Contains(worker, "historical · claude fable 5") || !strings.Contains(worker, "Scout writer") {
+		t.Error("artifactWorkerLabel must present current OpenAI work plainly and mark retired Fable provenance as historical")
 	}
 
 	// the settled-percent guard (renderArtifactRead has nested arrows that

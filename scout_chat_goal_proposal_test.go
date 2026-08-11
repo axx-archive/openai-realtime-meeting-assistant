@@ -14,12 +14,8 @@ import (
 	"testing"
 )
 
-// A propose_goal routing turn persists a Kind=proposal card whose proposal.kind
-// is goal_run: the objective survives, authority is clamped to workspace_write,
-// the lane is standard (Scout-proposed work is never auto), the weight is the
-// goal-loop label, and the summary names the decompose->gate loop. It never
-// launches.
-func TestScoutChatRouterProposesGoalRun(t *testing.T) {
+// A safe private goal request starts directly and persists a truthful work card.
+func TestScoutChatRouterStartsPrivateGoalRun(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
@@ -27,22 +23,15 @@ func TestScoutChatRouterProposesGoalRun(t *testing.T) {
 	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	startAgentThreadAsyncPrev := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-		t.Fatal("a goal_run proposal must never launch an agent thread")
-	}
-	t.Cleanup(func() { startAgentThreadAsync = startAgentThreadAsyncPrev })
 	startGoalThreadAsyncPrev := startGoalThreadAsync
-	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {
-		t.Fatal("a goal_run proposal must never launch a goal pipeline")
-	}
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
 	t.Cleanup(func() { startGoalThreadAsync = startGoalThreadAsyncPrev })
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Workflow != "scout_route" {
-			t.Fatal("a proposal turn must not also run the Q&A path")
+			t.Fatal("a work-routing turn must not also run the Q&A path")
 		}
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Route: "goal_run", Objective: "package the Aurora IP into a one-pager and an investor deck", AuthorityHint: "workspace_write",
+			Outcome: string(conversationIntentStartPrivateWork), Route: "goal_run", Objective: "package the Aurora IP into a one-pager and an investor deck", AuthorityHint: "workspace_write",
 		}), nil
 	})
 
@@ -59,45 +48,22 @@ func TestScoutChatRouterProposesGoalRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append routed message: %v", err)
 	}
-	if _, launched := response["agentThread"]; launched {
-		t.Fatalf("response keys=%v — NEVER silent-launch", responseKeys(response))
-	}
-	proposal, ok := response["proposal"].(*scoutRouterProposal)
+	launched, ok := response["agentThread"].(scoutAgentThread)
 	if !ok {
-		t.Fatalf("proposal type=%T, want *scoutRouterProposal", response["proposal"])
+		t.Fatalf("agentThread type=%T, want direct goal launch", response["agentThread"])
 	}
-	if proposal.Kind != scoutRouterProposalKindGoalRun {
-		t.Fatalf("proposal.Kind=%q, want %q", proposal.Kind, scoutRouterProposalKindGoalRun)
+	if launched.Mode != "goal" || launched.Query != "package the Aurora IP into a one-pager and an investor deck" {
+		t.Fatalf("launched=%#v", launched)
 	}
-	if proposal.ToolID != "" || proposal.Mode != "" {
-		t.Fatalf("a free-form goal carries no toolId/mode: %#v", proposal)
+	if launched.Artifact.Metadata["authority"] != toolAuthorityWorkspaceWrite {
+		t.Fatalf("authority=%q, want workspace_write", launched.Artifact.Metadata["authority"])
 	}
-	if proposal.Objective != "package the Aurora IP into a one-pager and an investor deck" {
-		t.Fatalf("objective=%q, want the routed goal objective", proposal.Objective)
+	if response["intentOutcome"] != string(conversationIntentStartPrivateWork) || response["proposal"] != nil {
+		t.Fatalf("response=%#v", response)
 	}
-	if proposal.Authority != toolAuthorityWorkspaceWrite {
-		t.Fatalf("authority=%q, want workspace_write", proposal.Authority)
-	}
-	if proposal.Lane != approvalLaneStandard {
-		t.Fatalf("lane=%q, want the standard governance lane", proposal.Lane)
-	}
-	if proposal.WeightLabel != scoutProposalWeightGoalLoop {
-		t.Fatalf("weight=%q, want the goal-loop label", proposal.WeightLabel)
-	}
-	if !strings.Contains(proposal.Summary, "goal loop") || !strings.Contains(proposal.Summary, "gates before") {
-		t.Fatalf("summary=%q, want the decompose->gate loop named", proposal.Summary)
-	}
-	if proposal.Query != utterance {
-		t.Fatalf("query=%q, want the utterance for the Tier-0 escape", proposal.Query)
-	}
-
-	// It persists as a Kind=proposal message (the render dispatch keys on that).
 	saved := response["thread"].(scoutChatThreadRecord)
-	if len(saved.Messages) != 2 || saved.Messages[1].Kind != scoutChatMessageKindProposal || saved.Messages[1].Proposal == nil {
-		t.Fatalf("persisted messages=%#v, want user turn + goal_run proposal card", saved.Messages)
-	}
-	if saved.Messages[1].Proposal.Kind != scoutRouterProposalKindGoalRun {
-		t.Fatalf("persisted proposal kind=%q, want goal_run", saved.Messages[1].Proposal.Kind)
+	if len(saved.Messages) != 2 || saved.Messages[1].Kind != "thread" || saved.Messages[1].Thread == nil || saved.Messages[1].IntentOutcome != string(conversationIntentStartPrivateWork) {
+		t.Fatalf("persisted messages=%#v, want user turn + work card", saved.Messages)
 	}
 }
 
@@ -254,20 +220,20 @@ func TestScoutChatGoalRunKeylessNeverProposes(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "take this from idea to a shipped pitch end to end as a goal", nil, "")
-	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY is not configured") {
-		t.Fatalf("keyless append error=%v, want honest provider error", err)
+	if err != nil {
+		t.Fatalf("keyless append err=%v, want persisted unavailable outcome", err)
 	}
-	if response != nil {
-		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
+	if response["intentOutcome"] != string(conversationIntentUnavailable) || response["proposal"] != nil || response["agentThread"] != nil {
+		t.Fatalf("response=%#v, want unavailable without work", response)
 	}
 	saved, _, readErr := kanbanApp.scoutChatThreadByID(user.Email, private.ID)
 	if readErr != nil {
 		t.Fatalf("read keyless thread: %v", readErr)
 	}
-	if len(saved.Messages) != 2 || saved.Messages[0].Role != "user" || saved.Messages[1].Role != "error" {
-		t.Fatalf("saved messages=%#v, want persisted human request plus provider error", saved.Messages)
+	if len(saved.Messages) != 2 || saved.Messages[0].Role != "user" || saved.Messages[1].Role != "scout" || saved.Messages[1].IntentOutcome != string(conversationIntentUnavailable) {
+		t.Fatalf("saved messages=%#v, want persisted human request plus unavailable outcome", saved.Messages)
 	}
-	if saved.Messages[0].Text == "" || !strings.Contains(saved.Messages[1].Text, "OPENAI_API_KEY is not configured") {
+	if saved.Messages[0].Text == "" || !strings.Contains(saved.Messages[1].Text, "couldn't answer safely") {
 		t.Fatalf("saved messages=%#v, want the request and honest provider error", saved.Messages)
 	}
 }
