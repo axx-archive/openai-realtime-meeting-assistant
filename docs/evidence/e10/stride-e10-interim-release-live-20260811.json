@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_reviewed_interim_release_activation_and_read_only_live_render",
+  "observedAt": "2026-08-11T18:01:14Z",
+  "status": "verified_local_unsigned_live_interim_release_pass",
+  "release": {
+    "commit": "11e3cf26ad4ff9ad3081a965c27dbce0d4780e22",
+    "gitTreeObject": "74b1ff6281e37fe08cec1d02e686a232b0dede84",
+    "releaseIdentityTreeDigest": "d34f2cb6522908acde58ca8d9e583897f5f6bbb2cd4010d181cdb1da854e83b0",
+    "sourceArchiveSha256": "a8d17f924022fd1f31211615d21a9c723010d2c01e9cebc0cc31ce2186cd157d",
+    "sourceReceiptSha256": "cbf460a5126c3a6af584080771d4cb1d2d2ce2cda3d320622126a7a7a793a04c",
+    "bundleSha256": "799ba0451893b817001f1019da4274e61cade6fb7a47861efcfda994f5095245",
+    "meetingassistImageId": "sha256:9a0c7b4cb95375da21161738ea6a1834357f9229ef3dea5fb3352cb4f2e17113",
+    "renderRunnerImageId": "sha256:0dcc14beee1939c9c7433bf9d0ff80c09ea01f9329f3acb32e3a00ffbd3aeb42",
+    "binarySha256": "6034d8e1ad8cf33af197fbadab741fe58e0e9982784d7ff17de34e320a0cedd9",
+    "ledgerGeneration": 59,
+    "attestation": "verified-local-unsigned"
+  },
+  "rollback": {
+    "retained": true,
+    "releaseCommit": "261aced8c7491b4b7a2ab5416a00838e3c43ae18",
+    "bundleSha256": "8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178",
+    "meetingassistImageId": "sha256:89c53b8fe55950ae92a336371f64cf70c5fabf8e8d6675da9eb66dc64372f465",
+    "renderRunnerImageId": "sha256:b943c4d245dbbe965eaba65d804d96db9da065984b4c4eb1d73c2f06c75b1e55"
+  },
+  "liveVerification": {
+    "healthUrl": "https://thebonfire.xyz/healthz",
+    "healthHttp": 200,
+    "readyUrl": "https://thebonfire.xyz/readyz",
+    "readyHttp": 200,
+    "reportedVersion": "11e3cf26ad4ff9ad3081a965c27dbce0d4780e22",
+    "appHealthy": true,
+    "renderRunnerHealthy": true,
+    "renderCanary": true,
+    "caddyRunning": true,
+    "canonicalMode": "shadow",
+    "canonicalRequired": false,
+    "canonicalHealthy": false,
+    "canonicalDirtyHighWater": 31984,
+    "canonicalReconciledHighWater": 8532,
+    "canonicalPending": 0,
+    "productionDataVolume": "/var/lib/docker/volumes/digitalocean_meeting_data/_data",
+    "productionDataVolumePresent": true
+  },
+  "renderedObservation": {
+    "url": "https://thebonfire.xyz/work",
+    "session": "existing_authenticated_chrome_session",
+    "theme": "dark",
+    "sha256": "b4b1ee56502e615a415cc60b5bc2893ef2e11e559ecd89702f3171eec16a927c",
+    "width": 2056,
+    "height": 1234,
+    "bytes": 158068,
+    "retainedInRepository": false,
+    "retentionReason": "body_minimized_receipt_does_not_retain_private_production_conversation_pixels",
+    "acceptedVisibleClaims": [
+      "one_primary_left_rail_home_work_network_work_search_you",
+      "name_only_current_organization_with_disclosure",
+      "labeled_notifications_appearance_and_profile_utility_group",
+      "work_thread_list_conversation_and_composer_render_without_duplicate_top_navigation",
+      "no_orphaned_bell_moon_or_avatar_glyph_stack"
+    ]
+  },
+  "validation": {
+    "fullGo": "PASS_root_519.185s_and_all_cmd_internal_packages",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_499_of_499",
+    "mobileTypecheck": "PASS",
+    "desktopShellIndependentCritic": "PASS",
+    "releaseBoundaryIndependentCritic": "PASS",
+    "sourceAndEvidenceSidecars": "PASS"
+  },
+  "operationalBoundary": {
+    "commitPushedToWorkingBranch": true,
+    "commitPushedToMain": true,
+    "exactArchiveOnly": true,
+    "mutableOptMeetingassistDeployUsed": false,
+    "staleOptMeetingassistDataTouched": false,
+    "productionDataMutation": false,
+    "productionConfigurationMutationBeyondReleaseActivation": false,
+    "productionProviderProbeOrSyntheticCall": false,
+    "messageWorkSettingsOrOrganizationMutationDuringRenderedInspection": false,
+    "collectionPublicationCohortOrManagedKeyAction": false
+  },
+  "exclusions": {
+    "externalAttestationComplete": false,
+    "wholePD1Complete": false,
+    "actualProviderBackedDeliverablesAccepted": false,
+    "physicalDeviceAccepted": false,
+    "wholeE10Complete": false
+  }
+}
