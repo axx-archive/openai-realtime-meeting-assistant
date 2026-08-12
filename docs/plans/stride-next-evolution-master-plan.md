@@ -39,17 +39,19 @@ the same release verifier before serving.
 The carrier remains `qualified=false` and `externallyAttested=false` because
 independent signing/off-host attestation is still a separate gate.
 
-Native Build 53 is the newest exact TestFlight mobile carrier. EAS
-build `47877cb2-9e02-4645-936f-de17e065242f` is `FINISHED` from exact commit
-`5a3d449d6272474d8fff070184e965571a15864e`; its exact IPA SHA-256 is
-`7115181df3d024e547eb46927ebc113cefd14c95eec8bea5a0e7accf42e2c91b`.
-EAS submission `386ade15-8934-48c2-8fb8-32a4e7726d5d` finished successfully
-and uploaded to App Store Connect app `6794029943`. Authenticated API readback
-proves Apple build `d99d6cbd-c156-4239-86bd-49c071c6f7d8` is `VALID`, approved,
-unexpired through 2026-11-08, and `IN_BETA_TESTING` for internal `Team (Expo)`
-and external `Bonfire`. Build 52 and earlier builds remain historical
-distribution evidence only. No physical iPhone/iPad acceptance is proven, and
-the seven-person Bonfire group still has no tester record named Tyler.
+Native Build 54 is the newest exact uploaded mobile carrier. EAS build
+`469a30c1-db11-4e7d-ab29-cbfc5b0d58be` is `FINISHED` from exact release commit
+`7fb35f883fed62ba0e35117ff59d126e369230c2`; the inspected IPA SHA-256 is
+`3788b49137702209b8cb213ab31922e8c1ba6357f5007685dc89acd54d071882`,
+and the app plus broadcast extension both report version 1.0.0, build 54.
+Exact EAS submission `500aa34e-729b-4f81-a9f7-e25b1052c08a` finished its
+upload to App Store Connect app `6794029943`; Apple processing, Build 54
+`VALID` readback and intended tester-group availability remain open and must
+not be inferred from upload success. Build 53 remains the newest independently
+proved `IN_BETA_TESTING` carrier for internal `Team (Expo)` and external
+`Bonfire` until that readback completes. No physical iPhone/iPad acceptance is
+proven, and the seven-person Bonfire group still has no tester record named
+Tyler.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -656,6 +658,7 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | PN0 public-network constitution revision 2 | **In Progress** | the normative source receipt `stride-e10-pn0-normative-inputs-20260809.json` is verified supporting evidence; exact legal/privacy/moderation/appeal/incident owners and policy signatures remain external |
 | PD0 comparative study/design thesis | **In Progress** | cross-product study `stride-e10-pd0-comparative-design-study-20260810.md` SHA-256 `1e781de1ddbc10eeb051680e54e6a08a4c763d547135dece1c638a193e8cf786` has independent design critic PASS; the ChatGPT Workstream study/interaction manifest also have exact independent critic PASS against reviewed SHAs `5bd071db...` / `98027ae6...`; current one-way study receipt SHA-256 `7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4`; the representative Work presentation and fail-closed Work→Network browser references have independent critic PASS against reviewed receipt SHA `b55f7c67...`, with current one-way receipt `stride-e10-pd0-work-network-prototype-rendered-20260810.json` SHA-256 `8e920a826e5890f15c9e44df0b78a2a1c1c7b4268dd89207b0ce98b3fe59f720`; native/product/device migration remains |
 | PD1 unified product migration | **In Progress** | bounded shell/Scout, local Agentic Lab and recurring-work grammar receipts pass. Agentic Lab proves a synthetic one-human/three-agent company, truthful completed-work versus governed Work Record semantics, authenticated Open, private attestation lifecycle and rendered desktop/iPhone/iPad. Receipt `e9f5a2d7...` closes the exact presentation process-dump rejection and one evolving desktop/430-responsive card/inspector grammar with shared fail-closed native family/phase copy; receipt `dfdf214d...` renders and independently accepts that same in-progress card/activity journey on native iPhone and iPad; receipt `0623ccee...` extends the accepted native one-request/one-card grammar through Research, Design and Financial model; receipt `b07b46a7...` completes the bounded twelve-family web/native interaction grammar, providerless restart and eight additional iPhone/iPad captures while preserving one card across material-artifact attachment; receipt `ff80a903...` adds the bounded simulated orientation, Accessibility XXXL, software-keyboard, accessibility-source and list-performance checkpoint; receipt `e4fb1548...` accepts one global desktop destination rail, quiet organization/context header, governed name-only organization chooser, labeled bottom utilities, responsive keyboard semantics and light/dark rendered parity; receipt `351a32e0...` accepts the bounded desktop ordinary-message/Show-more/thread-inspector interaction; receipt `0231271a...` accepts the bounded local conversation-first Home on web, iPhone and iPad, including server-owned continuation, zero-effect editable Continue/Explore/Create/Challenge starters, immediate fail-closed private-context clearing on any refresh failure, true light/dark and iPad Accessibility XXXL keyboard acceptance after AutoFill suppression; and live receipt `81675843...` binds the exact second interim release at ledger generation 60 plus a read-only authenticated dark-mode observation. Project smart-link/correction, compact meeting controls, the complete feed/work-card/Open/Drive/edit-regenerate loop, broader every-surface rendered migration, missing native ChatGPT/Slack observations, actual provider-backed artifacts/previews/Drive, functional/device accessibility and measured performance, physical devices and whole-PD1 evidence remain open |
+| PD1 Home v2 / private voice / meeting controls / native navigation | **Verified Complete — bounded release class** | local receipt `1c1a07e9...` accepts exact Continue destinations, editable two-level starters, separate dictation and private Realtime voice/thread binding, transparent composer focus, compact meeting controls, descriptor-free native cards and icon-only iPhone navigation. Exact commit `7fb35f88...` is on main and serves at ledger generation 61 from bundle `4e0e62d5...` under `verified-local-unsigned`; Build 54 is uploaded and awaiting Apple processing/readback. Provider canary, physical devices and whole-PD1 acceptance are not claimed. |
 | PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
 | PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
 | PI0-B pilot evidence/collection gate | **Not Started** | requires PI0-A baseline, PN1 and accepted PD1 pilot surfaces before any real collection |
@@ -669,6 +672,14 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | Complete venture deliverable catalog | **In Progress** | research/image/workbook have bounded prior evidence, and receipt `b07b46a7...` accepts only the interaction grammar for all twelve recurring families: Presentation, Research, Design, Financial model, Document, Meeting recap, Revision, Scheduled work, Build, Mixed package, Data visualization and Project plan. Actual provider-backed cited research/document/image/XLSX/PPTX/PDF/chart/mixed artifacts, attachment/reply/revision/translation/regeneration/scheduling/execution behavior, previews and Drive remain incomplete at their exact web/iPhone/iPad/live evidence classes |
 | Mobile Home/Work/new conversation correction | **In Progress** | receipt `ff80a903...` accepts a bounded loopback simulator slice for iPhone/iPad orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source focus/isolation, virtualized channel lists and a single shared active-work clock; receipt `0231271a...` accepts the bounded local native Home continuation/starters, fail-closed authorization refresh, light/dark and iPad AXXXL-plus-keyboard interaction after independent critic. Functional VoiceOver, reduced motion, remaining Dynamic Type spectrum, actual Split View/Stage Manager, pointer, Full Keyboard Access, measured runtime performance, reviewed commit/release and physical devices remain |
 | Tyler/TestFlight and all-user consent | **In Progress** | founder authorization is recorded; exact ASC tester relation and durable current-policy consent records remain readback gates |
+
+> **2026-08-12 controlling PD1 resume checkpoint:** The completed bounded
+> Home/voice/meeting/native-navigation row above supersedes older text that
+> still names compact meeting controls as the next action. Resume with the
+> first-class Project association/correction contract and the complete sleek
+> chat/thread/work-card/Open/named-Drive-save/edit-regenerate journeys. Apple
+> processing and intended tester-group readback for Build 54 remain a release
+> follow-up, not permission to reopen the accepted local or VPS checkpoint.
 
 ### Dependency-ordered remaining waves and stop/resume points
 

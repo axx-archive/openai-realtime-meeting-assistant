@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "stride-e10-interim-release-three-home-voice",
+  "capturedAt": "2026-08-12T16:16:00Z",
+  "source": {
+    "releaseCommit": "7fb35f883fed62ba0e35117ff59d126e369230c2",
+    "branch": "codex/country-golf-stride",
+    "remoteBranch": "axx/codex/country-golf-stride",
+    "remoteMain": "axx/main",
+    "pushed": true,
+    "localCheckpointReceiptSha256": "1c1a07e953219c4854479a4399cb1c9d761e62f78ad4e4edef514478fc6ad2c4"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 61,
+    "releaseDir": "/opt/meetingassist-releases/7fb35f883fed62ba0e35117ff59d126e369230c2",
+    "bundleSha256": "4e0e62d5937f56669c329d1e53da7fe6d8797fd8db1afb2567dd65997a13405d",
+    "sourceArchiveSha256": "2aa6d023899c0f9d3f4418025763990281a78cbe298d52dca56fad62481e3295",
+    "releaseReceiptSha256": "db2e93c38edbfcd22a168119eda21ae3ef2a5b11b59bf7f6ba2318181daec55a",
+    "buildManifestSha256": "ed721716c2c0db3dccab53c44aba2f34718ac9ca242b4976e0c3c06dbddbf70d",
+    "meetingassistImageId": "sha256:cd453c95020cf5156fae840e84b981a5e22b056c37b60c2bd6d60089c5341b69",
+    "renderRunnerImageId": "sha256:39b087e66f6fb6813fe0ab01dcebc67a5dd74f76398460f2bda5ecbc5f6ffdf6",
+    "healthBodySha256": "7d07040416ca01e8773e04542df4534d540f7cced7f2d6ef9e1115f24a3619cf",
+    "readyBodySha256": "ac5674f536ac60bb38dae66e835995be1aa560abbe933a37d2332720c02e8e91",
+    "verifier": "verified-local-unsigned",
+    "rollbackReleaseCommit": "7427268652401306fba426798c937bc982d116b9",
+    "rollbackRetained": true
+  },
+  "ios": {
+    "version": "1.0.0",
+    "buildNumber": "54",
+    "easBuildId": "469a30c1-db11-4e7d-ab29-cbfc5b0d58be",
+    "easBuildStatus": "FINISHED",
+    "easFingerprint": "17331b3576b1180e1657550e98e9452b367e79ac",
+    "gitCommitHash": "7fb35f883fed62ba0e35117ff59d126e369230c2",
+    "ipaSha256": "3788b49137702209b8cb213ab31922e8c1ba6357f5007685dc89acd54d071882",
+    "appBundleIdentifier": "xyz.thebonfire.app",
+    "extensionBundleIdentifier": "xyz.thebonfire.app.broadcast",
+    "submissionId": "500aa34e-729b-4f81-a9f7-e25b1052c08a",
+    "submissionStatus": "UPLOAD_COMPLETE",
+    "appStoreConnectAppId": "6794029943",
+    "appleProcessingStatus": "UNVERIFIED_PENDING",
+    "testerGroupAvailability": "UNVERIFIED_PENDING"
+  },
+  "notClaimed": [
+    "The carrier is not externally attested or signed by an independent release authority.",
+    "Build 54 Apple processing, VALID status and intended tester-group availability are not yet proven.",
+    "No physical iPhone or iPad acceptance is included.",
+    "No production OpenAI Realtime provider call or production data mutation was performed during release verification.",
+    "This bounded release does not complete Project smart-linking, native long-message/thread parity, first-class provider-backed artifact families or whole PD1/E10."
+  ]
+}
