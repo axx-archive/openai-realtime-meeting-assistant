@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-home-chief-of-staff-release-20260812",
+  "recordedAt": "2026-08-12T20:49:58Z",
+  "canonicalPlanSha256": "74a7966c0149bbf5d4538e194779b6908136c4045397ed7b15b2e19849ece99e",
+  "source": {
+    "releaseCommit": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "branch": "codex/country-golf-stride",
+    "main": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "workingBranch": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "cleanReleaseInventoryCount": 377,
+    "cleanReleaseInventorySha256": "044b943f4175b0d3458cc9494695508d24fb23c1793c6a001182b1aeb9832977",
+    "sourceArchiveSha256": "714095f39a6da0957c5cb38e26fb4dd26b3cc27b091a024b1f9132770a75b3bd",
+    "sourceReceiptSha256": "9d67d62a765ad085dccf2ed1ca2e743f2b20fc3133d24c7936339ba221a96476"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 63,
+    "releaseCommit": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "releaseDir": "/opt/meetingassist-releases/fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "bundleSha256": "3d83223dc833603c7cf695f035295f31ba3a8c24c99ae29a5c9d31b4c03c7a9e",
+    "applicationImageId": "sha256:e73f8146a080f909ca9e661f93d9c0312a0e38172edff459f0ea7247d940b1da",
+    "renderRunnerImageId": "sha256:300316afae439cfcac68a72b50a9b62752a42a25326fa9e767511d00efb3e9e9",
+    "releaseReceiptSha256": "c6d5a1711c0739eb0a69390dd6819bc21f653f7658939360f272ef491e205cbe",
+    "verifier": "verified-local-unsigned",
+    "publicHealthRelease": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "publicReadinessRelease": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "durableTransaction": {
+      "initialResult": "external-verification-interrupted-after-ingress-opened",
+      "recoveryLockRetained": true,
+      "resolution": "exact target Compose bundle reapplied; retained prior tool resume completed action=activated and retired the lock",
+      "dataVolumesMutated": false,
+      "terminalVerification": "PASS"
+    },
+    "rollback": {
+      "releaseCommit": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+      "bundleSha256": "08f519ebc7a397af0098c522840b8599c187c468f5a99cd9f0b024123dd0c931",
+      "applicationImageId": "sha256:393272fc5efe6ee770c6d30a2c53ea968c7c873f7e0c0e064eca963c9bb24b0d",
+      "renderRunnerImageId": "sha256:7264176a5723a5bebca97892ea9f7c3db02566b1308b0b70d48e849d372953e0"
+    }
+  },
+  "migration": {
+    "newMigrationRequired": false,
+    "existingProjectMigrationVersion": 18,
+    "existingProjectMigrationSha256": "39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "productionDataEdited": false
+  },
+  "ios": {
+    "version": "1.0.0",
+    "buildNumber": "56",
+    "easBuildId": "919cb22e-2ec1-43cc-bf6f-99c770842d86",
+    "easBuildStatus": "FINISHED",
+    "gitCommit": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+    "fingerprint": "51bae3ea534c65a27630d9bdf120c4280c5561a2",
+    "submissionId": "3a361594-50c2-4669-b6c5-7b175f727ee1",
+    "submissionStatus": "FINISHED",
+    "ascAppId": "6794029943",
+    "appleProcessingStatus": "uploaded-processing",
+    "intendedTesterGroupStatus": "not-yet-read-back"
+  },
+  "claim": {
+    "complete": [
+      "reviewed Home recommendation implementation and independent critic PASS",
+      "commit and push to main and working branch",
+      "exact clean-archive VPS build and durable activation",
+      "public health and readiness identity agreement",
+      "retained exact rollback bundle and images",
+      "EAS iOS Build 56 from the exact release commit",
+      "successful App Store Connect upload of Build 56"
+    ],
+    "notClaimed": [
+      "external signing or off-host attestation",
+      "Apple processing completion for Build 56",
+      "Build 56 membership in intended internal or external tester groups",
+      "meeting transcript, Project-state or full-history recommendation compaction",
+      "Project chip, Project-aware Send or complete Project Record",
+      "provider-generated recommendation synthesis or physical-device acceptance",
+      "repair of pre-existing STRIDE registry, canonical-shadow, ambient or meeting-intelligence degradations"
+    ]
+  },
+  "preserved": [
+    "digitalocean_meeting_data live volume",
+    "pre-existing untracked Home and meeting-control rendered evidence",
+    "unrelated stride-site worktree content",
+    "prior exact release directory and images"
+  ],
+  "next": "Integrate the fail-closed visible Project chip and Project-aware Send association, then extend permission-filtered recommendation inputs to authorized meetings and Project history before proving one Project-bound first-class Research work card through immutable revision, rich Open, durable named Drive receipt and normal-composer edit or regenerate."
+}
