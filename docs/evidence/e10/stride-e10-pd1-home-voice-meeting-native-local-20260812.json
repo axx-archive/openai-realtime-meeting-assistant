@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "stride-e10-pd1-home-voice-meeting-native-local",
+  "capturedAt": "2026-08-12T16:02:00Z",
+  "scope": {
+    "branch": "codex/country-golf-stride",
+    "baselineCommit": "343cdd8572f02288dc695284d215d83e63c47d95",
+    "state": "reviewed-uncommitted-local-checkpoint",
+    "claims": [
+      "Home v2 exposes four stable server-owned categories and a separate suggestion layer; category and suggestion selection have no send side effect.",
+      "The ordinary composer remains freely editable and explicit Send is the first persistence boundary.",
+      "Continue is bound to the exact authorized destination thread; other starters may open a new private Scout conversation.",
+      "Composer dictation is distinct from the adjacent circular private Realtime voice action.",
+      "A Realtime voice session is durably bound to one private thread and both finalized user turns and Scout responses are transcribed into that thread.",
+      "The meeting control island keeps Mic, Camera, Route, Share, More and separate Leave usable at narrow and desktop widths.",
+      "The iPhone translation uses descriptor-free starter cards and an icon-only floating navigation rail; iPad retains labeled sidebar navigation."
+    ]
+  },
+  "selectedSources": {
+    "home.go": "71320efee337dc0aefab8723e56fa3fd7cdf4df86f2026e3b9cf450725c139a3",
+    "home_test.go": "9e762f8988e7fce2225d23b8ba305be7c95c13241d639e164b7936f757b9763f",
+    "index.html": "c9c955387565ecf19fa5ad24e5432e1b5de0fbbe25acec98295dbb0bf3e4851b",
+    "frontend_home_contract_test.go": "19f8e0b253d6b5a3d32d0772a91941373eecfd08e267a5514c68e183596c66c7",
+    "frontend_meeting_control_island_test.go": "38d13f06e31f23e466235ad5b5c577fb839d656f67d6681f94e3b59d4c40b65a",
+    "main.go": "7e81be77a969c44b673077bb10263671a0257290292427b0b3ce7dfb0528745a",
+    "kanban.go": "43a0c91ae801d607d5013eab8b6bfac3ca831afc929e3df68aa6f1581acaaf7c",
+    "scout_chat_threads.go": "c22a58632ff79d2c71064965e1a791300fe02957a9c53ce893ec359aca945a73",
+    "attachments.go": "715a766204d8c262139bf4e6bf5d65d37465b074655de3ee08c60a6ba8c9bbe6",
+    "private_realtime_voice_binding_test.go": "9d219b5239b7cdd523d73310f80cacd8b4911656dfa343e3cdf28d97b5c827f3",
+    "mobile/src/screens/CanvasScreen.tsx": "a86dcf0614c97e7c63448bb5a97084ae8c5cd56710a4e8063c3fdc02bdaedb29",
+    "mobile/src/navigation/NativeUniversalShell.tsx": "316610e30c1498fe35d671c7a9085999ba268b547f4b5fcb3b6110d9c4d597e1",
+    "mobile/src/realtime/usePersonalRealtime.ts": "c371f7b9c210d78a39bbf9f3c5e9c37e9fe0b72e630c1f39cf29bab50550b70b",
+    "mobile/src/api/client.ts": "8c5c53445f4705c4fc866f444a7a1d91e870594b203c48d261e82d8de452e325",
+    "mobile/src/__tests__/homeContract.test.ts": "ba4180377425dcfd16d38829037444345b594f4f1965d88a825145bf0a3a822d",
+    "mobile/src/__tests__/nativeUniversalShell.test.ts": "d8cd2d67700b26156cf7cbe4e9b268e13f363dd28d6cf623b018be5488a0bcf4",
+    "mobile/app.config.ts": "02e78d532bbcee76c8bdc1c187f2a027b20ccbdfe0d461b0d9401704a5490331"
+  },
+  "renderedEvidence": {
+    "docs/evidence/e10/rendered-pd1-home-20260812/desktop-home-dark.png": "1c4aefd57a8ecddb1d82a3bf1b0dcd1f6ba54fbd268ecbf7479242adf2af9aef",
+    "docs/evidence/e10/rendered-pd1-home-20260812/phone-home-dark.png": "be9c70084d962fbf2b425ce1fb8d3841381a4fa0286a57d62573607feae8d275",
+    "docs/evidence/e10/rendered-pd1-home-20260812/phone-home-category-selected-dark.png": "fe35baf2774cf1a63c7a5b1946975375a79b5b621696a48e20eb728985a6c8bf",
+    "docs/evidence/e10/rendered-pd1-home-20260812/phone-home-suggestion-populated-dark.png": "d390d91a4e9cc876a9ce9ac6f2d65cdf8f216c575e3b5e51227be05c5c80ef0b",
+    "docs/evidence/e10/rendered-pd1-home-20260812/phone-home-live-meeting-dark.png": "1d6802a05c4606bcd0299a2625a440dfb8e8956197dee5c2f53803bbd486e5bf",
+    "docs/evidence/e10/rendered-pd1-home-native-20260812/iphone-home-icon-nav.png": "bf386913bd06b035a401fccd2da58c207e9893b254c3fcd551ae1ba3f6817da1",
+    "docs/evidence/e10/rendered-pd1-home-native-20260812/iphone-home-icon-nav-explore.png": "3ec29a726f0875e269429418bac61fe2cd031a937ceac65f35d2796a5cba41d3",
+    "docs/evidence/e10/rendered-pd1-home-native-20260812/iphone-home-icon-nav-axxxl.png": "091437cbdfc879f18eeeca9bc838303a8fbadb79590e9196badaa8e07c664747",
+    "docs/evidence/e10/rendered-pd1-meeting-controls-20260812/desktop-1440-light-menu.png": "6147ea4c77b084fd0edc17ead9f5ccba5c75bd18ac280f0c9206ca68fb0d16e9",
+    "docs/evidence/e10/rendered-pd1-meeting-controls-20260812/desktop-320-dark-menu.png": "3c40d282c282b02c186da86f8d6488549e918f4d03a3c6369dd51312f6dc8c5d",
+    "docs/evidence/e10/rendered-pd1-meeting-controls-20260812/desktop-768-light.png": "a64d788c3c34de01cc217b2cc6981607196d632d5fbf6c593b9abe8e36d52ce4"
+  },
+  "verification": {
+    "fullGo": "PASS: go test ./... -count=1; root package 550.266s",
+    "focusedRace": "PASS: Home, Realtime voice, meeting controls, latency, authorization and agentic lab under go test -race",
+    "goVet": "PASS: go vet ./...",
+    "meetingRenderedRepeat": "PASS: meeting control rendered/focus/guest test repeated 10 times",
+    "nativeTests": "PASS: 521/521",
+    "nativeTypecheck": "PASS: tsc --noEmit",
+    "diffCheck": "PASS: git diff --check",
+    "critic": "PASS: exact default and Accessibility XXXL native renders, current source, web Home and meeting controls; no blocker or major finding"
+  },
+  "notClaimed": [
+    "No live OpenAI Realtime provider canary is included in this local receipt.",
+    "No VPS activation, serving-release identity or production observation is included in this local receipt.",
+    "No EAS build, App Store Connect upload, Apple processing or tester-group availability is included in this local receipt.",
+    "No physical iPhone or iPad functional accessibility or media acceptance is included.",
+    "The first-class Project aggregate, ProjectAssociation correction transaction and longitudinal Project Record remain a later checkpoint.",
+    "Provider-backed first-class image, presentation, research and other deliverable-family acceptance remains later work."
+  ]
+}

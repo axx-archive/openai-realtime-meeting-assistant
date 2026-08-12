@@ -688,13 +688,10 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"usePersonalRealtime", "The cradle has one stable meaning"} {
+	for _, required := range []string{"usePersonalRealtime", "useComposerDictation", "The cradle has one stable meaning", `accessibilityLabel="Dictate a message"`, "Starts a full-duplex voice conversation and saves both sides in one private chat."} {
 		if !bytes.Contains(canvasSource, []byte(required)) {
 			t.Fatalf("mobile Canvas composer source is missing %q", required)
 		}
-	}
-	if bytes.Contains(canvasSource, []byte("useComposerDictation")) {
-		t.Fatal("mobile Canvas must keep the Home cradle voice-first and leave dictation to conversation threads")
 	}
 	threadSource, err := os.ReadFile(filepath.Join("mobile", "src", "screens", "ThreadScreen.tsx"))
 	if err != nil {

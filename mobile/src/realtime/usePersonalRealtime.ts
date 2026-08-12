@@ -48,6 +48,11 @@ export type PersonalRealtimeTurn = {
 const STATS_INTERVAL_MS = 100;
 const NATIVE_MEDIA_OPERATION_TIMEOUT_MS = 2_500;
 
+function newVoiceSessionId(): string {
+  const random = Math.random().toString(36).slice(2, 14);
+  return `voice-${Date.now().toString(36)}-${random}`;
+}
+
 function userFacingRealtimeError(error: unknown): string {
   if (error instanceof NativeMediaOperationTimeoutError) {
     return 'Scout voice audio did not respond. Please try again.';
@@ -108,6 +113,8 @@ export function usePersonalRealtime(options: {
   const leaseRef = useRef<AudioFocusLease | null>(null);
   const mediaSessionGenerationRef = useRef<number | null>(null);
   const handledCallsRef = useRef(new Set<string>());
+  const voiceSessionIdRef = useRef('');
+  const voiceThreadIdRef = useRef('');
   const toolAbortControllerRef = useRef<AbortController | null>(null);
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const smoothedLevelRef = useRef(0);
@@ -162,6 +169,8 @@ export function usePersonalRealtime(options: {
     streamRef.current = null;
     remoteStreamRef.current = null;
     handledCallsRef.current = new Set();
+    voiceSessionIdRef.current = '';
+    voiceThreadIdRef.current = '';
     smoothedLevelRef.current = 0;
     await closePersonalRealtimeTransportResources({
       dataChannel,
@@ -259,6 +268,8 @@ export function usePersonalRealtime(options: {
       ) return;
       const response = await api.realtimeTool(
         sessionToken,
+        voiceSessionIdRef.current,
+        voiceThreadIdRef.current,
         call.callId,
         call.name,
         argumentsValue,
@@ -484,13 +495,20 @@ export function usePersonalRealtime(options: {
         || peerRef.current !== peer
         || !officeControlChannelIsLive(sessionToken)
       ) return;
-      const answer = await api.realtimeOffer(sessionToken, localSDP);
+      const voiceSessionId = newVoiceSessionId();
+      voiceSessionIdRef.current = voiceSessionId;
+      voiceThreadIdRef.current = '';
+      const answer = await api.realtimeOffer(sessionToken, localSDP, voiceSessionId);
       if (
         generationRef.current !== connectionGeneration
         || peerRef.current !== peer
         || !lease.isCurrent()
         || !officeControlChannelIsLive(sessionToken)
       ) return;
+      if (answer.voiceSessionId !== voiceSessionId || !String(answer.threadId || '').trim()) {
+        throw new Error('Scout voice did not bind its private transcript.');
+      }
+      voiceThreadIdRef.current = answer.threadId;
       const answerSDP = normalizeRealtimeSDP(answer.sdp);
       if (!answerSDP) throw new Error('Scout voice returned an empty answer.');
       await peer.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerSDP }));

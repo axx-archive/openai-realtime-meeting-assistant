@@ -1073,6 +1073,7 @@ func main() {
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/.well-known/apple-app-site-association", appleAppSiteAssociationHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
+	http.HandleFunc("/assistant/home", assistantHomeHandler)
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/attachments", assistantAttachmentUploadHandler)
@@ -2376,7 +2377,8 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := struct {
-		SDP string `json:"sdp"`
+		SDP            string `json:"sdp"`
+		VoiceSessionID string `json:"voiceSessionId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime offer")
@@ -2386,6 +2388,16 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	offerSDP := payload.SDP
 	if strings.TrimSpace(offerSDP) == "" {
 		writeAuthError(w, http.StatusBadRequest, "sdp is required")
+		return
+	}
+	voiceSessionID, err := normalizePrivateRealtimeVoiceSessionID(payload.VoiceSessionID)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	voiceThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(user.Email, user.Name, voiceSessionID)
+	if err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -2404,8 +2416,10 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	recordCapabilityMilestone(capabilityPrivateVoice, "offer_accepted", time.Now().UTC())
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":  true,
-		"sdp": answerSDP,
+		"ok":             true,
+		"sdp":            answerSDP,
+		"voiceSessionId": voiceSessionID,
+		"threadId":       voiceThread.ID,
 	})
 }
 
@@ -2438,20 +2452,22 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 
 	rawPayload, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 	payload, decodeErr := decodeOpenAIToolArguments(rawPayload)
-	if readErr != nil || decodeErr != nil || len(payload) != 3 {
+	if readErr != nil || decodeErr != nil || len(payload) != 5 {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
 		return
 	}
+	voiceSessionID, voiceSessionIDOK := payload["voiceSessionId"].(string)
+	threadID, threadIDOK := payload["threadId"].(string)
 	callID, callIDOK := payload["callId"].(string)
 	name, nameOK := payload["name"].(string)
 	arguments, argumentsOK := payload["arguments"].(map[string]any)
-	if !callIDOK || !nameOK || !argumentsOK {
+	if !voiceSessionIDOK || !threadIDOK || !callIDOK || !nameOK || !argumentsOK {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
 		return
 	}
 
 	voiceContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
-	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceModelTool(voiceContext, user.Email, callID, name, arguments)
+	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceSessionModelTool(voiceContext, user.Email, voiceSessionID, threadID, callID, name, arguments)
 	ok := err == nil
 	if err != nil {
 		result = map[string]any{
@@ -2477,11 +2493,13 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":       ok,
-		"changed":  changed,
-		"result":   result,
-		"actions":  result["actions"],
-		"artifact": result["artifact"],
+		"ok":             ok,
+		"changed":        changed,
+		"voiceSessionId": voiceSessionID,
+		"threadId":       threadID,
+		"result":         result,
+		"actions":        result["actions"],
+		"artifact":       result["artifact"],
 	})
 }
 

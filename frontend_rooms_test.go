@@ -442,9 +442,8 @@ func TestIndexRoomsLobbyHomeStripSlim(t *testing.T) {
 	if strings.Contains(rowBody, "joinRoom(") {
 		t.Error("a live-now row must NEVER join directly")
 	}
-	quietBody := functionBody(html, "function homeLiveNowQuietRow()")
-	if !strings.Contains(quietBody, "all quiet") || !strings.Contains(quietBody, "setActiveTool('room')") {
-		t.Error("the quiet state must be one `rooms · all quiet` row that opens the lobby")
+	if strings.Contains(stripBody, "homeLiveNowQuietRow") || strings.Contains(strings.ToLower(stripBody), "all quiet") {
+		t.Error("the quiet state must remain absent; Home only shows a quick jump while a room is live")
 	}
 }
 

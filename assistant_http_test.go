@@ -34,7 +34,7 @@ func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0"}`))
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0","voiceSessionId":"voice-auth-test"}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -44,7 +44,7 @@ func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
 		t.Fatalf("status=%d, want %d for unauthenticated private realtime offer", recorder.Code, http.StatusUnauthorized)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0"}`))
+	req = httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0","voiceSessionId":"voice-auth-test"}`))
 	req.Header.Set("Content-Type", "application/json")
 	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
 		req.AddCookie(cookie)
@@ -137,7 +137,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 	realtimeCallsURL = server.URL
 	realtimeHTTPClient = server.Client()
 
-	emptyReq := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"   "}`))
+	emptyReq := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"   ","voiceSessionId":"voice-forward-test"}`))
 	emptyReq.Header.Set("Content-Type", "application/json")
 	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
 		emptyReq.AddCookie(cookie)
@@ -153,7 +153,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		t.Fatal("empty sdp should not reach mock OpenAI server")
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n"}`))
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-forward-test"}`))
 	req.Header.Set("Content-Type", "application/json")
 	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
 		req.AddCookie(cookie)
@@ -169,13 +169,18 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		t.Fatal("mock OpenAI server did not receive realtime offer")
 	}
 	var payload struct {
-		SDP string `json:"sdp"`
+		SDP            string `json:"sdp"`
+		VoiceSessionID string `json:"voiceSessionId"`
+		ThreadID       string `json:"threadId"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if payload.SDP != "v=0\r\n" {
 		t.Fatalf("response sdp=%q, want CRLF-normalized mock answer", payload.SDP)
+	}
+	if payload.VoiceSessionID != "voice-forward-test" || payload.ThreadID != privateRealtimeVoiceThreadID("aj@shareability.com", payload.VoiceSessionID) {
+		t.Fatalf("response voice binding=%+v", payload)
 	}
 }
 
@@ -201,7 +206,7 @@ func TestAssistantRealtimeOfferReportsQuotaBlocker(t *testing.T) {
 	realtimeCallsURL = server.URL
 	realtimeHTTPClient = server.Client()
 
-	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n"}`))
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-quota-test"}`))
 	req.Header.Set("Content-Type", "application/json")
 	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
 		req.AddCookie(cookie)
@@ -232,9 +237,14 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	voiceSessionID := "voice-direct-rejection"
+	thread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation("aj@shareability.com", "AJ", voiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"set_voice_control", "set_recording"} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"callId":"call-direct-rejected","name":%q,"arguments":{"enabled":true}}`, name)))
+			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-direct-rejected","name":%q,"arguments":{"enabled":true}}`, voiceSessionID, thread.ID, name)))
 			req.Header.Set("Content-Type", "application/json")
 			for _, cookie := range cookies {
 				req.AddCookie(cookie)

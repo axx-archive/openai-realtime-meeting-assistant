@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -514,12 +515,17 @@ func TestPrivateVoiceDirectBoardMutationIsUnavailable(t *testing.T) {
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 	before := len(kanbanApp.snapshotState().Cards)
+	voiceSessionID := "voice-forged-board-write"
+	voiceThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation("aj@shareability.com", "AJ", voiceSessionID)
+	if err != nil {
+		t.Fatalf("bind voice conversation: %v", err)
+	}
 	token, err := userSessionStore().create("aj@shareability.com")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool",
-		strings.NewReader(`{"callId":"call-forged-board-write","name":"create_ticket","arguments":{"title":"RW1BoardLiveRefreshProbe"}}`))
+		strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-forged-board-write","name":"create_ticket","arguments":{"title":"RW1BoardLiveRefreshProbe"}}`, voiceSessionID, voiceThread.ID)))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	recorder := httptest.NewRecorder()

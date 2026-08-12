@@ -2,6 +2,7 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
 import {
   nativeShellDestinations,
@@ -50,15 +51,17 @@ export function NativeUniversalShell({ active, children, keepSidebarForFocusedRo
         </View>
       ) : null}
       {compact ? (
-        <View
+        <Glass
           accessibilityLabel="Primary"
           accessibilityRole="tablist"
-          style={[styles.bottomRail, { paddingBottom: Math.max(insets.bottom, space[2]) }]}
+          interactive
+          radius={radius.full}
+          style={[styles.bottomRail, { bottom: Math.max(insets.bottom, space[2]) }]}
         >
           {nativeShellDestinations.map((destination) => (
             <ShellItem key={destination.id} compact destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
           ))}
-        </View>
+        </Glass>
       ) : null}
     </View>
   );
@@ -90,23 +93,18 @@ function ShellItem({
     >
       <SymbolView
         name={destination.icon as SFSymbol}
-        size={compact ? 20 : 18}
+        size={compact ? 19 : 18}
         tintColor={selected ? colors.ember : colors.text2}
       />
-      <Text
-        // Compact navigation is a fixed control surface, not reading content.
-        // Cap its visible label before Accessibility XXXL turns five stable
-        // destinations into clipped fragments; the full label remains exposed
-        // through accessibilityLabel. The roomier iPad sidebar can scale more.
-        maxFontSizeMultiplier={compact ? 1.2 : 2}
-        numberOfLines={compact ? 2 : 1}
-        style={[
-          compact ? styles.compactLabel : styles.sidebarLabel,
-          selected && styles.selectedLabel,
-        ]}
-      >
-        {destination.label}
-      </Text>
+      {!compact ? (
+        <Text
+          maxFontSizeMultiplier={2}
+          numberOfLines={1}
+          style={[styles.sidebarLabel, selected && styles.selectedLabel]}
+        >
+          {destination.label}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -115,7 +113,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bgApp },
   content: { flex: 1, minWidth: 0, minHeight: 0 },
   contentSidebar: { marginLeft: 248 },
-  contentCompact: { marginBottom: 64 },
+  contentCompact: { marginBottom: 84 },
   sidebar: {
     position: 'absolute',
     top: 0,
@@ -142,31 +140,24 @@ const styles = StyleSheet.create({
   sidebarLabel: { ...type.bodyMedium, color: colors.text2, flexShrink: 1 },
   bottomRail: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
-    left: 0,
-    minHeight: 64,
-    paddingTop: space[1],
-    paddingHorizontal: space[1],
+    alignSelf: 'center',
+    minHeight: 58,
+    padding: 5,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface1,
+    alignItems: 'center',
+    gap: 2,
   },
   compactItem: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 52,
-    paddingHorizontal: 2,
-    paddingVertical: space[1],
+    width: 48,
+    minHeight: 48,
+    paddingHorizontal: space[2],
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    borderRadius: radius.sm,
+    flexDirection: 'row',
+    gap: 6,
+    borderRadius: radius.full,
   },
   compactItemSelected: { backgroundColor: colors.accentSoft },
-  compactLabel: { ...type.label, color: colors.text2, textAlign: 'center', fontSize: 10, lineHeight: 12 },
   selectedLabel: { color: colors.emberText },
   pressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
 });

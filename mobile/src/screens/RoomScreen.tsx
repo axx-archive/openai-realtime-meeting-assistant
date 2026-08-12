@@ -34,6 +34,7 @@ import {
   type RoomConversationMode,
 } from '../components/RoomConversationSheet';
 import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/RoomParticipantsSheet';
+import { RoomConsentSheet } from '../components/RoomConsentSheet';
 import { AgentSpeakingWaveform } from '../components/AgentSpeakingWaveform';
 import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
@@ -632,6 +633,7 @@ export function RoomScreen({ route, navigation }: Props) {
   const [conversationVisible, setConversationVisible] = useState(false);
   const [roomWorkPreview, setRoomWorkPreview] = useState<{ title: string; text: string } | null>(null);
   const [participantsVisible, setParticipantsVisible] = useState(false);
+  const [consentVisible, setConsentVisible] = useState(false);
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
   const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
   const [agentControlSnapshot, setAgentControlSnapshot] = useState<RoomAgentParticipant[]>([]);
@@ -1202,20 +1204,8 @@ export function RoomScreen({ route, navigation }: Props) {
     if (!framing.checked && !framing.checking && !framing.applying) {
       nativeRoom.refreshCameraFraming();
     }
-    const shareAction = nativeRoom.state.screenSharing
-      ? 'Stop sharing screen'
-      : nativeRoom.state.screenShareStarting
-        ? 'Cancel screen share'
-        : 'Share your screen';
-    const audioOutput = nativeRoom.state.audioRoute?.outputs[0]?.name?.trim() || 'Speaker';
     const actions: InCallActionDescriptor[] = [
       { id: 'cancel', label: 'Cancel', cancel: true },
-      {
-        id: 'screen-share',
-        label: shareAction,
-        destructive: nativeRoom.state.screenSharing,
-        onSelect: toggleScreenShare,
-      },
       {
         id: 'recording',
         label: nativeRoom.state.recording ? 'Stop transcript recording' : 'Start transcript recording',
@@ -1234,16 +1224,10 @@ export function RoomScreen({ route, navigation }: Props) {
       { id: 'chat', label: nativeRoom.conversation.unreadCount ? `Open chat · ${nativeRoom.conversation.unreadCount} unread` : 'Open chat', onSelect: () => openConversation('chat') },
       { id: 'recap', label: 'Meeting recap', onSelect: () => openConversation('recap') },
       { id: 'transcript', label: 'Live transcript', onSelect: () => openConversation('transcript') },
-      {
-        id: 'audio-output',
-        label: `Audio output · ${audioOutput}`,
-        onSelect: () => Alert.alert(
-          'Audio output',
-          `The call is using ${audioOutput}. Choose another connected output from iPhone Control Center.`,
-        ),
-      },
       { id: 'people', label: 'People in this room', onSelect: () => setParticipantsVisible(true) },
       { id: 'specialists', label: 'Agent team', onSelect: openSpecialists },
+      { id: 'board', label: 'Board', onSelect: () => navigation.navigate('Board') },
+      { id: 'data-choices', label: 'Microphone data', onSelect: () => setConsentVisible(true) },
       { id: 'invite', label: 'Invite someone', onSelect: inviteToRoom },
       {
         id: 'workspace',
@@ -1275,6 +1259,14 @@ export function RoomScreen({ route, navigation }: Props) {
           && (cameraFramingRef.current.checking || cameraFramingRef.current.applying)) return;
         action.onSelect?.();
       },
+    );
+  }
+
+  function showAudioOutput() {
+    const audioOutput = nativeRoom.state.audioRoute?.outputs[0]?.name?.trim() || 'Speaker';
+    Alert.alert(
+      'Audio output',
+      `The call is using ${audioOutput}. Choose another connected output from iPhone or iPad Control Center.`,
     );
   }
 
@@ -1422,7 +1414,8 @@ export function RoomScreen({ route, navigation }: Props) {
             />
           ) : null}
 
-          <View accessibilityLabel="Call controls" style={[styles.callControlDock, { bottom: bottomInset }]}>
+          <View pointerEvents="box-none" style={[styles.callControlDockFrame, { bottom: bottomInset }]}>
+          <View accessibilityLabel="Call controls" style={styles.callControlDock}>
             <CallControl
               accessibilityLabel={nativeRoom.state.microphoneStarting
                 ? 'Cancel starting microphone'
@@ -1445,6 +1438,12 @@ export function RoomScreen({ route, navigation }: Props) {
               tone={nativeRoom.state.screenSharing || nativeRoom.state.screenShareStarting || nativeRoom.state.cameraOff || nativeRoom.state.cameraStarting ? 'off' : 'default'}
             />
             <CallControl
+              accessibilityLabel={`Audio route, ${nativeRoom.state.audioRoute?.outputs[0]?.name?.trim() || 'Speaker'}`}
+              icon="speaker.wave.2.fill"
+              label="Route"
+              onPress={showAudioOutput}
+            />
+            <CallControl
               accessibilityLabel={nativeRoom.state.screenSharing
                 ? 'Stop sharing screen'
                 : nativeRoom.state.screenShareStarting
@@ -1464,6 +1463,7 @@ export function RoomScreen({ route, navigation }: Props) {
               label="More"
               onPress={showInCallActions}
             />
+            <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.callControlDivider} />
             <CallControl
               accessibilityLabel="Leave room"
               icon="phone.down.fill"
@@ -1471,6 +1471,7 @@ export function RoomScreen({ route, navigation }: Props) {
               onPress={nativeRoom.leave}
               tone="danger"
             />
+          </View>
           </View>
 
           <RoomConversationSheet
@@ -1500,6 +1501,11 @@ export function RoomScreen({ route, navigation }: Props) {
             participants={participantRows}
             roomName={room?.name ?? route.params.title}
             visible={participantsVisible}
+          />
+          <RoomConsentSheet
+            onClose={() => setConsentVisible(false)}
+            sessionToken={sessionToken ?? ''}
+            visible={consentVisible}
           />
           <RoomSpecialistsSheet
             agents={inNativeRoom ? nativeRoom.state.agentParticipants : agentControlSnapshot}
@@ -1864,7 +1870,7 @@ const styles = StyleSheet.create({
   callRoomPill: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
   callRoomIdentity: {
     maxWidth: '100%',
-    minHeight: 42,
+    minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: space[3],
     paddingVertical: 6,
@@ -1892,38 +1898,41 @@ const styles = StyleSheet.create({
   callStatusDotWarning: { backgroundColor: '#FF9F0A' },
   callStatusDotCritical: { backgroundColor: '#FF6B63' },
   callStatusText: { flexShrink: 1, color: '#FFFFFF', fontSize: 11, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 14 },
+  callControlDockFrame: {
+    position: 'absolute',
+    left: space[2],
+    right: space[2],
+    zIndex: 30,
+    alignItems: 'center',
+  },
   callControlDock: {
     ...shadow.mark,
-    position: 'absolute',
-    left: space[3],
-    right: space[3],
-    zIndex: 30,
-    minHeight: 72,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    padding: space[2],
+    gap: 4,
+    padding: 6,
     borderRadius: radius.xxl,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.10)',
     backgroundColor: 'rgba(13,13,16,0.92)',
   },
   callControl: {
-    flex: 1,
+    width: 44,
     minWidth: 44,
-    height: 56,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    borderRadius: 20,
+    borderRadius: 24,
     backgroundColor: 'rgba(255,255,255,0.09)',
   },
   callControlOff: { backgroundColor: '#FFFFFF' },
+  callControlDivider: { width: StyleSheet.hairlineWidth, height: 28, marginHorizontal: 1, backgroundColor: 'rgba(255,255,255,0.16)' },
   callControlRecording: { backgroundColor: 'rgba(255,69,58,0.15)' },
   callControlDanger: { backgroundColor: '#FF453A' },
   callControlDisabled: { opacity: 0.42 },
   callControlPressed: { transform: [{ scale: 0.96 }] },
-  callControlLabel: { color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 12 },
+  callControlLabel: { display: 'none', color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 12 },
   callControlLabelInverted: { color: ink[950] },
   callControlBadge: {
     position: 'absolute',

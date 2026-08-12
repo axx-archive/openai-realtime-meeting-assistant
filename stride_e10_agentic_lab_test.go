@@ -248,6 +248,31 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 	mux.HandleFunc("/websocket", websocketHandler)
 	mux.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	mux.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
+	mux.HandleFunc("/assistant/home", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			assistantHomeHandler(writer, request)
+			return
+		}
+		if userFromRequest(request) == nil {
+			writeAuthError(writer, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		now := time.Now().UTC()
+		writeAuthJSON(writer, http.StatusOK, map[string]any{"ok": true, "home": homeSnapshot{
+			Version: homeSnapshotVersion, GeneratedAt: now.Format(time.RFC3339Nano),
+			Items: []homeItem{
+				{ID: "recent-country-golf", Kind: "recent-thread", Eyebrow: "Continue", Title: "Country Golf", Detail: "Pick up at the venue and membership strategy.", SourceRevision: now.Format(time.RFC3339Nano), Destination: homeDestination{Route: "thread", ThreadID: "agentic-lab-country-golf", MessageID: "country-golf-latest", Title: "Country Golf"}},
+				{ID: "needs-investor", Kind: "needs-you", Eyebrow: "Needs you", Title: "Review the investor package", Detail: "Open to respond", SourceRevision: now.Format(time.RFC3339Nano), WorkID: "agentic-lab-investor", Destination: homeDestination{Route: "thread", ThreadID: "agentic-lab-investor", MessageID: "investor-approval", Title: "Investor package"}},
+				{ID: "active-deck", Kind: "active-work", Eyebrow: "Presentation · Building", Title: "Create the STRIDE pitch deck", Detail: "Building the first draft", SourceRevision: now.Format(time.RFC3339Nano), WorkID: "agentic-lab-deck", Destination: homeDestination{Route: "thread", ThreadID: "agentic-lab-deck", MessageID: "deck-work", Title: "Pitch STRIDE"}},
+			},
+			Starters: []homeStarter{
+				{ID: "continue", Label: "Continue", Detail: "Pick up recent work", Suggestions: []homeStarterSuggestion{{ID: "continue-where-left-off", Text: "Continue where we left off in Country Golf.", Destination: homeDestination{Route: "thread", ThreadID: "agentic-lab-country-golf", MessageID: "country-golf-latest", Title: "Country Golf"}}}},
+				{ID: "explore", Label: "Explore", Detail: "Understand and discover", Suggestions: []homeStarterSuggestion{{ID: "explore-open-question", Text: "Explore the biggest open question in Country Golf.", Destination: homeDestination{Route: "new-private"}}}},
+				{ID: "create", Label: "Create", Detail: "Make the next useful thing", Suggestions: []homeStarterSuggestion{{ID: "create-next-deliverable", Text: "Create the next useful deliverable for Country Golf.", Destination: homeDestination{Route: "new-private"}}}},
+				{ID: "challenge", Label: "Challenge", Detail: "Grill and red-team", Suggestions: []homeStarterSuggestion{{ID: "challenge-assumptions", Text: "Challenge the current thinking in Country Golf and identify the weakest assumptions.", Destination: homeDestination{Route: "new-private"}}}},
+			},
+		}})
+	})
 	mux.HandleFunc("/assistant/chat-participants", assistantChatParticipantsHandler)
 	mux.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	mux.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
@@ -305,6 +330,15 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 			http.SetCookie(writer, &copy)
 		}
 		http.Redirect(writer, request, "/work", http.StatusFound)
+	})
+	mux.HandleFunc("/participants", func(writer http.ResponseWriter, request *http.Request) {
+		if userFromRequest(request) == nil {
+			writeAuthError(writer, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(writer).Encode(app.roomSnapshotForRoom(normalizeRoomID(request.URL.Query().Get("room"))))
 	})
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		body, readErr := os.ReadFile("index.html")
@@ -633,12 +667,19 @@ func strideE10AgenticLabMeetingFixtureScript() string {
 	let revealAttempts = 0;
 	let meetingModeInitialized = false;
 	let roomWorkLoaded = false;
+	let roomOccupancyInitialized = false;
 	const revealTimer = window.setInterval(() => {
 	  revealAttempts += 1;
 	  if (appShell.classList.contains('is-authed')) {
 	    setRoomView(true);
 	    setActiveTool('room', { history: false });
 	    setRoomChatOpen(true);
+	    if (!roomOccupancyInitialized) {
+	      roomOccupancyInitialized = true;
+	      refreshRoomStateSnapshot('rendered harness current occupancy').catch(() => {
+	        roomOccupancyInitialized = false;
+	      });
+	    }
 	    if (!roomWorkLoaded) {
 	      roomWorkLoaded = true;
 	      fetch('/__agentic-lab/room-chat-history', { cache: 'no-store' })

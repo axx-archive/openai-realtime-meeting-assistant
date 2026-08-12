@@ -4386,6 +4386,76 @@ const privateRealtimeVoiceUtteranceMaxRunes = 16_000
 // carries natural language into the same five-outcome chat path used by typed
 // turns. Legacy server action executors below are deliberately unreachable
 // from this boundary.
+func (app *kanbanBoardApp) applyPrivateRealtimeVoiceSessionModelTool(ctx context.Context, requesterEmail, voiceSessionID, threadID, callID, toolName string, args map[string]any) (map[string]any, bool, error) {
+	toolName = strings.TrimSpace(toolName)
+	if !privateRealtimeVoiceToolAllowed(toolName) {
+		return nil, false, fmt.Errorf("private Realtime voice capability %q is unavailable", toolName)
+	}
+	voiceSessionID, err := normalizePrivateRealtimeVoiceSessionID(voiceSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	thread, err := app.privateRealtimeVoiceConversation(requesterEmail, voiceSessionID, threadID)
+	if err != nil {
+		return nil, false, err
+	}
+	callID, err = normalizeScoutIdempotencyKey(callID)
+	if err != nil {
+		return nil, false, fmt.Errorf("private Realtime voice call id is invalid")
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	if toolName == "do_nothing" {
+		reason, argumentErr := exactPrivateRealtimeStringArgument(args, "reason")
+		if argumentErr != nil {
+			return nil, false, argumentErr
+		}
+		return map[string]any{"ok": true, "outcome": "no_effect", "message": reason, "thread_id": thread.ID}, false, nil
+	}
+
+	utterance, err := exactPrivateRealtimeStringArgument(args, "utterance")
+	if err != nil {
+		return nil, false, err
+	}
+	if utf8.RuneCountInString(utterance) > privateRealtimeVoiceUtteranceMaxRunes {
+		return nil, false, fmt.Errorf("private Realtime voice utterance is too long")
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	bodyDigest := sha256Hex([]byte("private-realtime-conversation/v2\x00" + requesterEmail + "\x00" + voiceSessionID + "\x00" + thread.ID + "\x00" + utterance))
+	operationLock := app.scoutChatThreadLock("private-realtime-session-operation-" + sha256Hex([]byte(requesterEmail + "\x00" + voiceSessionID + "\x00" + callID))[:24])
+	operationLock.Lock()
+	defer operationLock.Unlock()
+
+	// Re-authorize the exact bound thread after acquiring the session operation
+	// lock. Archival or authority drift between the initial request and commit
+	// therefore fails before any provider work or durable turn is admitted.
+	thread, err = app.privateRealtimeVoiceConversation(requesterEmail, voiceSessionID, thread.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	user := accountStore().findUser(requesterEmail)
+	if user == nil {
+		return nil, false, fmt.Errorf("private Realtime voice requester is unavailable")
+	}
+	ctx = withConversationTurnModality(ctx, conversationModalityPrivateRealtimeVoice)
+	ctx = withConversationTurnOperation(ctx, conversationTurnOperation{ID: callID, BodyDigest: bodyDigest})
+	response, err := app.appendScoutChatThreadMessage(ctx, user, thread.ID, utterance, nil, "")
+	if err != nil {
+		if strings.Contains(err.Error(), "reused with different content") {
+			return nil, false, fmt.Errorf("private Realtime voice operation id was reused with different words")
+		}
+		return nil, false, err
+	}
+	result := privateRealtimeConversationResult(response, thread.ID)
+	result["voice_session_id"] = voiceSessionID
+	return result, false, nil
+}
+
+// applyPrivateRealtimeVoiceModelTool remains as an internal compatibility
+// helper for legacy tests and non-HTTP callers. The HTTP surface uses the
+// session-bound entrypoint above and can never select an unrelated recent
+// private thread.
 func (app *kanbanBoardApp) applyPrivateRealtimeVoiceModelTool(ctx context.Context, requesterEmail string, callID string, toolName string, args map[string]any) (map[string]any, bool, error) {
 	toolName = strings.TrimSpace(toolName)
 	if !privateRealtimeVoiceToolAllowed(toolName) {

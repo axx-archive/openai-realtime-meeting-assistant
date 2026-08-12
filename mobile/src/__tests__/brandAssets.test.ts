@@ -88,7 +88,7 @@ test('The Strike vector is the exact static identity source', () => {
   assert.notEqual(sha256(tintedPng), sha256(darkPng), 'the tinted appearance must not be the dark one');
 });
 
-test('React Native shell separates the static logo from the live Signal Cradle', () => {
+test('React Native shell separates the static logo from composer voice controls', () => {
   const component = text('src/components/BrandMark.tsx');
   assert.match(component, /from 'expo-image'/);
   assert.match(component, /stride-logo-mark\.png/);
@@ -96,14 +96,14 @@ test('React Native shell separates the static logo from the live Signal Cradle',
   assert.match(component, /stride-logo-white\.png/);
   assert.match(component, /export function StrideLogo/);
 
-  // The hero Signal is both identity and the real-amplitude talk control. Its
-  // The Canvas must render exactly one live cradle, driven only by native
-  // Realtime, and no static lockup or dictation fallback.
+  // Home now follows the familiar composer grammar: bounded Dictate mic and a
+  // distinct circular full-duplex Live Voice control. No duplicate hero voice
+  // control or static lockup may return.
   const canvas = text('src/screens/CanvasScreen.tsx');
-  assert.equal(canvas.match(/<StrideCradle\b/g)?.length, 1);
-  assert.match(canvas, /trace=\{realtime\.trace\}/);
-  assert.match(canvas, /listening=\{listening\}/);
-  assert.match(canvas, /source=\{realtime\.status === 'talking' \? 'agent' : 'human'\}/);
+  assert.doesNotMatch(canvas, /<StrideCradle\b/);
+  assert.match(canvas, /accessibilityLabel="Dictate a message"/);
+  assert.match(canvas, /Start a new private voice chat with Scout/);
+  assert.match(canvas, /SymbolView name="waveform"/);
   assert.doesNotMatch(canvas, /<StrideLogo\b/);
   assert.doesNotMatch(canvas, /styles\.glow|rgba\(255,90,25,0\.035\)/);
   assert.doesNotMatch(canvas, />SCOUT<|<Dock/);
@@ -141,10 +141,12 @@ test('React Native shell separates the static logo from the live Signal Cradle',
   assert.match(composition, /<StrideCradle trace=\{EMPTY_TRACE\} listening=\{false\} \/>/);
   assert.match(composition, /export const canvasCradleComposition/);
   assert.match(canvas, /contentContainerStyle=\{canvasCradleComposition\.body\}/);
-  assert.match(canvas, /style=\{canvasCradleComposition\.skyAbove\}/);
-  assert.match(canvas, /canvasCradleComposition\.wave/);
-  assert.match(canvas, /style=\{canvasCradleComposition\.copyBlock\}/);
-  assert.match(canvas, /style=\{canvasCradleComposition\.skyBelow\}/);
+  assert.match(canvas, /canvasCradleComposition\.skyAbove/);
+  assert.match(canvas, /styles\.composerVoice/);
+  assert.match(canvas, /SymbolView name="waveform"/);
+  assert.match(canvas, /style=\{\[canvasCradleComposition\.copyBlock, styles\.homeCopyBlock\]\}/);
+  assert.match(canvas, /homeCopyBlock:\s*\{ width: '100%', minHeight: 0 \}/);
+  assert.match(canvas, /canvasCradleComposition\.skyBelow/);
   assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });

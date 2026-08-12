@@ -22,7 +22,7 @@ test('thread dictation holds locally, then uses the normal message send path onc
   assert.doesNotMatch(thread, /Stop dictation/);
 });
 
-test('Canvas keeps live Scout singular and leaves dictation to conversation screens', () => {
+test('Canvas keeps live Scout singular and separates composer dictation', () => {
   const canvas = source('src', 'screens', 'CanvasScreen.tsx');
   assert.match(canvas, /usePersonalRealtime/);
   assert.match(canvas, /realtime\.enabled/);
@@ -31,8 +31,10 @@ test('Canvas keeps live Scout singular and leaves dictation to conversation scre
   assert.doesNotMatch(canvas, /legacyUploadOnStop|fallbackVoice|voiceDictation/);
   const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
   assert.match(realtime, /audioFocusRuntime\.acquire\('personal_realtime'/);
-  assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP\)/);
-  assert.match(realtime, /api\.realtimeTool\([\s\S]*sessionToken,[\s\S]*call\.name/);
+  assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP, voiceSessionId\)/);
+  assert.match(realtime, /api\.realtimeTool\([\s\S]*sessionToken,[\s\S]*voiceSessionIdRef\.current,[\s\S]*voiceThreadIdRef\.current,[\s\S]*call\.name/);
+  assert.match(realtime, /answer\.voiceSessionId !== voiceSessionId/);
+  assert.match(realtime, /voiceThreadIdRef\.current = answer\.threadId/);
   assert.match(realtime, /api\.realtimeUsage\(sessionToken/);
   assert.match(realtime, /onActionsRef\.current\?\.\(response\.actions\)/);
   assert.match(realtime, /terminateTransportWithError\(connectionGeneration, 'Scout voice connection was interrupted\.'\)/);
@@ -79,7 +81,9 @@ test('Canvas keeps live Scout singular and leaves dictation to conversation scre
   assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
   assert.match(canvas, /submitHomeScoutOpening/);
   assert.match(canvas, /realtime\.stop\('cancelled'\)/);
-  assert.doesNotMatch(canvas, /useComposerDictation|composerDictation|submitComposerText/);
+  assert.match(canvas, /useComposerDictation/);
+  assert.match(canvas, /accessibilityLabel="Dictate a message"/);
+  assert.doesNotMatch(canvas, /composerDictation|submitComposerText/);
   const config = source('src', 'config.ts');
   assert.match(config, /EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true'/);
   const eas = JSON.parse(source('eas.json')) as {

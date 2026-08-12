@@ -95,7 +95,7 @@ test('only private thread composers claim Scout-directed dictation context', () 
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
   const room = source('src', 'components', 'RoomConversationSheet.tsx');
 
-  assert.doesNotMatch(canvas, /useComposerDictation/);
+  assert.match(canvas, /context: 'scout'/);
   assert.match(thread, /context: threadVisibility === ["']private["'] \? ["']scout["'] : ["']chat["']/);
   assert.doesNotMatch(room, /context: 'scout'/);
 });

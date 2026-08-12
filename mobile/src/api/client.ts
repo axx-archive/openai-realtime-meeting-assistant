@@ -36,6 +36,7 @@ import type {
   ArtifactDispositionRef,
   ArtifactDriveSaveCapability,
   ArtifactResponse,
+  HomeResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -288,6 +289,10 @@ export const api = {
     return request<RoomsResponse>("/rooms", { sessionToken });
   },
 
+  home(sessionToken: string): Promise<HomeResponse> {
+    return request<HomeResponse>("/assistant/home", { sessionToken });
+  },
+
   meetingSpecialists(
     sessionToken: string,
     roomId: string,
@@ -446,16 +451,19 @@ export const api = {
   realtimeOffer(
     sessionToken: string,
     sdp: string,
-  ): Promise<{ ok: boolean; sdp: string }> {
+    voiceSessionId: string,
+  ): Promise<{ ok: boolean; sdp: string; voiceSessionId: string; threadId: string }> {
     return request("/assistant/realtime-offer", {
       method: "POST",
-      body: { sdp },
+      body: { sdp, voiceSessionId },
       sessionToken,
     });
   },
 
   realtimeTool(
     sessionToken: string,
+    voiceSessionId: string,
+    threadId: string,
     callId: string,
     name: string,
     argumentsValue: Record<string, unknown>,
@@ -468,7 +476,7 @@ export const api = {
   }> {
     return request("/assistant/realtime-tool", {
       method: "POST",
-      body: { callId, name, arguments: argumentsValue },
+      body: { voiceSessionId, threadId, callId, name, arguments: argumentsValue },
       sessionToken,
       signal,
     });

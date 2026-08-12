@@ -26,6 +26,49 @@ export type RoomsResponse = {
   rooms: Room[];
 };
 
+export type HomeDestination =
+  | { route: 'alerts' }
+  | { route: 'room'; roomId: string; title?: string }
+  | { route: 'thread'; threadId: string; messageId?: string; title?: string };
+
+export type HomeStarterDestination =
+  | { route: 'new-private' }
+  | { route: 'thread'; threadId: string; messageId?: string; title?: string };
+
+export type HomeItem = {
+  id: string;
+  kind: 'recent-thread' | 'needs-you' | 'active-work' | 'live-meeting';
+  eyebrow: string;
+  title: string;
+  detail: string;
+  sourceRevision?: string;
+  workId?: string;
+  destination: HomeDestination;
+};
+
+export type HomeStarterSuggestion = {
+  id: string;
+  text: string;
+  destination: HomeStarterDestination;
+};
+
+export type HomeStarter = {
+  id: 'continue' | 'explore' | 'create' | 'challenge';
+  label: string;
+  detail: string;
+  suggestions: HomeStarterSuggestion[];
+};
+
+export type HomeSnapshot = {
+  version: 'home-v2';
+  generatedAt: string;
+  items: HomeItem[];
+  starters: HomeStarter[];
+  allClear: boolean;
+};
+
+export type HomeResponse = { ok: boolean; home: HomeSnapshot };
+
 export type ScoutThread = {
   id: string;
   title?: string;

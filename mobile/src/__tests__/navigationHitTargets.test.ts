@@ -23,6 +23,8 @@ test('Canvas has no duplicate shortcut band competing with the universal shell',
   const canvas = fs.readFileSync(path.join(mobileRoot, 'src', 'screens', 'CanvasScreen.tsx'), 'utf8');
   const shell = fs.readFileSync(path.join(mobileRoot, 'src', 'navigation', 'NativeUniversalShell.tsx'), 'utf8');
   assert.doesNotMatch(canvas, /<ChatCircle|<NavCluster|styles\.navRow|composerDock/);
-  assert.match(shell, /compactItem: \{[\s\S]*minHeight: 52/);
-  assert.match(shell, /bottomRail: \{[\s\S]*minHeight: 64/);
+  assert.match(shell, /compactItem: \{[\s\S]*minHeight: 48/);
+  assert.match(shell, /bottomRail: \{[\s\S]*minHeight: 58/);
+  assert.match(shell, /compactItemSelected: \{ backgroundColor: colors\.accentSoft \}/);
+  assert.match(shell, /!compact \? \([\s\S]*destination\.label/);
 });

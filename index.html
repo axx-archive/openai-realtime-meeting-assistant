@@ -1132,7 +1132,7 @@
         gap: 8px;
         height: 30px;
         padding: 0 13px;
-        border: 1px solid var(--line-1);
+        border: 1px solid transparent;
         border-radius: var(--r-full);
         background: var(--live-soft);
         color: var(--text-1);
@@ -6912,7 +6912,7 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        width: min(700px, 94vw);
+        width: min(860px, 94vw);
       }
 
       .office-launch__island {
@@ -6921,7 +6921,7 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 26px;
+        gap: 14px;
       }
 
       .office-launch__mark {
@@ -6937,20 +6937,79 @@
          on hover (design hover background) */
       .office-launch__wave {
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: center;
-        gap: 26px;
-        padding: 20px 40px;
-        border: 0;
-        border-radius: 28px;
-        background: transparent;
+        justify-content: center;
+        gap: 12px;
+        min-width: 142px;
+        min-height: 54px;
+        padding: 7px 14px 7px 8px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+        box-shadow: 0 10px 30px rgba(12, 10, 8, 0.035);
         color: var(--text-1);
         cursor: pointer;
         transition:
           background var(--dur-slow) var(--ease),
-          transform var(--dur-fast) var(--ease);
+          transform var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          box-shadow var(--dur-slow) var(--ease);
       }
-      .office-launch__wave:hover { background: var(--accent-soft); }
+      .office-launch__wave:hover {
+        background: var(--surface-2);
+        border-color: var(--line-2);
+        box-shadow: 0 14px 34px rgba(12, 10, 8, 0.07);
+        transform: translateY(-1px);
+      }
+      .office-launch__wave:active { transform: scale(0.97); }
+      .office-launch.is-listening .office-launch__wave {
+        border-color: color-mix(in srgb, var(--ember) 44%, var(--line-1));
+        background: color-mix(in srgb, var(--ember-soft) 30%, var(--surface-2));
+      }
+
+      .office-launch__mic {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+      .office-launch.is-listening .office-launch__mic { background: var(--ember); color: var(--on-ember); }
+
+      /* A real level display, not a decorative loading ellipsis. The bars hold
+         a quiet asymmetric voiceprint at rest and are driven by measured audio
+         energy while the Realtime lane is open. */
+      .office-launch__waveform {
+        width: 62px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        color: var(--text-2);
+      }
+
+      .office-launch__waveform-bar {
+        width: 2px;
+        height: var(--wave-height, var(--wave-rest, 7px));
+        min-height: 4px;
+        max-height: 23px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: var(--wave-opacity, 0.5);
+        transform-origin: center;
+        transition:
+          height 90ms linear,
+          opacity 120ms var(--ease),
+          color var(--dur-fast) var(--ease);
+      }
+
+      .office-launch__wave:hover .office-launch__waveform-bar { opacity: 0.72; }
+      .office-launch.is-listening .office-launch__waveform { color: var(--ember); }
 
       /* ---------- THE STRIDE SIGNAL CRADLE ----------
 
@@ -6959,14 +7018,16 @@
          visible. Real audio controls the energy; no live pipeline means no
          movement. Suspension lines and a literal frame are intentionally absent. */
       .office-launch__bars {
-        position: relative;
-        display: grid;
-        place-items: center;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
         /* The hero of the page. Scales with the viewport's SHORT axis so the
            mark never collides with the greeting on a laptop screen. */
-        --cradle-width: clamp(330px, 39vw, 520px);
-        width: var(--cradle-width);
-        height: calc(var(--cradle-width) * 0.34);
+        --cradle-width: 104px;
+        width: 1px;
+        height: 1px;
         /* Ember is EARNED. Grey at rest; the listening rule below lights it.
            Colour means something is happening — a resting screen holds no ember,
            and that trade (brand presence at rest for an honest signal) is
@@ -7015,6 +7076,7 @@
         font: 600 22px var(--font-sans);
         letter-spacing: -0.016em;
         text-align: center;
+        margin-top: 4px;
       }
 
       .home-scout-composer {
@@ -7024,19 +7086,76 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 20px;
+        margin-top: 44px;
         padding: 8px 9px 8px 17px;
         border: 1px solid var(--line-1);
         border-radius: 999px;
         background: color-mix(in srgb, var(--surface-2) 86%, transparent);
-        box-shadow: 0 12px 32px rgba(12, 10, 8, 0.06);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 2%, transparent), 0 14px 34px rgba(12, 10, 8, 0.045);
         color: var(--text-2);
-        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+        transition: box-shadow var(--dur-fast) var(--ease);
       }
 
       .home-scout-composer:focus-within {
-        border-color: color-mix(in srgb, var(--ember) 40%, var(--line-1));
-        box-shadow: 0 14px 38px rgba(12, 10, 8, 0.08);
+        border-color: transparent;
+        box-shadow: 0 16px 42px rgba(12, 10, 8, 0.07);
+      }
+
+      #homeScoutComposer .stride-dictation-mic,
+      .home-realtime-voice,
+      .home-scout-composer__send {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        flex: 0 0 44px;
+        border-radius: 999px;
+      }
+
+      #homeScoutComposer .stride-dictation-mic {
+        color: var(--text-2);
+      }
+
+      .home-realtime-voice {
+        display: grid;
+        place-items: center;
+        border: 0;
+        background: var(--text-1);
+        color: var(--surface-1);
+        cursor: pointer;
+        box-shadow: 0 5px 16px rgba(12, 10, 8, 0.12);
+        transition:
+          transform var(--dur-fast) var(--ease),
+          box-shadow var(--dur-fast) var(--ease),
+          background var(--dur-fast) var(--ease);
+      }
+
+      .home-realtime-voice:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(12, 10, 8, 0.18);
+      }
+      .home-realtime-voice:active { transform: scale(0.95); }
+      .office-launch.is-listening .home-realtime-voice {
+        background: var(--ember);
+        color: var(--on-ember);
+      }
+
+      .home-realtime-voice__wave {
+        width: 25px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2.5px;
+      }
+
+      .home-realtime-voice__bar {
+        width: 2.5px;
+        height: var(--wave-height, var(--wave-rest));
+        max-height: 22px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: var(--wave-opacity, 0.92);
+        transition: height 90ms linear, opacity 120ms var(--ease);
       }
 
       .home-scout-composer__input {
@@ -7047,6 +7166,15 @@
         background: transparent;
         color: var(--text-1);
         font: var(--type-body);
+        box-shadow: none;
+        appearance: none;
+      }
+
+      .home-scout-composer__input:focus,
+      .home-scout-composer__input:focus-visible {
+        border-color: transparent;
+        outline: none;
+        box-shadow: none;
       }
 
       .home-scout-composer__input::placeholder { color: var(--text-3); }
@@ -7074,6 +7202,199 @@
         font: var(--type-caption);
         text-align: center;
       }
+
+      .home-context-chip {
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 7px;
+        padding: 6px 10px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-caption);
+        cursor: pointer;
+      }
+      .home-context-chip:hover, .home-context-chip:focus-visible { border-color: var(--line-2); color: var(--text-1); }
+      .home-context-chip[hidden] { display: none; }
+
+      .home-refresh-retry {
+        min-height: 40px;
+        margin-top: 4px;
+        padding: 7px 12px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        cursor: pointer;
+      }
+      .home-refresh-retry:hover { background: var(--surface-2); color: var(--text-1); }
+      .home-refresh-retry[hidden] { display: none; }
+
+      .home-starters,
+      .home-suggestions,
+      .home-continuity {
+        box-sizing: border-box;
+        width: min(740px, 100%);
+      }
+      .home-starters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 34px;
+      }
+      .home-starters[hidden], .home-suggestions[hidden], .home-continuity[hidden] { display: none; }
+      .home-starter {
+        min-height: 98px;
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        padding: 15px 16px 14px;
+        border: 0;
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--surface-2) 52%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 9%, transparent);
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+        transform: translateY(0);
+        transition-property: box-shadow, transform, background-color;
+        transition-duration: 180ms;
+        transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+      }
+      .home-starter:hover, .home-starter:focus-visible {
+        transform: translateY(-3px);
+        background: color-mix(in srgb, var(--surface-2) 76%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 14%, transparent), 0 12px 26px rgba(12, 10, 8, 0.07);
+      }
+      .home-starter:active { transform: scale(.96); }
+      .home-starter__icon {
+        display: block;
+        height: 20px;
+        color: var(--text-3);
+        font: 500 17px/20px var(--font-sans);
+        transition-property: transform, opacity;
+        transition-duration: 180ms;
+        transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+      }
+      .home-starter[data-category-id="continue"] .home-starter__icon { color: var(--signal-500, #30d158); }
+      .home-starter[data-category-id="explore"] .home-starter__icon { color: var(--info, #4f9cff); }
+      .home-starter[data-category-id="create"] .home-starter__icon { color: #a78bfa; }
+      .home-starter[data-category-id="challenge"] .home-starter__icon { color: var(--ember); }
+      .home-starter:hover .home-starter__icon, .home-starter:focus-visible .home-starter__icon { transform: translateY(-1px) scale(1.06); }
+      .home-starter__label { margin-top: 5px; font: 600 13px/1.25 var(--font-sans); }
+      .home-starter__text {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-2);
+        font: 400 12px/1.35 var(--font-sans);
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .home-suggestions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+        width: min(620px, 100%);
+        margin-top: 36px;
+        padding: 0;
+        animation: home-suggestions-enter 220ms cubic-bezier(.2, 0, 0, 1) both;
+      }
+      .home-suggestions__back {
+        min-height: 44px;
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 8px;
+        padding: 7px 10px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--text-2);
+        font: 500 13px/1 var(--font-sans);
+        cursor: pointer;
+        transition: color 150ms cubic-bezier(.2, 0, 0, 1), background-color 150ms cubic-bezier(.2, 0, 0, 1);
+      }
+      .home-suggestions__back:hover, .home-suggestions__back:focus-visible {
+        color: var(--text-1);
+        background: color-mix(in srgb, var(--surface-2) 66%, transparent);
+      }
+      @keyframes home-suggestions-enter {
+        from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+        to { opacity: 1; transform: translateY(0); filter: blur(0); }
+      }
+      .home-suggestion {
+        width: 100%;
+        min-height: 42px;
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr) 18px;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text-2);
+        font: 400 13px/1.35 var(--font-sans);
+        text-align: left;
+        cursor: pointer;
+        transition-property: color, background-color, transform;
+        transition-duration: 150ms;
+        transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+      }
+      .home-suggestion__icon { color: var(--text-3); font: 500 14px/1 var(--font-sans); }
+      .home-suggestion__arrow { color: var(--text-3); opacity: 0; transform: translateX(-3px); transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(.2, 0, 0, 1); }
+      .home-suggestion:hover, .home-suggestion:focus-visible { color: var(--text-1); background: color-mix(in srgb, var(--surface-2) 66%, transparent); transform: translateX(2px); }
+      .home-suggestion:hover .home-suggestion__arrow, .home-suggestion:focus-visible .home-suggestion__arrow { opacity: 1; transform: translateX(0); }
+      .home-suggestion:active { transform: scale(.96); }
+
+      .office-launch.is-starter-open .home-scout-composer { margin-top: 28px; }
+
+      @media (max-width: 720px) {
+        .home-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .home-starters { width: min(420px, 100%); margin-top: 28px; }
+        .home-starter { min-height: 84px; padding: 13px 14px; }
+        .home-suggestions { width: 100%; margin-top: 24px; }
+        .home-scout-composer, .office-launch.is-starter-open .home-scout-composer { margin-top: 26px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .home-starter, .home-starter__icon, .home-suggestion, .home-suggestion__arrow { transition-duration: 0ms; }
+        .home-suggestions { animation: none; }
+      }
+
+      .home-continuity { margin-top: 22px; border-top: 1px solid var(--line-1); }
+      .home-continuity__row {
+        width: 100%;
+        min-height: 70px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 16px;
+        padding: 13px 4px;
+        border: 0;
+        border-bottom: 1px solid var(--line-1);
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+      }
+      .home-continuity__row:hover .home-continuity__title { color: var(--ember-text); }
+      .home-continuity__copy { min-width: 0; display: grid; gap: 2px; }
+      .home-continuity__eyebrow { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .home-continuity__title,
+      .home-continuity__detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .home-continuity__title { font: 600 14px var(--font-sans); letter-spacing: -0.01em; }
+      .home-continuity__detail { color: var(--text-2); font: var(--type-caption); }
+      .home-continuity__arrow { color: var(--text-3); }
 
       .office-hero {
         display: grid;
@@ -23325,28 +23646,62 @@
       .office-home-card__badge[hidden] { display: none; }
       .office-home-card__chevron { color: var(--text-3); flex: none; }
 
-      /* multi-room: the home live-now strip — only rooms with people
-         inside (green --live dot, per law: presence is green, never ember),
-         else one quiet row. Zero management chrome on home. */
-      .home-live { width: 100%; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+      /* Home exposes meetings as a compact destination, not a second navigation
+         bar. Quiet state recedes to a text affordance; an active room earns a
+         small presence pill and one-click lobby jump. */
+      .home-live {
+        width: auto;
+        max-width: min(420px, 100%);
+        margin-top: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
       .home-live[hidden] { display: none; }
       .home-live__row {
         display: flex;
-        width: 100%;
+        width: auto;
+        max-width: 100%;
+        min-height: 38px;
         align-items: center;
-        gap: 11px;
-        padding: 13px 16px;
-        border-radius: 16px;
+        gap: 9px;
+        padding: 8px 12px;
+        border-radius: 999px;
         border: 1px solid var(--line-1);
-        background: var(--surface-2);
+        background: color-mix(in srgb, var(--surface-2) 78%, transparent);
+        box-shadow: 0 8px 24px rgba(12, 10, 8, 0.035);
         color: var(--text-1);
         text-align: left;
         cursor: pointer;
-        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        transition:
+          transform var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          background var(--dur-fast) var(--ease),
+          box-shadow var(--dur-fast) var(--ease);
       }
-      .home-live__row:hover { border-color: var(--line-2, var(--line-1)); }
-      .home-live__row:active { transform: scale(0.98); }
-      .home-live__dot { width: 8px; height: 8px; border-radius: 999px; background: var(--line-2, var(--line-1)); flex: none; }
+      .home-live__row:hover {
+        border-color: var(--line-2, var(--line-1));
+        background: var(--surface-2);
+        box-shadow: 0 12px 28px rgba(12, 10, 8, 0.065);
+        transform: translateY(-1px);
+      }
+      .home-live__row:active { transform: scale(0.97); }
+      .home-live__row.is-quiet {
+        min-height: 32px;
+        padding: 5px 8px;
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
+        color: var(--text-3);
+      }
+      .home-live__row.is-quiet:hover {
+        border-color: var(--line-1);
+        background: color-mix(in srgb, var(--surface-2) 58%, transparent);
+        color: var(--text-2);
+      }
+      .home-live__icon { width: 15px; height: 15px; flex: none; color: var(--text-3); }
+      .home-live__dot { width: 7px; height: 7px; border-radius: 999px; background: var(--line-2, var(--line-1)); flex: none; }
       .home-live__dot.is-live { background: var(--live); animation: home-live-breathe 2.6s var(--ease) infinite; }
       @keyframes home-live-breathe {
         0%, 100% { box-shadow: 0 0 0 0 var(--live-soft); }
@@ -23354,7 +23709,7 @@
       }
       @media (prefers-reduced-motion: reduce) { .home-live__dot.is-live { animation: none; } }
       .home-live__name {
-        flex: 1;
+        flex: 0 1 auto;
         min-width: 0;
         font: 600 13.5px var(--font-sans);
         letter-spacing: -0.01em;
@@ -23362,7 +23717,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .home-live__count { flex: none; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .home-live__count { flex: none; font: 500 12px var(--font-sans); color: var(--text-3); }
       .home-live__chevron { color: var(--text-3); flex: none; }
 
       /* the sheet: a centered dialog on desktop, a full-height rising sheet on
@@ -25043,10 +25398,6 @@
           display: none;
         }
 
-        #appShell.is-guest.is-in-room .room-more {
-          display: none;
-        }
-
         #appShell.is-in-room #muteMic:active,
         #appShell.is-in-room #toggleCamera:active,
         #appShell.is-in-room #recordMeeting:active,
@@ -25492,12 +25843,19 @@
         }
 
         .office-launch__wave {
-          gap: 18px;
+          gap: 9px;
           color: var(--text-1);
         }
 
+        .office-launch.is-composer-focused {
+          justify-content: flex-start;
+          overflow-y: auto;
+          padding-top: 44px;
+          padding-bottom: calc(124px + env(safe-area-inset-bottom));
+        }
+
         .office-launch__bars {
-          --cradle-width: min(78vw, 340px);
+          --cradle-width: 94px;
         }
 
         /* Touch has no hover, so the press is where the affordance has to live:
@@ -28913,6 +29271,204 @@
         .stride-w2 *, .stride-w2 *::before, .stride-w2 *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
         .pd1-primary-nav *, .pd1-destination-surface * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
       }
+      /* PD1 compact meeting island. The primary order is invariant across
+         desktop, iPhone and iPad: Mic · Camera · Route · Share · More | Leave.
+         Everything contextual lives in the single More surface so controls do
+         not sprawl, duplicate ownership or move as meeting state changes. */
+      #appShell.is-in-room[data-tool="room"] .meeting-bar {
+        position: fixed;
+        right: auto;
+        bottom: max(18px, env(safe-area-inset-bottom));
+        left: calc(50% + 68px);
+        z-index: 900;
+        display: flex;
+        width: fit-content;
+        max-width: calc(100dvw - 24px);
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        overflow: visible;
+        opacity: 1;
+        transform: translateX(-50%);
+        animation: none;
+      }
+
+      /* Desktop authenticated chrome reserves a 136px rail with shell
+         padding. Anchor the island to the remaining stage rather than the
+         physical viewport; phone chrome removes this offset below. */
+      @media (min-width: 641px) {
+        #appShell.is-authed.is-in-room[data-tool="room"] .meeting-bar {
+          left: calc(50% + 68px);
+        }
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar .controls {
+        display: inline-flex;
+        width: auto;
+        grid-template-columns: none;
+        overflow: visible;
+        gap: 6px;
+        padding: 7px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: var(--r-full);
+        background: rgba(18, 18, 21, 0.72);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 12px 40px rgba(0, 0, 0, 0.42);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        transition: opacity var(--dur-med) var(--ease), background var(--dur-med) var(--ease);
+      }
+
+      @media (hover: hover) and (pointer: fine) {
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls {
+          opacity: 0.78;
+        }
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls:hover,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls:focus-within {
+          opacity: 1;
+          background: rgba(18, 18, 21, 0.9);
+        }
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar .room-clock,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomBoardToggle,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #consentToggle,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #recordMeeting,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #inviteToggle,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomScoutQuickAction,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #archiveMeeting {
+        display: none;
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #muteMic,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #toggleCamera,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #audioSettingsButton,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #screenShare,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #leave {
+        display: grid;
+        place-items: center;
+        grid-column: auto;
+        grid-row: auto;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle {
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.22);
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar .room-more {
+        position: relative;
+        display: block;
+        flex: none;
+        overflow: visible;
+      }
+
+      #appShell.is-in-room[data-tool="room"] .room-more__menu {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 10px);
+        z-index: 2;
+        display: grid;
+        width: 216px;
+        max-height: min(520px, calc(100dvh - 112px));
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid var(--glass-media-border);
+        border-radius: 18px;
+        background: var(--glass-media);
+        box-shadow: var(--glass-media-highlight), var(--glass-media-shadow);
+        backdrop-filter: var(--glass-blur-chrome);
+        -webkit-backdrop-filter: var(--glass-blur-chrome);
+      }
+
+      #appShell.is-in-room[data-tool="room"] .room-more__menu[hidden] { display: none; }
+
+      #appShell.is-in-room[data-tool="room"] .room-more__action {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        min-height: 44px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.9);
+        font: 500 13px var(--font-sans);
+        text-align: left;
+      }
+
+      #appShell.is-in-room[data-tool="room"] .room-more__action:hover,
+      #appShell.is-in-room[data-tool="room"] .room-more__action:focus-visible { background: rgba(255, 255, 255, 0.1); }
+      #appShell.is-in-room[data-tool="room"] .room-more__action[hidden] { display: none; }
+      #appShell.is-in-room[data-tool="room"] .room-more__action[disabled] { opacity: 0.45; }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar .controls__divider {
+        display: block;
+        width: 1px;
+        height: 24px;
+        margin: 0 2px;
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #leave {
+        width: 50px;
+        min-width: 50px;
+        justify-self: auto;
+      }
+
+      #appShell.is-in-room[data-tool="room"] .room-more__menu {
+        right: 0;
+        bottom: calc(100% + 10px);
+        width: 216px;
+        max-height: min(520px, calc(100dvh - 112px));
+        overflow-y: auto;
+      }
+
+      @media (max-width: 374px) {
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls {
+          gap: 3px;
+          padding: 5px;
+        }
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #muteMic,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #toggleCamera,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #audioSettingsButton,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #screenShare,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle {
+          width: 44px;
+          min-width: 44px;
+        }
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #leave {
+          width: 46px;
+          min-width: 46px;
+        }
+      }
+
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
+        #appShell.is-authed.is-in-room[data-tool="room"] .meeting-bar {
+          left: 50%;
+        }
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #audioSettingsButton,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar #screenShare {
+          display: grid;
+        }
+      }
     </style>
   </head>
   <body>
@@ -29150,7 +29706,7 @@
           <div class="office-launch bf-view">
             <div class="office-launch__wrap">
               <div class="office-launch__island">
-                <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave pressable">
+                <span class="office-launch__legacy-signal" hidden aria-hidden="true">
                   <!-- THE STRIDE SIGNAL CRADLE. A five-mass audio instrument,
                        separate from the static Strike identity, and the surface
                        you press to speak.
@@ -29173,19 +29729,33 @@
                       <path id="officeAperturePath" d="M0.00 0.00 L10.56 -1.04 L21.12 -1.88 L31.68 -2.64 L42.24 -3.37 L52.80 -4.06 L63.36 -4.72 L73.92 -5.36 L84.48 -5.97 L95.04 -6.56 L105.60 -7.13 L116.16 -7.68 L126.72 -8.20 L137.28 -8.70 L147.84 -9.18 L158.40 -9.64 L168.96 -10.07 L179.52 -10.48 L190.08 -10.86 L200.64 -11.22 L211.20 -11.55 L221.76 -11.86 L232.32 -12.15 L242.88 -12.41 L253.44 -12.64 L264.00 -12.84 L274.56 -13.02 L285.12 -13.17 L295.68 -13.30 L306.24 -13.39 L316.80 -13.46 L327.36 -13.50 L337.92 -13.52 L348.48 -13.50 L359.04 -13.46 L369.60 -13.39 L380.16 -13.30 L390.72 -13.17 L401.28 -13.02 L411.84 -12.84 L422.40 -12.64 L432.96 -12.41 L443.52 -12.15 L454.08 -11.86 L464.64 -11.55 L475.20 -11.22 L485.76 -10.86 L496.32 -10.48 L506.88 -10.07 L517.44 -9.64 L528.00 -9.18 L538.56 -8.70 L549.12 -8.20 L559.68 -7.68 L570.24 -7.13 L580.80 -6.56 L591.36 -5.97 L601.92 -5.36 L612.48 -4.72 L623.04 -4.06 L633.60 -3.37 L644.16 -2.64 L654.72 -1.88 L665.28 -1.04 L675.84 0.00 L675.84 0.00 L665.28 1.04 L654.72 1.88 L644.16 2.64 L633.60 3.37 L623.04 4.06 L612.48 4.72 L601.92 5.36 L591.36 5.97 L580.80 6.56 L570.24 7.13 L559.68 7.68 L549.12 8.20 L538.56 8.70 L528.00 9.18 L517.44 9.64 L506.88 10.07 L496.32 10.48 L485.76 10.86 L475.20 11.22 L464.64 11.55 L454.08 11.86 L443.52 12.15 L432.96 12.41 L422.40 12.64 L411.84 12.84 L401.28 13.02 L390.72 13.17 L380.16 13.30 L369.60 13.39 L359.04 13.46 L348.48 13.50 L337.92 13.52 L327.36 13.50 L316.80 13.46 L306.24 13.39 L295.68 13.30 L285.12 13.17 L274.56 13.02 L264.00 12.84 L253.44 12.64 L242.88 12.41 L232.32 12.15 L221.76 11.86 L211.20 11.55 L200.64 11.22 L190.08 10.86 L179.52 10.48 L168.96 10.07 L158.40 9.64 L147.84 9.18 L137.28 8.70 L126.72 8.20 L116.16 7.68 L105.60 7.13 L95.04 6.56 L84.48 5.97 L73.92 5.36 L63.36 4.72 L52.80 4.06 L42.24 3.37 L31.68 2.64 L21.12 1.88 L10.56 1.04 L0.00 0.00 Z"/>
                     </svg>
                   </span>
-                  <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
-                </button>
+                </span>
+                <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
               </div>
+              <div id="homeStarters" class="home-starters" role="group" aria-label="Conversation starter categories" hidden></div>
+              <div id="homeSuggestions" class="home-suggestions" role="group" aria-label="Suggestions based on your recent work" hidden></div>
               <form id="homeScoutComposer" class="home-scout-composer" autocomplete="off">
                 <input id="homeScoutInput" class="home-scout-composer__input" type="text" maxlength="4000" placeholder="Message Scout" aria-label="Message Scout from home" disabled>
+                <button type="button" id="homeRealtimeVoice" aria-label="Start a new private voice chat with Scout" title="Start voice chat" data-start-realtime-voice class="home-realtime-voice pressable">
+                  <span class="home-realtime-voice__wave" id="officeVoiceWaveform" aria-hidden="true">
+                    <span class="home-realtime-voice__bar" data-wave-rest="8" style="--wave-rest:8px"></span>
+                    <span class="home-realtime-voice__bar" data-wave-rest="15" style="--wave-rest:15px"></span>
+                    <span class="home-realtime-voice__bar" data-wave-rest="20" style="--wave-rest:20px"></span>
+                    <span class="home-realtime-voice__bar" data-wave-rest="13" style="--wave-rest:13px"></span>
+                    <span class="home-realtime-voice__bar" data-wave-rest="17" style="--wave-rest:17px"></span>
+                  </span>
+                </button>
                 <button id="homeScoutSend" class="home-scout-composer__send" type="submit" aria-label="Send message to a new private Scout thread" disabled>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>
                 </button>
               </form>
               <p id="homeScoutComposerStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
+              <button id="homeContextChip" class="home-context-chip" type="button" aria-label="Remove continuation context" hidden></button>
+              <button id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Home unavailable · Retry</button>
             </div>
-            <!-- multi-room: home carries ONLY the glanceable live-now strip
-                 (rooms with people inside, else one quiet row). The full
+            <div id="homeContinuity" class="home-continuity" aria-label="Your current context" aria-live="polite" hidden></div>
+            <!-- multi-room: home carries ONLY a glanceable live-now chip when
+                 a room is active. The full
                  list and every management affordance live on the lobby —
                  the rail's room tool. Rows render from roomsList (GET /rooms
                  + `rooms` office event) — never from another room's
@@ -29430,7 +30000,7 @@
             <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false" hidden>unpin</button>
           </div>
           <!-- in-room board panel — design glass sheet, real board peek -->
-          <aside id="roomBoardPanel" class="room-board-panel" hidden aria-label="Board peek">
+          <aside id="roomBoardPanel" class="room-board-panel" hidden aria-label="Board peek" tabindex="-1">
             <header class="room-board-panel__head">
               <span class="room-board-panel__title">Board</span>
               <span class="room-board-panel__sub">scout keeps it</span>
@@ -30451,6 +31021,20 @@
             </svg>
             <span class="camera-label">Camera</span>
           </button>
+          <button id="roomBoardToggle" class="btn btn--ghost" type="button" aria-label="Open board panel" aria-pressed="false" title="Board" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+              <path d="M15 3v18"></path>
+            </svg>
+          </button>
+          <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+              <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+              <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+            </svg>
+            <span class="audio-settings-label">Route</span>
+          </button>
           <button id="screenShare" class="btn btn--ghost" type="button" aria-label="Share screen" title="Share screen" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m9 10 3-3 3 3"></path>
@@ -30460,26 +31044,6 @@
               <path d="M8 21h8"></path>
             </svg>
             <span class="share-label">Share screen</span>
-          </button>
-          <button id="roomBoardToggle" class="btn btn--ghost" type="button" aria-label="Open board panel" aria-pressed="false" title="Board" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect width="18" height="18" x="3" y="3" rx="2"></rect>
-              <path d="M15 3v18"></path>
-            </svg>
-          </button>
-          <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 21v-7"></path>
-              <path d="M4 10V3"></path>
-              <path d="M12 21v-9"></path>
-              <path d="M12 8V3"></path>
-              <path d="M20 21v-5"></path>
-              <path d="M20 12V3"></path>
-              <path d="M2 14h4"></path>
-              <path d="M10 8h4"></path>
-              <path d="M18 16h4"></path>
-            </svg>
-            <span class="audio-settings-label">audio</span>
           </button>
           <button id="consentToggle" class="btn btn--ghost consent-toggle" type="button" aria-label="Microphone data choices" aria-expanded="false" title="Microphone data choices" hidden disabled>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>
@@ -30526,9 +31090,16 @@
               </svg>
             </button>
             <div id="roomMoreMenu" class="room-more__menu" role="menu" aria-label="More call actions" hidden>
+              <button id="roomMoreChat" class="room-more__action" type="button" role="menuitem">Chat</button>
+              <button id="roomMoreRecap" class="room-more__action" type="button" role="menuitem">Meeting recap</button>
+              <button id="roomMoreTranscript" class="room-more__action" type="button" role="menuitem">Live transcript</button>
               <button id="roomMoreRecord" class="room-more__action" type="button" role="menuitem">Recording</button>
+              <button id="roomMorePeople" class="room-more__action" type="button" role="menuitem">People in this room</button>
               <button id="roomMoreSpecialists" class="room-more__action" type="button" role="menuitem">Agent team</button>
               <button id="roomMoreInvite" class="room-more__action" type="button" role="menuitem">Invite people</button>
+              <button id="roomMoreBoard" class="room-more__action" type="button" role="menuitem">Board</button>
+              <button id="roomMoreConsent" class="room-more__action" type="button" role="menuitem">Microphone data</button>
+              <button id="roomMoreWorkspace" class="room-more__action" type="button" role="menuitem">Open advanced workspace</button>
               <button id="roomMoreArchive" class="room-more__action" type="button" role="menuitem">Send notes</button>
             </div>
           </div>
@@ -31545,9 +32116,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const archiveMeetingButton = document.getElementById('archiveMeeting')
       const roomMoreToggleButton = document.getElementById('roomMoreToggle')
       const roomMoreMenu = document.getElementById('roomMoreMenu')
+      const roomMoreChatButton = document.getElementById('roomMoreChat')
+      const roomMoreRecapButton = document.getElementById('roomMoreRecap')
+      const roomMoreTranscriptButton = document.getElementById('roomMoreTranscript')
       const roomMoreRecordButton = document.getElementById('roomMoreRecord')
+      const roomMorePeopleButton = document.getElementById('roomMorePeople')
       const roomMoreSpecialistsButton = document.getElementById('roomMoreSpecialists')
       const roomMoreInviteButton = document.getElementById('roomMoreInvite')
+      const roomMoreBoardButton = document.getElementById('roomMoreBoard')
+      const roomMoreConsentButton = document.getElementById('roomMoreConsent')
+      const roomMoreWorkspaceButton = document.getElementById('roomMoreWorkspace')
       const roomMoreArchiveButton = document.getElementById('roomMoreArchive')
       const roomScoutQuickActionButton = document.getElementById('roomScoutQuickAction')
       const meetingSpecialistsPanel = document.getElementById('meetingSpecialistsPanel')
@@ -31856,7 +32434,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const homeScoutInput = document.getElementById('homeScoutInput')
       const homeScoutSend = document.getElementById('homeScoutSend')
       const homeScoutComposerStatus = document.getElementById('homeScoutComposerStatus')
+      const homeContextChip = document.getElementById('homeContextChip')
+      const homeRefreshRetry = document.getElementById('homeRefreshRetry')
+      const homeStarters = document.getElementById('homeStarters')
+      const homeSuggestions = document.getElementById('homeSuggestions')
+      const homeContinuity = document.getElementById('homeContinuity')
       let homeScoutOpeningAttempt = null
+      let homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+      let selectedHomeCategoryId = ''
+      let selectedHomeSuggestionDestination = null
+      let homeSnapshotGeneration = 0
+      let homeSnapshotStale = false
       const officeIntelCard = document.getElementById('officeIntelCard')
       // mobile shell chrome (design mobile §1) — header back/bell/avatar,
       // the settings sheet head, and the chat stacked navigator
@@ -32106,6 +32694,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
       let privateRealtimeVoiceSessionToken = 0
+      let privateRealtimeVoiceID = ''
+      let privateRealtimeVoiceThreadID = ''
       let privateRealtimeVoiceFocusLease = null
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
@@ -32923,11 +33513,44 @@ Wrap the entire export in one code block. After the code block, say whether the 
       applyScreenShareSupportState()
       inviteToggleButton.addEventListener('click', toggleInvitePopover)
       roomMoreToggleButton?.addEventListener('click', () => setRoomMoreOpen(roomMoreMenu?.hidden !== false))
+      let roomChatFocusFrame = 0
+      const focusRoomChatComposer = () => {
+        if (roomChatFocusFrame) window.cancelAnimationFrame(roomChatFocusFrame)
+        roomChatFocusFrame = window.requestAnimationFrame(() => {
+          roomChatFocusFrame = 0
+          if (isRoomChatOpen() && roomMeetingMode === 'chat' && !roomChatInput.disabled) {
+            roomChatInput.focus()
+          }
+        })
+      }
+      roomMoreChatButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        setRoomMeetingMode('chat')
+        setRoomChatOpen(true)
+        focusRoomChatComposer()
+      })
+      roomMoreRecapButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        setRoomMeetingMode('recap')
+        setRoomChatOpen(true)
+        roomMeetingRecapTab?.focus()
+      })
+      roomMoreTranscriptButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        setRoomMeetingMode('transcript')
+        setRoomChatOpen(true)
+        roomMeetingTranscriptTab?.focus()
+      })
       roomMoreRecordButton?.addEventListener('click', () => {
         setRoomMoreOpen(false)
         if (!guestMode && !recordMeetingButton.disabled) recordMeetingButton.click()
       })
+      roomMorePeopleButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        openRoomPeoplePopover()
+      })
       roomMoreSpecialistsButton?.addEventListener('click', () => {
+        meetingSpecialistsRestoreFocus = roomMoreToggleButton
         setRoomMoreOpen(false)
         openMeetingSpecialists()
       })
@@ -32942,9 +33565,43 @@ Wrap the entire export in one code block. After the code block, say whether the 
         setRoomMoreOpen(false)
         if (!guestMode) inviteToggleButton.click()
       })
+      roomMoreBoardButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        if (!roomBoardToggleButton?.disabled) {
+          roomBoardToggleButton.click()
+          roomBoardPanel?.focus?.()
+        }
+      })
+      roomMoreConsentButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        if (!consentToggleButton?.disabled && !consentToggleButton?.hidden) consentToggleButton.click()
+      })
+      roomMoreWorkspaceButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        setActiveTool('artifacts')
+        artifactSearch?.focus()
+      })
       roomMoreArchiveButton?.addEventListener('click', () => {
         setRoomMoreOpen(false)
         if (!guestMode && !archiveMeetingButton.disabled) archiveMeetingButton.click()
+      })
+      roomMoreMenu?.addEventListener('keydown', event => {
+        const items = Array.from(roomMoreMenu.querySelectorAll('button:not([hidden]):not([disabled])'))
+        const index = items.indexOf(document.activeElement)
+        let next = -1
+        if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
+        if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index + items.length - 1) % items.length
+        if (event.key === 'Home') next = 0
+        if (event.key === 'End') next = items.length - 1
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setRoomMoreOpen(false)
+          roomMoreToggleButton?.focus()
+          return
+        }
+        if (next < 0) return
+        event.preventDefault()
+        items[next]?.focus()
       })
       meetingSpecialistsCloseButton?.addEventListener('click', closeMeetingSpecialists)
       meetingSpecialistsPanel?.addEventListener('click', event => {
@@ -33259,12 +33916,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
           homeScoutComposerStatus.textContent = ''
         }
         homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput.value.trim()
+        renderHomeStarters()
+      })
+      homeContextChip?.addEventListener('click', () => {
+        selectedHomeSuggestionDestination = null
+        homeScoutOpeningAttempt = null
+        homeContextChip.hidden = true
+        homeContextChip.textContent = ''
+        homeScoutInput?.focus()
       })
       homeScoutInput?.addEventListener('focus', () => {
         if (privateRealtimeVoiceInFlight()) {
           stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
         }
+        officeLaunchHome?.classList.add('is-composer-focused')
+        renderHomeStarters()
       })
+      homeScoutInput?.addEventListener('blur', () => window.setTimeout(() => {
+        if (document.activeElement !== homeScoutInput) officeLaunchHome?.classList.remove('is-composer-focused')
+        renderHomeStarters()
+      }, 0))
+      homeRefreshRetry?.addEventListener('click', () => loadHomeSnapshot())
       // settings sheet head — theme segmented + sign out
       sheetThemeDark?.addEventListener('click', () => setThemePreference('dark'))
       sheetThemeLight?.addEventListener('click', () => setThemePreference('light'))
@@ -34002,7 +34674,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         audioSettingsButton.disabled = !inRoom
         audioSettingsButton.classList.toggle('is-voice-focus', voiceFocusEnabled())
         audioSettingsButton.title = processorState
-        audioSettingsButton.setAttribute('aria-label', `Audio settings: ${processorState}`)
+        audioSettingsButton.setAttribute('aria-label', `Audio route: ${processorState}`)
         const audioSettingsLabel = audioSettingsButton.querySelector('.audio-settings-label')
         if (audioSettingsLabel) {
           audioSettingsLabel.textContent = voiceFocusEnabled() ? 'voice focus' : audioModeLabel()
@@ -34691,6 +35363,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        }
 	        if (authedUser) {
 	          loadScoutChatThreads()
+	          loadHomeSnapshot()
 	          loadParticipantPreview()
 	          // Rooms card hydration lives inside the auth fan-out — behind the
 	          // /auth/me await, so the boot pass never touches it (TDZ law).
@@ -35336,6 +36009,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          // agreement.
 	          syncAuthenticatedShell()
 	          loadScoutChatThreads()
+	          loadHomeSnapshot()
 	          // fresh sign-in hydrates the lobby + home strip immediately —
 	          // never an empty rooms surface until reload
 	          loadRoomsList()
@@ -35406,6 +36080,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
 	          loadScoutChatThreads()
+	          loadHomeSnapshot()
 	          // fresh sign-in hydrates the lobby + home strip immediately —
 	          // never an empty rooms surface until reload
 	          loadRoomsList()
@@ -41175,6 +41850,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         privateRealtimeVoiceStarting = true
         const sessionToken = ++privateRealtimeVoiceSessionToken
+        privateRealtimeVoiceID = newPrivateRealtimeVoiceID()
+        privateRealtimeVoiceThreadID = ''
         setVoiceIslandState('connecting', 'connecting…')
 
         try {
@@ -41297,7 +41974,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         await peer.setLocalDescription(offer)
         const localSDP = await waitForRealtimeOfferSDP(peer, offer)
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
-        const answerSDP = await exchangePrivateRealtimeOffer(localSDP)
+        const answerSDP = await exchangePrivateRealtimeOffer(localSDP, privateRealtimeVoiceID)
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
         await peer.setRemoteDescription({ type: 'answer', sdp: answerSDP })
         } catch (error) {
@@ -41408,15 +42085,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
       }
 
-      async function exchangePrivateRealtimeOffer(offerSDP) {
+      function newPrivateRealtimeVoiceID() {
+        const id = globalThis.crypto?.randomUUID?.()
+        if (id) return `voice-${id}`
+        return `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
+      }
+
+      async function exchangePrivateRealtimeOffer(offerSDP, voiceSessionId) {
         const sdp = normalizeRealtimeSDPForBrowser(offerSDP)
-        if (!sdp.trim()) {
+        if (!sdp.trim() || !String(voiceSessionId || '').trim()) {
           throw new Error('Realtime 2 voice did not create an offer')
         }
-        const result = await postAuthJSON('/assistant/realtime-offer', { sdp })
+        const result = await postAuthJSON('/assistant/realtime-offer', { sdp, voiceSessionId })
         if (!result.ok) {
           throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
         }
+        if (String(result.data?.voiceSessionId || '') !== voiceSessionId) {
+          throw new Error('Realtime 2 voice returned the wrong session')
+        }
+        const threadId = String(result.data?.threadId || '').trim()
+        if (!threadId) {
+          throw new Error('Realtime 2 voice did not bind its private transcript')
+        }
+        privateRealtimeVoiceThreadID = threadId
         const answerSDP = normalizeRealtimeSDPForBrowser(result.data?.sdp)
         if (!answerSDP) {
           throw new Error('Realtime 2 voice did not return an answer')
@@ -41499,6 +42190,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function strideCradleBalls() {
         return Array.from(document.querySelectorAll('#officeStrideCradle [data-cradle-ball]'))
+      }
+
+      function strideVoiceWaveBars() {
+        return Array.from(document.querySelectorAll('#officeVoiceWaveform .home-realtime-voice__bar'))
       }
 
       function strideSignalReduceMotion() {
@@ -41659,6 +42354,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           : (clamped - STRIDE_SIGNAL_FLOOR) / (1 - STRIDE_SIGNAL_FLOOR)
         const reduced = strideSignalReduceMotion()
         const source = voiceIslandState === 'talking' ? 'scout' : 'human'
+        const bars = strideVoiceWaveBars()
+        for (const [index, bar] of bars.entries()) {
+          const position = bars.length > 1 ? index / (bars.length - 1) : 0.5
+          const envelope = 0.42 + 0.58 * Math.sin(position * Math.PI)
+          const carrier = reduced ? 0.62 : 0.52 + 0.48 * Math.sin(seconds * 8.4 + index * 1.27)
+          const live = Math.max(0, energy * envelope * carrier)
+          const rest = Number(bar.dataset.waveRest || 7)
+          bar.style.setProperty('--wave-height', `${Math.min(23, rest + live * 9).toFixed(2)}px`)
+          bar.style.setProperty('--wave-opacity', String(0.5 + live * 0.42))
+        }
         if (!strideCradlePhysics || strideCradleLastSeconds <= 0) {
           strideCradlePhysics = createStrideCradlePhysics(energy, source)
           strideCradleLastSeconds = seconds
@@ -41818,6 +42523,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function restoreStrideSignalIdlePath() {
+        for (const bar of strideVoiceWaveBars()) {
+          bar.style.removeProperty('--wave-height')
+          bar.style.removeProperty('--wave-opacity')
+        }
         for (const group of strideCradleBalls()) {
           group.removeAttribute('transform')
           const ball = group.querySelector('.office-launch__ball')
@@ -42328,7 +43037,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         let output = { ok: false, error: 'tool request failed' }
         try {
-          const response = await postAuthJSON('/assistant/realtime-tool', { callId, name, arguments: args })
+          const response = await postAuthJSON('/assistant/realtime-tool', {
+            voiceSessionId: privateRealtimeVoiceID,
+            threadId: privateRealtimeVoiceThreadID,
+            callId,
+            name,
+            arguments: args
+          })
           output = response.data?.result || { ok: Boolean(response.ok) }
           if (!response.ok && !output.error) {
             output.error = response.data?.error || 'tool request failed'
@@ -42417,6 +43132,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
+        privateRealtimeVoiceID = ''
+        privateRealtimeVoiceThreadID = ''
         // A closing session ends any in-flight grill ritual (the browser owns it).
         privateGrillActive = false
         hidePrivateGrillStage()
@@ -51280,8 +51997,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           homeScoutInput.focus()
           return
         }
-        if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text) {
-          homeScoutOpeningAttempt = { text, key: nextHomeScoutOpeningKey() }
+        const continuationThreadId = selectedHomeSuggestionDestination?.route === 'thread'
+          ? String(selectedHomeSuggestionDestination.threadId || '')
+          : ''
+        if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text || homeScoutOpeningAttempt.threadId !== continuationThreadId) {
+          homeScoutOpeningAttempt = { text, threadId: continuationThreadId, key: nextHomeScoutOpeningKey() }
         }
         const attempt = homeScoutOpeningAttempt
         homeScoutComposer.dataset.submitting = 'true'
@@ -51293,14 +52013,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
         }
         try {
-          const response = await fetch('/assistant/chat-threads', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Idempotency-Key': attempt.key
-            },
-            body: JSON.stringify({ openingMessage: { text: attempt.text } })
-          })
+          const response = attempt.threadId
+            ? await fetch(`/assistant/chat-threads/${encodeURIComponent(attempt.threadId)}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: attempt.text, operationId: attempt.key })
+              })
+            : await fetch('/assistant/chat-threads', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Idempotency-Key': attempt.key
+                },
+                body: JSON.stringify({ openingMessage: { text: attempt.text } })
+              })
           const payload = await response.json().catch(() => ({}))
           if (!response.ok || !payload?.thread?.id) {
             if (response.status === 409) homeScoutOpeningAttempt = null
@@ -51308,6 +52034,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const thread = upsertScoutChatThread(payload.thread)
           homeScoutOpeningAttempt = null
+          selectedHomeSuggestionDestination = null
+          if (homeContextChip) homeContextChip.hidden = true
           homeScoutInput.value = ''
           setScoutTab('private')
           selectScoutChatThread(thread.id)
@@ -51382,9 +52110,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        activeScoutThreadId = ''
 	        pendingScoutFiles = []
 	        chatThreadsFingerprint = ''
+	        homeSnapshotGeneration += 1
+	        homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+	        selectedHomeCategoryId = ''
+	        selectedHomeSuggestionDestination = null
+	        if (homeContextChip) homeContextChip.hidden = true
+	        homeSnapshotStale = false
 	        renderPendingScoutFiles()
 	        renderChatAgentThreads()
 	        renderActiveScoutThread()
+	        renderHomeSnapshot()
 	        syncChatThreadPolling()
 	      }
 
@@ -51574,7 +52309,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            existing.messages = messages.map((candidate, index) => index === messageIndex ? message : candidate)
 	          }
 		        }
-		        upsertScoutChatThread(existing, { select: false })
+	        upsertScoutChatThread(existing, { select: false })
+	        loadHomeSnapshot()
 		        if (activeScoutThreadId === id) {
 		          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
 		            const root = desktopChatReplyTopology(existing.messages).rootFor(message)
@@ -54683,6 +55419,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           nudgeChatThreadsFromNotification()
         }
         appendNotificationEntry(payload, { toast: true })
+        loadHomeSnapshot()
       }
 
       function handleNotificationBacklog(payload) {
@@ -69801,6 +70538,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function updateOfficeHome() {
         renderOfficeGreeting()
         renderHomeLiveNow()
+        renderHomeSnapshot()
         renderLobby()
       }
 
@@ -69822,6 +70560,242 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         // Wave 8: refresh the Morning Brief badge whenever the home renders.
         refreshBriefBadge()
+      }
+
+      function validHomeSnapshot(value) {
+        return Boolean(value && typeof value === 'object' && typeof value.version === 'string'
+          && typeof value.generatedAt === 'string' && Array.isArray(value.items)
+          && Array.isArray(value.starters)
+          && value.starters.every(category => category && typeof category.id === 'string'
+            && typeof category.label === 'string' && typeof category.detail === 'string'
+            && Array.isArray(category.suggestions)
+            && category.suggestions.every(suggestion => suggestion && typeof suggestion.id === 'string' && typeof suggestion.text === 'string'))
+          && typeof value.allClear === 'boolean')
+      }
+
+      function homeCategoryNode(category) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'home-starter pressable'
+        button.dataset.categoryId = String(category?.id || '')
+        button.setAttribute('aria-label', `${String(category?.label || '')}: ${String(category?.detail || '')}`)
+        button.setAttribute('aria-expanded', String(selectedHomeCategoryId === category?.id))
+        button.setAttribute('aria-controls', 'homeSuggestions')
+        const icon = document.createElement('span')
+        icon.className = 'home-starter__icon'
+        icon.setAttribute('aria-hidden', 'true')
+        icon.textContent = ({ continue: '↻', explore: '⌕', create: '✦', challenge: '◇' })[String(category?.id || '')] || '·'
+        const label = document.createElement('span')
+        label.className = 'home-starter__label'
+        label.textContent = String(category?.label || '')
+        const text = document.createElement('span')
+        text.className = 'home-starter__text'
+        text.textContent = String(category?.detail || '')
+        button.append(icon, label, text)
+        button.addEventListener('pointerdown', event => event.preventDefault())
+        button.addEventListener('click', () => {
+          selectedHomeCategoryId = selectedHomeCategoryId === category.id ? '' : String(category.id)
+          renderHomeStarters()
+          if (selectedHomeCategoryId) homeSuggestions?.querySelector('.home-suggestion')?.focus()
+        })
+        button.addEventListener('keydown', event => {
+          if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+          event.preventDefault()
+          const buttons = Array.from(homeStarters?.querySelectorAll('.home-starter') || [])
+          const current = buttons.indexOf(button)
+          buttons[(current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
+        })
+        return button
+      }
+
+      function homeSuggestionNode(suggestion) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'home-suggestion pressable'
+        const icon = document.createElement('span')
+        icon.className = 'home-suggestion__icon'
+        icon.setAttribute('aria-hidden', 'true')
+        icon.textContent = ({ continue: '↻', explore: '⌕', create: '✦', challenge: '◇' })[selectedHomeCategoryId] || '·'
+        const text = document.createElement('span')
+        text.textContent = String(suggestion?.text || '')
+        const arrow = document.createElement('span')
+        arrow.className = 'home-suggestion__arrow'
+        arrow.setAttribute('aria-hidden', 'true')
+        arrow.textContent = '→'
+        button.append(icon, text, arrow)
+        button.setAttribute('aria-label', `Use suggestion: ${String(suggestion?.text || '')}`)
+        button.addEventListener('click', () => {
+          if (!homeScoutInput || !String(suggestion?.text || '').trim()) return
+          homeScoutInput.value = String(suggestion.text)
+          selectedHomeSuggestionDestination = suggestion?.destination || null
+          if (homeContextChip) {
+            const title = String(selectedHomeSuggestionDestination?.title || '').trim()
+            const continuing = selectedHomeSuggestionDestination?.route === 'thread' && title
+            homeContextChip.hidden = !continuing
+            homeContextChip.textContent = continuing ? `Continue in ${title}  ×` : ''
+            homeContextChip.setAttribute('aria-label', continuing ? `Remove continuation context for ${title}` : 'Remove continuation context')
+          }
+          homeScoutInput.dispatchEvent(new Event('input', { bubbles: true }))
+          homeScoutInput.focus()
+          homeScoutInput.setSelectionRange(homeScoutInput.value.length, homeScoutInput.value.length)
+        })
+        button.addEventListener('keydown', event => {
+          if (event.key !== 'Escape') return
+          event.preventDefault()
+          const categoryId = selectedHomeCategoryId
+          selectedHomeCategoryId = ''
+          renderHomeStarters()
+          homeStarters?.querySelector(`[data-category-id="${CSS.escape(categoryId)}"]`)?.focus()
+        })
+        return button
+      }
+
+      function homeSuggestionBackNode(category) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'home-suggestions__back pressable'
+        button.setAttribute('aria-label', `Back to categories from ${String(category?.label || '')}`)
+        button.textContent = `←  ${String(category?.label || '')}`
+        button.addEventListener('click', () => {
+          const categoryId = selectedHomeCategoryId
+          selectedHomeCategoryId = ''
+          renderHomeStarters()
+          homeStarters?.querySelector(`[data-category-id="${CSS.escape(categoryId)}"]`)?.focus()
+        })
+        return button
+      }
+
+      function renderHomeStarters() {
+        if (!homeStarters) return
+        const categories = authedUser && !guestMode ? homeSnapshot.starters : []
+        if (!categories.some(category => category.id === selectedHomeCategoryId)) selectedHomeCategoryId = ''
+        const selected = categories.find(category => category.id === selectedHomeCategoryId)
+        homeStarters.hidden = !categories.length || Boolean(selected)
+        homeStarters.replaceChildren(...categories.map(homeCategoryNode))
+        const suggestions = selected?.suggestions || []
+        officeLaunchHome?.classList.toggle('is-starter-open', Boolean(selected))
+        if (homeSuggestions) {
+          homeSuggestions.hidden = !suggestions.length
+          homeSuggestions.setAttribute('aria-label', selected ? `${selected.label} suggestions` : 'Suggestions based on your recent work')
+          homeSuggestions.replaceChildren(...(selected ? [homeSuggestionBackNode(selected), ...suggestions.map(homeSuggestionNode)] : []))
+        }
+        if (homeContinuity) {
+          const availableContext = authedUser && !guestMode && homeSnapshot.items.some(item => item?.kind !== 'live-meeting')
+          homeContinuity.hidden = Boolean(categories.length) || !availableContext
+        }
+      }
+
+      function openHomeDestination(destination) {
+        const route = String(destination?.route || '')
+        if (route === 'alerts') {
+          setNotificationPanelOpen(true, topbarBellButton)
+          return
+        }
+        if (route === 'room') {
+          selectLobbyRoom(String(destination?.roomId || 'office'))
+          setActiveTool('room')
+          return
+        }
+        if (route !== 'thread' || !destination?.threadId) return
+        setActiveTool('chat')
+        selectScoutChatThread(String(destination.threadId))
+        setMobileChatView('convo')
+        if (destination.messageId) {
+          window.requestAnimationFrame(() => desktopChatScrollToMessage(String(destination.messageId)))
+        }
+      }
+
+      function homeContinuityNode(item) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'home-continuity__row pressable'
+        button.setAttribute('aria-label', `${String(item?.eyebrow || '')}. ${String(item?.title || '')}. ${String(item?.detail || '')}`)
+        const copy = document.createElement('span')
+        copy.className = 'home-continuity__copy'
+        const eyebrow = document.createElement('span')
+        eyebrow.className = 'home-continuity__eyebrow'
+        eyebrow.textContent = String(item?.eyebrow || '')
+        const title = document.createElement('span')
+        title.className = 'home-continuity__title'
+        title.textContent = String(item?.title || '')
+        const detail = document.createElement('span')
+        detail.className = 'home-continuity__detail'
+        detail.textContent = String(item?.detail || '')
+        copy.append(eyebrow, title, detail)
+        const arrow = document.createElement('span')
+        arrow.className = 'home-continuity__arrow'
+        arrow.textContent = '›'
+        arrow.setAttribute('aria-hidden', 'true')
+        button.append(copy, arrow)
+        button.addEventListener('click', () => openHomeDestination(item?.destination))
+        return button
+      }
+
+      function renderHomeSnapshot() {
+        if (!homeContinuity) return
+        // Web keeps the existing quick-room jump as its dedicated meeting
+        // affordance; do not duplicate the same live room in this list.
+        const items = authedUser && !guestMode ? homeSnapshot.items.filter(item => item?.kind !== 'live-meeting') : []
+        homeContinuity.hidden = !items.length
+        homeContinuity.dataset.freshness = homeSnapshotStale ? 'stale' : 'current'
+        homeContinuity.replaceChildren(...items.map(homeContinuityNode))
+        renderHomeStarters()
+      }
+
+      function setHomeRefreshFailed(failed) {
+        if (!homeRefreshRetry) return
+        homeRefreshRetry.hidden = !failed
+        homeRefreshRetry.setAttribute('aria-label', failed
+          ? 'Home could not refresh. Retry without retaining prior private context.'
+          : 'Retry Home')
+      }
+
+      async function loadHomeSnapshot() {
+        const generation = ++homeSnapshotGeneration
+        if (!authedUser || guestMode) {
+          homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+          selectedHomeCategoryId = ''
+          selectedHomeSuggestionDestination = null
+          if (homeContextChip) homeContextChip.hidden = true
+          homeSnapshotStale = false
+          setHomeRefreshFailed(false)
+          renderHomeSnapshot()
+          return
+        }
+        try {
+          const response = await fetch('/assistant/home', { cache: 'no-store' })
+          if (generation !== homeSnapshotGeneration) return
+          if (response.status === 401 || response.status === 403) {
+            homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+            selectedHomeCategoryId = ''
+            selectedHomeSuggestionDestination = null
+            if (homeContextChip) homeContextChip.hidden = true
+            homeSnapshotStale = false
+            setHomeRefreshFailed(false)
+            renderHomeSnapshot()
+            return
+          }
+          if (!response.ok) throw new Error('home unavailable')
+          const payload = await response.json()
+          if (!validHomeSnapshot(payload?.home)) throw new Error('invalid home snapshot')
+          homeSnapshot = payload.home
+          homeSnapshotStale = false
+          setHomeRefreshFailed(false)
+          renderHomeSnapshot()
+        } catch {
+          if (generation !== homeSnapshotGeneration) return
+          // Home is an authorization-filtered projection. A failed refresh can
+          // coincide with revocation, so clear every server-derived title,
+          // preview, starter and destination immediately. The local composer
+          // draft remains untouched.
+          homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+          selectedHomeCategoryId = ''
+          selectedHomeSuggestionDestination = null
+          if (homeContextChip) homeContextChip.hidden = true
+          homeSnapshotStale = true
+          setHomeRefreshFailed(true)
+          renderHomeSnapshot()
+        }
       }
 
       // Meeting identity: the server's first-class meeting record when one is
@@ -70280,6 +71254,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomsList = Array.isArray(payload?.rooms) ? payload.rooms : []
         reconcileLobbySelection()
         renderHomeLiveNow()
+        loadHomeSnapshot()
         renderLobby()
       }
 
@@ -70879,10 +71854,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomMoreSpecialistsButton.hidden = Boolean(guestMode)
           roomMoreSpecialistsButton.disabled = !appShell.classList.contains('is-in-room')
         }
+        if (roomMoreRecapButton) {
+          roomMoreRecapButton.hidden = Boolean(guestMode)
+        }
+        if (roomMoreTranscriptButton) {
+          roomMoreTranscriptButton.hidden = Boolean(guestMode)
+        }
+        if (roomMorePeopleButton) {
+          roomMorePeopleButton.disabled = !appShell.classList.contains('is-in-room')
+        }
         if (roomMoreArchiveButton) {
           roomMoreArchiveButton.hidden = Boolean(guestMode)
           roomMoreArchiveButton.disabled = archiveMeetingButton.disabled
           roomMoreArchiveButton.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
+        }
+        if (roomMoreBoardButton) {
+          roomMoreBoardButton.hidden = Boolean(guestMode)
+          roomMoreBoardButton.disabled = Boolean(roomBoardToggleButton?.disabled)
+          roomMoreBoardButton.textContent = roomBoardPanel?.hidden === false ? 'Close board' : 'Board'
+        }
+        if (roomMoreConsentButton) {
+          roomMoreConsentButton.hidden = Boolean(consentToggleButton?.hidden)
+          roomMoreConsentButton.disabled = Boolean(consentToggleButton?.disabled)
+        }
+        if (roomMoreWorkspaceButton) {
+          roomMoreWorkspaceButton.hidden = Boolean(guestMode)
+          roomMoreWorkspaceButton.disabled = !appShell.classList.contains('is-in-room')
         }
         syncRoomScoutQuickAction()
       }
@@ -70912,7 +71909,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomMoreToggleButton.setAttribute('aria-expanded', String(next))
         if (next) {
           const first = Array.from(roomMoreMenu.querySelectorAll('button:not([hidden]):not([disabled])'))[0]
-          window.setTimeout(() => first?.focus(), 0)
+          first?.focus()
         }
       }
 
@@ -71067,7 +72064,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function openMeetingSpecialists() {
         if (!meetingSpecialistsPanel || guestMode || !appShell.classList.contains('is-in-room')) return
-        meetingSpecialistsRestoreFocus = document.activeElement
+        const active = document.activeElement
+        if (!meetingSpecialistsRestoreFocus) {
+          meetingSpecialistsRestoreFocus = roomMoreMenu?.contains(active) || active?.hidden
+            ? roomMoreToggleButton
+            : active
+        }
         meetingSpecialistsPanel.hidden = false
         document.body.classList.add('has-modal-open')
         window.setTimeout(() => meetingSpecialistsPanel.querySelector('.meeting-specialists__panel')?.focus(), 0)
@@ -71080,7 +72082,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         document.body.classList.remove('has-modal-open')
         const target = meetingSpecialistsRestoreFocus
         meetingSpecialistsRestoreFocus = null
-        if (target?.isConnected) target.focus()
+        if (target?.isConnected && !target.hidden && target.getClientRects().length) target.focus()
         else roomMoreToggleButton?.focus()
       }
 
@@ -71154,6 +72156,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         invitePopoverEl.remove()
         invitePopoverEl = null
         inviteToggleButton?.setAttribute('aria-expanded', 'false')
+      }
+
+      function openRoomPeoplePopover() {
+        closeInvitePopover()
+        if (!appShell.classList.contains('is-in-room')) return
+        const bar = roomMoreToggleButton?.closest('.meeting-bar')
+        if (!bar) return
+        const pop = document.createElement('div')
+        pop.className = 'invite-pop'
+        pop.setAttribute('role', 'dialog')
+        pop.setAttribute('aria-label', 'People in this room')
+        pop.tabIndex = -1
+        const people = normalizeParticipantList([
+          ...participantsInRoom,
+          ...roomAgentParticipants.map(agent => agent.name),
+        ])
+        if (!people.length) {
+          pop.append(invitePopRow('No one else is seated yet.', 'Invite', () => {
+            closeInvitePopover()
+            inviteToggleButton.click()
+          }))
+        } else {
+          people.forEach(name => {
+            const row = document.createElement('div')
+            row.className = 'invite-pop__row'
+            const label = document.createElement('span')
+            label.className = 'invite-pop__label'
+            label.textContent = name
+            row.append(label)
+            pop.append(row)
+          })
+        }
+        invitePopoverEl = pop
+        bar.append(pop)
+        window.setTimeout(() => pop.focus(), 0)
       }
 
       function toggleInvitePopover() {
@@ -71249,18 +72286,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         homeLiveSignature = signature
-        strip.hidden = stripHidden
-        if (stripHidden) {
+        strip.hidden = stripHidden || !live.length
+        if (stripHidden || !live.length) {
           strip.replaceChildren()
           return
         }
-        strip.replaceChildren(...(live.length ? live.map(room => homeLiveNowRow(room)) : [homeLiveNowQuietRow()]))
+        strip.replaceChildren(...live.map(room => homeLiveNowRow(room)))
       }
 
       function homeLiveNowRow(room) {
         const row = document.createElement('button')
         row.type = 'button'
         row.className = 'home-live__row pressable'
+        row.setAttribute('aria-label', `Open live meeting ${room.name || room.id}`)
         const dot = document.createElement('span')
         dot.className = 'home-live__dot is-live'
         const name = document.createElement('span')
@@ -71268,7 +72306,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         name.textContent = room.name || room.id
         const count = document.createElement('span')
         count.className = 'home-live__count'
-        count.textContent = `${Number(room.participantCount) || 0} inside`
+        const participantCount = Number(room.participantCount) || 0
+        count.textContent = `live · ${participantCount} ${participantCount === 1 ? 'person' : 'people'}`
         row.append(dot, name, count)
         row.insertAdjacentHTML('beforeend', homeLiveChevron())
         // deep-link: land on the lobby with this room selected — never join
@@ -71276,24 +72315,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           selectLobbyRoom(room.id)
           setActiveTool('room')
         })
-        return row
-      }
-
-      function homeLiveNowQuietRow() {
-        const row = document.createElement('button')
-        row.type = 'button'
-        row.className = 'home-live__row pressable'
-        const dot = document.createElement('span')
-        dot.className = 'home-live__dot'
-        const name = document.createElement('span')
-        name.className = 'home-live__name'
-        name.textContent = 'rooms'
-        const count = document.createElement('span')
-        count.className = 'home-live__count'
-        count.textContent = 'all quiet'
-        row.append(dot, name, count)
-        row.insertAdjacentHTML('beforeend', homeLiveChevron())
-        row.addEventListener('click', () => setActiveTool('room'))
         return row
       }
 

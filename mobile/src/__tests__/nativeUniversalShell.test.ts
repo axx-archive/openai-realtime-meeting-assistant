@@ -54,16 +54,18 @@ test('mounted shell press preserves its navigator child through destination, ful
   };
   registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (['react-native', 'expo-symbols', 'react-native-safe-area-context'].includes(specifier)) {
+      if (['react-native', 'expo-symbols', 'react-native-safe-area-context', 'expo-blur', 'expo-glass-effect'].includes(specifier)) {
         return { url: `native-shell-stub:${specifier}`, shortCircuit: true };
       }
       return nextResolve(specifier, context);
     },
     load(url, context, nextLoad) {
       const modules: Record<string, string> = {
-        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>value.light; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message)}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
+        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>value.light; export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
         'native-shell-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'native-shell-stub:react-native-safe-area-context': `export const useSafeAreaInsets=()=>globalThis.__nativeShellInsets||({top:0,right:0,bottom:0,left:0});`,
+        'native-shell-stub:expo-blur': `export const BlurView='BlurView';`,
+        'native-shell-stub:expo-glass-effect': `export const GlassView='GlassView'; export const isLiquidGlassAvailable=()=>false;`,
       };
       if (modules[url]) return { format: 'module', source: modules[url], shortCircuit: true };
       return nextLoad(url, context);
@@ -175,9 +177,9 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.match(shell, /accessibilityRole="tab"/);
   assert.match(shell, /accessibilityState=\{\{ selected \}\}/);
   assert.match(shell, /minHeight: 48/);
-  assert.match(shell, /minHeight: 52/);
+  assert.match(shell, /minHeight: 58/);
   assert.match(shell, /transform: \[\{ scale: 0\.96 \}\]/);
-  assert.match(shell, /maxFontSizeMultiplier=\{compact \? 1\.2 : 2\}/);
+  assert.match(shell, /!compact \? \([\s\S]*maxFontSizeMultiplier=\{2\}/);
   assert.doesNotMatch(shell, /Animated\.|LayoutAnimation|setTimeout/);
   assert.equal((shell.match(/\{children\}/g) ?? []).length, 1);
   assert.doesNotMatch(shell, /if \(!visible\) return/);

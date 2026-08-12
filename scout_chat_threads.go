@@ -387,6 +387,18 @@ type scoutChatOpeningOperation struct {
 	ReplyMessageID string `json:"replyMessageId"`
 }
 
+const privateRealtimeVoiceSessionBindingVersion = "private-realtime-voice-session/v1"
+
+// scoutChatVoiceSessionBinding is the durable, body-free authority binding
+// between one explicit private Live Voice session and its one Scout thread.
+// The raw client session id is never persisted or projected; only its digest is
+// retained so a restart can prove that a retry names the same session.
+type scoutChatVoiceSessionBinding struct {
+	Version       string `json:"version"`
+	SessionDigest string `json:"sessionDigest"`
+	BoundAt       string `json:"boundAt"`
+}
+
 // scoutChatLegacyConversationOperation is the durable retry alias for native
 // clients that predate the required conversation operationId. The alias is
 // scoped to one authenticated session, requester, and thread. A distinct
@@ -542,6 +554,9 @@ type scoutChatThreadRecord struct {
 	// one private thread. It contains hashes and deterministic ids only and is
 	// stripped from every client projection.
 	OpeningOperation *scoutChatOpeningOperation `json:"openingOperation,omitempty"`
+	// VoiceSession is server-only. It binds an explicit private Realtime session
+	// to this exact owner-only thread and is stripped from every viewer response.
+	VoiceSession *scoutChatVoiceSessionBinding `json:"voiceSession,omitempty"`
 	// LegacyConversationOperations are server-only compatibility aliases. They
 	// never appear in viewer projections and cannot select a tool or authority.
 	LegacyConversationOperations []scoutChatLegacyConversationOperation `json:"legacyConversationOperations,omitempty"`
@@ -551,6 +566,118 @@ type scoutChatThreadRecord struct {
 	// AmbientMind deletion even after response loss. Viewer projections always
 	// strip this field.
 	ModerationReceipts []scoutChatModerationReceipt `json:"moderationReceipts,omitempty"`
+}
+
+func normalizePrivateRealtimeVoiceSessionID(value string) (string, error) {
+	value, err := normalizeScoutIdempotencyKey(value)
+	if err != nil || len(value) > 128 {
+		return "", fmt.Errorf("private Realtime voice session id is invalid")
+	}
+	return value, nil
+}
+
+func privateRealtimeVoiceSessionDigest(value string) string {
+	return sha256Hex([]byte(privateRealtimeVoiceSessionBindingVersion + "\x00" + value))
+}
+
+func privateRealtimeVoiceThreadID(requesterEmail, voiceSessionID string) string {
+	return "scout-voice-" + sha256Hex([]byte(privateRealtimeVoiceSessionBindingVersion + "\x00" + normalizeAccountEmail(requesterEmail) + "\x00" + voiceSessionID))[:24]
+}
+
+func validPrivateRealtimeVoiceThreadBinding(thread scoutChatThreadRecord, requesterEmail, voiceSessionID string) bool {
+	binding := thread.VoiceSession
+	return binding != nil && binding.Version == privateRealtimeVoiceSessionBindingVersion &&
+		isHexDigest(binding.SessionDigest) && binding.SessionDigest == privateRealtimeVoiceSessionDigest(voiceSessionID) &&
+		strings.TrimSpace(binding.BoundAt) != "" && normalizeAccountEmail(thread.OwnerEmail) == normalizeAccountEmail(requesterEmail) &&
+		scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && !thread.Table && strings.TrimSpace(thread.Intake) == "" && strings.TrimSpace(thread.AgentID) == ""
+}
+
+// ensurePrivateRealtimeVoiceConversation deterministically and atomically
+// creates one owner-only Scout thread per requester+voiceSessionId. A retry
+// after response loss or process restart returns the same thread; an archived
+// or identity-mismatched record fails closed instead of manufacturing another.
+func (app *kanbanBoardApp) ensurePrivateRealtimeVoiceConversation(requesterEmail, createdBy, voiceSessionID string) (scoutChatThreadRecord, bool, error) {
+	if app == nil || app.memory == nil {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("private Realtime voice memory is unavailable")
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail == "" {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("private Realtime voice requester is required")
+	}
+	voiceSessionID, err := normalizePrivateRealtimeVoiceSessionID(voiceSessionID)
+	if err != nil {
+		return scoutChatThreadRecord{}, false, err
+	}
+	threadID := privateRealtimeVoiceThreadID(requesterEmail, voiceSessionID)
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	for _, entry := range app.memory.snapshot(0) {
+		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
+			continue
+		}
+		existing, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || !validPrivateRealtimeVoiceThreadBinding(existing, requesterEmail, voiceSessionID) {
+			lock.Unlock()
+			return scoutChatThreadRecord{}, false, fmt.Errorf("private Realtime voice session binding does not match")
+		}
+		if strings.TrimSpace(existing.ArchivedAt) != "" {
+			lock.Unlock()
+			return scoutChatThreadRecord{}, false, fmt.Errorf("private Realtime voice conversation is archived")
+		}
+		lock.Unlock()
+		return existing, false, nil
+	}
+
+	now := time.Now().UTC()
+	thread := scoutChatThreadRecord{
+		ID:         threadID,
+		Title:      "Live Voice with Scout",
+		Preview:    "new voice conversation",
+		OwnerEmail: requesterEmail,
+		CreatedBy:  canonicalRoomActorName(createdBy),
+		Visibility: scoutChatVisibilityPrivate,
+		CreatedAt:  now.Format(time.RFC3339Nano),
+		UpdatedAt:  now.Format(time.RFC3339Nano),
+		VoiceSession: &scoutChatVoiceSessionBinding{
+			Version:       privateRealtimeVoiceSessionBindingVersion,
+			SessionDigest: privateRealtimeVoiceSessionDigest(voiceSessionID),
+			BoundAt:       now.Format(time.RFC3339Nano),
+		},
+	}
+	entryText, encodeErr := encodeScoutChatThread(thread)
+	if encodeErr == nil {
+		_, _, encodeErr = app.memory.appendScoutChatThread(thread.ID, entryText, scoutChatThreadMetadata(thread))
+	}
+	lock.Unlock()
+	if encodeErr != nil {
+		return scoutChatThreadRecord{}, false, encodeErr
+	}
+	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
+	return thread, true, nil
+}
+
+// privateRealtimeVoiceConversation resolves, but never creates, the thread
+// previously minted by the offer. The client echoes both values returned by the
+// offer; disagreement, owner isolation, archive, or corrupt/missing binding is
+// rejected before a conversation turn can reach the router.
+func (app *kanbanBoardApp) privateRealtimeVoiceConversation(requesterEmail, voiceSessionID, threadID string) (scoutChatThreadRecord, error) {
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	voiceSessionID, err := normalizePrivateRealtimeVoiceSessionID(voiceSessionID)
+	if err != nil || requesterEmail == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session is invalid")
+	}
+	expectedThreadID := privateRealtimeVoiceThreadID(requesterEmail, voiceSessionID)
+	if strings.TrimSpace(threadID) != expectedThreadID {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session and thread do not match")
+	}
+	thread, _, err := app.scoutChatThreadByID(requesterEmail, expectedThreadID)
+	if err != nil || !validPrivateRealtimeVoiceThreadBinding(thread, requesterEmail, voiceSessionID) {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session is unavailable")
+	}
+	if strings.TrimSpace(thread.ArchivedAt) != "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice conversation is archived")
+	}
+	return thread, nil
 }
 
 func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {

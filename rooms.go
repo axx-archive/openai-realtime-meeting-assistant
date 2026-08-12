@@ -602,6 +602,16 @@ func appRoomStore() *roomStore {
 	return store
 }
 
+// appRoomStoreIfOpen returns only the store already established by startup.
+// Read-only projections (such as Home) use this seam so a GET can never create
+// rooms.json merely by asking for current context.
+func appRoomStoreIfOpen() *roomStore {
+	roomStoreMu.Lock()
+	store := roomStoreCache[roomsFilePath()]
+	roomStoreMu.Unlock()
+	return store
+}
+
 // sweepExpiredGuestLinksIfOpen runs on the session-persist seam (§5.1). Only
 // an already-opened store is swept, so a session write can never conjure a
 // rooms.json into a data directory that has none.
