@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-project-realtime-persistent-release-20260812",
+  "recordedAt": "2026-08-12T19:41:00Z",
+  "canonicalPlanSha256": "5aaa613812cb752ce824b3b2d1e1a56be033e0e38d70f1f41e3bc03e1708d561",
+  "source": {
+    "releaseCommit": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "branch": "codex/country-golf-stride",
+    "main": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "workingBranch": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "cleanReleaseInventoryCount": 377,
+    "cleanReleaseInventorySha256": "da0390df37c74258ad8f86110bab24f97a5f862efa18bfeac9a58f878cf91312",
+    "sourceReceiptSha256": "a17c22bdbe9befe9d480f10da76381be7dd6ff29774399d59a8fb193265834aa"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 62,
+    "releaseCommit": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "releaseDir": "/opt/meetingassist-releases/cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "bundleSha256": "08f519ebc7a397af0098c522840b8599c187c468f5a99cd9f0b024123dd0c931",
+    "applicationImageId": "sha256:393272fc5efe6ee770c6d30a2c53ea968c7c873f7e0c0e064eca963c9bb24b0d",
+    "renderRunnerImageId": "sha256:7264176a5723a5bebca97892ea9f7c3db02566b1308b0b70d48e849d372953e0",
+    "releaseReceiptSha256": "9287f86ca11dd3f9cd2fe7a747a5bc94b5dafff00e648580fecd15ff3e2cf73e",
+    "verifier": "verified-local-unsigned",
+    "publicHealthRelease": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "publicReadinessRelease": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "rollback": {
+      "releaseCommit": "7fb35f883fed62ba0e35117ff59d126e369230c2",
+      "bundleSha256": "4e0e62d5937f56669c329d1e53da7fe6d8797fd8db1afb2567dd65997a13405d",
+      "applicationImageId": "sha256:cd453c95020cf5156fae840e84b981a5e22b056c37b60c2bd6d60089c5341b69",
+      "renderRunnerImageId": "sha256:39b087e66f6fb6813fe0ab01dcebc67a5dd74f76398460f2bda5ecbc5f6ffdf6"
+    }
+  },
+  "migration": {
+    "version": 18,
+    "sha256": "39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "databaseReadback": "18|39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "finalMigrationMaxVersion": 17,
+    "allowFutureMigrations": true,
+    "rollbackCompatibility": "retained release validates embedded versions 1-17 and tolerates additive version 18",
+    "baseEnvBackup": "/opt/meetingassist-backups/release62-base-env-pre-migration18-20260812T1935Z"
+  },
+  "ios": {
+    "version": "1.0.0",
+    "buildNumber": "55",
+    "easBuildId": "52ae0dd4-d6dd-462e-a9f4-a3cc06bbc351",
+    "easBuildStatus": "FINISHED",
+    "gitCommit": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "fingerprint": "f6a9a4cab7dc459effd5a5e729a1b76c7d6b1ffe",
+    "submissionId": "477acca1-582e-48a0-90f6-dbfde81a57a5",
+    "submissionStatus": "FINISHED",
+    "ascAppId": "6794029943",
+    "appleProcessingStatus": "not-yet-read-back",
+    "intendedTesterGroupStatus": "not-yet-read-back"
+  },
+  "claim": {
+    "complete": [
+      "commit and push to main and working branch",
+      "exact clean-archive VPS build and activation",
+      "public health and readiness identity agreement",
+      "retained exact rollback bundle and images",
+      "canonical migration 18 application and checksum readback",
+      "EAS iOS Build 55 from exact release commit",
+      "finished EAS submission handoff to App Store Connect"
+    ],
+    "notClaimed": [
+      "external signing or off-host attestation",
+      "Apple VALID processing for Build 55",
+      "Build 55 membership in internal Team or external Bonfire tester groups",
+      "native active-floating-control pixel proof or physical-device acceptance",
+      "live personal Realtime provider quality, latency or barge-in acceptance",
+      "Home chief-of-staff personalization, Project chip or first-class artifact completion",
+      "repair of pre-existing ambient, meeting-intelligence, backup or canonical-shadow degradations"
+    ]
+  },
+  "preserved": [
+    "digitalocean_meeting_data live volume",
+    "pre-existing untracked Home and meeting-control rendered evidence",
+    "unrelated stride-site worktree content",
+    "prior exact release directory and images"
+  ],
+  "next": "Read back Apple Build 55 processing and intended tester relationships without blocking the next local product slice; then integrate the governed Project chip and permission-filtered chief-of-staff recommendation path before proving one Project-bound first-class Research work card."
+}
