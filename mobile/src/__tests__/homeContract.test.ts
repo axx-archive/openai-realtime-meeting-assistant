@@ -19,7 +19,12 @@ test('native Home consumes one server-owned snapshot and does not rebuild client
   assert.doesNotMatch(hook, /MAX_STALE_HOME_MS|receivedAtRef/u);
   assert.match(hook, /const HOME_STARTER_IDS = \['continue', 'explore', 'create', 'challenge'\] as const/u);
   assert.match(hook, /const HOME_STARTER_SHELLS: HomeStarter\[\] = \[/u);
-  assert.match(hook, /starters: snapshot\.starters\.length !== HOME_STARTER_IDS\.length[\s\S]*HOME_STARTER_SHELLS/u);
+  assert.match(hook, /starters: authorizedSnapshot\.starters\.length !== HOME_STARTER_IDS\.length[\s\S]*HOME_STARTER_SHELLS/u);
+  assert.match(hook, /requestRef = useRef<\{ sessionToken: string; promise: Promise<void>; refreshQueued: boolean \}/u);
+  assert.match(hook, /activeRequest\?\.sessionToken === sessionToken[\s\S]*activeRequest\.refreshQueued = true/u);
+  assert.match(hook, /sessionTokenRef\.current !== sessionToken/u);
+  assert.match(hook, /const authorizedSnapshot = snapshotSessionToken === sessionToken \? snapshot : EMPTY/u);
+  assert.match(hook, /continuity: authorizedSnapshot\.items/u);
   assert.match(hook, /snapshot\.version === 'home-v2'/u);
   assert.match(hook, /snapshot\.starters\.length === HOME_STARTER_IDS\.length/u);
   assert.match(types, /id: 'continue' \| 'explore' \| 'create' \| 'challenge';/u);

@@ -34,10 +34,15 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`.home-starter__text {
         display: none;`,
 		`const HOME_CATEGORY_SHELLS = Object.freeze([`,
+		`data-hydrated="false"`,
+		`aria-busy="true"`,
 		`button.disabled = !suggestionsReady`,
 		`const categories = !guestMode`,
 		`Why this: ${whyThis}`,
 		`homeStarters.dataset.hydrated = String(suggestionsReady)`,
+		`homeSnapshotRequest?.audienceKey === audienceKey`,
+		`if (refreshAfterCurrent) homeSnapshotRefreshQueued = true`,
+		`resetHomeProjection()`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("desktop Home missing %q", want)
@@ -67,6 +72,31 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 	}
 }
 
+func TestDesktopHomeCategoryShellsExistBeforeJavaScriptHydration(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	start := strings.Index(html, `<div id="homeStarters"`)
+	end := strings.Index(html, `<div id="homeSuggestions"`)
+	if start < 0 || end <= start {
+		t.Fatal("static Home category shell boundary missing")
+	}
+	shell := html[start:end]
+	if strings.Contains(strings.SplitN(shell, ">", 2)[0], " hidden") {
+		t.Fatal("static Home category shells are hidden until JavaScript runs")
+	}
+	if got := strings.Count(shell, `class="home-starter pressable"`); got != 4 {
+		t.Fatalf("static Home category count=%d, want 4 before JavaScript hydration", got)
+	}
+	for _, label := range []string{"Continue", "Explore", "Create", "Challenge"} {
+		if !strings.Contains(shell, `aria-label="`+label+`. Suggestions loading."`) {
+			t.Fatalf("static Home category %q is missing its loading semantics", label)
+		}
+	}
+}
+
 func TestDesktopHomeRenderedFocusedSuggestionsAndResponsiveLayout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("rendered browser contract")
@@ -89,22 +119,28 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
  {id:'deck',kind:'work',eyebrow:'Presentation · Building',title:'Create the STRIDE pitch deck',detail:'Building the first draft',destination:{route:'thread',threadId:'deck',title:'STRIDE pitch deck'}}
 ],starters:[
  {id:'continue',label:'Continue',detail:'Pick up recent work',suggestions:[{id:'continue-1',text:'Continue where we left off in Country Golf.',whyThis:'You were last working here.',destination:{route:'thread',threadId:'country-golf',title:'Country Golf'}}]},
- {id:'explore',label:'Explore',detail:'Understand and discover',suggestions:[{id:'explore-1',text:'Explore the biggest open question in Country Golf.',whyThis:'You were last working here.',destination:{route:'new-private'}},{id:'explore-2',text:'Connect what the team has been saying about membership and identify the useful next move.',whyThis:'Membership has come up across 2 conversations you can open.',destination:{route:'new-private'}}]},
+ {id:'explore',label:'Explore',detail:'Understand and discover',suggestions:[{id:'explore-1',text:'Explore the biggest open question in Country Golf.',whyThis:'You were last working here.',destination:{route:'new-private'}},{id:'explore-2',text:'Connect what has come up across your conversations about membership and identify the useful next move.',whyThis:'Membership has come up across 2 conversations you can open.',destination:{route:'new-private'}}]},
  {id:'create',label:'Create',detail:'Make the next useful thing',suggestions:[{id:'create-1',text:'Create the next useful deliverable for Country Golf.',whyThis:'Work is already underway here.',destination:{route:'new-private'}}]},
  {id:'challenge',label:'Challenge',detail:'Grill and red-team',suggestions:[{id:'challenge-1',text:'Challenge the current thinking in Country Golf and identify the weakest assumptions.',whyThis:'This decision is waiting on you.',destination:{route:'new-private'}}]}
 ]};
 let homeAvailable=true;
+let homeRequestCount=0;
+let homeAccount='a';
 const initialHomeReadyAt=Date.now()+2000;
 let roomsMode='quiet';
 const server=http.createServer((req,res)=>{
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation);}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ'}));}
  if(req.url==='/assistant/home'){
+   homeRequestCount+=1;
+   const payloadHome=homeAccount==='b'?JSON.parse(JSON.stringify(home).replaceAll('Country Golf','B launch')):home;
    if(!homeAvailable){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
-   const reply=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({home}));};
+   const reply=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({home:payloadHome}));};
+   if(homeAccount==='b'){return setTimeout(reply,1200);}
    if(Date.now()<initialHomeReadyAt){return setTimeout(reply,initialHomeReadyAt-Date.now());}
    return reply();
  }
+ if(req.url==='/__home_account_b'){homeAccount='b';res.writeHead(204);return res.end();}
  if(req.url==='/__rooms_live'){roomsMode='live';res.writeHead(204);return res.end();}
  if(req.url==='/rooms'){
    const rooms=roomsMode==='live'?[{id:'weekly-product',name:'Weekly product',live:true,participantCount:3,archived:false}]:[];
@@ -132,6 +168,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(immediate.disabled,4,'unhydrated Home shells are non-actionable');
  assert.equal(immediate.hydrated,'false','Home shells disclose their unhydrated state');
  await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
+ assert.equal(homeRequestCount,1,'startup auth and room hydration coalesce into one Home request');
  const hydratedComposerTop=await page.evaluate(()=>document.getElementById('homeScoutComposer').getBoundingClientRect().top);
  assert.ok(Math.abs(hydratedComposerTop-immediate.composerTop)<=3,'Home hydration shifted the composer: '+immediate.composerTop+' -> '+hydratedComposerTop);
  await page.fill('#homeScoutInput','Unsent local draft');
@@ -220,6 +257,22 @@ const server=http.createServer((req,res)=>{
  for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme);
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,starterCount:document.querySelectorAll('#homeStarters .home-starter').length,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
  assert.equal(phone.fits,true);assert.equal(phone.starterCount,4);assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
+ await page.evaluate(async()=>{
+   await fetch('/__home_account_b');
+   selectedHomeSuggestionDestination={route:'thread',threadId:'country-golf'};
+   setAuthenticatedUser({email:'b@example.test',name:'B'});
+   void loadHomeSnapshot();
+ });
+ const switched=await page.evaluate(()=>({
+   oldCopy:document.querySelector('.office-launch').textContent.includes('Country Golf'),
+   disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
+   hydrated:document.getElementById('homeStarters').dataset.hydrated,
+   destination:selectedHomeSuggestionDestination,
+   chipHidden:document.getElementById('homeContextChip').hidden
+ }));
+ assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true},'A context survived the A to B authority boundary');
+ await page.waitForFunction(()=>document.getElementById('homeStarters').dataset.hydrated==='true');
+ assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false);
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)

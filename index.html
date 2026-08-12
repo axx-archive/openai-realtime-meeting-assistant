@@ -7267,12 +7267,13 @@
         transition-duration: 180ms;
         transition-timing-function: cubic-bezier(.2, 0, 0, 1);
       }
-      .home-starter:hover, .home-starter:focus-visible {
+      .home-starter:not(:disabled):hover, .home-starter:focus-visible {
         transform: translateY(-3px);
         background: color-mix(in srgb, var(--surface-2) 76%, transparent);
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 14%, transparent), 0 12px 26px rgba(12, 10, 8, 0.07);
       }
-      .home-starter:active { transform: scale(.96); }
+      .home-starter:not(:disabled):active { transform: scale(.96); }
+      .home-starter:disabled { cursor: default; }
       .home-starter__icon {
         display: block;
         height: 20px;
@@ -7286,7 +7287,7 @@
       .home-starter[data-category-id="explore"] .home-starter__icon { color: var(--info, #4f9cff); }
       .home-starter[data-category-id="create"] .home-starter__icon { color: #a78bfa; }
       .home-starter[data-category-id="challenge"] .home-starter__icon { color: var(--ember); }
-      .home-starter:hover .home-starter__icon, .home-starter:focus-visible .home-starter__icon { transform: translateY(-1px) scale(1.06); }
+      .home-starter:not(:disabled):hover .home-starter__icon, .home-starter:focus-visible .home-starter__icon { transform: translateY(-1px) scale(1.06); }
       .home-starter__label { margin-top: 5px; font: 600 13px/1.25 var(--font-sans); }
       .home-starter__text {
         display: none;
@@ -29729,7 +29730,12 @@
                 </span>
                 <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
               </div>
-              <div id="homeStarters" class="home-starters" role="group" aria-label="Conversation starter categories" hidden></div>
+              <div id="homeStarters" class="home-starters" role="group" aria-label="Conversation starter categories" aria-busy="true" data-hydrated="false">
+                <button type="button" class="home-starter pressable" data-category-id="continue" aria-label="Continue. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">↻</span><span class="home-starter__label">Continue</span><span class="home-starter__text"></span></button>
+                <button type="button" class="home-starter pressable" data-category-id="explore" aria-label="Explore. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">⌕</span><span class="home-starter__label">Explore</span><span class="home-starter__text"></span></button>
+                <button type="button" class="home-starter pressable" data-category-id="create" aria-label="Create. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">✦</span><span class="home-starter__label">Create</span><span class="home-starter__text"></span></button>
+                <button type="button" class="home-starter pressable" data-category-id="challenge" aria-label="Challenge. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">◇</span><span class="home-starter__label">Challenge</span><span class="home-starter__text"></span></button>
+              </div>
               <div id="homeSuggestions" class="home-suggestions" role="group" aria-label="Suggestions based on your recent work" hidden></div>
               <form id="homeScoutComposer" class="home-scout-composer" autocomplete="off">
                 <input id="homeScoutInput" class="home-scout-composer__input" type="text" maxlength="4000" placeholder="Message Scout" aria-label="Message Scout from home" disabled>
@@ -32448,6 +32454,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let selectedHomeSuggestionDestination = null
       let homeSnapshotGeneration = 0
       let homeSnapshotStale = false
+      let homeSnapshotRequest = null
+      let homeSnapshotRefreshQueued = false
       const officeIntelCard = document.getElementById('officeIntelCard')
       // mobile shell chrome (design mobile §1) — header back/bell/avatar,
       // the settings sheet head, and the chat stacked navigator
@@ -32841,6 +32849,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!identityChanged) {
           return
         }
+        // Home recommendations and their exact thread destinations are private
+        // authority projections. Remove them synchronously after publishing the
+        // replacement identity, before that account's shell can paint or fetch.
+        resetHomeProjection()
         // Authentication transitions are a hard privacy boundary. Fence any
         // in-flight fetch for the prior account and remove its projection from
         // the DOM before the new account can load.
@@ -52226,17 +52238,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        activeScoutThreadId = ''
 	        pendingScoutFiles = []
 	        chatThreadsFingerprint = ''
+	        resetHomeProjection()
+	        renderPendingScoutFiles()
+	        renderChatAgentThreads()
+	        renderActiveScoutThread()
+	        syncChatThreadPolling()
+	      }
+
+	      function resetHomeProjection() {
 	        homeSnapshotGeneration += 1
+	        homeSnapshotRequest = null
+	        homeSnapshotRefreshQueued = false
 	        homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
 	        selectedHomeCategoryId = ''
 	        selectedHomeSuggestionDestination = null
 	        if (homeContextChip) homeContextChip.hidden = true
 	        homeSnapshotStale = false
-	        renderPendingScoutFiles()
-	        renderChatAgentThreads()
-	        renderActiveScoutThread()
 	        renderHomeSnapshot()
-	        syncChatThreadPolling()
 	      }
 
 	      function chatThreadsListFingerprint(threads) {
@@ -52426,7 +52444,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 		        }
 	        upsertScoutChatThread(existing, { select: false })
-	        loadHomeSnapshot()
+	        loadHomeSnapshot(true)
 		        if (activeScoutThreadId === id) {
 		          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
 		            const root = desktopChatReplyTopology(existing.messages).rootFor(message)
@@ -55535,7 +55553,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           nudgeChatThreadsFromNotification()
         }
         appendNotificationEntry(payload, { toast: true })
-        loadHomeSnapshot()
+        loadHomeSnapshot(true)
       }
 
       function handleNotificationBacklog(payload) {
@@ -70812,6 +70830,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const selected = categories.find(category => category.id === selectedHomeCategoryId)
         homeStarters.hidden = !categories.length || Boolean(selected)
         homeStarters.dataset.hydrated = String(suggestionsReady)
+        homeStarters.setAttribute('aria-busy', String(!suggestionsReady))
         homeStarters.replaceChildren(...categories.map(category => homeCategoryNode(category, suggestionsReady)))
         const suggestions = selected?.suggestions || []
         officeLaunchHome?.classList.toggle('is-starter-open', Boolean(selected))
@@ -70891,9 +70910,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : 'Retry Home')
       }
 
-      async function loadHomeSnapshot() {
+      async function loadHomeSnapshot(refreshAfterCurrent = false) {
+        const audienceKey = authedUser && !guestMode ? String(authedUser.email || authedUser.id || 'member') : ''
+        if (audienceKey && homeSnapshotRequest?.audienceKey === audienceKey) {
+          if (refreshAfterCurrent) homeSnapshotRefreshQueued = true
+          return homeSnapshotRequest.promise
+        }
         const generation = ++homeSnapshotGeneration
         if (!authedUser || guestMode) {
+          homeSnapshotRequest = null
+          homeSnapshotRefreshQueued = false
           homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
           selectedHomeCategoryId = ''
           selectedHomeSuggestionDestination = null
@@ -70907,39 +70933,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // Paint it before awaiting the permission-filtered recommendation
         // snapshot so Home never arrives late or shifts the composer.
         renderHomeSnapshot()
-        try {
-          const response = await fetch('/assistant/home', { cache: 'no-store' })
-          if (generation !== homeSnapshotGeneration) return
-          if (response.status === 401 || response.status === 403) {
+        const request = (async () => {
+          try {
+            const response = await fetch('/assistant/home', { cache: 'no-store' })
+            if (generation !== homeSnapshotGeneration) return
+            if (response.status === 401 || response.status === 403) {
+              homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
+              selectedHomeCategoryId = ''
+              selectedHomeSuggestionDestination = null
+              if (homeContextChip) homeContextChip.hidden = true
+              homeSnapshotStale = false
+              setHomeRefreshFailed(false)
+              renderHomeSnapshot()
+              return
+            }
+            if (!response.ok) throw new Error('home unavailable')
+            const payload = await response.json()
+            if (!validHomeSnapshot(payload?.home)) throw new Error('invalid home snapshot')
+            homeSnapshot = payload.home
+            homeSnapshotStale = false
+            setHomeRefreshFailed(false)
+            renderHomeSnapshot()
+          } catch {
+            if (generation !== homeSnapshotGeneration) return
+            // Home is an authorization-filtered projection. A failed refresh can
+            // coincide with revocation, so clear every server-derived title,
+            // preview, starter and destination immediately. The local composer
+            // draft remains untouched.
             homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
             selectedHomeCategoryId = ''
             selectedHomeSuggestionDestination = null
             if (homeContextChip) homeContextChip.hidden = true
-            homeSnapshotStale = false
-            setHomeRefreshFailed(false)
+            homeSnapshotStale = true
+            setHomeRefreshFailed(true)
             renderHomeSnapshot()
-            return
           }
-          if (!response.ok) throw new Error('home unavailable')
-          const payload = await response.json()
-          if (!validHomeSnapshot(payload?.home)) throw new Error('invalid home snapshot')
-          homeSnapshot = payload.home
-          homeSnapshotStale = false
-          setHomeRefreshFailed(false)
-          renderHomeSnapshot()
-        } catch {
-          if (generation !== homeSnapshotGeneration) return
-          // Home is an authorization-filtered projection. A failed refresh can
-          // coincide with revocation, so clear every server-derived title,
-          // preview, starter and destination immediately. The local composer
-          // draft remains untouched.
-          homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
-          selectedHomeCategoryId = ''
-          selectedHomeSuggestionDestination = null
-          if (homeContextChip) homeContextChip.hidden = true
-          homeSnapshotStale = true
-          setHomeRefreshFailed(true)
-          renderHomeSnapshot()
+        })()
+        const currentRequest = { audienceKey, promise: request }
+        homeSnapshotRequest = currentRequest
+        try {
+          return await request
+        } finally {
+          if (homeSnapshotRequest !== currentRequest) return
+          homeSnapshotRequest = null
+          if (homeSnapshotRefreshQueued && authedUser && !guestMode) {
+            homeSnapshotRefreshQueued = false
+            queueMicrotask(() => { loadHomeSnapshot() })
+          }
         }
       }
 
