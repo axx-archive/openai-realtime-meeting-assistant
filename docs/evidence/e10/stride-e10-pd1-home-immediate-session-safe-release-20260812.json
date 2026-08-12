@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-home-immediate-session-safe-release-20260812",
+  "recordedAt": "2026-08-12T21:24:00Z",
+  "priorCanonicalPlanSha256": "74a7966c0149bbf5d4538e194779b6908136c4045397ed7b15b2e19849ece99e",
+  "source": {
+    "releaseCommit": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "branch": "codex/country-golf-stride",
+    "main": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "workingBranch": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "cleanReleaseInventoryCount": 377,
+    "cleanReleaseInventorySha256": "f6a1c5df5ee45e02823eb38878a8b30e940d467f679d6bb21bfb684b5a0159cf",
+    "sourceArchiveSha256": "7fdf3f2765b7d380198e9d14d4503a2c32ce0c0c092cf187d17542192c5d9da4",
+    "sourceReceiptSha256": "3459db18fbcb3234d581d1871c2f089137d1996ea93e1a830114e2999abd42ff"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 64,
+    "releaseCommit": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "releaseDir": "/opt/meetingassist-releases/ee5c2b386f535320a7fad5888fd512851c832b01",
+    "bundleSha256": "f111742b14218bcea769594f76fc8a9d2cbe85dd214185e75621920f596baf2b",
+    "applicationImageId": "sha256:1837474359a91e413db45f06e7cfac6f607fbf46212495c106de527effb1c7db",
+    "renderRunnerImageId": "sha256:acdf07f714dab127a783af0ebdb201c62e4db11259097aea272b960d8efcd557",
+    "releaseReceiptSha256": "ead2f42095f6eb23516194a9722071126bf6e21c7b6141b6e009712ea3ebff15",
+    "buildManifestSha256": "2362f956ae932fe59246f4fc487cc2a86c70f0995acaf5b71eaf13f9b27e8ce7",
+    "verifier": "verified-local-unsigned",
+    "publicHealthRelease": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "publicReadinessRelease": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "rollback": {
+      "releaseCommit": "fc4e3a5709738186d6176d86ebdef3d1ad26e7bc",
+      "bundleSha256": "3d83223dc833603c7cf695f035295f31ba3a8c24c99ae29a5c9d31b4c03c7a9e",
+      "applicationImageId": "sha256:e73f8146a080f909ca9e661f93d9c0312a0e38172edff459f0ea7247d940b1da",
+      "renderRunnerImageId": "sha256:300316afae439cfcac68a72b50a9b62752a42a25326fa9e767511d00efb3e9e9"
+    }
+  },
+  "migration": {
+    "newMigrationRequired": false,
+    "existingProjectMigrationVersion": 18,
+    "productionDataEdited": false
+  },
+  "ios": {
+    "version": "1.0.0",
+    "buildNumber": "57",
+    "easBuildId": "2ba79940-081c-4308-b2db-4f3f43017c57",
+    "easBuildStatus": "FINISHED",
+    "gitCommit": "ee5c2b386f535320a7fad5888fd512851c832b01",
+    "fingerprint": "324a48159948293f51cb5141ba3d12328c7f25be",
+    "submissionId": "bbb0c957-bcbc-4de8-9d23-46845593e33e",
+    "submissionStatusAtReceipt": "IN_PROGRESS",
+    "submissionErrorAtReceipt": null,
+    "ascAppId": "6794029943",
+    "appleProcessingStatus": "not-yet-read-back",
+    "intendedTesterGroupStatus": "not-yet-read-back"
+  },
+  "validation": {
+    "fullGo": "PASS; go test ./... -count=1; root package 542.987s",
+    "focusedGo": "PASS; Home and DesktopHome focused suite",
+    "focusedRace": "PASS; HomeSnapshot, HomeChiefOfStaff and static-shell contracts",
+    "goVet": "PASS",
+    "native": "PASS; 526/526",
+    "nativeTypecheck": "PASS",
+    "renderedWeb": "PASS; delayed Home response proves immediate shells, one startup request and zero composer shift",
+    "critic": "PASS; no blocker or major finding",
+    "diffCheck": "PASS"
+  },
+  "claim": {
+    "complete": [
+      "web renders four disabled category shells in the initial server HTML before authentication and Home fetch",
+      "native renders the same stable category shells synchronously while personalized recommendations load",
+      "web and native coalesce duplicate Home requests per exact authenticated audience or session",
+      "account or session changes synchronously clear the prior personalized snapshot and reject delayed prior-user responses",
+      "personalized failure clears private recommendation context while preserving the local draft",
+      "reviewed commit and push to main and working branch",
+      "exact clean-archive VPS build and durable activation",
+      "public health, readiness, live initial HTML and release ledger identity agreement",
+      "retained exact rollback bundle and images",
+      "EAS iOS Build 57 from the exact release commit"
+    ],
+    "notClaimed": [
+      "Build 57 App Store Connect upload completion or Apple processing",
+      "Build 57 membership in intended internal or external tester groups",
+      "signed Project suggestion token, Project chip, Project-aware Send or complete Project Record",
+      "authorized meeting, Project-state or full-history recommendation compaction",
+      "provider-backed artifact families or physical-device acceptance",
+      "whole-PD1 or whole-E10 completion"
+    ]
+  },
+  "preserved": [
+    "digitalocean_meeting_data live volume",
+    "pre-existing untracked Home and meeting-control rendered evidence",
+    "unrelated stride-site worktree content",
+    "prior exact release directory and images"
+  ],
+  "next": "Integrate the fail-closed visible Project chip and Project-aware Send association, then prove one Project-bound Research request through one server-owned evolving card, immutable revisions, rich Open, a durable named Drive receipt and normal-composer edit or regenerate before reusing that spine for every artifact family."
+}
