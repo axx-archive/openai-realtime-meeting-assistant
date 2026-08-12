@@ -529,8 +529,7 @@ func (app *kanbanBoardApp) rememberRoomAgentTranscriptForEpoch(scope RoomScoutSc
 	if err != nil || !appended {
 		return
 	}
-	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
-	broadcastScopedRoomKanbanEvent(scope, "memory_transcript", entry)
+	app.broadcastCurrentMeetingTranscript(scope.RoomID, entry)
 	if _, consentErr := (appBrainSourceConsentVerifier{App: app}).AuthorizeBrainSourceConsent(context.Background(), entry); consentErr == nil {
 		app.nudgeAmbientAgentForRoom(meetingBrainAgentName, scope.RoomID)
 		if err := app.projectSTRIDEAuthoritativeTranscript(context.Background(), meeting, entry); err != nil {

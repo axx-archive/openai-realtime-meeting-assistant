@@ -251,7 +251,8 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 		"Service briefly unavailable — your reply is still here. Check the thread, then try again.",
 		"Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.",
 		"chatContextReplySend.disabled = false",
-		"renderDesktopMessageContext(thread, root, { scrollToBottom: true })",
+		"const hasReplies = desktopChatReplyTopology(messages).repliesFor(root).length > 0",
+		"renderDesktopMessageContext(thread, root, { scrollToBottom: hasReplies })",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("desktop thread reply recovery missing %q", want)
@@ -458,7 +459,7 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 		}
 	}
 	renderRail := functionBodyAfterSignature(html, "function renderDesktopMessageContext(thread, root, options = {})")
-	for _, want := range []string{"const priorScrollTop", "const wasNearBottom", "chatContextBody.scrollTop = priorScrollTop"} {
+	for _, want := range []string{"const priorScrollTop", "const wasNearBottom", "chatContextParent.replaceChildren", "chatContextBody.scrollTop = priorScrollTop"} {
 		if !strings.Contains(renderRail, want) {
 			t.Errorf("reply rail scroll stability missing %q", want)
 		}

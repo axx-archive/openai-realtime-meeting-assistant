@@ -49,6 +49,19 @@ func sharedRoomRecallPrincipal(roomID string, sittingID string) RecallPrincipal 
 	}
 }
 
+// currentRoomMediaRecallPrincipal binds a shared-room reader to the exact
+// server-owned media generation that is currently authoritative for the
+// sitting. Captured transcript rows carry that generation as a revocation
+// fence; a zero-generation service principal must not silently make those
+// rows disappear from interval analysis or room Scout recall.
+func (app *kanbanBoardApp) currentRoomMediaRecallPrincipal(roomID string, sittingID string) RecallPrincipal {
+	principal := sharedRoomRecallPrincipal(roomID, sittingID)
+	if app != nil {
+		principal.MediaGeneration = app.roomMediaGeneration(roomID)
+	}
+	return principal
+}
+
 func recallPrincipalForGuest(guestID string, roomID string, sittingID string) RecallPrincipal {
 	return RecallPrincipal{
 		GuestID:   strings.TrimSpace(guestID),
@@ -72,6 +85,7 @@ func (app *kanbanBoardApp) recallPrincipalForMemberRoom(email string, roomID str
 	principal.RoomID = roomID
 	if app != nil && app.memory != nil {
 		principal.SittingID = app.memory.currentMeetingID(roomID)
+		principal.MediaGeneration = app.roomMediaGeneration(roomID)
 	}
 	return principal
 }

@@ -1086,7 +1086,7 @@ func TestMeetingDigestProducerCarryForwardStampsDroppedFacts(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	app := newIsolatedKanbanBoardApp(t)
 
-	appendDigestTestBrain(t, app, "brain-1", "m1", "## Overview\nFirst window.", nil)
+	appendDigestTestBrain(t, app, "brain-1", "m1", "## Overview\nFirst window.", map[string]string{meetingBrainCaptureMetadataKey: "42"})
 	calls := 0
 	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
 		calls++
@@ -1101,7 +1101,7 @@ func TestMeetingDigestProducerCarryForwardStampsDroppedFacts(t *testing.T) {
 		t.Fatalf("pass1: %v", err)
 	}
 
-	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nSecond window.", nil)
+	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nSecond window.", map[string]string{meetingBrainCaptureMetadataKey: "84"})
 	second, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
 	if err != nil {
 		t.Fatalf("pass2: %v", err)
@@ -1112,6 +1112,9 @@ func TestMeetingDigestProducerCarryForwardStampsDroppedFacts(t *testing.T) {
 
 	if got := second.Metadata[digestDroppedFactsMetadataKey]; got != "3" {
 		t.Fatalf("droppedFacts stamp = %q, want %q (headroom 9, 12 live priors)", got, "3")
+	}
+	if got := second.Metadata[meetingDigestCaptureMetadataKey]; got != "84" {
+		t.Fatalf("analysis capture high-water = %q, want %q", got, "84")
 	}
 	var payload meetingDigestPayload
 	if err := json.Unmarshal([]byte(second.Text), &payload); err != nil {

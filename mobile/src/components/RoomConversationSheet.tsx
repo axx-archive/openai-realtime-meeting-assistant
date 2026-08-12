@@ -10,6 +10,7 @@ import {
   type NativeSyntheticEvent,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,8 +26,13 @@ import {
   nextThreadScrollInteraction,
   shouldFollowThreadTail,
 } from '../messaging/threadListPerformance';
+import {
+  meetingIntelligenceStatusLabel,
+  type MeetingIntelligenceFact,
+  type MeetingIntelligenceSnapshot,
+} from '../realtime/meetingIntelligence';
 
-export type RoomConversationMode = 'chat' | 'transcript';
+export type RoomConversationMode = 'recap' | 'transcript' | 'chat';
 
 type ChatItem = {
   id: string;
@@ -35,6 +41,12 @@ type ChatItem = {
   createdAt: string;
   authorEmail?: string;
   agentId?: string;
+  artifactId?: string;
+  workRunId?: string;
+  workStatus?: 'queued' | 'running' | 'approval_required' | 'complete' | 'needs_attention';
+  workFamily?: string;
+  workTitle?: string;
+  workProgress?: number;
   followThroughId?: string;
   followThroughStatus?: 'queued' | 'delivering' | 'delivered' | 'awaiting_input';
   transient?: boolean;
@@ -55,11 +67,13 @@ type Props = {
   roomName: string;
   messages: ChatItem[];
   transcriptEntries: TranscriptItem[];
+  intelligence: MeetingIntelligenceSnapshot | null;
   viewer: { name?: string; email?: string };
   onClose: () => void;
   onDeleteMessage: (id: string) => boolean;
   onModeChange: (mode: RoomConversationMode) => void;
   onSendMessage: (text: string) => boolean;
+  onOpenArtifact?: (artifactId: string, title: string) => void;
 };
 
 function normalizedIdentity(value: unknown): string {
@@ -206,11 +220,13 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   roomName,
   messages,
   transcriptEntries,
+  intelligence,
   viewer,
   onClose,
   onDeleteMessage,
   onModeChange,
   onSendMessage,
+  onOpenArtifact,
 }: Props) {
   const safeArea = useSafeAreaInsets();
   const chatListRef = useRef<FlatList<ChatItem>>(null);
@@ -301,6 +317,32 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             <Text style={[styles.messageTime, own && styles.messageTimeOwn]}>{timeLabel(item.createdAt)}</Text>
           </View>
           <RoomMessageText own={own} scout={scout} text={item.text} />
+          {item.artifactId && item.workRunId && item.workStatus ? (
+            <Pressable
+              accessibilityHint="Opens the current activity or completed deliverable"
+              accessibilityLabel={`Open ${item.workTitle || item.workFamily || 'Scout work'}`}
+              accessibilityRole="button"
+              onPress={() => onOpenArtifact?.(item.artifactId!, item.workTitle || item.workFamily || 'Scout work')}
+              style={({ pressed }) => [styles.workCard, pressed && styles.pressed]}
+            >
+              <View style={styles.workCardHeader}>
+                <Text numberOfLines={1} style={styles.workCardFamily}>{item.workFamily || 'Scout work'}</Text>
+                <Text style={[styles.workCardStatus, item.workStatus === 'needs_attention' && styles.workCardStatusAttention]}>
+                  {item.workStatus === 'complete' ? 'Delivered' : item.workStatus === 'needs_attention' ? 'Needs attention' : item.workStatus === 'approval_required' ? 'Needs approval' : 'Working'}
+                </Text>
+              </View>
+              <Text numberOfLines={2} style={styles.workCardTitle}>{item.workTitle || 'Open work'}</Text>
+              {typeof item.workProgress === 'number' ? (
+                <View style={styles.workProgressTrack}>
+                  <View style={[styles.workProgressFill, { width: `${item.workProgress}%` as `${number}%` }]} />
+                </View>
+              ) : null}
+              <View style={styles.workCardOpenRow}>
+                <Text style={styles.workCardOpen}>Open</Text>
+                <SymbolView name="arrow.up.right" tintColor="#FF8A5B" size={12} />
+              </View>
+            </Pressable>
+          ) : null}
           {item.followThroughId && item.followThroughStatus ? (
             <Text style={styles.followThroughStatus}>
               {item.followThroughStatus === 'awaiting_input' ? 'Needs a destination' : 'Scheduled work'}
@@ -343,6 +385,26 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
     ? { icon: 'bubble.left.and.bubble.right', title: 'No messages yet', body: 'Send a note without interrupting the conversation.' }
     : { icon: 'captions.bubble', title: 'Nothing transcribed yet', body: 'Spoken moments will appear here as the room captures them.' }, [mode]);
 
+  const renderRecapFacts = useCallback((title: string, facts: readonly MeetingIntelligenceFact[]) => {
+    if (!facts.length) return null;
+    return (
+      <View style={styles.recapSection}>
+        <Text style={styles.recapSectionTitle}>{title}</Text>
+        {facts.map((fact, index) => (
+          <View key={`${title}-${fact.sourceId ?? index}-${fact.text}`} style={styles.recapFact}>
+            <View style={styles.recapBullet} />
+            <View style={styles.recapFactCopy}>
+              <Text selectable style={styles.recapFactText}>{fact.text}</Text>
+              {fact.owner || fact.status ? (
+                <Text style={styles.recapFactMeta}>{[fact.owner, fact.status].filter(Boolean).join(' · ')}</Text>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  }, []);
+
   return (
     <Modal
       animationType="slide"
@@ -377,11 +439,11 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
         </View>
 
         <View accessibilityLabel="Conversation view" accessibilityRole="tablist" style={styles.segmentedControl}>
-          {(['chat', 'transcript'] as const).map((item) => {
+          {(['recap', 'transcript', 'chat'] as const).map((item) => {
             const selected = mode === item;
             return (
               <Pressable
-                accessibilityLabel={item === 'chat' ? 'Room chat' : 'Live transcript'}
+                accessibilityLabel={item === 'chat' ? 'Room chat' : item === 'transcript' ? 'Live transcript' : 'Meeting recap'}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
                 key={item}
@@ -389,12 +451,12 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                 style={[styles.segment, selected && styles.segmentSelected]}
               >
                 <SymbolView
-                  name={item === 'chat' ? 'bubble.left.and.bubble.right.fill' : 'captions.bubble.fill'}
+                  name={item === 'chat' ? 'bubble.left.and.bubble.right.fill' : item === 'transcript' ? 'captions.bubble.fill' : 'doc.text.fill'}
                   tintColor={selected ? ink[950] : 'rgba(255,255,255,0.58)'}
                   size={15}
                 />
                 <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>
-                  {item === 'chat' ? 'Chat' : 'Transcript'}
+                  {item === 'chat' ? 'Chat' : item === 'transcript' ? 'Transcript' : 'Recap'}
                 </Text>
               </Pressable>
             );
@@ -535,7 +597,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               </View>
             </View>
           </>
-        ) : (
+        ) : mode === 'transcript' ? (
           <FlatList
             ListEmptyComponent={(
               <View style={styles.emptyState}>
@@ -559,6 +621,36 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             scrollEventThrottle={100}
             style={styles.list}
           />
+        ) : (
+          <ScrollView contentContainerStyle={[styles.recapContent, { paddingBottom: Math.max(safeArea.bottom, space[6]) }]} style={styles.list}>
+            <View style={styles.recapStatusCard}>
+              <View style={styles.recapStatusRow}>
+                <View style={[styles.recapStatusDot, intelligence?.transcript.state !== 'listening' && styles.recapStatusDotWarning]} />
+                <Text accessibilityLiveRegion="polite" style={styles.recapStatusText}>{meetingIntelligenceStatusLabel(intelligence)}</Text>
+              </View>
+              {intelligence?.notes.groundedThrough ? (
+                <Text style={styles.recapCoverage}>
+                  Through {timeLabel(intelligence.notes.groundedThrough)} · {intelligence.recap?.sourceCount ?? 0} sources
+                </Text>
+              ) : null}
+            </View>
+            {intelligence?.recap ? (
+              <>
+                {intelligence.recap.title ? <Text style={styles.recapTitle}>{intelligence.recap.title}</Text> : null}
+                {renderRecapFacts('Decisions', intelligence.recap.decisions)}
+                {renderRecapFacts('Actions', intelligence.recap.actions)}
+                {renderRecapFacts('Open questions', intelligence.recap.openQuestions)}
+                {renderRecapFacts('Topics', intelligence.recap.topics)}
+                {renderRecapFacts('Risks', intelligence.recap.risks)}
+              </>
+            ) : (
+              <View style={styles.emptyState}>
+                <SymbolView name="doc.text" tintColor="rgba(255,255,255,0.35)" size={28} />
+                <Text style={styles.emptyTitle}>Notes are catching up</Text>
+                <Text style={styles.emptyBody}>The transcript remains live. One evolving recap will appear here when its source coverage is verified.</Text>
+              </View>
+            )}
+          </ScrollView>
         )}
         </KeyboardAvoidingView>
       </View>
@@ -618,6 +710,16 @@ const styles = StyleSheet.create({
   messageTextOwn: { color: ink[950] },
   messageTextScout: { color: 'rgba(255,255,255,0.92)' },
   followThroughStatus: { ...type.captionMedium, marginTop: 7, color: '#FF8A5B' },
+	workCard: { minWidth: 230, gap: 7, marginTop: space[3], padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.35)', backgroundColor: 'rgba(9,9,11,0.48)' },
+	workCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
+	workCardFamily: { ...type.captionMedium, flex: 1, color: 'rgba(255,255,255,0.62)' },
+	workCardStatus: { ...type.captionMedium, color: '#30D158' },
+	workCardStatusAttention: { color: '#FF9F0A' },
+	workCardTitle: { ...type.body, color: '#FFFFFF' },
+	workProgressTrack: { height: 3, overflow: 'hidden', borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)' },
+	workProgressFill: { height: 3, borderRadius: 2, backgroundColor: '#FF8A5B' },
+	workCardOpenRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+	workCardOpen: { ...type.captionMedium, color: '#FF8A5B' },
   messageMention: { fontWeight: '600', color: '#82B7FF' },
   messageMentionScout: { fontWeight: '700', color: '#FF8A5B' },
   deleteMessage: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
@@ -627,6 +729,21 @@ const styles = StyleSheet.create({
   transcriptSpeaker: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
   transcriptTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
   transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
+  recapContent: { flexGrow: 1, gap: space[4], paddingHorizontal: space[4], paddingTop: space[2] },
+  recapStatusCard: { gap: 5, padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
+  recapStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  recapStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#30D158' },
+  recapStatusDotWarning: { backgroundColor: '#FF9F0A' },
+  recapStatusText: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
+  recapCoverage: { ...type.caption, color: 'rgba(255,255,255,0.48)' },
+  recapTitle: { ...type.title2, color: '#FFFFFF' },
+  recapSection: { gap: space[2] },
+  recapSectionTitle: { ...type.label, color: '#FF8A5B', textTransform: 'uppercase', letterSpacing: 0.7 },
+  recapFact: { flexDirection: 'row', alignItems: 'flex-start', gap: space[2] },
+  recapBullet: { width: 6, height: 6, marginTop: 8, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.38)' },
+  recapFactCopy: { minWidth: 0, flex: 1, gap: 2 },
+  recapFactText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
+  recapFactMeta: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
   scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: 'rgba(255,90,25,0.10)' },
   scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -321,6 +323,500 @@ func TestLaunchAgentThreadWithOriginStampsOnlyOriginKeys(t *testing.T) {
 	}
 }
 
+func TestOfficeRealtimeAgentLaunchBindsAttributedRequesterAndMeetingDigest(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	digest, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, "Transcript analysis: the team asked for a partner landscape and evidence-backed shortlist.", map[string]string{
+		"meetingId": meetingID, "roomId": officeRoomID,
+	})
+	if err != nil {
+		t.Fatalf("append meeting digest: %v", err)
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 7
+	state.mediaSittingID = meetingID
+	state.activeSpeakerName = "Tom"
+	state.participantCounts["Tom"] = 1
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.armOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToResponse("response-room-research")
+	app.bindOfficeScoutRequesterToCall("response-room-research", "call-room-research")
+
+	previousRunner := startAgentThreadAsync
+	var launched scoutAgentThread
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched = thread }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	result, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "call-room-research", ResponseID: "response-room-research"}, map[string]any{
+		"mode": "research", "query": "Research the opportunity discussed in this meeting and use the transcript analysis to scope it.",
+	}, meetingID)
+	if err != nil {
+		t.Fatalf("launch_agent_thread: %v", err)
+	}
+	if launched.ID == "" || asString(result["ok"]) == "false" {
+		t.Fatalf("result=%v launched=%+v", result, launched)
+	}
+	metadata := launched.Artifact.Metadata
+	if metadata["requestedBy"] != "tom@shareability.com" || metadata["createdBy"] != scoutParticipantName || metadata["originKind"] != agentThreadOriginRoom || metadata["originId"] != officeRoomID || metadata["originMeetingId"] != meetingID {
+		t.Fatalf("metadata=%v, want Tom-bound office meeting work owned visibly by Scout", metadata)
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), launched)
+	if err != nil {
+		t.Fatalf("provider context: %v", err)
+	}
+	foundDigest := false
+	for _, entry := range providerContext.Memory {
+		if entry.ID == digest.ID && strings.Contains(entry.Text, "Transcript analysis") {
+			foundDigest = true
+		}
+	}
+	if !foundDigest {
+		t.Fatalf("provider memory=%v, want exact authorized current-meeting analysis", providerContext.Memory)
+	}
+	if _, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "call-room-research", ResponseID: "response-room-research"}, map[string]any{
+		"mode": "research", "query": "start a second job from the same spoken turn",
+	}, meetingID); err == nil || !strings.Contains(err.Error(), "attributed signed-in") {
+		t.Fatalf("second launch from consumed requester binding err=%v, want fail closed", err)
+	}
+}
+
+func TestOfficeRealtimeAgentLaunchRejectsUnattributedOrStaleRequester(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 3
+	state.mediaSittingID = meetingID
+	app.mu.Unlock()
+
+	previousRunner := startAgentThreadAsync
+	launches := 0
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	args := map[string]any{"mode": "research", "query": "Research the meeting request"}
+	if _, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "unattributed-call", ResponseID: "unattributed-response"}, args, meetingID); err == nil || !strings.Contains(err.Error(), "attributed signed-in") {
+		t.Fatalf("unattributed launch err=%v, want fail closed", err)
+	}
+
+	app.mu.Lock()
+	state.activeSpeakerName = "Tom"
+	state.participantCounts["Tom"] = 1
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.armOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToResponse("stale-response")
+	app.bindOfficeScoutRequesterToCall("stale-response", "stale-call")
+	app.mu.Lock()
+	state.mediaGen++
+	state.mediaSittingID = "successor-sitting"
+	app.mu.Unlock()
+	app.memory.rotateMeetingID(officeRoomID)
+	if _, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "stale-call", ResponseID: "stale-response"}, args, meetingID); err == nil || !strings.Contains(err.Error(), "attributed signed-in") {
+		t.Fatalf("stale-sitting launch err=%v, want fail closed", err)
+	}
+	if launches != 0 {
+		t.Fatalf("launches=%d, want zero for unattributed/stale requests", launches)
+	}
+}
+
+func TestOfficeRealtimeAgentLaunchKeepsInterleavedSpeakersBoundToTheirResponses(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 9
+	state.mediaSittingID = meetingID
+	state.participantCounts["Tom"] = 1
+	state.participantCounts["Tyler"] = 1
+	state.activeSpeakerName = "Tom"
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToInputItem("item-tom")
+
+	// Tyler commits a second turn before Tom's delayed transcription completes.
+	// Each provider input item must retain its own immutable requester.
+	app.mu.Lock()
+	state.activeSpeakerName = "Tyler"
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToInputItem("item-tyler")
+	if !app.armScoutVoiceResponseForInputItem("Scout, research the pricing question Tom raised.", "item-tom") {
+		t.Fatal("Tom input-item transcription was not admitted")
+	}
+	if !app.armScoutVoiceResponseForInputItem("Scout, research the distribution question Tyler raised.", "item-tyler") {
+		t.Fatal("Tyler input-item transcription was not admitted")
+	}
+	responseCreate := app.realtimeResponseCreateForInputItem("item-tom")
+	metadata := responseCreate["metadata"].(map[string]string)
+	if metadata["stride_input_item_id"] != "item-tom" {
+		t.Fatalf("response.create metadata=%v, want exact input item", metadata)
+	}
+	// response.created for A is deliberately delayed until after B's transcript.
+	// Echoed server metadata must still bind each response to its own input item.
+	app.handleRealtimeEvent([]byte(`{"type":"response.created","response":{"id":"response-tom","metadata":{"stride_input_item_id":"item-tom"}}}`))
+	app.handleRealtimeEvent([]byte(`{"type":"response.created","response":{"id":"response-tyler","metadata":{"stride_input_item_id":"item-tyler"}}}`))
+	app.bindOfficeScoutRequesterToCall("response-tom", "call-tom")
+	app.bindOfficeScoutRequesterToCall("response-tyler", "call-tyler")
+
+	previousRunner := startAgentThreadAsync
+	var launches atomic.Int32
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	tomResult, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "call-tom", ResponseID: "response-tom"}, map[string]any{
+		"mode": "research", "query": "Research the pricing question Tom raised.",
+	}, meetingID)
+	if err != nil {
+		t.Fatalf("Tom launch: %v", err)
+	}
+	tylerResult, _, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{Name: "launch_agent_thread", CallID: "call-tyler", ResponseID: "response-tyler"}, map[string]any{
+		"mode": "research", "query": "Research the distribution question Tyler raised.",
+	}, meetingID)
+	if err != nil {
+		t.Fatalf("Tyler launch: %v", err)
+	}
+	tomThread := tomResult["thread"].(scoutAgentThread)
+	tylerThread := tylerResult["thread"].(scoutAgentThread)
+	if tomThread.Artifact.Metadata["requestedBy"] != "tom@shareability.com" || tylerThread.Artifact.Metadata["requestedBy"] != "tyler@shareability.com" {
+		t.Fatalf("requesters Tom=%q Tyler=%q, want response-owned identities", tomThread.Artifact.Metadata["requestedBy"], tylerThread.Artifact.Metadata["requestedBy"])
+	}
+	if launches.Load() != 2 {
+		t.Fatalf("launches=%d, want one exact launch per response", launches.Load())
+	}
+}
+
+func TestRoomVoiceWorkExactRetryAndTerminalReplayUseOneRun(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 3
+	state.mediaSittingID = meetingID
+	app.mu.Unlock()
+
+	previousRunner := startAgentThreadAsync
+	var launches atomic.Int32
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	args := map[string]any{"mode": "research", "query": "Map the market opportunity discussed in this meeting."}
+	origin := map[string]string{
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID,
+		"originMeetingId": meetingID, "requestedBy": "aj@shareability.com",
+	}
+	first, _, err := app.launchRealtimeAgentThreadForOperation(args, origin, agentThreadGoalSpec{}, "call-first")
+	if err != nil {
+		t.Fatalf("first launch: %v", err)
+	}
+	retry, _, err := app.launchRealtimeAgentThreadForOperation(args, origin, agentThreadGoalSpec{}, "call-lost-response-retry")
+	if err != nil {
+		t.Fatalf("exact retry: %v", err)
+	}
+	firstThread := first["thread"].(scoutAgentThread)
+	retryThread := retry["thread"].(scoutAgentThread)
+	if firstThread.ID != retryThread.ID || firstThread.Artifact.ID != retryThread.Artifact.ID || launches.Load() != 1 {
+		t.Fatalf("first=%s/%s retry=%s/%s launches=%d, want one durable run", firstThread.ID, firstThread.Artifact.ID, retryThread.ID, retryThread.Artifact.ID, launches.Load())
+	}
+	if got := len(app.roomChatHistory(20)); got != 1 {
+		t.Fatalf("room cards=%d, want one idempotent running card", got)
+	}
+	completed, _, err := app.updateOSArtifactWithMetadata(firstThread.Artifact.ID, "", "# Complete\n\nEvidence-backed result.", scoutParticipantName, map[string]string{
+		roomWorkActivationMetadataKey: roomWorkActivationComplete,
+		"status":                      "complete", "threadStatus": "complete", "goalStatus": "complete", "progressPercent": "100",
+	})
+	if err != nil {
+		t.Fatalf("complete room work: %v", err)
+	}
+	if !app.projectRoomAgentThreadStatus(completed, firstThread.ID, "complete") {
+		t.Fatal("complete room work projection failed")
+	}
+	terminalReplay, _, err := app.launchRealtimeAgentThreadForOperation(args, origin, agentThreadGoalSpec{}, "call-terminal-retry")
+	if err != nil {
+		t.Fatalf("terminal replay: %v", err)
+	}
+	terminalThread := terminalReplay["thread"].(scoutAgentThread)
+	if terminalThread.ID != firstThread.ID || terminalThread.Status != "complete" || launches.Load() != 1 {
+		t.Fatalf("terminal replay=%+v launches=%d, want prior completed run without restart", terminalThread, launches.Load())
+	}
+}
+
+func TestRoomVoiceWorkBootRecoveryStartsExactPersistedRunOnce(t *testing.T) {
+	setupAuthTestEnv(t)
+	directory := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(directory, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(directory, "board.json"))
+	seed := newKanbanBoardApp()
+	meetingID := seed.memory.ensureMeetingID(officeRoomID)
+	seed.mu.Lock()
+	state := seed.roomLiveLocked(officeRoomID)
+	state.mediaGen = 4
+	state.mediaSittingID = meetingID
+	seed.mu.Unlock()
+
+	previousRunner := startAgentThreadAsync
+	var starts atomic.Int32
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { starts.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	args := map[string]any{"mode": "research", "query": "Recover this exact room research after a process loss."}
+	origin := map[string]string{
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID,
+		"originMeetingId": meetingID, "requestedBy": "aj@shareability.com",
+	}
+	result, _, err := seed.launchRealtimeAgentThreadForOperation(args, origin, agentThreadGoalSpec{}, "call-before-crash")
+	if err != nil {
+		t.Fatalf("seed launch: %v", err)
+	}
+	thread := result["thread"].(scoutAgentThread)
+	if starts.Load() != 1 {
+		t.Fatalf("seed starts=%d, want one pre-crash activation", starts.Load())
+	}
+
+	// A process restart has a fresh in-process start registry. Boot recovery may
+	// start the exact durable started run once; a duplicate reconciliation in
+	// the same process must not start it again or mint another artifact/card.
+	starts.Store(0)
+	restarted := newKanbanBoardApp()
+	restarted.reconcileRoomAgentThreadsAtBoot()
+	if starts.Load() != 1 {
+		t.Fatalf("recovery starts=%d, want exactly one", starts.Load())
+	}
+	stored, ok := restarted.osArtifactByID(thread.Artifact.ID)
+	if !ok || stored.Metadata[roomWorkActivationMetadataKey] != roomWorkActivationStarted || stored.Metadata["threadId"] != thread.ID {
+		t.Fatalf("recovered artifact=%+v ok=%t", stored, ok)
+	}
+	roomArtifacts := 0
+	for _, entry := range restarted.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		if entry.Metadata[roomWorkOperationDigestMetadataKey] != "" {
+			roomArtifacts++
+		}
+	}
+	if roomArtifacts != 1 || len(restarted.roomChatHistory(20)) != 1 {
+		t.Fatalf("room artifacts=%d cards=%d, want one durable run/card", roomArtifacts, len(restarted.roomChatHistory(20)))
+	}
+}
+
+func TestRoomVoiceWorkBootRecoveryRunsBeforeMissingProviderConfigurationGate(t *testing.T) {
+	setupAuthTestEnv(t)
+	directory := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(directory, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(directory, "board.json"))
+	t.Setenv("OPENAI_API_KEY", "")
+	seed := newKanbanBoardApp()
+	meetingID := seed.memory.ensureMeetingID(officeRoomID)
+	seed.mu.Lock()
+	state := seed.roomLiveLocked(officeRoomID)
+	state.mediaGen = 6
+	state.mediaSittingID = meetingID
+	seed.mu.Unlock()
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	result, _, err := seed.launchRealtimeAgentThreadForOperation(map[string]any{
+		"mode": "research", "query": "Recover honestly when provider configuration disappears.",
+	}, map[string]string{
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID,
+		"originMeetingId": meetingID, "requestedBy": "aj@shareability.com",
+	}, agentThreadGoalSpec{}, "call-before-config-loss")
+	if err != nil {
+		t.Fatalf("seed launch: %v", err)
+	}
+	thread := result["thread"].(scoutAgentThread)
+
+	restarted := newKanbanBoardApp()
+	startAgentThreadAsync = func(app *kanbanBoardApp, recovered scoutAgentThread) {
+		app.runAgentThread(recovered)
+	}
+	if err := restarted.JoinConferenceRoom(); err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("join err=%v, want provider configuration failure after recovery", err)
+	}
+	stored, ok := restarted.osArtifactByID(thread.Artifact.ID)
+	if !ok || stored.Metadata[roomWorkActivationMetadataKey] != roomWorkActivationNeedsAttention || stored.Metadata["status"] != "error" || !strings.Contains(stored.Metadata["error"], "OPENAI_API_KEY") {
+		t.Fatalf("recovered artifact=%+v ok=%t, want durable needs_attention", stored, ok)
+	}
+	history := restarted.roomChatHistory(20)
+	workRuns := map[string]bool{}
+	for _, event := range history {
+		workRuns[asString(event["workRunId"])] = true
+	}
+	if len(history) != 2 || len(workRuns) != 1 || asString(history[len(history)-1]["workStatus"]) != "needs_attention" {
+		t.Fatalf("room cards=%+v, want one evolving run with truthful terminal projection", history)
+	}
+}
+
+func TestRoomVoiceWorkProjectionFailureLeavesRecoverableReservation(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 5
+	state.mediaSittingID = meetingID
+	app.mu.Unlock()
+	previousRunner := startAgentThreadAsync
+	var starts atomic.Int32
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { starts.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	args := map[string]any{"mode": "research", "query": "Persist the card before starting this work."}
+	origin := map[string]string{
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID,
+		"originMeetingId": meetingID, "requestedBy": "aj@shareability.com",
+	}
+	body, err := canonicalJSON(map[string]any{
+		"mode": "research", "query": canonicalizeBoardText(asString(args["query"])), "requester": "aj@shareability.com",
+		"roomId": officeRoomID, "sittingId": meetingID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := "agent-thread-room-" + sha256Hex(append([]byte("room-voice-work/v1\x00"), body...))[:24]
+	spec := agentThreadGoalSpec{OperationID: runID, OperationBodyDigest: sha256Hex(append([]byte("room-voice-work/v1\x00"), body...)), RequestedBy: "aj@shareability.com"}
+	reserved, err := app.launchAgentThreadWithSpecBound("research", asString(args["query"]), scoutParticipantName, origin, spec, runID, nil, false)
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	directory := filepath.Dir(app.memory.path)
+	if err := os.Chmod(directory, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	activationErr := app.activateReservedRoomAgentThread(reserved, spec, scoutParticipantName)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if activationErr == nil {
+		t.Fatal("activation unexpectedly succeeded while durable card projection was unavailable")
+	}
+	stored, _ := app.osArtifactByID(reserved.Artifact.ID)
+	if stored.Metadata[roomWorkActivationMetadataKey] != roomWorkActivationReserved || starts.Load() != 0 {
+		t.Fatalf("failed activation state=%q starts=%d, want reserved and zero worker", stored.Metadata[roomWorkActivationMetadataKey], starts.Load())
+	}
+	result, _, err := app.launchRealtimeAgentThreadForOperation(args, origin, agentThreadGoalSpec{}, "call-after-storage-recovery")
+	if err != nil {
+		t.Fatalf("retry after storage recovery: %v", err)
+	}
+	recovered := result["thread"].(scoutAgentThread)
+	if recovered.ID != runID || recovered.Artifact.ID != reserved.Artifact.ID || starts.Load() != 1 {
+		t.Fatalf("recovered=%s/%s reserved=%s/%s starts=%d", recovered.ID, recovered.Artifact.ID, runID, reserved.Artifact.ID, starts.Load())
+	}
+}
+
+func TestManualArchiveCancelsInterleavedRoomLaunchAndAdvancesMediaScope(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admit AJ: %v", err)
+	}
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	oldMeeting, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("active meeting missing")
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 11
+	state.mediaSittingID = oldMeeting.ID
+	state.activeSpeakerName = "AJ"
+	state.participantCounts["AJ"] = 1
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.armOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToResponse("response-before-archive")
+	app.bindOfficeScoutRequesterToCall("response-before-archive", "call-before-archive")
+
+	previousRunner := startAgentThreadAsync
+	var starts atomic.Int32
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { starts.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	app.mu.Lock()
+	app.officeToolBeforeCommit = func() {
+		close(entered)
+		<-release
+	}
+	app.mu.Unlock()
+	t.Cleanup(func() {
+		app.mu.Lock()
+		app.officeToolBeforeCommit = nil
+		app.mu.Unlock()
+	})
+	toolDone := make(chan struct{})
+	go func() {
+		defer close(toolDone)
+		app.finishToolCallForSitting(kanbanRealtimeOutputItem{
+			Type: "function_call", Name: "launch_agent_thread",
+			ResponseID: "response-before-archive", CallID: "call-before-archive",
+		}, map[string]any{
+			"mode": "research", "query": "Research the topic from the meeting being archived.",
+		}, nil, false, oldMeeting.ID)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("room work did not reach the pre-commit seam")
+	}
+	app.mu.Lock()
+	oldEpoch := app.officeWorkEpoch
+	app.mu.Unlock()
+	type archiveOutcome struct {
+		result meetingArchiveResult
+		err    error
+	}
+	archiveDone := make(chan archiveOutcome, 1)
+	go func() {
+		result, err := app.archiveMeetingWithOfficeScoutFence("AJ")
+		archiveDone <- archiveOutcome{result: result, err: err}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		app.mu.Lock()
+		advanced := app.officeWorkEpoch != oldEpoch
+		app.mu.Unlock()
+		if advanced {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("manual archive did not advance the room-work epoch")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	select {
+	case <-toolDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled room work did not drain")
+	}
+	var archived archiveOutcome
+	select {
+	case archived = <-archiveDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manual archive did not complete")
+	}
+	if archived.err != nil {
+		t.Fatalf("archive: %v", archived.err)
+	}
+	if starts.Load() != 0 {
+		t.Fatalf("old-sitting worker starts=%d, want zero", starts.Load())
+	}
+	successor, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok || successor.ID == oldMeeting.ID || archived.result.MeetingID != oldMeeting.ID {
+		t.Fatalf("archived=%+v successor=%+v ok=%t", archived.result, successor, ok)
+	}
+	app.mu.Lock()
+	state = app.roomLiveLocked(officeRoomID)
+	mediaSittingID, mediaGeneration := state.mediaSittingID, state.mediaGen
+	bindingsRemain := len(app.officeScoutRequesterByResponse) + len(app.officeScoutRequesterByCall)
+	app.mu.Unlock()
+	if mediaSittingID != successor.ID || mediaGeneration <= 11 || bindingsRemain != 0 {
+		t.Fatalf("media sitting=%q generation=%d bindings=%d, want successor %q and retired predecessor", mediaSittingID, mediaGeneration, bindingsRemain, successor.ID)
+	}
+}
+
 // A terminal queued-worker completion derives the display title from the
 // finished body; the launch prompt survives as threadQuery.
 func TestUpdateQueuedAgentThreadDerivesTitleOnCompletion(t *testing.T) {
@@ -414,6 +910,46 @@ func TestDeliverArtifactToOriginRoomPostsCardOnce(t *testing.T) {
 	app.deliverArtifactToOrigin(stored, "agent-thread-research-1")
 	if got := len(app.roomChatHistory(10)); got != 1 {
 		t.Fatalf("room chat history=%d after retry, want still 1", got)
+	}
+}
+
+func TestRoomAgentThreadStatusProjectsOneIdempotentRevisionPerState(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	artifact, _, err := app.createOSArtifactWithMetadata("research", "partner landscape", "# Private work\n\nSecure work is queued.", scoutParticipantName, map[string]string{
+		"title": "Partner landscape", "mode": "research", "status": "running", "threadStatus": "running",
+		"progressPercent": "35", "originKind": agentThreadOriginRoom, "originId": officeRoomID, "originMeetingId": meetingID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadID := "agent-thread-research-room-projection"
+	if !app.projectRoomAgentThreadStatus(artifact, threadID, "running") {
+		t.Fatal("running projection failed")
+	}
+	if !app.projectRoomAgentThreadStatus(artifact, threadID, "running") {
+		t.Fatal("idempotent running replay should reconcile successfully")
+	}
+	updated, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
+		"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "progressPercent": "72",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.projectRoomAgentThreadStatus(updated, threadID, "error") {
+		t.Fatal("needs-attention projection failed")
+	}
+	history := app.roomChatHistory(10)
+	if len(history) != 2 {
+		t.Fatalf("history=%v, want running + needs-attention revisions exactly once", history)
+	}
+	for index, message := range history {
+		if asString(message["workRunId"]) != threadID || asString(message["artifactId"]) != artifact.ID || asString(message["agentId"]) != "scout" {
+			t.Fatalf("history[%d]=%v, want one governed Scout work identity", index, message)
+		}
+	}
+	if asString(history[0]["workStatus"]) != "running" || asString(history[1]["workStatus"]) != "needs_attention" {
+		t.Fatalf("statuses=%q,%q", asString(history[0]["workStatus"]), asString(history[1]["workStatus"]))
 	}
 }
 

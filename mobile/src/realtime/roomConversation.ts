@@ -21,6 +21,11 @@ export type RoomChatMessage = Readonly<{
   createdAt: string;
   roomId: string;
   artifactId?: string;
+  workRunId?: string;
+  workStatus?: 'queued' | 'running' | 'approval_required' | 'complete' | 'needs_attention';
+  workFamily?: string;
+  workTitle?: string;
+  workProgress?: number;
   authorEmail?: string;
   agentId?: string;
   replyTo?: string;
@@ -40,6 +45,7 @@ export type RoomTranscriptEntry = Readonly<{
   roomId: string;
   speaker: string;
   source: string;
+  captureSequence?: number;
   metadata: Readonly<Record<string, string>>;
 }>;
 
@@ -71,6 +77,7 @@ export type RoomConversationAction =
   }>
   | Readonly<{ type: 'room_chat_delete'; payload: unknown }>
   | Readonly<{ type: 'memory_transcript'; payload: unknown }>
+  | Readonly<{ type: 'meeting_transcript_snapshot'; payload: unknown }>
   | Readonly<{ type: 'mark_read' }>
   | Readonly<{ type: 'reset'; roomId?: string }>;
 
@@ -140,6 +147,21 @@ function parseMetadata(value: unknown): Record<string, string> {
   return metadata;
 }
 
+function transcriptCaptureSequence(metadata: Readonly<Record<string, string>>): number | undefined {
+  const value = Number(metadata.captureSequence);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function orderedTranscriptEntries(values: readonly RoomTranscriptEntry[]): readonly RoomTranscriptEntry[] {
+  return [...values].sort((left, right) => {
+    if (left.captureSequence && right.captureSequence && left.captureSequence !== right.captureSequence) {
+      return left.captureSequence - right.captureSequence;
+    }
+    const byTime = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    return byTime;
+  });
+}
+
 function transcriptBody(rawText: string, speaker: string): string {
   if (!speaker) return rawText;
   const prefix = `${speaker}:`;
@@ -159,6 +181,17 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
   const name = normalizedAuthor(payload.name) || 'Guest';
   const roomId = normalizedRoomId(payload.roomId);
   const artifactId = wireIdentifier(payload.artifactId);
+  const workRunId = wireIdentifier(payload.workRunId);
+  const rawWorkStatus = wireIdentifier(payload.workStatus).toLowerCase();
+  const workStatus = ['queued', 'running', 'approval_required', 'complete', 'needs_attention'].includes(rawWorkStatus)
+    ? rawWorkStatus as RoomChatMessage['workStatus']
+    : undefined;
+  const workFamily = normalizedText(payload.workFamily, MAX_AUTHOR_CODE_POINTS);
+  const workTitle = normalizedText(payload.workTitle, MAX_CHAT_TEXT_CODE_POINTS);
+  const rawWorkProgress = Number(payload.workProgress);
+  const workProgress = Number.isFinite(rawWorkProgress) && rawWorkProgress >= 0 && rawWorkProgress <= 100
+    ? Math.round(rawWorkProgress)
+    : undefined;
   const authorEmail = normalizedEmail(payload.authorEmail);
   const agentId = wireIdentifier(payload.agentId).toLowerCase();
   const replyTo = wireIdentifier(payload.replyTo);
@@ -176,6 +209,10 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
     createdAt,
     roomId,
     ...(artifactId ? { artifactId } : {}),
+    ...(workRunId && workStatus ? { workRunId, workStatus } : {}),
+    ...(workRunId && workFamily ? { workFamily } : {}),
+    ...(workRunId && workTitle ? { workTitle } : {}),
+    ...(workRunId && workProgress !== undefined ? { workProgress } : {}),
     ...(authorEmail ? { authorEmail } : {}),
     ...(agentId ? { agentId } : {}),
     ...(replyTo ? { replyTo } : {}),
@@ -197,7 +234,11 @@ export function parseRoomChatHistory(payload: unknown): RoomChatMessage[] | null
     seen.add(message.id);
     messages.push(message);
   }
-  return messages;
+  const latestWorkIndex = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (message.workRunId) latestWorkIndex.set(message.workRunId, index);
+  });
+  return messages.filter((message, index) => !message.workRunId || latestWorkIndex.get(message.workRunId) === index);
 }
 
 export function parseRoomChatDelete(payload: unknown): RoomChatDelete | null {
@@ -217,6 +258,7 @@ export function parseMemoryTranscriptEntry(payload: unknown): RoomTranscriptEntr
   const metadata = parseMetadata(payload.metadata);
   const speaker = normalizedAuthor(metadata.speaker);
   const text = transcriptBody(rawText, speaker);
+  const captureSequence = transcriptCaptureSequence(metadata);
   if (!text) return null;
   return {
     id,
@@ -226,8 +268,35 @@ export function parseMemoryTranscriptEntry(payload: unknown): RoomTranscriptEntr
     roomId: normalizedRoomId(metadata.roomId),
     speaker,
     source: wireIdentifier(metadata.source),
+    ...(captureSequence ? { captureSequence } : {}),
     metadata,
   };
+}
+
+export function parseMeetingTranscriptSnapshot(payload: unknown): Readonly<{
+  roomId: string;
+  meetingId: string;
+  entries: readonly RoomTranscriptEntry[];
+}> | null {
+  if (!isRecord(payload) || payload.contract !== 'meeting-transcript-v1' || !Array.isArray(payload.entries)
+    || payload.entries.length > ROOM_TRANSCRIPT_HISTORY_LIMIT) return null;
+  const roomId = wireIdentifier(payload.roomId);
+  const meetingId = wireIdentifier(payload.meetingId);
+  if (!roomId || !meetingId) return null;
+  const entries: RoomTranscriptEntry[] = [];
+  const seen = new Set<string>();
+  const seenSequences = new Set<number>();
+  let priorSequence = 0;
+  for (const raw of payload.entries) {
+    const entry = parseMemoryTranscriptEntry(raw);
+    if (!entry || !entry.captureSequence || entry.roomId !== normalizedRoomId(roomId) || entry.metadata.meetingId !== meetingId
+      || seen.has(entry.id) || seenSequences.has(entry.captureSequence) || entry.captureSequence <= priorSequence) return null;
+    seen.add(entry.id);
+    seenSequences.add(entry.captureSequence);
+    priorSequence = entry.captureSequence;
+    entries.push(entry);
+  }
+  return { roomId: normalizedRoomId(roomId), meetingId, entries: orderedTranscriptEntries(entries) };
 }
 
 export function roomChatMessageIsOwn(
@@ -307,13 +376,19 @@ export function roomConversationReducer(
       const message = parseRoomChatMessage(action.payload);
       if (!message || !sameRoom(message.roomId, state.roomId)) return state;
       if (state.messages.some((candidate) => candidate.id === message.id)) return state;
+      const priorWorkIndex = message.workRunId
+        ? state.messages.findIndex((candidate) => candidate.workRunId === message.workRunId)
+        : -1;
+      const nextMessages = priorWorkIndex >= 0
+        ? state.messages.map((candidate, index) => index === priorWorkIndex ? message : candidate)
+        : [...state.messages, message];
 
       const unreadCount = !action.chatOpen && !roomChatMessageIsOwn(message, action.viewer)
         ? Math.min(state.unreadCount + 1, ROOM_CONVERSATION_UNREAD_LIMIT)
         : state.unreadCount;
       return {
         ...state,
-        messages: tail([...state.messages, message], ROOM_CHAT_HISTORY_LIMIT),
+        messages: tail(nextMessages, ROOM_CHAT_HISTORY_LIMIT),
         unreadCount,
       };
     }
@@ -333,15 +408,25 @@ export function roomConversationReducer(
     }
     case 'memory_transcript': {
       const entry = parseMemoryTranscriptEntry(action.payload);
-      if (!entry || !sameRoom(entry.roomId, state.roomId)) return state;
+      if (!entry || !entry.captureSequence || !sameRoom(entry.roomId, state.roomId)) return state;
       if (state.transcriptEntries.some((candidate) => candidate.id === entry.id)) return state;
       return {
         ...state,
         transcriptEntries: tail(
-          [...state.transcriptEntries, entry],
+          orderedTranscriptEntries([...state.transcriptEntries, entry]),
           ROOM_TRANSCRIPT_HISTORY_LIMIT,
         ),
       };
+    }
+    case 'meeting_transcript_snapshot': {
+      const snapshot = parseMeetingTranscriptSnapshot(action.payload);
+      if (!snapshot || !sameRoom(snapshot.roomId, state.roomId)) return state;
+      const merged = new Map<string, RoomTranscriptEntry>();
+      state.transcriptEntries
+        .filter((entry) => entry.metadata.meetingId === snapshot.meetingId)
+        .forEach((entry) => merged.set(entry.id, entry));
+      snapshot.entries.forEach((entry) => merged.set(entry.id, entry));
+      return { ...state, transcriptEntries: tail(orderedTranscriptEntries([...merged.values()]), ROOM_TRANSCRIPT_HISTORY_LIMIT) };
     }
     case 'mark_read':
       return state.unreadCount === 0 ? state : { ...state, unreadCount: 0 };

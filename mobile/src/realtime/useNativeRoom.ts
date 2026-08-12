@@ -14,6 +14,7 @@ import BonfireCameraFraming, {
 } from '../../modules/bonfire-camera-framing';
 import BonfireMediaSession, {
   nextMediaSessionGeneration,
+  type MeetingAudioRouteSnapshot,
 } from '../../modules/bonfire-media-session';
 import { api } from '../api/client';
 import type { RoomAgentParticipant } from '../api/types';
@@ -105,6 +106,10 @@ import {
   type RoomConversationViewer,
 } from './roomConversation';
 import {
+  meetingIntelligenceReducer,
+  type MeetingIntelligenceState,
+} from './meetingIntelligence';
+import {
   adaptiveCameraFramingAdmission,
   cameraFramingStateFromCapabilities,
   cameraFramingTelemetryFromCapabilities,
@@ -163,6 +168,7 @@ export type NativeRoomState = {
   cameraFraming: CameraFramingState;
   activeSpeaker?: string;
   quality: NativeRoomQuality | null;
+  audioRoute: MeetingAudioRouteSnapshot | null;
   error: string | null;
 };
 
@@ -318,6 +324,7 @@ const initialState: NativeRoomState = {
   videoSuspended: false,
   cameraFraming: emptyCameraFramingState(),
   quality: null,
+  audioRoute: null,
   error: null,
 };
 
@@ -333,6 +340,10 @@ export function useNativeRoom(
     roomConversationReducer,
     roomId,
     createRoomConversationState,
+  );
+  const [intelligence, dispatchIntelligence] = useReducer(
+    meetingIntelligenceReducer,
+    null as MeetingIntelligenceState,
   );
   const socketRef = useRef<WebSocket | null>(null);
   const socketContextRef = useRef<NativeRoomSocketContext | null>(null);
@@ -462,9 +473,17 @@ export function useNativeRoom(
     } catch {
       return false;
     }
-    return (Platform.OS !== 'ios' || snapshot !== null)
+    const active = (Platform.OS !== 'ios' || snapshot !== null)
       && activeRoomTerminalRef.current === session
       && !session.authority.isTerminal();
+    if (active && snapshot) {
+      setState((current) => (
+        activeRoomTerminalRef.current === session && !session.authority.isTerminal()
+          ? { ...current, audioRoute: snapshot }
+          : current
+      ));
+    }
+    return active;
   }, []);
 
   const reassertMeetingMedia = useCallback((): void => {
@@ -1605,6 +1624,7 @@ export function useNativeRoom(
           activeRoomTerminalRef.current = null;
           if (session.presentationKind === 'unmount') return;
           dispatchConversation({ type: 'reset', roomId });
+          dispatchIntelligence({ type: 'reset' });
           setState(session.presentationKind === 'failure'
             ? { ...initialState, error: session.terminalMessage ?? 'The room disconnected.' }
             : initialState);
@@ -1614,6 +1634,7 @@ export function useNativeRoom(
           activeRoomTerminalRef.current = null;
           if (session.presentationKind === 'unmount') return;
           dispatchConversation({ type: 'reset', roomId });
+          dispatchIntelligence({ type: 'reset' });
           setState({
             ...initialState,
             error: session.terminalMessage ?? 'The room did not close cleanly. Please try again.',
@@ -2427,8 +2448,24 @@ export function useNativeRoom(
         break;
       }
       case 'memory_transcript': {
+        const payload = parseNestedData<unknown>(nested.data, null);
         dispatchConversation({
           type: 'memory_transcript',
+          payload,
+        });
+        dispatchIntelligence({ type: 'transcript_progress', payload });
+        break;
+      }
+      case 'meeting_transcript_snapshot': {
+        dispatchConversation({
+          type: 'meeting_transcript_snapshot',
+          payload: parseNestedData<unknown>(nested.data, null),
+        });
+        break;
+      }
+      case 'meeting_intelligence_snapshot': {
+        dispatchIntelligence({
+          type: 'snapshot',
           payload: parseNestedData<unknown>(nested.data, null),
         });
         break;
@@ -2792,6 +2829,7 @@ export function useNativeRoom(
     );
     roomChatOpenRef.current = false;
     dispatchConversation({ type: 'reset', roomId });
+    dispatchIntelligence({ type: 'reset' });
     try {
       const clientConfigResult = await settleGenerationOperation(
         api.clientConfig(sessionToken),
@@ -3499,6 +3537,7 @@ export function useNativeRoom(
   return {
     state,
     conversation,
+    intelligence,
     join,
     leave,
     setMuted,

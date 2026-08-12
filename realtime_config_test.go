@@ -679,15 +679,30 @@ func TestRealtimeCreateArtifactScaffoldsWorkflow(t *testing.T) {
 }
 
 func TestRealtimeLaunchAgentThreadCreatesRunningArtifact(t *testing.T) {
+	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 1
+	state.mediaSittingID = meetingID
+	state.activeSpeakerName = "AJ"
+	state.participantCounts["AJ"] = 1
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.armOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToResponse("response-design")
+	app.bindOfficeScoutRequesterToCall("response-design", "call-design")
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-	result, changed, err := app.applyToolCallArgs("launch_agent_thread", map[string]any{
+	result, changed, err := app.applyOfficeRealtimeToolCallArgs(kanbanRealtimeOutputItem{
+		Type: "function_call", Name: "launch_agent_thread", ResponseID: "response-design", CallID: "call-design",
+	}, map[string]any{
 		"mode":  "design",
 		"query": "turn Realtime 2 into the UI for Scout threads and artifacts",
-	})
+	}, meetingID)
 	if err != nil {
 		t.Fatalf("launch_agent_thread: %v", err)
 	}
@@ -720,6 +735,41 @@ func TestRealtimeLaunchAgentThreadCreatesRunningArtifact(t *testing.T) {
 	}
 	if actions[0].Tool != "chat" || actions[0].ArtifactID != artifact.ID {
 		t.Fatalf("actions=%#v, want launch_agent_thread to route visible work to Chat with artifact id", actions)
+	}
+}
+
+func TestRealtimeLaunchAgentThreadProviderResultIsSmallAndHuman(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	artifact := meetingMemoryEntry{
+		ID:   "os-artifact-research-1",
+		Text: strings.Repeat("internal scaffold and provider context ", 200),
+		Metadata: map[string]string{
+			"title": "Hey! What's Up? market research",
+		},
+	}
+	thread := scoutAgentThread{ID: "agent-thread-research-1", Status: "running", Query: "research the meeting", Artifact: artifact}
+	minimized := realtimeProviderToolResult("launch_agent_thread", map[string]any{
+		"ok": true, "thread": thread, "artifact": artifact, "actions": []string{"internal action"},
+	})
+	raw, err := json.Marshal(minimized)
+	if err != nil {
+		t.Fatalf("marshal minimized result: %v", err)
+	}
+	if len(raw) > 400 || bytes.Contains(raw, []byte("internal scaffold")) || bytes.Contains(raw, []byte("actions")) {
+		t.Fatalf("provider tool result leaked internal work payload (%d bytes): %s", len(raw), raw)
+	}
+	if minimized["work_run_id"] != thread.ID || minimized["artifact_id"] != artifact.ID || minimized["status"] != "running" {
+		t.Fatalf("minimized result=%v, want truthful visible work identity", minimized)
+	}
+	instructions := scoutSpokenResponseInstructions()
+	if !strings.Contains(instructions, "only one short sentence") || !strings.Contains(instructions, "room work card") {
+		t.Fatalf("spoken continuation instructions are not bounded: %q", instructions)
+	}
+	roomInstructions := app.sessionInstructions()
+	for _, want := range []string{"For launch_agent_thread, call the tool with no spoken preamble", "one sentence of at most twelve words", "Never narrate reasoning"} {
+		if !strings.Contains(roomInstructions, want) {
+			t.Fatalf("room voice instructions missing latency fence %q: %s", want, roomInstructions)
+		}
 	}
 }
 
@@ -1222,6 +1272,44 @@ func TestRealtimeResponseDoneRecordsVoiceRoomUsage(t *testing.T) {
 	}
 }
 
+func TestRealtimeResponseAndToolLatencyAreRecordedWithoutTranscriptBody(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.markRealtimeResponseStarted()
+	app.markRealtimeFirstAudio()
+	app.finishRealtimeResponseTelemetry("completed", true)
+	app.recordRealtimeToolLatency("launch_agent_thread", time.Now().Add(-25*time.Millisecond))
+
+	allRows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	rows := make([]map[string]any, 0, 2)
+	for _, row := range allRows {
+		if row["kind"] == evalKindRealtimeLatency {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("latency rows=%d, want response+tool: %v", len(rows), allRows)
+	}
+	responseFields := rows[0]["fields"].(map[string]any)
+	if rows[0]["kind"] != evalKindRealtimeLatency || responseFields["phase"] != "response_done" || responseFields["status"] != "completed" || responseFields["tool_response"] != true {
+		t.Fatalf("response latency row=%v", rows[0])
+	}
+	if _, ok := responseFields["first_audio_ms"].(float64); !ok {
+		t.Fatalf("first-audio latency missing: %v", responseFields)
+	}
+	toolFields := rows[1]["fields"].(map[string]any)
+	if toolFields["phase"] != "tool_done" || toolFields["tool"] != "launch_agent_thread" || toolFields["duration_ms"].(float64) < 0 {
+		t.Fatalf("tool latency row=%v", rows[1])
+	}
+	for _, row := range rows {
+		raw, _ := json.Marshal(row)
+		if bytes.Contains(bytes.ToLower(raw), []byte("transcript")) || bytes.Contains(bytes.ToLower(raw), []byte("utterance")) {
+			t.Fatalf("latency telemetry leaked conversation body: %s", raw)
+		}
+	}
+}
+
 func TestVoicePeerTranscriptionSegmentsFeedLedgerAndFunnel(t *testing.T) {
 	dir := realtimeLedgerSetup(t)
 	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
@@ -1352,16 +1440,32 @@ func TestPrivateVoiceProposalMintStampsProvenance(t *testing.T) {
 }
 
 func TestRoomVoiceDirectLaunchRecordsLaunchProvenance(t *testing.T) {
+	setupAuthTestEnv(t)
 	dir := realtimeLedgerSetup(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
+	// A room-voice launch is authorized by the server-observed human speaker,
+	// never provider tool arguments. Establish the exact current sitting and
+	// AJ's authenticated presence before the tool callback arrives.
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.mediaGen = 1
+	state.mediaSittingID = meetingID
+	state.activeSpeakerName = "AJ"
+	state.participantCounts["AJ"] = 1
+	app.mu.Unlock()
+	app.captureOfficeScoutRequesterCandidate()
+	app.armOfficeScoutRequesterCandidate()
+	app.bindOfficeScoutRequesterToResponse("response-2")
+	app.bindOfficeScoutRequesterToCall("response-2", "call-2")
+
 	app.finishToolCall(kanbanRealtimeOutputItem{
-		Type:   "function_call",
-		Name:   "launch_agent_thread",
-		CallID: "call-2",
+		Type: "function_call", Name: "launch_agent_thread",
+		ResponseID: "response-2", CallID: "call-2",
 	}, map[string]any{
 		"mode":  "research",
 		"query": "map the exit landscape",

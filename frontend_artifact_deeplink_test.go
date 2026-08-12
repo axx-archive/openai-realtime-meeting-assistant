@@ -58,20 +58,29 @@ func TestIndexOpenAgentArtifactDeepLink(t *testing.T) {
 		t.Error("openAgentArtifact must fetch an out-of-window id by id before selecting")
 	}
 
-	// the by-id miss fetch itself: single-flight GET /artifacts?id=, insert via
-	// addArtifactEntry, THEN select — mirroring fetchGoalArtifactById.
+	// The shared exact-id helper owns the single-flight GET + insertion. The
+	// deep-link wrapper owns only selection arbitration, so stage cards and
+	// Intelligence deep links cannot drift into two different read paths.
 	fetchBody := functionBody(html, "function fetchArtifactByIdAndSelect(id)")
 	if fetchBody == "" {
 		t.Fatal("index.html missing fetchArtifactByIdAndSelect")
 	}
 	for _, want := range []string{
-		"/artifacts?id=",
 		"deepLinkArtifactFetchesInFlight",
-		"addArtifactEntry(artifact, { select: false })",
+		"fetchArtifactEntryById(want)",
 		"selectArtifact(artifact.id)",
 	} {
 		if !strings.Contains(fetchBody, want) {
 			t.Errorf("fetchArtifactByIdAndSelect body missing %q", want)
+		}
+	}
+	exactFetch := functionBody(html, "async function fetchArtifactEntryById(id)")
+	for _, want := range []string{
+		"/artifacts?id=", "artifactEntryFetchesInFlight",
+		"addArtifactEntry(artifact, { select: false })",
+	} {
+		if !strings.Contains(exactFetch, want) {
+			t.Errorf("fetchArtifactEntryById body missing %q", want)
 		}
 	}
 

@@ -338,6 +338,9 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 	if boolEnv(agent.backfillEnv) {
 		return "", "", nil
 	}
+	if baseline, admitted := app.meetingDigestCurrentMeetingBootstrapBaseline(agent, roomID); admitted {
+		return baseline, "", nil
+	}
 	baselineID, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID)
 	if ambiguous {
 		return "", ambientContinuityAmbiguous, nil
@@ -1240,7 +1243,7 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 	}
 	roomID = normalizeRoomID(roomID)
 
-	servicePrincipal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
+	servicePrincipal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
 	baselineID := app.ambientAgentWindowBaseline(agent, roomID)
 	app.mu.Lock()
 	failure := app.agentFailures[ambientAgentScopeKey(agent, roomID)]
@@ -1427,7 +1430,7 @@ func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig, roomID
 		limit = 1
 	}
 	roomID = normalizeRoomID(roomID)
-	principal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
+	principal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
 	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), principal)
 	if len(inputs) == 0 {
 		return "", 0, 0, false

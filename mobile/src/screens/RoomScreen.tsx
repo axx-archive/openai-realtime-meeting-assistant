@@ -38,6 +38,8 @@ import { AgentSpeakingWaveform } from '../components/AgentSpeakingWaveform';
 import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
+import { meetingIntelligenceStatusLabel } from '../realtime/meetingIntelligence';
+import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import {
   cameraFramingRenderRevision,
   centerStageControlStatus,
@@ -628,6 +630,7 @@ export function RoomScreen({ route, navigation }: Props) {
   const [pinnedParticipantKey, setPinnedParticipantKey] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<RoomConversationMode>('chat');
   const [conversationVisible, setConversationVisible] = useState(false);
+  const [roomWorkPreview, setRoomWorkPreview] = useState<{ title: string; text: string } | null>(null);
   const [participantsVisible, setParticipantsVisible] = useState(false);
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
   const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
@@ -817,10 +820,11 @@ export function RoomScreen({ route, navigation }: Props) {
     : videoSuspended
       ? 'Restoring video'
     : nativeRoom.state.quality?.label ?? 'Live';
+  const callActivityLabel = nativeRoom.state.screenShareStarting
+    ? 'Starting share'
+    : nativeRoom.state.screenSharing ? 'Sharing screen' : qualityLabel;
   const callStatusLabel = nativeRoom.state.error
-    ?? (nativeRoom.state.screenShareStarting
-      ? 'Starting share'
-      : nativeRoom.state.screenSharing ? 'Sharing screen' : qualityLabel);
+    ?? (nativeRoom.state.recording ? `${meetingIntelligenceStatusLabel(nativeRoom.intelligence)} · ${callActivityLabel}` : callActivityLabel);
   const localStreamURL = useMemo(() => nativeRoom.state.localStream?.toURL(), [nativeRoom.state.localStream]);
   const localVideoTrackId = nativeRoom.state.localStream?.getVideoTracks()[0]?.id;
   const screenShareStreamURL = useMemo(
@@ -946,6 +950,24 @@ export function RoomScreen({ route, navigation }: Props) {
     setConversationVisible(false);
     nativeRoom.setRoomChatOpen(false);
   }, [nativeRoom.setRoomChatOpen]);
+  const openRoomWorkArtifact = useCallback(async (artifactId: string, fallbackTitle: string) => {
+    if (!sessionToken || !artifactId) return;
+    setError(null);
+    try {
+      const response = await api.artifact(sessionToken, artifactId);
+      const artifact = response.artifacts[0];
+      const text = String(artifact?.text ?? '').trim();
+      if (!text) throw new Error('This work has not published any activity yet.');
+      setConversationVisible(false);
+      nativeRoom.setRoomChatOpen(false);
+      setRoomWorkPreview({
+        title: String(artifact?.metadata?.title ?? fallbackTitle).trim() || 'Scout work',
+        text,
+      });
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open this work.');
+    }
+  }, [nativeRoom.setRoomChatOpen, sessionToken]);
 
   function completeJoin(withVideo: boolean, withAudio: boolean, transferExisting: boolean) {
     if (!room?.passcodeRequired) {
@@ -1068,6 +1090,14 @@ export function RoomScreen({ route, navigation }: Props) {
     );
   }
 
+  const toggleScreenShare = useCallback(() => {
+    if (nativeRoom.state.screenSharing || nativeRoom.state.screenShareStarting) {
+      nativeRoom.stopScreenShare(nativeRoom.state.screenShareStarting ? 'cancelled' : 'user');
+      return;
+    }
+    requestScreenShare();
+  }, [nativeRoom.state.screenShareStarting, nativeRoom.state.screenSharing, nativeRoom.stopScreenShare, nativeRoom.startScreenShare]);
+
   function setAutoFrameFromCallMenu() {
     const framing = cameraFramingRef.current;
     if (!framing.centerStageSupported || framing.checking || framing.applying) return;
@@ -1177,19 +1207,14 @@ export function RoomScreen({ route, navigation }: Props) {
       : nativeRoom.state.screenShareStarting
         ? 'Cancel screen share'
         : 'Share your screen';
+    const audioOutput = nativeRoom.state.audioRoute?.outputs[0]?.name?.trim() || 'Speaker';
     const actions: InCallActionDescriptor[] = [
       { id: 'cancel', label: 'Cancel', cancel: true },
       {
         id: 'screen-share',
         label: shareAction,
         destructive: nativeRoom.state.screenSharing,
-        onSelect: () => {
-          if (nativeRoom.state.screenSharing || nativeRoom.state.screenShareStarting) {
-            nativeRoom.stopScreenShare(nativeRoom.state.screenShareStarting ? 'cancelled' : 'user');
-          } else {
-            requestScreenShare();
-          }
-        },
+        onSelect: toggleScreenShare,
       },
       {
         id: 'recording',
@@ -1206,6 +1231,17 @@ export function RoomScreen({ route, navigation }: Props) {
       });
     }
     actions.push(
+      { id: 'chat', label: nativeRoom.conversation.unreadCount ? `Open chat · ${nativeRoom.conversation.unreadCount} unread` : 'Open chat', onSelect: () => openConversation('chat') },
+      { id: 'recap', label: 'Meeting recap', onSelect: () => openConversation('recap') },
+      { id: 'transcript', label: 'Live transcript', onSelect: () => openConversation('transcript') },
+      {
+        id: 'audio-output',
+        label: `Audio output · ${audioOutput}`,
+        onSelect: () => Alert.alert(
+          'Audio output',
+          `The call is using ${audioOutput}. Choose another connected output from iPhone Control Center.`,
+        ),
+      },
       { id: 'people', label: 'People in this room', onSelect: () => setParticipantsVisible(true) },
       { id: 'specialists', label: 'Agent team', onSelect: openSpecialists },
       { id: 'invite', label: 'Invite someone', onSelect: inviteToRoom },
@@ -1409,16 +1445,21 @@ export function RoomScreen({ route, navigation }: Props) {
               tone={nativeRoom.state.screenSharing || nativeRoom.state.screenShareStarting || nativeRoom.state.cameraOff || nativeRoom.state.cameraStarting ? 'off' : 'default'}
             />
             <CallControl
-              accessibilityLabel={nativeRoom.conversation.unreadCount
-                ? `Room chat, ${nativeRoom.conversation.unreadCount} unread`
-                : 'Open room chat'}
-              badge={nativeRoom.conversation.unreadCount}
-              icon="bubble.left.and.bubble.right.fill"
-              label="Chat"
-              onPress={() => openConversation('chat')}
+              accessibilityLabel={nativeRoom.state.screenSharing
+                ? 'Stop sharing screen'
+                : nativeRoom.state.screenShareStarting
+                  ? 'Cancel starting screen share'
+                  : 'Share your screen'}
+              icon="rectangle.on.rectangle"
+              label={nativeRoom.state.screenSharing ? 'Stop share' : nativeRoom.state.screenShareStarting ? 'Cancel' : 'Share'}
+              onPress={toggleScreenShare}
+              tone={nativeRoom.state.screenSharing || nativeRoom.state.screenShareStarting ? 'off' : 'default'}
             />
             <CallControl
-              accessibilityLabel="More call options"
+              accessibilityLabel={nativeRoom.conversation.unreadCount
+                ? `More call options, room chat has ${nativeRoom.conversation.unreadCount} unread`
+                : 'More call options'}
+              badge={nativeRoom.conversation.unreadCount}
               icon="ellipsis"
               label="More"
               onPress={showInCallActions}
@@ -1433,16 +1474,25 @@ export function RoomScreen({ route, navigation }: Props) {
           </View>
 
           <RoomConversationSheet
+            intelligence={nativeRoom.intelligence}
             messages={[...nativeRoom.conversation.messages]}
             mode={conversationMode}
             onClose={closeConversation}
             onDeleteMessage={nativeRoom.deleteRoomChat}
             onModeChange={changeConversationMode}
+            onOpenArtifact={openRoomWorkArtifact}
             onSendMessage={nativeRoom.sendRoomChat}
             roomName={room?.name ?? route.params.title}
             transcriptEntries={[...spokenTranscriptEntries]}
             viewer={{ email: user?.email, name: user?.name }}
             visible={conversationVisible}
+          />
+          <LongMessageSheet
+            authorName={roomWorkPreview?.title ?? 'Scout work'}
+            onClose={() => setRoomWorkPreview(null)}
+            scout
+            text={roomWorkPreview?.text ?? ''}
+            visible={Boolean(roomWorkPreview)}
           />
           <RoomParticipantsSheet
             onClose={() => setParticipantsVisible(false)}

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_ordinary_message_thread_layout_and_theme_checkpoint",
+  "observedAt": "2026-08-11T20:10:00-07:00",
+  "status": "bounded_desktop_ordinary_message_thread_and_contrast_independent_critic_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "10269c6399000c18c5ae8c3cfdb89c09fa2b9228",
+    "canonicalPlanSha256BeforeCheckpoint": "7a83e29b02e3f765d0b9af308d545a21c04deec3ea8807f8c1e175a9ee95eac4",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "messageType": "ordinary_prose_remains_the_same_user_message_skin_and_identity_regardless_of_length",
+    "overflow": "rendered_height_over_eight_lines_exposes_show_more_and_show_less_with_exact_aria_state_and_no_character_heuristic",
+    "affordance": "show_more_is_visibly_bordered_directional_at_least_forty_css_pixels_and_computed_contrast_is_at_least_4_5_to_1_after_theme_settle",
+    "thread": "full_parent_stays_in_its_own_bounded_region_while_eighteen_replies_scroll_independently_and_one_reply_composer_remains_reachable",
+    "responsive": "1024_thread_primary_1280_conversation_plus_thread_1728_list_plus_conversation_plus_thread",
+    "minimalism": "redundant_private_brain_footer_and_competing_main_composer_are_absent_while_thread_reply_is_open",
+    "themes": ["dark", "light"],
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "index.html": "c6bc2184802fc72941502110fa654732b427bb43fa29ba834c5ab6c6accec283",
+    "frontend_feed_design_test.go": "b40b75c1fda0043327797cc32fc8a986c04627337d0786e53f0488f314f79752",
+    "frontend_pd1_top_level_ia_test.go": "a08df8cd686a708944c24342dc28d42b8d9d29759a31934edcd04cceda1cb420",
+    "frontend_desktop_chat_quality_test.go": "4d2d8a1a2ccbe71b721809fad5e948b70341b34ea9c88b8c65222b7c7e169526",
+    "frontend_pip_privacy_test.go": "983594e9d3e4f9f1088f9483ccc1b67be907e584bc3ab83fc105a980646f9848"
+  },
+  "renderedEvidence": [
+    {"surface":"thread_compact_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-compact-dark.png","sha256":"7b2a9a5432f307f37afa965915bbf51e5fc2af9ae10c6065e20bd63bbb1e730b","width":1024,"height":768},
+    {"surface":"thread_compact_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-compact-light.png","sha256":"24574b51888681d78dc66e9301f237d4fff66668c08fc39175272af2ef03ee80","width":1024,"height":768},
+    {"surface":"thread_standard_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-standard-dark.png","sha256":"bf80e7498b7101bed9bc78d370b7886b04c36bfe3ea78aec0237f5609221f5dd","width":1280,"height":800},
+    {"surface":"thread_standard_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-standard-light.png","sha256":"5cbefd9bf35fa60896c9d6747cd7413d8506fe8a0f9e28d457d959a74719d29b","width":1280,"height":800},
+    {"surface":"thread_wide_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-wide-dark.png","sha256":"3318ee91dade313de9e31536e6d5624f87bea25925132286fa81b3e0185c087c","width":1728,"height":1000},
+    {"surface":"thread_wide_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-long-message-thread-wide-light.png","sha256":"5c6f418e4cd57bf6dab7a4384d765762ba418ee3e220997a1904ef4c9ec2b489","width":1728,"height":1000},
+    {"surface":"ordinary_compact_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-compact-dark.png","sha256":"a5f2e321770a3cb276e065224889b57ea6dec9fad77ac9206a6d6f4253da7062","width":1024,"height":768},
+    {"surface":"ordinary_compact_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-compact-light.png","sha256":"62a546484d40490a7d84833336ce0c29a54e6fd18cc0d36d124a63c272be24ea","width":1024,"height":768},
+    {"surface":"ordinary_standard_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-standard-dark.png","sha256":"9347d9b2ba68271e56fab585e8fb45c432297736f072f18e7226b0f9372410f8","width":1280,"height":800},
+    {"surface":"ordinary_standard_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-standard-light.png","sha256":"7a9634b8ff0fdbc496d704b2d3aeb4a4bdcac482831b78807b08675970c6490f","width":1280,"height":800},
+    {"surface":"ordinary_wide_dark","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-wide-dark.png","sha256":"63dc24be38ad38f4df1f67faede13c2dfd178f8aa42fe1d044aaee826c64258f","width":1728,"height":1000},
+    {"surface":"ordinary_wide_light","path":"docs/evidence/e10/rendered-pd1-feed-thread-20260811/desktop-ordinary-messages-wide-light.png","sha256":"3ecebdcde2791b87e9aef5ba207ba3c92986ef68117c038f4674fd4c7ab7cf65","width":1728,"height":1000}
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS_7.419s_with_twelve_render_capture",
+    "focusedGoRace": "PASS_5.909s",
+    "fullGo": "PASS_root_525.869s_and_all_cmd_internal_packages",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_514_of_514",
+    "mobileTypecheck": "PASS",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "firstVerdict": "REVISE_theme_transition_capture_made_show_more_look_disabled",
+      "repair": "settle_theme_transition_for_180ms_and_assert_computed_contrast_at_every_viewport_and_theme",
+      "finalVerdict": "PASS",
+      "focusedNormal": "PASS_4.309s",
+      "focusedRace": "PASS_5.769s",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_desktop_ordinary_message_thread_layout_minimalism_and_theme_contrast_checkpoint"
+    }
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "collection": 0,
+    "publication": 0,
+    "cohortActivation": 0,
+    "releaseAuthorizedButNotYetExecuted": true
+  },
+  "openGates": [
+    "remaining_cross_platform_pd1_surfaces",
+    "functional_voiceover_and_full_dynamic_type_spectrum",
+    "actual_ipad_split_view_pointer_and_full_keyboard_access",
+    "home_meeting_controls_and_complete_work_artifact_drive_revision_journeys",
+    "physical_iphone_and_ipad_acceptance",
+    "provider_backed_deliverable_acceptance",
+    "whole_e10_ledger"
+  ],
+  "exclusions": {
+    "nativeAcceptedByThisReceipt": false,
+    "physicalDeviceAccepted": false,
+    "providerCalled": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

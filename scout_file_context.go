@@ -448,6 +448,45 @@ func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester stri
 	return appendUniqueFileContextEntries(pinned, base)
 }
 
+// currentMeetingDigestContext adds the latest authorized cumulative recap to
+// a provider-admission snapshot. Digest records are intentionally omitted from
+// the generic client memory rail, but an eligible Scout/coworker should still
+// know the current meeting state when answering or starting work. The store is
+// principal-scoped first, so private or other-room material cannot widen the
+// job. A room-launched job is pinned to its exact sitting; other eligible jobs
+// receive at most the three newest active meetings they are authorized to read.
+func (app *kanbanBoardApp) currentMeetingDigestContext(ctx context.Context, principal RecallPrincipal, metadata map[string]string) []meetingMemoryEntry {
+	if app == nil || app.meetings == nil || app.memory == nil {
+		return nil
+	}
+	scoped := app.scopedRecallApp(ctx, principal)
+	if scoped == nil || scoped.memory == nil {
+		return nil
+	}
+	digests := scoped.memory.latestDigestPerMeeting()
+	if meetingID := strings.TrimSpace(metadata["originMeetingId"]); meetingID != "" {
+		if digest, ok := digests[meetingID]; ok {
+			return []meetingMemoryEntry{digest}
+		}
+		return nil
+	}
+
+	app.meetings.mu.Lock()
+	records := append([]meetingRecord(nil), app.meetings.records...)
+	app.meetings.mu.Unlock()
+	current := make([]meetingMemoryEntry, 0, 3)
+	for index := len(records) - 1; index >= 0 && len(current) < 3; index-- {
+		record := records[index]
+		if strings.TrimSpace(record.EndedAt) != "" {
+			continue
+		}
+		if digest, ok := digests[strings.TrimSpace(record.ID)]; ok {
+			current = append(current, digest)
+		}
+	}
+	return current
+}
+
 // agentThreadSourceConversationEntries resolves the exact, currently
 // authorized public-channel or private-thread transcript ending at the human
 // message that minted the work. It deliberately excludes later conversation:
@@ -643,6 +682,7 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 	var base []meetingMemoryEntry
 	if ok {
 		base = app.memorySnapshotForPrincipal(ctx, principal, 20)
+		base = appendUniqueFileContextEntries(app.currentMeetingDigestContext(ctx, principal, metadata), base)
 		sourceEntries, sourceErr := app.agentThreadSourceConversationEntries(principal, metadata)
 		if sourceErr != nil {
 			return AgentJobContext{}, sourceErr

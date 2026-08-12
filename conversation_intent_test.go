@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,6 +200,12 @@ func TestConversationIntentHTTPClientToolTemplateIsIgnored(t *testing.T) {
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		switch request.Workflow {
 		case "scout_route":
+			if strings.Contains(strings.ToLower(request.Input), "based on the convo tyler, tom and i are having") {
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+					Outcome: string(conversationIntentStartPrivateWork), Route: "workstream", Mode: "research",
+					Objective: "Research the opportunity discussed by Tyler, Tom, and AJ using the available conversation and transcript analysis",
+				}), nil
+			}
 			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
 		case "scout_chat":
 			return "Let's talk through the assumptions.", nil
@@ -230,6 +238,259 @@ func TestConversationIntentHTTPClientToolTemplateIsIgnored(t *testing.T) {
 	}
 	if _, launched := response["agentThread"]; launched {
 		t.Fatalf("client toolTemplate launched work: %v", response)
+	}
+}
+
+func TestConversationIntentHTTPLegacyNativeMissingOperationIDIsNarrowlyCompatible(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
+	t.Cleanup(func() { kanbanApp = previousApp })
+	var providerCalls atomic.Int32
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls.Add(1)
+		switch request.Workflow {
+		case "scout_route":
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
+		case "scout_chat":
+			return "I can help with that.", nil
+		default:
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+			return "", nil
+		}
+	})
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Legacy native", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginRequest.Header.Set("X-Bonfire-Client", "expo")
+	loginResponse := httptest.NewRecorder()
+	authHandler(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("native login status=%d body=%s", loginResponse.Code, loginResponse.Body.String())
+	}
+	var login struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(loginResponse.Body.Bytes(), &login); err != nil || login.SessionToken == "" {
+		t.Fatalf("native login payload=%s err=%v", loginResponse.Body.String(), err)
+	}
+
+	legacy := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"Hey! What's up?"}`))
+	legacy.Header.Set("Content-Type", "application/json")
+	legacy.Header.Set("X-Bonfire-Client", "expo")
+	legacy.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	legacyResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(legacyResponse, legacy)
+	if legacyResponse.Code != http.StatusOK {
+		t.Fatalf("legacy native status=%d body=%s", legacyResponse.Code, legacyResponse.Body.String())
+	}
+	var projected map[string]any
+	if err := json.Unmarshal(legacyResponse.Body.Bytes(), &projected); err != nil {
+		t.Fatal(err)
+	}
+	issued, _ := projected["operationId"].(string)
+	if projected["legacyOperationIdIssued"] != true || !strings.HasPrefix(issued, "legacy-native-conversation-") {
+		t.Fatalf("legacy response=%v, want explicit server-issued operation id", projected)
+	}
+	if providerCalls.Load() != 2 {
+		t.Fatalf("provider calls=%d, want router plus answer", providerCalls.Load())
+	}
+
+	// A process restart and lost response cannot mint a second turn. The exact
+	// authenticated session/thread/body alias is durable and reuses the prior
+	// server operation; neither router nor answer provider runs again.
+	kanbanApp = newKanbanBoardApp()
+	kanbanApp.apiKey = "openai-router-test"
+	retry := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"Hey! What's up?"}`))
+	retry.Header.Set("Content-Type", "application/json")
+	retry.Header.Set("X-Bonfire-Client", "expo")
+	retry.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	retryResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(retryResponse, retry)
+	if retryResponse.Code != http.StatusOK {
+		t.Fatalf("legacy restart retry status=%d body=%s", retryResponse.Code, retryResponse.Body.String())
+	}
+	var retryProjected map[string]any
+	if err := json.Unmarshal(retryResponse.Body.Bytes(), &retryProjected); err != nil {
+		t.Fatal(err)
+	}
+	if retryProjected["legacyOperationIdReused"] != true || retryProjected["operationId"] != issued || retryProjected["replayed"] != true || providerCalls.Load() != 2 {
+		t.Fatalf("restart retry=%v provider calls=%d, want exact replay", retryProjected, providerCalls.Load())
+	}
+	if bytes.Contains(retryResponse.Body.Bytes(), []byte("legacyConversationOperations")) || bytes.Contains(retryResponse.Body.Bytes(), []byte("sessionDigest")) {
+		t.Fatalf("server-only legacy alias leaked: %s", retryResponse.Body.String())
+	}
+	reloaded, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil || len(reloaded.Messages) != 2 {
+		t.Fatalf("reloaded messages=%d err=%v, want one user plus one answer", len(reloaded.Messages), err)
+	}
+
+	// Reserving a distinct body does not retire the last accepted alias until
+	// that distinct turn itself commits. This preserves the older response-loss
+	// retry when the newer request is interrupted before its conversation
+	// append. Reserve the newer body directly at that exact durable seam.
+	const distinctText = "A distinct turn interrupted after reservation"
+	distinctBody, err := canonicalJSON(map[string]any{
+		"threadId": thread.ID, "requester": "aj@shareability.com", "text": distinctText,
+		"files": []scoutChatFileAttachment(nil), "followUpArtifactId": "", "replyToMessageId": "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionProbe := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", nil)
+	sessionProbe.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	distinctDigest := sha256Hex(append([]byte("conversation-http-turn/v1\x00"), distinctBody...))
+	distinctOperationID, reused, err := kanbanApp.reserveLegacyNativeConversationOperation("aj@shareability.com", thread.ID, strideE10SessionHashFromRequest(sessionProbe), distinctDigest)
+	if err != nil || reused || distinctOperationID == "" {
+		t.Fatalf("distinct reservation id=%q reused=%t err=%v", distinctOperationID, reused, err)
+	}
+	olderRetry := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"Hey! What's up?"}`))
+	olderRetry.Header.Set("Content-Type", "application/json")
+	olderRetry.Header.Set("X-Bonfire-Client", "expo")
+	olderRetry.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	olderRetryResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(olderRetryResponse, olderRetry)
+	var olderProjected map[string]any
+	if olderRetryResponse.Code != http.StatusOK || json.Unmarshal(olderRetryResponse.Body.Bytes(), &olderProjected) != nil || olderProjected["operationId"] != issued || olderProjected["replayed"] != true || providerCalls.Load() != 2 {
+		t.Fatalf("older replay status=%d payload=%v provider calls=%d", olderRetryResponse.Code, olderProjected, providerCalls.Load())
+	}
+
+	// The distinct turn's exact retry reuses its reserved id and, only after
+	// successful commit, retires the older alias. Repeating the older text after
+	// that accepted turn is therefore a deliberate new message, not a replay.
+	distinct := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"A distinct turn interrupted after reservation"}`))
+	distinct.Header.Set("Content-Type", "application/json")
+	distinct.Header.Set("X-Bonfire-Client", "expo")
+	distinct.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	distinctResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(distinctResponse, distinct)
+	var distinctProjected map[string]any
+	if distinctResponse.Code != http.StatusOK || json.Unmarshal(distinctResponse.Body.Bytes(), &distinctProjected) != nil || distinctProjected["legacyOperationIdReused"] != true || distinctProjected["operationId"] != distinctOperationID || providerCalls.Load() != 4 {
+		t.Fatalf("distinct retry status=%d payload=%v provider calls=%d", distinctResponse.Code, distinctProjected, providerCalls.Load())
+	}
+	repeatedAfterAccepted := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"Hey! What's up?"}`))
+	repeatedAfterAccepted.Header.Set("Content-Type", "application/json")
+	repeatedAfterAccepted.Header.Set("X-Bonfire-Client", "expo")
+	repeatedAfterAccepted.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	repeatedAfterAcceptedResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(repeatedAfterAcceptedResponse, repeatedAfterAccepted)
+	var repeatedProjected map[string]any
+	if repeatedAfterAcceptedResponse.Code != http.StatusOK || json.Unmarshal(repeatedAfterAcceptedResponse.Body.Bytes(), &repeatedProjected) != nil || repeatedProjected["legacyOperationIdReused"] == true || repeatedProjected["operationId"] == issued || providerCalls.Load() != 6 {
+		t.Fatalf("intentional repeat status=%d payload=%v provider calls=%d", repeatedAfterAcceptedResponse.Code, repeatedProjected, providerCalls.Load())
+	}
+
+	// The exact failed Build 53 shape from the live report now reaches the
+	// conversation router. In a public channel it is held as the existing
+	// explicit Scout proposal, with the transcript-backed research objective
+	// intact, instead of dying at transport validation.
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Hey! What's Up?", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	research := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+channel.ID+"/messages", strings.NewReader(`{"text":"@Scout based on the convo Tyler, Tom and I are having can you run a research report? dig into the transcript analysis to scope it out if needed"}`))
+	research.Header.Set("Content-Type", "application/json")
+	research.Header.Set("X-Bonfire-Client", "expo")
+	research.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	researchResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(researchResponse, research)
+	if researchResponse.Code != http.StatusOK {
+		t.Fatalf("legacy native research status=%d body=%s", researchResponse.Code, researchResponse.Body.String())
+	}
+	var researchProjected map[string]any
+	if err := json.Unmarshal(researchResponse.Body.Bytes(), &researchProjected); err != nil {
+		t.Fatal(err)
+	}
+	proposal, _ := researchProjected["proposal"].(map[string]any)
+	if researchProjected["legacyOperationIdIssued"] != true || proposal == nil || !strings.Contains(strings.ToLower(asString(proposal["objective"])), "transcript") {
+		t.Fatalf("legacy native research response=%v, want public proposal with transcript-grounded objective", researchProjected)
+	}
+
+	// A browser cookie cannot use the compatibility door.
+	web := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"browser missing id"}`))
+	web.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		web.AddCookie(cookie)
+	}
+	webResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(webResponse, web)
+	if webResponse.Code != http.StatusBadRequest {
+		t.Fatalf("web missing operation id status=%d body=%s", webResponse.Code, webResponse.Body.String())
+	}
+
+	// Nor can a modern native request replace a malformed supplied retry key
+	// with a fresh server id; only the exactly-missing legacy field is bridged.
+	malformed := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader("{\"text\":\"bad id\",\"operationId\":\"bad\\nkey\"}"))
+	malformed.Header.Set("Content-Type", "application/json")
+	malformed.Header.Set("X-Bonfire-Client", "expo")
+	malformed.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	malformedResponse := httptest.NewRecorder()
+	assistantChatThreadHandler(malformedResponse, malformed)
+	if malformedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("malformed native operation id status=%d body=%s", malformedResponse.Code, malformedResponse.Body.String())
+	}
+}
+
+func TestLegacyNativeConversationPendingAliasesSurviveConcurrentAcceptanceAndCapacity(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Legacy concurrent aliases", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDigest := sha256Hex([]byte("legacy-native-session"))
+	bodyA := sha256Hex([]byte("body-a"))
+	bodyB := sha256Hex([]byte("body-b"))
+	opA, reused, err := app.reserveLegacyNativeConversationOperation("aj@shareability.com", thread.ID, sessionDigest, bodyA)
+	if err != nil || reused {
+		t.Fatalf("reserve A id=%q reused=%t err=%v", opA, reused, err)
+	}
+	opB, reused, err := app.reserveLegacyNativeConversationOperation("aj@shareability.com", thread.ID, sessionDigest, bodyB)
+	if err != nil || reused {
+		t.Fatalf("reserve B id=%q reused=%t err=%v", opB, reused, err)
+	}
+	if err := app.retireLegacyNativeConversationOperations("aj@shareability.com", thread.ID, sessionDigest, opA); err != nil {
+		t.Fatalf("accept A: %v", err)
+	}
+	if replayB, reused, err := app.reserveLegacyNativeConversationOperation("aj@shareability.com", thread.ID, sessionDigest, bodyB); err != nil || !reused || replayB != opB {
+		t.Fatalf("A acceptance destroyed pending B: id=%q reused=%t err=%v", replayB, reused, err)
+	}
+	if err := app.retireLegacyNativeConversationOperations("aj@shareability.com", thread.ID, sessionDigest, opB); err != nil {
+		t.Fatalf("accept B after A: %v", err)
+	}
+	reloaded, _, err := app.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.LegacyConversationOperations) != 1 || reloaded.LegacyConversationOperations[0].OperationID != opB || strings.TrimSpace(reloaded.LegacyConversationOperations[0].AcceptedAt) == "" {
+		t.Fatalf("aliases=%+v, want only accepted B after its later commit", reloaded.LegacyConversationOperations)
+	}
+
+	capacityThread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Legacy capacity", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBody := sha256Hex([]byte("pending-0"))
+	firstOperation := ""
+	for index := 0; index < maxLegacyConversationOperationAliases; index++ {
+		bodyDigest := sha256Hex([]byte(fmt.Sprintf("pending-%d", index)))
+		op, reused, reserveErr := app.reserveLegacyNativeConversationOperation("aj@shareability.com", capacityThread.ID, sessionDigest, bodyDigest)
+		if reserveErr != nil || reused {
+			t.Fatalf("capacity reserve %d id=%q reused=%t err=%v", index, op, reused, reserveErr)
+		}
+		if index == 0 {
+			firstOperation = op
+		}
+	}
+	if _, _, err := app.reserveLegacyNativeConversationOperation("aj@shareability.com", capacityThread.ID, sessionDigest, sha256Hex([]byte("overflow"))); !errors.Is(err, ErrSTRIDEConversationConflict) {
+		t.Fatalf("overflow err=%v, want fail-closed conflict", err)
+	}
+	if replay, reused, err := app.reserveLegacyNativeConversationOperation("aj@shareability.com", capacityThread.ID, sessionDigest, firstBody); err != nil || !reused || replay != firstOperation {
+		t.Fatalf("capacity evicted pending authority: id=%q reused=%t err=%v", replay, reused, err)
 	}
 }
 

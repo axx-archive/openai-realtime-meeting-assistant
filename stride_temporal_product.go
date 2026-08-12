@@ -184,7 +184,7 @@ func (app *kanbanBoardApp) answerSTRIDETemporalForRoom(ctx context.Context, scop
 		ids = append(ids, reference.ID+"@"+strconv.FormatInt(reference.Revision, 10))
 	}
 	metadata["evidenceRefs"] = strings.Join(ids, ",")
-	if _, ok := app.recordRoomChatMessageForMeeting(scope.RoomID, scoutParticipantName, shared.Text, metadata, scope.SittingID); !ok {
+	if _, ok := app.recordRoomChatMessageForScope(scope, scoutParticipantName, shared.Text, metadata); !ok {
 		return STRIDETemporalRecallResult{}, ErrSTRIDETemporalProductScope
 	}
 	return shared, nil

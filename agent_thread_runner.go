@@ -26,6 +26,15 @@ const (
 	agentThreadOriginTool          = "tool"
 )
 
+const (
+	roomWorkActivationMetadataKey      = "roomWorkActivationState"
+	roomWorkOperationDigestMetadataKey = "roomWorkOperationDigest"
+	roomWorkActivationReserved         = "reserved"
+	roomWorkActivationStarted          = "started"
+	roomWorkActivationComplete         = "complete"
+	roomWorkActivationNeedsAttention   = "needs_attention"
+)
+
 // agentThreadOriginMetadataKeys are the only origin keys a launch call site
 // may stamp; everything else in the origin map is dropped. routeNote is the
 // card 068 delivery-routing disclosure (best match / #general fallback) the
@@ -362,6 +371,10 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 			metadata[key] = value
 		}
 	}
+	if strings.TrimSpace(reservedRunID) != "" && strings.TrimSpace(origin["originKind"]) == agentThreadOriginRoom {
+		metadata[roomWorkActivationMetadataKey] = roomWorkActivationReserved
+		metadata[roomWorkOperationDigestMetadataKey] = strings.TrimSpace(spec.OperationBodyDigest)
+	}
 	if requestedBy := normalizeAccountEmail(origin["requestedBy"]); requestedBy != "" {
 		metadata["requestedBy"] = requestedBy
 	}
@@ -412,13 +425,34 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 			}
 		}
 	} else {
-		artifact, _, err = app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
+		if strings.TrimSpace(reservedRunID) != "" {
+			artifactID := "os-artifact-room-work-" + sha256Hex([]byte("room-agent-thread-artifact/v1\x00" + threadID))[:24]
+			artifact, _, _, err = app.createOSArtifactWithIDAndMetadataAcknowledged(artifactID, mode, query, content, createdBy, metadata)
+			// Deterministic create is also the lost-response/restart replay seam.
+			// A duplicate acknowledgement may describe the initial reservation
+			// even though the run has since advanced or completed, so every replay
+			// decision must bind the latest durable artifact revision.
+			if err == nil {
+				if persisted, ok := app.osArtifactByID(artifactID); ok {
+					artifact = persisted
+				}
+			}
+		} else {
+			artifact, _, err = app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
+		}
 	}
 	if err != nil {
 		return scoutAgentThread{}, err
 	}
 	if strings.TrimSpace(artifact.ID) == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread artifact was not saved")
+	}
+	if strings.TrimSpace(reservedRunID) != "" && strings.TrimSpace(origin["originKind"]) == agentThreadOriginRoom {
+		for _, key := range []string{"source", "mode", "query", "threadId", "threadQuery", "originKind", "originId", "originMeetingId", "requestedBy", "operationId", "operationBodyDigest", roomWorkOperationDigestMetadataKey} {
+			if strings.TrimSpace(artifact.Metadata[key]) != strings.TrimSpace(metadata[key]) {
+				return scoutAgentThread{}, fmt.Errorf("room work replay binding changed")
+			}
+		}
 	}
 	if openAIToolReservationLocked {
 		app.openAIToolActivationMu.Unlock()
@@ -430,16 +464,136 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 		ID:              threadID,
 		Mode:            mode,
 		Query:           query,
-		Status:          "running",
+		Status:          firstNonEmptyString(strings.TrimSpace(artifact.Metadata["threadStatus"]), "running"),
 		Artifact:        artifact,
 		Actions:         actions,
 		TenantAuthority: envelope,
 	}
 
 	if activate {
-		app.activateAgentThreadLaunch(thread, spec, createdBy)
+		if strings.TrimSpace(thread.Artifact.Metadata["originKind"]) == agentThreadOriginRoom && strings.TrimSpace(reservedRunID) != "" {
+			if err := app.activateReservedRoomAgentThread(thread, spec, createdBy); err != nil {
+				return scoutAgentThread{}, err
+			}
+		} else {
+			app.activateAgentThreadLaunch(thread, spec, createdBy)
+		}
 	}
 	return thread, nil
+}
+
+func (app *kanbanBoardApp) markRoomThreadStartedInProcess(artifactID string) bool {
+	artifactID = strings.TrimSpace(artifactID)
+	if app == nil || artifactID == "" {
+		return false
+	}
+	app.roomStartedThreadsMu.Lock()
+	defer app.roomStartedThreadsMu.Unlock()
+	if app.roomStartedThreads == nil {
+		app.roomStartedThreads = make(map[string]struct{})
+	}
+	if _, exists := app.roomStartedThreads[artifactID]; exists {
+		return false
+	}
+	app.roomStartedThreads[artifactID] = struct{}{}
+	return true
+}
+
+func (app *kanbanBoardApp) forgetRoomThreadStartedInProcess(artifactID string) {
+	if app == nil {
+		return
+	}
+	app.roomStartedThreadsMu.Lock()
+	delete(app.roomStartedThreads, strings.TrimSpace(artifactID))
+	app.roomStartedThreadsMu.Unlock()
+}
+
+func (app *kanbanBoardApp) activateReservedRoomAgentThread(thread scoutAgentThread, spec agentThreadGoalSpec, createdBy string) error {
+	if app == nil || app.memory == nil || strings.TrimSpace(thread.Artifact.ID) == "" {
+		return fmt.Errorf("room work reservation is unavailable")
+	}
+	app.roomWorkActivationMu.Lock()
+	defer app.roomWorkActivationMu.Unlock()
+	current, ok := app.osArtifactByID(thread.Artifact.ID)
+	if !ok || current.Metadata["originKind"] != agentThreadOriginRoom || current.Metadata["threadId"] != thread.ID || current.Metadata["originMeetingId"] == "" || current.Metadata["originMeetingId"] != app.memory.currentMeetingID(officeRoomID) {
+		return fmt.Errorf("room work reservation is stale")
+	}
+	state := strings.TrimSpace(current.Metadata[roomWorkActivationMetadataKey])
+	if state == roomWorkActivationComplete || state == roomWorkActivationNeedsAttention {
+		thread.Artifact = current
+		return nil
+	}
+	if state != roomWorkActivationReserved && state != roomWorkActivationStarted {
+		return fmt.Errorf("room work reservation state is invalid")
+	}
+	if !app.projectRoomAgentThreadStatus(current, thread.ID, "running") {
+		return fmt.Errorf("room work card could not be durably projected")
+	}
+	transitioned := false
+	if state == roomWorkActivationReserved {
+		header := artifactAuthorizationHeaderFromEntry(current)
+		updated, changed, err := app.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
+			roomWorkActivationMetadataKey: roomWorkActivationReserved,
+		}, current.ID, map[string]string{
+			roomWorkActivationMetadataKey: roomWorkActivationStarted,
+			"roomWorkActivatedAt":         time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil || !changed {
+			return fmt.Errorf("room work activation was not durable")
+		}
+		current, transitioned = updated, true
+	}
+	thread.Artifact = current
+	if !app.markRoomThreadStartedInProcess(current.ID) {
+		return nil
+	}
+	launchKey := "room-work-launch-" + sha256Hex([]byte(thread.ID))
+	if err := recordWorkflowRunOnce(workflowRunEntry{
+		IdempotencyKey: launchKey,
+		WorkflowID:     firstNonEmptyString(spec.ToolTemplate, "agent_thread_"+thread.Mode),
+		TriggerSurface: agentThreadTriggerSurface(current.Metadata),
+		Proposer:       firstNonEmptyString(spec.RequestedBy, current.Metadata["requestedBy"], createdBy),
+		Lane:           current.Metadata["approvalLane"], Outcome: workflowOutcomeLaunched,
+		ThreadID: thread.ID, RoomID: officeRoomID,
+	}); err != nil {
+		app.forgetRoomThreadStartedInProcess(current.ID)
+		return fmt.Errorf("room work launch provenance is unavailable: %w", err)
+	}
+	if transitioned {
+		recordProposalEvent(proposalEventLaunched, strings.TrimSpace(spec.Launch.ProposalID), map[string]any{
+			"path":      firstNonEmptyString(strings.TrimSpace(spec.Launch.Path), triggerSurfaceRoomVoice),
+			"source":    firstNonEmptyString(strings.TrimSpace(spec.Launch.Source), proposalSourceRoomVoice),
+			"thread_id": thread.ID, "mode": thread.Mode,
+		})
+	}
+	startAgentThreadAsync(app, thread)
+	return nil
+}
+
+func (app *kanbanBoardApp) reconcileRoomAgentThreadsAtBoot() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		state := strings.TrimSpace(entry.Metadata[roomWorkActivationMetadataKey])
+		if entry.Metadata["originKind"] != agentThreadOriginRoom || (state != roomWorkActivationReserved && state != roomWorkActivationStarted) {
+			continue
+		}
+		thread := scoutAgentThread{
+			ID: entry.Metadata["threadId"], Mode: entry.Metadata["mode"], Query: firstNonEmptyString(entry.Metadata["threadQuery"], entry.Metadata["query"]),
+			Status: "running", Artifact: entry,
+		}
+		if thread.ID == "" || thread.Mode == "" || thread.Query == "" || entry.Metadata["originMeetingId"] != app.memory.currentMeetingID(officeRoomID) {
+			_, _, _ = app.updateOSArtifactWithMetadata(entry.ID, "", entry.Text, scoutParticipantName, map[string]string{
+				roomWorkActivationMetadataKey: roomWorkActivationNeedsAttention,
+				"status":                      "needs_attention", "threadStatus": "needs_attention", "goalStatus": "needs_attention", "reviewGate": "blocked", "error": "meeting ended before room work could resume",
+			})
+			continue
+		}
+		if err := app.activateReservedRoomAgentThread(thread, agentThreadGoalSpec{}, scoutParticipantName); err != nil {
+			log.Errorf("Room work recovery deferred for %s: %v", thread.ID, err)
+		}
+	}
 }
 
 func (app *kanbanBoardApp) activateAgentThreadLaunch(thread scoutAgentThread, spec agentThreadGoalSpec, createdBy string) {
@@ -449,6 +603,7 @@ func (app *kanbanBoardApp) activateAgentThreadLaunch(thread scoutAgentThread, sp
 	// inside the nested thread, so no client — present or future — can read a
 	// navigation action off this room-wide broadcast and yank the tab.
 	broadcastAssistantEvent("action", assistantToolLabel(thread.Mode)+" thread launched", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, thread.Status, "listening"))
+	app.projectRoomAgentThreadStatus(thread.Artifact, thread.ID, "running")
 
 	// W0 items 7+8: every thread launch — all callers route through this one
 	// seam — records workflow-run provenance plus THE proposal-chain launched
@@ -787,6 +942,9 @@ func (app *kanbanBoardApp) quarantineScoutAgentThread(thread scoutAgentThread) {
 }
 
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
+	if strings.TrimSpace(thread.Artifact.Metadata[roomWorkActivationMetadataKey]) != "" {
+		defer app.forgetRoomThreadStartedInProcess(thread.Artifact.ID)
+	}
 	if !strideE10TenantCutoverEnabled() {
 		app.runAgentThreadAuthorized(thread)
 		return
@@ -927,6 +1085,13 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		title = derived
 		metadata["titleSource"] = "derived"
 	}
+	if thread.Artifact.Metadata["originKind"] == agentThreadOriginRoom && strings.TrimSpace(thread.Artifact.Metadata[roomWorkActivationMetadataKey]) != "" {
+		if err == nil {
+			metadata[roomWorkActivationMetadataKey] = roomWorkActivationComplete
+		} else {
+			metadata[roomWorkActivationMetadataKey] = roomWorkActivationNeedsAttention
+		}
+	}
 	if err == nil {
 		// Terminal seam contract: grill runs get their READINESS score parsed
 		// and stamped, and every completed run lands in the threadRuns log the
@@ -956,6 +1121,7 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
+	app.forgetRoomThreadStartedInProcess(artifact.ID)
 
 	// Run ledger: one compact, SEARCHABLE run_log memory line per terminal run
 	// — complete and error alike — so recall can answer "what has Scout run
@@ -974,6 +1140,9 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	// (complete → Done, error → Blocked) so the board stops lying about
 	// launched work.
 	app.syncLinkedCardForArtifact(artifact, status)
+	if status != "complete" {
+		app.projectRoomAgentThreadStatus(artifact, thread.ID, status)
+	}
 	// Close the loop: a successful completion posts the compact artifact card
 	// back to the surface that requested the work (room chat or channel).
 	if status == "complete" {
@@ -1047,15 +1216,11 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID(officeRoomID) {
 			return
 		}
+		if !app.projectRoomAgentThreadStatus(artifact, agentThreadID, "complete") {
+			return
+		}
 		if !stampDelivered() {
 			return
-		}
-		payload, ok := app.recordRoomChatMessageWithArtifact(officeRoomID, scoutParticipantName, text, artifact.ID, originMeetingID)
-		if !ok {
-			return
-		}
-		if scope, current := app.roomPublicationScope(officeRoomID, originMeetingID); current {
-			broadcastScopedRoomKanbanEvent(scope, "room_chat", payload)
 		}
 	case agentThreadOriginChannel:
 		channelID := strings.TrimSpace(artifact.Metadata["originId"])
@@ -1405,11 +1570,76 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, status, "listening"))
 	// Keep chat-side thread cards in step with queued/approval states too.
 	app.updateScoutChatThreadRefs(thread.ID, status, artifact.ID)
+	app.projectRoomAgentThreadStatus(artifact, thread.ID, status)
 	// Approval gates stall silently otherwise: the creator gets a durable
 	// nudge that the worker is waiting on them.
 	if status == codexJobStatusApprovalRequired {
 		app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
 	}
+}
+
+// projectRoomAgentThreadStatus persists one deterministic status revision for
+// a room-launched run and broadcasts it inside the exact originating sitting.
+// Clients collapse revisions by workRunId, so the meeting sees one evolving
+// work card rather than a launch bubble plus disconnected terminal messages.
+// The deterministic per-status entry id makes retries/restarts broadcast-free.
+func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEntry, threadID, status string) bool {
+	if app == nil || app.memory == nil || strings.TrimSpace(artifact.ID) == "" || strings.TrimSpace(artifact.Metadata["originKind"]) != agentThreadOriginRoom {
+		return false
+	}
+	threadID = strings.TrimSpace(threadID)
+	meetingID := strings.TrimSpace(artifact.Metadata["originMeetingId"])
+	if threadID == "" || meetingID == "" || meetingID != app.memory.currentMeetingID(officeRoomID) {
+		return false
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case "queued", "running", "approval_required", "complete", "error", "needs_attention":
+	default:
+		status = "running"
+	}
+	mode := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["mode"]), artifact.Kind, "workflow")
+	family := assistantToolLabel(mode)
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), strings.TrimSpace(artifact.Metadata["threadQuery"]), family+" work")
+	title = compactAssistantLine(title)
+	verb := "started"
+	switch status {
+	case "queued":
+		verb = "queued"
+	case "approval_required":
+		verb = "needs approval"
+	case "complete":
+		verb = "finished"
+	case "error", "needs_attention":
+		verb = "needs attention"
+	}
+	logicalStatus := status
+	if status == "error" {
+		logicalStatus = "needs_attention"
+	}
+	messageID := "room-work-" + sha256Hex([]byte(strings.Join([]string{threadID, logicalStatus}, "\x00")))[:32]
+	payload, appended := app.recordRoomChatMessageForMeeting(officeRoomID, scoutParticipantName, verb+" "+strings.ToLower(family)+" — "+title, map[string]string{
+		roomChatServerMessageIDMetadataKey: messageID,
+		"artifactId":                       artifact.ID,
+		"speaker":                          scoutParticipantName,
+		"agentId":                          "scout",
+		"workRunId":                        threadID,
+		"workStatus":                       logicalStatus,
+		"workFamily":                       family,
+		"workTitle":                        title,
+		"workProgress":                     strings.TrimSpace(artifact.Metadata["progressPercent"]),
+	}, meetingID)
+	if appended {
+		if scope, current := app.roomPublicationScope(officeRoomID, meetingID); current {
+			broadcastScopedRoomKanbanEvent(scope, "room_chat", payload)
+			return true
+		}
+		return false
+	}
+	// An exact already-persisted status revision is a successful idempotent
+	// replay, but it must not be broadcast again.
+	entry, exists := app.memory.entryByKindAndID(meetingMemoryKindTranscript, messageID)
+	return exists && strings.TrimSpace(entry.Metadata["workRunId"]) == threadID && strings.TrimSpace(entry.Metadata["workStatus"]) == logicalStatus && strings.TrimSpace(entry.Metadata["artifactId"]) == artifact.ID
 }
 
 func agentThreadRequestTimeout(thread scoutAgentThread) time.Duration {

@@ -5,6 +5,7 @@ import {
   ROOM_CONVERSATION_UNREAD_LIMIT,
   ROOM_TRANSCRIPT_HISTORY_LIMIT,
   createRoomConversationState,
+  parseMeetingTranscriptSnapshot,
   parseMemoryTranscriptEntry,
   parseRoomChatDelete,
   parseRoomChatHistory,
@@ -43,6 +44,7 @@ function transcript(
       roomId: 'the-office',
       speaker: 'AJ',
       source: 'transcript_lane',
+      captureSequence: String(Number(id.match(/\d+$/u)?.[0] ?? '99')),
     },
     ...overrides,
   };
@@ -103,6 +105,42 @@ describe('native room conversation', () => {
     assert.equal(parseMemoryTranscriptEntry({ ...transcript('no-time'), createdAt: null }), null);
   });
 
+  it('replays one exact current-sitting transcript snapshot and rejects mixed or duplicate records', () => {
+    const payload = {
+      contract: 'meeting-transcript-v1',
+      roomId: 'the-office',
+      meetingId: 'meeting-current',
+      entries: [
+        transcript('transcript-1', { metadata: { roomId: 'the-office', meetingId: 'meeting-current', speaker: 'AJ', source: 'transcript_lane', captureSequence: '1' } }),
+        transcript('transcript-2', { metadata: { roomId: 'the-office', meetingId: 'meeting-current', speaker: 'Tim', source: 'transcript_lane', captureSequence: '2' } }),
+      ],
+    };
+    assert.equal(parseMeetingTranscriptSnapshot(payload)?.entries.length, 2);
+    let state = roomConversationReducer(createRoomConversationState('the-office'), {
+      type: 'meeting_transcript_snapshot', payload,
+    });
+    assert.deepEqual(state.transcriptEntries.map((entry) => entry.id), ['transcript-1', 'transcript-2']);
+
+    const retained = state;
+    state = roomConversationReducer(state, {
+      type: 'meeting_transcript_snapshot',
+      payload: { ...payload, entries: [...payload.entries, transcript('foreign', { metadata: { roomId: 'another-room', meetingId: 'meeting-current', captureSequence: '3' } })] },
+    });
+    assert.equal(state, retained);
+    assert.equal(parseMeetingTranscriptSnapshot({ ...payload, entries: [payload.entries[0], payload.entries[0]] }), null);
+    assert.equal(parseMeetingTranscriptSnapshot({ ...payload, entries: [
+      { ...payload.entries[0], metadata: { roomId: 'the-office', meetingId: 'meeting-current', speaker: 'AJ', source: 'transcript_lane' } },
+    ] }), null);
+    assert.equal(parseMeetingTranscriptSnapshot({ ...payload, entries: [payload.entries[1], payload.entries[0]] }), null);
+
+    state = roomConversationReducer(state, {
+      type: 'memory_transcript',
+      payload: transcript('transcript-3', { metadata: { roomId: 'the-office', meetingId: 'meeting-current', speaker: 'AJ', source: 'transcript_lane', captureSequence: '3' } }),
+    });
+    state = roomConversationReducer(state, { type: 'meeting_transcript_snapshot', payload });
+    assert.deepEqual(state.transcriptEntries.map((entry) => entry.id), ['transcript-1', 'transcript-2', 'transcript-3']);
+  });
+
   it('preserves server-owned durable follow-through receipts for visible work state', () => {
     const parsed = parseRoomChatMessage(chat('chat-follow-through', {
       agentId: 'scout',
@@ -118,6 +156,31 @@ describe('native room conversation', () => {
       followThroughStatus: 'invented',
     }))?.followThroughId, undefined);
   });
+
+	it('renders one evolving room work identity across running, restart replay, and needs-attention', () => {
+		const running = chat('room-work-running', {
+			name: 'Scout', agentId: 'scout', artifactId: 'os-artifact-research-1',
+			workRunId: 'agent-thread-research-1', workStatus: 'running', workFamily: 'Research',
+			workTitle: 'Partner landscape', workProgress: '35',
+		});
+		const blocked = chat('room-work-needs-attention', {
+			name: 'Scout', agentId: 'scout', artifactId: 'os-artifact-research-1',
+			workRunId: 'agent-thread-research-1', workStatus: 'needs_attention', workFamily: 'Research',
+			workTitle: 'Partner landscape', workProgress: '72',
+		});
+		const parsed = parseRoomChatMessage(running);
+		assert.equal(parsed?.workRunId, 'agent-thread-research-1');
+		assert.equal(parsed?.workStatus, 'running');
+		assert.equal(parsed?.workProgress, 35);
+		assert.deepEqual(parseRoomChatHistory([running, blocked])?.map((message) => message.id), ['room-work-needs-attention']);
+
+		let state = createRoomConversationState('the-office');
+		state = roomConversationReducer(state, { type: 'room_chat', payload: running, chatOpen: true });
+		state = roomConversationReducer(state, { type: 'room_chat', payload: blocked, chatOpen: true });
+		assert.equal(state.messages.length, 1);
+		assert.equal(state.messages[0]?.id, 'room-work-needs-attention');
+		assert.equal(state.messages[0]?.workStatus, 'needs_attention');
+	});
 
   it('treats a valid room_chat_history array as authoritative, deduped, room-scoped, and bounded', () => {
     let state = createRoomConversationState('the-office');

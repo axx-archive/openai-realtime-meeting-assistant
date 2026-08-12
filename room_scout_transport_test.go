@@ -425,6 +425,66 @@ func TestRoomScoutSideEffectsAndDeliveryStayInOwningRoom(t *testing.T) {
 	}
 }
 
+func TestRoomScoutRecallSeesOnlyCurrentMediaGenerationTranscript(t *testing.T) {
+	app := newW2ATestApp(t)
+	defer app.Close()
+	roomID := "room-current-recall"
+	sittingID := app.memory.ensureMeetingID(roomID)
+	scope := RoomScoutScope{RoomID: roomID, SittingID: sittingID, MediaGeneration: 17}
+	bundle, err := newRoomRealtimeBundle(scope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bundle.close()
+	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
+	state.mediaSittingID = sittingID
+	state.mediaGen = scope.MediaGeneration
+	state.scoutInvited = true
+	state.realtime = bundle
+	app.mu.Unlock()
+
+	if _, appended, err := app.memory.appendAttributedTranscriptEntry(
+		roomID,
+		"current-media-transcript",
+		"item-current",
+		"AJ",
+		"source_owned",
+		"The first-class recap must preserve the exact capture high-water.",
+		map[string]string{
+			"source":          "openai_realtime",
+			"visibility":      "room",
+			"sittingId":       sittingID,
+			"mediaGeneration": "17",
+		},
+		true,
+		sittingID,
+	); err != nil || !appended {
+		t.Fatalf("append current media transcript: appended=%v err=%v", appended, err)
+	}
+
+	result, _, err := app.applyRoomScoutToolArgs(context.Background(), scope, "answer_memory_question", map[string]any{
+		"query": "What must the first-class recap preserve?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := asInt(result["context"]); got == 0 {
+		t.Fatalf("current-generation transcript was absent from Scout context: %v", result)
+	}
+	if answer := strings.ToLower(asString(result["answer"])); !strings.Contains(answer, "capture high-water") {
+		t.Fatalf("Scout recall was not grounded in current-generation transcript: %v", result)
+	}
+
+	stale := scope
+	stale.MediaGeneration++
+	if _, _, err := app.applyRoomScoutToolArgs(context.Background(), stale, "answer_memory_question", map[string]any{
+		"query": "What must the first-class recap preserve?",
+	}); !errors.Is(err, ErrRoomScoutFence) {
+		t.Fatalf("stale media generation err=%v, want %v", err, ErrRoomScoutFence)
+	}
+}
+
 func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 	app := newW2ATestApp(t)
 	defer app.Close()

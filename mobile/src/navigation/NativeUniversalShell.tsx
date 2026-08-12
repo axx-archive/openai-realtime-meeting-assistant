@@ -94,7 +94,11 @@ function ShellItem({
         tintColor={selected ? colors.ember : colors.text2}
       />
       <Text
-        maxFontSizeMultiplier={2}
+        // Compact navigation is a fixed control surface, not reading content.
+        // Cap its visible label before Accessibility XXXL turns five stable
+        // destinations into clipped fragments; the full label remains exposed
+        // through accessibilityLabel. The roomier iPad sidebar can scale more.
+        maxFontSizeMultiplier={compact ? 1.2 : 2}
         numberOfLines={compact ? 2 : 1}
         style={[
           compact ? styles.compactLabel : styles.sidebarLabel,

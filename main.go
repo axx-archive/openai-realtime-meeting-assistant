@@ -4180,6 +4180,37 @@ func closeParticipantConnectionsWithMessage(states []peerConnectionState, messag
 	}
 }
 
+func closeRoomGenerationConnectionsForRestart(roomID string, generation uint64) {
+	roomID = normalizeRoomID(roomID)
+	if generation == 0 {
+		return
+	}
+	listLock.RLock()
+	states := make([]peerConnectionState, 0)
+	for _, state := range peerConnections {
+		if normalizeRoomID(state.roomID) == roomID && state.mediaGeneration == generation {
+			states = append(states, state)
+		}
+	}
+	listLock.RUnlock()
+	closedPeers := map[*webrtc.PeerConnection]struct{}{}
+	closedSockets := map[*threadSafeWriter]struct{}{}
+	for _, state := range states {
+		if state.peerConnection != nil {
+			if _, seen := closedPeers[state.peerConnection]; !seen {
+				closedPeers[state.peerConnection] = struct{}{}
+				_ = state.peerConnection.Close()
+			}
+		}
+		if state.websocket != nil {
+			if _, seen := closedSockets[state.websocket]; !seen {
+				closedSockets[state.websocket] = struct{}{}
+				_ = state.websocket.Close()
+			}
+		}
+	}
+}
+
 func nextParticipantSessionID() string {
 	return fmt.Sprintf("participant-%d-%d", time.Now().UnixNano(), participantSessionSeq.Add(1))
 }
@@ -5244,6 +5275,28 @@ func websocketFrameForLog(raw []byte) string {
 	return string(out)
 }
 
+func sendMemberMeetingIntelligenceSnapshots(c *threadSafeWriter, app *kanbanBoardApp, memberEmail string, scope RoomScoutScope) error {
+	if c == nil || app == nil || strings.TrimSpace(memberEmail) == "" || !scope.valid() {
+		return ErrRoomScoutFence
+	}
+	current, ok := app.roomPublicationScope(scope.RoomID, scope.SittingID)
+	if !ok || !current.same(scope) {
+		return ErrRoomScoutFence
+	}
+	principal := app.recallPrincipalForMemberRoom(memberEmail, scope.RoomID)
+	if principal.SittingID != scope.SittingID || principal.MediaGeneration != scope.MediaGeneration {
+		return ErrRoomScoutFence
+	}
+	transcript, intelligence := app.memberMeetingIntelligenceSnapshots(context.Background(), principal, scope.RoomID, time.Now().UTC())
+	if transcript == nil && intelligence == nil {
+		return ErrRoomScoutFence
+	}
+	if err := sendKanbanEvent(c, "meeting_transcript_snapshot", transcript); err != nil {
+		return err
+	}
+	return sendKanbanEvent(c, "meeting_intelligence_snapshot", intelligence)
+}
+
 func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// Principal + room resolved BEFORE the upgrade (multi-room §4.5): a member
 	// session wins; a guest session is accepted only for its own room; neither
@@ -6031,6 +6084,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot(connRoomID)); err != nil {
 				log.Errorf("Failed to send meeting record: %v", err)
 			}
+			// Reconnect replay for the exact active room+sitting+generation. Both
+			// frames derive from one authorized immutable memory generation. A second
+			// reconcile runs after media registration below, closing the interval in
+			// which this socket cannot yet receive scoped live transcript events.
+			memberMeetingScope := RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}
+			if err := sendMemberMeetingIntelligenceSnapshots(c, kanbanApp, sessionEmail, memberMeetingScope); err != nil && !errors.Is(err, ErrRoomScoutFence) {
+				log.Errorf("Failed to send current meeting intelligence: %v", err)
+			}
 			// Unread notification backlog is per-account, so it replays as a
 			// direct send scoped to this socket's session user.
 			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionEmail, notificationListLimit)); err != nil {
@@ -6194,6 +6255,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 				if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 					log.Errorf("Failed to send undo state after media join: %v", err)
+				}
+				// The socket is now in the exact scoped fan-out pool. Replaying the
+				// same atomic pair once more makes pre-registration transcript arrivals
+				// visible; later arrivals are delivered live. Client reducers merge by
+				// capture sequence and reject any regressing intelligence high-water.
+				memberMeetingScope := RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}
+				if err := sendMemberMeetingIntelligenceSnapshots(c, kanbanApp, sessionEmail, memberMeetingScope); err != nil && !errors.Is(err, ErrRoomScoutFence) {
+					log.Errorf("Failed to reconcile meeting intelligence after media join: %v", err)
 				}
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
@@ -6510,12 +6579,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					"guest":   "true",
 				}
 			}
-			payload, ok := kanbanApp.recordRoomChatMessageForMeeting(connRoomID, currentParticipantName(), chat.Text, chatMetadata, participantSittingID)
+			messageScope := RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}
+			payload, ok := kanbanApp.recordRoomChatMessageForScope(messageScope, currentParticipantName(), chat.Text, chatMetadata)
 			if !ok {
 				continue
 			}
 			payload["roomId"] = connRoomID
-			messageScope := RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}
 			broadcastScopedRoomKanbanEvent(messageScope, "room_chat", payload)
 			// @Scout is an explicit server-owned text turn for authenticated
 			// members. It is independent of the Realtime invite, never gives a
@@ -6609,7 +6678,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				})
 				continue
 			}
-			result, err := kanbanApp.archiveMeeting(currentParticipantName())
+			result, err := kanbanApp.archiveMeetingWithOfficeScoutFence(currentParticipantName())
 			if err != nil {
 				log.Errorf("Failed to archive meeting: %v", err)
 				_ = sendKanbanEvent(c, "assistant_event", map[string]any{

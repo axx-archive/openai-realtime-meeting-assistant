@@ -217,6 +217,7 @@ const (
 	evalKindCorrectionHit     = "correction_hit"     // fields: term, room_id — canonicalizeDomainTerms regex hit
 	evalKindNoVocabWarning    = "no_vocab_warning"   // authoritative STT lane running without vocabulary biasing
 	evalKindDigestOutput      = "digest_output"      // fields: outcome, reason, attempt_hash — accepted/rejected/circuit_open
+	evalKindRealtimeLatency   = "realtime_latency"   // fields: duration_ms, first_audio_ms, tool_response, status
 )
 
 // Reserved eval lane for the W2 STT harness scores (transcript_wer,

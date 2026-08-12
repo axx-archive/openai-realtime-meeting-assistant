@@ -149,6 +149,17 @@ Default-off code, migrations, validators, clients, routes, or UI carriers are
 interim fail-closed infrastructure wherever the intended product says the
 capability must ultimately be operational; they are not product completion.
 
+**Seven-tester completion rule:** at final E10 acceptance every intended
+capability in this ledger is installed, reachable and operational for the
+verified seven-person tester cohort on its admitted desktop/iPhone/iPad
+surface. No advertised capability may remain hidden, default-off,
+policy-disabled, providerless-only or available only to a fixture/admin and be
+counted complete. This does not remove action-time human authority: publishing,
+external sending, production mutation, irreversible deletion, expanded
+audience, collection/contact/cohort activation and material spend remain fully
+operable governed actions whose exact consequential effect waits for the
+required approval, consent, policy and budget receipt.
+
 ### Exact current evidence boundary
 
 - Local source is commit `a3c8d30711680d71c5902952f0d763996ce67576`
@@ -195,6 +206,56 @@ capability must ultimately be operational; they are not product completion.
   verifier ceremony, calling a paid provider without an exact cap, activating
   collection/publication/cohorts, mutating production data, or claiming that
   the interim release completes PD1/E10.
+- At 2026-08-11 the founder made **Home, live-meeting controls, and the complete
+  conversation/feed -> agent work -> artifact -> revision/Drive loop** explicit
+  PD1 design priorities. Treat them as one cross-platform interaction system,
+  not separate polish tickets. Home must be a calm, useful re-entry point;
+  video controls must remain obvious under time pressure; and every agent-side
+  work surface must preserve one evolving run identity, human-readable state,
+  rich result preview, governed Open, named Drive save and editable
+  regeneration without internal process/model/tool copy. Continue comparing
+  every relevant state in light and dark appearances against the safely
+  observable native ChatGPT, Slack and Buzz references, adopt principles rather
+  than trade dress, and require rendered normal interaction plus an independent
+  design critic before acceptance. This founder checkpoint adds acceptance
+  depth to PD1 and the AJA matrix; it does not create a second roadmap, move the
+  physical-iPhone reference study ahead of order 10, authorize provider spend,
+  or make the interim release complete.
+
+**Founder-directed STRIDE organization activation.** After the current exact
+interim release is reviewed and live identity/data readback is current, create
+one canonical private organization named **STRIDE** and attach the exact
+verified AJ and Tyler person records as members. Resolve immutable person/user
+IDs and any existing organization/name collision before the write; do not
+guess from display names, create duplicate people, or use the agentic fixture
+as production membership evidence. AJ remains platform owner. This direction
+authorizes the named organization/membership outcome, but execution still
+requires the ordinary exact production backup, data-path, tenant-generation,
+consent, audit-receipt and rollback fence and must not be bundled into an
+unreviewed deploy.
+
+This small administrative activation does not pre-decide the later general
+new-user onboarding, invitation, organization discovery/join or organization
+creation flows. It exists now to prove the intended person-centered graph:
+verified ContributionAttestations and governed Work Records from multiple
+organizations may ladder into AJ's or Tyler's canonical core profile as
+field-level, purpose-bound projections. The profile shows only contribution
+facts the person/controller and source organization are authorized to release,
+with organization attribution, verification tier, evidence/released-field
+manifest, correction/revocation and freshness. It must never expose another
+organization's private work body, confidential membership graph, unreleased
+employer inference or cross-tenant search/contact authority. Correcting,
+revoking, leaving or deleting at the source must rebuild/purge the core-profile
+projection without rewriting the underlying historical truth.
+- At 2026-08-11 the founder additionally required the **current active meeting**
+  to become a live acceptance lane without displacing the serialized PD1 work.
+  Revalidate the serving meeting read-only first: continuous Realtime
+  transcription, bounded interval analysis, current Scout/specialist awareness
+  and question answering, durable memory-backed smart recaps, reconnect/replay
+  and truthful degraded/consent state. Any production correction, restart,
+  provider call or data/config mutation remains a separate exact action-time
+  gate; local source or synthetic transcript tests cannot substitute for the
+  current meeting readback.
 - The pre-release read-only production baseline at 2026-08-11 10:09 PT still
   serves exact release `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, bundle
   `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
@@ -621,7 +682,8 @@ artifacts; they do not edit the product or create competing systems.
 | 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 38-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
 | 1 — complete | **PD0 representative browser prototype and system freeze**, single Product Design owner. The comparative study, ChatGPT Workstream extension, Work presentation lifecycle and fail-closed Work→Network bridge passed independent critics. | exact studies/manifests; 13-journey validator; four synchronized J4 postimages; desktop/430 iPhone/1180 iPad reference captures; screenshot SHA/dimension verifier; Network value withholding; independent critic PASS | complete only for the bounded browser-reference class; no native/product/device/provider/Drive/publication/activation claim |
 | 2 — complete for the local/default-off class | **OpenAI-only conversational work runtime**, one provider/runtime owner. Inventory, function-tool design `c5363c31...`, isolated carrier `7064ee32...`, five-way router `10948ff1...`, complete local provider/model/restart gate `9c83c4b1...` and concrete adapter receipt `20ebacf8...` are independently accepted on exact dirty bytes. `report_goal_state`, `answer_memory_question`, `create_artifact` and `update_artifact` bind to governed product services under the frozen journal; every other tool is unavailable. | exact approved model/effort map; natural text/voice/Scout/direct-agent intent corpus; five server outcomes; exact tool authority/restart/final-use journal; tool-specific pre/post/reconcile/final-use and projection tests; no visible/client tool preselection; no-Anthropic negatives; full Go `515.862s`; 488/488 native tests and typecheck; provider receipts and independent critics | deterministic/providerless paths stay intact; four-tool integration remains default-off; managed custody and live activation remain gated; zero provider calls and zero production mutations in verification; no activation until exact project/cost authority and reviewed release receipts |
-| 3 — in progress; interim release complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and independent critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; and `2186910c...` binds exact live commit `11e3cf2...`, ledger generation 59, verifier agreement, rollback and a read-only rendered dark-mode observation. Resume the remaining every-surface migration without overlapping implementation ownership. The exact resume point is functional VoiceOver, the remaining Dynamic Type spectrum, actual Split View, pointer, Full Keyboard Access, measured runtime performance and physical-device acceptance. Actual deliverables/previews/Drive remain in the provider-backed AJA matrix. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible work-card stages/interventions; every deliverable preview/Drive; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; independent critic | retain live release `11e3cf2...`, rollback `261aced8...` and Build 53; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
+| 3 — in progress; interim release complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and independent critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; and `2186910c...` binds exact live commit `11e3cf2...`, ledger generation 59, verifier agreement, rollback and a read-only rendered dark-mode observation. Resume the remaining every-surface migration without overlapping implementation ownership. The exact resume point is functional VoiceOver, the remaining Dynamic Type spectrum, actual Split View, pointer, Full Keyboard Access and measured runtime performance, followed by the founder-priority Home, live-meeting-control and complete feed/work-card/Open/named-Drive-save/edit-regenerate contracts before physical-device acceptance. Actual provider-backed deliverables/previews/Drive remain in the AJA matrix. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; independent critic | retain live release `11e3cf2...`, rollback `261aced8...` and Build 53; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
+| 3a — next after exact release/readback | **Founder-directed STRIDE organization and cross-org profile proof**, identity/organization authority owner. Resolve the canonical AJ and Tyler people, confirm no organization/name collision, create one private `STRIDE` organization, attach both exact members and prove that governed contributions from multiple organizations project into each person's core profile without cross-tenant body or membership leakage. General onboarding/invite/join UX remains later. | exact pre/post person/org/membership IDs and generations; backup/rollback; consent and audit receipt; active signed ContributionAttestations plus released-field manifests; correction/revocation/leave/delete rebuild and zero-disclosure corpus; desktop/iPhone/iPad profile render and independent critic | production data mutation is limited to the exact named organization/memberships after current readback; no duplicate people, inferred public/shared org, onboarding policy, search/contact activation or private-source copying |
 | 4 — next | **PI0-A baseline and installation design**, instrumentation owner; no collection. | signed baseline, event/schema/source digests, off/no-byte parity, privacy/export/purge/restore tests, critic | collection and emitters remain off; remove candidate installation without touching source data |
 | 5 — next | **PN1 safe projections default off**, PN authority owner after PD0+PI0-A. | migrations/PG, current-authority/CAS/ACL, purge/rebuild/restore, fixture render and critic; every PN switch false | drop candidate projections through governed rollback; private W4 remains authority |
 | 6 — later | **W5/W6 external services and qualification**, custody and qualification owners. | managed services/keys/high-water/purge, durable current consent, five profiles/two reviewers, signed product/privacy/legal policy, current health/rollback | keep MyMind/publication/search/contact/provider switches off; exact service/key rollback |
@@ -724,7 +786,14 @@ founder connects the phone at the end.
   coexistence, accessibility focus/isolation and virtualized-list/shared-clock
   architecture. Receipt `e4fb1548...` accepts the redesigned one-rail desktop
   shell, quiet header, governed name-only organization chooser, labeled utility
-  group, responsive keyboard semantics and light/dark render parity. The exact
+  group, responsive keyboard semantics and light/dark render parity. Receipt
+  `351a32e0...` now accepts the bounded desktop ordinary-message and thread
+  interaction at 1024/1280/1728 in light and dark: long prose retains the exact
+  ordinary-user message skin and identity, rendered overflow exposes a settled
+  high-contrast Show more/less control, the full parent remains visible while
+  eighteen replies scroll independently, one reply composer owns the active
+  surface, and the redundant private-brain footer is absent. It does not accept
+  native threads, the remaining PD1 surfaces or the whole ledger. The exact
   interim release is complete in receipt `2186910c...`: reviewed commit
   `11e3cf2...` is pushed to the working branch and main, serves from the exact
   clean archive at ledger generation 59, returns `verified-local-unsigned`, and
@@ -732,9 +801,28 @@ founder connects the phone at the end.
   and a read-only authenticated dark-mode render. `stride-site/` remained
   excluded, and no production message/work/settings, provider probe, data,
   collection, publication, cohort or managed-key mutation was performed. The
-  exact next ready action is to resume functional VoiceOver, the remaining Dynamic Type spectrum,
-  actual Split View, pointer, Full Keyboard Access, measured runtime performance
-  and physical-device acceptance. The native reference study is honestly partial:
+  exact next ready action is to resume functional VoiceOver, the remaining
+  Dynamic Type spectrum, actual Split View, pointer, Full Keyboard Access and
+  measured runtime performance, then serialize the founder-priority Home,
+  live-meeting-control and complete feed-to-artifact interaction contracts
+  above through the remaining PD1 surfaces before physical-device acceptance.
+  The current active-meeting readback is separately body-minimized in receipt
+  `651d660c...`: serving release `11e3cf2...` has healthy connected OpenAI
+  transcription and fresh 300-second brain/decision/mission analysis for the
+  seven-person office sitting, but the gate is **PARTIAL RED**. Room Scout and
+  room voice are disconnected/degraded, no current grounded Scout/specialist
+  Q&A receipt exists, the room-specific recap projection is missing, and the
+  cumulative meeting-digest worker is disabled/unregistered with 51 dead-letter
+  records. Preserve the healthy live capture; next diagnose and locally repair
+  those exact awareness/recap/recovery failures, then require a reviewed exact
+  release plus current-meeting readback before activation. Do not call the
+  generic fresh brain capability a visible smart recap. The exact next ready
+  action at this checkpoint is to commit and push the reviewed current candidate
+  excluding `stride-site/`, activate its clean archive through the retained
+  rollback release, require ledger/image/Caddy/health/readiness/verifier
+  agreement, record the live receipt, then resume the remaining PD1 and meeting
+  acceptance queues without treating this bounded release as completion.
+  The native reference study is honestly partial:
   Buzz is observed, while native ChatGPT and Slack remain at the smallest
   inspection gates recorded in `2d030367...`; do not pause other ready PD1 work
   or guess their behavior. In parallel only where file ownership is disjoint,
@@ -745,9 +833,11 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next:** complete the remaining every-surface rendered PD1 journeys and the
-  functional/device accessibility and measured-performance matrix, finish the PI0-A baseline, then build and
-  gate PN1 default-off authority. Actual editable-PPTX presentation acceptance
+- **Next:** complete the remaining every-surface rendered PD1 journeys,
+  including Home, live meeting controls and the complete work-card/Open/Save
+  to Drive/edit-regenerate loop, plus the functional/device accessibility and
+  measured-performance matrix; finish the PI0-A baseline, then build and gate
+  PN1 default-off authority. Actual editable-PPTX presentation acceptance
   stays in the later AJA deliverable/device matrix after exact provider budget
   and release authority are available.
 - **Later:** install/qualify W5-W6 external services, complete the real AJA
@@ -1053,6 +1143,236 @@ Platform-native expression:
   keyboard/focus/shortcuts, pointer/hover/context menus, drag/drop, native
   share/files, safe areas, connect/disconnect/resume, and no stretched phone
   cards, gratuitous whitespace, or web fallback.
+
+#### Founder-priority PD1 interaction contracts
+
+These journeys share one semantic state model and one Product Design owner.
+Desktop, iPhone and iPad may compose them differently, but no platform may
+invent a separate work lifecycle, omit governed actions, expose internal
+runtime vocabulary or strand the user outside the source conversation.
+
+**Home is a re-entry surface, not a dashboard grid.** Its hierarchy is:
+
+1. one immediate voice/text entry into ordinary conversation, with no tool or
+   deliverable picker;
+2. the most recent meaningful conversation and exact continuation point;
+3. a small prioritized **Needs you** area for approvals, clarifications,
+   failures or completed work awaiting review; and
+4. bounded current context such as the next meeting and active work, only when
+   it changes the user's next action.
+
+Home never duplicates the full Work or Network feed, leads with vanity
+analytics, exposes raw agent queues, or turns every available feature into a
+tile. Empty, offline, revoked, loading and all-clear states remain intentional
+and useful. Desktop may use quiet simultaneous context, iPhone stays
+one-handed and progressive, and iPad uses additional space only for persistent
+continuity or detail—not stretched cards or empty ornament. Light and dark
+appearances, Dynamic Type, keyboard/focus, pointer, VoiceOver and reduced
+motion preserve the same priority and action labels.
+
+When useful context exists, Home may offer at most four **editable
+conversation starters**, never four product modes or tool/deliverable pickers.
+The stable semantic set is **Continue** (resume the exact recent thread,
+meeting or workstream), **Explore** (understand/research), **Create** (make the
+contextually relevant artifact) and **Challenge** (Grill/red-team/rehearse).
+The visible sentence is personalized to current authorized context, such as
+“Challenge the Country Golf deck like an investor”; selecting it only seeds
+the ordinary composer and leaves the text editable. It does not launch work or
+select a provider, model, effort, tool, authority or output contract. A
+consequential “deploy/ship” suggestion may appear only when a reviewed release
+actually makes it relevant and still routes to exact approval; Deploy is not a
+permanent Home category.
+
+Starter acceptance is zero-effect until the ordinary composer is explicitly
+submitted. Selecting, editing, clearing or canceling a starter, reloading Home,
+or losing the referenced context through revocation must create zero WorkRun,
+provider call, project mutation, approval record or authority expansion. The
+seeded text remains fully editable and a revoked-context reload removes the
+private suggestion rather than retaining stale names or previews.
+
+Project association is server-owned context, not a client routing dial. STRIDE
+may smart-link work to an existing verified project such as Ball Dogs or
+Country Golf when the current authorized conversation, attachment/reply
+ancestry and work graph produce one high-confidence match. The proposed
+project appears as a removable/correctable chip on the turn and evolving work
+card, retains the evidence and classifier revision that produced it, and a
+correction propagates through the governed work graph. Ambiguous matches
+clarify once. No match leaves private work unlinked and may offer **Create
+private project**; an inferred candidate never silently becomes a canonical,
+shared or public project.
+
+The project-link classifier ships with a frozen revision, calibrated confidence
+threshold and labeled multi-project/adversarial corpus. Acceptance requires
+zero unauthorized project-name disclosure, zero silent shared/public linking,
+deterministic clarify-once behavior below the one-project threshold, and exact
+remove/correct propagation through restart, stale-evidence and ACL-revocation
+cases. The receipt records the considered evidence classes and classifier
+revision without exposing private source bodies.
+
+**Live-meeting controls are a pressure-tested control surface.** The primary
+dock keeps microphone, camera, speaker/route where applicable, share and Leave
+recognizable and reachable; Leave is visually and spatially separated from
+reversible toggles. Participants, chat, captions/transcript, reactions,
+settings and other secondary actions remain one predictable reveal away rather
+than permanently crowding the video. Recording/listening/consent, degraded
+media, screen-share ownership and Scout/specialist engagement are persistent
+truth states, not transient toast copy. Human, Scout and specialist presence,
+speaking and removal controls are unmistakably different. Controls may recede
+during passive viewing but reappear on touch, pointer movement or keyboard
+focus without moving targets; labels, tooltips, focus order, 44-point touch
+areas, hardware-keyboard equivalents, VoiceOver actions, reduced motion,
+orientation, Picture in Picture, background/resume and interruption are
+acceptance requirements. Meeting-chat Suggested Work and artifacts reuse the
+same governed feed grammar below.
+
+The compact control composition is frozen as one content-hugging, stable-order
+island: **Mic · Camera · Route · Share · More | Leave**. Route may use an
+honest platform-native picker/handoff, unsupported Share remains visible and
+truthful, and Leave is spatially and visually separated. Receding changes
+emphasis without moving targets; one mutually exclusive surface owner governs
+More, Meeting, People, Agents, Route, Consent and Settings. Recording, chat,
+invite, Scout, recap/transcript and board actions live in grouped secondary
+surfaces, never duplicate the primary dock. Rendered acceptance measures stage
+occlusion, safe-area/keyboard/inspector collision, fixed-target recovery and
+non-stretched iPad geometry.
+
+**The live intelligence loop is part of the meeting, not a later batch job.**
+For the current active meeting and every accepted successor, transcript
+segments retain exact room, sitting, speaker, source and sequence identity;
+reconnect or duplicate delivery cannot reorder, omit or double-apply them.
+Bounded interval analysis advances only over a verified contiguous transcript
+high-water and produces attributable themes, decisions, questions, risks,
+action candidates and disagreement without presenting an inference as a
+quote. Scout and every admitted specialist may answer only from the currently
+authorized transcript/context window plus governed company memory, must cite
+or describe that grounding in human terms, and must report unavailable rather
+than invent awareness. Smart recaps remain visible in the meeting and durable
+memory after restart, merge interval updates into one evolving recap, preserve
+corrections/deletions/audience, and expose decisions, actions, owners,
+unresolved questions and source links. Acceptance requires current live
+readback plus restart/reconnect, delayed/out-of-order/duplicate segment,
+revoked-consent, agent-join/leave and post-meeting replay tests; synthetic
+fixtures alone remain insufficient.
+
+**Agent work has one conversation-to-result spine.** A natural-language turn
+may answer, clarify, start private work, hold for exact approval or report
+unavailable. When work starts, the source conversation receives one compact
+card whose immutable run identity evolves through human phases, intervention
+and completion; progress copy is allowlisted human language and never a model,
+effort, tool, template, run ID, artifact ID or process dump. The feed card shows
+only what helps the next decision: named worker/provenance, family, phase,
+bounded progress, intervention or failure, result title/preview and next
+action. Side inspectors, sheets, notifications and Work views are projections
+of that same run rather than new cards.
+
+**Message length never changes message type.** Ordinary conversation remains
+an ordinary message regardless of character count or visual height; “letter,”
+“memo,” “document” and other artifact treatments appear only when the person
+explicitly creates or attaches that type. Long ordinary prose uses a quiet
+line-measured **Show more / Show less** expansion in the feed, preserving the
+original typography and reply context. On desktop, **Reply**, the reply count
+or an explicit Open thread action selects the right thread inspector with the
+full parent pinned, ordered replies and one composer; closing restores focus to
+the exact source message. iPhone uses a native sheet/full-screen thread and
+iPad uses the appropriate inspector, while inline reading may still expand
+without forced navigation. Truncation must respect Dynamic Type, keyboard and
+VoiceOver; it cannot rely on a raw character threshold, hide attachments or
+mentions, invent a content label, or create a second message identity.
+
+At completion, the same card becomes a result surface with format-appropriate
+rich preview: paginated documents/PDFs, native slide thumbnails plus notes and
+citations, image/design canvas, workbook sheets/charts/formulas, data
+visualization, mixed-package inventory, meeting/action record or code/handoff.
+**Open** preserves return-to-conversation context and uses a desktop/iPad
+inspector or workspace and an iPhone full-screen native viewer as appropriate;
+raw JSON, server paths and download-only dead ends fail acceptance.
+
+The desktop/iPad right-side inspector is contextual and absent or collapsed
+when nothing merits inspection. For the selected immutable run it may show
+human-readable phase/progress, “Needs you” intervention, rich live/final
+preview, source/citation treatment, revision lineage, governed provenance and
+the smallest relevant actions: **Open**, **Save to Drive**, **Regenerate/edit**
+and an overflow for secondary actions. It never becomes a second feed, an
+empty permanent column or a dump of model, reasoning, tool, template, run ID,
+artifact path or internal workflow. iPhone expresses the same information in
+detents/full-screen viewers with preserved source-conversation return, not a
+compressed desktop sidebar.
+
+Inspector ownership is deterministic. Opening a work card selects its immutable
+run; unrelated progress never steals focus; updates to that run preserve the
+selection; closing restores focus to the exact source card; and revocation
+purges the selected title, preview and actions immediately. The desktop/iPad
+breakpoint, resize behavior and compact-width sheet fallback are frozen in the
+platform parity ledger rather than inferred from viewport CSS.
+
+**Save to Drive** is a direct governed action, not a hidden export workflow. It
+opens a focused destination sheet with a human filename prefilled from the
+result title, permits rename and recent/folder choice, preserves extension and
+revision semantics, then shows an idempotent saved receipt with **Open in
+Drive**. Capability-off, stale authority, conflict, offline and failed states
+remain truthful and retryable without duplicating files. A save never changes
+audience, publishes, or silently grants access.
+
+**Edit and regenerate** starts from the exact accepted prompt, attachments,
+reply ancestry and source revisions in a normal editable composer. The user may
+change the name, instructions or bounded inputs, compare what will be retained,
+and submit one new revision. The prior artifact stays available; the work
+lineage and card identity remain stable; late/lost responses cannot overwrite a
+newer revision; and a material audience, external-send, publication, deletion,
+production or spend change requires its own exact approval. Regeneration never
+reopens a tool/template/model picker and never replaces an artifact with a
+second unexplained work card.
+
+The acceptance matrix exercises these three contracts through short and long
+content, concurrent work, attachments/reply context, interruption, restart,
+lost response, offline/reconnect, stale/revoked authority, success and failure
+on desktop web, native iPhone and native iPad in light and dark appearances.
+Normal interaction, accessibility trees/focus, screenshots/video, artifact and
+Drive receipts, latency/render/list measurements, source/race/full suites and
+an independent design critic are controlling. A beautiful static screenshot,
+source marker or providerless placeholder does not close the matrix.
+
+Whole-product minimalism is an acceptance inventory, not a styling preference.
+Every visible element on each tested surface must map to its primary user task
+or a required truth/governance state. Duplicate actions, decorative empty
+panels, redundant status copy, competing composers, internal runtime labels and
+utility chrome that belongs in another surface are recorded as failures in
+light and dark appearance, not waived as harmless decoration.
+
+The final seven-tester production matrix must run on the exact serving release,
+not only the Agentic Lab fixture. It combines each starter/family with relevant
+project context, meeting transcript/recap, attachments and reply ancestry,
+voice/dictation, revision, restart/lost response, approval and Drive/open flows;
+captures the actual provider/model/reasoning/tool receipts; and verifies that
+the server-owned founder matrix—not a client, legacy assignment or model
+output—selected them. A maintained blind expert rubric compares representative
+STRIDE outputs and interaction journeys with the strongest safely obtainable
+current reference products for research, presentation, image/design,
+financial-model, document, site/build and adversarial-review work. PASS requires
+substantive output quality, editability, grounding, visual coherence, latency,
+continuity and governance at least at the frozen reference bar and a documented
+STRIDE advantage; “the route returned 200”, self-scoring or a generic model
+answer is not competitive-product acceptance. Exact paid-provider project and
+cost caps remain action-time gates for this production matrix.
+
+Before those comparative runs, freeze a benchmark manifest with reference
+product/app/version and observation date, an authority-safe task corpus, sample
+size, blinded judge composition, family-specific dimensions and objective
+integrity checks, per-dimension floors, latency/task-completion thresholds,
+tie-break and requalification cadence. Research, presentations, image/design,
+spreadsheets/financial models, documents, sites/builds and Challenge each need
+their own rubric plus cross-family continuity/governance checks; no aggregate
+score may hide a failing grounding, editability, visual, safety or completion
+dimension.
+
+The platform parity ledger is instantiated—not merely templated—with rows for
+Home continuity, all four starters, project chip/correction, meeting dock and
+truth rail, work-card lifecycle, inspector/viewer, rich Open, Save to Drive and
+edit/regenerate on desktop, iPhone and iPad. Every row records
+`equivalent_capability`, `intentional_platform_expression` or
+`explicitly_deferred`, with physical-device, VoiceOver, background/resume,
+Files/share-sheet, Split View/Stage Manager, pointer and hardware-keyboard
+evidence cells where applicable.
 
 #### Unified system and representative prototype gate
 

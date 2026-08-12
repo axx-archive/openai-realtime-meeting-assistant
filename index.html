@@ -738,46 +738,12 @@
         color: var(--text-1);
         box-shadow: none;
       }
-      /* "you are here" — a 2px ink hairline inset on the active tool's left
-         edge; reads at a glance and is monochrome (color = state, not chrome).
-         Scoped to nav tools ([data-tool]); the theme toggle also carries
-         aria-pressed (dark active) and must NOT wear the you-are-here mark. */
-      .tool-rail__tool[data-tool][aria-pressed="true"]::after {
-        content: "";
-        position: absolute;
-        left: 3px;
-        top: 50%;
-        translate: 0 -50%;
-        width: 2px;
-        height: 16px;
-        border-radius: var(--r-full);
-        background: var(--accent);
-        pointer-events: none;
-      }
       .tool-rail__tool[disabled] {
         opacity: 0.4;
         cursor: not-allowed;
         transform: none;
       }
 
-      /* live dot — the room is live while you're in it */
-      .tool-rail__live {
-        position: absolute;
-        top: 1px;
-        left: auto;
-        right: 3px;
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--live);
-        border: 2px solid var(--bg-app);
-        opacity: 0;
-        transition: opacity var(--dur-med) var(--ease);
-        pointer-events: none;
-      }
-      #appShell.is-in-room .tool-rail__live {
-        opacity: 1;
-      }
 
       /* room-chat unread count on the room rail icon — visible from any tool */
       .tool-rail__unread {
@@ -10593,8 +10559,8 @@
         display: none;
       }
       /* a burst from the same voice reads as one turn — the SenderMark heads
-         the first bubble only (letters always name their author, so they keep it) */
-      .scout-chat-msg.is-followup:not(.scout-chat-msg--longform) .scout-chat-msg__idrow {
+         the first bubble only, regardless of rendered message height. */
+      .scout-chat-msg.is-followup .scout-chat-msg__idrow {
         display: none;
       }
 
@@ -10731,23 +10697,9 @@
 	  }
 	  .governed-work-viewer__error { color: var(--danger); }
 
-      /* sheet §3 letters: past ~400 chars a bubble stops being a bubble — it
-         becomes a letter card on the feed measure with an identity header
-         ("scout · 22:42") and a clamped body
-         behind "read the full letter" */
-      #chatTool .scout-chat-msg--longform {
-        max-width: min(var(--feed-measure), 92%) !important;
-        /* letters sit on the feed spine like every card — authorship stays
-           legible via the identity header, and the feed stops zigzagging
-           left-right as you scroll */
-        align-self: center;
-        justify-content: center;
-      }
-      .scout-chat-msg--longform .scout-chat-msg__stack {
-        flex: 1;
-        min-width: 0;
-      }
-      /* the letter card's identity header row (sheet 3a) */
+      /* Long ordinary prose keeps the exact geometry and skin of its author.
+         Rendered height adds only the quiet Show more control below it. */
+      /* Shared sender identity header row. */
       .scout-chat-msg__idrow {
         align-self: stretch;
         display: flex;
@@ -10755,10 +10707,7 @@
         gap: 9px;
         margin-bottom: 6px; /* + the stack's 4px gap = the sheet's 10px */
       }
-      /* SenderMark — the ONE agent identity chip shared by a short Scout bubble
-         and a longform letter: 22px surface-3 square, flame in the ignition
-         ember, name (label-lg ink) · model (label text-3) · time (numeric,
-         right). A person's letter reuses the row with monochrome initials. */
+      /* SenderMark — the ONE agent identity chip shared by Scout messages. */
       .scout-chat-msg__idbadge {
         display: inline-flex;
         width: 22px;
@@ -10804,9 +10753,9 @@
         flex: none;
       }
       /* the clamp + its expander — wired, not decorative */
-      .scout-chat-msg--longform .scout-chat-text.is-clamped {
+      .scout-chat-text.is-clamped {
         display: -webkit-box;
-        -webkit-line-clamp: 4;
+        -webkit-line-clamp: 8;
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
@@ -10814,17 +10763,40 @@
         order: 2;
         align-self: flex-start;
         margin-top: 10px;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
+        padding: 0 12px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font: 600 12px/1 var(--font-sans);
+        letter-spacing: 0;
+        color: var(--text-1);
         white-space: nowrap;
         cursor: pointer;
-        transition: color var(--dur-fast) var(--ease);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        transition-property: color, background-color, border-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
-      .scout-chat-msg__expand:hover { color: var(--text-1); }
+      .scout-chat-msg__expand::after {
+        content: "\2193";
+        font: 650 12px/1 var(--font-sans);
+      }
+      .scout-chat-msg__expand[aria-expanded="true"]::after { content: "\2191"; }
+      .scout-chat-msg--user .scout-chat-msg__expand { align-self: flex-end; }
+      .scout-chat-msg__expand:hover {
+        color: var(--text-1);
+        border-color: var(--text-3);
+        background: var(--surface-3);
+      }
+      .scout-chat-msg__expand:focus-visible {
+        color: var(--text-1);
+        outline: 2px solid var(--focus);
+        outline-offset: 4px;
+        border-radius: var(--r-sm);
+      }
 
       /* card 073 — delete your own misplaced message. The control speaks in
          the attribution's quiet mono voice and stays invisible until the
@@ -11139,28 +11111,6 @@
 
       @media (prefers-reduced-motion: reduce) {
         .scout-chat-reply-state__pulse { animation: none; }
-      }
-
-      /* sheet §3 letter card — after the bubble variants so it wins */
-      .scout-chat-msg--longform .scout-chat-text {
-        align-self: stretch;
-        background: var(--surface-2);
-        color: var(--text-1);
-        border: 0;
-        border-radius: 0;
-        padding: 0;
-        font: var(--type-body-longform);
-        letter-spacing: var(--track-text);
-        box-shadow: none;
-      }
-      /* the card chrome rides the stack so header/body/expander share it — a
-         letter is a card, so it lifts to surface-2 (never dimmer than a bubble)
-         and signals authorship through the SenderMark, not an edge stripe */
-      .scout-chat-msg--longform .scout-chat-msg__stack {
-        border: 1px solid var(--line-1);
-        background: var(--surface-2);
-        border-radius: var(--r-lg);
-        padding: 16px 20px 15px;
       }
 
       /* kit: file-attachment chips above a user message bubble */
@@ -12196,23 +12146,6 @@
         display: none;
       }
 
-      /* the privacy caveat under the private composer — "private" means hidden
-         from teammates, not from the system: the thread stays OUT of the company
-         brain (the "Feed the brain" chip is the only opt-in door). Channels hide
-         it (they're public anyway). */
-      .scout-chat-brain-note {
-        flex: none;
-        margin: -6px 16px 12px;
-        text-align: center;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
-      }
-
-      .scout-chat-brain-note[hidden] {
-        display: none;
-      }
-
       /* design composer container: 12px 16px 14px around the pill */
       .chat-conversation .scout-chat-form {
         margin: 12px 16px 14px;
@@ -12400,6 +12333,27 @@
           overscroll-behavior: contain;
           padding: 18px;
           scrollbar-gutter: stable;
+        }
+
+        #chatTool .chat-context-rail__parent {
+          flex: none;
+          max-height: min(42vh, 360px);
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          padding: 18px 18px 16px;
+          background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+          box-shadow: 0 1px 0 var(--line-1);
+          scrollbar-gutter: stable;
+        }
+
+        #chatTool .chat-context-rail__parent[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-context-rail__parent .chat-context-card--message[data-root="true"] {
+          margin: 0;
+          padding: 0;
+          box-shadow: none;
         }
 
         #chatTool .chat-context-card,
@@ -13269,7 +13223,6 @@
           max-width: var(--desktop-chat-media-measure);
         }
 
-        #chatTool .scout-chat-msg--longform,
         #chatTool .scout-chat-research,
         #chatTool .runlog,
         #chatTool .manifest-card,
@@ -13312,6 +13265,19 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
+        }
+
+        /* A message thread owns the active reply composer. Retaining the
+           channel/private composer beneath it created two competing input
+           targets and collapsed the center pane at laptop widths. */
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatDestination,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutFollowUpTarget,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatPendingFiles,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutMentionPopover,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutDeliverablesPopover,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatForm,
+        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatHint {
+          display: none;
         }
 
 	        #chatTool .scout-starter,
@@ -14155,8 +14121,7 @@
         #chatTool .scout-chat-pending-files,
         #chatTool .chat-work-indicator,
         #chatTool .scout-chat-form,
-        #chatTool .scout-chat-hint,
-        #chatTool .scout-chat-brain-note {
+        #chatTool .scout-chat-hint {
           width: calc(100% - (var(--desktop-chat-gutter) * 2));
           max-width: none;
           margin-left: auto;
@@ -14731,6 +14696,35 @@
 	    }
 	  }
 
+      /* With a contextual thread/activity inspector open, the active
+         conversation outranks the channel list on compact and ordinary
+         desktop widths. Wide canvases retain the full three-pane workspace. */
+      @media (min-width: 861px) and (max-width: 1599px) {
+        #chatTool:has(#chatContextRail:not([hidden])) .chat-threads,
+        #chatTool:has(#chatContextRail:not([hidden])) .chat-workspace-resizer--threads {
+          display: none;
+        }
+      }
+
+      /* At compact desktop widths the thread already carries the complete
+         parent message, its replies, and its composer. Give that interaction
+         the canvas instead of laying it over a visibly sliced conversation. */
+      @media (min-width: 861px) and (max-width: 1099px) {
+        #chatTool:has(#chatContextRail:not([hidden])) .chat-conversation {
+          display: none;
+        }
+
+        #chatTool:has(#chatContextRail:not([hidden])) .chat-context-rail {
+          position: relative;
+          inset: auto;
+          z-index: auto;
+          flex: 1 1 auto;
+          width: auto;
+          max-width: none;
+          box-shadow: none;
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) and (min-width: 861px) {
         #chatTool .desktop-chat-actions,
         #chatTool .desktop-chat-link-preview,
@@ -14845,6 +14839,135 @@
         transform: scale(var(--press-scale));
       }
 
+      .room-meeting-tabs {
+        flex: none;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px;
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+      }
+
+      .room-meeting-tab {
+        min-height: 40px;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-button);
+        cursor: pointer;
+      }
+
+      .room-meeting-tab.is-selected {
+        background: var(--surface-1);
+        color: var(--text-1);
+        box-shadow: var(--shadow-mark);
+      }
+
+      .room-meeting-view {
+        min-height: 0;
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .room-meeting-view[hidden] {
+        display: none;
+      }
+
+      .room-meeting-chat {
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .room-meeting-status,
+      .room-meeting-empty {
+        padding: var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+      }
+
+      .room-meeting-status__line {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+      }
+
+      .room-meeting-status__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      .room-meeting-status.is-catching-up .room-meeting-status__dot,
+      .room-meeting-status.is-paused .room-meeting-status__dot {
+        background: var(--warn);
+      }
+
+      .room-meeting-status__coverage,
+      .room-meeting-fact__meta,
+      .room-meeting-empty p {
+        margin: 4px 0 0;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
+      .room-meeting-recap,
+      .room-meeting-transcript {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-4);
+        padding: var(--sp-2) 4px var(--sp-5);
+      }
+
+      .room-meeting-recap__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+      }
+
+      .room-meeting-section {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .room-meeting-section h3 {
+        margin: 0;
+        color: var(--accent);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .room-meeting-fact,
+      .room-meeting-transcript__entry {
+        padding: var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+      }
+
+      .room-meeting-fact p,
+      .room-meeting-transcript__entry p {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body);
+      }
+
+      .room-meeting-transcript__meta {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        margin-bottom: 5px;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
       .room-chat__thread {
         padding: 14px 4px;
       }
@@ -14872,25 +14995,188 @@
         border-color: color-mix(in srgb, var(--danger) 42%, var(--line-1));
       }
 
-      /* close-the-loop delivery: a finished-artifact message carries a glass
-         chip that opens the report in the intel library */
-      .room-chat-artifact-chip {
-        align-self: flex-start;
+      /* A room-launched agent run is one evolving work object, not a chat
+         bubble plus a tiny attachment pill. Its whole surface opens the live
+         activity or deliverable; status and progress remain truthful. */
+      .scout-chat-msg.room-chat-msg--work {
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .room-chat-work-card {
+        width: 100%;
+        min-height: 132px;
+        display: grid;
+        gap: 10px;
+        padding: 15px;
+        border: 0;
+        border-radius: 18px;
+        background:
+          radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--ember) 9%, transparent), transparent 48%),
+          var(--surface-2);
+        color: var(--text-1);
+        text-align: left;
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.07),
+          0 1px 2px -1px rgba(0, 0, 0, 0.07),
+          0 8px 24px rgba(0, 0, 0, 0.06);
+        cursor: pointer;
+        transition-property: box-shadow, transform, background-color;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      [data-theme="dark"] .room-chat-work-card {
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09);
+      }
+
+      .room-chat-work-card:hover {
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.08),
+          0 12px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      [data-theme="dark"] .room-chat-work-card:hover {
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+      }
+
+      .room-chat-work-card:active {
+        transform: scale(0.96);
+      }
+
+      .room-chat-work-card__head,
+      .room-chat-work-card__foot {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .room-chat-work-card__family,
+      .room-chat-work-card__status,
+      .room-chat-work-card__meta,
+      .room-chat-work-card__open,
+      .room-chat-work-card__progress-copy {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .room-chat-work-card__family {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-2);
+        text-overflow: ellipsis;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .room-chat-work-card__status {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-2);
+      }
+
+      .room-chat-work-card__status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ember);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 12%, transparent);
+      }
+
+      .room-chat-work-card[data-status="complete"] .room-chat-work-card__status-dot {
+        background: var(--success);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 12%, transparent);
+      }
+
+      .room-chat-work-card:is([data-status="needs_attention"], [data-status="approval_required"]) .room-chat-work-card__status-dot {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 12%, transparent);
+      }
+
+      .room-chat-work-card__title {
+        margin: 0;
+        color: var(--text-1);
+        font: 650 15px/1.35 var(--font-sans);
+        text-wrap: balance;
+      }
+
+      .room-chat-work-card__detail {
+        margin: -3px 0 0;
+        color: var(--text-2);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+
+      .room-chat-work-card__progress {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .room-chat-work-card__track {
+        height: 3px;
+        overflow: hidden;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--text-3) 15%, transparent);
+      }
+
+      .room-chat-work-card__fill {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--ember);
+      }
+
+      .room-chat-work-card__progress-copy,
+      .room-chat-work-card__meta {
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .room-chat-work-card__open {
+        flex: none;
+        min-height: 40px;
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        min-height: 32px;
+        margin: -8px -8px -8px 0;
+        padding: 0 8px 0 12px;
+        color: var(--ember-text);
+      }
+
+      .room-chat-work-card__arrow {
+        display: inline-block;
+        transform: translateY(-1px);
+      }
+
+      /* Historical completion rows carried only artifactId. Keep their
+         doorway usable while new runs use the richer work card above. */
+      .room-chat-artifact-chip {
+        align-self: flex-start;
+        min-height: 40px;
         max-width: 100%;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
         margin-top: 6px;
-        padding: 0 11px;
-        border: 1px solid var(--line-1);
+        padding: 0 13px;
+        border: 0;
         border-radius: var(--r-full);
         background: var(--surface-3);
         color: var(--text-2);
+        box-shadow: 0 0 0 1px var(--line-1);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         cursor: pointer;
-        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        transition-property: box-shadow, color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
 
       .room-chat-artifact-chip__title {
@@ -14900,12 +15186,12 @@
       }
 
       .room-chat-artifact-chip:hover {
-        background: var(--surface-2);
         color: var(--text-1);
+        box-shadow: 0 0 0 1px var(--line-2);
       }
 
       .room-chat-artifact-chip:active {
-        transform: scale(var(--press-scale));
+        transform: scale(0.96);
       }
 
       /* peer bubble — another participant: surface fill, left-aligned */
@@ -24116,18 +24402,6 @@
           color: var(--on-accent);
           box-shadow: none;
         }
-        /* the horizontal dock lets the filled accent circle carry active; the
-           vertical you-are-here hairline reads awkwardly on its left flank */
-        .tool-rail__tool[data-tool][aria-pressed="true"]::after {
-          display: none;
-        }
-
-        .tool-rail__live {
-          top: 4px;
-          left: 31px;
-          border-color: var(--glass-chrome);
-        }
-
         .stage-segmented button {
           padding: 0 10px;
         }
@@ -28469,14 +28743,6 @@
         border-color: var(--line-1);
         color: var(--text-1);
       }
-      .pd1-primary-nav__item[aria-current="page"]::before {
-        content: '';
-        position: absolute;
-        inset: 12px auto 12px -5px;
-        width: 2px;
-        border-radius: var(--r-full);
-        background: var(--accent);
-      }
 
       .work-tool-menu {
         position: absolute;
@@ -28509,7 +28775,6 @@
       }
       .work-tool-menu .tool-rail__tool:hover { transform: none; background: var(--surface-3); color: var(--text-1); }
       .work-tool-menu .tool-rail__tool:active { transform: scale(var(--press-scale)); }
-      .work-tool-menu .tool-rail__tool[data-tool][aria-pressed="true"]::after { left: 4px; }
       .work-tool-menu .tool-rail__label {
         position: static;
         translate: none;
@@ -28632,7 +28897,6 @@
         }
         .pd1-primary-nav__item > span,
         .pd1-primary-nav__disclosure { display: none; }
-        .pd1-primary-nav__item[aria-current="page"]::before { display: none; }
         .work-tool-menu {
           position: fixed;
           inset: auto 12px calc(82px + env(safe-area-inset-bottom)) 12px;
@@ -28692,7 +28956,6 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
             <span class="tool-rail__label">meetings</span>
           </button>
-          <span class="tool-rail__live" aria-hidden="true"></span>
           <span id="roomRailUnread" class="tool-rail__unread" aria-hidden="true" hidden>0</span>
         </span>
         <span class="tool-rail__slot">
@@ -28911,7 +29174,6 @@
                     </svg>
                   </span>
                   <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
-                  <span class="office-launch__tap-hint" id="officeLaunchHint">tap to talk to Scout</span>
                 </button>
               </div>
               <form id="homeScoutComposer" class="home-scout-composer" autocomplete="off">
@@ -28929,32 +29191,6 @@
                  + `rooms` office event) — never from another room's
                  participants frames. -->
             <div id="homeLiveNow" class="home-live" hidden></div>
-            <button id="officeBriefCard" class="office-home-card" type="button" aria-haspopup="dialog">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M4 9h16"></path><path d="M8 13h8"></path><path d="M8 16h5"></path></svg>
-              <span class="office-home-card__text">
-                <span class="office-home-card__title">Morning Brief</span>
-                <span class="office-home-card__sub">what moved, what's waiting</span>
-              </span>
-              <span id="officeBriefBadge" class="office-home-card__badge" hidden>0</span>
-              <svg class="office-home-card__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-            </button>
-            <button id="officePortfolioCard" class="office-home-card" type="button" aria-haspopup="dialog">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 5-6"></path></svg>
-              <span class="office-home-card__text">
-                <span class="office-home-card__title">Portfolio Health</span>
-                <span class="office-home-card__sub">the whole book at a glance</span>
-              </span>
-              <svg class="office-home-card__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-            </button>
-            <button id="officeIntelCard" class="office-intel-card" type="button">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>
-              <span class="office-intel-card__text">
-                <span class="office-intel-card__title">Intelligence</span>
-                <span class="office-intel-card__sub">the company brain</span>
-              </span>
-              <svg class="office-intel-card__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-            </button>
-            <p class="office-foot-hint">everything the company does lands here.</p>
           </div>
         </section>
 
@@ -29144,7 +29380,7 @@
           </section>
           <!-- Room chat — everyone in the room; messages persist into meeting
                memory as typed transcript lines (metadata source=room_chat) -->
-          <section id="roomChatPanel" class="room-chat" hidden aria-label="Room chat">
+          <section id="roomChatPanel" class="room-chat" hidden aria-label="Meeting conversation and notes">
             <header class="room-chat__header">
               <div class="room-chat__title">
                 <span class="room-chat__mark" aria-hidden="true">
@@ -29152,27 +29388,36 @@
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                   </svg>
                 </span>
-                <h2>Room chat</h2>
+                <h2>Meeting</h2>
               </div>
               <button id="roomChatClose" class="room-chat__close" type="button" aria-label="Close room chat" title="Close room chat">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
               </button>
             </header>
-            <div id="roomChatThread" class="scout-chat-thread room-chat__thread" role="log" aria-label="Room chat messages">
-              <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
+            <div class="room-meeting-tabs" role="tablist" aria-label="Meeting view">
+              <button id="roomMeetingRecapTab" class="room-meeting-tab" type="button" role="tab" aria-controls="roomMeetingRecap" aria-selected="false">Recap</button>
+              <button id="roomMeetingTranscriptTab" class="room-meeting-tab" type="button" role="tab" aria-controls="roomMeetingTranscript" aria-selected="false">Transcript</button>
+              <button id="roomMeetingChatTab" class="room-meeting-tab is-selected" type="button" role="tab" aria-controls="roomMeetingChat" aria-selected="true">Chat</button>
             </div>
-            <div id="roomChatMentionPopover" class="scout-mention-popover" hidden>
-              <div id="roomChatMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention Scout"></div>
+            <div id="roomMeetingRecap" class="room-meeting-view" role="tabpanel" aria-labelledby="roomMeetingRecapTab" hidden></div>
+            <div id="roomMeetingTranscript" class="room-meeting-view room-meeting-transcript" role="tabpanel" aria-labelledby="roomMeetingTranscriptTab" hidden></div>
+            <div id="roomMeetingChat" class="room-meeting-view room-meeting-chat" role="tabpanel" aria-labelledby="roomMeetingChatTab">
+              <div id="roomChatThread" class="scout-chat-thread room-chat__thread" role="log" aria-label="Room chat messages">
+                <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
+              </div>
+              <div id="roomChatMentionPopover" class="scout-mention-popover" hidden>
+                <div id="roomChatMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention Scout"></div>
+              </div>
+              <form id="roomChatForm" class="scout-chat-form room-chat__form">
+                <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room or @Scout…" aria-label="Message the room or mention Scout" disabled></textarea>
+                <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 19V5"></path>
+                    <path d="m5 12 7-7 7 7"></path>
+                  </svg>
+                </button>
+              </form>
             </div>
-            <form id="roomChatForm" class="scout-chat-form room-chat__form">
-              <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room or @Scout…" aria-label="Message the room or mention Scout" disabled></textarea>
-              <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 19V5"></path>
-                  <path d="m5 12 7-7 7 7"></path>
-                </svg>
-              </button>
-            </form>
           </section>
         </aside>
 
@@ -29517,7 +29762,6 @@
               </button>
             </form>
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
-            <p id="scoutChatBrainNote" class="scout-chat-brain-note">private · not shared with the company brain — use "Feed the brain" to teach the office</p>
           </div>
           <div id="chatContextResize" class="chat-workspace-resizer chat-workspace-resizer--context" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin="360" aria-valuemax="640" aria-valuenow="440" tabindex="0" hidden></div>
           <aside id="chatContextRail" class="chat-context-rail" aria-label="Conversation context" aria-live="polite" tabindex="-1" hidden>
@@ -29531,6 +29775,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
               </button>
             </header>
+            <div id="chatContextParent" class="chat-context-rail__parent" hidden></div>
             <div id="chatContextBody" class="chat-context-rail__body"></div>
             <form id="chatContextReplyForm" class="chat-context-reply" hidden>
               <div id="chatContextMentionPopover" class="scout-mention-popover" hidden>
@@ -31505,6 +31750,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatContextTitle = document.getElementById('chatContextTitle')
 	      const chatContextMeta = document.getElementById('chatContextMeta')
 	      const chatContextClose = document.getElementById('chatContextClose')
+	      const chatContextParent = document.getElementById('chatContextParent')
 	      const chatContextBody = document.getElementById('chatContextBody')
 	      const chatContextReplyForm = document.getElementById('chatContextReplyForm')
 	      const chatContextReplyInput = document.getElementById('chatContextReplyInput')
@@ -31518,7 +31764,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatWorkIndicatorOpen = document.getElementById('chatWorkIndicatorOpen')
 	      const chatWorkIndicatorText = document.getElementById('chatWorkIndicatorText')
 	      const chatWorkIndicatorActions = document.getElementById('chatWorkIndicatorActions')
-	      const scoutChatBrainNote = document.getElementById('scoutChatBrainNote')
       const roomChatPanel = document.getElementById('roomChatPanel')
       const roomChatThread = document.getElementById('roomChatThread')
       const roomChatForm = document.getElementById('roomChatForm')
@@ -31526,6 +31771,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const roomChatSend = document.getElementById('roomChatSend')
       const roomChatMentionPopover = document.getElementById('roomChatMentionPopover')
       const roomChatMentionList = document.getElementById('roomChatMentionList')
+      const roomMeetingRecapTab = document.getElementById('roomMeetingRecapTab')
+      const roomMeetingTranscriptTab = document.getElementById('roomMeetingTranscriptTab')
+      const roomMeetingChatTab = document.getElementById('roomMeetingChatTab')
+      const roomMeetingRecap = document.getElementById('roomMeetingRecap')
+      const roomMeetingTranscript = document.getElementById('roomMeetingTranscript')
+      const roomMeetingChat = document.getElementById('roomMeetingChat')
       const roomChatToggle = document.getElementById('roomChatToggle')
       const roomChatUnread = document.getElementById('roomChatUnread')
       const roomRailUnread = document.getElementById('roomRailUnread')
@@ -31926,6 +32177,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const roomChatMaxNodes = 200
       const roomChatSeenIds = new Set()
       let roomChatUnreadCount = 0
+      let roomMeetingMode = 'chat'
+      let currentMeetingIntelligence = null
+      let roomMeetingTranscriptHistory = []
       const notificationMaxEntries = 100
       let notificationEntries = []
       let codexProposals = []
@@ -33245,6 +33499,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
       roomChatToggle.addEventListener('click', () => setRoomChatOpen(!isRoomChatOpen()))
       roomChatClose.addEventListener('click', () => setRoomChatOpen(false))
+      const roomMeetingTabs = [roomMeetingRecapTab, roomMeetingTranscriptTab, roomMeetingChatTab]
+      roomMeetingTabs.forEach((tab, index) => {
+        const mode = ['recap', 'transcript', 'chat'][index]
+        tab.addEventListener('click', () => setRoomMeetingMode(mode))
+        tab.addEventListener('keydown', event => {
+          let nextIndex = -1
+          if (event.key === 'ArrowRight') nextIndex = (index + 1) % roomMeetingTabs.length
+          if (event.key === 'ArrowLeft') nextIndex = (index + roomMeetingTabs.length - 1) % roomMeetingTabs.length
+          if (event.key === 'Home') nextIndex = 0
+          if (event.key === 'End') nextIndex = roomMeetingTabs.length - 1
+          if (nextIndex < 0) return
+          event.preventDefault()
+          roomMeetingTabs[nextIndex].focus()
+          setRoomMeetingMode(['recap', 'transcript', 'chat'][nextIndex])
+        })
+      })
       notificationBell.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden, notificationBell))
       notificationClose.addEventListener('click', () => setNotificationPanelOpen(false, null, { restoreFocus: true }))
       notificationMarkAll.addEventListener('click', markAllNotificationsRead)
@@ -38631,9 +38901,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const id = String(artifactId || '').trim()
         if (!id) return
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
-        if (!entry && typeof loadArtifacts === 'function' && canUseArtifactLibrary()) {
-          await loadArtifacts()
-          entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
+        if (!entry && canUseArtifactLibrary()) {
+          entry = await fetchArtifactEntryById(id)
         }
         // DD-1: resolve the deck-hero context. The manifest card hands one in
         // (options.deck) so a deck leads with its cover even when the deck
@@ -47843,6 +48112,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function applyMemorySnapshot(data) {
         memoryEntries = Array.isArray(data) ? data : []
         renderMemory()
+        renderMeetingTranscript()
       }
 
       // Board and memory state normally ride the room or office websocket;
@@ -48067,6 +48337,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'participant_track':
           case 'active_speaker':
           case 'meeting':
+          case 'meeting_intelligence_snapshot':
+          case 'meeting_transcript_snapshot':
           case 'memory_transcript':
           case 'room_chat':
           case 'room_closed':
@@ -48099,6 +48371,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'memory_transcript':
             addMemoryEntry(message.data)
+            appendRoomMeetingTranscriptEntry(message.data)
             // Typed room-chat lines land in the transcript timeline too, but a
             // silent typer must not be promoted to active speaker or pulse the
             // ember — those cues are reserved for spoken audio.
@@ -48220,6 +48493,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'meeting':
             handleMeetingRecord(message.data)
+            break
+          case 'meeting_intelligence_snapshot':
+            handleMeetingIntelligenceSnapshot(message.data)
+            break
+          case 'meeting_transcript_snapshot':
+            handleMeetingTranscriptSnapshot(message.data)
             break
           case 'codex_proposal':
             upsertCodexProposal(message.data)
@@ -52906,6 +53185,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // insert it into the window, THEN select. loadArtifacts preserves the
       // selected out-of-window entry across its wholesale refresh.
       const deepLinkArtifactFetchesInFlight = new Set()
+      // One authenticated, exact-id read backs every card-to-stage doorway.
+      // Work cards can arrive ahead of the newest-100 library refresh, so a
+      // list read is not an authority or availability check for the named
+      // artifact. Concurrent card/deep-link opens share the same request and
+      // the returned entry is inserted without changing the user's selection.
+      const artifactEntryFetchesInFlight = new Map()
+      async function fetchArtifactEntryById(id) {
+        const want = String(id || '').trim()
+        if (!want || !authedUser) return null
+        const cached = artifactEntries.find(entry => String(entry?.id || '') === want)
+        if (cached) return cached
+        if (!artifactEntryFetchesInFlight.has(want)) {
+          artifactEntryFetchesInFlight.set(want, (async () => {
+            try {
+              const response = await fetch(`/artifacts?id=${encodeURIComponent(want)}`, { cache: 'no-store' })
+              if (!response.ok) return null
+              const payload = await response.json()
+              const artifact = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+              if (!artifact?.id || String(artifact.id) !== want) return null
+              addArtifactEntry(artifact, { select: false })
+              return artifact
+            } catch {
+              return null
+            } finally {
+              artifactEntryFetchesInFlight.delete(want)
+            }
+          })())
+        }
+        return artifactEntryFetchesInFlight.get(want)
+      }
       // The deep-link whose selection is still owed. A fetch that lands must not
       // steal the selection from a newer user pick (or a newer deep-link) made
       // while it was in flight — so we only select when this is still the active
@@ -52917,17 +53226,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         deepLinkArtifactFetchesInFlight.add(want)
         pendingDeepLinkArtifactId = want
         const selectedAtCall = selectedArtifactId
-        fetch(`/artifacts?id=${encodeURIComponent(want)}`, { cache: 'no-store' })
-          .then(response => response.ok ? response.json() : null)
-          .then(payload => {
-            const artifact = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+        fetchArtifactEntryById(want)
+          .then(artifact => {
             if (!artifact?.id) return
             // Decide before addArtifactEntry (its ensureSelectedArtifact can re-home
             // the selection): this deep-link still owns the selection only while it
             // is the active deep-link and the user hasn't picked a different
             // artifact since the fetch began.
             const stillOwnsSelection = pendingDeepLinkArtifactId === want && selectedArtifactId === selectedAtCall
-            addArtifactEntry(artifact, { select: false })
             if (stillOwnsSelection) {
               selectArtifact(artifact.id)
             }
@@ -55072,6 +55378,418 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // memory (transcript injection) and echoes it back on broadcast, so the
       // sender renders from the same ordering as everyone else.
 
+      function roomMeetingRecord(value) {
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+      }
+
+      function roomMeetingIdentifier(value) {
+        if (typeof value !== 'string') return ''
+        const candidate = value.trim()
+        return candidate && candidate.length <= 512 && !/[\u0000-\u001f\u007f]/u.test(candidate) ? candidate : ''
+      }
+
+      function roomMeetingTimestamp(value) {
+        if (typeof value !== 'string') return ''
+        const candidate = value.trim()
+        return candidate && candidate.length <= 128 && Number.isFinite(Date.parse(candidate)) ? candidate : ''
+      }
+
+      function roomMeetingText(value, max = 500) {
+        if (typeof value !== 'string') return ''
+        return Array.from(value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').replace(/\s+/gu, ' ').trim()).slice(0, max).join('')
+      }
+
+      function parseRoomMeetingFacts(value) {
+        if (!Array.isArray(value) || value.length > 32) return null
+        const facts = []
+        for (const raw of value) {
+          const fact = roomMeetingRecord(raw)
+          const text = roomMeetingText(fact?.text, 1000)
+          if (!fact || !text) return null
+          const owner = roomMeetingText(fact.owner, 160)
+          const status = roomMeetingText(fact.status, 80)
+          const sourceId = roomMeetingIdentifier(fact.sourceId)
+          const at = fact.at == null || fact.at === '' ? '' : roomMeetingTimestamp(fact.at)
+          if (fact.at && !at) return null
+          facts.push({ text, owner, status, sourceId, at })
+        }
+        return facts
+      }
+
+      function parseMeetingIntelligenceSnapshot(payload) {
+        const root = roomMeetingRecord(payload)
+        const transcript = roomMeetingRecord(root?.transcript)
+        const notes = roomMeetingRecord(root?.notes)
+        const scout = roomMeetingRecord(root?.scout)
+        if (!root || root.contract !== 'meeting-intelligence-v1' || !transcript || !notes || !scout) return null
+        const roomId = roomMeetingIdentifier(root.roomId)
+        const meetingId = roomMeetingIdentifier(root.meetingId)
+        const revision = roomMeetingIdentifier(root.revision)
+        const generatedAt = roomMeetingTimestamp(root.generatedAt)
+        const transcriptStates = ['listening', 'transcript_paused', 'not_listening']
+        const noteStates = ['current', 'catching_up']
+        const coverageStates = ['full', 'partial_late_start', 'partial_gaps', 'partial_synthesis', 'unknown']
+        const scoutStates = ['ready', 'listening', 'answering', 'not_caught_up', 'unavailable']
+        const captureHighWater = transcript.captureHighWater
+        const segmentCount = transcript.segmentCount
+        const analysisCaptureHighWater = notes.analysisCaptureHighWater
+        const sourceCount = scout.sourceCount
+        if (!roomId || !meetingId || !revision || !generatedAt
+            || !transcriptStates.includes(transcript.state)
+            || !Number.isSafeInteger(captureHighWater) || captureHighWater < 0
+            || !Number.isSafeInteger(segmentCount) || segmentCount < 0 || segmentCount > 1000000
+            || !Number.isSafeInteger(analysisCaptureHighWater) || analysisCaptureHighWater < 0
+            || typeof transcript.sequenceComplete !== 'boolean'
+            || !noteStates.includes(notes.state) || !coverageStates.includes(notes.coverage)
+            || !scoutStates.includes(scout.state)
+            || !Number.isSafeInteger(sourceCount) || sourceCount < 0 || sourceCount > 10000) return null
+
+        const lastSegmentId = roomMeetingIdentifier(transcript.lastSegmentId)
+        const lastCapturedAt = transcript.lastCapturedAt == null || transcript.lastCapturedAt === '' ? '' : roomMeetingTimestamp(transcript.lastCapturedAt)
+        const noteRevision = roomMeetingIdentifier(notes.revision)
+        const notesUpdatedAt = notes.updatedAt == null || notes.updatedAt === '' ? '' : roomMeetingTimestamp(notes.updatedAt)
+        const groundedThrough = notes.groundedThrough == null || notes.groundedThrough === '' ? '' : roomMeetingTimestamp(notes.groundedThrough)
+        const scoutGroundedThrough = scout.groundedThrough == null || scout.groundedThrough === '' ? '' : roomMeetingTimestamp(scout.groundedThrough)
+        if ((transcript.lastCapturedAt && !lastCapturedAt) || (notes.updatedAt && !notesUpdatedAt)
+            || (notes.groundedThrough && !groundedThrough) || (scout.groundedThrough && !scoutGroundedThrough)) return null
+
+        let recap = null
+        if (root.recap != null) {
+          const rawRecap = roomMeetingRecord(root.recap)
+          const topics = parseRoomMeetingFacts(rawRecap?.topics)
+          const decisions = parseRoomMeetingFacts(rawRecap?.decisions)
+          const actions = parseRoomMeetingFacts(rawRecap?.actions)
+          const openQuestions = parseRoomMeetingFacts(rawRecap?.openQuestions)
+          const risks = parseRoomMeetingFacts(rawRecap?.risks)
+          if (!rawRecap || !topics || !decisions || !actions || !openQuestions || !risks
+              || !Array.isArray(rawRecap.themes) || rawRecap.themes.length > 16
+              || !Number.isSafeInteger(rawRecap.sourceCount) || rawRecap.sourceCount < 0 || rawRecap.sourceCount > 10000) return null
+          const themes = rawRecap.themes.map(theme => roomMeetingText(theme, 240))
+          if (themes.some(theme => !theme)) return null
+          recap = {
+            title: roomMeetingText(rawRecap.title, 240), topics, decisions, actions,
+            openQuestions, risks, themes, sourceCount: rawRecap.sourceCount
+          }
+        }
+        const transcriptHasSegments = segmentCount > 0
+        const analysisIsCurrent = transcriptHasSegments && transcript.sequenceComplete
+          && captureHighWater > 0 && analysisCaptureHighWater === captureHighWater
+        if ((!transcriptHasSegments && (captureHighWater !== 0 || lastSegmentId || lastCapturedAt))
+            || (transcriptHasSegments && (captureHighWater === 0 || !lastSegmentId || !lastCapturedAt))
+            || analysisCaptureHighWater > captureHighWater
+            || (notes.state === 'current' && (!analysisIsCurrent || !noteRevision || !notesUpdatedAt || !recap))
+            || (notes.state === 'catching_up' && analysisIsCurrent)
+            || (scout.state === 'ready' && notes.state !== 'current')) return null
+        return {
+          contract: 'meeting-intelligence-v1', roomId, meetingId, revision, generatedAt,
+          transcript: {
+            state: transcript.state, captureHighWater, sequenceComplete: transcript.sequenceComplete,
+            segmentCount, lastSegmentId, lastCapturedAt
+          },
+          notes: {
+            state: notes.state, revision: noteRevision, updatedAt: notesUpdatedAt,
+            groundedThrough, analysisCaptureHighWater, coverage: notes.coverage
+          },
+          scout: { state: scout.state, groundedThrough: scoutGroundedThrough, sourceCount },
+          recap
+        }
+      }
+
+      function meetingIntelligenceTimeLabel(value) {
+        const date = value ? new Date(value) : null
+        if (!date || Number.isNaN(date.valueOf())) return ''
+        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      }
+
+      function meetingIntelligenceStatusLabel(snapshot) {
+        if (!snapshot) return 'Meeting notes unavailable'
+        if (snapshot.transcript.state === 'not_listening') return 'Not listening'
+        if (snapshot.transcript.state === 'transcript_paused') return 'Transcript paused'
+        return snapshot.notes.state === 'current' ? 'Listening · Notes current' : 'Listening · Notes catching up'
+      }
+
+      function meetingIntelligenceCoverageLabel(snapshot) {
+        const labels = {
+          full: 'Full meeting coverage',
+          partial_late_start: 'Partial coverage · joined late',
+          partial_gaps: 'Partial coverage · transcript gaps',
+          partial_synthesis: 'Partial coverage · recap catching up',
+          unknown: 'Coverage still being verified'
+        }
+        const parts = [labels[snapshot?.notes?.coverage] || labels.unknown]
+        const through = meetingIntelligenceTimeLabel(snapshot?.notes?.groundedThrough)
+        if (through) parts.push(`through ${through}`)
+        const sources = Number(snapshot?.scout?.sourceCount || snapshot?.recap?.sourceCount || 0)
+        if (sources > 0) parts.push(`${sources} ${sources === 1 ? 'source' : 'sources'}`)
+        return parts.join(' · ')
+      }
+
+      function renderMeetingRecapFacts(container, title, facts) {
+        if (!Array.isArray(facts) || !facts.length) return
+        const section = document.createElement('section')
+        section.className = 'room-meeting-section'
+        const heading = document.createElement('h3')
+        heading.textContent = title
+        section.appendChild(heading)
+        facts.forEach(fact => {
+          const item = document.createElement('article')
+          item.className = 'room-meeting-fact'
+          const copy = document.createElement('p')
+          copy.textContent = fact.text
+          item.appendChild(copy)
+          const metaText = [fact.owner, fact.status].filter(Boolean).join(' · ')
+          if (metaText) {
+            const meta = document.createElement('p')
+            meta.className = 'room-meeting-fact__meta'
+            meta.textContent = metaText
+            item.appendChild(meta)
+          }
+          section.appendChild(item)
+        })
+        container.appendChild(section)
+      }
+
+      function renderMeetingRecap() {
+        const fragment = document.createDocumentFragment()
+        const snapshot = currentMeetingIntelligence
+        const status = document.createElement('div')
+        status.className = `room-meeting-status${snapshot?.notes?.state === 'catching_up' ? ' is-catching-up' : ''}${snapshot?.transcript?.state !== 'listening' ? ' is-paused' : ''}`
+        const line = document.createElement('div')
+        line.className = 'room-meeting-status__line'
+        const dot = document.createElement('span')
+        dot.className = 'room-meeting-status__dot'
+        dot.setAttribute('aria-hidden', 'true')
+        const label = document.createElement('span')
+        label.textContent = meetingIntelligenceStatusLabel(snapshot)
+        line.append(dot, label)
+        status.appendChild(line)
+        if (snapshot) {
+          const coverage = document.createElement('p')
+          coverage.className = 'room-meeting-status__coverage'
+          coverage.textContent = meetingIntelligenceCoverageLabel(snapshot)
+          status.appendChild(coverage)
+        }
+        fragment.appendChild(status)
+
+        if (!snapshot?.recap) {
+          const empty = document.createElement('div')
+          empty.className = 'room-meeting-empty'
+          const text = document.createElement('p')
+          text.textContent = snapshot
+            ? 'The live transcript is being captured. A grounded recap will appear after the first analysis finishes.'
+            : 'Join the meeting to see its live, grounded recap.'
+          empty.appendChild(text)
+          fragment.appendChild(empty)
+        } else {
+          const recap = document.createElement('div')
+          recap.className = 'room-meeting-recap'
+          if (snapshot.recap.title) {
+            const title = document.createElement('h2')
+            title.className = 'room-meeting-recap__title'
+            title.textContent = snapshot.recap.title
+            recap.appendChild(title)
+          }
+          renderMeetingRecapFacts(recap, 'Decisions', snapshot.recap.decisions)
+          renderMeetingRecapFacts(recap, 'Actions', snapshot.recap.actions)
+          renderMeetingRecapFacts(recap, 'Open questions', snapshot.recap.openQuestions)
+          renderMeetingRecapFacts(recap, 'Topics', snapshot.recap.topics)
+          renderMeetingRecapFacts(recap, 'Risks', snapshot.recap.risks)
+          fragment.appendChild(recap)
+        }
+        roomMeetingRecap.replaceChildren(fragment)
+      }
+
+      function roomMeetingTranscriptEntries() {
+        const meetingId = String(meetingRecord?.id || currentMeetingIntelligence?.meetingId || '').trim()
+        const roomId = activeJoin.roomId || 'office'
+        if (!meetingId) return []
+        return roomMeetingTranscriptHistory
+          .filter(entry => entry?.kind === 'transcript'
+            && String(entry?.metadata?.meetingId || '').trim() === meetingId
+            && String(entry?.metadata?.roomId || 'office').trim() === roomId)
+          .sort((left, right) => {
+            const leftSequence = Number(left?.metadata?.captureSequence)
+            const rightSequence = Number(right?.metadata?.captureSequence)
+            if (Number.isSafeInteger(leftSequence) && leftSequence > 0
+                && Number.isSafeInteger(rightSequence) && rightSequence > 0
+                && leftSequence !== rightSequence) return leftSequence - rightSequence
+            const byTime = Date.parse(left?.createdAt || '') - Date.parse(right?.createdAt || '')
+            return byTime
+          })
+          .slice(-200)
+      }
+
+      function renderMeetingTranscript() {
+        const entries = roomMeetingTranscriptEntries()
+        if (!entries.length) {
+          const empty = document.createElement('div')
+          empty.className = 'room-meeting-empty'
+          const text = document.createElement('p')
+          text.textContent = currentMeetingIntelligence?.transcript?.state === 'transcript_paused'
+            ? 'Transcript capture is paused.'
+            : 'Spoken moments will appear here as the meeting captures them.'
+          empty.appendChild(text)
+          roomMeetingTranscript.replaceChildren(empty)
+          return
+        }
+        const nodes = entries.map(entry => {
+          const item = document.createElement('article')
+          item.className = 'room-meeting-transcript__entry'
+          const meta = document.createElement('div')
+          meta.className = 'room-meeting-transcript__meta'
+          const speaker = document.createElement('span')
+          speaker.textContent = memoryEntryWho(entry) || 'Live transcript'
+          const time = document.createElement('time')
+          time.textContent = meetingIntelligenceTimeLabel(entry.createdAt)
+          meta.append(speaker, time)
+          const copy = document.createElement('p')
+          const rawText = String(entry.text || '')
+          const speakerPrefix = memoryEntryWho(entry)
+          copy.textContent = speakerPrefix && rawText.toLocaleLowerCase().startsWith(`${speakerPrefix.toLocaleLowerCase()}:`)
+            ? rawText.slice(speakerPrefix.length + 1).trim()
+            : rawText
+          item.append(meta, copy)
+          return item
+        })
+        roomMeetingTranscript.replaceChildren(...nodes)
+        if (roomMeetingMode === 'transcript') {
+          roomMeetingTranscript.scrollTop = roomMeetingTranscript.scrollHeight
+        }
+      }
+
+      function parseRoomMeetingTranscriptEntry(payload) {
+        const entry = roomMeetingRecord(payload)
+        const metadata = roomMeetingRecord(entry?.metadata)
+        const id = roomMeetingIdentifier(entry?.id)
+        const text = roomMeetingText(entry?.text, 8000)
+        const createdAt = roomMeetingTimestamp(entry?.createdAt)
+        const roomId = roomMeetingIdentifier(metadata?.roomId || 'office')
+        const meetingId = roomMeetingIdentifier(metadata?.meetingId)
+        if (!entry || entry.kind !== 'transcript' || !metadata || !id || !text || !createdAt || !roomId || !meetingId) return null
+        const safeMetadata = {}
+        const entries = Object.entries(metadata)
+        if (entries.length > 64) return null
+        for (const [key, value] of entries) {
+          if (!roomMeetingIdentifier(key) || typeof value !== 'string' || Array.from(value).length > 4096) return null
+          safeMetadata[key] = value
+        }
+        const rawCaptureSequence = String(safeMetadata.captureSequence || '').trim()
+        if (!/^[1-9][0-9]{0,15}$/.test(rawCaptureSequence)) return null
+        const captureSequence = Number(rawCaptureSequence)
+        if (!Number.isSafeInteger(captureSequence)) return null
+        return { id, kind: 'transcript', text, createdAt, captureSequence, metadata: safeMetadata }
+      }
+
+      function roomMeetingTranscriptOrder(left, right) {
+        if (Number.isSafeInteger(left?.captureSequence) && Number.isSafeInteger(right?.captureSequence)
+            && left.captureSequence !== right.captureSequence) {
+          return left.captureSequence - right.captureSequence
+        }
+        const timeDelta = Date.parse(left?.createdAt || '') - Date.parse(right?.createdAt || '')
+        return Number.isFinite(timeDelta) && timeDelta !== 0 ? timeDelta : 0
+      }
+
+      function handleMeetingTranscriptSnapshot(payload) {
+        const root = roomMeetingRecord(payload)
+        const roomId = roomMeetingIdentifier(root?.roomId)
+        const meetingId = roomMeetingIdentifier(root?.meetingId)
+        if (!root || root.contract !== 'meeting-transcript-v1' || !roomId || !meetingId
+            || !Array.isArray(root.entries) || root.entries.length > 200
+            || roomId !== (activeJoin.roomId || 'office')
+            || (meetingRecord?.id && meetingRecord.id !== meetingId)) return
+        const entries = root.entries.map(parseRoomMeetingTranscriptEntry)
+        if (entries.some(entry => !entry || entry.metadata.meetingId !== meetingId
+            || String(entry.metadata.roomId || 'office') !== roomId)) return
+        const ids = new Set()
+        const sequences = new Set()
+        for (let index = 0; index < entries.length; index += 1) {
+          const entry = entries[index]
+          if (ids.has(entry.id) || sequences.has(entry.captureSequence)
+              || (index > 0 && entries[index - 1].captureSequence >= entry.captureSequence)) return
+          ids.add(entry.id)
+          sequences.add(entry.captureSequence)
+        }
+        const merged = new Map()
+        roomMeetingTranscriptHistory
+          .filter(entry => entry?.metadata?.meetingId === meetingId)
+          .forEach(entry => merged.set(entry.id, entry))
+        entries.forEach(entry => merged.set(entry.id, entry))
+        roomMeetingTranscriptHistory = [...merged.values()].sort(roomMeetingTranscriptOrder).slice(-200)
+        renderMeetingTranscript()
+      }
+
+      function appendRoomMeetingTranscriptEntry(payload) {
+        const entry = parseRoomMeetingTranscriptEntry(payload)
+        const meetingId = String(meetingRecord?.id || currentMeetingIntelligence?.meetingId || '').trim()
+        const roomId = activeJoin.roomId || 'office'
+        if (!entry || !Number.isSafeInteger(entry.captureSequence) || entry.metadata.meetingId !== meetingId || String(entry.metadata.roomId || 'office') !== roomId) return
+        const retained = roomMeetingTranscriptHistory.filter(candidate => candidate.id !== entry.id)
+        roomMeetingTranscriptHistory = [...retained, entry].sort(roomMeetingTranscriptOrder).slice(-200)
+        markMeetingIntelligenceBehindTranscript(entry)
+        renderMeetingTranscript()
+      }
+
+      function markMeetingIntelligenceBehindTranscript(entry) {
+        const current = currentMeetingIntelligence
+        if (!current || current.meetingId !== entry?.metadata?.meetingId
+            || !Number.isSafeInteger(entry.captureSequence)
+            || entry.captureSequence <= current.transcript.captureHighWater) return
+        currentMeetingIntelligence = {
+          ...current,
+          transcript: {
+            ...current.transcript,
+            captureHighWater: entry.captureSequence,
+            sequenceComplete: current.transcript.sequenceComplete && entry.captureSequence === current.transcript.captureHighWater + 1,
+            segmentCount: current.transcript.segmentCount + 1,
+            lastSegmentId: entry.id,
+            lastCapturedAt: entry.createdAt
+          },
+          notes: { ...current.notes, state: 'catching_up' },
+          scout: {
+            ...current.scout,
+            state: current.scout.state === 'unavailable' ? 'unavailable' : 'not_caught_up'
+          }
+        }
+        renderMeetingRecap()
+      }
+
+      function handleMeetingIntelligenceSnapshot(payload) {
+        const next = parseMeetingIntelligenceSnapshot(payload)
+        if (!next || next.roomId !== (activeJoin.roomId || 'office')) return
+        if (meetingRecord?.id && next.meetingId !== meetingRecord.id) return
+        const current = currentMeetingIntelligence
+        if (current && current.meetingId === next.meetingId) {
+          if (Date.parse(next.generatedAt) < Date.parse(current.generatedAt)) return
+          if (next.transcript.captureHighWater < current.transcript.captureHighWater) return
+        }
+        currentMeetingIntelligence = next
+        renderMeetingRecap()
+        renderMeetingTranscript()
+      }
+
+      function setRoomMeetingMode(mode) {
+        if (!['recap', 'transcript', 'chat'].includes(mode)) return
+        roomMeetingMode = mode
+        const rows = [
+          [roomMeetingRecapTab, roomMeetingRecap, 'recap'],
+          [roomMeetingTranscriptTab, roomMeetingTranscript, 'transcript'],
+          [roomMeetingChatTab, roomMeetingChat, 'chat']
+        ]
+        rows.forEach(([tab, panel, value]) => {
+          const selected = value === mode
+          tab.classList.toggle('is-selected', selected)
+          tab.setAttribute('aria-selected', String(selected))
+          tab.tabIndex = selected ? 0 : -1
+          panel.hidden = !selected
+        })
+        if (mode === 'recap') renderMeetingRecap()
+        if (mode === 'transcript') renderMeetingTranscript()
+        if (mode === 'chat') {
+          roomChatThread.scrollTop = roomChatThread.scrollHeight
+          window.requestAnimationFrame(() => { roomChatThread.scrollTop = roomChatThread.scrollHeight })
+        }
+      }
+
       function isRoomChatOpen() {
         return appShell.classList.contains('is-room-chat-open')
       }
@@ -55083,13 +55801,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomChatToggle.setAttribute('aria-label', open ? 'Close room chat' : 'Open room chat')
         if (open) {
           clearRoomChatUnread()
-          // Pin to the latest message: messages appended while the panel was
-          // hidden left scrollTop at 0, so reopening showed the oldest line.
-          roomChatThread.scrollTop = roomChatThread.scrollHeight
-          window.requestAnimationFrame(() => {
-            roomChatThread.scrollTop = roomChatThread.scrollHeight
-          })
-          if (!roomChatInput.disabled) {
+          setRoomMeetingMode(roomMeetingMode)
+          if (roomMeetingMode === 'chat' && !roomChatInput.disabled) {
             roomChatInput.focus()
           }
         }
@@ -55214,6 +55927,81 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.classList.add('is-error')
         }
         item.dataset.messageId = String(message?.id || '')
+        const workRunId = String(message?.workRunId || '').trim()
+        const workStatus = String(message?.workStatus || '').trim().toLowerCase()
+        const artifactId = String(message?.artifactId || '').trim()
+        if (workRunId) {
+          item.dataset.workRunId = workRunId
+          item.classList.add('room-chat-msg--work')
+          const entry = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId)
+          const statusLabel = workStatus === 'complete' ? 'Delivered' : workStatus === 'needs_attention' ? 'Needs attention' : workStatus === 'approval_required' ? 'Needs approval' : 'Working'
+          const familyLabel = String(message?.workFamily || '').trim() || (entry ? artifactModeLabel(entry) : 'Scout work')
+          const title = String(message?.workTitle || '').trim() || (entry ? artifactDisplayTitle(entry) : 'Open work')
+          const detail = workStatus === 'complete'
+            ? 'The deliverable is ready to open.'
+            : workStatus === 'needs_attention'
+              ? 'Scout needs a retry or more context.'
+              : workStatus === 'approval_required'
+                ? 'Review the held action before work continues.'
+                : 'Scout is working from this meeting’s shared context.'
+          const card = document.createElement('button')
+          card.type = 'button'
+          card.className = 'room-chat-work-card'
+          card.dataset.status = workStatus || 'running'
+          card.setAttribute('aria-label', `${statusLabel}: ${title}. Open work`)
+          const head = document.createElement('span')
+          head.className = 'room-chat-work-card__head'
+          const family = document.createElement('span')
+          family.className = 'room-chat-work-card__family'
+          family.textContent = familyLabel
+          const status = document.createElement('span')
+          status.className = 'room-chat-work-card__status'
+          const statusDot = document.createElement('span')
+          statusDot.className = 'room-chat-work-card__status-dot'
+          statusDot.setAttribute('aria-hidden', 'true')
+          status.append(statusDot, document.createTextNode(statusLabel))
+          head.append(family, status)
+          const heading = document.createElement('h3')
+          heading.className = 'room-chat-work-card__title'
+          heading.textContent = title
+          const description = document.createElement('p')
+          description.className = 'room-chat-work-card__detail'
+          description.textContent = detail
+          card.append(head, heading, description)
+          const progressValue = Number(message?.workProgress)
+          if (Number.isFinite(progressValue) && progressValue >= 0 && progressValue <= 100 && workStatus !== 'complete') {
+            const progress = document.createElement('span')
+            progress.className = 'room-chat-work-card__progress'
+            const track = document.createElement('span')
+            track.className = 'room-chat-work-card__track'
+            const fill = document.createElement('span')
+            fill.className = 'room-chat-work-card__fill'
+            fill.style.width = `${Math.round(progressValue)}%`
+            track.append(fill)
+            const progressCopy = document.createElement('span')
+            progressCopy.className = 'room-chat-work-card__progress-copy'
+            progressCopy.textContent = `${Math.round(progressValue)}%`
+            progress.append(track, progressCopy)
+            card.append(progress)
+          }
+          const foot = document.createElement('span')
+          foot.className = 'room-chat-work-card__foot'
+          const attribution = document.createElement('span')
+          attribution.className = 'room-chat-work-card__meta'
+          attribution.textContent = `Scout · ${scoutChatTimeLabel(message?.createdAt)}`
+          const open = document.createElement('span')
+          open.className = 'room-chat-work-card__open'
+          open.append(document.createTextNode('Open'), Object.assign(document.createElement('span'), { className: 'room-chat-work-card__arrow', textContent: '↗' }))
+          foot.append(attribution, open)
+          card.append(foot)
+          if (artifactId) {
+            card.addEventListener('click', () => openArtifactStage(artifactId, title))
+          } else {
+            card.disabled = true
+          }
+          item.append(card)
+          return item
+        }
         const meta = document.createElement('span')
         meta.className = 'scout-chat-meta'
         const author = own ? 'you' : scout ? 'Scout' : String(message?.name || 'guest').toLowerCase()
@@ -55236,17 +56024,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // Close-the-loop delivery: a completed Scout thread posts its card
         // back to the room; artifactId turns the bubble into a doorway to the
         // full report in the intel library.
-        const artifactId = String(message?.artifactId || '').trim()
         if (artifactId) {
           const entry = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId)
           const chip = document.createElement('button')
           chip.type = 'button'
           chip.className = 'room-chat-artifact-chip'
           const label = document.createElement('span')
-          label.textContent = entry ? artifactModeLabel(entry) : 'artifact'
+          label.textContent = entry ? artifactModeLabel(entry) : 'Work'
           const chipTitle = document.createElement('span')
           chipTitle.className = 'room-chat-artifact-chip__title'
-          chipTitle.textContent = entry ? artifactDisplayTitle(entry) : 'view report'
+          chipTitle.textContent = entry ? artifactDisplayTitle(entry) : 'Open work'
           chip.append(label, chipTitle)
           // rerouted (founder, live test 2026-07-07): the chip opens the
           // report over the room in the artifact stage — never a yank to the
@@ -55279,7 +56066,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const stick = roomChatIsNearBottom()
         roomChatThread.querySelector('.scout-chat-empty')?.remove()
-        roomChatThread.appendChild(roomChatMessageNode(message))
+        const node = roomChatMessageNode(message)
+        const workRunId = String(message?.workRunId || '').trim()
+        const priorWork = workRunId
+          ? roomChatThread.querySelector(`.scout-chat-msg[data-work-run-id="${selectorEscape(workRunId)}"]`)
+          : null
+        if (priorWork) priorWork.replaceWith(node)
+        else roomChatThread.appendChild(node)
         // Cap the rendered thread; the server replays history on rejoin.
         while (roomChatThread.children.length > roomChatMaxNodes) {
           roomChatThread.firstElementChild?.remove()
@@ -55916,12 +56709,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? `Channel chat ${chatThreadDisplayTitle(thread)}`
 	            : `Private chat with ${privateTarget}`)
 	        }
-	        if (scoutChatBrainNote) {
-	          // "private" means hidden from teammates, not from the system — the
-	          // thread stays OUT of the company brain (the "Feed the brain" chip is
-	          // the only opt-in door); channels are public anyway, so it's moot there
-	          scoutChatBrainNote.hidden = isChannel
-	        }
 	        // card 070: keep the composer destination guard in lockstep with the head
 	        renderScoutChatDestination()
 	        if (appShell?.dataset.tool === 'chat') syncToolTopbar()
@@ -56481,7 +57268,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Keep the server-stamped author name in the grouping key so Mary,
 	        // Colton, Jules, and Scout never collapse into one visual speaker.
 	        const followKey = `${kind}|${authorEmail || authorName.toLowerCase() || kind}`
-	        const isFollowup = !viaScout && text.length <= 400 && feedPrevMsgKey === followKey
+		const isFollowup = !viaScout && feedPrevMsgKey === followKey
 	        feedPrevMsgKey = viaScout ? '' : followKey
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        node.dataset.messageId = String(message?.id || '')
@@ -57226,11 +58013,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		          ? chatContextBody.scrollHeight - chatContextBody.scrollTop - chatContextBody.clientHeight < 48
 		          : false
 		        const fragment = document.createDocumentFragment()
-		        fragment.appendChild(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
 		        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
+		        chatContextParent.replaceChildren(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
+		        chatContextParent.hidden = false
 		        chatContextBody.replaceChildren(fragment)
 		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
-		        if (options.scrollToBottom || wasNearBottom) {
+		        if (options.scrollToBottom === true || (options.scrollToBottom === undefined && wasNearBottom)) {
 		          chatContextBody.scrollTop = chatContextBody.scrollHeight
 		        } else {
 		          chatContextBody.scrollTop = priorScrollTop
@@ -57301,6 +58089,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatContextRail) chatContextRail.hidden = true
 	        if (chatContextResize) chatContextResize.hidden = true
 	        if (chatContextReplyForm) chatContextReplyForm.hidden = true
+	        if (chatContextParent) {
+	          chatContextParent.hidden = true
+	          chatContextParent.replaceChildren()
+	        }
 	        if (chatContextBody) chatContextBody.replaceChildren()
 	        if (options.restoreFocus !== false) chatContextReturnFocus?.focus?.({ preventScroll: true })
 	        chatContextReturnFocus = null
@@ -57377,7 +58169,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reply: true
 	        })) return
 	        chatContextState = { mode: 'thread', threadId: String(thread?.id || ''), rootMessageId: String(root.id) }
-	        renderDesktopMessageContext(thread, root, { scrollToBottom: true })
+	        const hasReplies = desktopChatReplyTopology(messages).repliesFor(root).length > 0
+	        // A brand-new long parent must open at its beginning. Established
+	        // threads land on their latest replies, matching the reply-first
+	        // expectation without hiding the start of an unreplied message.
+	        renderDesktopMessageContext(thread, root, { scrollToBottom: hasReplies })
 	        ensureDesktopChatParticipantDirectory()
 	      }
 
@@ -57516,6 +58312,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function renderDesktopWorkContext(message, artifact) {
 	        if (chatContextState?.mode !== 'work' || String(chatContextState.messageId) !== String(message?.id || '')) return
+	        if (chatContextParent) {
+	          chatContextParent.hidden = true
+	          chatContextParent.replaceChildren()
+	        }
 	        const ref = message?.thread || {}
 	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
 	        const phase = desktopWorkPhase(artifact, status, ref)
@@ -59214,18 +60014,69 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return (raw.split(/\s+/)[0] || 'you').toLowerCase()
       }
 
+      let scoutChatOverflowBodySequence = 0
+      function mountScoutChatMessageOverflow(item, body, stack) {
+        if (!item || !body || !stack) return
+        const bodyId = `scout-chat-message-body-${++scoutChatOverflowBodySequence}`
+        body.id = bodyId
+        let expanded = false
+        let control = null
+        let frame = 0
+        const evaluate = () => {
+          frame = 0
+          if (!item.isConnected) return
+          const lineHeight = Number.parseFloat(window.getComputedStyle(body).lineHeight)
+          if (!Number.isFinite(lineHeight) || lineHeight <= 0) return
+          const overflow = body.scrollHeight > (lineHeight * 8) + 1
+          item.classList.toggle('scout-chat-msg--longform', overflow)
+          if (!overflow) {
+            body.classList.remove('is-clamped')
+            control?.remove()
+            control = null
+            expanded = false
+            return
+          }
+          if (!control) {
+            control = document.createElement('button')
+            control.type = 'button'
+            control.className = 'scout-chat-msg__expand'
+            control.setAttribute('aria-controls', bodyId)
+            control.addEventListener('click', () => {
+              expanded = !expanded
+              body.classList.toggle('is-clamped', !expanded)
+              control.textContent = expanded ? 'Show less' : 'Show more'
+              control.setAttribute('aria-expanded', String(expanded))
+            })
+            const meta = stack.querySelector('.scout-chat-msg__meta')
+            stack.insertBefore(control, meta || null)
+          }
+          body.classList.toggle('is-clamped', !expanded)
+          control.textContent = expanded ? 'Show less' : 'Show more'
+          control.setAttribute('aria-expanded', String(expanded))
+        }
+        const schedule = () => {
+          if (frame) window.cancelAnimationFrame(frame)
+          frame = window.requestAnimationFrame(evaluate)
+        }
+        schedule()
+        if ('ResizeObserver' in window) {
+          const observer = new ResizeObserver(() => {
+            if (!item.isConnected) {
+              observer.disconnect()
+              return
+            }
+            schedule()
+          })
+          observer.observe(item)
+        }
+      }
+
       function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
 		if (Array.isArray(files) && files.length) {
 		  item.classList.add('scout-chat-msg--media')
 		}
-        // sheet §3 letters: past ~400 chars the bubble becomes a letter card
-        // on the feed measure with an identity header + clamp
-        const longform = String(text || '').length > 400
-        if (longform) {
-          item.classList.add('scout-chat-msg--longform')
-        }
         const label = authorLabel || (kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : kind === 'peer' ? 'peer' : 'error')
         item.title = `${label} · ${scoutChatTimeLabel(ts)}${viaScout ? ' · via Scout' : ''}`
 
@@ -59275,25 +60126,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           idrow.appendChild(idtime)
           stack.appendChild(idrow)
-        } else if (longform) {
-          // a person's letter reuses the identity row with monochrome initials
-          const idrow = document.createElement('div')
-          idrow.className = 'scout-chat-msg__idrow'
-          const badge = document.createElement('span')
-          badge.className = 'scout-chat-msg__idbadge'
-          badge.setAttribute('aria-hidden', 'true')
-          badge.textContent = chatPeerInitials(kind === 'user' ? scoutChatSelfHandle() : label)
-          const idname = document.createElement('span')
-          idname.className = 'scout-chat-msg__idname'
-          idname.textContent = kind === 'user' ? scoutChatSelfHandle() : label
-          const idmodel = document.createElement('span')
-          idmodel.className = 'scout-chat-msg__idmodel'
-          idmodel.textContent = `· a letter${kind === 'user' && viaScout ? ' · via scout' : ''}`
-          const idtime = document.createElement('span')
-          idtime.className = 'scout-chat-msg__idtime'
-          idtime.textContent = scoutChatTimeLabel(ts)
-          idrow.append(badge, idname, idmodel, idtime)
-          stack.appendChild(idrow)
         } else if (kind === 'peer' && authorLabel) {
           // sheet 3a group header — "Tyler 22:41" above the first bubble
           const author = document.createElement('span')
@@ -59322,27 +60154,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             appendChatMentionTextNodes(body, text)
           }
           stack.appendChild(body)
-          if (longform) {
-            // the wired clamp: four lines, then "read the full letter"
-            body.classList.add('is-clamped')
-            const expand = document.createElement('button')
-            expand.type = 'button'
-            expand.className = 'scout-chat-msg__expand'
-            expand.textContent = 'read the full letter'
-            expand.setAttribute('aria-expanded', 'false')
-            expand.addEventListener('click', () => {
-              const open = body.classList.toggle('is-clamped') === false
-              expand.textContent = open ? 'collapse the letter' : 'read the full letter'
-              expand.setAttribute('aria-expanded', String(open))
-            })
-            stack.appendChild(expand)
-          }
         }
 
         // sheet 3a attribution BELOW a you-bubble — "aj · via scout · 22:39".
         // Scout/error carry the SenderMark head above instead; peers the group
         // header — only you keep the quiet mono line beneath the bubble.
-        if (!longform && kind === 'user') {
+		if (kind === 'user') {
           const meta = document.createElement('span')
           meta.className = 'scout-chat-msg__meta'
           const handle = scoutChatSelfHandle()
@@ -59363,6 +60180,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         item.appendChild(stack)
+		const body = stack.querySelector('.scout-chat-text')
+		if (body) mountScoutChatMessageOverflow(item, body, stack)
         return item
       }
 
@@ -65412,6 +66231,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!entry?.text) {
           return
         }
+        if (entry.kind === 'transcript') {
+          appendRoomMeetingTranscriptEntry(entry)
+        }
         if (entry.kind === 'os_artifact') {
           addArtifactEntry(entry)
         }
@@ -65421,6 +66243,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           memoryEntries = memoryEntries.slice(memoryEntries.length - 20)
         }
         renderMemory()
+        renderMeetingTranscript()
       }
 
       /* ---------- Memory tool (design §10, D15) — day-grouped meeting
@@ -69011,7 +69834,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       let meetingClockOffsetMs = 0
 
       function handleMeetingRecord(payload) {
+        const previousMeetingId = String(meetingRecord?.id || '')
         meetingRecord = payload && payload.id ? payload : null
+        const nextMeetingId = String(meetingRecord?.id || '')
+        if (!nextMeetingId || (previousMeetingId && previousMeetingId !== nextMeetingId)) {
+          currentMeetingIntelligence = null
+          roomMeetingTranscriptHistory = []
+        }
         if (payload?.serverNow) {
           const serverNowMs = Date.parse(payload.serverNow)
           if (Number.isFinite(serverNowMs)) {
@@ -69037,6 +69866,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           sharedMeetingStartMs = 0
         }
         syncMeetingIdentityLabel()
+        renderMeetingRecap()
+        renderMeetingTranscript()
       }
 
       function meetingDisplayName() {

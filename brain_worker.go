@@ -13,6 +13,7 @@ import (
 const (
 	meetingBrainAgentName             = "meeting brain"
 	meetingBrainCursorMetadataKey     = "processedThroughTranscriptId"
+	meetingBrainCaptureMetadataKey    = "processedThroughCaptureSequence"
 	defaultMeetingBrainInterval       = 5 * time.Minute
 	defaultMeetingBrainMinTranscripts = 4
 	// defaultMeetingBrainMaxTranscripts (A7) is lowered from 80 so a single dense
@@ -174,6 +175,9 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		"throughTranscriptCreatedAt":  lastTranscript.CreatedAt.Format(time.RFC3339Nano),
 		"transcriptCount":             strconv.Itoa(len(transcripts)),
 		meetingBrainCursorMetadataKey: rawTranscripts[len(rawTranscripts)-1].ID,
+	}
+	if sequence, ok := entryCaptureSequence(rawTranscripts[len(rawTranscripts)-1]); ok {
+		metadata[meetingBrainCaptureMetadataKey] = strconv.FormatUint(sequence, 10)
 	}
 	metadata = applyAmbientDerivedScope(metadata, transcripts)
 	// §6.4 provenance (inclusion RATIFIED 2026-07-09): a write-up over a

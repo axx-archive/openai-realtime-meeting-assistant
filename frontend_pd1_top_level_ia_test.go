@@ -181,6 +181,30 @@ func TestPD1GlobalRailAndContextualWorkMenuRemainTruthful(t *testing.T) {
 	}
 }
 
+func TestPD1NavigationUsesQuietSelectionWithoutRailOrMeetingStatusOrnaments(t *testing.T) {
+	html := pd1Index(t)
+	for _, forbidden := range []string{
+		`.pd1-primary-nav__item[aria-current="page"]::before`,
+		`.tool-rail__tool[data-tool][aria-pressed="true"]::after`,
+		`class="tool-rail__live"`,
+		`.tool-rail__live`,
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("navigation still exposes decorative active/live ornament %q", forbidden)
+		}
+	}
+	for _, marker := range []string{
+		`.pd1-primary-nav__item[aria-current="page"] {`,
+		`background: var(--surface-3);`,
+		`border-color: var(--line-1);`,
+		`color: var(--text-1);`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("quiet selected-state contract missing %q", marker)
+		}
+	}
+}
+
 func TestPD1KeyboardFocusResponsiveAndMotionContracts(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
@@ -218,6 +242,7 @@ func TestPD1RenderedBrowserNavigationHistoryFocusAndLayout(t *testing.T) {
 	script := `
 const fs = require('fs');
 const http = require('http');
+const path = require('path');
 const assert = require('assert/strict');
 const { chromium } = require('playwright');
 const html = fs.readFileSync(process.env.PD1_INDEX, 'utf8');
@@ -370,6 +395,174 @@ const server = http.createServer((req, res) => {
     return {activeBefore:Boolean(activeBefore),mismatches,synced,preview:scoutChatThreads[0].preview,status:scoutChatThreads[0].messages[0].thread.status,activeAfter:Boolean(chatThreadActiveWork(scoutChatThreads[0]))};
   });
   assert.deepEqual(terminal,{activeBefore:false,mismatches:[false,false,false,false],synced:true,preview:'Research delivered · 12 cited source links · 10 domains',status:'complete',activeAfter:false});
+  // Begin the rendered ordinary-message acceptance from a clean normal Work
+  // surface. Earlier navigation/menu assertions intentionally exercise
+  // overlays whose dimming must not contaminate the visual evidence.
+  await page.goto(base + '/work', {waitUntil:'domcontentloaded'});
+  await page.waitForSelector('#appShell.is-authed');
+  await page.waitForFunction(() => !document.getElementById('chatTool').hidden);
+  const shortMessageText = 'This is an ordinary message from the same person.';
+  const shortMessage = {id:'message-short-prose',kind:'message',role:'user',authorName:'Synthetic',authorEmail:'synthetic@example.test',text:shortMessageText,createdAt:'2026-08-11T23:44:00Z'};
+  const longMessageText = Array.from({length:14}, (_, index) => 'This is ordinary team-chat prose line ' + (index + 1) + ', with enough detail to make the rendered message taller without turning it into a document.').join(' ');
+  const longMessage = {id:'message-long-prose',kind:'message',role:'user',authorName:'Synthetic',authorEmail:'synthetic@example.test',text:longMessageText,createdAt:'2026-08-11T23:45:00Z'};
+  await page.evaluate(({shortMessage, longMessage}) => {
+    scoutChatThreads=[{id:'channel-long-prose',title:'Bonfire Chat',visibility:'public',messages:[shortMessage,longMessage]}];
+    activeScoutThreadId='channel-long-prose';
+    const messageNode = message => {
+      const node=scoutChatMessageNode('user',message.text,message.createdAt,[],message.authorName,false);
+      node.dataset.messageId=message.id;
+      decorateDesktopChatMessage(node,message,'user',message.authorName);
+      return node;
+    };
+    document.getElementById('scoutChatThread').replaceChildren(messageNode(shortMessage),messageNode(longMessage));
+  }, {shortMessage,longMessage});
+  await page.waitForFunction(() => document.querySelector('[data-message-id="message-long-prose"] .scout-chat-msg__expand')?.textContent === 'Show more');
+  assert.equal(await page.locator('[data-message-id="message-short-prose"] .scout-chat-msg__expand').count(),0);
+  const ordinaryLongMessage = await page.locator('[data-message-id="message-long-prose"]').evaluate(node => ({
+    classes:Array.from(node.classList),
+    text:node.innerText,
+    expanded:node.querySelector('.scout-chat-msg__expand')?.getAttribute('aria-expanded'),
+    controls:node.querySelector('.scout-chat-msg__expand')?.getAttribute('aria-controls'),
+    bodyId:node.querySelector('.scout-chat-text')?.id,
+  }));
+  assert.ok(ordinaryLongMessage.classes.includes('scout-chat-msg--longform'));
+  assert.ok(!ordinaryLongMessage.text.toLowerCase().includes('letter'));
+  assert.equal(ordinaryLongMessage.expanded,'false');
+  assert.equal(ordinaryLongMessage.controls,ordinaryLongMessage.bodyId);
+  const ordinaryMessageParity = await page.locator('[data-message-id="message-long-prose"]').evaluate(longNode => {
+    const shortNode=document.querySelector('[data-message-id="message-short-prose"]');
+    const style = node => {
+      const item=getComputedStyle(node);
+      const body=getComputedStyle(node.querySelector('.scout-chat-text'));
+      const rect=node.querySelector('.scout-chat-text').getBoundingClientRect();
+      return {
+        itemMaxWidth:item.maxWidth,
+        itemAlignSelf:item.alignSelf,
+        backgroundColor:body.backgroundColor,
+        color:body.color,
+        border:body.border,
+        borderRadius:body.borderRadius,
+        fontFamily:body.fontFamily,
+        fontSize:body.fontSize,
+        fontWeight:body.fontWeight,
+        lineHeight:body.lineHeight,
+        padding:body.padding,
+        right:rect.right,
+      };
+    };
+    return {short:style(shortNode),long:style(longNode)};
+  });
+  assert.deepEqual({...ordinaryMessageParity.long,right:ordinaryMessageParity.short.right},ordinaryMessageParity.short);
+  assert.ok(Math.abs(ordinaryMessageParity.short.right-ordinaryMessageParity.long.right)<1);
+  const expandAffordance=await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').evaluate(button => {
+    const style=getComputedStyle(button);
+    const after=getComputedStyle(button,'::after');
+    const rect=button.getBoundingClientRect();
+    const top=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
+    return {display:style.display,color:style.color,background:style.backgroundColor,border:style.borderTopWidth,after:after.content,height:rect.height,width:rect.width,visible:rect.bottom<=innerHeight && rect.right<=innerWidth,topId:top?.id||'',topClass:top?.className||'',topTag:top?.tagName||''};
+  });
+  assert.equal(expandAffordance.display,'flex');
+  assert.equal(expandAffordance.border,'1px');
+  assert.notEqual(expandAffordance.background,'rgba(0, 0, 0, 0)');
+  assert.ok(expandAffordance.after.includes('↓') || expandAffordance.after.includes('2193'));
+  assert.ok(expandAffordance.height+0.01>=40 && expandAffordance.width+0.01>=40 && expandAffordance.visible,JSON.stringify(expandAffordance));
+  const renderDir=String(process.env.PD1_RENDER_DIR||'').trim();
+  if(renderDir){
+    fs.mkdirSync(renderDir,{recursive:true});
+    for (const candidate of [
+      {name:'compact',width:1024,height:768},
+      {name:'standard',width:1280,height:800},
+      {name:'wide',width:1728,height:1000},
+    ]) {
+      await page.setViewportSize({width:candidate.width,height:candidate.height});
+      for (const theme of ['dark','light']) {
+        await page.evaluate(nextTheme => renderTheme(nextTheme),theme);
+        await page.mouse.move(2,2);
+        await page.waitForTimeout(180);
+        const contrast=await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').evaluate(button => {
+          const style=getComputedStyle(button);
+          const rgb=value => (value.match(/[\d.]+/g)||[]).slice(0,3).map(Number);
+          const luminance=value => {
+            const channels=rgb(value).map(channel => {
+              const normalized=channel/255;
+              return normalized<=0.04045?normalized/12.92:Math.pow((normalized+0.055)/1.055,2.4);
+            });
+            return 0.2126*channels[0]+0.7152*channels[1]+0.0722*channels[2];
+          };
+          const foreground=luminance(style.color);
+          const background=luminance(style.backgroundColor);
+          return {ratio:(Math.max(foreground,background)+0.05)/(Math.min(foreground,background)+0.05),color:style.color,background:style.backgroundColor};
+        });
+        assert.ok(contrast.ratio>=4.5,theme+' '+candidate.name+' expand contrast '+JSON.stringify(contrast));
+        await page.screenshot({path:path.join(renderDir,'desktop-ordinary-messages-'+candidate.name+'-'+theme+'.png')});
+      }
+    }
+    await page.setViewportSize({width:1280,height:800});
+    await page.evaluate(() => renderTheme('dark'));
+  }
+  await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').click();
+  assert.deepEqual(await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').evaluate(button => ({text:button.textContent,expanded:button.getAttribute('aria-expanded')})),{text:'Show less',expanded:'true'});
+  await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').click();
+  assert.deepEqual(await page.locator('[data-message-id="message-long-prose"] .scout-chat-msg__expand').evaluate(button => ({text:button.textContent,expanded:button.getAttribute('aria-expanded')})),{text:'Show more',expanded:'false'});
+  await page.evaluate(root => {
+    const thread=scoutChatThreads[0];
+    thread.messages=[root,...Array.from({length:18},(_,index)=>({
+      id:'message-long-reply-'+(index+1),kind:'message',role:index%2===0?'user':'scout',
+      authorName:index%2===0?'Synthetic':'Scout',authorEmail:index%2===0?'synthetic@example.test':'',
+      text:'Thread reply '+(index+1)+' keeps the discussion connected to the original parent while the reply history grows.',
+      createdAt:'2026-08-11T23:' + String(46+Math.floor(index/2)).padStart(2,'0') + ':00Z',
+      replyTo:{messageId:root.id,authorName:root.authorName,text:root.text.slice(0,120)},
+    }))];
+  },longMessage);
+  const replyTrigger=page.locator('[data-message-id="message-long-prose"] .desktop-chat-actions button').filter({hasText:'reply'});
+  await replyTrigger.evaluate(button => { button.dataset.testThreadTrigger='true'; });
+  await replyTrigger.click();
+  await page.waitForFunction(() => !document.getElementById('chatContextRail').hidden);
+  assert.equal(await page.locator('#chatContextKicker').innerText(),'thread');
+  assert.ok((await page.locator('#chatContextParent').innerText()).includes('ordinary team-chat prose line 14'));
+  assert.ok((await page.locator('#chatContextBody').innerText()).includes('Thread reply 18'));
+  const pinnedTop=await page.locator('#chatContextParent').evaluate(node => node.getBoundingClientRect().top);
+  await page.locator('#chatContextBody').evaluate(node => { node.scrollTop=node.scrollHeight; });
+  assert.equal(await page.locator('#chatContextParent').evaluate(node => node.getBoundingClientRect().top),pinnedTop);
+  assert.ok((await page.locator('#chatContextBody').evaluate(node => node.scrollTop))>0);
+  assert.equal(await page.locator('#chatContextReplyInput').getAttribute('placeholder'),'Message the thread…');
+  assert.equal(await page.locator('#chatContextReplyInput').isVisible(),true);
+  assert.equal(await page.locator('#scoutChatForm').isVisible(),false);
+  assert.equal(await page.locator('#scoutChatBrainNote').count(),0);
+  if(renderDir){
+    for (const candidate of [
+      {name:'compact',width:1024,height:768,threadsVisible:false,conversationVisible:false},
+      {name:'standard',width:1280,height:800,threadsVisible:false,conversationVisible:true},
+      {name:'wide',width:1728,height:1000,threadsVisible:true,conversationVisible:true},
+    ]) {
+      await page.setViewportSize({width:candidate.width,height:candidate.height});
+      const layout=await page.evaluate(() => {
+        const reply=document.getElementById('chatContextReplyForm').getBoundingClientRect();
+        const rail=document.getElementById('chatContextRail').getBoundingClientRect();
+        return {
+          documentFits:document.documentElement.scrollWidth<=innerWidth,
+          chatFits:document.getElementById('chatTool').scrollWidth<=document.getElementById('chatTool').clientWidth,
+          threadsVisible:getComputedStyle(document.querySelector('#chatTool .chat-threads')).display!=='none',
+          conversationVisible:getComputedStyle(document.querySelector('#chatTool .chat-conversation')).display!=='none',
+          mainComposerVisible:getComputedStyle(document.getElementById('scoutChatForm')).display!=='none',
+          replyVisible:reply.width>=320 && reply.bottom<=innerHeight && reply.left>=0 && reply.right<=innerWidth,
+          railVisible:rail.width>=360 && rail.right<=innerWidth,
+        };
+      });
+      assert.deepEqual(layout,{documentFits:true,chatFits:true,threadsVisible:candidate.threadsVisible,conversationVisible:candidate.conversationVisible,mainComposerVisible:false,replyVisible:true,railVisible:true});
+      for (const theme of ['dark','light']) {
+        await page.evaluate(nextTheme => renderTheme(nextTheme),theme);
+        await page.mouse.move(2,2);
+        await page.waitForTimeout(180);
+        await page.screenshot({path:path.join(renderDir,'desktop-long-message-thread-'+candidate.name+'-'+theme+'.png')});
+      }
+    }
+    await page.setViewportSize({width:1280,height:800});
+    await page.evaluate(() => renderTheme('dark'));
+  }
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#chatContextRail').evaluate(node => node.hidden),true);
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset?.testThreadTrigger),'true');
   const activeRowPreview = await page.evaluate(() => {
     artifactEntries=[{id:'artifact-follow-up',status:'running',metadata:{threadStatus:'running',status:'running',threadId:'run-follow-up',originKind:'channel',originId:'channel-follow-up'}}];
     const thread={id:'channel-follow-up',title:'Bonfire Chat',visibility:'public',preview:'Research delivered · 12 cited source links · 10 domains',updatedAt:'2026-08-10T00:01:00Z',messages:[{id:'follow-up-work',kind:'thread',text:'Research delivered · 12 cited source links · 10 domains',thread:{id:'run-follow-up',artifactId:'artifact-follow-up',status:'running',startedAt:'2026-08-10T00:00:00Z'}}]};

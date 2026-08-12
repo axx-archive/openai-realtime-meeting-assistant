@@ -785,8 +785,8 @@ func TestScoutWakePatternMatchesWholeWordOnly(t *testing.T) {
 }
 
 // The wake broadcast fires only for transcripts that name Scout: a room
-// socket sees both transcript events but exactly one wake, and it belongs to
-// the matching line.
+// socket sees both exact-scope memory_transcript publications but exactly one
+// body-minimized assistant wake event, and it belongs to the matching line.
 func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
@@ -812,16 +812,20 @@ func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 	if !ok {
 		t.Fatal("member admission did not open an office sitting")
 	}
+	scope, current := kanbanApp.roomPublicationScope(officeRoomID, meeting.ID)
+	if !current || scope.MediaGeneration == 0 {
+		t.Fatalf("member media scope is not current: current=%t scope=%+v", current, scope)
+	}
 	enableFullTranscriptConsentForTest(t, kanbanApp, memberAdmissionPrincipal("aj@shareability.com"), officeRoomID, meeting.ID)
 
 	attributeNextTranscriptForTest(kanbanApp, officeRoomID, "AJ")
-	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
+	kanbanApp.rememberTranscriptForGeneration(officeRoomID, scope.MediaGeneration, kanbanRealtimeEvent{
 		EventID:    "wake-event-1",
 		ItemID:     "wake-item-1",
 		Transcript: "We are scouting locations at a discount.",
 	}, "transcript_lane", "test-model")
 	attributeNextTranscriptForTest(kanbanApp, officeRoomID, "AJ")
-	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
+	kanbanApp.rememberTranscriptForGeneration(officeRoomID, scope.MediaGeneration, kanbanRealtimeEvent{
 		EventID:    "wake-event-2",
 		ItemID:     "wake-item-2",
 		Transcript: "Hey Scout, pull up the board.",
@@ -847,6 +851,10 @@ func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
 			t.Fatalf("decode kanban envelope: %v", err)
 		}
+		if inner.Event == "memory_transcript" {
+			transcriptsSeen++
+			continue
+		}
 		if inner.Event != "assistant_event" {
 			continue
 		}
@@ -856,10 +864,6 @@ func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 		}
 		if err := json.Unmarshal(inner.Data, &payload); err != nil {
 			t.Fatalf("decode assistant event: %v", err)
-		}
-		if payload.Kind == "transcript" {
-			transcriptsSeen++
-			continue
 		}
 		if payload.Kind == "wake" {
 			if transcriptsSeen != 2 {

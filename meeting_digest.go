@@ -60,7 +60,13 @@ const (
 	// meetingDigestCursorMetadataKey rides every upserted meeting_digest; the
 	// runner reads it off the NEWEST digest to resume after the consumed
 	// window (agent_runner.go unconsumedEntriesAfter).
-	meetingDigestCursorMetadataKey = "throughBrainId"
+	meetingDigestCursorMetadataKey  = "throughBrainId"
+	meetingDigestCaptureMetadataKey = "analysisCaptureHighWater"
+	// This activation-only fence is narrower than MEETING_DIGEST_BACKFILL: it
+	// permits an explicitly reviewed deployment to fold the one active sitting
+	// after a previously disabled worker is restored, without replaying prior
+	// meetings. It remains false unless an operator enables it at action time.
+	meetingDigestCurrentMeetingBootstrapEnv = "MEETING_DIGEST_CURRENT_MEETING_BOOTSTRAP"
 
 	dayDigestAgentName         = "day digest"
 	defaultDayDigestInterval   = 30 * time.Minute
@@ -188,6 +194,43 @@ func (app *kanbanBoardApp) startDayDigestWorker(apiKey string) {
 
 func meetingDigestMaxMeetingsPerTick() int {
 	return positiveIntEnv("MEETING_DIGEST_MAX_MEETINGS_PER_TICK", defaultMeetingDigestMaxMeetingsPerTick)
+}
+
+// meetingDigestCurrentMeetingBootstrapBaseline returns the exact predecessor
+// brain for the room's active sitting. Starting after that cursor admits only
+// current-meeting brains; returning an empty predecessor is safe only when the
+// first matching room brain already belongs to the active sitting. Existing
+// digest/checkpoint continuity always wins before this seam is consulted.
+func (app *kanbanBoardApp) meetingDigestCurrentMeetingBootstrapBaseline(agent ambientAgentConfig, roomID string) (string, bool) {
+	if app == nil || app.memory == nil || app.meetings == nil || agent.name != meetingDigestAgentName || !boolEnv(meetingDigestCurrentMeetingBootstrapEnv) {
+		return "", false
+	}
+	roomID = agent.scopeRoomID(roomID)
+	record, active := app.meetings.activeRecord(roomID)
+	if !active || strings.TrimSpace(record.ID) == "" {
+		return "", false
+	}
+	if _, alreadyCurrent := app.memory.latestDigestPerMeeting()[record.ID]; alreadyCurrent {
+		return "", false
+	}
+	windowRoomID := agent.windowRoomID(roomID)
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	predecessor := ""
+	foundCurrent := false
+	for _, entry := range app.memory.entries {
+		if entry.Kind != agent.inputKind || memoryEntryHiddenFromRecall(entry) || (windowRoomID != "" && normalizeRoomID(entry.Metadata["roomId"]) != normalizeRoomID(windowRoomID)) {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata["meetingId"]) == record.ID {
+			foundCurrent = true
+			continue
+		}
+		if !foundCurrent {
+			predecessor = entry.ID
+		}
+	}
+	return predecessor, foundCurrent
 }
 
 /* ---------- T2 anchored-JSON schema ---------- */
@@ -1115,6 +1158,9 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			"brainCount":                   strconv.Itoa(len(group.brains)),
 			"generatedAt":                  time.Now().UTC().Format(time.RFC3339),
 		}
+		if highWater := meetingIntelligenceBrainGroupCaptureHighWater(app.memory, group.brains); highWater > 0 {
+			metadata[meetingDigestCaptureMetadataKey] = strconv.FormatUint(highWater, 10)
+		}
 		metadata = applyAmbientDerivedScope(metadata, group.brains)
 		// item 1.3a: mirror the clamped aliases into searchable metadata text.
 		if aliases := digestAliasesMetadata(payload.Aliases); aliases != "" {
@@ -1157,6 +1203,10 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		if err != nil {
 			return newest, err
 		}
+		// A cumulative digest revision advances the same in-meeting Recap
+		// projection. The scope check drops stale/ended sittings, and the guest
+		// writer allowlist withholds this member-memory surface.
+		app.broadcastMeetingIntelligence(metadata["roomId"], group.key)
 		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash))
 		newest = entry
 	}

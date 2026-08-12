@@ -163,6 +163,7 @@ type kanbanRealtimeEvent struct {
 	Name           string `json:"name,omitempty"`
 	Arguments      string `json:"arguments,omitempty"`
 	CallID         string `json:"call_id,omitempty"`
+	ResponseID     string `json:"response_id,omitempty"`
 	Error          *struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
@@ -173,7 +174,9 @@ type kanbanRealtimeEvent struct {
 	// peer's own STT billing, metered per segment (W0-5).
 	Usage    *kanbanRealtimeUsage `json:"usage,omitempty"`
 	Response *struct {
-		Status        string `json:"status,omitempty"`
+		ID            string            `json:"id,omitempty"`
+		Status        string            `json:"status,omitempty"`
+		Metadata      map[string]string `json:"metadata,omitempty"`
 		StatusDetails *struct {
 			Type   string `json:"type,omitempty"`
 			Reason string `json:"reason,omitempty"`
@@ -191,6 +194,9 @@ type kanbanRealtimeOutputItem struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
+	// ResponseID is stamped by the server event adapter. It is never accepted
+	// from model arguments and binds a tool callback to the admitted human turn.
+	ResponseID string `json:"-"`
 }
 
 // kanbanRealtimeUsage decodes the usage object the Realtime API attaches to
@@ -340,11 +346,21 @@ type kanbanBoardApp struct {
 	forwardedAudioNotice           bool
 	realtimeResponseActive         bool
 	realtimeResponseRecordingEpoch uint64
+	realtimeResponseStartedAt      time.Time
+	realtimeResponseFirstAudioAt   time.Time
 	voiceControlActive             bool
 	voiceControlUpdatedAt          time.Time
 	voiceControlUpdatedBy          string
 	scoutVoiceArmedAt              time.Time
 	scoutVoiceArmedUntil           time.Time
+	// officeScoutRequester is a short-lived, server-attributed binding from the
+	// human speaker who caused the current Realtime response to any durable work
+	// it launches. Provider arguments can never choose or widen this identity.
+	officeScoutRequester           officeScoutRequesterBinding
+	officeScoutRequesterByInput    map[string]officeScoutRequesterBinding
+	officeScoutArmedRequester      officeScoutRequesterBinding
+	officeScoutRequesterByResponse map[string]officeScoutRequesterBinding
+	officeScoutRequesterByCall     map[string]officeScoutRequesterBinding
 	scoutSpokenResponse            bool
 	scoutSpokenResponseSent        bool
 	scoutLastToolResultAt          time.Time
@@ -358,6 +374,9 @@ type kanbanBoardApp struct {
 	officeWorkInFlight             map[uint64]int
 	officeWorkCond                 *sync.Cond
 	officeWorkCommitMu             sync.Mutex
+	roomWorkActivationMu           sync.Mutex
+	roomStartedThreadsMu           sync.Mutex
+	roomStartedThreads             map[string]struct{}
 	// officeToolBeforeCommit is a test-only barrier for the final room-consent
 	// conditional commit. Production leaves it nil.
 	officeToolBeforeCommit   func()
@@ -551,6 +570,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		handledCalls:              map[string]struct{}{},
 		memory:                    memory,
 		goalStartedChildren:       map[string]struct{}{},
+		roomStartedThreads:        map[string]struct{}{},
 		openAIToolActiveRuns:      map[string]struct{}{},
 		openAIToolActivationOwner: uuid.NewString(),
 		pendingAttachmentUploads:  map[string]pendingAttachmentUploadGrant{},
@@ -739,6 +759,14 @@ func nextKanbanCardIndex(cards []kanbanCard) int {
 }
 
 func (app *kanbanBoardApp) JoinConferenceRoom() error {
+	// Durable work recovery is independent of whether the optional Realtime
+	// provider can join. A restart with missing/rotated configuration must
+	// reconcile persisted reservations into an exact retry or needs_attention,
+	// never leave a falsely running card behind the API-key gate.
+	app.startWorkflowTicker()
+	app.reconcileGoalThreadsAtBoot()
+	app.reconcileRoomAgentThreadsAtBoot()
+
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is not configured")
@@ -785,12 +813,6 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// ledger_event). Backfill OFF by default (COMPANY_DIGEST_BACKFILL).
 	app.startCompanyDigestWorker(apiKey)
 	app.startScoutProactiveWorker(apiKey)
-	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
-	// proposals and any auto_run-lane standing-approved work. Model-free, so it
-	// starts independent of the API key gate above.
-	app.startWorkflowTicker()
-	app.reconcileGoalThreadsAtBoot()
-
 	return nil
 }
 
@@ -888,6 +910,9 @@ func (app *kanbanBoardApp) teardownRealtimePeerForIdle() {
 	app.connected = false
 	app.forwardedAudioNotice = false
 	app.realtimeResponseActive = false
+	app.realtimeResponseStartedAt = time.Time{}
+	app.realtimeResponseFirstAudioAt = time.Time{}
+	app.clearOfficeScoutRequesterBindingsLocked()
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
@@ -966,6 +991,9 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string, startG
 	app.inputEnc = inputEnc
 	app.forwardedAudioNotice = false
 	app.realtimeResponseActive = false
+	app.realtimeResponseStartedAt = time.Time{}
+	app.realtimeResponseFirstAudioAt = time.Time{}
+	app.clearOfficeScoutRequesterBindingsLocked()
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
@@ -1014,6 +1042,9 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string, startG
 				app.connected = false
 				app.forwardedAudioNotice = false
 				app.realtimeResponseActive = false
+				app.realtimeResponseStartedAt = time.Time{}
+				app.realtimeResponseFirstAudioAt = time.Time{}
+				app.clearOfficeScoutRequesterBindingsLocked()
 				app.scoutVoiceArmedAt = time.Time{}
 				app.scoutVoiceArmedUntil = time.Time{}
 				app.scoutSpokenResponse = false
@@ -1105,6 +1136,9 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 	app.connected = false
 	app.forwardedAudioNotice = false
 	app.realtimeResponseActive = false
+	app.realtimeResponseStartedAt = time.Time{}
+	app.realtimeResponseFirstAudioAt = time.Time{}
+	app.clearOfficeScoutRequesterBindingsLocked()
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
@@ -1178,6 +1212,9 @@ func (app *kanbanBoardApp) Close() error {
 		app.connected = false
 		app.forwardedAudioNotice = false
 		app.realtimeResponseActive = false
+		app.realtimeResponseStartedAt = time.Time{}
+		app.realtimeResponseFirstAudioAt = time.Time{}
+		app.clearOfficeScoutRequesterBindingsLocked()
 		app.scoutVoiceArmedAt = time.Time{}
 		app.scoutVoiceArmedUntil = time.Time{}
 		app.scoutSpokenResponse = false
@@ -2062,9 +2099,25 @@ func transcriptStartsWithScoutWakePhrase(text string) bool {
 }
 
 func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) bool {
+	return app.armScoutVoiceResponseForTurn(transcript)
+}
+
+func (app *kanbanBoardApp) armScoutVoiceResponseForTurn(transcript string) bool {
+	return app.armScoutVoiceResponseForInputItem(transcript, "")
+}
+
+func (app *kanbanBoardApp) armScoutVoiceResponseForInputItem(transcript, inputItemID string) bool {
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" {
 		return false
+	}
+	frozenRequester := officeScoutRequesterBinding{}
+	if strings.TrimSpace(inputItemID) != "" {
+		var ok bool
+		frozenRequester, ok = app.officeScoutRequesterForInputItem(inputItemID)
+		if !ok {
+			return false
+		}
 	}
 	explicitReference := strideVoiceMentionsScout(transcript)
 	voiceControl := app.voiceControlEnabled()
@@ -2074,7 +2127,7 @@ func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) bool {
 		return false
 	}
 	if !voiceControl {
-		speakerID := app.currentRoomSpeaker(officeRoomID)
+		speakerID := firstNonEmptyString(frozenRequester.Name, app.currentRoomSpeaker(officeRoomID))
 		app.mu.Lock()
 		machine := app.scoutInvocation
 		if machine == nil {
@@ -2114,6 +2167,12 @@ func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) bool {
 		app.scoutVoiceArmedUntil = now.Add(scoutVoiceArmDuration)
 	}
 	app.mu.Unlock()
+	if strings.TrimSpace(inputItemID) == "" {
+		// Non-Realtime callers and focused tests retain the direct seam. Live
+		// Realtime work is bound through response metadata to the exact committed
+		// input item instead of this compatibility slot.
+		app.armOfficeScoutRequesterCandidate()
+	}
 
 	metadata := map[string]any{
 		"voiceControl": voiceControl,
@@ -2130,6 +2189,15 @@ func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) bool {
 		app.flushScoutSpokenResponseIfPending()
 	}
 	return true
+}
+
+func (app *kanbanBoardApp) realtimeResponseCreateForInputItem(inputItemID string) map[string]any {
+	return map[string]any{
+		"tool_choice": app.realtimeToolChoice(),
+		"metadata": map[string]string{
+			"stride_input_item_id": strings.TrimSpace(inputItemID),
+		},
+	}
 }
 
 func (app *kanbanBoardApp) currentRoomSpeaker(roomID string) string {
@@ -2318,13 +2386,54 @@ func (app *kanbanBoardApp) markScoutSpokenResponseDelivered() {
 	app.mu.Unlock()
 }
 
-func (app *kanbanBoardApp) markRealtimeResponseActive(active bool) {
+func (app *kanbanBoardApp) markRealtimeResponseStarted() {
+	now := time.Now().UTC()
 	app.mu.Lock()
-	app.realtimeResponseActive = active
-	if active {
-		app.realtimeResponseRecordingEpoch = app.roomLiveLocked(officeRoomID).recordingEpoch
+	app.realtimeResponseActive = true
+	app.realtimeResponseRecordingEpoch = app.roomLiveLocked(officeRoomID).recordingEpoch
+	app.realtimeResponseStartedAt = now
+	app.realtimeResponseFirstAudioAt = time.Time{}
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) markRealtimeFirstAudio() {
+	now := time.Now().UTC()
+	app.mu.Lock()
+	if app.realtimeResponseActive && app.realtimeResponseFirstAudioAt.IsZero() {
+		app.realtimeResponseFirstAudioAt = now
 	}
 	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) finishRealtimeResponseTelemetry(status string, hadFunctionCall bool) {
+	now := time.Now().UTC()
+	app.mu.Lock()
+	startedAt := app.realtimeResponseStartedAt
+	firstAudioAt := app.realtimeResponseFirstAudioAt
+	app.realtimeResponseActive = false
+	app.realtimeResponseStartedAt = time.Time{}
+	app.realtimeResponseFirstAudioAt = time.Time{}
+	app.mu.Unlock()
+	if startedAt.IsZero() {
+		return
+	}
+	fields := map[string]any{
+		"phase": "response_done", "status": firstNonEmptyString(strings.TrimSpace(status), "unknown"),
+		"duration_ms": now.Sub(startedAt).Milliseconds(), "tool_response": hadFunctionCall,
+		"room_id": officeRoomID, "model": app.currentRealtimeModel(),
+	}
+	if !firstAudioAt.IsZero() {
+		fields["first_audio_ms"] = firstAudioAt.Sub(startedAt).Milliseconds()
+	}
+	recordEvalEvent(seatVoiceRoom, evalKindRealtimeLatency, fields)
+	log.Infof("Realtime Scout response status=%s tool_response=%t duration_ms=%d first_audio_ms=%v", fields["status"], hadFunctionCall, fields["duration_ms"], fields["first_audio_ms"])
+}
+
+func realtimeResponseStatus(event kanbanRealtimeEvent) string {
+	if event.Response == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Response.Status)
 }
 
 func (app *kanbanBoardApp) realtimeResponseEpoch() uint64 {
@@ -2347,6 +2456,7 @@ func scoutSpokenResponseInstructions() string {
 		"Do not call tools.",
 		"Do not repeat or mention the wake phrase.",
 		"If the tool result contains an answer or reason, say it plainly.",
+		"If work was started, say only one short sentence that it started and the room work card will show progress. Do not summarize the work request, artifact, workflow, or metadata.",
 		"If the tool result completed a board update, acknowledge it in one short sentence.",
 	}, " ")
 }
@@ -2368,6 +2478,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
 		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
+		"# Voice latency and brevity\nMove immediately. For launch_agent_thread, call the tool with no spoken preamble. Before any other slow tool, use at most one short acknowledgement. After a tool result, speak one sentence of at most twelve words. For direct answers, use at most two short sentences unless the room explicitly asks for detail. Never narrate reasoning, restate the request, list workflow metadata, or read an artifact scaffold aloud.",
 		"# Voice control mode\n" + voiceControlState + " This is the shared room Realtime 2 Scout, fed by room audio and heard by everyone in the room. The private Scout chat outside the room is a separate per-user surface; open chat with control_app instead of joining or controlling the room for private conversation requests. When active, answer simple capability, help, navigation, and status questions directly unless a listed tool is needed. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
 		"# Preambles\nDo not speak preambles for routine app or board updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
@@ -3246,7 +3357,10 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		// transcription model's rates regardless of which lane persists, so
 		// meter every segment that reports usage.
 		app.recordVoicePeerTranscriptionUsage(event)
-		admitted := app.armScoutVoiceResponse(event.Transcript)
+		admitted := app.armScoutVoiceResponseForInputItem(event.Transcript, event.ItemID)
+		if !admitted {
+			app.discardOfficeScoutRequesterForInputItem(event.ItemID)
+		}
 		if !app.transcriptionLaneConnected() {
 			app.recordVoicePeerTranscriptSegment(event, "completed")
 			if mediaGeneration > 0 {
@@ -3258,12 +3372,13 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		if admitted {
 			if err := app.SendEvent(map[string]any{
 				"type":     "response.create",
-				"response": map[string]any{"tool_choice": app.realtimeToolChoice()},
+				"response": app.realtimeResponseCreateForInputItem(event.ItemID),
 			}); err != nil && !strings.Contains(err.Error(), "Realtime event channel is unavailable") {
 				log.Errorf("Failed to admit Scout room response: %v", err)
 			}
 		}
 	case "conversation.item.input_audio_transcription.failed":
+		app.discardOfficeScoutRequesterForInputItem(event.ItemID)
 		// A6: mirror the .completed gate. When the Scout peer is the persisting
 		// session (lane down), a failed segment still froze a window at its commit;
 		// pop it (discard) so the FIFO stays aligned and later transcripts keep their
@@ -3283,10 +3398,12 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			app.noteRealtimeSpeechStartedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
 	case "input_audio_buffer.speech_stopped":
+		app.captureOfficeScoutRequesterCandidate()
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStoppedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
 	case "input_audio_buffer.committed":
+		app.bindOfficeScoutRequesterToInputItem(event.ItemID)
 		// A6: when the Scout peer is the persisting session (lane down), freeze the
 		// attribution window at commit so its transcription.completed resolves the
 		// speaker from this turn's boundaries, not whatever the next turn overwrote.
@@ -3295,10 +3412,14 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			app.freezeAttributionWindowAtCommitForRoomGenerationWithCaptureAndConsent(officeRoomID, mediaGeneration, nil, nil)
 		}
 	case "response.created":
-		app.markRealtimeResponseActive(true)
+		if event.Response != nil {
+			app.bindOfficeScoutRequesterInputToResponse(event.Response.Metadata["stride_input_item_id"], event.Response.ID)
+		}
+		app.markRealtimeResponseStarted()
 		broadcastAssistantEvent("audio", "Scout is thinking", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
 		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "thinking", "")
 	case "response.output_audio_transcript.delta":
+		app.markRealtimeFirstAudio()
 		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "talking", "")
 	case "response.output_audio_transcript.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
@@ -3316,12 +3437,15 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
-			app.handleToolCall(*event.Item, true)
+			item := *event.Item
+			item.ResponseID = event.ResponseID
+			app.handleToolCall(item, true)
 		}
 	case "response.function_call_arguments.done":
-		app.handleToolCall(realtimeFunctionCallFromArgumentsDone(event), true)
+		item := realtimeFunctionCallFromArgumentsDone(event)
+		item.ResponseID = event.ResponseID
+		app.handleToolCall(item, true)
 	case "response.done":
-		app.markRealtimeResponseActive(false)
 		hadFunctionCall := false
 		if event.Response != nil {
 			interrupted := isInterruptedRealtimeResponseStatus(event.Response.Status)
@@ -3334,6 +3458,7 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			}
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {
+					outputItem.ResponseID = event.Response.ID
 					hadFunctionCall = true
 					if interrupted {
 						// The response was cancelled/incomplete/failed: its tool
@@ -3354,6 +3479,7 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		// W0-5: response.done over the datachannel is the authoritative
 		// server-side metering point for the room voice seat.
 		app.recordRealtimeResponseUsage(event)
+		app.finishRealtimeResponseTelemetry(realtimeResponseStatus(event), hadFunctionCall)
 		app.flushScoutSpokenResponseIfPending()
 		broadcastAssistantEvent("audio", "Scout is listening", map[string]any{"eventType": event.Type, "voiceState": "listening"})
 		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "listening", "")
@@ -3476,6 +3602,9 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		log.Errorf("Ignoring Kanban tool call %q without call_id", outputItem.Name)
 		return
 	}
+	if outputItem.Name == "launch_agent_thread" {
+		app.bindOfficeScoutRequesterToCall(outputItem.ResponseID, outputItem.CallID)
+	}
 
 	args, parseErr := parseToolCallArguments(outputItem)
 	outcome := classifyToolArgParse(parseErr, allowIncompleteArguments)
@@ -3531,12 +3660,14 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 	consentFence := currentConsentLaneAuthority().roomDecisionFence(canonicalTenantID(), officeRoomID, sittingID)
 	broadcastAssistantEvent("action", "using "+humanizeToolName(outputItem.Name), map[string]any{"tool": outputItem.Name})
 
+	toolStartedAt := time.Now().UTC()
 	// Count the call as in flight until its result lands so a crosstalk or
 	// continuation transcript completing meanwhile cannot disarm the turn.
 	app.beginScoutToolCall()
 	finish := func() {
 		defer app.endScoutToolCall()
 		app.finishToolCallForSittingWithConsentFence(outputItem, args, parseErr, armedAtStart, sittingID, consentFence)
+		app.recordRealtimeToolLatency(outputItem.Name, toolStartedAt)
 	}
 
 	if realtimeToolRunsAsync(outputItem.Name) {
@@ -3547,6 +3678,19 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		return
 	}
 	finish()
+}
+
+func (app *kanbanBoardApp) recordRealtimeToolLatency(toolName string, startedAt time.Time) {
+	if startedAt.IsZero() {
+		return
+	}
+	duration := time.Since(startedAt).Milliseconds()
+	fields := map[string]any{
+		"phase": "tool_done", "tool": strings.TrimSpace(toolName),
+		"duration_ms": duration, "room_id": officeRoomID, "model": app.currentRealtimeModel(),
+	}
+	recordEvalEvent(seatVoiceRoom, evalKindRealtimeLatency, fields)
+	log.Infof("Realtime Scout tool=%s duration_ms=%d", fields["tool"], duration)
 }
 
 func realtimeToolRunsAsync(name string) bool {
@@ -3621,7 +3765,7 @@ func (app *kanbanBoardApp) finishToolCallInEpoch(workCtx context.Context, epoch 
 			if workCtx.Err() != nil || !app.officeScoutWorkCurrent(epoch, sittingID) {
 				return ErrRoomScoutFence
 			}
-			result, changed, err = app.applyToolCallArgs(outputItem.Name, args)
+			result, changed, err = app.applyOfficeRealtimeToolCallArgs(outputItem, args, sittingID)
 			return nil
 		})
 		if commitErr != nil {
@@ -3658,7 +3802,7 @@ func (app *kanbanBoardApp) finishToolCallInEpoch(workCtx context.Context, epoch 
 			// (a full artifact/package body) must not bloat the Realtime session
 			// context. Capped tighter here — the voice window is smaller and audio
 			// tokens accrue fast.
-			"output": capVoiceToolResultContent(mustMarshalJSON(result)),
+			"output": capVoiceToolResultContent(mustMarshalJSON(realtimeProviderToolResult(outputItem.Name, result))),
 		},
 	}); err != nil {
 		log.Errorf("Failed to send Kanban function output: %v", err)
@@ -3687,6 +3831,50 @@ func (app *kanbanBoardApp) finishToolCallInEpoch(workCtx context.Context, epoch 
 		broadcastAssistantEvent("error", "could not refresh assistant board context", map[string]any{"tool": outputItem.Name})
 	}
 	return nil
+}
+
+func (app *kanbanBoardApp) applyOfficeRealtimeToolCallArgs(outputItem kanbanRealtimeOutputItem, args map[string]any, sittingID string) (map[string]any, bool, error) {
+	if outputItem.Name != "launch_agent_thread" {
+		return app.applyToolCallArgs(outputItem.Name, args)
+	}
+	requester, requesterOK := app.consumeOfficeScoutRequesterForCall(outputItem.CallID, sittingID)
+	if !requesterOK {
+		return nil, false, fmt.Errorf("an attributed signed-in meeting participant is required to start work")
+	}
+	return app.launchRealtimeAgentThreadForOperation(args, map[string]string{
+		"originKind":      agentThreadOriginRoom,
+		"originId":        officeRoomID,
+		"originMeetingId": sittingID,
+		"requestedBy":     requester.Email,
+	}, agentThreadGoalSpec{Launch: launchFunnelLineage{
+		Source: proposalSourceRoomVoice,
+		Path:   "launch_agent_thread",
+	}}, outputItem.CallID)
+}
+
+// realtimeProviderToolResult strips large internal thread/artifact structs from
+// the Realtime conversation. The room already has a durable work card; feeding
+// its full scaffold back to the voice model caused long, repetitive spoken
+// acknowledgements and needless audio/token latency.
+func realtimeProviderToolResult(toolName string, result map[string]any) map[string]any {
+	if toolName != "launch_agent_thread" || result == nil {
+		return result
+	}
+	minimized := map[string]any{
+		"ok": result["ok"], "message": "Work started. The meeting work card will show progress and the final deliverable.",
+	}
+	if errText := strings.TrimSpace(asString(result["error"])); errText != "" {
+		minimized["message"] = "Work could not start. Tell the room it needs attention."
+		minimized["error"] = errText
+		return minimized
+	}
+	if thread, ok := result["thread"].(scoutAgentThread); ok {
+		minimized["work_run_id"] = thread.ID
+		minimized["status"] = thread.Status
+		minimized["artifact_id"] = thread.Artifact.ID
+		minimized["title"] = firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["title"]), strings.TrimSpace(thread.Query))
+	}
+	return minimized
 }
 
 func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (map[string]any, bool, error) {
@@ -3855,19 +4043,13 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// allowlists both exclude launch_agent_thread), so the direct-launch
 		// funnel lineage (source=room_voice, path=launch_agent_thread) rides the
 		// spec onto the single launched emitter.
-		return app.launchRealtimeAgentThread(args, map[string]string{
-			"originKind":      agentThreadOriginRoom,
-			"originMeetingId": app.memory.currentMeetingID(officeRoomID),
-		}, agentThreadGoalSpec{Launch: launchFunnelLineage{
-			Source: proposalSourceRoomVoice,
-			Path:   "launch_agent_thread",
-		}})
+		return nil, false, fmt.Errorf("Realtime launch_agent_thread requires an exact response and call binding")
 	case "update_artifact":
 		return app.updateRealtimeArtifact(args)
 	case "publish_artifact":
 		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
-		return app.answerMemoryQuestionForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
+		return app.answerMemoryQuestionForPrincipal(args, app.currentRoomMediaRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
 	case "organize_files":
 		// Shared dispatch (room voice + workers) has no single requester: an
 		// empty viewer scopes the file list to team-visible rows only (direct
@@ -3947,9 +4129,9 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		}
 		return result.toolResult(), false, nil
 	case "cross_meeting_briefing":
-		return app.crossMeetingBriefingToolForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
+		return app.crossMeetingBriefingToolForPrincipal(args, app.currentRoomMediaRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 	case "get_meeting_detail":
-		return app.getMeetingDetailForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
+		return app.getMeetingDetailForPrincipal(args, app.currentRoomMediaRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 	case "start_grill_session":
 		return app.startGrillSession(args)
 	case "end_grill_session":
@@ -4816,7 +4998,7 @@ func osAssistantActionsForTool(tool string, artifactID string) []osAssistantActi
 }
 
 func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
-	return app.createRealtimeArtifactForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
+	return app.createRealtimeArtifactForPrincipal(args, app.currentRoomMediaRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 }
 
 func (app *kanbanBoardApp) createRealtimeArtifactForPrincipal(args map[string]any, principal RecallPrincipal) (map[string]any, bool, error) {
@@ -4876,6 +5058,10 @@ func (app *kanbanBoardApp) createRealtimeArtifactForPrincipal(args map[string]an
 }
 
 func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin map[string]string, spec agentThreadGoalSpec) (map[string]any, bool, error) {
+	return app.launchRealtimeAgentThreadForOperation(args, origin, spec, "")
+}
+
+func (app *kanbanBoardApp) launchRealtimeAgentThreadForOperation(args map[string]any, origin map[string]string, spec agentThreadGoalSpec, callID string) (map[string]any, bool, error) {
 	mode := normalizeAgentThreadMode(asString(args["mode"]))
 	if mode == "" {
 		return nil, false, fmt.Errorf("mode is required")
@@ -4884,8 +5070,31 @@ func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin
 	if query == "" {
 		return nil, false, fmt.Errorf("query is required")
 	}
+	runID := ""
+	if strings.TrimSpace(origin["originKind"]) == agentThreadOriginRoom {
+		requester := normalizeAccountEmail(origin["requestedBy"])
+		sittingID := strings.TrimSpace(origin["originMeetingId"])
+		body, bodyErr := canonicalJSON(map[string]any{
+			"mode": mode, "query": query, "requester": requester,
+			"roomId": strings.TrimSpace(origin["originId"]), "sittingId": sittingID,
+		})
+		if bodyErr != nil || requester == "" || sittingID == "" || strings.TrimSpace(callID) == "" {
+			return nil, false, fmt.Errorf("room work operation binding is invalid")
+		}
+		operationDigest := sha256Hex(append([]byte("room-voice-work/v1\x00"), body...))
+		runID = "agent-thread-room-" + operationDigest[:24]
+		spec.OperationID = runID
+		spec.OperationBodyDigest = operationDigest
+		spec.RequestedBy = requester
+	}
 
-	thread, err := app.launchAgentThreadWithSpec(mode, query, scoutParticipantName, origin, spec)
+	var thread scoutAgentThread
+	var err error
+	if runID != "" {
+		thread, err = app.launchAgentThreadWithSpecBound(mode, query, scoutParticipantName, origin, spec, runID, nil, true)
+	} else {
+		thread, err = app.launchAgentThreadWithSpec(mode, query, scoutParticipantName, origin, spec)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -5188,8 +5397,7 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegmentAndSource(roomID
 		return
 	}
 
-	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
-	broadcastRoomKanbanEvent(roomID, "memory_transcript", entry)
+	publication, publicationCurrent := app.broadcastCurrentMeetingTranscript(roomID, entry)
 	// A3: wake the meeting-brain worker so it re-checks THIS ROOM's window on
 	// this fresh transcript instead of waiting up to a full brain interval (W4
 	// §7.4: nudges carry the room). The worker debounces (a buffered wake) and,
@@ -5213,8 +5421,8 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegmentAndSource(roomID
 	// Detection lives only here, so typed room chat never pulses, and the
 	// recording toggle gates it (no transcripts = no presence). §7.3: a
 	// listen-only sitting has no Scout — the wake pulse is skipped too.
-	if scoutWakePattern.MatchString(entry.Text) && !app.sittingListenOnly(roomID) {
-		broadcastAssistantEvent("wake", "Scout heard its name", map[string]any{"speaker": speaker})
+	if publicationCurrent && scoutWakePattern.MatchString(entry.Text) && !app.sittingListenOnly(roomID) {
+		broadcastScopedRoomAssistantTelemetry(publication.Scope, "wake", "Scout heard its name", map[string]any{"speaker": speaker})
 	}
 }
 
@@ -5230,6 +5438,10 @@ const (
 	// roomChatHistoryLimit is how many chat messages replay to a newly
 	// admitted participant.
 	roomChatHistoryLimit = 50
+	// roomChatServerMessageIDMetadataKey lets trusted server projections use a
+	// deterministic append id. It is removed before persistence and can never be
+	// selected by a client or leak onto the wire.
+	roomChatServerMessageIDMetadataKey = "_serverMessageId"
 )
 
 // normalizeRoomChatText trims a typed chat message and enforces the server
@@ -5279,6 +5491,17 @@ func (app *kanbanBoardApp) recordRoomChatMessageWithMetadata(roomID string, send
 }
 
 func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, senderName string, text string, extraMetadata map[string]string, expectedMeetingID string) (map[string]any, bool) {
+	return app.recordRoomChatMessageForMeetingWithScope(roomID, senderName, text, extraMetadata, expectedMeetingID, nil)
+}
+
+func (app *kanbanBoardApp) recordRoomChatMessageForScope(scope RoomScoutScope, senderName string, text string, extraMetadata map[string]string) (map[string]any, bool) {
+	if !scope.valid() {
+		return nil, false
+	}
+	return app.recordRoomChatMessageForMeetingWithScope(scope.RoomID, senderName, text, extraMetadata, scope.SittingID, &scope)
+}
+
+func (app *kanbanBoardApp) recordRoomChatMessageForMeetingWithScope(roomID string, senderName string, text string, extraMetadata map[string]string, expectedMeetingID string, expectedScope *RoomScoutScope) (map[string]any, bool) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; room chat message was not saved")
 		return nil, false
@@ -5300,9 +5523,36 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, sender
 	} else {
 		metadata["visibility"] = "room"
 	}
+	if expectedScope != nil {
+		if !expectedScope.valid() || normalizeRoomID(expectedScope.RoomID) != roomID || strings.TrimSpace(expectedScope.SittingID) != strings.TrimSpace(expectedMeetingID) {
+			return nil, false
+		}
+		metadata["mediaGeneration"] = strconv.FormatUint(expectedScope.MediaGeneration, 10)
+	}
 
-	id := durableTimestampID("chat", time.Now())
-	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, metadata, expectedMeetingID)
+	id := strings.TrimSpace(metadata[roomChatServerMessageIDMetadataKey])
+	delete(metadata, roomChatServerMessageIDMetadataKey)
+	if id == "" {
+		id = durableTimestampID("chat", time.Now())
+	}
+	var entry meetingMemoryEntry
+	var appended bool
+	var err error
+	if expectedScope != nil {
+		// Linearize the session-owned typed write against room media rollover.
+		// A stale websocket cannot persist under the old sitting and then have
+		// its body published under the successor generation.
+		app.mu.Lock()
+		state := app.roomLiveLocked(roomID)
+		if state.mediaGen != expectedScope.MediaGeneration || state.mediaSittingID != strings.TrimSpace(expectedScope.SittingID) {
+			app.mu.Unlock()
+			return nil, false
+		}
+		entry, appended, err = app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, metadata, expectedMeetingID)
+		app.mu.Unlock()
+	} else {
+		entry, appended, err = app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, metadata, expectedMeetingID)
+	}
 	if err != nil {
 		log.Errorf("Failed to write room chat to meeting memory: %v", err)
 		return nil, false
@@ -5312,16 +5562,21 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, sender
 	}
 
 	isBoundedProbe := metadata["mediaSoakCanary"] == "true"
+	publicationCurrent := true
 	if !isBoundedProbe {
-		broadcastRoomAssistantTelemetry(roomID, "transcript", "heard: "+entry.Text, nil)
-		if scope, current := app.roomPublicationScope(roomID, entry.Metadata["meetingId"]); current {
+		if expectedScope != nil {
+			_, publicationCurrent = app.broadcastCurrentMeetingTranscript(roomID, entry)
+		} else if scope, current := app.roomPublicationScope(roomID, entry.Metadata["meetingId"]); current {
+			broadcastScopedRoomAssistantTelemetry(scope, "transcript", "heard: "+entry.Text, nil)
 			broadcastScopedRoomKanbanEvent(scope, "memory_transcript", entry)
+		} else {
+			publicationCurrent = false
 		}
 	}
 	// A3: typed room chat is a brain input too — wake the brain worker for THIS
 	// ROOM the same way spoken transcripts do so a text-only exchange is not
 	// left un-brained until the next floor tick (W4 §7.4: nudges carry the room).
-	if !isBoundedProbe {
+	if !isBoundedProbe && (expectedScope == nil || publicationCurrent) {
 		app.nudgeAmbientAgentForRoom(meetingBrainAgentName, roomID)
 	}
 	return roomChatEventPayload(entry), true
@@ -5353,6 +5608,11 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 	// render a "view report" chip on the bubble.
 	if artifactID := strings.TrimSpace(entry.Metadata["artifactId"]); artifactID != "" {
 		payload["artifactId"] = artifactID
+	}
+	for _, key := range []string{"workRunId", "workStatus", "workFamily", "workTitle", "workProgress"} {
+		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
+			payload[key] = value
+		}
 	}
 	// The session-identity stamp: own-message detection (and the delete
 	// affordance) keys on this, never on the mutable display name.
@@ -5547,7 +5807,7 @@ func decorateArchiveDownloadURLForClient(entry meetingMemoryEntry) meetingMemory
 }
 
 func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
-	return app.answerMemoryQuestionForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
+	return app.answerMemoryQuestionForPrincipal(args, app.currentRoomMediaRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
 }
 
 var recallBroadcastProbe func(RecallPrincipal, string)
@@ -7960,11 +8220,15 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if closedMeetingChanged && closedMeeting != nil {
 		app.broadcastMeetingRecord(*closedMeeting)
 	}
+	successorID := ""
 	if app.meetings != nil && app.memory != nil && app.activeParticipantCount(officeRoomID) > 0 {
-		successorID := app.memory.ensureMeetingID(officeRoomID)
+		successorID = app.memory.ensureMeetingID(officeRoomID)
 		if successor, started := app.meetings.startMeeting(officeRoomID, successorID, time.Now().UTC(), app.participantSnapshot()); started {
 			app.broadcastMeetingRecord(successor)
 		}
+	}
+	if successorID != "" && meetingID != "" {
+		app.rolloverOfficeMediaAfterManualArchive(meetingID, successorID)
 	}
 
 	return meetingArchiveResult{
@@ -8711,6 +8975,18 @@ func broadcastAssistantEvent(kind string, text string, metadata map[string]any) 
 	broadcastRoomAssistantTelemetry(officeRoomID, kind, text, metadata)
 }
 
+func assistantTelemetryPayload(kind string, text string, metadata map[string]any) map[string]any {
+	payload := map[string]any{
+		"kind":      kind,
+		"text":      strings.TrimSpace(text),
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for key, value := range metadata {
+		payload[key] = value
+	}
+	return payload
+}
+
 func broadcastRoomAssistantTelemetry(roomID string, kind string, text string, metadata map[string]any) {
 	roomID = normalizeRoomID(roomID)
 	text = strings.TrimSpace(text)
@@ -8727,16 +9003,19 @@ func broadcastRoomAssistantTelemetry(roomID string, kind string, text string, me
 		kanbanApp.mu.Unlock()
 	}
 
-	payload := map[string]any{
-		"kind":      kind,
-		"text":      text,
-		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	for key, value := range metadata {
-		payload[key] = value
-	}
+	broadcastRoomKanbanEvent(roomID, "assistant_event", assistantTelemetryPayload(kind, text, metadata))
+}
 
-	broadcastRoomKanbanEvent(roomID, "assistant_event", payload)
+// broadcastScopedRoomAssistantTelemetry keeps body-bearing meeting telemetry
+// inside the same room+sitting+media-generation fence as the durable event it
+// describes. Named-room transcript text must never use broadcastAssistantEvent,
+// whose legacy contract is the organization office.
+func broadcastScopedRoomAssistantTelemetry(scope RoomScoutScope, kind string, text string, metadata map[string]any) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	broadcastScopedRoomKanbanEvent(scope, "assistant_event", assistantTelemetryPayload(kind, text, metadata))
 }
 
 func sendKanbanEvent(websocket *threadSafeWriter, event string, data any) error {
@@ -8925,6 +9204,10 @@ func deliverScopedRoomKanbanEvent(scope RoomScoutScope, event string, data any) 
 // publications must exclude stale sitting and generation sockets.
 func broadcastScopedRoomKanbanEvent(scope RoomScoutScope, event string, data any) {
 	acks, err := broadcastScopedRoomKanbanEventAcknowledged(scope, event, data)
+	logScopedRoomDeliveryFailures(event, acks, err)
+}
+
+func logScopedRoomDeliveryFailures(event string, acks []scopedRoomDeliveryAcknowledgement, err error) {
 	if err != nil {
 		log.Errorf("Failed to broadcast scoped Kanban event %s: %v", event, err)
 		return
@@ -8954,6 +9237,55 @@ func (app *kanbanBoardApp) roomPublicationScope(roomID, sittingID string) (RoomS
 	}
 	scope := RoomScoutScope{RoomID: roomID, SittingID: sittingID, MediaGeneration: app.roomMediaGeneration(roomID)}
 	return scope, roomPublicationScopeValid(scope)
+}
+
+// currentMeetingTranscriptPublicationScope binds a persisted spoken/agent
+// transcript back to the server-owned active sitting and media generation.
+// Missing generation is admitted only for the legacy, pre-media office shell;
+// named rooms and active media generations always require an exact stamp.
+func (app *kanbanBoardApp) currentMeetingTranscriptPublicationScope(roomID string, entry meetingMemoryEntry) (RoomScoutScope, bool) {
+	if app == nil {
+		return RoomScoutScope{}, false
+	}
+	roomID = normalizeRoomID(roomID)
+	scope, current := app.roomPublicationScope(roomID, entry.Metadata["meetingId"])
+	if !current {
+		return RoomScoutScope{}, false
+	}
+	encodedGeneration := strings.TrimSpace(entry.Metadata["mediaGeneration"])
+	if encodedGeneration == "" {
+		return scope, roomID == officeRoomID && scope.MediaGeneration == 0
+	}
+	generation, err := strconv.ParseUint(encodedGeneration, 10, 64)
+	if err != nil || generation != scope.MediaGeneration {
+		return RoomScoutScope{}, false
+	}
+	return scope, true
+}
+
+// broadcastCurrentMeetingTranscript is the sole body-bearing publication seam
+// for a persisted spoken or agent transcript. Persistence may linearize just
+// before a sitting rolls over; if the exact committed scope is no longer
+// current, the durable record remains available to governed recall but no live
+// socket receives it under a widened or successor scope.
+type currentMeetingTranscriptPublication struct {
+	Scope                 RoomScoutScope
+	AssistantEvent        []scopedRoomDeliveryAcknowledgement
+	MemoryTranscriptEvent []scopedRoomDeliveryAcknowledgement
+}
+
+func (app *kanbanBoardApp) broadcastCurrentMeetingTranscript(roomID string, entry meetingMemoryEntry) (currentMeetingTranscriptPublication, bool) {
+	scope, current := app.currentMeetingTranscriptPublicationScope(roomID, entry)
+	if !current {
+		return currentMeetingTranscriptPublication{}, false
+	}
+	publication := currentMeetingTranscriptPublication{Scope: scope}
+	var err error
+	publication.AssistantEvent, err = broadcastScopedRoomKanbanEventAcknowledged(scope, "assistant_event", assistantTelemetryPayload("transcript", "heard: "+entry.Text, nil))
+	logScopedRoomDeliveryFailures("assistant_event", publication.AssistantEvent, err)
+	publication.MemoryTranscriptEvent, err = broadcastScopedRoomKanbanEventAcknowledged(scope, "memory_transcript", entry)
+	logScopedRoomDeliveryFailures("memory_transcript", publication.MemoryTranscriptEvent, err)
+	return publication, true
 }
 
 func roomPublicationScopeValid(scope RoomScoutScope) bool {

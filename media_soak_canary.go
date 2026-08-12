@@ -127,7 +127,7 @@ func (runtimeObserver *liveMediaSoakRuntime) plantCanary(check *mediaSoakCanaryC
 		listLock.Unlock()
 		check.Track = track
 	case "chat":
-		payload, ok := runtimeObserver.app.recordRoomChatMessageForMeeting(check.Source.RoomID, "Media Soak", check.Token, metadata, check.Source.SittingID)
+		payload, ok := runtimeObserver.app.recordRoomChatMessageForScope(RoomScoutScope{RoomID: check.Source.RoomID, SittingID: check.Source.SittingID, MediaGeneration: check.Source.Generation}, "Media Soak", check.Token, metadata)
 		if !ok {
 			return errors.New("chat ingress rejected")
 		}

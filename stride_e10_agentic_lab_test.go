@@ -7,13 +7,16 @@ package main
 // enroll a real user/cohort.
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +74,7 @@ func TestStrideE10AgenticLabExercisesOneHumanAgentWorkGraphDefaultOff(t *testing
 	previousApp := kanbanApp
 	app := newKanbanBoardApp()
 	kanbanApp = app
+	seedStrideE10AgenticLabCurrentMeeting(t, app)
 	t.Cleanup(func() {
 		if app != nil {
 			_ = app.Close()
@@ -217,14 +221,39 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 	registerSTRIDERuntimeRoutes(mux)
 	evidence := seedStrideE10AgenticLab(t, app, mux, cookies)
 	assertStrideE10AgenticLabEvidence(t, evidence)
+	roomWorkMessages := seedStrideE10AgenticLabRoomWorkCard(t, app)
 
 	mux.HandleFunc("/auth/", authHandler)
+	mux.HandleFunc("/rooms", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			roomsHandler(writer, request)
+			return
+		}
+		if userFromRequest(request) == nil {
+			writeAuthError(writer, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		rooms := make([]map[string]any, 0)
+		for _, room := range appRoomStore().list() {
+			payload := roomListPayload(room)
+			if normalizeRoomID(room.ID) == officeRoomID {
+				payload["live"] = true
+				payload["participantCount"] = 1
+			}
+			rooms = append(rooms, payload)
+		}
+		writeAuthJSON(writer, http.StatusOK, map[string]any{"ok": true, "rooms": rooms})
+	})
+	mux.HandleFunc("/rooms/", roomActionHandler)
+	mux.HandleFunc("/websocket", websocketHandler)
 	mux.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	mux.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	mux.HandleFunc("/assistant/chat-participants", assistantChatParticipantsHandler)
 	mux.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	mux.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
 	mux.HandleFunc("/assistant/notifications/clear", assistantNotificationsClearHandler)
+	mux.HandleFunc("/artifacts", artifactsHandler)
+	mux.HandleFunc("/artifacts/open", artifactOpenHandler)
 	mux.Handle("/public/", http.StripPrefix("/public/", http.FileServer(http.Dir("public"))))
 	mux.HandleFunc("/sw.js", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -240,6 +269,35 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 		writer.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(writer).Encode(evidence)
 	})
+	mux.HandleFunc("/__agentic-lab/current-meeting/refresh", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			writeAuthError(writer, http.StatusMethodNotAllowed, "POST required")
+			return
+		}
+		if userFromRequest(request) == nil {
+			writeAuthError(writer, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		scope, rows, refreshErr := refreshStrideE10AgenticLabCurrentMeeting(app)
+		if refreshErr != nil {
+			writeAuthError(writer, http.StatusConflict, refreshErr.Error())
+			return
+		}
+		writeAuthJSON(writer, http.StatusOK, map[string]any{
+			"ok": true, "roomId": scope.RoomID, "meetingId": scope.SittingID,
+			"mediaGeneration": scope.MediaGeneration, "transcriptRows": rows,
+		})
+	})
+	mux.HandleFunc("/__agentic-lab/room-chat-history", func(writer http.ResponseWriter, request *http.Request) {
+		if userFromRequest(request) == nil {
+			writeAuthError(writer, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		writeAuthJSON(writer, http.StatusOK, map[string]any{
+			"ok": true, "messages": roomWorkMessages,
+		})
+	})
 	mux.HandleFunc("/__agentic-lab/login", func(writer http.ResponseWriter, request *http.Request) {
 		for _, cookie := range cookies {
 			copy := *cookie
@@ -253,6 +311,9 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 		if readErr != nil {
 			http.Error(writer, "index unavailable", http.StatusInternalServerError)
 			return
+		}
+		if request.URL.Query().Get("meeting-fixture") == "1" {
+			body = bytes.Replace(body, []byte("</body>"), []byte(strideE10AgenticLabMeetingFixtureScript()+"</body>"), 1)
 		}
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 		writer.Header().Set("Cache-Control", "no-store")
@@ -298,6 +359,303 @@ func TestStrideE10AgenticLabRenderedHarness(t *testing.T) {
 	if err := server.Close(); err != nil {
 		t.Fatal(fmt.Errorf("close Agentic Lab harness: %w", err))
 	}
+}
+
+func seedStrideE10AgenticLabRoomWorkCard(t *testing.T, app *kanbanBoardApp) []map[string]any {
+	t.Helper()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	if meetingID == "" {
+		t.Fatal("Agentic Lab room work fixture requires the current office sitting")
+	}
+	artifact, _, err := app.createOSArtifactWithMetadata(
+		"research",
+		"Hey! What's Up? research",
+		"# Research in progress\n\nScout is grounding the report in the current meeting transcript and analysis.",
+		scoutParticipantName,
+		map[string]string{
+			"title": "Hey! What's Up? research", "mode": "research",
+			"status": "running", "threadStatus": "running", "progressPercent": "34",
+			"originKind": agentThreadOriginRoom, "originId": officeRoomID, "originMeetingId": meetingID,
+			"requestedBy": artifactLibraryAdminEmail,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.projectRoomAgentThreadStatus(artifact, "agent-thread-agentic-lab-room-research", "running") {
+		t.Fatal("Agentic Lab room work fixture did not project")
+	}
+	messages := app.roomChatHistoryForRoom(officeRoomID, roomChatHistoryLimit)
+	if len(messages) != 1 || messages[0]["workRunId"] != "agent-thread-agentic-lab-room-research" {
+		t.Fatalf("Agentic Lab room work history=%v, want one exact running projection", messages)
+	}
+	return messages
+}
+
+func seedStrideE10AgenticLabCurrentMeeting(t *testing.T, app *kanbanBoardApp) {
+	t.Helper()
+	if app == nil || app.memory == nil || app.meetings == nil {
+		t.Fatal("Agentic Lab current-meeting fixture requires memory and meeting stores")
+	}
+	meetingID := "meeting-agentic-lab-current"
+	// Keep the rendered harness sitting inside the production active-meeting
+	// window. A fixed wall-clock time eventually ages out and turns a real
+	// reconnect/replay capture into an unavailable-state fixture.
+	startedAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second)
+	if _, changed := app.meetings.startMeeting(officeRoomID, meetingID, startedAt, []string{"AJ"}); !changed {
+		t.Fatal("Agentic Lab current-meeting record was not created")
+	}
+	app.memory.mu.Lock()
+	app.memory.meetingIDs[officeRoomID] = meetingID
+	app.memory.mu.Unlock()
+
+	transcriptRows := []struct {
+		id      string
+		speaker string
+		text    string
+	}{
+		{"segment-agentic-101", "AJ", "The launch story should lead with the team becoming dramatically more capable."},
+		{"segment-agentic-102", "Maya", "I will tighten the customer proof and share the revised narrative before tomorrow."},
+		{"segment-agentic-103", "AJ", "Keep pricing out of the public draft until the launch group approves it."},
+		{"segment-agentic-104", "Scout", "The recap is current through this moment and the approval boundary is preserved."},
+	}
+	var last meetingMemoryEntry
+	for _, row := range transcriptRows {
+		entry, appended, err := app.memory.appendAttributedTranscriptEntry(
+			officeRoomID, row.id, row.id, row.speaker, "source_owned", row.text,
+			map[string]string{"source": "agentic_lab_rendered_fixture", "mediaGeneration": "1"}, true, meetingID,
+		)
+		if err != nil || !appended {
+			t.Fatalf("append Agentic Lab current transcript %s: appended=%t err=%v", row.id, appended, err)
+		}
+		last = entry
+	}
+	digest := meetingDigestPayload{
+		MeetingID: meetingID,
+		Title:     "Launch narrative and approval boundary",
+		Day:       "2026-08-11",
+		Started:   startedAt.Format(time.RFC3339),
+		Attendees: []string{"AJ", "Maya", "Scout"},
+		Topics: []meetingDigestTopic{{
+			T:      "Position STRIDE as the place where teams turn shared context into finished work.",
+			Anchor: transcriptRows[0].id,
+		}},
+		Decisions: []meetingDigestDecision{{
+			D:      "Lead the launch story with increased team capability, not a feature inventory.",
+			Anchor: transcriptRows[0].id,
+		}},
+		ActionItems: []meetingDigestAction{{
+			A: "Tighten the customer proof and circulate the revised narrative.", Owner: "Maya", Status: "Due tomorrow", Anchor: transcriptRows[1].id,
+		}},
+		OpenQuestions: []meetingDigestQuestion{{
+			Q: "Which customer proof belongs above the fold?", Anchor: transcriptRows[1].id,
+		}},
+		Themes: []string{"launch narrative", "customer proof", "approval boundary"},
+	}
+	body, err := json.Marshal(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, string(body), map[string]string{
+		"meetingId": meetingID, "roomId": officeRoomID,
+		meetingDigestCaptureMetadataKey: last.Metadata["captureSequence"],
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lane := &meetingTranscriptionLane{}
+	lane.setConnected(true)
+	scout, err := newRoomRealtimeBundle(RoomScoutScope{RoomID: officeRoomID, SittingID: meetingID, MediaGeneration: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scout.mu.Lock()
+	scout.status = RoomScoutReady
+	scout.mu.Unlock()
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	now := time.Now().UTC()
+	state.participants["AJ"] = now
+	state.participantCounts["AJ"] = 1
+	state.participantEndpoints["AJ"] = map[string]string{"agentic-lab-endpoint": "agentic-lab-session"}
+	state.participantSessionLiveness["AJ"] = map[string]time.Time{"agentic-lab-session": now}
+	state.recordingEnabled = true
+	state.lane = lane
+	state.realtime = scout
+	state.mediaGen = 1
+	state.mediaSittingID = meetingID
+	app.mu.Unlock()
+}
+
+// refreshStrideE10AgenticLabCurrentMeeting intentionally runs only inside the
+// loopback rendered harness. A real mobile join can roll the sitting/media
+// generation after the process starts, so rendered evidence must append and
+// publish through the exact current scope rather than relaxing the production
+// replay fence or relying on a pre-join static fixture.
+func refreshStrideE10AgenticLabCurrentMeeting(app *kanbanBoardApp) (RoomScoutScope, int, error) {
+	if app == nil || app.memory == nil || app.meetings == nil {
+		return RoomScoutScope{}, 0, errors.New("current-meeting fixture is unavailable")
+	}
+	record, active := app.meetings.activeRecord(officeRoomID)
+	if !active || strings.TrimSpace(record.ID) == "" {
+		// The rendered harness has no physical media device keeping its seeded
+		// participant endpoint alive. Re-establish a real current sitting and
+		// media-generation binding before publishing through the production
+		// WebSocket/replay seams; transcript/intelligence data is never injected
+		// into the client.
+		now := time.Now().UTC()
+		meetingID := fmt.Sprintf("meeting-agentic-live-%d", now.UnixNano())
+		started, changed := app.meetings.startMeeting(officeRoomID, meetingID, now, []string{"AJ"})
+		if !changed {
+			return RoomScoutScope{}, 0, errors.New("start current rendered-harness meeting")
+		}
+		record = started
+		app.memory.mu.Lock()
+		app.memory.meetingIDs[officeRoomID] = meetingID
+		app.memory.mu.Unlock()
+		app.mu.Lock()
+		state := app.roomLiveLocked(officeRoomID)
+		state.participants["AJ"] = now
+		state.participantCounts["AJ"] = 1
+		state.participantEndpoints["AJ"] = map[string]string{"agentic-lab-endpoint": "agentic-lab-session"}
+		state.participantSessionLiveness["AJ"] = map[string]time.Time{"agentic-lab-session": now}
+		state.mediaGen = 1
+		state.mediaSittingID = meetingID
+		app.mu.Unlock()
+		app.broadcastMeetingRecord(record)
+	}
+	scope, current := app.roomPublicationScope(officeRoomID, record.ID)
+	if !current {
+		return RoomScoutScope{}, 0, errors.New("current room sitting and media generation are not stable")
+	}
+
+	transcriptRows := []struct {
+		speaker string
+		text    string
+	}{
+		{"AJ", "The launch story should lead with the team becoming dramatically more capable."},
+		{"Caitlyn", "I will tighten the customer proof and share the revised narrative before tomorrow."},
+		{"AJ", "Keep pricing out of the public draft until the launch group approves it."},
+		{"Tyler", "The recap is current through this moment and the approval boundary is preserved."},
+	}
+	entries := make([]meetingMemoryEntry, 0, len(transcriptRows))
+	for index, row := range transcriptRows {
+		entryID := fmt.Sprintf("segment-agentic-live-%s-%d", scope.SittingID, index+1)
+		entry, appended, err := app.memory.appendAttributedTranscriptEntry(
+			officeRoomID, entryID, entryID, row.speaker, "source_owned", row.text,
+			map[string]string{
+				"source":          "agentic_lab_rendered_fixture",
+				"mediaGeneration": strconv.FormatUint(scope.MediaGeneration, 10),
+			}, true, scope.SittingID,
+		)
+		if err != nil {
+			return RoomScoutScope{}, 0, fmt.Errorf("append current transcript row %d: %w", index+1, err)
+		}
+		if appended {
+			entries = append(entries, entry)
+		}
+	}
+	if len(entries) == 0 {
+		return RoomScoutScope{}, 0, errors.New("current-meeting fixture was already refreshed")
+	}
+	last := entries[len(entries)-1]
+	digest := meetingDigestPayload{
+		MeetingID: scope.SittingID,
+		Title:     "Launch narrative and approval boundary",
+		Day:       time.Now().UTC().Format("2006-01-02"),
+		Started:   record.StartedAt,
+		Attendees: []string{"AJ", "Caitlyn", "Tyler"},
+		Topics: []meetingDigestTopic{{
+			T: "Position STRIDE as the place where teams turn shared context into finished work.", Anchor: entries[0].ID,
+		}},
+		Decisions: []meetingDigestDecision{{
+			D: "Lead the launch story with increased team capability, not a feature inventory.", Anchor: entries[0].ID,
+		}},
+		ActionItems: []meetingDigestAction{{
+			A: "Tighten the customer proof and circulate the revised narrative.", Owner: "Caitlyn", Status: "Due tomorrow", Anchor: entries[1].ID,
+		}},
+		OpenQuestions: []meetingDigestQuestion{{
+			Q: "Which customer proof belongs above the fold?", Anchor: entries[1].ID,
+		}},
+		Themes: []string{"launch narrative", "customer proof", "approval boundary"},
+	}
+	body, err := json.Marshal(digest)
+	if err != nil {
+		return RoomScoutScope{}, 0, err
+	}
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, scope.SittingID, string(body), map[string]string{
+		"meetingId": scope.SittingID, "roomId": scope.RoomID,
+		meetingDigestCaptureMetadataKey: last.Metadata["captureSequence"],
+	}); err != nil {
+		return RoomScoutScope{}, 0, fmt.Errorf("persist current meeting digest: %w", err)
+	}
+
+	app.mu.Lock()
+	state := app.roomLiveLocked(scope.RoomID)
+	if state.mediaGen != scope.MediaGeneration || state.mediaSittingID != scope.SittingID {
+		app.mu.Unlock()
+		return RoomScoutScope{}, 0, errors.New("current room scope changed while refreshing the fixture")
+	}
+	if state.lane == nil {
+		state.lane = &meetingTranscriptionLane{}
+	}
+	state.lane.mu.Lock()
+	state.lane.connected = true
+	state.lane.mu.Unlock()
+	state.recordingEnabled = true
+	if state.realtime == nil {
+		state.realtime, err = newRoomRealtimeBundle(scope, nil)
+	}
+	bundle := state.realtime
+	app.mu.Unlock()
+	if err != nil {
+		return RoomScoutScope{}, 0, fmt.Errorf("prepare current Scout fixture: %w", err)
+	}
+	if bundle != nil {
+		bundle.mu.Lock()
+		bundle.status = RoomScoutReady
+		bundle.lastError = ""
+		bundle.mu.Unlock()
+	}
+
+	for _, entry := range entries {
+		if _, published := app.broadcastCurrentMeetingTranscript(scope.RoomID, entry); !published {
+			return RoomScoutScope{}, 0, errors.New("current meeting scope changed before transcript publication")
+		}
+	}
+	app.broadcastMeetingIntelligence(scope.RoomID, scope.SittingID)
+	return scope, len(entries), nil
+}
+
+func strideE10AgenticLabMeetingFixtureScript() string {
+	return `<script>
+(() => {
+	window.setTimeout(() => {
+	let revealAttempts = 0;
+	let meetingModeInitialized = false;
+	let roomWorkLoaded = false;
+	const revealTimer = window.setInterval(() => {
+	  revealAttempts += 1;
+	  if (appShell.classList.contains('is-authed')) {
+	    setRoomView(true);
+	    setActiveTool('room', { history: false });
+	    setRoomChatOpen(true);
+	    if (!roomWorkLoaded) {
+	      roomWorkLoaded = true;
+	      fetch('/__agentic-lab/room-chat-history', { cache: 'no-store' })
+	        .then(response => response.ok ? response.json() : Promise.reject(new Error('room history unavailable')))
+	        .then(payload => handleRoomChatHistory(payload.messages))
+	        .catch(() => { roomWorkLoaded = false; });
+	    }
+	    if (!meetingModeInitialized) {
+	      setRoomMeetingMode('recap');
+	      meetingModeInitialized = true;
+	    }
+	  }
+	  if (revealAttempts >= 40) window.clearInterval(revealTimer);
+	}, 250);
+	}, 600);
+})();
+</script>`
 }
 
 func configureStrideE10AgenticLabEnv(t *testing.T) string {

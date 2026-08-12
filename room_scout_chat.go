@@ -143,7 +143,7 @@ func (app *kanbanBoardApp) publishRoomScoutTextAnswer(scope RoomScoutScope, repl
 	for key, value := range extraMetadata {
 		metadata[key] = value
 	}
-	payload, ok := app.recordRoomChatMessageForMeeting(scope.RoomID, scoutParticipantName, answer, metadata, scope.SittingID)
+	payload, ok := app.recordRoomChatMessageForScope(scope, scoutParticipantName, answer, metadata)
 	if !ok || !app.roomScoutTextScopeCurrent(scope) {
 		return
 	}

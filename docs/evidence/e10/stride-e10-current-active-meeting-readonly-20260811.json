@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "read_only_operational_snapshot",
+  "observedAt": "2026-08-11T18:58:08.944186058Z",
+  "scope": "current active production meeting; body-minimized; no provider probe, message, work launch, setting, data, configuration, process, or release mutation",
+  "servingRelease": {
+    "commit": "11e3cf26ad4ff9ad3081a965c27dbce0d4780e22",
+    "strideE10W4Generation": 206
+  },
+  "meeting": {
+    "roomId": "office",
+    "sittingId": "meeting-20260810-183620-030586385",
+    "startedAt": "2026-08-11T18:24:59.256003126Z",
+    "participantCount": 7,
+    "recordingEnabled": true,
+    "media": {
+      "active": true,
+      "actor": true,
+      "status": "degraded"
+    },
+    "consent": {
+      "status": "healthy",
+      "policyVersion": "microphone-data-controls-v1"
+    }
+  },
+  "transcription": {
+    "verdict": "PASS_CURRENT_SNAPSHOT",
+    "provider": "openai",
+    "model": "gpt-transcribe",
+    "connected": true,
+    "status": "healthy",
+    "authoritative": true,
+    "lagSeconds": 3,
+    "lastSuccessAt": "2026-08-11T18:58:04.624708954Z",
+    "segmentsAfterCurrentStart": 151,
+    "distinctHumanSpeakersAfterCurrentStart": 6
+  },
+  "intervalAnalysis": {
+    "verdict": "PASS_CURRENT_SNAPSHOT",
+    "brainIntervalSeconds": 300,
+    "brainStatus": "healthy",
+    "brainArtifactsAfterCurrentStart": 5,
+    "brainLastSuccessAt": "2026-08-11T18:55:38.76291624Z",
+    "decisionPassesAfterCurrentStart": 5,
+    "decisionLastSuccessAt": "2026-08-11T18:55:43.727224538Z",
+    "missionInsightsAfterCurrentStart": 5,
+    "missionLastSuccessAt": "2026-08-11T18:55:46.543201001Z",
+    "continuityHealthy": true
+  },
+  "agentAwarenessAndQuestionAnswering": {
+    "verdict": "RED_NOT_LIVE_PROVED",
+    "roomScoutConnected": false,
+    "roomScoutStatus": "degraded",
+    "roomVoiceConnected": false,
+    "typedScoutStatus": "degraded",
+    "specialistMeetingFeatures": "not live-proved in this snapshot",
+    "providerProbePerformed": false,
+    "reason": "The active transcript and analysis are current, but no current connected Scout/specialist lane or grounded live Q&A receipt proves that Scout and every admitted agent can answer from this sitting."
+  },
+  "smartRecap": {
+    "verdict": "RED_MISSING",
+    "roomProjectionStatus": "missing",
+    "meetingDigestsAfterCurrentStart": 0,
+    "meetingDigestWorker": {
+      "enabled": false,
+      "supervisorRegistered": false,
+      "supervisorRunning": false,
+      "checkpointStatus": "missing",
+      "deadLetter": 51,
+      "lastSuccessAt": "2026-07-11T03:36:45.833573761Z"
+    },
+    "note": "The generic recap capability reports the fresh brain artifact, but the room-specific smart-recap projection is missing and the cumulative meeting-digest worker is disabled."
+  },
+  "overallVerdict": "PARTIAL_RED",
+  "accepted": [
+    "current production Realtime transcription is connected, authoritative, low-lag, and accumulating speaker-attributed segments",
+    "brain, decision, and mission analysis are advancing over the current sitting at bounded intervals"
+  ],
+  "open": [
+    "connected and grounded Scout plus admitted-specialist live Q&A proof",
+    "one durable evolving smart recap visible in-room and after restart",
+    "meeting-digest supervisor recovery and its 51 dead-letter records",
+    "reconnect, delayed, duplicate, out-of-order, revoked-consent, agent join/leave, post-meeting replay, and device-render acceptance"
+  ],
+  "bodyMinimization": {
+    "transcriptTextEmitted": false,
+    "analysisTextEmitted": false,
+    "recapTextEmitted": false,
+    "participantNamesEmitted": false,
+    "credentialsEmitted": false
+  }
+}

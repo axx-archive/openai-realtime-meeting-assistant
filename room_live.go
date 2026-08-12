@@ -1031,6 +1031,55 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	}
 }
 
+// rolloverOfficeMediaAfterManualArchive retires the exact predecessor media
+// generation while people remain in the office. Existing signaling sockets are
+// closed so their normal reconnect path is admitted against the successor; no
+// old transcript/provider callback can be re-labeled as the new sitting.
+func (app *kanbanBoardApp) rolloverOfficeMediaAfterManualArchive(previousSittingID, successorSittingID string) {
+	if app == nil {
+		return
+	}
+	previousSittingID = strings.TrimSpace(previousSittingID)
+	successorSittingID = strings.TrimSpace(successorSittingID)
+	if previousSittingID == "" || successorSittingID == "" || previousSittingID == successorSittingID {
+		return
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	if strings.TrimSpace(state.mediaSittingID) != previousSittingID {
+		app.mu.Unlock()
+		return
+	}
+	oldGeneration := state.mediaGen
+	lane := app.transcriptLane
+	app.transcriptLane = nil
+	app.transcriptionStartToken++
+	app.transcriptionStarting = false
+	mediaActor := state.mediaActor
+	state.mediaActor = nil
+	state.mediaSittingID = successorSittingID
+	state.pendingAttributionWindows = nil
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
+	state.activeSpeakerName = ""
+	state.activeSpeakerCandidate = ""
+	state.activeSpeakerCandidateAt = time.Time{}
+	state.activeSpeakerPayload = nil
+	state.mediaGen++
+	if state.mediaGen == 0 {
+		state.mediaGen++
+	}
+	closeRoomMediaActorOwned(officeRoomID, mediaActor)
+	app.clearOfficeScoutRequesterBindingsLocked()
+	app.mu.Unlock()
+
+	app.teardownRealtimePeerForIdle()
+	if lane != nil {
+		lane.close()
+	}
+	closeRoomGenerationConnectionsForRestart(officeRoomID, oldGeneration)
+}
+
 func (app *kanbanBoardApp) roomMediaGeneration(roomID string) uint64 {
 	if app == nil {
 		return 0

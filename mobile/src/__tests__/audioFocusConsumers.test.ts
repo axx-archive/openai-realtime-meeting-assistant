@@ -77,7 +77,9 @@ test('Canvas keeps live Scout singular and leaves dictation to conversation scre
   assert.match(realtime, /cleanupScope !== 'owned'[\s\S]*deactivateVideoMeeting\(expectedMediaSessionGeneration\)/);
   assert.match(realtime, /cleanupScope === 'detached'[\s\S]*mediaSessionGenerationRef\.current === null/);
   assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
-  assert.doesNotMatch(canvas, /useComposerDictation|Message Scout|composerDictation|submitComposerText/);
+  assert.match(canvas, /submitHomeScoutOpening/);
+  assert.match(canvas, /realtime\.stop\('cancelled'\)/);
+  assert.doesNotMatch(canvas, /useComposerDictation|composerDictation|submitComposerText/);
   const config = source('src', 'config.ts');
   assert.match(config, /EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true'/);
   const eas = JSON.parse(source('eas.json')) as {

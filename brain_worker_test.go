@@ -136,6 +136,9 @@ func TestMeetingBrainWorkerWritesSummaryForNewTranscripts(t *testing.T) {
 	if entry.Metadata["fromTranscriptId"] != "event-1" || entry.Metadata["throughTranscriptId"] != "event-2" {
 		t.Fatalf("brain metadata=%v, want transcript window", entry.Metadata)
 	}
+	if got, want := entry.Metadata[meetingBrainCaptureMetadataKey], "2"; got != want {
+		t.Fatalf("brain capture high-water=%q, want %q", got, want)
+	}
 	if remaining := app.memory.unsummarizedTranscripts(10); len(remaining) != 0 {
 		t.Fatalf("unsummarized transcripts=%d, want 0", len(remaining))
 	}

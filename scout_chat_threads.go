@@ -387,6 +387,20 @@ type scoutChatOpeningOperation struct {
 	ReplyMessageID string `json:"replyMessageId"`
 }
 
+// scoutChatLegacyConversationOperation is the durable retry alias for native
+// clients that predate the required conversation operationId. The alias is
+// scoped to one authenticated session, requester, and thread. A distinct
+// accepted body replaces the prior alias, while an exact lost-response retry
+// reuses the same immutable operation across process restart.
+type scoutChatLegacyConversationOperation struct {
+	SessionDigest string `json:"sessionDigest"`
+	Requester     string `json:"requester"`
+	BodyDigest    string `json:"bodyDigest"`
+	OperationID   string `json:"operationId"`
+	BoundAt       string `json:"boundAt"`
+	AcceptedAt    string `json:"acceptedAt,omitempty"`
+}
+
 // scoutChatReactionEmojis is deliberately closed: the mobile long-press tray
 // and the server accept the same small, iMessage-like vocabulary. This also
 // avoids accepting arbitrary multi-codepoint/control payloads as reactions.
@@ -528,6 +542,9 @@ type scoutChatThreadRecord struct {
 	// one private thread. It contains hashes and deterministic ids only and is
 	// stripped from every client projection.
 	OpeningOperation *scoutChatOpeningOperation `json:"openingOperation,omitempty"`
+	// LegacyConversationOperations are server-only compatibility aliases. They
+	// never appear in viewer projections and cannot select a tool or authority.
+	LegacyConversationOperations []scoutChatLegacyConversationOperation `json:"legacyConversationOperations,omitempty"`
 	// ModerationReceipts are a private durable outbox. Removing an ordinary
 	// public agent reply and recording the pending canonical retraction happen
 	// in the same thread rewrite; retries and restarts can therefore finish the
@@ -777,11 +794,6 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
-		if operationErr != nil {
-			writeAuthError(w, http.StatusBadRequest, "conversation operationId is required and must be valid")
-			return
-		}
 		body, bodyErr := canonicalJSON(map[string]any{
 			"threadId": threadID, "requester": normalizeAccountEmail(user.Email),
 			"text": payload.Text, "files": payload.Files,
@@ -791,9 +803,37 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "conversation request is invalid")
 			return
 		}
+		bodyDigest := sha256Hex(append([]byte("conversation-http-turn/v1\x00"), body...))
+		operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
+		legacyNativeOperationIssued := false
+		legacyNativeOperationReused := false
+		if operationErr != nil {
+			// Build 53 and earlier native clients predate the required operationId
+			// field. Keep that exact, authenticated native boundary usable while
+			// those binaries age out, without weakening browser requests or letting
+			// a malformed modern id silently lose its retry identity. The generated
+			// id is returned so clients and receipts stay honest about the narrower
+			// compatibility semantics. A durable session-scoped alias makes an exact
+			// response-loss retry converge even though the old binary cannot echo the
+			// returned id itself.
+			_, sessionAuthority := sessionAuthorityFromRequest(r)
+			legacyNativeAuthority := sessionAuthority == sessionAuthorityBearer || sessionAuthority == sessionAuthorityExplicitHeader
+			if strings.TrimSpace(payload.OperationID) == "" && wantsNativeSessionToken(r) && legacyNativeAuthority {
+				var reserveErr error
+				operationID, legacyNativeOperationReused, reserveErr = kanbanApp.reserveLegacyNativeConversationOperation(user.Email, threadID, strideE10SessionHashFromRequest(r), bodyDigest)
+				if reserveErr != nil {
+					writeScoutChatThreadError(w, reserveErr)
+					return
+				}
+				legacyNativeOperationIssued = true
+			} else {
+				writeAuthError(w, http.StatusBadRequest, "conversation operationId is required and must be valid")
+				return
+			}
+		}
 		messageContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
 		messageContext = withConversationTurnOperation(messageContext, conversationTurnOperation{
-			ID: operationID, BodyDigest: sha256Hex(append([]byte("conversation-http-turn/v1\x00"), body...)),
+			ID: operationID, BodyDigest: bodyDigest,
 		})
 		// toolTemplate is retained only as a decode-only compatibility field.
 		// Normal clients cannot arm work, authority, or an output contract with
@@ -803,10 +843,26 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
+		if legacyNativeOperationIssued && !asBool(response["replayed"]) {
+			// Only a durably accepted distinct turn retires older aliases for
+			// this authenticated legacy session. Reserving a new body alone is
+			// insufficient: its provider/commit path may still fail, and an older
+			// lost response must remain exactly replayable until then.
+			if err := kanbanApp.retireLegacyNativeConversationOperations(user.Email, threadID, strideE10SessionHashFromRequest(r), operationID); err != nil {
+				writeScoutChatThreadError(w, err)
+				return
+			}
+		}
 		if strings.TrimSpace(payload.ToolTemplate) != "" {
 			response["clientToolTemplateIgnored"] = true
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		projected := kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response)
+		if legacyNativeOperationIssued {
+			projected["legacyOperationIdIssued"] = true
+			projected["legacyOperationIdReused"] = legacyNativeOperationReused
+			projected["operationId"] = operationID
+		}
+		writeAuthJSON(w, http.StatusOK, projected)
 		return
 	}
 
@@ -990,6 +1046,123 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+const maxLegacyConversationOperationAliases = 64
+
+func (app *kanbanBoardApp) reserveLegacyNativeConversationOperation(viewerEmail, threadID, sessionDigest, bodyDigest string) (string, bool, error) {
+	if app == nil || app.memory == nil {
+		return "", false, fmt.Errorf("chat threads are unavailable")
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	threadID = strings.TrimSpace(threadID)
+	sessionDigest = strings.TrimSpace(sessionDigest)
+	bodyDigest = strings.TrimSpace(bodyDigest)
+	if viewerEmail == "" || !strideIdentifier(threadID) || !isHexDigest(sessionDigest) || !isHexDigest(bodyDigest) {
+		return "", false, fmt.Errorf("legacy native conversation authority is invalid")
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return "", false, err
+	}
+	matchingIndex := -1
+	for index, alias := range thread.LegacyConversationOperations {
+		if alias.SessionDigest != sessionDigest || normalizeAccountEmail(alias.Requester) != viewerEmail {
+			continue
+		}
+		if alias.BodyDigest != bodyDigest {
+			continue
+		}
+		if matchingIndex >= 0 {
+			return "", false, fmt.Errorf("%w: legacy native conversation body alias is ambiguous", ErrSTRIDEConversationConflict)
+		}
+		matchingIndex = index
+	}
+	if matchingIndex >= 0 {
+		alias := thread.LegacyConversationOperations[matchingIndex]
+		operationID, operationErr := normalizeScoutIdempotencyKey(alias.OperationID)
+		if operationErr != nil || !isHexDigest(alias.BodyDigest) {
+			return "", false, fmt.Errorf("%w: legacy native conversation alias is corrupt", ErrSTRIDEConversationConflict)
+		}
+		return operationID, true, nil
+	}
+
+	now := time.Now().UTC()
+	alias := scoutChatLegacyConversationOperation{
+		SessionDigest: sessionDigest,
+		Requester:     viewerEmail,
+		BodyDigest:    bodyDigest,
+		OperationID:   durableTimestampID("legacy-native-conversation", now),
+		BoundAt:       now.Format(time.RFC3339Nano),
+	}
+	thread.LegacyConversationOperations = append(thread.LegacyConversationOperations, alias)
+	if len(thread.LegacyConversationOperations) > maxLegacyConversationOperationAliases {
+		// Never evict an unresolved or accepted replay authority merely to make
+		// space. A missing-id legacy client cannot echo the operation ID, so silent
+		// eviction would convert response loss into duplicate work. Later accepted
+		// turns compact only older accepted aliases for the same authority.
+		return "", false, fmt.Errorf("%w: legacy native conversation alias capacity is exhausted", ErrSTRIDEConversationConflict)
+	}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return "", false, err
+	}
+	return alias.OperationID, false, nil
+}
+
+func (app *kanbanBoardApp) retireLegacyNativeConversationOperations(viewerEmail, threadID, sessionDigest, acceptedOperationID string) error {
+	if app == nil || app.memory == nil {
+		return fmt.Errorf("chat threads are unavailable")
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	threadID = strings.TrimSpace(threadID)
+	sessionDigest = strings.TrimSpace(sessionDigest)
+	acceptedOperationID = strings.TrimSpace(acceptedOperationID)
+	if viewerEmail == "" || !strideIdentifier(threadID) || !isHexDigest(sessionDigest) {
+		return fmt.Errorf("legacy native conversation authority is invalid")
+	}
+	if _, err := normalizeScoutIdempotencyKey(acceptedOperationID); err != nil {
+		return fmt.Errorf("legacy native conversation operation is invalid")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return err
+	}
+	acceptedIndex := -1
+	for index, alias := range thread.LegacyConversationOperations {
+		if alias.SessionDigest == sessionDigest && normalizeAccountEmail(alias.Requester) == viewerEmail && alias.OperationID == acceptedOperationID {
+			if acceptedIndex >= 0 {
+				return fmt.Errorf("%w: accepted legacy native conversation alias is ambiguous", ErrSTRIDEConversationConflict)
+			}
+			acceptedIndex = index
+		}
+	}
+	if acceptedIndex < 0 {
+		return fmt.Errorf("%w: accepted legacy native conversation alias is missing", ErrSTRIDEConversationConflict)
+	}
+	if strings.TrimSpace(thread.LegacyConversationOperations[acceptedIndex].AcceptedAt) == "" {
+		thread.LegacyConversationOperations[acceptedIndex].AcceptedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	retained := make([]scoutChatLegacyConversationOperation, 0, len(thread.LegacyConversationOperations))
+	for index, alias := range thread.LegacyConversationOperations {
+		sameAuthority := alias.SessionDigest == sessionDigest && normalizeAccountEmail(alias.Requester) == viewerEmail
+		if index == acceptedIndex || !sameAuthority || strings.TrimSpace(alias.AcceptedAt) == "" {
+			retained = append(retained, alias)
+			continue
+		}
+		// A newly accepted body may retire only an older accepted alias for the
+		// same authenticated session. Concurrent pending bodies remain durable
+		// until each either commits and accepts or an operator resolves capacity.
+	}
+	thread.LegacyConversationOperations = retained
+	return app.saveScoutChatThread(thread)
 }
 
 func writeScoutChatThreadError(w http.ResponseWriter, err error) {

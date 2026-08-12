@@ -5,6 +5,7 @@ import type { ScoutMessage, ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { firstArray } from '../utils/records';
+import { buildHomeContinuity, type HomeContinuityItem, type HomeNotification } from './homeContinuity';
 import { resolveLiveLine, type LiveLineInput, type LiveLineResult } from './liveLine';
 import { useShowPreviews } from './previewPreference';
 
@@ -22,6 +23,14 @@ import { useShowPreviews } from './previewPreference';
  */
 
 export type LiveLine = LiveLineResult;
+
+export type HomeCanvasSnapshot = {
+  live: LiveLine;
+  continuity: HomeContinuityItem[];
+  refreshing: boolean;
+  refreshError: string;
+  refresh: () => Promise<void>;
+};
 
 type NotificationRow = {
   read?: boolean;
@@ -61,14 +70,18 @@ function lastFrom(thread: ScoutThread | undefined): LiveLineInput['tableLastMess
   };
 }
 
-export function useLiveLine(): LiveLine {
+export function useHomeCanvas(): HomeCanvasSnapshot {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
   const { showPreviews } = useShowPreviews();
   const [line, setLine] = useState<LiveLine>(EMPTY);
+  const [continuity, setContinuity] = useState<HomeContinuityItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
+    setRefreshing(true);
     try {
       const [rooms, alerts, threadList] = await Promise.all([
         api.rooms(sessionToken),
@@ -128,9 +141,19 @@ export function useLiveLine(): LiveLine {
           showPreviews,
         }),
       );
+      setContinuity(buildHomeContinuity({
+        viewerEmail: email,
+        notifications: unread as HomeNotification[],
+        rooms: rooms.rooms ?? [],
+        threads,
+      }));
+      setRefreshError('');
     } catch {
-      // A failed poll leaves the previous line in place rather than blanking
-      // the canvas — a transient network blip should not look like "all clear".
+      // A failed poll leaves the previous authorized snapshot in place rather
+      // than making a transient network blip look like "all clear".
+      setRefreshError('Home could not refresh. Your conversations are still available in Work.');
+    } finally {
+      setRefreshing(false);
     }
   }, [sessionToken, showPreviews, user?.email]);
 
@@ -151,5 +174,9 @@ export function useLiveLine(): LiveLine {
     void load();
   }, [load, office.event, office.version]);
 
-  return line;
+  return { live: line, continuity, refreshing, refreshError, refresh: load };
+}
+
+export function useLiveLine(): LiveLine {
+  return useHomeCanvas().live;
 }

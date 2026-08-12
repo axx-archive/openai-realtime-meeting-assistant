@@ -8,18 +8,23 @@ export type WorkPresentationInput = {
 
 export function workFamilyLabel(work?: WorkPresentationInput | null): string {
   const description = `${String(work?.query ?? '')} ${String(work?.mode ?? '')}`.toLowerCase();
+  const hasResearch = /\b(research|investigate|compare|market scan|sources?|due diligence)\b/u.test(description);
+  const hasDocument = /\b(document|memo|brief|one-pager|report)\b/u.test(description);
+  const hasDeck = /\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/u.test(description);
+  const hasWorkbook = /\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/u.test(description);
   if (/\b(schedule|scheduled|recurring|daily|weekly|monthly|every (?:day|weekday|week|month))\b/u.test(description)) return 'Scheduled work';
   if (/\b(revise|revision|redline|translate|translation|regenerate|rewrite|edit (?:this|the|my)|update (?:this|the|my))\b/u.test(description)) return 'Revision';
-  if (/\b(mixed package|investor package|diligence package|fundraising package|data room package)\b/u.test(description) || /\b(research|memo|deck)\b.{0,32}\b(deck|workbook|financial model)\b/u.test(description)) return 'Mixed package';
+  if (/\b(mixed package|investor package|diligence package|fundraising package|data room package)\b/u.test(description)
+    || [hasResearch, hasDocument, hasDeck, hasWorkbook].filter(Boolean).length >= 2) return 'Mixed package';
   if (/\b(meeting recap|meeting notes|action record|decision log|transcript recap)\b/u.test(description)) return 'Meeting recap';
   if (/\b(chart|visualization|dashboard|plot|graph|data table)\b/u.test(description)) return 'Data visualization';
   if (/\b(code|implementation|repository|pull request|execution handoff|deployment handoff)\b/u.test(description)) return 'Build';
   if (/\b(project plan|task board|operating plan|roadmap|work breakdown)\b/u.test(description)) return 'Project plan';
-  if (/\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/u.test(description)) return 'Financial model';
-  if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/u.test(description)) return 'Presentation';
+  if (hasWorkbook) return 'Financial model';
+  if (hasDeck) return 'Presentation';
   if (/\b(image|images|design|visual|logo|brand|mockup|illustration|render|creative)\b/u.test(description)) return 'Design';
-  if (/\b(research|investigate|compare|market scan|sources?|due diligence)\b/u.test(description)) return 'Research';
-  if (/\b(document|memo|brief|one-pager|report)\b/u.test(description)) return 'Document';
+  if (hasResearch) return 'Research';
+  if (hasDocument) return 'Document';
   return 'Work';
 }
 

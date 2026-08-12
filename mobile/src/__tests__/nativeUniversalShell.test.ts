@@ -177,7 +177,7 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.match(shell, /minHeight: 48/);
   assert.match(shell, /minHeight: 52/);
   assert.match(shell, /transform: \[\{ scale: 0\.96 \}\]/);
-  assert.match(shell, /maxFontSizeMultiplier=\{2\}/);
+  assert.match(shell, /maxFontSizeMultiplier=\{compact \? 1\.2 : 2\}/);
   assert.doesNotMatch(shell, /Animated\.|LayoutAnimation|setTimeout/);
   assert.equal((shell.match(/\{children\}/g) ?? []).length, 1);
   assert.doesNotMatch(shell, /if \(!visible\) return/);

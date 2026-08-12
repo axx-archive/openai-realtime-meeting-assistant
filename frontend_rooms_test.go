@@ -400,9 +400,8 @@ func TestIndexRoomsLobbyHomeStripSlim(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
 	stripAt := strings.Index(html, `id="homeLiveNow"`)
-	briefAt := strings.Index(html, `id="officeBriefCard"`)
-	if stripAt == -1 || briefAt == -1 || stripAt > briefAt {
-		t.Error("the live-now strip must render above Morning Brief on the office home")
+	if stripAt == -1 {
+		t.Error("the office home must retain the live-now room jump")
 	}
 	toolAt := strings.Index(html, `<section id="officeTool"`)
 	overlayAt := strings.Index(html, `id="briefOverlay"`)
@@ -410,6 +409,14 @@ func TestIndexRoomsLobbyHomeStripSlim(t *testing.T) {
 		t.Fatal("could not slice the office home markup")
 	}
 	home := html[toolAt:overlayAt]
+	for _, removed := range []string{
+		`id="officeBriefCard"`, `id="officePortfolioCard"`, `id="officeIntelCard"`,
+		"everything the company does lands here", `id="officeLaunchHint"`,
+	} {
+		if strings.Contains(home, removed) {
+			t.Errorf("the calm office home must remove superseded utility/instruction chrome %q", removed)
+		}
+	}
 	for _, banned := range []string{"new room", "invite", "guest-links", "mint", "lobbyCreate", "type=\"password\""} {
 		if strings.Contains(strings.ToLower(home), strings.ToLower(banned)) {
 			t.Errorf("the office home markup must carry no management chrome, found %q", banned)

@@ -900,6 +900,7 @@ func (app *kanbanBoardApp) applyRoomScoutToolArgsForRequester(ctx context.Contex
 		args = map[string]any{}
 	}
 	principal := sharedRoomRecallPrincipal(scope.RoomID, scope.SittingID)
+	principal.MediaGeneration = scope.MediaGeneration
 	switch toolName {
 	case "answer_memory_question", "cross_meeting_briefing", "get_meeting_detail":
 		return app.applyToolCallArgsForPrincipal(toolName, args, principal)
