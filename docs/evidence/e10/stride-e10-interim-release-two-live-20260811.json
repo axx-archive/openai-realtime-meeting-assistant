@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_reviewed_second_interim_release_activation_and_read_only_live_render",
+  "observedAt": "2026-08-11T20:18:00-07:00",
+  "status": "verified_local_unsigned_live_second_interim_release_pass",
+  "release": {
+    "commit": "7427268652401306fba426798c937bc982d116b9",
+    "gitTreeObject": "1b7b5a07360c82e252d120568e21a204151b008a",
+    "sourceArchiveSha256": "11ba89814f12bff15d60b263f9f6140005868f4d548f100cb3e8c1c1bf2e1606",
+    "sourceReceiptSha256": "ff861b3810777290577a971406c9abfc056060eeb5ca5877951eb9a6b15566bc",
+    "buildManifestSha256": "d2e828744f8bc96cd0639d4b4ff1349321c41433fc91bf03cefbe772b3aadfb7",
+    "releaseReceiptSha256": "c84519d111aca35acb5d9c25427e6e5692c758248941f45cb8d5d144c1988e38",
+    "bundleSha256": "930ce5de7b6fb2bdfe4d048a67b845a708265ff16ef8f3e89500767c1fd5888b",
+    "meetingassistImageId": "sha256:966ee14f21b824c0c59632fe180c2c8b4382688dbc1941690652017e8e0d0ca3",
+    "renderRunnerImageId": "sha256:891c49bbb38791ecac3249ad05c583baf96e68e0bc0bdd8ffc0119fe4c1b91a4",
+    "binarySha256": "b7bb825041d7b661639f5c27deef531720a3a64e22aaaaf136a8298c90ad65f9",
+    "ledgerGeneration": 60,
+    "activeLedgerSha256AtVerification": "b2805618220cf02c5e08e769242ee3c1e3dd0c47736a7749ff4a4fc4d437f322",
+    "attestation": "verified-local-unsigned"
+  },
+  "rollback": {
+    "retained": true,
+    "releaseCommit": "11e3cf26ad4ff9ad3081a965c27dbce0d4780e22",
+    "bundleSha256": "799ba0451893b817001f1019da4274e61cade6fb7a47861efcfda994f5095245",
+    "meetingassistImageId": "sha256:9a0c7b4cb95375da21161738ea6a1834357f9229ef3dea5fb3352cb4f2e17113",
+    "renderRunnerImageId": "sha256:0dcc14beee1939c9c7433bf9d0ff80c09ea01f9329f3acb32e3a00ffbd3aeb42"
+  },
+  "liveVerification": {
+    "healthUrl": "https://thebonfire.xyz/healthz",
+    "healthHttp": 200,
+    "readyUrl": "https://thebonfire.xyz/readyz",
+    "readyHttp": 200,
+    "reportedVersion": "7427268652401306fba426798c937bc982d116b9",
+    "processQualified": true,
+    "qualified": false,
+    "attestationReason": "unsigned_external_verification_required",
+    "appHealthy": true,
+    "renderRunnerHealthy": true,
+    "renderCanary": true,
+    "caddyRunning": true,
+    "canonicalMode": "shadow",
+    "canonicalRequired": false,
+    "canonicalHealthy": false,
+    "canonicalHighWaterAtReadback": 33632,
+    "canonicalReconciledHighWater": 8532,
+    "canonicalError": "parity_diverged_with_126_repair_candidates",
+    "productionDataVolume": "/var/lib/docker/volumes/digitalocean_meeting_data/_data",
+    "productionDataVolumeMutatedByReleaseInspection": false
+  },
+  "renderedObservation": {
+    "url": "https://thebonfire.xyz/work",
+    "session": "existing_authenticated_chrome_session",
+    "theme": "dark",
+    "sha256": "73c82c9b92bf518cbd0791c59fb15a5a7865e19d9f335c347fec78a9bf589475",
+    "width": 2056,
+    "height": 1234,
+    "bytes": 154881,
+    "retainedInRepository": false,
+    "retentionReason": "body_minimized_receipt_does_not_retain_private_production_conversation_pixels",
+    "acceptedVisibleClaims": [
+      "one_primary_left_rail_with_quiet_selected_state",
+      "name_only_current_organization_in_the_header",
+      "thread_list_conversation_and_single_composer_render_without_horizontal_overflow",
+      "redundant_private_brain_footer_is_absent",
+      "existing_rich_media_and_human_message_surfaces_render"
+    ]
+  },
+  "validation": {
+    "fullGo": "PASS_root_525.869s_and_all_cmd_internal_packages",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_514_of_514",
+    "mobileTypecheck": "PASS",
+    "ordinaryMessageThreadIndependentCritic": "PASS",
+    "focusedGoNormal": "PASS_7.419s_with_twelve_render_capture",
+    "focusedGoRace": "PASS_5.909s",
+    "sourceAndEvidenceSidecars": "PASS",
+    "releaseVerifier": "verified-local-unsigned"
+  },
+  "operationalBoundary": {
+    "commitPushedToWorkingBranch": true,
+    "commitPushedToMain": true,
+    "exactArchiveOnly": true,
+    "mutableOptMeetingassistDeployUsed": false,
+    "staleOptMeetingassistDataTouched": false,
+    "productionDataMutation": false,
+    "productionConfigurationMutationBeyondReleaseActivation": false,
+    "productionProviderProbeOrSyntheticCall": false,
+    "messageWorkSettingsMeetingOrOrganizationMutationDuringRenderedInspection": false,
+    "collectionPublicationCohortOrManagedKeyAction": false,
+    "strideSiteExcluded": true
+  },
+  "exclusions": {
+    "externalAttestationComplete": false,
+    "canonicalShadowHealthy": false,
+    "currentMeetingAcceptanceComplete": false,
+    "wholePD1Complete": false,
+    "actualProviderBackedDeliverablesAccepted": false,
+    "physicalDeviceAccepted": false,
+    "wholeE10Complete": false
+  }
+}

@@ -793,7 +793,19 @@ founder connects the phone at the end.
   high-contrast Show more/less control, the full parent remains visible while
   eighteen replies scroll independently, one reply composer owns the active
   surface, and the redundant private-brain footer is absent. It does not accept
-  native threads, the remaining PD1 surfaces or the whole ledger. The exact
+  native threads, the remaining PD1 surfaces or the whole ledger. The second
+  exact interim release is complete in receipt `81675843...`: reviewed commit
+  `7427268652401306fba426798c937bc982d116b9` is pushed to the working branch
+  and main and serves from exact bundle `930ce5de...` at ledger generation 60;
+  app image `966ee14f...`, renderer `891c49bb...`, Caddy, public health/
+  readiness, render canary, retained `11e3cf2...` rollback and the mandatory
+  verifier agree. A read-only authenticated dark-mode observation confirms the
+  live Work shell renders without horizontal overflow and without the redundant
+  private-brain footer. `stride-site/` remained excluded and no production
+  message, work, setting, meeting, provider, data, collection, publication,
+  cohort or organization mutation occurred during release verification. The
+  release remains `verified-local-unsigned`; external attestation and the known
+  non-required canonical-shadow divergence remain open. The exact
   interim release is complete in receipt `2186910c...`: reviewed commit
   `11e3cf2...` is pushed to the working branch and main, serves from the exact
   clean archive at ledger generation 59, returns `verified-local-unsigned`, and
@@ -817,11 +829,11 @@ founder connects the phone at the end.
   those exact awareness/recap/recovery failures, then require a reviewed exact
   release plus current-meeting readback before activation. Do not call the
   generic fresh brain capability a visible smart recap. The exact next ready
-  action at this checkpoint is to commit and push the reviewed current candidate
-  excluding `stride-site/`, activate its clean archive through the retained
-  rollback release, require ledger/image/Caddy/health/readiness/verifier
-  agreement, record the live receipt, then resume the remaining PD1 and meeting
-  acceptance queues without treating this bounded release as completion.
+  action at this checkpoint is now to resume the remaining PD1 and meeting
+  acceptance queues against serving release `7427268...`, beginning with the
+  founder-priority Home, compact live-meeting controls and complete work-card/
+  Open/Drive/edit-regenerate interactions while preserving the current-meeting
+  truth gates. Do not treat this bounded release as completion.
   The native reference study is honestly partial:
   Buzz is observed, while native ChatGPT and Slack remain at the smallest
   inspection gates recorded in `2d030367...`; do not pause other ready PD1 work
