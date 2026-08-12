@@ -281,7 +281,7 @@ func TestFrontendScoutMemoryPrivateRealtimeRequiresLiveOfficeControlChannel(t *t
 		t.Fatal("personal Scout must not appear available without its live office control channel")
 	}
 
-	start := strings.Index(html, "async function startPrivateRealtimeVoiceConversation()")
+	start := strings.Index(html, "async function startPrivateRealtimeVoiceConversation(options = {})")
 	endOffset := -1
 	if start >= 0 {
 		endOffset = strings.Index(html[start:], "async function beginPrivateRealtimeVoiceSession")
@@ -292,22 +292,18 @@ func TestFrontendScoutMemoryPrivateRealtimeRequiresLiveOfficeControlChannel(t *t
 	startPath := html[start : start+endOffset]
 	for _, want := range []string{
 		"if (!officeSocketLive())",
-		"if (privateRealtimeVoiceInFlight())",
-		"stopRealtimeVoiceConversation({",
-		"notifyServer: false",
-		"terminalReason: 'control_channel_lost'",
-		"ensureOfficeSocket()",
-		"Scout is reconnecting. Try again in a moment.",
+		"const ready = await waitForOfficeSocketReady(sessionToken)",
+		"Scout is still reconnecting. Try again in a moment.",
 	} {
 		if !strings.Contains(startPath, want) {
 			t.Errorf("private Realtime control-channel gate missing %q", want)
 		}
 	}
 	gateIndex := strings.Index(startPath, "if (!officeSocketLive())")
-	modeIndex := strings.Index(startPath, "setRealtimeVoiceMode('private')")
+	focusIndex := strings.Index(startPath, "await acquireRealtimeVoiceAudioFocus('private_realtime')")
 	beginIndex := strings.Index(startPath, "await beginPrivateRealtimeVoiceSession(sessionToken)")
-	if gateIndex < 0 || modeIndex < 0 || beginIndex < 0 || gateIndex > modeIndex || gateIndex > beginIndex {
-		t.Fatal("the live control-channel gate must precede all private Realtime startup state and transport work")
+	if gateIndex < 0 || focusIndex < 0 || beginIndex < 0 || gateIndex > focusIndex || gateIndex > beginIndex {
+		t.Fatal("the live control-channel gate must precede private Realtime audio focus and transport work")
 	}
 
 	officeStart := strings.Index(html, "function ensureOfficeSocket()")

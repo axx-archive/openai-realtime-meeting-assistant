@@ -18,6 +18,8 @@ test('native Home consumes one server-owned snapshot and does not rebuild client
   assert.match(hook, /catch \(error\)[\s\S]*setSnapshot\(EMPTY\)[\s\S]*setFreshness\('stale'\)/u);
   assert.doesNotMatch(hook, /MAX_STALE_HOME_MS|receivedAtRef/u);
   assert.match(hook, /const HOME_STARTER_IDS = \['continue', 'explore', 'create', 'challenge'\] as const/u);
+  assert.match(hook, /const HOME_STARTER_SHELLS: HomeStarter\[\] = \[/u);
+  assert.match(hook, /sessionToken && snapshot\.starters\.length !== HOME_STARTER_IDS\.length[\s\S]*HOME_STARTER_SHELLS/u);
   assert.match(hook, /snapshot\.version === 'home-v2'/u);
   assert.match(hook, /snapshot\.starters\.length === HOME_STARTER_IDS\.length/u);
   assert.match(types, /id: 'continue' \| 'explore' \| 'create' \| 'challenge';/u);
@@ -31,7 +33,8 @@ test('native Home always renders server categories and expands an accessible sug
   assert.match(screen, /\{home\.starters\.length > 0 && !activeStarter \? \(/u);
   assert.match(screen, /home\.starters\.map\(\(starter\) =>/u);
   assert.match(screen, /onPress=\{\(\) => setActiveStarterID\(starter\.id\)\}/u);
-  assert.match(screen, /accessibilityState=\{\{ expanded: activeStarterID === starter\.id \}\}/u);
+  assert.match(screen, /disabled=\{!home\.startersReady\}/u);
+  assert.match(screen, /accessibilityState=\{\{ disabled: !home\.startersReady, expanded: activeStarterID === starter\.id \}\}/u);
   assert.match(screen, /\{activeStarter \? \(/u);
   assert.match(screen, /accessibilityLabel=\{`\$\{activeStarter\.label\} suggestions`\}/u);
   assert.match(screen, /accessibilityLabel="Back to starter categories"/u);
@@ -90,7 +93,7 @@ test('native Home expands truthful context and suggestions for accessibility tex
   assert.match(screen, /Keyboard\.addListener\('keyboardDidHide'/u);
   assert.match(screen, /accessibilityLabel=\{starter\.label\}/u);
   assert.doesNotMatch(screen, /style=\{styles\.starterText\}>\{starter\.detail\}/u);
-  assert.match(screen, /accessibilityHint="Shows editable message suggestions\."/u);
+  assert.match(screen, /accessibilityHint=\{home\.startersReady \? 'Shows editable message suggestions\.' : 'Suggestions are loading\.'\}/u);
   assert.doesNotMatch(screen, /numberOfLines=\{1\} style=\{styles\.continuity(?:Eyebrow|Title)\}/u);
   assert.doesNotMatch(screen, /numberOfLines=\{2\} style=\{styles\.continuityDetail\}/u);
 });

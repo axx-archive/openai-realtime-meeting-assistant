@@ -845,18 +845,42 @@ func assistantRealtimeMilestoneHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
 		return
 	}
-	if userFromRequest(r) == nil {
+	user := userFromRequest(r)
+	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
 	payload := struct {
-		Milestone string `json:"milestone"`
+		Milestone         string `json:"milestone"`
+		VoiceSessionID    string `json:"voiceSessionId"`
+		ThreadID          string `json:"threadId"`
+		TransportRevision int    `json:"transportRevision"`
+		OperationID       string `json:"operationId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime milestone")
 		return
 	}
 	milestone := strings.ToLower(strings.TrimSpace(payload.Milestone))
+	hasBinding := strings.TrimSpace(payload.VoiceSessionID) != "" || strings.TrimSpace(payload.ThreadID) != "" || payload.TransportRevision != 0 || strings.TrimSpace(payload.OperationID) != ""
+	if hasBinding {
+		if kanbanApp == nil || strings.TrimSpace(payload.VoiceSessionID) == "" || strings.TrimSpace(payload.ThreadID) == "" || payload.TransportRevision <= 0 || strings.TrimSpace(payload.OperationID) == "" {
+			writeAuthError(w, http.StatusBadRequest, "realtime milestone binding is incomplete")
+			return
+		}
+		latency, replayed, err := kanbanApp.appendPrivateRealtimeVoiceTransportMilestone(user.Email, payload.VoiceSessionID, payload.ThreadID, payload.TransportRevision, payload.OperationID, milestone, time.Now().UTC())
+		if err != nil {
+			status := http.StatusConflict
+			if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "unknown") {
+				status = http.StatusBadRequest
+			}
+			writeAuthError(w, status, err.Error())
+			return
+		}
+		recordCapabilityMilestoneFrom(capabilityPrivateVoice, milestone, "client", time.Now().UTC())
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "replayed": replayed, "latency": latency})
+		return
+	}
 	switch milestone {
 	case "peer_connected", "data_channel_open", "remote_track", "first_audio", "response_done":
 		recordCapabilityMilestoneFrom(capabilityPrivateVoice, milestone, "client", time.Now().UTC())

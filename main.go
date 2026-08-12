@@ -2400,10 +2400,18 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusConflict, err.Error())
 		return
 	}
+	transportRevision, err := kanbanApp.beginPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, time.Now().UTC())
+	if err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	recordCapabilityPoll(capabilityPrivateVoice, time.Now().UTC())
 	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP, user.Email)
 	if err != nil {
+		if persistErr := kanbanApp.finishPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, transportRevision, false, time.Now().UTC()); persistErr != nil {
+			log.Errorf("Failed to persist private Realtime transport failure for %s: %v", user.Email, persistErr)
+		}
 		recordCapabilityFailure(capabilityPrivateVoice, time.Now().UTC(), err)
 		log.Errorf("Failed to create private Realtime voice call for %s: %v", user.Email, err)
 		if message, status, ok := openAIAPIRequestUserMessage(err); ok {
@@ -2413,13 +2421,19 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	if err := kanbanApp.finishPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, transportRevision, true, time.Now().UTC()); err != nil {
+		log.Errorf("Failed to persist private Realtime transport acceptance for %s: %v", user.Email, err)
+		writeAuthError(w, http.StatusServiceUnavailable, "Scout voice could not persist its private session")
+		return
+	}
 	recordCapabilityMilestone(capabilityPrivateVoice, "offer_accepted", time.Now().UTC())
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"sdp":            answerSDP,
-		"voiceSessionId": voiceSessionID,
-		"threadId":       voiceThread.ID,
+		"ok":                true,
+		"sdp":               answerSDP,
+		"voiceSessionId":    voiceSessionID,
+		"threadId":          voiceThread.ID,
+		"transportRevision": transportRevision,
 	})
 }
 

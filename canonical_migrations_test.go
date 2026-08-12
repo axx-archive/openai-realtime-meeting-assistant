@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 17 {
-		t.Fatalf("migration count = %d, want 17", len(migrations))
+	if len(migrations) != 18 {
+		t.Fatalf("migration count = %d, want 18", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -171,6 +171,37 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[16].SQL, "key_refs jsonb NOT NULL") ||
 		!strings.Contains(migrations[16].SQL, "VALUES ('person_mymind_context', false, 1)") {
 		t.Fatalf("unexpected private MyMind custody migration: %+v", migrations[16])
+	}
+	if migrations[17].Version != 18 || migrations[17].Name != "0018_stride_projects.sql" ||
+		migrations[17].SHA256 != sha256.Sum256([]byte(migrations[17].SQL)) ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_revisions") ||
+		!strings.Contains(migrations[17].SQL, "ADD COLUMN authority_generation") ||
+		!strings.Contains(migrations[17].SQL, "Project authority generation must advance exactly once") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_projects_current") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_thread_binding_revisions") ||
+		!strings.Contains(migrations[17].SQL, "CREATE UNIQUE INDEX stride_project_thread_one_active_owner") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_association_revisions") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_association_events") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_correction_receipts") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_operation_receipts") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_source_authority_receipts") ||
+		!strings.Contains(migrations[17].SQL, "CREATE TABLE stride_project_projection_outbox") ||
+		!strings.Contains(migrations[17].SQL, "CREATE VIEW stride_project_associations_authorized_current") ||
+		!strings.Contains(migrations[17].SQL, "CREATE FUNCTION stride_project_source_drift_unlist") ||
+		!strings.Contains(migrations[17].SQL, "UNIQUE(organization_id,operation_kind,idempotency_key_digest)") ||
+		!strings.Contains(migrations[17].SQL, "Project operation requires current organization session authority") ||
+		!strings.Contains(migrations[17].SQL, "ProjectAssociation requires exact current source authority receipt") ||
+		!strings.Contains(migrations[17].SQL, "Project source receipt requires exact authorized canonical conversation event") ||
+		!strings.Contains(migrations[17].SQL, "FOREIGN KEY(organization_id,subject_id) REFERENCES stride_conversation_events") ||
+		!strings.Contains(migrations[17].SQL, "source_event.invalidated_at IS NOT NULL") ||
+		!strings.Contains(migrations[17].SQL, "ProjectAssociation current revision requires authority event") ||
+		!strings.Contains(migrations[17].SQL, "Project correction receipt does not bind exact old and replacement current edges") ||
+		!strings.Contains(migrations[17].SQL, "Project controller membership must belong to Project organization") ||
+		!strings.Contains(migrations[17].SQL, "supersede exact current digest") ||
+		!strings.Contains(migrations[17].SQL, "illegal ProjectAssociation transition or resurrection") ||
+		!strings.Contains(migrations[17].SQL, "('project_authority_read',false,1)") ||
+		!strings.Contains(migrations[17].SQL, "('project_record_projection',false,1)") {
+		t.Fatalf("unexpected STRIDE Projects migration: %+v", migrations[17])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

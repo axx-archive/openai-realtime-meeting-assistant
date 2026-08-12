@@ -43,6 +43,7 @@ import { duration, ease, useReduceMotion } from '../theme/motion';
 import { colors } from '../theme/tokens';
 import type { RootStackParamList } from './types';
 import { NativeUniversalShell } from './NativeUniversalShell';
+import { PersonalRealtimeProvider } from '../realtime/PersonalRealtimeProvider';
 import {
   nativeShellDestinationForRoute,
   createNativeShellSelectionCoordinator,
@@ -216,24 +217,51 @@ export function RootNavigator() {
     setActiveRoute(route);
   }, []);
 
+  const handleRealtimeActions = useCallback((actions: Array<Record<string, unknown>>) => {
+    if (!navigationRef.isReady()) return;
+    for (const action of actions) {
+      const actionType = String(action.type ?? '').trim();
+      const tool = String(action.tool ?? action.mode ?? '').trim();
+      if (!['open_tool', 'assistant_mode'].includes(actionType)) continue;
+      if (tool === 'chat') navigationRef.navigate('Deck', { segment: 'threads' });
+      else if (['workflow', 'research', 'design', 'grill'].includes(tool)) {
+        navigationRef.navigate('Deck', { segment: 'work' });
+      } else if (tool === 'board') navigationRef.navigate('Board');
+      else if (tool === 'artifacts' || tool === 'files') navigationRef.navigate('Files');
+      else if (tool === 'meetings') navigationRef.navigate('Meetings');
+      else if (tool === 'memory') navigationRef.navigate('Memory');
+      else if (tool === 'intelligence') navigationRef.navigate('Intelligence');
+      else if (tool === 'notifications' || tool === 'alerts') navigationRef.navigate('Alerts');
+      else if (tool === 'settings') navigationRef.navigate('Settings');
+    }
+  }, []);
+
+  const openPersonalRealtimeThread = useCallback((threadId: string) => {
+    if (!navigationRef.isReady()) return;
+    navigationRef.navigate('Thread', { threadId, title: 'Scout voice' });
+  }, []);
+
   if (bootstrapping) {
     return <LaunchCradle />;
   }
 
   return (
     <View style={styles.root}>
-      <NativeUniversalShell
-        active={activeShellDestination}
-        keepSidebarForFocusedRoute={Boolean(user && sessionToken && activeRoute === 'Thread')}
-        visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
-        onSelect={selectShellDestination}
-      >
-      <NavigationContainer
-        ref={navigationRef}
-        theme={navTheme}
-        onReady={() => { syncActiveRoute(); flushPendingPushTarget(); }}
-        onStateChange={syncActiveRoute}
-      >
+      <PersonalRealtimeProvider onActions={handleRealtimeActions} roomActive={activeRoute === 'Room'}>
+        <NativeUniversalShell
+          active={activeShellDestination}
+          keepSidebarForFocusedRoute={Boolean(user && sessionToken && activeRoute === 'Thread')}
+          personalRealtimeVisible={Boolean(user && sessionToken && activeRoute !== 'Room')}
+          visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
+          onOpenPersonalRealtimeThread={openPersonalRealtimeThread}
+          onSelect={selectShellDestination}
+        >
+        <NavigationContainer
+          ref={navigationRef}
+          theme={navTheme}
+          onReady={() => { syncActiveRoute(); flushPendingPushTarget(); }}
+          onStateChange={syncActiveRoute}
+        >
         <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user && sessionToken ? (
           <>
@@ -316,8 +344,9 @@ export function RootNavigator() {
           <Stack.Screen name="Login" component={LoginScreen} />
         )}
         </Stack.Navigator>
-      </NavigationContainer>
-      </NativeUniversalShell>
+        </NavigationContainer>
+        </NativeUniversalShell>
+      </PersonalRealtimeProvider>
       {launchVisible ? (
         <Animated.View
           pointerEvents="none"

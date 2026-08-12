@@ -66,6 +66,10 @@ const (
 	STRIDEFeatureNetworkContact                 STRIDEFeature = "network_contact"
 	STRIDEFeatureNetworkQueryParserProvider     STRIDEFeature = "network_query_parser_provider"
 	STRIDEFeatureNetworkSemanticReranker        STRIDEFeature = "network_semantic_reranker"
+	STRIDEFeatureProjectAuthorityRead           STRIDEFeature = "project_authority_read"
+	STRIDEFeatureProjectAuthorityWrite          STRIDEFeature = "project_authority_write"
+	STRIDEFeatureProjectSmartLink               STRIDEFeature = "project_smart_link"
+	STRIDEFeatureProjectRecordProjection        STRIDEFeature = "project_record_projection"
 )
 
 var allSTRIDEFeatures = []STRIDEFeature{
@@ -87,6 +91,7 @@ var allSTRIDEFeatures = []STRIDEFeature{
 	STRIDEFeatureContributionCandidateDetection, STRIDEFeatureContributionReview, STRIDEFeatureWorkRecordPrivate,
 	STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch,
 	STRIDEFeatureNetworkContact, STRIDEFeatureNetworkQueryParserProvider, STRIDEFeatureNetworkSemanticReranker,
+	STRIDEFeatureProjectAuthorityRead, STRIDEFeatureProjectAuthorityWrite, STRIDEFeatureProjectSmartLink, STRIDEFeatureProjectRecordProjection,
 }
 
 type STRIDERegistryKind string

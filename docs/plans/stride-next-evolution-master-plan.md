@@ -45,13 +45,14 @@ Native Build 54 is the newest exact uploaded mobile carrier. EAS build
 `3788b49137702209b8cb213ab31922e8c1ba6357f5007685dc89acd54d071882`,
 and the app plus broadcast extension both report version 1.0.0, build 54.
 Exact EAS submission `500aa34e-729b-4f81-a9f7-e25b1052c08a` finished its
-upload to App Store Connect app `6794029943`; Apple processing, Build 54
-`VALID` readback and intended tester-group availability remain open and must
-not be inferred from upload success. Build 53 remains the newest independently
-proved `IN_BETA_TESTING` carrier for internal `Team (Expo)` and external
-`Bonfire` until that readback completes. No physical iPhone/iPad acceptance is
-proven, and the seven-person Bonfire group still has no tester record named
-Tyler.
+upload to App Store Connect app `6794029943`. Fresh 2026-08-12 App Store
+Connect readback proves Build 54 is `VALID`, unexpired and internally
+`IN_BETA_TESTING`; its external state remains `READY_FOR_BETA_SUBMISSION`.
+Exact intended-group relationships and external Bonfire availability therefore
+remain open and must not be inferred from upload or internal processing. Build
+53 remains the newest independently proved external `IN_BETA_TESTING` carrier.
+No physical iPhone/iPad acceptance is proven, and the seven-person Bonfire
+group still has no tester record named Tyler.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -657,8 +658,10 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | E10-R9 Work Record/network | **Superseded** | W0-W6 plus PN0-PN5 are controlling; private Work Record is live under W4; public projection/search/contact follow PN/W6 gates |
 | PN0 public-network constitution revision 2 | **In Progress** | the normative source receipt `stride-e10-pn0-normative-inputs-20260809.json` is verified supporting evidence; exact legal/privacy/moderation/appeal/incident owners and policy signatures remain external |
 | PD0 comparative study/design thesis | **In Progress** | cross-product study `stride-e10-pd0-comparative-design-study-20260810.md` SHA-256 `1e781de1ddbc10eeb051680e54e6a08a4c763d547135dece1c638a193e8cf786` has independent design critic PASS; the ChatGPT Workstream study/interaction manifest also have exact independent critic PASS against reviewed SHAs `5bd071db...` / `98027ae6...`; current one-way study receipt SHA-256 `7123407a41c422f9690b6c899e81dbc69b5f852b37913eb08af2140f43f800d4`; the representative Work presentation and fail-closed Work→Network browser references have independent critic PASS against reviewed receipt SHA `b55f7c67...`, with current one-way receipt `stride-e10-pd0-work-network-prototype-rendered-20260810.json` SHA-256 `8e920a826e5890f15c9e44df0b78a2a1c1c7b4268dd89207b0ce98b3fe59f720`; native/product/device migration remains |
-| PD1 unified product migration | **In Progress** | bounded shell/Scout, local Agentic Lab and recurring-work grammar receipts pass. Agentic Lab proves a synthetic one-human/three-agent company, truthful completed-work versus governed Work Record semantics, authenticated Open, private attestation lifecycle and rendered desktop/iPhone/iPad. Receipt `e9f5a2d7...` closes the exact presentation process-dump rejection and one evolving desktop/430-responsive card/inspector grammar with shared fail-closed native family/phase copy; receipt `dfdf214d...` renders and independently accepts that same in-progress card/activity journey on native iPhone and iPad; receipt `0623ccee...` extends the accepted native one-request/one-card grammar through Research, Design and Financial model; receipt `b07b46a7...` completes the bounded twelve-family web/native interaction grammar, providerless restart and eight additional iPhone/iPad captures while preserving one card across material-artifact attachment; receipt `ff80a903...` adds the bounded simulated orientation, Accessibility XXXL, software-keyboard, accessibility-source and list-performance checkpoint; receipt `e4fb1548...` accepts one global desktop destination rail, quiet organization/context header, governed name-only organization chooser, labeled bottom utilities, responsive keyboard semantics and light/dark rendered parity; receipt `351a32e0...` accepts the bounded desktop ordinary-message/Show-more/thread-inspector interaction; receipt `0231271a...` accepts the bounded local conversation-first Home on web, iPhone and iPad, including server-owned continuation, zero-effect editable Continue/Explore/Create/Challenge starters, immediate fail-closed private-context clearing on any refresh failure, true light/dark and iPad Accessibility XXXL keyboard acceptance after AutoFill suppression; and live receipt `81675843...` binds the exact second interim release at ledger generation 60 plus a read-only authenticated dark-mode observation. Project smart-link/correction, compact meeting controls, the complete feed/work-card/Open/Drive/edit-regenerate loop, broader every-surface rendered migration, missing native ChatGPT/Slack observations, actual provider-backed artifacts/previews/Drive, functional/device accessibility and measured performance, physical devices and whole-PD1 evidence remain open |
-| PD1 Home v2 / private voice / meeting controls / native navigation | **Verified Complete — bounded release class** | local receipt `1c1a07e9...` accepts exact Continue destinations, editable two-level starters, separate dictation and private Realtime voice/thread binding, transparent composer focus, compact meeting controls, descriptor-free native cards and icon-only iPhone navigation. Exact commit `7fb35f88...` is on main and serves at ledger generation 61 from bundle `4e0e62d5...` under `verified-local-unsigned`; Build 54 is uploaded and awaiting Apple processing/readback. Provider canary, physical devices and whole-PD1 acceptance are not claimed. |
+| PD1 unified product migration | **In Progress** | bounded shell/Scout, local Agentic Lab and recurring-work grammar receipts pass. Agentic Lab proves a synthetic one-human/three-agent company, truthful completed-work versus governed Work Record semantics, authenticated Open, private attestation lifecycle and rendered desktop/iPhone/iPad. Receipt `e9f5a2d7...` closes the exact presentation process-dump rejection and one evolving desktop/430-responsive card/inspector grammar with shared fail-closed native family/phase copy; receipt `dfdf214d...` renders and independently accepts that same in-progress card/activity journey on native iPhone and iPad; receipt `0623ccee...` extends the accepted native one-request/one-card grammar through Research, Design and Financial model; receipt `b07b46a7...` completes the bounded twelve-family web/native interaction grammar, providerless restart and eight additional iPhone/iPad captures while preserving one card across material-artifact attachment; receipt `ff80a903...` adds the bounded simulated orientation, Accessibility XXXL, software-keyboard, accessibility-source and list-performance checkpoint; receipt `e4fb1548...` accepts one global desktop destination rail, quiet organization/context header, governed name-only organization chooser, labeled bottom utilities, responsive keyboard semantics and light/dark rendered parity; receipt `351a32e0...` accepts the bounded desktop ordinary-message/Show-more/thread-inspector interaction; receipt `0231271a...` accepts the bounded local conversation-first Home on web, iPhone and iPad; and the bounded third interim release row below supersedes its formerly-open compact controls and Home migration sub-scope. The Project authority foundation row below now closes stable Project identity, append-only correctable ProjectAssociation and body-free permission-filtered Project Record indexing for the exact local/default-off class. Home smart-link UI, full source-family Project Record coverage, the complete feed/work-card/Open/Drive/edit-regenerate loop, broader every-surface rendered migration, missing native ChatGPT/Slack observations, actual provider-backed artifacts/previews/Drive, functional/device accessibility and measured performance, physical devices and whole-PD1 evidence remain open. |
+| PD1 Home v2 / private voice / meeting controls / native navigation | **Verified Complete — bounded release class** | local receipt `1c1a07e9...` accepts exact Continue destinations, editable two-level starters, separate dictation and private Realtime voice/thread binding, transparent composer focus, compact meeting controls, descriptor-free native cards and icon-only iPhone navigation. Exact commit `7fb35f88...` is on main and serves at ledger generation 61 from bundle `4e0e62d5...` under `verified-local-unsigned`; Build 54 is Apple `VALID`, unexpired and internally `IN_BETA_TESTING`. Exact intended-group/external Bonfire availability, provider canary, physical devices and whole-PD1 acceptance are not claimed. |
+| PD1 Project identity / association / Project Record foundation | **Verified Complete — bounded local/default-off class** | receipt `stride-e10-pd1-project-foundation-local-20260812.json` binds migration 0018, stable organization-scoped Project identity, exact current session/source authority, correctable append-only ProjectAssociation, atomic old/new correction, synchronous source-drift unlisting plus four-family purge outbox, restart-safe permission-filtered body-free Project Record reconstruction and operation-scoped durable replay. Focused and race suites, real disposable-PostgreSQL upgrade/authority/correction/revoke/replay tests, DR, vet, 20× stress, full `go test ./...` (`536.950s`) and a fresh independent critic PASS. All Project switches remain false; no Home chip/chooser, HTTP exposure, production migration, provider call, commit, push or deploy is claimed. |
+| PD1 persistent personal Realtime / immediate Home taxonomy | **Verified Complete — bounded local release-candidate class** | receipt `stride-e10-pd1-project-realtime-persistent-local-20260812.json` binds the exact web/native/server candidate: the Home waveform starts a durable owner-only `gpt-realtime-2.1` thread; logical human and Scout turns append to that exact thread; the voice control persists across ordinary navigation, opens the bound thread and shows truthful listening/thinking/talking/acting/error state; transient loss retries the same logical session/thread twice with strictly increasing transport revisions while stale callbacks fail closed; explicit stop, auth/session drift, room entry, backgrounding and audio-focus takeover terminate it. Web and native render the four stable category shells immediately while authorized suggestions load, keep them non-actionable until hydration and avoid composer shift. Full Go (`542.384s`), focused race, 526/526 native, typecheck, Release simulator build, vet, rendered responsive web evidence, diff-check and fresh critic pass. This does not claim a live provider conversation, physical-device quality/latency, production activation, TestFlight availability, Home chief-of-staff personalization or Project-chip integration. |
 | PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
 | PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
 | PI0-B pilot evidence/collection gate | **Not Started** | requires PI0-A baseline, PN1 and accepted PD1 pilot surfaces before any real collection |
@@ -674,12 +677,21 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | Tyler/TestFlight and all-user consent | **In Progress** | founder authorization is recorded; exact ASC tester relation and durable current-policy consent records remain readback gates |
 
 > **2026-08-12 controlling PD1 resume checkpoint:** The completed bounded
-> Home/voice/meeting/native-navigation row above supersedes older text that
-> still names compact meeting controls as the next action. Resume with the
-> first-class Project association/correction contract and the complete sleek
-> chat/thread/work-card/Open/named-Drive-save/edit-regenerate journeys. Apple
-> processing and intended tester-group readback for Build 54 remain a release
-> follow-up, not permission to reopen the accepted local or VPS checkpoint.
+> Home/meeting/native-navigation release, local/default-off Project authority
+> foundation and persistent-personal-Realtime/immediate-Home release candidate
+> rows above supersede older text that names compact meeting controls,
+> first-class Project identity or cross-navigation voice ownership as the next
+> action. Resume after exact release readback by integrating the fail-closed
+> visible Project suggestion/selection/correction chip into Home and
+> conversation Send and using permission-filtered recurring compaction to rank
+> explainable chief-of-staff suggestions from the current user's authorized
+> work, public/team conversations, meetings and Project state. Then prove one
+> server-owned Project-bound Research work
+> projection through immutable revision, rich Open, named Drive receipt/Open in
+> Drive and normal-composer edit/regenerate on web, iPhone and iPad. Apple
+> external Bonfire state and exact intended tester-group relationship readback
+> for Build 54 remain a release follow-up, not permission to reopen the accepted
+> local or VPS checkpoint.
 
 ### Dependency-ordered remaining waves and stop/resume points
 
@@ -693,7 +705,7 @@ artifacts; they do not edit the product or create competing systems.
 | 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 38-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
 | 1 — complete | **PD0 representative browser prototype and system freeze**, single Product Design owner. The comparative study, ChatGPT Workstream extension, Work presentation lifecycle and fail-closed Work→Network bridge passed independent critics. | exact studies/manifests; 13-journey validator; four synchronized J4 postimages; desktop/430 iPhone/1180 iPad reference captures; screenshot SHA/dimension verifier; Network value withholding; independent critic PASS | complete only for the bounded browser-reference class; no native/product/device/provider/Drive/publication/activation claim |
 | 2 — complete for the local/default-off class | **OpenAI-only conversational work runtime**, one provider/runtime owner. Inventory, function-tool design `c5363c31...`, isolated carrier `7064ee32...`, five-way router `10948ff1...`, complete local provider/model/restart gate `9c83c4b1...` and concrete adapter receipt `20ebacf8...` are independently accepted on exact dirty bytes. `report_goal_state`, `answer_memory_question`, `create_artifact` and `update_artifact` bind to governed product services under the frozen journal; every other tool is unavailable. | exact approved model/effort map; natural text/voice/Scout/direct-agent intent corpus; five server outcomes; exact tool authority/restart/final-use journal; tool-specific pre/post/reconcile/final-use and projection tests; no visible/client tool preselection; no-Anthropic negatives; full Go `515.862s`; 488/488 native tests and typecheck; provider receipts and independent critics | deterministic/providerless paths stay intact; four-tool integration remains default-off; managed custody and live activation remain gated; zero provider calls and zero production mutations in verification; no activation until exact project/cost authority and reviewed release receipts |
-| 3 — in progress; second interim release complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and independent critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; and `81675843...` binds exact live commit `7427268...`, ledger generation 60, verifier agreement, rollback and a read-only rendered dark-mode observation. Resume the remaining every-surface migration without overlapping implementation ownership. The exact next ready action is the compact live-meeting-control contract, followed by project smart-link/correction and the complete feed/work-card/Open/named-Drive-save/edit-regenerate contracts, then functional VoiceOver/reduced motion, the remaining Dynamic Type spectrum, actual Split View/Stage Manager, pointer, Full Keyboard Access, measured runtime performance and physical-device acceptance. Actual provider-backed deliverables/previews/Drive remain in the AJA matrix. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; independent critic | retain live release `7427268...`, rollback `11e3cf2...` and Build 53; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
+| 3 — in progress; third interim release, local Project foundation and persistent-Realtime candidate complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and independent critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; `1c1a07e9...` plus live receipt `4466e8e4...` bind the exact third release `7fb35f88...`; `stride-e10-pd1-project-foundation-local-20260812.json` accepts the exact local/default-off Project identity/association/Project Record authority foundation; and `stride-e10-pd1-project-realtime-persistent-local-20260812.json` accepts the immediate Home shells plus durable cross-navigation same-thread personal Realtime candidate. After exact release readback, resume with Home/project-chip Send integration and authorized recurring compaction/ranking for explainable chief-of-staff suggestions, then one server-owned Project-bound Research work projection through immutable revision, rich Open, durable named Drive receipt/Open in Drive and normal-composer edit/regenerate. Extend the reusable contract across the remaining artifact families and complete functional/device accessibility. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; independent critic | retain live release `7fb35f88...`, rollback `7427268...` and exact Build 54 until the candidate is activated; Project switches remain false; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
 | 3a — next after exact release/readback | **Founder-directed STRIDE organization and cross-org profile proof**, identity/organization authority owner. Resolve the canonical AJ and Tyler people, confirm no organization/name collision, create one private `STRIDE` organization, attach both exact members and prove that governed contributions from multiple organizations project into each person's core profile without cross-tenant body or membership leakage. General onboarding/invite/join UX remains later. | exact pre/post person/org/membership IDs and generations; backup/rollback; consent and audit receipt; active signed ContributionAttestations plus released-field manifests; correction/revocation/leave/delete rebuild and zero-disclosure corpus; desktop/iPhone/iPad profile render and independent critic | production data mutation is limited to the exact named organization/memberships after current readback; no duplicate people, inferred public/shared org, onboarding policy, search/contact activation or private-source copying |
 | 4 — next | **PI0-A baseline and installation design**, instrumentation owner; no collection. | signed baseline, event/schema/source digests, off/no-byte parity, privacy/export/purge/restore tests, critic | collection and emitters remain off; remove candidate installation without touching source data |
 | 5 — next | **PN1 safe projections default off**, PN authority owner after PD0+PI0-A. | migrations/PG, current-authority/CAS/ACL, purge/rebuild/restore, fixture render and critic; every PN switch false | drop candidate projections through governed rollback; private W4 remains authority |
@@ -827,9 +839,12 @@ founder connects the phone at the end.
   bounded conversation-first Home is now independently accepted only at the
   local/default-off web/iPhone/iPad class in receipt `0231271a...`; it includes
   fail-closed private-context refresh and the exact combined iPad AXXXL plus
-  keyboard state. The exact next ready action is the compact live-meeting-
-  control contract, followed by project smart-link/correction and the complete
-  feed-to-artifact interaction contracts. Functional VoiceOver/reduced motion,
+  keyboard state. This paragraph is historical: the third bounded release now
+  completes compact live-meeting controls and the superseding controlling
+  checkpoint above now records the bounded local/default-off Project identity,
+  correction and Project Record foundation complete and resumes with Home chip/
+  Send integration plus the complete feed-to-artifact interaction contracts.
+  Functional VoiceOver/reduced motion,
   the remaining Dynamic Type spectrum, actual Split View/Stage Manager,
   pointer, Full Keyboard Access and measured performance remain before
   physical-device acceptance.
@@ -844,12 +859,13 @@ founder connects the phone at the end.
   those exact awareness/recap/recovery failures, then require a reviewed exact
   release plus current-meeting readback before activation. Do not call the
   generic fresh brain capability a visible smart recap. The exact next ready
-  action at this checkpoint is now to resume the remaining PD1 and meeting
-  acceptance queues against serving release `7427268...`, beginning with the
-  compact live-meeting controls, then project smart-link/correction and the
-  complete work-card/Open/Drive/edit-regenerate interactions while preserving
-  the current-meeting truth gates. Do not treat the Home checkpoint or bounded
-  release as completion.
+  historical action at that checkpoint was to resume the remaining PD1 and
+  meeting acceptance queues against serving release `7427268...`. It is
+  superseded by serving release `7fb35f88...`, the accepted local Project/
+  ProjectAssociation foundation, and the Home integration then work-card/Open/
+  Drive/edit-regenerate sequence above.
+  Preserve the current-meeting truth gates and do not treat the Home checkpoint
+  or bounded release as whole-PD1 completion.
   The native reference study is honestly partial:
   Buzz is observed, while native ChatGPT and Slack remain at the smallest
   inspection gates recorded in `2d030367...`; do not pause other ready PD1 work
@@ -857,13 +873,26 @@ founder connects the phone at the end.
   complete PI0-A baseline/installation design with collection off. Preserve the
   exact approval, replay, client-authority, named-agent, provider/model,
   source-revision and child-restart boundaries; every non-admitted tool remains
-  unavailable. The reviewed interim release is authorized; no production
+  unavailable. The prior reviewed interim-release authority was consumed by the
+  third exact release. That historical boundary is superseded for the current
+  objective by the founder's 2026-08-12 explicit continuing authorization to
+  commit, push, run required migrations and deploy reviewed work through
+  completion; exact-release verification, rollback retention and live-data
+  exclusions remain mandatory. No production
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next:** complete the remaining every-surface rendered PD1 journeys,
-  beginning with live meeting controls, project smart-link/correction and the
-  complete work-card/Open/Save to Drive/edit-regenerate loop, plus the functional/device accessibility and
+- **Next:** integrate the accepted Project authority into Home/conversation as
+  a visible suggested/selected/removable/correctable chip with explicit-Send
+  reauthorization. Build the authorized recurring compaction and deterministic
+  ranking path that makes each category's suggestions feel like a grounded
+  chief of staff: current commitments and blockers first, then exact
+  continuation, Project relevance, meeting/team recurrence and safe generic
+  fallback, with a body-minimized **Why this?** trail and immediate revocation
+  invalidation. Then prove one Project-bound Research request through one
+  evolving server-owned work card, rich Open, exact named Drive receipt/Open in
+  Drive and immutable normal-composer edit/regenerate on web, iPhone and iPad.
+  Reuse that contract for the remaining artifact families, then complete the functional/device accessibility and
   measured-performance matrix; finish the PI0-A baseline, then build and gate
   PN1 default-off authority. Actual editable-PPTX presentation acceptance
   stays in the later AJA deliverable/device matrix after exact provider budget
@@ -879,8 +908,11 @@ No additional founder product-direction or provider-choice permission is
 presently required. OpenAI is controlling and Anthropic product-generation is
 superseded. Exact per-route cost caps/receipts, managed service/key custody, independent
 privacy/security/DR approvals, device evidence, and cohort ceremonies remain
-action-time or evidence gates. Only the exact reviewed interim release ceremony
-described above is currently authorized.
+action-time or evidence gates. The current founder authorization covers
+reviewed commits, pushes, required schema migrations and exact VPS/TestFlight
+release ceremonies through this objective; it does not authorize unrelated
+production-data edits, publication, cohort activation or unbounded provider
+spend.
 
 ## Historical 2026-08-09 unified E10 reconciliation and public-network revision 2 — superseded
 
@@ -1209,8 +1241,39 @@ additional permanent categories. A consequential “deploy/ship” suggestion ma
 appear only when a reviewed release actually makes it relevant and still routes
 to exact approval; Deploy is not a permanent Home category.
 
+The child suggestions set a **permission-aware chief-of-staff bar**, not a
+recent-items or generic prompt bar. For the exact signed-in person and active
+organization, the server continuously distills currently authorized signals
+from the person's private conversations and work, public/team channels they may
+read, meeting transcripts and decisions, Project status/history, promised
+follow-ups, approvals, blocked or aging work, upcoming meetings and reviewed
+outcomes. It prefers timely cross-source synthesis such as a commitment made in
+a meeting that is now blocked in a Project thread, or a repeated customer risk
+that deserves a Challenge prompt. The desired reaction is “how did Scout know
+that was the useful next move?”, but never because STRIDE crossed an audience
+boundary or exposed somebody else's private activity.
+
+Ranking is server-owned, stable for the snapshot and explainable: **Needs you
+and explicit commitments**, exact continuation, active Project relevance,
+cross-source recurrence, freshness, then a safe generic fallback. One noisy
+source or repeated mention cannot crowd out all four categories; duplicate,
+stale, resolved and low-confidence proposals are suppressed. Each personalized
+suggestion carries body-minimized source coverage and a plain-language **Why
+this?** projection that can reveal only sources the current viewer can open.
+Dismissal and correction become bounded ranking feedback, never authority or a
+hidden negative judgment about a person. Suggestion synthesis runs on recurring
+permission-filtered conversation/Project compaction with exact high-water,
+freshness and invalidation receipts; it cannot query raw public or private
+history outside that authorized snapshot at card-click time.
+
 The four category cards use the same quiet interactive-card grammar as a new
 Codex task. A motion-safe hover/focus response signals that each is interactive;
+the non-personal four-card taxonomy renders in the first web/native frame and
+reserves its final geometry while the authorized recommendation snapshot loads.
+Those shells remain non-actionable and announce Suggestions loading until the
+server snapshot hydrates them in place; loading, refresh failure or revocation
+may clear recommendation text and destinations but must not make the stable
+taxonomy arrive late or shift the composer.
 selecting one lets the four cards recede and reveals its compact bottom-centred
 suggestion list close to the ordinary composer, matching Codex's progressive
 disclosure rather than stacking a second dashboard grid underneath the cards.
@@ -1283,6 +1346,13 @@ confirms only the private association, not work execution, audience widening,
 publication or spend. An explicit chooser selection is **Selected** and is
 confirmed at Send. Multiple eligible matches clarify once; no eligible match
 remains unlinked. Selection/removal before Send changes only the candidate.
+The short-lived source-authority receipt used at mutation time is evidence, not
+the lifetime of the durable edge: reads resolve the same exact current source
+revision and ACL/consent/purge generations again and may mint a replacement
+ephemeral receipt without rewriting ProjectAssociation history. Receipt expiry
+alone cannot leave Home, Work, Board or Project Record caches stale; canonical
+source revocation/change fails the authorized-current view synchronously and
+enqueues all four body-free purge projections for restart-safe convergence.
 
 One canonical, tenant-and-organization-scoped `Project` aggregate—not a chat
 title, free-form tag, title-derived slug or agent guess—owns immutable identity,

@@ -58,7 +58,13 @@ const officeControlRuntime = {
   sessionToken: null as string | null,
   live: false,
   generation: 0,
+  reconnectEligible: false,
 };
+const officeControlListeners = new Set<() => void>();
+
+function notifyOfficeControlListeners(): void {
+  officeControlListeners.forEach((listener) => listener());
+}
 
 function closePersonalRealtimeForControlLoss(): void {
   if (audioFocusRuntime.mode !== 'personal_realtime') return;
@@ -71,21 +77,27 @@ function commitOfficeControlSession(sessionToken: string | null): void {
   if (officeControlRuntime.sessionToken === sessionToken && !officeControlRuntime.live) return;
   officeControlRuntime.sessionToken = sessionToken;
   officeControlRuntime.live = false;
+  officeControlRuntime.reconnectEligible = false;
   officeControlRuntime.generation += 1;
+  notifyOfficeControlListeners();
   closePersonalRealtimeForControlLoss();
 }
 
 function markOfficeControlLive(sessionToken: string): void {
   if (officeControlRuntime.sessionToken !== sessionToken || officeControlRuntime.live) return;
   officeControlRuntime.live = true;
+  officeControlRuntime.reconnectEligible = false;
   officeControlRuntime.generation += 1;
+  notifyOfficeControlListeners();
 }
 
-function markOfficeControlDisconnected(sessionToken: string): void {
+function markOfficeControlDisconnected(sessionToken: string, reconnectEligible = true): void {
   if (officeControlRuntime.sessionToken !== sessionToken) return;
-  if (officeControlRuntime.live) {
+  if (officeControlRuntime.live || officeControlRuntime.reconnectEligible !== reconnectEligible) {
     officeControlRuntime.live = false;
+    officeControlRuntime.reconnectEligible = reconnectEligible;
     officeControlRuntime.generation += 1;
+    notifyOfficeControlListeners();
   }
   closePersonalRealtimeForControlLoss();
 }
@@ -96,6 +108,46 @@ export function officeControlChannelIsLive(sessionToken: string | null): boolean
     && officeControlRuntime.sessionToken === sessionToken
     && officeControlRuntime.live,
   );
+}
+
+export function officeControlChannelSnapshot(sessionToken: string | null): {
+  live: boolean;
+  generation: number;
+  reconnectEligible: boolean;
+} {
+  const scoped = Boolean(sessionToken && officeControlRuntime.sessionToken === sessionToken);
+  return {
+    live: scoped && officeControlRuntime.live,
+    generation: officeControlRuntime.generation,
+    reconnectEligible: scoped && officeControlRuntime.reconnectEligible,
+  };
+}
+
+export async function waitForOfficeControlChannel(
+  sessionToken: string,
+  isCurrent: () => boolean,
+  timeoutMs = 6_000,
+): Promise<boolean> {
+  if (officeControlChannelIsLive(sessionToken)) return true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearInterval(cancellationPoll);
+      officeControlListeners.delete(check);
+      resolve(value);
+    };
+    const check = () => {
+      if (!isCurrent()) finish(false);
+      else if (officeControlChannelIsLive(sessionToken)) finish(true);
+    };
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    const cancellationPoll = setInterval(check, 100);
+    officeControlListeners.add(check);
+    check();
+  });
 }
 
 type NativeWebSocketConstructor = new (
@@ -148,7 +200,7 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
     };
 
     const close = () => {
-      if (sessionToken) markOfficeControlDisconnected(sessionToken);
+      if (sessionToken) markOfficeControlDisconnected(sessionToken, false);
       clearReconnect();
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;

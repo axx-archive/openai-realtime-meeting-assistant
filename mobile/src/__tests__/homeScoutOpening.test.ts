@@ -25,11 +25,10 @@ test('the private-only opening mode atomically carries only the first message', 
   });
 });
 
-test('voice stops before create and acceptance returns a route with no message target', async () => {
+test('create preserves persistent voice and acceptance returns a route with no message target', async () => {
   const events: string[] = [];
   const attempt = { text: 'Open a new thread', idempotencyKey: 'home-scout-key' };
   const result = await submitHomeScoutOpening(attempt, {
-    stopVoice: async () => { events.push('stop-voice'); },
     createThread: async (body, key) => {
       events.push('create-thread');
       assert.deepEqual(body, {
@@ -52,7 +51,7 @@ test('voice stops before create and acceptance returns a route with no message t
       };
     },
   });
-  assert.deepEqual(events, ['stop-voice', 'create-thread']);
+  assert.deepEqual(events, ['create-thread']);
   assert.equal(result.accepted, true);
   if (!result.accepted) return;
   assert.deepEqual(result.thread, { threadId: 'thread-1', title: 'Server title' });
@@ -63,7 +62,6 @@ test('a failed create returns the same draft and key for retry', async () => {
   const attempt = { text: 'Please keep this', idempotencyKey: 'same-key' };
   const failure = new Error('offline');
   const result = await submitHomeScoutOpening(attempt, {
-    stopVoice: async () => undefined,
     createThread: async () => { throw failure; },
   });
   assert.deepEqual(result, { accepted: false, attempt, error: failure });

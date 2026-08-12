@@ -43,11 +43,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 54 carries the two-level Home starters, the separate bounded
-      // dictation and private Realtime voice paths, compact meeting controls,
-      // and the icon-only native iPhone navigation rail.
+      // Build 55 carries immediate Home category shells plus persistent,
+      // same-thread private Realtime voice with bounded reconnect, alongside
+      // compact meeting controls and the icon-only iPhone navigation rail.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '54',
+      buildNumber: '55',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

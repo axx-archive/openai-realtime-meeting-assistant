@@ -4,6 +4,8 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
+import { PersonalRealtimeFloatingControl } from '../realtime/PersonalRealtimeFloatingControl';
+import { useOptionalPersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import {
   nativeShellDestinations,
   nativeShellLayout,
@@ -14,13 +16,24 @@ type Props = {
   active: NativeShellDestination;
   children: React.ReactNode;
   keepSidebarForFocusedRoute?: boolean;
+  personalRealtimeVisible?: boolean;
   visible: boolean;
+  onOpenPersonalRealtimeThread?: (threadId: string) => void;
   onSelect: (destination: (typeof nativeShellDestinations)[number]) => void;
 };
 
-export function NativeUniversalShell({ active, children, keepSidebarForFocusedRoute = false, visible, onSelect }: Props) {
+export function NativeUniversalShell({
+  active,
+  children,
+  keepSidebarForFocusedRoute = false,
+  personalRealtimeVisible = false,
+  visible,
+  onOpenPersonalRealtimeThread,
+  onSelect,
+}: Props) {
   const { width, fontScale } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const realtime = useOptionalPersonalRealtimeContext();
   // An iPhone in landscape is wide, but it is not an iPad workspace. Keep the
   // focused conversation full-width instead of turning 874pt into a 248pt
   // desktop rail. Real iPads still adapt by width for Split View.
@@ -62,6 +75,23 @@ export function NativeUniversalShell({ active, children, keepSidebarForFocusedRo
             <ShellItem key={destination.id} compact destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
           ))}
         </Glass>
+      ) : null}
+      {(personalRealtimeVisible || realtime?.active) && realtime ? (
+        <View
+          pointerEvents="box-none"
+          style={[
+            styles.personalRealtime,
+            {
+              top: Math.max(insets.top, space[2]),
+              right: Math.max(insets.right, space[3]),
+            },
+          ]}
+        >
+          <PersonalRealtimeFloatingControl
+            realtime={realtime}
+            onOpenThread={onOpenPersonalRealtimeThread}
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -146,6 +176,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
+  },
+  personalRealtime: {
+    position: 'absolute',
+    zIndex: 10,
   },
   compactItem: {
     width: 48,

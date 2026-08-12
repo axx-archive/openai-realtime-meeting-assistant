@@ -8,6 +8,7 @@ import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 export type HomeCanvasSnapshot = {
   continuity: HomeItem[];
   starters: HomeStarter[];
+  startersReady: boolean;
   allClear: boolean;
   freshness: 'loading' | 'current' | 'stale';
   refreshing: boolean;
@@ -24,6 +25,12 @@ const EMPTY: HomeSnapshot = {
 };
 
 const HOME_STARTER_IDS = ['continue', 'explore', 'create', 'challenge'] as const;
+const HOME_STARTER_SHELLS: HomeStarter[] = [
+  { id: 'continue', label: 'Continue', detail: '', suggestions: [] },
+  { id: 'explore', label: 'Explore', detail: '', suggestions: [] },
+  { id: 'create', label: 'Create', detail: '', suggestions: [] },
+  { id: 'challenge', label: 'Challenge', detail: '', suggestions: [] },
+];
 
 function validHomeStarterDestination(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
@@ -119,7 +126,10 @@ export function useHomeCanvas(): HomeCanvasSnapshot {
 
   return {
     continuity: snapshot.items,
-    starters: snapshot.starters,
+    starters: sessionToken && snapshot.starters.length !== HOME_STARTER_IDS.length
+      ? HOME_STARTER_SHELLS
+      : snapshot.starters,
+    startersReady: snapshot.starters.length === HOME_STARTER_IDS.length && freshness === 'current',
     allClear: snapshot.allClear,
     freshness,
     refreshing,

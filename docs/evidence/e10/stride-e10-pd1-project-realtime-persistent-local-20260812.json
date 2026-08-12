@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-project-realtime-persistent-local-20260812",
+  "recordedAt": "2026-08-12T19:20:00Z",
+  "repository": {
+    "branch": "codex/country-golf-stride",
+    "baseHead": "779bfd3546df9c0f5d0272125eebc945f1116fa1",
+    "workingTree": "intentionally-dirty-uncommitted-release-candidate",
+    "canonicalPlanSha256": "106f9a6d857f8b7da3d7b8fcb4c3e2cd208c9a6bf29a8182796060aae44f3ff4"
+  },
+  "claim": {
+    "class": "verified-local-release-candidate",
+    "summary": "Bounded Project authority foundation plus persistent cross-navigation personal Realtime voice and immediate non-actionable Home taxonomy shells on web and native.",
+    "accepted": [
+      "stable organization-scoped Project identity and correctable append-only ProjectAssociation foundation behind default-off switches",
+      "owner-only durable gpt-realtime-2.1 thread binding with exact logical user and Scout turn persistence",
+      "cross-navigation web and native voice ownership with exact-thread jump and truthful state control",
+      "same-session and same-thread bounded reconnect with strictly increasing transport revisions and stale-callback fencing",
+      "terminal stop on explicit stop, authentication or session drift, Room entry, backgrounding and audio-focus takeover",
+      "four stable Home category shells on the first authenticated frame while authorized suggestions load",
+      "non-actionable shell state, in-place hydration, fail-closed private-context clearing and bounded layout shift"
+    ],
+    "notClaimed": [
+      "Home Project chip, chooser or conversation Send integration",
+      "chief-of-staff personalized suggestion implementation or recurring context compaction",
+      "full longitudinal Project Record across every source family",
+      "live provider conversation, barge-in quality or measured production latency",
+      "native active-floating-control pixel proof or physical-device acceptance",
+      "provider-backed artifacts, Drive or complete work-card acceptance",
+      "VPS activation, production migration readback or TestFlight Build 55 availability"
+    ]
+  },
+  "switches": {
+    "project_authority_read": false,
+    "project_authority_write": false,
+    "project_smart_link": false,
+    "project_record_projection": false
+  },
+  "reviewedFiles": {
+    "docs/plans/stride-next-evolution-master-plan.md": "106f9a6d857f8b7da3d7b8fcb4c3e2cd208c9a6bf29a8182796060aae44f3ff4",
+    "index.html": "1068ca646c10b6bc5ddcb71f2da0d6b53f9e8a2bb98b3cbc68ae4ca2198c562a",
+    "frontend_home_contract_test.go": "81f81417874f8b5bc149cad7d836edc4c2a0ebd28a0677a1a0d8bee689c95dc3",
+    "frontend_latency_test.go": "b17a38999bd2160cf05ab57e072820f90a78b01038a41a0157950b859eca8429",
+    "main.go": "a00c7e80fd4f2ed7e366112e3cc259564a3312e3f5800bfd566d1df28a8de470",
+    "scout_chat_threads.go": "b9d1e89d735ea9cf27dc4565ad6cd28f00b36131423ab60efd854c887679cddf",
+    "usage_rollup.go": "1d0095a45fbff28ba4237a19596f72cea332e365beaa4745192deee76814ded1",
+    "private_realtime_voice_reliability.go": "669216ba450f3725f5cc6f0639076497d0ec4738731c7901fc900d148b5f66a0",
+    "private_realtime_voice_reliability_test.go": "86f0eb322182627f63d768bbd892bdecdefeb7ec8aa2f557ca6a2fbd8f1a095f",
+    "mobile/app.config.ts": "8592ed4c3dca4c153cf971baaa94653d52f9158ae534dda999da0caf9006757c",
+    "mobile/src/canvas/useLiveLine.ts": "58857b781eab737ff6c8998268642b226f3b8e55f21b4c01d63ef61bf64d34dc",
+    "mobile/src/navigation/NativeUniversalShell.tsx": "b8d881840cafa4938806c18a895ab1d4905051015ab5987fe2d07c580ae18196",
+    "mobile/src/navigation/RootNavigator.tsx": "6ffeb1715776dda1a3063d012b8f45d66bf4947e5bd98a8674ebe4d59cf211af",
+    "mobile/src/realtime/OfficeEventsContext.tsx": "eb544199c8cacb8760a1346565fe9998fd58a3400c3e4bce073e971abe60906f",
+    "mobile/src/realtime/PersonalRealtimeContext.tsx": "25ba3b380ba80ffac470aa14f089e3ce2669f8284acd8d93ed54c13f916c531d",
+    "mobile/src/realtime/PersonalRealtimeFloatingControl.tsx": "2d5ada28079b2073a5206ce4968a15db3b5e2b142f1f70373b0c3c8599ccb729",
+    "mobile/src/realtime/PersonalRealtimeProvider.tsx": "3f94fce5fb9a1cc14d736108015e0bef75c75039f97b07111b680e4997f302c2",
+    "mobile/src/realtime/usePersonalRealtime.ts": "7384e95eacd5c93778a8121548e111d80517a425aedfa26f2098ccc83ba1829c",
+    "mobile/src/screens/CanvasScreen.tsx": "69beb06c7d22e87f6520adef11cd2305a73e0b86eb5193dc237b839541ab9de9",
+    "mobile/src/__tests__/personalRealtimePersistence.test.ts": "385257a4afa5b1cbb2f7eecd27640d6b31ba159c8bc502116e4b6237fa3144ba",
+    "migrations/0018_stride_projects.sql": "39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "stride_project_authority.go": "4bff599d4e6427297f2e4af6d085ed52888b33399cce85dd491511cafb116d2b",
+    "stride_project_contracts.go": "ba4d67463c4c908e700ecd25719399186eead7ea361ad874037343ba9ee69961",
+    "stride_project_linker.go": "dea0a9fe8867d7e29650e5ff9e05a7117a5c96fb8c4c4797e0bb2c20e517aa92",
+    "stride_project_projection.go": "ab5635d13db1091b050f5aed5a1367335790cc87f00c4606a1a845ca4d8b7d8c",
+    "stride_project_repository_postgres.go": "830506d5faf4fcc6e319342f78cb53a8e1d2900beca7b4452b048ba7857968a3"
+  },
+  "renderedEvidence": {
+    "desktop-home-dark.png": "073d9627eeb4442d5a1a4e1c49b4a07f2e810099d1a8e211874cb712d43d9541",
+    "desktop-home-voice-live-dark.png": "3c6dfd41fcbf490a81cf37ebcfe07882cb08af7b67bae8e228fda1297d661510",
+    "desktop-home-voice-live-light.png": "7274044cb6a59131912c596fca9a25c193d146077e4cc23e4e14855e49104c4f",
+    "phone-home-dark.png": "978b63566dd752cc2d1e92f785088585b6481a670e334d744679b50923b8f5b4",
+    "phone-home-voice-live-dark.png": "2c5840e5e3cbfea6f0f6f6761a81d36dde78e958d074638936e26f5e3bdaf4c7",
+    "phone-home-voice-live-light.png": "e5a9f042ac4d1d39041b3164a821956c22f8d4c273fb0cd23fcf1c00a54a78b2"
+  },
+  "validation": [
+    {"command": "go test ./... -count=1", "result": "PASS", "mainPackageElapsedSeconds": 542.384},
+    {"command": "go test -race . -run 'Test(DesktopHome|FrontendScoutMemoryPrivateRealtime|FrontendLatency|PrivateRealtimeVoice|AssistantRealtime)' -count=1", "result": "PASS"},
+    {"command": "cd mobile && npm test -- --runInBand", "result": "PASS", "tests": "526/526"},
+    {"command": "cd mobile && npm run typecheck", "result": "PASS"},
+    {"command": "xcodebuild Release iphonesimulator", "result": "PASS"},
+    {"command": "go vet ./...", "result": "PASS"},
+    {"command": "git diff --check", "result": "PASS"}
+  ],
+  "independentCritic": {
+    "verdict": "PASS",
+    "blockers": 0,
+    "majors": 0,
+    "nativeActiveControlPixelProofClaimed": false
+  },
+  "releaseBaseline": {
+    "readOnlyCheckedAt": "2026-08-12T19:08:43Z",
+    "activeRelease": "7fb35f883fed62ba0e35117ff59d126e369230c2",
+    "ledgerGeneration": 61,
+    "rollbackRelease": "7427268652401306fba426798c937bc982d116b9",
+    "publicHealthAndReadinessAgree": true,
+    "knownDegradationsUnchanged": true
+  },
+  "externalEffects": {
+    "providerCalls": 0,
+    "productionReads": 1,
+    "productionWrites": 0,
+    "gitCommit": false,
+    "gitPush": false,
+    "deploy": false,
+    "testFlightUpload": false
+  },
+  "next": "After exact release readback, integrate the Project chip and permission-filtered chief-of-staff recommendation path, then prove one Project-bound first-class Research card through immutable revision, rich Open, durable named Drive receipt/Open in Drive and normal-composer edit/regenerate."
+}

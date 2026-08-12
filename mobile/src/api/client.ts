@@ -452,7 +452,13 @@ export const api = {
     sessionToken: string,
     sdp: string,
     voiceSessionId: string,
-  ): Promise<{ ok: boolean; sdp: string; voiceSessionId: string; threadId: string }> {
+  ): Promise<{
+    ok: boolean;
+    sdp: string;
+    voiceSessionId: string;
+    threadId: string;
+    transportRevision: number;
+  }> {
     return request("/assistant/realtime-offer", {
       method: "POST",
       body: { sdp, voiceSessionId },
@@ -495,17 +501,32 @@ export const api = {
 
   realtimeMilestone(
     sessionToken: string,
-    milestone:
+    milestoneOrBinding:
       | "peer_connected"
       | "data_channel_open"
       | "remote_track"
       | "first_audio"
       | "response_done"
-      | "transport_error",
+      | "transport_error"
+      | {
+        voiceSessionId: string;
+        threadId: string;
+        transportRevision: number;
+        operationId: string;
+        milestone:
+          | "peer_connected"
+          | "data_channel_open"
+          | "remote_track"
+          | "first_audio"
+          | "response_done"
+          | "transport_error";
+      },
   ): Promise<{ ok: boolean }> {
     return request("/assistant/realtime/milestone", {
       method: "POST",
-      body: { milestone },
+      body: typeof milestoneOrBinding === "string"
+        ? { milestone: milestoneOrBinding }
+        : milestoneOrBinding,
       sessionToken,
     });
   },

@@ -46,11 +46,10 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
     realtime.indexOf('const terminateTransportWithError = useCallback'),
     realtime.indexOf('const sendEvent = useCallback'),
   );
-  assert.ok(
-    terminalCleanup.indexOf('releasePersonalRealtimeTerminalFocus(lease, cleanupTransport)')
-      < terminalCleanup.indexOf("setLiveStatus('error')"),
-    'native Realtime must finish transport/focus cleanup before rendering inactive error status',
-  );
+  const reconnectRelease = terminalCleanup.indexOf('void releasePersonalRealtimeTerminalFocus(');
+  const terminalRelease = terminalCleanup.indexOf('releasePersonalRealtimeTerminalFocus(lease, cleanupTransport)');
+  assert.ok(reconnectRelease >= 0 && reconnectRelease < terminalCleanup.indexOf("setLiveStatus('error')"));
+  assert.ok(terminalRelease >= 0 && terminalRelease < terminalCleanup.lastIndexOf("setLiveStatus('error')"));
   const realtimeStart = realtime.slice(
     realtime.indexOf('const start = useCallback'),
     realtime.indexOf('const stop = useCallback'),
@@ -59,16 +58,16 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(realtimeStart, /const mediaSessionGeneration = nextMediaSessionGeneration\(\)/);
   assert.match(realtimeStart, /waitForBoundedNativeOperation\([\s\S]*activateVideoMeeting\(mediaSessionGeneration\)/);
   assert.match(realtimeStart, /startupDrain = startup;\s*const \[clientConfig, stream\] = await startup;/);
-  assert.match(realtimeStart, /closePersonalRealtimeStartup\(startupDrain, cleanupSessionTransport\)/);
+  assert.match(realtimeStart, /closePersonalRealtimeStartup\(\s*startupDrain,/);
   assert.match(realtimeStart, /generationRef\.current \+= 1;\s*startupFailureTerminalRequest = \+\+terminalRequestRef\.current;/);
   assert.ok(
     realtimeStart.indexOf('const startup = drainPersonalRealtimeStartup(')
-      < realtimeStart.indexOf('releasePersonalRealtimeTerminalFocus(lease, cleanupSessionTransport'),
+      < realtimeStart.indexOf('releasePersonalRealtimeTerminalFocus(\n        lease,'),
     'startup siblings drain before any terminal media/focus cleanup',
   );
   assert.match(realtimeStart, /await lease\.release\('cancelled'\)\.catch\(\(\) => undefined\);/);
   const startupFailure = realtimeStart.slice(realtimeStart.indexOf('} catch (startError)'));
-  const startupCleanup = startupFailure.indexOf('await releasePersonalRealtimeTerminalFocus(lease, cleanupSessionTransport)');
+  const startupCleanup = startupFailure.indexOf('await releasePersonalRealtimeTerminalFocus(\n        lease,');
   assert.ok(startupFailure.indexOf('generationRef.current += 1') < startupCleanup);
   assert.ok(startupCleanup < startupFailure.indexOf('setError(message)'));
   assert.ok(startupCleanup < startupFailure.indexOf("setLiveStatus('error')"));
@@ -78,7 +77,11 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(realtime, /personalRealtimeCleanupScope\(/);
   assert.match(realtime, /cleanupScope !== 'owned'[\s\S]*deactivateVideoMeeting\(expectedMediaSessionGeneration\)/);
   assert.match(realtime, /cleanupScope === 'detached'[\s\S]*mediaSessionGenerationRef\.current === null/);
-  assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
+  const realtimeProvider = source('src', 'realtime', 'PersonalRealtimeProvider.tsx');
+  const root = source('src', 'navigation', 'RootNavigator.tsx');
+  assert.match(realtimeProvider, /usePersonalRealtime\(\{ onActions \}\)/);
+  assert.match(canvas, /usePersonalRealtimeContext\(\)/);
+  assert.match(root, /<PersonalRealtimeProvider onActions=\{handleRealtimeActions\} roomActive=\{activeRoute === 'Room'\}>/);
   assert.match(canvas, /submitHomeScoutOpening/);
   assert.match(canvas, /realtime\.stop\('cancelled'\)/);
   assert.match(canvas, /useComposerDictation/);

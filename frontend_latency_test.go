@@ -547,9 +547,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"addArtifactEntry(result.artifact, { select: false })",
 		"notes sent · ${meetingName} → memory",
 		"method: 'PATCH'",
-		"voiceIslandMain.addEventListener('click', () => openOfficeTool('chat'))",
+		"voiceIslandMain.addEventListener('click', openPrivateRealtimeVoiceThread)",
 		"function shouldShowVoiceIsland()",
-		"return (appShell.dataset.tool || 'office') !== 'office'",
+		"async function openPrivateRealtimeVoiceThread()",
+		"selectScoutChatThread(threadId)",
 		"let realtimeVoiceMode = 'idle'",
 		"let roomEntryInProgress = false",
 		"function privateRealtimeVoiceSurfaceAvailable()",
@@ -2216,7 +2217,12 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"function normalizeRealtimeSDPForBrowser(sdp)",
 		"join('\\r\\n')",
 		"function shouldShowVoiceIsland()",
-		"return (appShell.dataset.tool || 'office') !== 'office'",
+		"return true",
+		"function waitForOfficeSocketReady(sessionToken, timeoutMs = 4500)",
+		"const ready = await waitForOfficeSocketReady(sessionToken)",
+		"voiceIslandMain.addEventListener('click', openPrivateRealtimeVoiceThread)",
+		"async function openPrivateRealtimeVoiceThread()",
+		"selectScoutChatThread(threadId)",
 		"let privateRealtimeVoicePeer",
 		"let privateRealtimeVoiceHandledCalls = new Set()",
 		"let privateRealtimeVoiceSessionToken = 0",
@@ -2224,13 +2230,22 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"await beginPrivateRealtimeVoiceSession(sessionToken)",
 		"assertPrivateRealtimeVoiceSession(sessionToken",
 		"postAuthJSON('/assistant/realtime-offer'",
+		"const transportRevision = Number(result.data?.transportRevision || 0)",
+		"privateRealtimeVoiceTransportRevision = transportRevision",
 		"postAuthJSON('/assistant/realtime-tool'",
+		"voiceSessionId: privateRealtimeVoiceID",
+		"transportRevision: privateRealtimeVoiceTransportRevision",
+		"operationId",
 		"function handlePrivateRealtimeToolCall(item)",
 		"type: 'function_call_output'",
 		"type: 'response.create'",
-		"function closePrivateRealtimeVoiceSession()",
+		"function closePrivateRealtimeVoiceSession(options = {})",
+		"function schedulePrivateRealtimeVoiceReconnect(detail)",
+		"const delay = binding.attempts === 1 ? 500 : 1500",
+		"priorTransportRevision > 0 && transportRevision <= priorTransportRevision",
 		"setVoiceIslandState('connecting', 'connecting…')",
-		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",
+		"right: max(18px, calc(env(safe-area-inset-right) + 14px));",
+		"top: max(18px, calc(env(safe-area-inset-top) + 12px));",
 		"background: var(--glass-chrome);",
 		"border-radius: var(--r-full);",
 		"voiceIslandDetailForEvent('hearing', text)",
@@ -2249,7 +2264,7 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 	if strings.Contains(html, "joinRoom({ voiceOnly: true })") {
 		t.Fatal("waveform Realtime voice launchers must not enter the room join path")
 	}
-	privateStart := strings.Index(html, "async function startPrivateRealtimeVoiceConversation()")
+	privateStart := strings.Index(html, "async function startPrivateRealtimeVoiceConversation(options = {})")
 	privateEnd := strings.Index(html, "async function beginPrivateRealtimeVoiceSession(sessionToken)")
 	if privateStart < 0 || privateEnd < 0 || privateEnd <= privateStart {
 		t.Fatal("could not isolate private Realtime voice launcher")
@@ -2315,7 +2330,7 @@ func TestPrivateRealtimeTerminalErrorsFenceAndCloseTransportBeforeErrorUI(t *tes
 		t.Fatal("private Realtime must close its peer, channel, processor, and microphone before rendering terminal error UI")
 	}
 
-	closeBody := functionBody(html, "function closePrivateRealtimeVoiceSession()")
+	closeBody := functionBodyAfterSignature(html, "function closePrivateRealtimeVoiceSession(options = {})")
 	for _, want := range []string{
 		"privateRealtimeVoiceSessionToken += 1",
 		"privateRealtimeVoiceDataChannel.close()",

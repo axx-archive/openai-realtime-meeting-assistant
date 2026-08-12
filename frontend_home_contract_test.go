@@ -31,6 +31,11 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`homeSnapshotGeneration += 1`,
 		`id="homeRealtimeVoice"`,
 		`aria-label="Start a new private voice chat with Scout"`,
+		`.home-starter__text {
+        display: none;`,
+		`const HOME_CATEGORY_SHELLS = Object.freeze([`,
+		`button.disabled = !suggestionsReady`,
+		`homeStarters.dataset.hydrated = String(suggestionsReady)`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("desktop Home missing %q", want)
@@ -87,13 +92,16 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
  {id:'challenge',label:'Challenge',detail:'Grill and red-team',suggestions:[{id:'challenge-1',text:'Challenge the current thinking in Country Golf and identify the weakest assumptions.'}]}
 ]};
 let homeAvailable=true;
+const initialHomeReadyAt=Date.now()+2000;
 let roomsMode='quiet';
 const server=http.createServer((req,res)=>{
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation);}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ'}));}
  if(req.url==='/assistant/home'){
    if(!homeAvailable){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
-   res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({home}));
+   const reply=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({home}));};
+   if(Date.now()<initialHomeReadyAt){return setTimeout(reply,initialHomeReadyAt-Date.now());}
+   return reply();
  }
  if(req.url==='/__rooms_live'){roomsMode='live';res.writeHead(204);return res.end();}
  if(req.url==='/rooms'){
@@ -111,7 +119,19 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
+ await page.waitForFunction(()=>document.querySelectorAll('#homeStarters .home-starter').length===4);
+ const immediate=await page.evaluate(()=>({
+   starters:document.querySelectorAll('#homeStarters .home-starter').length,
+   disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
+   hydrated:document.getElementById('homeStarters').dataset.hydrated,
+   composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top
+ }));
+ assert.equal(immediate.starters,4,'four stable Home shells paint before recommendations');
+ assert.equal(immediate.disabled,4,'unhydrated Home shells are non-actionable');
+ assert.equal(immediate.hydrated,'false','Home shells disclose their unhydrated state');
  await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
+ const hydratedComposerTop=await page.evaluate(()=>document.getElementById('homeScoutComposer').getBoundingClientRect().top);
+ assert.ok(Math.abs(hydratedComposerTop-immediate.composerTop)<=3,'Home hydration shifted the composer: '+immediate.composerTop+' -> '+hydratedComposerTop);
  await page.fill('#homeScoutInput','Unsent local draft');
  homeAvailable=false;
  await page.evaluate(()=>loadHomeSnapshot());
@@ -122,7 +142,7 @@ const server=http.createServer((req,res)=>{
    draft:document.getElementById('homeScoutInput').value,
    retry:document.getElementById('homeRefreshRetry').textContent.trim()
  }));
-	assert.deepEqual(failed,{continuity:0,starters:0,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
+	assert.deepEqual(failed,{continuity:0,starters:4,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
 	homeAvailable=true;
 	await page.evaluate(()=>document.getElementById('homeRefreshRetry').click());
 	await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3&&document.getElementById('homeRefreshRetry').hidden);
@@ -140,6 +160,20 @@ const server=http.createServer((req,res)=>{
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
  for(const theme of ['dark','light'])await capture('phone-home',theme);
+ await page.setViewportSize({width:1440,height:900});
+ await page.evaluate(()=>{officeWs={readyState:WebSocket.OPEN,send(){},close(){}};setRealtimeVoiceMode('private');privateRealtimeVoiceThreadID='scout-voice-render';setVoiceIslandState('listening','listening…');});
+ await page.waitForFunction(()=>!document.getElementById('voiceIsland').hidden);
+ await page.waitForTimeout(320);
+ let voiceGeometry=await page.locator('#voiceIsland').evaluate(node=>{const box=node.getBoundingClientRect();return{right:innerWidth-box.right,top:box.top,width:box.width}});
+ assert.ok(voiceGeometry.right>=14&&voiceGeometry.right<=24&&voiceGeometry.top>=12&&voiceGeometry.top<=24&&voiceGeometry.width<=300,JSON.stringify(voiceGeometry));
+ for(const theme of ['dark','light'])await capture('desktop-home-voice-live',theme);
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForTimeout(100);
+ await page.evaluate(()=>{setRealtimeVoiceMode('private');privateRealtimeVoiceThreadID='scout-voice-render';setVoiceIslandState('listening','listening…');});
+ voiceGeometry=await page.locator('#voiceIsland').evaluate(node=>{const box=node.getBoundingClientRect();return{right:innerWidth-box.right,top:box.top,width:box.width}});
+ assert.ok(voiceGeometry.right>=8&&voiceGeometry.right<=16&&voiceGeometry.top>=60&&voiceGeometry.top<=72&&voiceGeometry.width<=300,JSON.stringify(voiceGeometry));
+ for(const theme of ['dark','light'])await capture('phone-home-voice-live',theme);
+ await page.evaluate(()=>{setRealtimeVoiceMode('idle');setVoiceIslandState('idle');});
  await page.setViewportSize({width:1440,height:900});
  await page.focus('#homeScoutInput');
  await page.waitForFunction(()=>document.querySelectorAll('#homeStarters .home-starter').length===4 && document.getElementById('homeContinuity').hidden);

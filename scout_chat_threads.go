@@ -397,6 +397,12 @@ type scoutChatVoiceSessionBinding struct {
 	Version       string `json:"version"`
 	SessionDigest string `json:"sessionDigest"`
 	BoundAt       string `json:"boundAt"`
+	// TransportRevision advances for every reconnect offer while the durable
+	// conversation identity remains stable. TransportAttempts and
+	// their milestones are server-only reliability receipts; viewer projection
+	// removes the entire VoiceSession binding.
+	TransportRevision int                              `json:"transportRevision,omitempty"`
+	TransportAttempts []scoutChatVoiceTransportAttempt `json:"transportAttempts,omitempty"`
 }
 
 // scoutChatLegacyConversationOperation is the durable retry alias for native

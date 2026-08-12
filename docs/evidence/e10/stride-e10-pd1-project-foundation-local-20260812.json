@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-project-foundation-local-20260812",
+  "recordedAt": "2026-08-12T18:15:31Z",
+  "repository": {
+    "branch": "codex/country-golf-stride",
+    "baseHead": "779bfd3546df9c0f5d0272125eebc945f1116fa1",
+    "workingTree": "intentionally-dirty-uncommitted",
+    "canonicalPlanSha256": "6277e278122468ecde624296049022e22bb254533391904fde08dd576482e3c4"
+  },
+  "claim": {
+    "class": "verified-local-default-off-foundation",
+    "summary": "Stable organization-scoped Project identity, exact current authority, append-only correctable ProjectAssociation, atomic correction, restart-safe permission-filtered body-free Project Record index, source-drift unlisting and durable replay.",
+    "notClaimed": [
+      "Home project chip or chooser integration",
+      "HTTP or mobile product exposure",
+      "full longitudinal Project Record across every source family",
+      "production database migration or feature activation",
+      "provider-backed artifacts, Drive, or physical-device acceptance",
+      "commit, push, deploy, TestFlight upload, or VPS activation"
+    ]
+  },
+  "switches": {
+    "project_authority_read": false,
+    "project_authority_write": false,
+    "project_smart_link": false,
+    "project_record_projection": false
+  },
+  "reviewedFiles": {
+    "migrations/0018_stride_projects.sql": "39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "stride_project_authority.go": "4bff599d4e6427297f2e4af6d085ed52888b33399cce85dd491511cafb116d2b",
+    "stride_project_authority_test.go": "5885a4bc348d0238df84e63acb14616ba2bdded3e56a54896e0ba2986cf4b0a5",
+    "stride_project_contracts.go": "ba4d67463c4c908e700ecd25719399186eead7ea361ad874037343ba9ee69961",
+    "stride_project_contracts_test.go": "bcd93a5fbeeed1cbed4e570fd00bef64b0bb5b49b8ab577575c556248948e81b",
+    "stride_project_linker.go": "dea0a9fe8867d7e29650e5ff9e05a7117a5c96fb8c4c4797e0bb2c20e517aa92",
+    "stride_project_linker_test.go": "b11a5cc383ace37a17460e66e421a35e2d607b4905e9256d9854a2eb42ba3f7f",
+    "stride_project_projection.go": "ab5635d13db1091b050f5aed5a1367335790cc87f00c4606a1a845ca4d8b7d8c",
+    "stride_project_projection_test.go": "7e3eff67d13adcd935eaa0dea41ee1c063168de68f59bc265d6823fcd755f6e6",
+    "stride_project_repository_postgres.go": "830506d5faf4fcc6e319342f78cb53a8e1d2900beca7b4452b048ba7857968a3",
+    "stride_project_repository_postgres_test.go": "d726b78708643eac4c6930d5dbeaa46407404792936338b7dae7d55af18ae6e1",
+    "canonical_migrations_test.go": "539514ba6affce6985aae86623271be17b4f37f0f65001ca59fb1902d0fbb1bb",
+    "canonical_postgres_test.go": "c3a598336a8675d40b1da12cf5efa8f992b291e80b90c57191e5f598c4b44d48",
+    "internal/dr/postgres.go": "3556f39914386541f2bcd0528782336123055f0dd07a0308a99260f311dcf00c",
+    "stride_contracts.go": "019beb3eaa8003d69e81bc0d1896b3fc4b23e01d97f6bfde604feeb1150d2778",
+    "stride_registry.go": "043ec44598d59152102140c86866809bbf0950b443ee68343c3eaf69d6e22432",
+    "docs/plans/stride-next-evolution-master-plan.md": "6277e278122468ecde624296049022e22bb254533391904fde08dd576482e3c4"
+  },
+  "validation": [
+    {
+      "command": "go test . -run 'TestProject|TestPostgresProject|TestLoadCanonicalMigrations' -count=1 -timeout=5m",
+      "result": "PASS"
+    },
+    {
+      "command": "go test -race . -run 'TestProject' -count=1 -timeout=5m",
+      "result": "PASS"
+    },
+    {
+      "command": "go test ./internal/dr -count=1 -timeout=5m",
+      "result": "PASS"
+    },
+    {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    {
+      "command": "go test . -run 'TestProjectAssociationRenews|TestPostgresProjectMigrationBackfills|TestPostgresProjectMigrationRequires|TestProjectRecord(RebuildRetries|ReadLinearizes)' -count=20 -timeout=5m",
+      "result": "PASS",
+      "elapsedSeconds": 32.235
+    },
+    {
+      "command": "go test ./... -count=1 -timeout=20m",
+      "result": "PASS",
+      "mainPackageElapsedSeconds": 536.950
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "independentCritic": {
+    "verdict": "PASS",
+    "blockers": 0,
+    "majors": 0,
+    "reviewedHashesFrozen": true
+  },
+  "externalEffects": {
+    "providerCalls": 0,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "gitCommit": false,
+    "gitPush": false,
+    "deploy": false,
+    "testFlightUpload": false
+  },
+  "next": "Integrate an authorized Project suggestion/selection/correction chip into Home and conversation Send, then prove one server-owned Project-bound Research work card through immutable revision, rich Open, named Drive receipt/Open in Drive, and normal-composer edit/regenerate on web, iPhone, and iPad."
+}

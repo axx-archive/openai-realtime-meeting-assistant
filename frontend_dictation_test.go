@@ -54,7 +54,7 @@ func TestWebHomeScoutComposerUsesAtomicPrivateOpening(t *testing.T) {
 		"setScoutTab('private')",
 		"selectScoutChatThread(thread.id)",
 		"setMobileChatView('convo')",
-		"terminalReason: 'superseded_by_text_composer'",
+		"Personal Realtime is app-level presence",
 		`.home-scout-composer__send {`,
 		"box-sizing: border-box;",
 		"grid-template-columns: minmax(0, 1fr);",
@@ -64,6 +64,9 @@ func TestWebHomeScoutComposerUsesAtomicPrivateOpening(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("atomic web home opening missing %q", want)
 		}
+	}
+	if strings.Contains(html, "terminalReason: 'superseded_by_text_composer'") {
+		t.Fatal("ordinary Home typing or Send must not hang up persistent personal Realtime")
 	}
 }
 

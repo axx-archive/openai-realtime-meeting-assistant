@@ -47,7 +47,6 @@ function fallbackTitle(text: string): string {
 export async function submitHomeScoutOpening(
   attempt: HomeScoutOpeningAttempt,
   dependencies: {
-    stopVoice: () => Promise<void>;
     createThread: (
       body: ReturnType<typeof homeScoutOpeningBody>,
       idempotencyKey: string,
@@ -55,7 +54,6 @@ export async function submitHomeScoutOpening(
   },
 ): Promise<HomeScoutOpeningResult> {
   try {
-    await dependencies.stopVoice();
     const response = await dependencies.createThread(
       homeScoutOpeningBody(attempt),
       attempt.idempotencyKey,

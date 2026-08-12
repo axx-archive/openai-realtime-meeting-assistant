@@ -7248,7 +7248,7 @@
       }
       .home-starters[hidden], .home-suggestions[hidden], .home-continuity[hidden] { display: none; }
       .home-starter {
-        min-height: 98px;
+        min-height: 78px;
         display: grid;
         align-content: start;
         gap: 6px;
@@ -7287,14 +7287,7 @@
       .home-starter:hover .home-starter__icon, .home-starter:focus-visible .home-starter__icon { transform: translateY(-1px) scale(1.06); }
       .home-starter__label { margin-top: 5px; font: 600 13px/1.25 var(--font-sans); }
       .home-starter__text {
-        min-width: 0;
-        overflow: hidden;
-        color: var(--text-2);
-        font: 400 12px/1.35 var(--font-sans);
-        display: -webkit-box;
-        overflow: hidden;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
+        display: none;
       }
 
       .home-suggestions {
@@ -8041,13 +8034,13 @@
 
       .voice-island {
         position: fixed;
-        left: 50%;
-        top: max(82px, calc(env(safe-area-inset-top) + 72px));
+        right: max(18px, calc(env(safe-area-inset-right) + 14px));
+        top: max(18px, calc(env(safe-area-inset-top) + 12px));
         z-index: 1350;
         display: flex;
         align-items: center;
         gap: 10px;
-        width: min(430px, calc(100vw - 32px));
+        width: min(300px, calc(100vw - 32px));
         min-height: 54px;
         padding: 8px 8px 8px 16px;
         border: 1px solid var(--glass-border);
@@ -8056,7 +8049,6 @@
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
-        transform: translateX(-50%);
         pointer-events: auto;
         transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
@@ -8068,11 +8060,11 @@
       @keyframes voice-island-enter {
         from {
           opacity: 0;
-          transform: translateX(-50%) translateY(-10px) scale(0.98);
+          transform: translateY(-8px) scale(0.98);
         }
         to {
           opacity: 1;
-          transform: translateX(-50%) translateY(0) scale(1);
+          transform: translateY(0) scale(1);
         }
       }
 
@@ -8149,13 +8141,12 @@
 
       .voice-ledger {
         position: fixed;
-        left: 50%;
-        top: max(146px, calc(env(safe-area-inset-top) + 136px));
+        right: max(18px, calc(env(safe-area-inset-right) + 14px));
+        top: max(82px, calc(env(safe-area-inset-top) + 76px));
         z-index: 1360;
         width: min(360px, calc(100vw - 32px));
         max-height: min(60vh, 420px);
         overflow-y: auto;
-        transform: translateX(-50%);
         padding: 12px;
         border: 1px solid var(--glass-border);
         border-radius: var(--r-lg);
@@ -8168,8 +8159,8 @@
       }
       .voice-ledger[hidden] { display: none; }
       @keyframes voice-ledger-enter {
-        from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        from { opacity: 0; transform: translateY(-6px); }
+        to { opacity: 1; transform: translateY(0); }
       }
       .voice-ledger__title {
         font: var(--type-label);
@@ -8811,8 +8802,9 @@
         }
 
         .voice-island {
-          top: max(68px, calc(env(safe-area-inset-top) + 62px));
-          width: calc(100vw - 24px);
+          right: max(12px, env(safe-area-inset-right));
+          top: max(64px, calc(env(safe-area-inset-top) + 56px));
+          width: min(300px, calc(100vw - 24px));
           padding-left: 12px;
         }
       }
@@ -32440,6 +32432,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const homeSuggestions = document.getElementById('homeSuggestions')
       const homeContinuity = document.getElementById('homeContinuity')
       let homeScoutOpeningAttempt = null
+      const HOME_CATEGORY_SHELLS = Object.freeze([
+        { id: 'continue', label: 'Continue', detail: '', suggestions: [] },
+        { id: 'explore', label: 'Explore', detail: '', suggestions: [] },
+        { id: 'create', label: 'Create', detail: '', suggestions: [] },
+        { id: 'challenge', label: 'Challenge', detail: '', suggestions: [] }
+      ])
       let homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
       let selectedHomeCategoryId = ''
       let selectedHomeSuggestionDestination = null
@@ -32696,6 +32694,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceSessionToken = 0
       let privateRealtimeVoiceID = ''
       let privateRealtimeVoiceThreadID = ''
+      let privateRealtimeVoiceTransportRevision = 0
+      let privateRealtimeVoiceMilestoneOperations = new Map()
+      let privateRealtimeVoiceReconnectTimer = 0
+      let privateRealtimeVoiceReconnectBinding = null
       let privateRealtimeVoiceFocusLease = null
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
@@ -33785,7 +33787,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         stopOSAssistantVoice()
         setOSAssistantOpen(false)
       })
-      voiceIslandMain.addEventListener('click', () => openOfficeTool('chat'))
+      voiceIslandMain.addEventListener('click', openPrivateRealtimeVoiceThread)
       voiceIslandClose.addEventListener('click', stopRealtimeVoiceConversation)
       voiceIslandLedgerBtn?.addEventListener('click', event => {
         event.stopPropagation()
@@ -33926,9 +33928,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         homeScoutInput?.focus()
       })
       homeScoutInput?.addEventListener('focus', () => {
-        if (privateRealtimeVoiceInFlight()) {
-          stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
-        }
+        // Personal Realtime is app-level presence. Ordinary typing does not
+        // hang up the call; only explicit close, a competing microphone mode,
+        // room entry, or an authority fence may end it.
         officeLaunchHome?.classList.add('is-composer-focused')
         renderHomeStarters()
       })
@@ -35528,6 +35530,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return officeWs?.readyState === WebSocket.OPEN
       }
 
+      function waitForOfficeSocketReady(sessionToken, timeoutMs = 4500) {
+        if (officeSocketLive()) return Promise.resolve(true)
+        ensureOfficeSocket()
+        const startedAt = Date.now()
+        return new Promise(resolve => {
+          const check = () => {
+            if (sessionToken !== privateRealtimeVoiceSessionToken || !privateRealtimeVoiceActive()) {
+              resolve(false)
+              return
+            }
+            if (officeSocketLive()) {
+              resolve(true)
+              return
+            }
+            if (Date.now() - startedAt >= timeoutMs) {
+              resolve(false)
+              return
+            }
+            window.setTimeout(check, 50)
+          }
+          check()
+        })
+      }
+
       function ensureOfficeSocket() {
         if (!authedUser || guestMode) {
           // guests never hold an office socket — the signed-in event union
@@ -35598,10 +35624,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      // no longer be proven current, so fence startup and active transports
 	      // through the normal terminal path before attempting reconnection.
 	      if (privateRealtimeVoiceInFlight()) {
-	        stopRealtimeVoiceConversation({
-	          notifyServer: false,
-	          terminalReason: 'control_channel_lost'
-	        })
+	        if (!schedulePrivateRealtimeVoiceReconnect('control channel reconnecting')) {
+	          stopRealtimeVoiceConversation({
+	            notifyServer: false,
+	            terminalReason: 'control_channel_lost'
+	          })
+	        }
 	      }
           officeWs = null
 	      syncOSAssistantAvailability()
@@ -41814,23 +41842,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         await startPrivateRealtimeVoiceConversation()
       }
 
-      async function startPrivateRealtimeVoiceConversation() {
-        // The office socket is the durable invalidation/control channel for a
-        // browser-owned private session. Never create or retain a peer while
-        // that authority lane is unavailable, including the interval before
-        // its close callback has fired.
-        if (!officeSocketLive()) {
-          if (privateRealtimeVoiceInFlight()) {
-            stopRealtimeVoiceConversation({
-              notifyServer: false,
-              terminalReason: 'control_channel_lost'
-            })
-          }
-          ensureOfficeSocket()
-          setVoiceIslandState('idle')
-          showToast({ text: 'Scout is reconnecting. Try again in a moment.', kind: 'note' })
-          return
-        }
+      async function startPrivateRealtimeVoiceConversation(options = {}) {
+        const reconnect = options?.reconnect && typeof options.reconnect === 'object' ? options.reconnect : null
         if (privateRealtimeVoiceStarting) {
           setVoiceIslandState('connecting', 'connecting…')
           return
@@ -41841,22 +41854,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         stopOSAssistantVoice()
-        closePrivateRealtimeVoiceSession()
-        const focusLease = await acquireRealtimeVoiceAudioFocus('private_realtime')
-        if (focusLease && !focusLease.isCurrent()) return
+        closePrivateRealtimeVoiceSession({ preserveReconnect: Boolean(reconnect) })
         setRealtimeVoiceMode('private')
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         privateRealtimeVoiceStarting = true
         const sessionToken = ++privateRealtimeVoiceSessionToken
-        privateRealtimeVoiceID = newPrivateRealtimeVoiceID()
-        privateRealtimeVoiceThreadID = ''
+        privateRealtimeVoiceID = String(reconnect?.voiceSessionId || '') || newPrivateRealtimeVoiceID()
+        privateRealtimeVoiceThreadID = String(reconnect?.threadId || '')
+        privateRealtimeVoiceTransportRevision = Number(reconnect?.transportRevision || 0)
+        privateRealtimeVoiceMilestoneOperations = new Map()
         setVoiceIslandState('connecting', 'connecting…')
 
         try {
+          // The office socket is the authority/invalidation channel. A click
+          // during an ordinary reconnect waits briefly instead of disappearing,
+          // while capture and provider setup still remain fenced behind proof
+          // that this exact session owns a live control channel.
+          if (!officeSocketLive()) {
+            const ready = await waitForOfficeSocketReady(sessionToken)
+            if (!ready) {
+              if (sessionToken !== privateRealtimeVoiceSessionToken || !privateRealtimeVoiceActive()) return
+              throw new Error('Scout is still reconnecting. Try again in a moment.')
+            }
+          }
+          if (sessionToken !== privateRealtimeVoiceSessionToken || !privateRealtimeVoiceActive()) return
+          const focusLease = await acquireRealtimeVoiceAudioFocus('private_realtime')
+          if (focusLease && !focusLease.isCurrent()) return
+          if (sessionToken !== privateRealtimeVoiceSessionToken || !privateRealtimeVoiceActive()) {
+            releaseRealtimeVoiceAudioFocus('cancelled')
+            return
+          }
           await beginPrivateRealtimeVoiceSession(sessionToken)
           if (privateRealtimeVoiceActive() && privateRealtimeVoicePeer) {
+            privateRealtimeVoiceReconnectBinding = null
             setVoiceIslandState('listening', 'listening…')
           }
         } catch (error) {
@@ -41866,6 +41898,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (sessionToken !== privateRealtimeVoiceSessionToken) return
           const message = error.message || 'Realtime 2 voice could not start'
           console.warn('Private Realtime voice failed', error)
+          if (reconnect && schedulePrivateRealtimeVoiceReconnect(message)) return
           closePrivateRealtimeVoiceSession()
           if (privateRealtimeVoiceActive()) {
             setRealtimeVoiceMode('idle')
@@ -41936,9 +41969,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('connecting', 'connecting…')
           } else if (state === 'failed' || state === 'disconnected') {
             postPrivateRealtimeMilestone('transport_error')
-            terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection interrupted')
+            if (!schedulePrivateRealtimeVoiceReconnect('reconnecting…')) {
+              terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection interrupted')
+            }
           } else if (state === 'closed' && privateRealtimeVoiceActive()) {
-            terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')
+            if (!schedulePrivateRealtimeVoiceReconnect('reconnecting…')) {
+              terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')
+            }
           }
         }
 
@@ -41958,11 +41995,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         dataChannel.onerror = () => {
           if (privateRealtimeVoiceDataChannel !== dataChannel) return
-          terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice needs attention')
+          if (!schedulePrivateRealtimeVoiceReconnect('reconnecting…')) {
+            terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice needs attention')
+          }
         }
         dataChannel.onclose = () => {
           if (privateRealtimeVoiceDataChannel !== dataChannel) return
-          terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')
+          if (!schedulePrivateRealtimeVoiceReconnect('reconnecting…')) {
+            terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')
+          }
         }
 
         attempt.stream.getTracks().forEach(track => {
@@ -41974,7 +42015,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         await peer.setLocalDescription(offer)
         const localSDP = await waitForRealtimeOfferSDP(peer, offer)
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
-        const answerSDP = await exchangePrivateRealtimeOffer(localSDP, privateRealtimeVoiceID)
+        const answerSDP = await exchangePrivateRealtimeOffer(
+          localSDP,
+          privateRealtimeVoiceID,
+          privateRealtimeVoiceThreadID,
+          privateRealtimeVoiceTransportRevision
+        )
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
         await peer.setRemoteDescription({ type: 'answer', sdp: answerSDP })
         } catch (error) {
@@ -42091,7 +42137,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
       }
 
-      async function exchangePrivateRealtimeOffer(offerSDP, voiceSessionId) {
+      async function exchangePrivateRealtimeOffer(offerSDP, voiceSessionId, expectedThreadId = '', priorTransportRevision = 0) {
         const sdp = normalizeRealtimeSDPForBrowser(offerSDP)
         if (!sdp.trim() || !String(voiceSessionId || '').trim()) {
           throw new Error('Realtime 2 voice did not create an offer')
@@ -42104,10 +42150,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           throw new Error('Realtime 2 voice returned the wrong session')
         }
         const threadId = String(result.data?.threadId || '').trim()
-        if (!threadId) {
+        const transportRevision = Number(result.data?.transportRevision || 0)
+        if (!threadId || !Number.isSafeInteger(transportRevision) || transportRevision <= 0) {
           throw new Error('Realtime 2 voice did not bind its private transcript')
         }
+        if ((expectedThreadId && threadId !== expectedThreadId)
+          || (priorTransportRevision > 0 && transportRevision <= priorTransportRevision)) {
+          throw new Error('Realtime 2 voice could not resume its private transcript')
+        }
         privateRealtimeVoiceThreadID = threadId
+        privateRealtimeVoiceTransportRevision = transportRevision
         const answerSDP = normalizeRealtimeSDPForBrowser(result.data?.sdp)
         if (!answerSDP) {
           throw new Error('Realtime 2 voice did not return an answer')
@@ -42714,7 +42766,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function postPrivateRealtimeMilestone(milestone) {
         try {
-          postAuthJSON('/assistant/realtime/milestone', { milestone: String(milestone || '') }).catch(() => {})
+          const name = String(milestone || '').trim()
+          const payload = { milestone: name }
+          if (privateRealtimeVoiceID && privateRealtimeVoiceThreadID && privateRealtimeVoiceTransportRevision > 0) {
+            const key = `${privateRealtimeVoiceTransportRevision}:${name}`
+            let operationId = privateRealtimeVoiceMilestoneOperations.get(key)
+            if (!operationId) {
+              operationId = `milestone-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`}`
+              privateRealtimeVoiceMilestoneOperations.set(key, operationId)
+            }
+            Object.assign(payload, {
+              voiceSessionId: privateRealtimeVoiceID,
+              threadId: privateRealtimeVoiceThreadID,
+              transportRevision: privateRealtimeVoiceTransportRevision,
+              operationId
+            })
+          }
+          postAuthJSON('/assistant/realtime/milestone', payload).catch(() => {})
         } catch {
           // Transport telemetry must never disturb the voice surface.
         }
@@ -43116,7 +43184,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
       }
 
-      function closePrivateRealtimeVoiceSession() {
+      function closePrivateRealtimeVoiceSession(options = {}) {
         privateRealtimeVoiceSessionToken += 1
         privateRealtimeVoiceStarting = false
         if (privateRealtimeVoiceDataChannel) {
@@ -43134,6 +43202,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceHandledCalls = new Set()
         privateRealtimeVoiceID = ''
         privateRealtimeVoiceThreadID = ''
+        privateRealtimeVoiceTransportRevision = 0
+        privateRealtimeVoiceMilestoneOperations = new Map()
+        if (!options?.preserveReconnect) cancelPrivateRealtimeVoiceReconnect()
         // A closing session ends any in-flight grill ritual (the browser owns it).
         privateGrillActive = false
         hidePrivateGrillStage()
@@ -43197,6 +43268,35 @@ Wrap the entire export in one code block. After the code block, say whether the 
           || privateRealtimeVoiceActive()
       }
 
+      function cancelPrivateRealtimeVoiceReconnect() {
+        if (privateRealtimeVoiceReconnectTimer) window.clearTimeout(privateRealtimeVoiceReconnectTimer)
+        privateRealtimeVoiceReconnectTimer = 0
+        privateRealtimeVoiceReconnectBinding = null
+      }
+
+      function schedulePrivateRealtimeVoiceReconnect(detail) {
+        if (!privateRealtimeVoiceActive() || !privateRealtimeVoiceSurfaceAvailable()) return false
+        const prior = privateRealtimeVoiceReconnectBinding || {
+          voiceSessionId: privateRealtimeVoiceID,
+          threadId: privateRealtimeVoiceThreadID,
+          transportRevision: privateRealtimeVoiceTransportRevision,
+          attempts: 0
+        }
+        if (!prior.voiceSessionId || !prior.threadId || prior.transportRevision <= 0 || prior.attempts >= 2) return false
+        const binding = { ...prior, attempts: prior.attempts + 1 }
+        privateRealtimeVoiceReconnectBinding = binding
+        closePrivateRealtimeVoiceSession({ preserveReconnect: true })
+        setRealtimeVoiceMode('private')
+        setVoiceIslandState('connecting', detail || 'reconnecting…')
+        const delay = binding.attempts === 1 ? 500 : 1500
+        privateRealtimeVoiceReconnectTimer = window.setTimeout(() => {
+          privateRealtimeVoiceReconnectTimer = 0
+          if (privateRealtimeVoiceReconnectBinding !== binding || !privateRealtimeVoiceSurfaceAvailable()) return
+          startPrivateRealtimeVoiceConversation({ reconnect: binding })
+        }, delay)
+        return true
+      }
+
       function stopPrivateRealtimeVoiceForRoom() {
         if (privateRealtimeVoiceInFlight()) {
           stopRealtimeVoiceConversation({ notifyServer: false })
@@ -43208,6 +43308,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // never treats it as authority; it makes "Dictate ended Live Voice"
         // inspectable instead of silently stealing the microphone.
         window.__bonfirePrivateRealtimeTerminalReason = String(options?.terminalReason || 'user_ended')
+        cancelPrivateRealtimeVoiceReconnect()
         if (!realtimeVoiceActive && !realtimeVoiceOnlyPending) {
           closePrivateRealtimeVoiceSession()
           setVoiceIslandState('idle')
@@ -43332,7 +43433,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (roomEntryInProgress || appShell.classList.contains('is-in-room') || roomMediaActive()) {
           return false
         }
-        return (appShell.dataset.tool || 'office') !== 'office'
+        return true
+      }
+
+      async function openPrivateRealtimeVoiceThread() {
+        const threadId = String(privateRealtimeVoiceThreadID || '').trim()
+        setActiveTool('chat')
+        if (!threadId) return
+        await loadScoutChatThreads()
+        if (!scoutChatThreads.some(thread => String(thread?.id || '') === threadId)) {
+          showToast({ text: 'The voice transcript is still syncing.', kind: 'note' })
+          return
+        }
+        selectScoutChatThread(threadId)
+        setMobileChatView('convo')
       }
 
       function syncVoiceIslandVisibility() {
@@ -52009,9 +52123,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         homeScoutInput.disabled = true
         homeScoutSend.disabled = true
         homeScoutComposerStatus.textContent = ''
-        if (privateRealtimeVoiceInFlight()) {
-          stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
-        }
         try {
           const response = attempt.threadId
             ? await fetch(`/assistant/chat-threads/${encodeURIComponent(attempt.threadId)}/messages`, {
@@ -70573,12 +70684,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           && typeof value.allClear === 'boolean')
       }
 
-      function homeCategoryNode(category) {
+      function homeCategoryNode(category, suggestionsReady) {
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'home-starter pressable'
         button.dataset.categoryId = String(category?.id || '')
-        button.setAttribute('aria-label', `${String(category?.label || '')}: ${String(category?.detail || '')}`)
+        button.disabled = !suggestionsReady
+        button.setAttribute('aria-label', suggestionsReady
+          ? String(category?.label || '')
+          : `${String(category?.label || '')}. Suggestions loading.`)
         button.setAttribute('aria-expanded', String(selectedHomeCategoryId === category?.id))
         button.setAttribute('aria-controls', 'homeSuggestions')
         const icon = document.createElement('span')
@@ -70667,11 +70781,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderHomeStarters() {
         if (!homeStarters) return
-        const categories = authedUser && !guestMode ? homeSnapshot.starters : []
+        const suggestionsReady = Boolean(authedUser && !guestMode && homeSnapshot.starters.length === HOME_CATEGORY_SHELLS.length)
+        const categories = authedUser && !guestMode
+          ? (suggestionsReady ? homeSnapshot.starters : HOME_CATEGORY_SHELLS)
+          : []
         if (!categories.some(category => category.id === selectedHomeCategoryId)) selectedHomeCategoryId = ''
         const selected = categories.find(category => category.id === selectedHomeCategoryId)
         homeStarters.hidden = !categories.length || Boolean(selected)
-        homeStarters.replaceChildren(...categories.map(homeCategoryNode))
+        homeStarters.dataset.hydrated = String(suggestionsReady)
+        homeStarters.replaceChildren(...categories.map(category => homeCategoryNode(category, suggestionsReady)))
         const suggestions = selected?.suggestions || []
         officeLaunchHome?.classList.toggle('is-starter-open', Boolean(selected))
         if (homeSuggestions) {
@@ -70762,6 +70880,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           renderHomeSnapshot()
           return
         }
+        // The stable four-card taxonomy is safe, non-personal product chrome.
+        // Paint it before awaiting the permission-filtered recommendation
+        // snapshot so Home never arrives late or shifts the composer.
+        renderHomeSnapshot()
         try {
           const response = await fetch('/assistant/home', { cache: 'no-store' })
           if (generation !== homeSnapshotGeneration) return

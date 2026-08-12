@@ -240,6 +240,7 @@ test('OfficeEvents context and callbacks are scoped to the exact identity and se
 test('OfficeEvents is the fail-closed control plane for every personal Realtime path', () => {
   const office = source('src', 'realtime', 'OfficeEventsContext.tsx');
   const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
+  const realtimeProvider = source('src', 'realtime', 'PersonalRealtimeProvider.tsx');
   const canvas = source('src', 'screens', 'CanvasScreen.tsx');
   assert.match(office, /markOfficeControlDisconnected\(sessionToken\)/);
   assert.match(office, /Date\.now\(\) - lastFrameAt > OFFICE_SILENCE_TIMEOUT_MS/);
@@ -247,13 +248,13 @@ test('OfficeEvents is the fail-closed control plane for every personal Realtime 
   assert.match(office, /closePersonalRealtimeForControlLoss\(\)/);
   assert.match(office, /audioFocusRuntime\.mode !== 'personal_realtime'/);
   assert.match(office, /markOfficeControlLive\(sessionToken\)/);
-  assert.match(realtime, /if \(!officeControlChannelIsLive\(sessionToken\)\)/);
+  assert.match(realtime, /await waitForOfficeControlChannel\(/);
   const realtimeStart = realtime.slice(
     realtime.indexOf('const start = useCallback'),
     realtime.indexOf('const stop = useCallback'),
   );
   assert.ok(
-    realtimeStart.indexOf('!officeControlChannelIsLive(sessionToken)')
+    realtimeStart.indexOf('await waitForOfficeControlChannel(')
       < realtimeStart.indexOf("audioFocusRuntime.acquire('personal_realtime'"),
   );
   assert.match(realtimeStart, /!lease\.isCurrent\(\)[\s\S]*!officeControlChannelIsLive\(sessionToken\)/);
@@ -266,7 +267,10 @@ test('OfficeEvents is the fail-closed control plane for every personal Realtime 
   assert.match(toolAdmission, /toolAbortController\.signal\.aborted/);
   assert.match(toolAdmission, /api\.realtimeTool\([\s\S]*toolAbortController\.signal/);
   assert.match(realtime, /toolAbortController\?\.abort\(\)/);
-  assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
+  assert.match(realtimeProvider, /usePersonalRealtime\(\{ onActions \}\)/);
+  assert.match(canvas, /usePersonalRealtimeContext\(\)/);
+  assert.match(realtime, /authorityTokenRef\.current === sessionToken/);
+  assert.match(realtime, /void stop\('cancelled'\)/);
   assert.doesNotMatch(canvas, /fallbackVoice|audioFocusRuntime\.acquire\('personal_realtime'/);
   assert.doesNotMatch(source('src', 'voice', 'useComposerDictation.ts'), /officeControlChannelIsLive/);
   assert.doesNotMatch(source('src', 'realtime', 'useNativeRoom.ts'), /officeControlChannelIsLive/);

@@ -25,7 +25,7 @@ import { canvasCradleComposition } from '../components/CanvasCradleComposition';
 import { Waveform } from '../components/Waveform';
 import { useHomeCanvas } from '../canvas/useLiveLine';
 import { createConversationOperationId } from '../conversations/newConversation';
-import { usePersonalRealtime } from '../realtime/usePersonalRealtime';
+import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import type { HomeStarterDestination, HomeStarterSuggestion } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
@@ -79,24 +79,7 @@ export function CanvasScreen() {
   const { fontScale } = useWindowDimensions();
   const { sessionToken } = useAuth();
   const home = useHomeCanvas();
-  const handleRealtimeActions = useCallback((actions: Array<Record<string, unknown>>) => {
-    for (const action of actions) {
-      const actionType = String(action.type ?? '').trim();
-      const tool = String(action.tool ?? action.mode ?? '').trim();
-      if (!['open_tool', 'assistant_mode'].includes(actionType)) continue;
-      if (tool === 'chat') navigation.navigate('Deck', { segment: 'threads' });
-      else if (['workflow', 'research', 'design', 'grill'].includes(tool)) {
-        navigation.navigate('Deck', { segment: 'work' });
-      } else if (tool === 'board') navigation.navigate('Board');
-      else if (tool === 'artifacts' || tool === 'files') navigation.navigate('Files');
-      else if (tool === 'meetings') navigation.navigate('Meetings');
-      else if (tool === 'memory') navigation.navigate('Memory');
-      else if (tool === 'intelligence') navigation.navigate('Intelligence');
-      else if (tool === 'notifications' || tool === 'alerts') navigation.navigate('Alerts');
-      else if (tool === 'settings') navigation.navigate('Settings');
-    }
-  }, [navigation]);
-  const realtime = usePersonalRealtime({ onActions: handleRealtimeActions });
+  const realtime = usePersonalRealtimeContext();
   const listening = realtime.active;
   const [draft, setDraft] = useState('');
   const [activeStarterID, setActiveStarterID] = useState<string | null>(null);
@@ -156,7 +139,6 @@ export function CanvasScreen() {
       setSending(true);
       setSendError('');
       try {
-        if (realtime.active || realtime.status === 'error') await realtime.stop('cancelled');
         await api.sendScoutMessage(
           sessionToken,
           draftDestination.threadId,
@@ -193,11 +175,6 @@ export function CanvasScreen() {
     setSending(true);
     setSendError('');
     const result = await submitHomeScoutOpening(attempt, {
-      stopVoice: async () => {
-        if (realtime.active || realtime.status === 'error') {
-          await realtime.stop('cancelled');
-        }
-      },
       createThread: (body, idempotencyKey) => api.createScoutThread(
         sessionToken,
         body,
@@ -225,7 +202,7 @@ export function CanvasScreen() {
       );
     }
     setSending(false);
-  }, [draft, draftDestination, navigation, realtime, sending, sessionToken]);
+  }, [draft, draftDestination, navigation, sending, sessionToken]);
 
   // The disabled mic already communicates capability. Reserve copy below the
   // composer for a real runtime problem; a permanent policy sentence is
@@ -421,10 +398,11 @@ export function CanvasScreen() {
               {home.starters.map((starter) => (
                 <Pressable
                   key={starter.id}
+                  disabled={!home.startersReady}
                   accessibilityRole="button"
                   accessibilityLabel={starter.label}
-                  accessibilityHint="Shows editable message suggestions."
-                  accessibilityState={{ expanded: activeStarterID === starter.id }}
+                  accessibilityHint={home.startersReady ? 'Shows editable message suggestions.' : 'Suggestions are loading.'}
+                  accessibilityState={{ disabled: !home.startersReady, expanded: activeStarterID === starter.id }}
                   onPress={() => setActiveStarterID(starter.id)}
                   style={({ pressed }) => [
                     styles.starter,

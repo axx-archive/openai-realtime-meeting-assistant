@@ -14,7 +14,8 @@ test('home is conversation-first through voice or direct text with no picker', (
   assert.match(canvas, /api\.createScoutThread/);
   assert.match(canvas, /placeholder="Message Scout"/);
   assert.match(canvas, /openingAttemptRef/);
-  assert.match(canvas, /realtime\.stop\('cancelled'\)/);
+  const sendOpening = canvas.slice(canvas.indexOf('const sendOpening'), canvas.indexOf('const voiceNotice'));
+  assert.doesNotMatch(sendOpening, /realtime\.stop/);
   assert.match(canvas, /<Text maxFontSizeMultiplier=\{1\.35\} style=\{styles\.greeting\}>/);
   assert.match(canvas, /maxFontSizeMultiplier=\{1\.6\}[\s\S]*?style=\{styles\.composerInput\}/);
   assert.match(canvas, /<Text maxFontSizeMultiplier=\{1\} style=\{styles\.composerSendGlyph\}>/);
