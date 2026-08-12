@@ -35,6 +35,8 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
         display: none;`,
 		`const HOME_CATEGORY_SHELLS = Object.freeze([`,
 		`button.disabled = !suggestionsReady`,
+		`const categories = !guestMode`,
+		`Why this: ${whyThis}`,
 		`homeStarters.dataset.hydrated = String(suggestionsReady)`,
 	} {
 		if !strings.Contains(html, want) {
@@ -86,10 +88,10 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
  {id:'needs-you',kind:'needs-you',eyebrow:'Needs you',title:'Review the investor package',detail:'Open to respond',destination:{route:'alerts'}},
  {id:'deck',kind:'work',eyebrow:'Presentation · Building',title:'Create the STRIDE pitch deck',detail:'Building the first draft',destination:{route:'thread',threadId:'deck',title:'STRIDE pitch deck'}}
 ],starters:[
- {id:'continue',label:'Continue',detail:'Pick up recent work',suggestions:[{id:'continue-1',text:'Continue where we left off in Country Golf.'}]},
- {id:'explore',label:'Explore',detail:'Understand and discover',suggestions:[{id:'explore-1',text:'Explore the biggest open question in Country Golf.'},{id:'explore-2',text:'Discover what we may be missing in Country Golf.'}]},
- {id:'create',label:'Create',detail:'Make the next useful thing',suggestions:[{id:'create-1',text:'Create the next useful deliverable for Country Golf.'}]},
- {id:'challenge',label:'Challenge',detail:'Grill and red-team',suggestions:[{id:'challenge-1',text:'Challenge the current thinking in Country Golf and identify the weakest assumptions.'}]}
+ {id:'continue',label:'Continue',detail:'Pick up recent work',suggestions:[{id:'continue-1',text:'Continue where we left off in Country Golf.',whyThis:'You were last working here.',destination:{route:'thread',threadId:'country-golf',title:'Country Golf'}}]},
+ {id:'explore',label:'Explore',detail:'Understand and discover',suggestions:[{id:'explore-1',text:'Explore the biggest open question in Country Golf.',whyThis:'You were last working here.',destination:{route:'new-private'}},{id:'explore-2',text:'Connect what the team has been saying about membership and identify the useful next move.',whyThis:'Membership has come up across 2 conversations you can open.',destination:{route:'new-private'}}]},
+ {id:'create',label:'Create',detail:'Make the next useful thing',suggestions:[{id:'create-1',text:'Create the next useful deliverable for Country Golf.',whyThis:'Work is already underway here.',destination:{route:'new-private'}}]},
+ {id:'challenge',label:'Challenge',detail:'Grill and red-team',suggestions:[{id:'challenge-1',text:'Challenge the current thinking in Country Golf and identify the weakest assumptions.',whyThis:'This decision is waiting on you.',destination:{route:'new-private'}}]}
 ]};
 let homeAvailable=true;
 const initialHomeReadyAt=Date.now()+2000;

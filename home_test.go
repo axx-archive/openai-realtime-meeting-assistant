@@ -87,12 +87,12 @@ func TestHomeSnapshotIsConversationFirstAndServerOwned(t *testing.T) {
 				t.Fatalf("invalid or duplicate suggestion=%+v", suggestion)
 			}
 			seenSuggestionIDs[suggestion.ID] = true
-			if !strings.Contains(suggestion.Text, "Country Golf") {
-				t.Fatalf("suggestion is not server-contextual=%+v", suggestion)
+			if suggestion.WhyThis == "" || len(suggestion.SourceCoverage) != 1 {
+				t.Fatalf("suggestion lacks body-free explanation/provenance=%+v", suggestion)
 			}
 			if starter.ID == "continue" {
-				if suggestion.Destination != snapshot.Items[0].Destination {
-					t.Fatalf("Continue destination=%+v, want authorized recent destination=%+v", suggestion.Destination, snapshot.Items[0].Destination)
+				if suggestion.Destination.Route != "thread" {
+					t.Fatalf("Continue destination=%+v, want exact authorized thread", suggestion.Destination)
 				}
 			} else if suggestion.Destination != (homeDestination{Route: "new-private"}) {
 				t.Fatalf("%s destination=%+v, want new private conversation", starter.ID, suggestion.Destination)
@@ -129,12 +129,83 @@ func TestHomeSnapshotIgnoresGenericNotificationsAndCollapsesSameThread(t *testin
 		t.Fatalf("starters=%+v, want stable categories without private continuation context", snapshot.Starters)
 	}
 	for _, starter := range snapshot.Starters {
-		if len(starter.Suggestions) != 1 || starter.Suggestions[0].Destination != (homeDestination{Route: "new-private"}) {
-			t.Fatalf("generic starter=%+v, want one server-owned new-private suggestion", starter)
+		if len(starter.Suggestions) < 1 || len(starter.Suggestions) > 4 {
+			t.Fatalf("bounded starter=%+v, want one to four chief-of-staff suggestions", starter)
 		}
-		if strings.Contains(starter.Suggestions[0].Text, "Forecast") {
-			t.Fatalf("generic starter retained excluded thread context: %+v", starter)
+		for _, suggestion := range starter.Suggestions {
+			if starter.ID == "continue" {
+				if suggestion.Destination.Route != "thread" || !strings.Contains(strings.ToLower(suggestion.Text), "forecast") || len(suggestion.SourceCoverage) != 1 {
+					t.Fatalf("Continue did not prioritize the exact waiting work: %+v", suggestion)
+				}
+			} else if suggestion.Destination != (homeDestination{Route: "new-private"}) || !strings.Contains(strings.ToLower(suggestion.Text), "forecast") || len(suggestion.SourceCoverage) != 1 {
+				t.Fatalf("non-Continue starter did not use the only authorized waiting context: %+v", starter)
+			}
 		}
+	}
+	if !strings.Contains(snapshot.Starters[3].Suggestions[0].WhyThis, "waiting on a decision") {
+		t.Fatalf("Challenge did not explain the sparse needs-you recommendation: %+v", snapshot.Starters[3].Suggestions)
+	}
+}
+
+func TestHomeChiefOfStaffRecommendationsUseSoleActiveWork(t *testing.T) {
+	now := time.Date(2026, 8, 12, 18, 0, 0, 0, time.UTC)
+	threads := []scoutChatThreadRecord{{
+		ID: "work", Title: "Launch brief", OwnerEmail: artifactLibraryAdminEmail, UpdatedAt: now.Format(time.RFC3339Nano),
+		Messages: []scoutChatMessageRecord{{ID: "work-message", Role: "scout", CreatedAt: now.Format(time.RFC3339Nano), Thread: &scoutChatThreadRef{ID: "work-run", Query: "Draft the launch brief", Status: "running"}}},
+	}}
+	snapshot := buildHomeSnapshot(threads, nil, nil, now)
+	create := snapshot.Starters[2].Suggestions
+	if len(create) == 0 || !strings.Contains(strings.ToLower(create[0].Text), "launch brief") || create[0].SourceCoverage[0].Kind != "active-work" {
+		t.Fatalf("Create ranking=%+v, want the sole active work rather than a generic fallback", create)
+	}
+}
+
+func TestHomeChiefOfStaffRecommendationsPrioritizeNeedsYouAndActiveWork(t *testing.T) {
+	now := time.Date(2026, 8, 12, 18, 0, 0, 0, time.UTC)
+	threads := []scoutChatThreadRecord{
+		{ID: "recent", Title: "Customer rollout", OwnerEmail: artifactLibraryAdminEmail, UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "recent-message", Role: "user", Text: "Review the launch sequence", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}},
+		{ID: "decision", Title: "Enterprise pilot", OwnerEmail: artifactLibraryAdminEmail, UpdatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "decision-message", Role: "scout", CreatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano), Thread: &scoutChatThreadRef{ID: "decision-run", Query: "Approve the Enterprise pilot scope", Status: "approval_required"}}}},
+		{ID: "work", Title: "Board update", OwnerEmail: artifactLibraryAdminEmail, UpdatedAt: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "work-message", Role: "scout", CreatedAt: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), Thread: &scoutChatThreadRef{ID: "work-run", Query: "Draft the August board update", Status: "running"}}}},
+	}
+	snapshot := buildHomeSnapshot(threads, nil, nil, now)
+	continueSuggestions := snapshot.Starters[0].Suggestions
+	if len(continueSuggestions) != 3 || continueSuggestions[2].Destination.ThreadID != "decision" || !strings.Contains(continueSuggestions[2].WhyThis, "waiting") {
+		t.Fatalf("Continue ranking=%+v, want recent context plus the exact needs-you work", continueSuggestions)
+	}
+	createSuggestions := snapshot.Starters[2].Suggestions
+	if len(createSuggestions) == 0 || !strings.Contains(createSuggestions[0].Text, "August board update") || createSuggestions[0].SourceCoverage[0].Kind != "active-work" {
+		t.Fatalf("Create ranking=%+v, want active-work recommendation", createSuggestions)
+	}
+	challengeSuggestions := snapshot.Starters[3].Suggestions
+	if len(challengeSuggestions) == 0 || !strings.Contains(challengeSuggestions[0].Text, "Enterprise pilot") || challengeSuggestions[0].SourceCoverage[0].Kind != "needs-you" {
+		t.Fatalf("Challenge ranking=%+v, want waiting decision recommendation", challengeSuggestions)
+	}
+}
+
+func TestHomeChiefOfStaffRecommendationsSynthesizeOnlyViewerAuthorizedThreads(t *testing.T) {
+	now := time.Date(2026, 8, 12, 19, 0, 0, 0, time.UTC)
+	threads := []scoutChatThreadRecord{
+		{ID: "team", Title: "Launch planning", Visibility: scoutChatVisibilityPublic, UpdatedAt: now.Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "team-message", Text: "The onboarding risk needs an owner."}}},
+		{ID: "private", Title: "Customer follow-up", OwnerEmail: artifactLibraryAdminEmail, UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "private-message", Text: "Revisit the onboarding timeline before Friday."}}},
+	}
+	snapshot := buildHomeSnapshot(threads, nil, nil, now)
+	explore := snapshot.Starters[1].Suggestions
+	found := false
+	for _, suggestion := range explore {
+		if suggestion.ID != "explore-recurring-theme" {
+			continue
+		}
+		found = true
+		if !strings.Contains(suggestion.Text, "onboarding") || !strings.Contains(suggestion.Text, "your conversations") || strings.Contains(suggestion.Text, "the team") || len(suggestion.SourceCoverage) != 2 || !strings.Contains(suggestion.WhyThis, "2 conversations") {
+			t.Fatalf("recurring theme suggestion=%+v", suggestion)
+		}
+	}
+	if !found {
+		t.Fatalf("Explore suggestions=%+v, want cross-source authorized synthesis", explore)
+	}
+	encoded, _ := json.Marshal(explore)
+	if strings.Contains(string(encoded), "needs an owner") || strings.Contains(string(encoded), "before Friday") {
+		t.Fatalf("recommendation explanation leaked source bodies: %s", encoded)
 	}
 }
 

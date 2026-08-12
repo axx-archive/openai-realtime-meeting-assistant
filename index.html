@@ -7243,7 +7243,9 @@
       .home-starters {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-auto-rows: 78px;
         gap: 12px;
+        min-height: 78px;
         margin-top: 34px;
       }
       .home-starters[hidden], .home-suggestions[hidden], .home-continuity[hidden] { display: none; }
@@ -7344,6 +7346,9 @@
         transition-timing-function: cubic-bezier(.2, 0, 0, 1);
       }
       .home-suggestion__icon { color: var(--text-3); font: 500 14px/1 var(--font-sans); }
+      .home-suggestion__copy { min-width: 0; display: grid; gap: 2px; }
+      .home-suggestion__text { color: inherit; text-wrap: pretty; }
+      .home-suggestion__why { color: var(--text-3); font: 400 11px/1.3 var(--font-sans); text-wrap: pretty; }
       .home-suggestion__arrow { color: var(--text-3); opacity: 0; transform: translateX(-3px); transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(.2, 0, 0, 1); }
       .home-suggestion:hover, .home-suggestion:focus-visible { color: var(--text-1); background: color-mix(in srgb, var(--surface-2) 66%, transparent); transform: translateX(2px); }
       .home-suggestion:hover .home-suggestion__arrow, .home-suggestion:focus-visible .home-suggestion__arrow { opacity: 1; transform: translateX(0); }
@@ -7353,7 +7358,7 @@
 
       @media (max-width: 720px) {
         .home-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .home-starters { width: min(420px, 100%); margin-top: 28px; }
+        .home-starters { width: min(420px, 100%); grid-auto-rows: 84px; min-height: 180px; margin-top: 28px; }
         .home-starter { min-height: 84px; padding: 13px 14px; }
         .home-suggestions { width: 100%; margin-top: 24px; }
         .home-scout-composer, .office-launch.is-starter-open .home-scout-composer { margin-top: 26px; }
@@ -70676,11 +70681,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function validHomeSnapshot(value) {
         return Boolean(value && typeof value === 'object' && typeof value.version === 'string'
           && typeof value.generatedAt === 'string' && Array.isArray(value.items)
-          && Array.isArray(value.starters)
+          && Array.isArray(value.starters) && value.starters.length === HOME_CATEGORY_SHELLS.length
+          && HOME_CATEGORY_SHELLS.every((shell, index) => value.starters[index]?.id === shell.id)
           && value.starters.every(category => category && typeof category.id === 'string'
             && typeof category.label === 'string' && typeof category.detail === 'string'
             && Array.isArray(category.suggestions)
-            && category.suggestions.every(suggestion => suggestion && typeof suggestion.id === 'string' && typeof suggestion.text === 'string'))
+            && category.suggestions.length > 0 && category.suggestions.length <= 4
+            && category.suggestions.every(suggestion => suggestion && typeof suggestion.id === 'string'
+              && typeof suggestion.text === 'string' && Boolean(suggestion.text.trim())
+              && typeof suggestion.whyThis === 'string' && Boolean(suggestion.whyThis.trim())
+              && suggestion.destination && ['new-private', 'thread'].includes(suggestion.destination.route)
+              && (suggestion.destination.route !== 'thread' || Boolean(String(suggestion.destination.threadId || '').trim()))))
           && typeof value.allClear === 'boolean')
       }
 
@@ -70730,14 +70741,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         icon.className = 'home-suggestion__icon'
         icon.setAttribute('aria-hidden', 'true')
         icon.textContent = ({ continue: '↻', explore: '⌕', create: '✦', challenge: '◇' })[selectedHomeCategoryId] || '·'
+        const copy = document.createElement('span')
+        copy.className = 'home-suggestion__copy'
         const text = document.createElement('span')
+        text.className = 'home-suggestion__text'
         text.textContent = String(suggestion?.text || '')
+        const why = document.createElement('span')
+        why.className = 'home-suggestion__why'
+        why.textContent = String(suggestion?.whyThis || '')
+        copy.append(text, why)
         const arrow = document.createElement('span')
         arrow.className = 'home-suggestion__arrow'
         arrow.setAttribute('aria-hidden', 'true')
         arrow.textContent = '→'
-        button.append(icon, text, arrow)
-        button.setAttribute('aria-label', `Use suggestion: ${String(suggestion?.text || '')}`)
+        button.append(icon, copy, arrow)
+        const whyThis = String(suggestion?.whyThis || '').trim()
+        button.setAttribute('aria-label', `Use suggestion: ${String(suggestion?.text || '')}${whyThis ? `. Why this: ${whyThis}` : ''}`)
+        if (whyThis) button.title = `Why this: ${whyThis}`
         button.addEventListener('click', () => {
           if (!homeScoutInput || !String(suggestion?.text || '').trim()) return
           homeScoutInput.value = String(suggestion.text)
@@ -70782,7 +70802,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renderHomeStarters() {
         if (!homeStarters) return
         const suggestionsReady = Boolean(authedUser && !guestMode && homeSnapshot.starters.length === HOME_CATEGORY_SHELLS.length)
-        const categories = authedUser && !guestMode
+        // This taxonomy is safe product chrome. Paint its reserved geometry
+        // before auth restoration and the permission-filtered Home fetch;
+        // guest mode is the only state that suppresses it.
+        const categories = !guestMode
           ? (suggestionsReady ? homeSnapshot.starters : HOME_CATEGORY_SHELLS)
           : []
         if (!categories.some(category => category.id === selectedHomeCategoryId)) selectedHomeCategoryId = ''

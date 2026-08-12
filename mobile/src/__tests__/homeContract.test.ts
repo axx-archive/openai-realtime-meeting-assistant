@@ -19,12 +19,13 @@ test('native Home consumes one server-owned snapshot and does not rebuild client
   assert.doesNotMatch(hook, /MAX_STALE_HOME_MS|receivedAtRef/u);
   assert.match(hook, /const HOME_STARTER_IDS = \['continue', 'explore', 'create', 'challenge'\] as const/u);
   assert.match(hook, /const HOME_STARTER_SHELLS: HomeStarter\[\] = \[/u);
-  assert.match(hook, /sessionToken && snapshot\.starters\.length !== HOME_STARTER_IDS\.length[\s\S]*HOME_STARTER_SHELLS/u);
+  assert.match(hook, /starters: snapshot\.starters\.length !== HOME_STARTER_IDS\.length[\s\S]*HOME_STARTER_SHELLS/u);
   assert.match(hook, /snapshot\.version === 'home-v2'/u);
   assert.match(hook, /snapshot\.starters\.length === HOME_STARTER_IDS\.length/u);
   assert.match(types, /id: 'continue' \| 'explore' \| 'create' \| 'challenge';/u);
   assert.match(types, /version: 'home-v2';/u);
   assert.match(types, /detail: string;\s+suggestions: HomeStarterSuggestion\[\]/u);
+  assert.match(types, /whyThis: string;/u);
   assert.match(types, /HomeStarterDestination =\s+\| \{ route: 'new-private' \}\s+\| \{ route: 'thread'; threadId: string;/u);
   assert.doesNotMatch(screen, /const HOME_STARTER_IDS|Tell me what you want to pick back up|Help me explore the most important/u);
 });

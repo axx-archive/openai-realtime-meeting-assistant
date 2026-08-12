@@ -54,6 +54,8 @@ function validHomeStarter(value: unknown, expectedID: string): boolean {
       return typeof candidate.id === 'string'
         && typeof candidate.text === 'string'
         && Boolean(candidate.text.trim())
+        && typeof candidate.whyThis === 'string'
+        && Boolean(candidate.whyThis.trim())
         && validHomeStarterDestination(candidate.destination);
     });
 }
@@ -126,7 +128,10 @@ export function useHomeCanvas(): HomeCanvasSnapshot {
 
   return {
     continuity: snapshot.items,
-    starters: sessionToken && snapshot.starters.length !== HOME_STARTER_IDS.length
+    // Canvas only mounts in the signed-in shell. The four non-personal cards
+    // can therefore reserve their geometry immediately while auth restoration
+    // and the authorized recommendation snapshot complete.
+    starters: snapshot.starters.length !== HOME_STARTER_IDS.length
       ? HOME_STARTER_SHELLS
       : snapshot.starters,
     startersReady: snapshot.starters.length === HOME_STARTER_IDS.length && freshness === 'current',

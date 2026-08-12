@@ -50,6 +50,12 @@ export type HomeStarterSuggestion = {
   id: string;
   text: string;
   destination: HomeStarterDestination;
+  whyThis: string;
+  sourceCoverage?: Array<{
+    kind: string;
+    id: string;
+    revision: string;
+  }>;
 };
 
 export type HomeStarter = {

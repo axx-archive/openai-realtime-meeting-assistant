@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-home-chief-of-staff-local-20260812",
+  "recordedAt": "2026-08-12T20:12:57Z",
+  "repository": {
+    "branch": "codex/country-golf-stride",
+    "baseHead": "1f83ab27ad9e615ac35c792ed95cc77635dfdcec",
+    "workingTree": "intentionally-dirty-uncommitted-release-candidate",
+    "canonicalPlanSha256": "517d4c23740ce8d8295f17fbc97c3728aa34924044567c1897ebead978eb23a7"
+  },
+  "claim": {
+    "class": "verified-local-release-candidate",
+    "summary": "Immediate four-card Home shells plus deterministic, permission-filtered chief-of-staff recommendations on web and native.",
+    "accepted": [
+      "four stable Continue, Explore, Create and Challenge shells paint before authorized Home hydration and reserve exact hydrated geometry",
+      "shells remain non-actionable while loading and private recommendation state clears fail-closed",
+      "current Needs-you, active work and exact recent continuation rank before safe generic fallbacks, including sparse one-thread states",
+      "one recurring topic may be identified across two or more already-viewer-authorized conversations without exposing source bodies or mislabeling private context as team sentiment",
+      "each suggestion is an editable full sentence with a plain-language Why this explanation and body-free source ID and revision coverage",
+      "category selection and suggestion seeding have zero server, provider, Project, WorkRun or authority effect; explicit Send remains the first persistence boundary",
+      "responsive web and native contract parity preserves arbitrary typing, accessible category and suggestion semantics, and explicit submission"
+    ],
+    "notClaimed": [
+      "meeting transcript, Project state or full authorized history compaction",
+      "provider-generated recommendation synthesis or live provider quality",
+      "signed suggestion tokens or Project chip, chooser, Send association and correction",
+      "full longitudinal Project Record across every source family",
+      "physical-device acceptance or production recommendation readback",
+      "provider-backed artifacts, Drive or complete work-card acceptance"
+    ]
+  },
+  "reviewedFiles": {
+    "docs/plans/stride-next-evolution-master-plan.md": "517d4c23740ce8d8295f17fbc97c3728aa34924044567c1897ebead978eb23a7",
+    "home.go": "b21db0f7ccf46dfd18d362e41287c2318f0aef7eef0c7da713f15903380d760f",
+    "home_test.go": "20f79c3a51ba63c77ada7e7691d2bacbbe029f1dd3ab28a56cb03d2247ebbd50",
+    "index.html": "a6ad5d146ed10ca74fd1873fd154acb3758db110120471d4c60ec8ddfe927d95",
+    "frontend_home_contract_test.go": "908ac04e3d4a015a444aee1973cfeb10ad776be7ee2cc3c76d3719fc609dec09",
+    "mobile/app.config.ts": "0d1f17e329c6a652a888ffd9a97a071857fc40d27d84378c3df14a6946a1ca1f",
+    "mobile/src/api/types.ts": "110d3ddff7bce1d66cb6521b1a79c327517584eb4b9dffa1bda6f1671e781f49",
+    "mobile/src/canvas/useLiveLine.ts": "f27e8dd5810d0688f73caef629ec4d5581b350b249fe6c9d8770a06a6ff63a2d",
+    "mobile/src/screens/CanvasScreen.tsx": "b1ae9722e2fa73a4fd9c88628c029e8d5ab83fd532b009403f5548e35bf27cc7",
+    "mobile/src/__tests__/homeContract.test.ts": "ae9d72c9364264879089d98df18feb17efab2201c4bb2fced67dc64d4cecb4eb"
+  },
+  "renderedEvidence": {
+    "desktop-home-category-selected-dark.png": "ae3f5724dafdd9b6497d874c71a80de9d9ed52e75ab5def9326175977059e1fa",
+    "desktop-home-category-selected-light.png": "cdffcbfbe3f62b43b04f45afc8d65e0c96dcd101246a009fa92a93727c57c924",
+    "phone-home-category-selected-dark.png": "304f0e73233860ff0679031933d8c4202c82ecccc0a6e98e423fd0d7ab31e6a5",
+    "phone-home-category-selected-light.png": "fa1b537c04b8047b37306dd3b3f020efd52279f4bbe94cb6d0346ed49163cc9b"
+  },
+  "validation": [
+    {"command": "go test ./... -count=1", "result": "PASS", "mainPackageElapsedSeconds": 540.630},
+    {"command": "go test -race . -count=1 -run 'Test(HomeSnapshot|HomeChief|AssistantHomeHandler|DesktopHome)'", "result": "PASS", "elapsedSeconds": 13.591},
+    {"command": "cd mobile && npm test -- --runInBand", "result": "PASS", "tests": "526/526"},
+    {"command": "cd mobile && npm run typecheck", "result": "PASS"},
+    {"command": "go vet ./...", "result": "PASS"},
+    {"command": "HOME_RENDER_DIR=<bounded-output> go test . -run '^TestDesktopHomeRenderedFocusedSuggestionsAndResponsiveLayout$' -count=1", "result": "PASS"},
+    {"command": "git diff --check", "result": "PASS"}
+  ],
+  "independentCritic": {
+    "verdict": "PASS",
+    "blockers": 0,
+    "majors": 0,
+    "revisionsClosed": [
+      "sparse Needs-you and active-only context now drives personalized recommendations",
+      "private authorized conversation context is no longer described as team sentiment"
+    ]
+  },
+  "releaseBaseline": {
+    "activeRelease": "cf7240f3cf7cc9618e465a4781c43fa8f2306ac5",
+    "ledgerGeneration": 62,
+    "rollbackRelease": "7fb35f883fed62ba0e35117ff59d126e369230c2",
+    "publicHealthAndReadinessAgree": true,
+    "knownDegradationsUnchanged": true
+  },
+  "externalEffects": {
+    "providerCalls": 0,
+    "productionWrites": 0,
+    "gitCommit": false,
+    "gitPush": false,
+    "deploy": false,
+    "testFlightUpload": false
+  },
+  "next": "Integrate the visible Project chip and permission-filtered Project-aware Send contract, then prove one Project-bound first-class Research card through immutable revision, rich Open, durable named Drive receipt and normal-composer edit or regenerate."
+}

@@ -37,9 +37,20 @@ type homeStarter struct {
 }
 
 type homeStarterSuggestion struct {
-	ID          string          `json:"id"`
-	Text        string          `json:"text"`
-	Destination homeDestination `json:"destination"`
+	ID             string                 `json:"id"`
+	Text           string                 `json:"text"`
+	Destination    homeDestination        `json:"destination"`
+	WhyThis        string                 `json:"whyThis"`
+	SourceCoverage []homeSuggestionSource `json:"sourceCoverage,omitempty"`
+}
+
+// homeSuggestionSource is deliberately body-free. The Home projection may
+// explain why a recommendation exists, but it must not copy private message
+// bodies, audience membership, or internal authority material into the UI.
+type homeSuggestionSource struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Revision string `json:"revision"`
 }
 
 type homeSnapshot struct {
@@ -62,6 +73,11 @@ type homeRoomCandidate struct {
 	SourceRevision   string
 	Live             bool
 	ParticipantCount int
+}
+
+type homeRecurringTheme struct {
+	Topic   string
+	Threads []scoutChatThreadRecord
 }
 
 func homeTimestamp(value string) time.Time {
@@ -388,69 +404,243 @@ func homeLiveMeetingItem(rooms []homeRoomCandidate) *homeItem {
 	}
 }
 
-func homeStarters(recent *homeItem) []homeStarter {
+func homeSuggestionSourceForItem(item *homeItem) []homeSuggestionSource {
+	if item == nil || strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.SourceRevision) == "" {
+		return nil
+	}
+	return []homeSuggestionSource{{Kind: item.Kind, ID: item.ID, Revision: item.SourceRevision}}
+}
+
+func homeSuggestion(id, text, why string, destination homeDestination, source *homeItem) homeStarterSuggestion {
+	return homeStarterSuggestion{
+		ID: id, Text: text, Destination: destination, WhyThis: why,
+		SourceCoverage: homeSuggestionSourceForItem(source),
+	}
+}
+
+func homeSuggestionWithCoverage(id, text, why string, destination homeDestination, sources []homeSuggestionSource) homeStarterSuggestion {
+	return homeStarterSuggestion{ID: id, Text: text, Destination: destination, WhyThis: why, SourceCoverage: sources}
+}
+
+var homeThemeStopWords = map[string]bool{
+	"about": true, "after": true, "again": true, "against": true, "because": true, "before": true, "being": true,
+	"between": true, "could": true, "create": true, "current": true, "from": true, "have": true, "help": true,
+	"into": true, "meeting": true, "most": true, "need": true, "project": true, "review": true, "scout": true,
+	"should": true, "their": true, "there": true, "these": true, "thing": true, "think": true, "this": true,
+	"through": true, "update": true, "want": true, "what": true, "where": true, "which": true, "with": true,
+	"work": true, "would": true, "your": true,
+}
+
+func homeThemeWords(value string) []string {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool { return r < 'a' || r > 'z' })
+	result := make([]string, 0, len(words))
+	seen := map[string]bool{}
+	for _, word := range words {
+		if len(word) < 5 || homeThemeStopWords[word] || seen[word] {
+			continue
+		}
+		seen[word] = true
+		result = append(result, word)
+	}
+	return result
+}
+
+// homeRecurringTheme finds one deterministic topic repeated across at least
+// two viewer-authorized conversations. It runs over the already filtered
+// thread snapshot and emits only body-free source coverage; raw messages never
+// enter the Home response.
+func homeRecurringThemeForViewer(threads []scoutChatThreadRecord) *homeRecurringTheme {
+	type themeCandidate struct {
+		threads map[string]scoutChatThreadRecord
+		latest  time.Time
+	}
+	candidates := map[string]*themeCandidate{}
+	for _, thread := range threads {
+		if thread.ArchivedAt != "" || thread.Intake != "" || strings.TrimSpace(thread.ID) == "" {
+			continue
+		}
+		context := thread.Title
+		for index, included := len(thread.Messages)-1, 0; index >= 0 && included < 3; index, included = index-1, included+1 {
+			context += " " + thread.Messages[index].Text
+			if thread.Messages[index].Thread != nil {
+				context += " " + thread.Messages[index].Thread.Query
+			}
+		}
+		for _, word := range homeThemeWords(context) {
+			candidate := candidates[word]
+			if candidate == nil {
+				candidate = &themeCandidate{threads: map[string]scoutChatThreadRecord{}}
+				candidates[word] = candidate
+			}
+			candidate.threads[thread.ID] = thread
+			if timestamp := scoutChatThreadTime(thread); timestamp.After(candidate.latest) {
+				candidate.latest = timestamp
+			}
+		}
+	}
+	words := make([]string, 0, len(candidates))
+	for word, candidate := range candidates {
+		if len(candidate.threads) >= 2 {
+			words = append(words, word)
+		}
+	}
+	if len(words) == 0 {
+		return nil
+	}
+	sort.Slice(words, func(i, j int) bool {
+		left, right := candidates[words[i]], candidates[words[j]]
+		if len(left.threads) != len(right.threads) {
+			return len(left.threads) > len(right.threads)
+		}
+		if !left.latest.Equal(right.latest) {
+			return left.latest.After(right.latest)
+		}
+		return words[i] < words[j]
+	})
+	selected := candidates[words[0]]
+	result := &homeRecurringTheme{Topic: words[0]}
+	for _, thread := range selected.threads {
+		result.Threads = append(result.Threads, thread)
+	}
+	sort.Slice(result.Threads, func(i, j int) bool {
+		return scoutChatThreadTime(result.Threads[i]).After(scoutChatThreadTime(result.Threads[j]))
+	})
+	if len(result.Threads) > 3 {
+		result.Threads = result.Threads[:3]
+	}
+	return result
+}
+
+func homeThemeCoverage(theme *homeRecurringTheme) []homeSuggestionSource {
+	if theme == nil {
+		return nil
+	}
+	result := make([]homeSuggestionSource, 0, len(theme.Threads))
+	for _, thread := range theme.Threads {
+		result = append(result, homeSuggestionSource{Kind: "conversation", ID: thread.ID, Revision: firstNonEmptyString(thread.UpdatedAt, thread.CreatedAt)})
+	}
+	return result
+}
+
+func homeContextTitle(item *homeItem) string {
+	if item == nil {
+		return ""
+	}
+	return strings.TrimSpace(item.Title)
+}
+
+// homeStarters is a deterministic, permission-filtered chief-of-staff
+// projection. Its inputs are already viewer-authorized Home items; it never
+// searches another tenant, starts provider work, or mutates a Project. The
+// ordering encodes the product priority: needs-you, active work, exact
+// continuation, then safe generic fallbacks.
+func homeStarters(recent, attention, active *homeItem, theme *homeRecurringTheme) []homeStarter {
 	newPrivate := homeDestination{Route: "new-private"}
-	if recent == nil || strings.TrimSpace(recent.Title) == "" || recent.Destination.Route != "thread" || strings.TrimSpace(recent.Destination.ThreadID) == "" {
+	hasThreadContext := func(item *homeItem) bool {
+		return item != nil && strings.TrimSpace(item.Title) != "" && item.Destination.Route == "thread" && strings.TrimSpace(item.Destination.ThreadID) != ""
+	}
+	if !hasThreadContext(recent) && !hasThreadContext(attention) && !hasThreadContext(active) {
+		continueSuggestion := homeSuggestion("continue-where-left-off", "Tell me what you want to pick back up.", "A safe starting point when there is no current conversation to resume.", newPrivate, nil)
 		return []homeStarter{
 			{
 				ID: "continue", Label: "Continue", Detail: "Pick up recent work",
-				Suggestions: []homeStarterSuggestion{
-					{ID: "continue-where-left-off", Text: "Tell me what you want to pick back up.", Destination: newPrivate},
-				},
+				Suggestions: []homeStarterSuggestion{continueSuggestion},
 			},
 			{
 				ID: "explore", Label: "Explore", Detail: "Understand and discover",
 				Suggestions: []homeStarterSuggestion{
-					{ID: "explore-open-question", Text: "Help me explore the most important open question.", Destination: newPrivate},
+					homeSuggestion("explore-open-question", "Help me explore the most important open question.", "A fresh private conversation while Scout gets to know your current work.", newPrivate, nil),
 				},
 			},
 			{
 				ID: "create", Label: "Create", Detail: "Make the next useful thing",
 				Suggestions: []homeStarterSuggestion{
-					{ID: "create-next-deliverable", Text: "Help me create the next useful deliverable.", Destination: newPrivate},
+					homeSuggestion("create-next-deliverable", "Help me create the next useful deliverable.", "A fresh private conversation while Scout gets to know your current work.", newPrivate, nil),
 				},
 			},
 			{
 				ID: "challenge", Label: "Challenge", Detail: "Grill and red-team",
 				Suggestions: []homeStarterSuggestion{
-					{ID: "challenge-assumptions", Text: "Challenge my current thinking and identify the weakest assumptions.", Destination: newPrivate},
+					homeSuggestion("challenge-assumptions", "Challenge my current thinking and identify the weakest assumptions.", "A fresh private conversation while Scout gets to know your current work.", newPrivate, nil),
 				},
 			},
 		}
 	}
+	// Needs-you and active-work rows are valid chief-of-staff context even when
+	// they are the viewer's only conversation. The Home item projection removes
+	// them from the separate recent slot to avoid duplicate rows, but the starter
+	// projection must still use them rather than falling back to generic copy.
+	if !hasThreadContext(recent) {
+		if hasThreadContext(attention) {
+			recent = attention
+		} else {
+			recent = active
+		}
+	}
 	subject := strings.TrimSpace(recent.Title)
 	continueDestination := recent.Destination
+	continueSuggestions := []homeStarterSuggestion{
+		homeSuggestion("continue-where-left-off", "Continue where we left off in "+subject+".", "You were last working here.", continueDestination, recent),
+		homeSuggestion("continue-whats-changed", "Tell me what has changed in "+subject+" and the best next step.", "You were last working here.", continueDestination, recent),
+	}
+	if attention != nil && attention.Destination.Route == "thread" && attention.Destination.ThreadID != recent.Destination.ThreadID {
+		continueSuggestions = append(continueSuggestions, homeSuggestion(
+			"continue-needs-you", "Help me resolve what is waiting on me in "+homeContextTitle(attention)+".",
+			"This work is currently waiting for your decision or input.", attention.Destination, attention))
+	} else {
+		continueSuggestions = append(continueSuggestions, homeSuggestion(
+			"continue-open-decision", "Pick up the most important unfinished decision in "+subject+".",
+			"You were last working here.", continueDestination, recent))
+	}
+
+	createSource := recent
+	createSubject := subject
+	createWhy := "You were last working here."
+	if active != nil && homeContextTitle(active) != "" {
+		createSource, createSubject = active, homeContextTitle(active)
+		createWhy = "Work is already underway here, so a concrete next deliverable is timely."
+	}
+	challengeSource := recent
+	challengeSubject := subject
+	challengeWhy := "You were last working here."
+	if attention != nil && homeContextTitle(attention) != "" {
+		challengeSource, challengeSubject = attention, homeContextTitle(attention)
+		challengeWhy = "This work is waiting on a decision, making its assumptions worth testing now."
+	}
+	exploreSuggestions := []homeStarterSuggestion{
+		homeSuggestion("explore-open-question", "Explore the biggest open question in "+subject+".", "You were last working here.", newPrivate, recent),
+		homeSuggestion("explore-options", "Compare the strongest options for "+subject+" and show me the tradeoffs.", "You were last working here.", newPrivate, recent),
+	}
+	if theme != nil && len(theme.Threads) >= 2 {
+		exploreSuggestions = append(exploreSuggestions, homeSuggestionWithCoverage(
+			"explore-recurring-theme", "Connect what has come up across your conversations about "+theme.Topic+" and identify the useful next move.",
+			fmt.Sprintf("%s has come up across %d conversations you can open.", strings.Title(theme.Topic), len(theme.Threads)), newPrivate, homeThemeCoverage(theme)))
+	} else {
+		exploreSuggestions = append(exploreSuggestions, homeSuggestion("explore-blind-spots", "Discover what we may be missing in "+subject+".", "You were last working here.", newPrivate, recent))
+	}
 	return []homeStarter{
 		{
 			ID: "continue", Label: "Continue", Detail: "Pick up recent work",
-			Suggestions: []homeStarterSuggestion{
-				{ID: "continue-where-left-off", Text: "Continue where we left off in " + subject + ".", Destination: continueDestination},
-				{ID: "continue-whats-changed", Text: "Tell me what has changed in " + subject + " and the best next step.", Destination: continueDestination},
-				{ID: "continue-open-decision", Text: "Pick up the most important unfinished decision in " + subject + ".", Destination: continueDestination},
-			},
+			Suggestions: continueSuggestions,
 		},
 		{
 			ID: "explore", Label: "Explore", Detail: "Understand and discover",
-			Suggestions: []homeStarterSuggestion{
-				{ID: "explore-open-question", Text: "Explore the biggest open question in " + subject + ".", Destination: newPrivate},
-				{ID: "explore-options", Text: "Compare the strongest options for " + subject + " and show me the tradeoffs.", Destination: newPrivate},
-				{ID: "explore-blind-spots", Text: "Discover what we may be missing in " + subject + ".", Destination: newPrivate},
-			},
+			Suggestions: exploreSuggestions,
 		},
 		{
 			ID: "create", Label: "Create", Detail: "Make the next useful thing",
 			Suggestions: []homeStarterSuggestion{
-				{ID: "create-next-deliverable", Text: "Create the next useful deliverable for " + subject + ".", Destination: newPrivate},
-				{ID: "create-plan", Text: "Turn the current thinking in " + subject + " into a concise plan.", Destination: newPrivate},
-				{ID: "create-update", Text: "Draft a clear project update for " + subject + ".", Destination: newPrivate},
+				homeSuggestion("create-next-deliverable", "Create the next useful deliverable for "+createSubject+".", createWhy, newPrivate, createSource),
+				homeSuggestion("create-plan", "Turn the current thinking in "+createSubject+" into a concise plan.", createWhy, newPrivate, createSource),
+				homeSuggestion("create-update", "Draft a clear project update for "+createSubject+".", createWhy, newPrivate, createSource),
 			},
 		},
 		{
 			ID: "challenge", Label: "Challenge", Detail: "Grill and red-team",
 			Suggestions: []homeStarterSuggestion{
-				{ID: "challenge-assumptions", Text: "Challenge the current thinking in " + subject + " and identify the weakest assumptions.", Destination: newPrivate},
-				{ID: "challenge-grill", Text: "Grill me on " + subject + " like a skeptical investor.", Destination: newPrivate},
-				{ID: "challenge-failure", Text: "Red-team the plan for " + subject + " and show me how it could fail.", Destination: newPrivate},
+				homeSuggestion("challenge-assumptions", "Challenge the current thinking in "+challengeSubject+" and identify the weakest assumptions.", challengeWhy, newPrivate, challengeSource),
+				homeSuggestion("challenge-grill", "Grill me on "+challengeSubject+" like a skeptical investor.", challengeWhy, newPrivate, challengeSource),
+				homeSuggestion("challenge-failure", "Red-team the plan for "+challengeSubject+" and show me how it could fail.", challengeWhy, newPrivate, challengeSource),
 			},
 		},
 	}
@@ -478,7 +668,7 @@ func buildHomeSnapshot(threads []scoutChatThreadRecord, notifications []map[stri
 	}
 	return homeSnapshot{
 		Version: homeSnapshotVersion, GeneratedAt: now.UTC().Format(time.RFC3339Nano), Items: items,
-		Starters: homeStarters(recent), AllClear: len(items) == 0,
+		Starters: homeStarters(recent, attention, active, homeRecurringThemeForViewer(threads)), AllClear: len(items) == 0,
 	}
 }
 

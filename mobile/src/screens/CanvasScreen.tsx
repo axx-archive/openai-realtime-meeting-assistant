@@ -436,11 +436,14 @@ export function CanvasScreen() {
                   key={suggestion.id}
                   accessibilityRole="button"
                   accessibilityLabel={suggestion.text}
-                  accessibilityHint="Fills the editable message field. Nothing is sent until you press Send."
+                  accessibilityHint={`${suggestion.whyThis} Fills the editable message field. Nothing is sent until you press Send.`}
                   onPress={() => useStarterSuggestion(suggestion)}
                   style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
                 >
-                  <Text maxFontSizeMultiplier={1.8} style={styles.suggestionText}>{suggestion.text}</Text>
+                  <View style={styles.suggestionCopy}>
+                    <Text maxFontSizeMultiplier={1.8} style={styles.suggestionText}>{suggestion.text}</Text>
+                    <Text maxFontSizeMultiplier={1.8} style={styles.suggestionWhy}>{suggestion.whyThis}</Text>
+                  </View>
                   <Text accessibilityElementsHidden maxFontSizeMultiplier={1} style={styles.suggestionArrow}>›</Text>
                 </Pressable>
               ))}
@@ -621,7 +624,9 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   suggestionRowPressed: { backgroundColor: colors.surface2, transform: [{ scale: 0.96 }] },
-  suggestionText: { ...type.caption, minWidth: 0, flex: 1, color: colors.text2 },
+  suggestionCopy: { minWidth: 0, flex: 1, gap: 2 },
+  suggestionText: { ...type.caption, color: colors.text2 },
+  suggestionWhy: { ...type.label, color: colors.text3 },
   suggestionArrow: { fontSize: 19, lineHeight: 22, color: colors.text3 },
   composerBlock: {
     width: '100%',
