@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_release_pd1_existing_thread_project_checkpoint",
+  "observedAt": "2026-08-13T02:35:22Z",
+  "status": "bounded_exact_release_and_app_store_upload_pass",
+  "source": {
+    "implementationCommit": "7bf81f0645a8604fbf99dbdeabca423b8e7c6860",
+    "branch": "codex/country-golf-stride",
+    "remoteMain": "7bf81f0645a8604fbf99dbdeabca423b8e7c6860",
+    "canonicalPlanSha256AfterReadback": "828cb2e02fa2647a9387f8bbed21ef848609e01c320990f75ba6e74ce4820e91",
+    "localReceipt": "stride-e10-pd1-existing-thread-project-local-20260812.json",
+    "localReceiptSha256": "3560e1e8f02506dcf7619c1442f015507dccb8ae2a8478cee2c5d0dd85a33b0e"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 70,
+    "releaseCommit": "7bf81f0645a8604fbf99dbdeabca423b8e7c6860",
+    "bundleSha256": "d74233c9a5358a58606c29e06ac6234bd2e52ae80213d5bf8ca65db17bef763e",
+    "meetingassistImageId": "sha256:fa99c0b8691c0a0dba4b288f2fbb8ceb9619588bfba3da46be55533de9c2bf85",
+    "renderRunnerImageId": "sha256:bdca19ab53773e7f9c0b487cab552dac6fbf743a67f0bae820d15141ee996b67",
+    "migrationCount": 20,
+    "migrationMaxVersion": 20,
+    "migrationCapBackup": "/opt/meetingassist-backups/release-env-pre-migration20-20260813T0222Z.env",
+    "health": "PASS_exact_release_identity",
+    "readiness": "PASS_ok_true_exact_release_identity_with_preexisting_nonrequired_degraded_capabilities",
+    "verification": "verified-local-unsigned"
+  },
+  "rollback": {
+    "releaseCommit": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "bundleSha256": "0967116aeeab0d0f0d13aba0c7eb089efcc7e3b76c2963615649d9e6c4b9bb02",
+    "meetingassistImageId": "sha256:903b46566e96f8ba62ede0f348cfd0ad808f700cfc2b3352872bf6a324a9d7b8",
+    "renderRunnerImageId": "sha256:6e3fe3f8e769d3c818a3be3e6a5379875a33b694b6d47130c3ee956c390713da",
+    "retainedAndReadable": true,
+    "additiveMigrationCompatible": true
+  },
+  "ios": {
+    "buildId": "20b14f2a-875d-432c-95e8-b1a9f0b210e4",
+    "version": "1.0.0",
+    "buildNumber": "59",
+    "gitCommit": "7bf81f0645a8604fbf99dbdeabca423b8e7c6860",
+    "fingerprint": "9fc03e85860b94874346cfd624429dca8b71cfac",
+    "buildStatus": "FINISHED",
+    "submissionId": "476cc1aa-46da-48ef-a3c8-dd48287318fa",
+    "appStoreConnectAppId": "6794029943",
+    "submissionStatus": "FINISHED_UPLOAD_ACCEPTED",
+    "appleProcessing": "PENDING_READBACK",
+    "intendedTestFlightGroupAvailability": "NOT_PROVEN"
+  },
+  "acceptedScope": [
+    "existing_thread_text_only_project_association_on_web_and_native",
+    "server_derived_private_organization_channel_and_exact_member_scoped_source_authority",
+    "provider_and_work_fence_until_canonical_project_confirmation",
+    "exact_retry_terminal_drift_and_late_socket_ordering",
+    "native_video_routes_to_live_room_discovery",
+    "venture_studio_marketplace_and_fine_tuning_governance_frozen_in_plan"
+  ],
+  "openGates": [
+    "apple_processing_and_exact_intended_testflight_group_readback",
+    "sent_message_project_correction",
+    "project_linked_attachment_and_reply_source_coverage",
+    "rich_meeting_record_transcript_and_ask_scout_product_flow",
+    "recurring_authorized_meeting_project_and_history_compaction",
+    "first_class_project_bound_work_and_artifact_spine",
+    "provider_backed_artifact_family_device_acceptance",
+    "approved_agentic_lab_schedule_budget_persona_and_effect_manifest",
+    "marketplace_and_fine_tuning_release_gates"
+  ],
+  "exclusions": {
+    "appleProcessingComplete": false,
+    "intendedTestFlightGroupAvailable": false,
+    "sentMessageProjectCorrectionComplete": false,
+    "projectLinkedAttachmentsComplete": false,
+    "meetingRecordRedesignComplete": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "physicalDeviceAccepted": false,
+    "cronActive": false,
+    "marketplaceCandidatePublished": false,
+    "fineTuningAuthorized": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}
