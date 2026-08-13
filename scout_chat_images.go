@@ -641,6 +641,16 @@ func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, thread
 	}
 	thread.Messages = append(filtered, message)
 	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, message)
+	if store := currentHomeProjectStore(); store != nil {
+		for _, removedMessage := range removed {
+			if removedMessage.Kind == scoutChatMessageKindImage && removedMessage.Image != nil {
+				if err := store.invalidateProjectChatReplyParentsByLegacyMutation(context.Background(), thread.ID, removedMessage.ID, "parent_regenerated"); err != nil {
+					lock.Unlock()
+					return scoutChatThreadRecord{}, err
+				}
+			}
+		}
+	}
 	if err := saveScoutChatImageThread(app, thread); err != nil {
 		lock.Unlock()
 		return scoutChatThreadRecord{}, err
@@ -706,6 +716,12 @@ func (app *kanbanBoardApp) completeScoutChatImagePending(ownerEmail, threadID, p
 	thread.Messages = filtered
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)
+	if store := currentHomeProjectStore(); store != nil && replacedImage != nil {
+		if err := store.invalidateProjectChatReplyParentsByLegacyMutation(context.Background(), thread.ID, replacesMessageID, "parent_regenerated"); err != nil {
+			lock.Unlock()
+			return err
+		}
+	}
 	if err := app.saveScoutChatThread(thread); err != nil {
 		lock.Unlock()
 		return err

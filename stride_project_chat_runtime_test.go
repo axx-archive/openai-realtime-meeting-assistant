@@ -876,17 +876,10 @@ FROM stride_conversation_events WHERE tenant_id=$1 AND event_id=$2`, snapshot.Or
 		t.Fatalf("reply parent=%q err=%v", dependencyParent, err)
 	}
 	groupID := projectChatID("project_source_group", snapshot.Organization.Header.ID, thread.ID, messageID, operation)
-	if _, err := store.pool.Exec(ctx, `UPDATE stride_conversation_events SET content_revision=content_revision+1,
-content_digest=decode($3,'hex') WHERE tenant_id=$1 AND event_id=$2`, snapshot.Organization.Header.ID, parentID,
-		sha256Hex([]byte("edited reply parent"))); err != nil {
+	if err := store.invalidateProjectChatReplyParentsByLegacyMutation(ctx, thread.ID, "project_v2_reply_parent", "parent_edited"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.invalidateProjectChatReplyGroupForDrift(ctx, snapshot.Organization.Header.ID, groupID,
-		"project_v2_reply_parent_drift", "parent_edited"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.invalidateProjectChatReplyGroupForDrift(ctx, snapshot.Organization.Header.ID, groupID,
-		"project_v2_reply_parent_drift", "parent_edited"); err != nil {
+	if err := store.invalidateProjectChatReplyParentsByLegacyMutation(ctx, thread.ID, "project_v2_reply_parent", "parent_edited"); err != nil {
 		t.Fatalf("reply drift receipt replay: %v", err)
 	}
 	var authorized int
@@ -894,5 +887,172 @@ content_digest=decode($3,'hex') WHERE tenant_id=$1 AND event_id=$2`, snapshot.Or
 JOIN stride_project_chat_source_group_members member ON member.organization_id=authorized.organization_id AND member.association_id=authorized.association_id
 WHERE member.organization_id=$1 AND member.group_id=$2`, snapshot.Organization.Header.ID, groupID).Scan(&authorized); err != nil || authorized != 0 {
 		t.Fatalf("reply-drift group authorized=%d err=%v", authorized, err)
+	}
+}
+
+func TestPostgresProjectChatSendV3BindsEvidenceOnlyReplyMedia(t *testing.T) {
+	ctx, store, _ := migratedPostgresCanonicalStore(t)
+	store.replyMediaReceiptTTL = 2 * time.Second
+	seedProjectPostgresAuthority(t, ctx, store)
+	snapshot := projectChatSnapshotFixture(t)
+	thread := scoutChatThreadRecord{ID: "project_v3_reply_media_thread", OwnerEmail: snapshot.Session.Email, Visibility: scoutChatVisibilityPrivate}
+	seed, err := store.confirmHomeProjectChatSend(ctx, snapshot, thread, "project_v3_reply_media_parent", "project-v3-parent-operation",
+		"Parent with governed media.", homeProjectContextToken{Kind: "create", ProjectTitle: "V3 Reply Media Project", Basis: "selected", Confidence: 1,
+			OrganizationID: snapshot.Organization.Header.ID, PersonID: snapshot.Person.Header.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := projectChatID("conversation_event", snapshot.Organization.Header.ID, thread.ID, "project_v3_reply_media_parent")
+	var parentRevision, parentACL, parentPurge int64
+	var parentDigest, parentAudience string
+	if err := store.pool.QueryRow(ctx, `SELECT content_revision,encode(content_digest,'hex'),encode(audience_digest,'hex'),acl_version,purge_generation
+FROM stride_conversation_events WHERE tenant_id=$1 AND event_id=$2`, snapshot.Organization.Header.ID, parentID).
+		Scan(&parentRevision, &parentDigest, &parentAudience, &parentACL, &parentPurge); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(ctx, `UPDATE stride_conversation_events SET author_principal='service:scout'
+WHERE tenant_id=$1 AND event_id=$2`, snapshot.Organization.Header.ID, parentID); err != nil {
+		t.Fatal(err)
+	}
+	media := projectChatManifestReplyMedia{Ordinal: 0, Kind: "generated_image", SourceID: "reply_v3_image_source",
+		SourceRevision: "sha256:" + sha256Hex([]byte("reply-v3-image-revision")), BlobRef: sha256Hex([]byte("reply-v3-image-blob")),
+		BlobDigest: sha256Hex([]byte("reply-v3-image-blob")), Mime: "image/png", Size: 128,
+		DestinationRevision: "sha256:" + sha256Hex([]byte("reply-v3-destination")), AuthorPrincipal: "service:scout"}
+	media.PartID = projectChatID("rich_message_part", snapshot.Organization.Header.ID, parentID, "0", media.SourceID)
+	media.PartDigest = projectChatReplyMediaPartDigest(parentID, media)
+	text := "Use the exact governed parent image."
+	manifest := projectChatSourceManifest{Version: projectChatSourceManifestV3,
+		Destination: homeProjectDestination{Route: "thread", ThreadID: thread.ID}, TextDigest: sha256Hex([]byte(text)),
+		Reply: &projectChatManifestReply{ManifestVersion: projectChatSourceManifestV3, MessageID: "project_v3_reply_media_parent", EventID: parentID,
+			SourceRevision: parentRevision, SourceDigest: parentDigest, LegacyDigest: sha256Hex([]byte("project-v3-parent-legacy")),
+			AuthorPersonID: "service:scout", AudienceDigest: parentAudience,
+			ACLRevision: parentACL, PurgeGeneration: parentPurge, Media: []projectChatManifestReplyMedia{media}}}
+	manifest.Digest = projectChatManifestDigest(manifest)
+	token := homeProjectContextToken{Version: homeProjectContextV3, Kind: "project", ProjectID: seed.ProjectID, ProjectRevision: seed.ProjectRevision,
+		ProjectDigest: seed.ProjectDigest, ProjectTitle: seed.ProjectTitle, Basis: "selected", Confidence: 1,
+		OrganizationID: snapshot.Organization.Header.ID, PersonID: snapshot.Person.Header.ID, SourceManifestDigest: manifest.Digest}
+	messageID, operation := "project_v3_reply_media_child", "project-v3-reply-media-operation"
+	link, err := store.confirmProjectChatSendWithManifest(ctx, snapshot, thread, messageID, operation, text, token,
+		privateProjectChatSourceAuthority(snapshot.Person.Header.ID), &manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childID := projectChatID("conversation_event", snapshot.Organization.Header.ID, thread.ID, messageID)
+	var supportCount, parentAssociationCount, authorized int
+	if err := store.pool.QueryRow(ctx, `SELECT
+(SELECT count(*) FROM stride_project_chat_reply_media_dependencies WHERE organization_id=$1 AND child_event_id=$2),
+(SELECT count(*) FROM stride_project_association_revisions WHERE organization_id=$1 AND subject_id=$3),
+(SELECT count(*) FROM stride_project_associations_authorized_current WHERE organization_id=$1 AND association_id=$4)`,
+		snapshot.Organization.Header.ID, childID, media.PartID, link.AssociationID).Scan(&supportCount, &parentAssociationCount, &authorized); err != nil {
+		t.Fatal(err)
+	}
+	if supportCount != 1 || parentAssociationCount != 0 || authorized != 1 {
+		t.Fatalf("support=%d parent associations=%d authorized=%d, want 1/0/1", supportCount, parentAssociationCount, authorized)
+	}
+	replayed, found, err := store.committedProjectChatSendWithManifest(ctx, token, thread, messageID, operation, text, manifest)
+	if err != nil || !found || replayed.AssociationID != link.AssociationID {
+		t.Fatalf("v3 reply media replay found=%v link=%+v err=%v", found, replayed, err)
+	}
+	groupID := projectChatID("project_source_group", snapshot.Organization.Header.ID, thread.ID, messageID, operation)
+	// The original receipt is admission evidence for its group, not perpetual
+	// correction authority. Corrections must mint a fresh current-session
+	// receipt after the original has expired.
+	time.Sleep(2100 * time.Millisecond)
+	store.replyMediaReceiptTTL = 30 * time.Minute
+	replacementSeed, err := store.confirmHomeProjectChatSend(ctx, snapshot,
+		scoutChatThreadRecord{ID: "project_v3_reply_media_replacement_seed", OwnerEmail: snapshot.Session.Email, Visibility: scoutChatVisibilityPrivate},
+		"project_v3_reply_media_replacement_message", "project-v3-reply-media-replacement-seed", "Create replacement Project.", homeProjectContextToken{
+			Kind: "create", ProjectTitle: "V3 Reply Media Replacement", Basis: "selected", Confidence: 1,
+			OrganizationID: snapshot.Organization.Header.ID, PersonID: snapshot.Person.Header.ID,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correctionToken := projectChatCorrectionToken{ContextRevision: 1, OldAssociationID: link.AssociationID,
+		OldAssociationRevision: link.AssociationRevision, OrganizationID: snapshot.Organization.Header.ID,
+		Target: projectChatCorrectionTarget{Kind: "project", ProjectID: replacementSeed.ProjectID,
+			ProjectRevision: replacementSeed.ProjectRevision, ProjectDigest: replacementSeed.ProjectDigest,
+			ProjectTitle: replacementSeed.ProjectTitle}}
+	corrected, err := store.replaceProjectChatSourceGroup(ctx, snapshot, groupID, "project-v3-reply-media-correction", correctionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementGroupID := projectChatID("project_source_group_correction", snapshot.Organization.Header.ID, groupID,
+		"project-v3-reply-media-correction")
+	var supportReceipts, oldAuthorized, replacementAuthorized int
+	if err := store.pool.QueryRow(ctx, `SELECT
+(SELECT count(*) FROM stride_project_chat_reply_media_authority_receipts WHERE organization_id=$1 AND child_event_id=$2),
+(SELECT count(*) FROM stride_project_associations_authorized_current authorized JOIN stride_project_chat_source_group_members member
+ ON member.organization_id=authorized.organization_id AND member.association_id=authorized.association_id
+ WHERE member.organization_id=$1 AND member.group_id=$3),
+(SELECT count(*) FROM stride_project_associations_authorized_current authorized JOIN stride_project_chat_source_group_members member
+ ON member.organization_id=authorized.organization_id AND member.association_id=authorized.association_id
+ WHERE member.organization_id=$1 AND member.group_id=$4)`, snapshot.Organization.Header.ID, childID, groupID, replacementGroupID).
+		Scan(&supportReceipts, &oldAuthorized, &replacementAuthorized); err != nil {
+		t.Fatal(err)
+	}
+	if supportReceipts != 2 || oldAuthorized != 0 || replacementAuthorized != 1 || corrected.ProjectID != replacementSeed.ProjectID {
+		t.Fatalf("v3 correction receipts=%d old authorized=%d replacement authorized=%d result=%+v",
+			supportReceipts, oldAuthorized, replacementAuthorized, corrected)
+	}
+	groups, err := store.activeProjectChatGroupsForAttachmentSource(ctx, media.SourceID)
+	if err != nil || len(groups) != 1 || groups[0].groupID != replacementGroupID {
+		t.Fatalf("reply support reverse lookup=%+v err=%v", groups, err)
+	}
+	if err := store.invalidateProjectChatAttachmentSourceGroupForDrift(ctx, snapshot.Organization.Header.ID, replacementGroupID,
+		"project_v3_reply_media_drift", media.SourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM stride_project_associations_authorized_current
+WHERE organization_id=$1 AND association_id=$2`, snapshot.Organization.Header.ID, corrected.AssociationID).Scan(&authorized); err != nil || authorized != 0 {
+		t.Fatalf("drifted support authorized=%d err=%v, want 0", authorized, err)
+	}
+}
+
+func TestProjectChatV3PreviewResolvesExactGeneratedParentMediaWithoutWritingCanonicalRows(t *testing.T) {
+	setupAuthTestEnv(t)
+	ctx, store, _ := migratedPostgresCanonicalStore(t)
+	seedProjectPostgresAuthority(t, ctx, store)
+	previousRuntime := currentCanonicalRuntime()
+	setCanonicalRuntime(&CanonicalRuntime{mode: CanonicalModeOff, postgres: store})
+	defer setCanonicalRuntime(previousRuntime)
+	snapshot := projectChatSnapshotFixture(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	snapshot.Session.Email = user.Email
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "V3 generated media preview", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := scoutChatMessageRecord{ID: "project-v3-generated-parent", Kind: scoutChatMessageKindImage, Role: "scout",
+		Text: "here's the concept render.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Image: &scoutChatImageRef{Ref: ref, Mime: "image/png", Name: "concept.png", ArtifactID: "artifact-v3-parent"}}
+	thread.Messages = append(thread.Messages, parent)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	var beforeEvents int
+	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM stride_conversation_events`).Scan(&beforeEvents); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := app.resolveProjectChatSourceManifest(ctx, user, snapshot, "Use the parent render",
+		homeProjectDestination{Route: "thread", ThreadID: thread.ID}, nil, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != projectChatSourceManifestV3 || manifest.Reply == nil || manifest.Reply.AuthorPersonID != "service:scout" ||
+		len(manifest.Reply.Media) != 1 || manifest.Reply.Media[0].Kind != "generated_image" || manifest.Reply.Media[0].BlobRef != ref {
+		t.Fatalf("resolved v3 manifest=%+v", manifest)
+	}
+	var afterEvents int
+	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM stride_conversation_events`).Scan(&afterEvents); err != nil || afterEvents != beforeEvents {
+		t.Fatalf("preview canonical event count before=%d after=%d err=%v", beforeEvents, afterEvents, err)
 	}
 }

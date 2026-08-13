@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -132,11 +133,33 @@ func (app *kanbanBoardApp) reconcileScoutProjectLinkWithManifest(ctx context.Con
 	}
 	var link confirmedProjectChatLink
 	var err error
-	if token.Version == homeProjectContextV2 {
+	var replySourceLock *sync.Mutex
+	if binding.Manifest.Version == projectChatSourceManifestV3 && binding.Manifest.Reply != nil {
+		replySourceLock = app.scoutChatThreadLock(thread.ID)
+		replySourceLock.Lock()
+		freshThread, _, freshErr := app.scoutChatThreadByID(user.Email, thread.ID)
+		if freshErr != nil || !app.projectChatReplyMediaManifestCurrent(user.Email, freshThread, binding.Manifest.Reply) {
+			replySourceLock.Unlock()
+			return thread, errHomeProjectStale
+		}
+		thread = freshThread
+	}
+	if replySourceLock != nil {
+		defer func() {
+			if replySourceLock != nil {
+				replySourceLock.Unlock()
+			}
+		}()
+	}
+	if homeProjectTokenHasSourceManifest(token.Version) {
 		link, _, err = store.committedProjectChatSendWithManifest(ctx, token, thread, messageID, key, text, binding.Manifest)
 	}
 	if err != nil {
 		return thread, err
+	}
+	if replySourceLock != nil {
+		replySourceLock.Unlock()
+		replySourceLock = nil
 	}
 	if link.AssociationID == "" {
 		err = withCurrentHomeProjectAuthorityRequestContext(ctx, token, func(snapshot StrideE10TenantAuthoritySnapshot) error {
@@ -145,7 +168,7 @@ func (app *kanbanBoardApp) reconcileScoutProjectLinkWithManifest(ctx context.Con
 				return sourceErr
 			}
 			var linkErr error
-			if token.Version == homeProjectContextV2 {
+			if homeProjectTokenHasSourceManifest(token.Version) {
 				link, linkErr = store.confirmProjectChatSendWithManifest(ctx, snapshot, thread, messageID, key, text, token, sourceAuthority, &binding.Manifest)
 			} else {
 				link, linkErr = store.confirmProjectChatSend(ctx, snapshot, thread, messageID, key, text, token, sourceAuthority)
@@ -157,7 +180,7 @@ func (app *kanbanBoardApp) reconcileScoutProjectLinkWithManifest(ctx context.Con
 		return thread, err
 	}
 	var groupAssociationIDs []string
-	if token.Version == homeProjectContextV2 {
+	if homeProjectTokenHasSourceManifest(token.Version) {
 		groupID := projectChatID("project_source_group", token.OrganizationID, thread.ID, messageID, key)
 		groupAssociationIDs, err = store.projectChatSourceGroupAssociationIDs(ctx, token.OrganizationID, groupID)
 		if err != nil || len(groupAssociationIDs) != len(binding.Manifest.Attachments)+1 || groupAssociationIDs[0] != link.AssociationID {
@@ -189,8 +212,9 @@ func (app *kanbanBoardApp) reconcileScoutProjectLinkWithManifest(ctx context.Con
 		operation.ProjectDigest = link.ProjectDigest
 		operation.ProjectTitle = link.ProjectTitle
 		operation.AssociationID = link.AssociationID
-		if token.Version == homeProjectContextV2 {
+		if homeProjectTokenHasSourceManifest(token.Version) {
 			operation.SourceManifestDigest = binding.Manifest.Digest
+			operation.SourceManifestVersion = binding.Manifest.Version
 			operation.SourceGroupID = projectChatID("project_source_group", token.OrganizationID, thread.ID, messageID, key)
 			operation.AssociationIDs = append([]string(nil), groupAssociationIDs...)
 		}
@@ -227,8 +251,8 @@ func (app *kanbanBoardApp) reconcileScoutProjectLinkWithManifest(ctx context.Con
 func (store *PostgresCanonicalStore) committedProjectChatSendWithManifest(ctx context.Context, token homeProjectContextToken,
 	thread scoutChatThreadRecord, messageID, operationKey, text string, manifest projectChatSourceManifest) (confirmedProjectChatLink, bool, error) {
 	var result confirmedProjectChatLink
-	if store == nil || store.pool == nil || token.Version != homeProjectContextV2 || !strideIdentifier(token.OrganizationID) ||
-		!strideIdentifier(thread.ID) || !strideIdentifier(messageID) || manifest.Digest != token.SourceManifestDigest ||
+	if store == nil || store.pool == nil || !homeProjectTokenHasSourceManifest(token.Version) || !strideIdentifier(token.OrganizationID) ||
+		!strideIdentifier(thread.ID) || !strideIdentifier(messageID) || manifest.Version != projectChatManifestVersionForToken(token.Version) || manifest.Digest != token.SourceManifestDigest ||
 		manifest.Digest != projectChatManifestDigest(manifest) || manifest.TextDigest != sha256Hex([]byte(strings.TrimSpace(text))) {
 		return result, false, nil
 	}
@@ -241,8 +265,9 @@ FROM stride_project_chat_send_receipts receipt
 JOIN stride_project_revisions project ON project.organization_id=receipt.organization_id AND project.project_id=receipt.project_id AND project.revision=receipt.project_revision
 JOIN stride_project_chat_source_groups source_group ON source_group.organization_id=receipt.organization_id AND source_group.group_id=$3
 WHERE receipt.organization_id=$1 AND receipt.operation_id=$2 AND receipt.thread_id=$4 AND receipt.message_id=$5 AND receipt.status='confirmed'
- AND source_group.conversation_event_id=receipt.conversation_event_id AND source_group.root_association_id=receipt.association_id`,
-		token.OrganizationID, operationID, groupID, thread.ID, messageID).Scan(&result.ProjectID, &result.ProjectRevision, &result.ProjectTitle,
+ AND source_group.conversation_event_id=receipt.conversation_event_id AND source_group.root_association_id=receipt.association_id
+ AND source_group.source_manifest_version=$6`,
+		token.OrganizationID, operationID, groupID, thread.ID, messageID, manifest.Version).Scan(&result.ProjectID, &result.ProjectRevision, &result.ProjectTitle,
 		&result.ProjectDigest, &result.AssociationID, &result.AssociationRevision, &actorPersonID, &storedManifest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return confirmedProjectChatLink{}, false, nil
@@ -292,7 +317,7 @@ func (app *kanbanBoardApp) acceptedScoutProjectTurnRetry(user *userAccount, thre
 func (app *kanbanBoardApp) acceptedScoutProjectTurnCanonicalResume(ctx context.Context, user *userAccount,
 	snapshot StrideE10TenantAuthoritySnapshot, threadID, operationID, bodyDigest, tokenDigest, text string,
 	token homeProjectContextToken, manifest projectChatSourceManifest) (bool, error) {
-	if app == nil || user == nil || token.Version != homeProjectContextV2 || token.Kind != "project" ||
+	if app == nil || user == nil || !homeProjectTokenHasSourceManifest(token.Version) || token.Kind != "project" ||
 		!strideIdentifier(threadID) || !strideIdentifier(operationID) || !isHexDigest(bodyDigest) || !isHexDigest(tokenDigest) ||
 		token.PersonID != snapshot.Person.Header.ID || token.OrganizationID != snapshot.Organization.Header.ID ||
 		token.MembershipID != snapshot.Membership.Header.ID || manifest.Digest != token.SourceManifestDigest {
@@ -360,8 +385,8 @@ func (app *kanbanBoardApp) beginScoutExistingProjectTurn(ctx context.Context, us
 	manifestDigest := ""
 	var attachmentSources []scoutChatProjectAttachmentSource
 	var replySource *scoutChatProjectReplySource
-	if binding.Token.Version == homeProjectContextV2 {
-		if binding.Manifest.Version != projectChatSourceManifestVersion || !isHexDigest(binding.Manifest.Digest) ||
+	if homeProjectTokenHasSourceManifest(binding.Token.Version) {
+		if binding.Manifest.Version != projectChatManifestVersionForToken(binding.Token.Version) || !isHexDigest(binding.Manifest.Digest) ||
 			binding.Token.SourceManifestDigest != binding.Manifest.Digest || !projectChatManifestMatchesFiles(binding.Manifest, message.Files, func() string {
 			if message.ReplyTo == nil {
 				return ""
@@ -394,8 +419,12 @@ func (app *kanbanBoardApp) beginScoutExistingProjectTurn(ctx context.Context, us
 		if existing.OperationID != operation.ID {
 			continue
 		}
+		existingManifestVersion := existing.SourceManifestVersion
+		if existingManifestVersion == 0 && existing.SourceManifestDigest != "" {
+			existingManifestVersion = projectChatSourceManifestVersion
+		}
 		if existing.TokenDigest != tokenDigest || existing.MessageID != message.ID || existing.ProjectKind != binding.Token.Kind || existing.ProjectID != binding.Token.ProjectID || existing.ProjectRevision != binding.Token.ProjectRevision || existing.ProjectDigest != binding.Token.ProjectDigest || existing.ProjectTitle != binding.Token.ProjectTitle || existing.Basis != binding.Token.Basis ||
-			existing.SourceManifestDigest != manifestDigest || existing.SourceGroupID != sourceGroupID {
+			existing.SourceManifestDigest != manifestDigest || existingManifestVersion != binding.Manifest.Version || existing.SourceGroupID != sourceGroupID {
 			return thread, message, false, ErrProjectAuthorityConflict
 		}
 		messageIndex := scoutChatMessageIndex(current, message.ID)
@@ -411,7 +440,7 @@ func (app *kanbanBoardApp) beginScoutExistingProjectTurn(ctx context.Context, us
 	current.ProjectLinkOperations = append(current.ProjectLinkOperations, scoutChatProjectLinkOperation{
 		OperationID: operation.ID, TokenDigest: tokenDigest, MessageID: message.ID, State: "pending", ProjectKind: binding.Token.Kind,
 		ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, ProjectDigest: binding.Token.ProjectDigest,
-		ProjectTitle: binding.Token.ProjectTitle, Basis: binding.Token.Basis, SourceManifestDigest: manifestDigest, SourceGroupID: sourceGroupID,
+		ProjectTitle: binding.Token.ProjectTitle, Basis: binding.Token.Basis, SourceManifestDigest: manifestDigest, SourceManifestVersion: binding.Manifest.Version, SourceGroupID: sourceGroupID,
 		AttachmentSources: attachmentSources, ReplySource: replySource, ReservationID: message.attachmentReservationID,
 	})
 	current.Messages = append(current.Messages, message)
@@ -608,7 +637,7 @@ func (store *PostgresCanonicalStore) confirmProjectChatSendWithManifest(ctx cont
 	}
 	manifestDigest := ""
 	if manifest != nil {
-		if manifest.Version != projectChatSourceManifestVersion || manifest.Destination != (homeProjectDestination{Route: "thread", ThreadID: thread.ID}) ||
+		if manifest.Version != projectChatManifestVersionForToken(token.Version) || manifest.Destination != (homeProjectDestination{Route: "thread", ThreadID: thread.ID}) ||
 			manifest.TextDigest != sha256Hex([]byte(strings.TrimSpace(text))) || manifest.Digest != projectChatManifestDigest(*manifest) {
 			return result, ErrProjectAuthorityConflict
 		}
@@ -761,6 +790,50 @@ VALUES($1,$2,1,$3,1,$4,$5,$6,$7,$8,$9,$10,$10,'message',1,decode($11,'hex'),sha2
 	if err != nil {
 		return result, err
 	}
+	if manifest != nil && manifest.Version == projectChatSourceManifestV3 && manifest.Reply != nil {
+		parent := manifest.Reply
+		for _, media := range parent.Media {
+			if media.Ordinal < 0 || !oneOf(media.Kind, "file", "generated_image") || !strideIdentifier(media.PartID) || !isHexDigest(media.PartDigest) {
+				return result, ErrProjectAuthorityConflict
+			}
+			destinationDigest := sha256Hex([]byte(media.DestinationRevision))
+			originID, originRevision := any(nil), any(nil)
+			if media.OriginFileID != "" {
+				originID, originRevision = media.OriginFileID, media.OriginRevision
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO stride_rich_message_part_revisions(organization_id,part_id,revision,conversation_event_id,conversation_event_revision,ordinal,source_id,source_revision,source_origin_id,source_origin_revision,blob_ref,blob_digest,media_type,byte_size,destination_digest,destination_revision,author_principal,source_audience,source_acl_revision,purge_generation,recorded_at,content_digest)
+VALUES($1,$2,1,$3,$4,$5,$6,$7,$8,$9,$10,decode($11,'hex'),$12,$13,decode($14,'hex'),$15,$16,$17::jsonb,$18,$19,$20,decode($21,'hex'))
+ON CONFLICT(part_id,revision) DO NOTHING`, snapshot.Organization.Header.ID, media.PartID, parent.EventID, parent.SourceRevision,
+				media.Ordinal, media.SourceID, media.SourceRevision, originID, originRevision, media.BlobRef, media.BlobDigest, media.Mime,
+				media.Size, destinationDigest, media.DestinationRevision, media.AuthorPrincipal, audience, sourceAuthority.ACLRevision,
+				parent.PurgeGeneration, now, media.PartDigest); err != nil {
+				return result, err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO stride_rich_message_parts_current(organization_id,part_id,revision,conversation_event_id,ordinal,content_digest,updated_at)
+VALUES($1,$2,1,$3,$4,decode($5,'hex'),$6) ON CONFLICT(part_id) DO NOTHING`, snapshot.Organization.Header.ID, media.PartID,
+				parent.EventID, media.Ordinal, media.PartDigest, now); err != nil {
+				return result, err
+			}
+			receiptID := projectChatID("project_reply_media_receipt", operationID, fmt.Sprint(media.Ordinal), media.PartID)
+			mediaOperationKey := sha256Hex([]byte("project-chat-reply-media/v1\x00" + operationKeyDigest + "\x00" + fmt.Sprint(media.Ordinal)))
+			mediaFingerprint := sha256Hex([]byte(strings.Join([]string{"project-chat-reply-media/v1", snapshot.Organization.Header.ID,
+				eventID, parent.EventID, fmt.Sprint(media.Ordinal), media.Kind, media.PartID, "1", media.PartDigest, manifest.Digest, mediaOperationKey}, "\x1f")))
+			if _, err = tx.Exec(ctx, `INSERT INTO stride_project_chat_reply_media_authority_receipts(organization_id,receipt_id,child_event_id,parent_event_id,part_id,part_revision,part_digest,source_audience,source_acl_revision,purge_generation,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,operation_key_digest,request_fingerprint,recorded_at,expires_at)
+VALUES($1,$2,$3,$4,$5,1,decode($6,'hex'),$7::jsonb,$8,$9,$10,$11,$12,decode($13,'hex'),$14,$15,decode($16,'hex'),decode($17,'hex'),$18,$19)
+ON CONFLICT(organization_id,receipt_id) DO NOTHING`, snapshot.Organization.Header.ID, receiptID, eventID, parent.EventID, media.PartID,
+				media.PartDigest, audience, sourceAuthority.ACLRevision, parent.PurgeGeneration, snapshot.Person.Header.ID,
+				snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision, snapshot.SessionHash, snapshot.ActiveSession.SessionRevision,
+				snapshot.Generation, mediaOperationKey, mediaFingerprint, now, now.Add(store.projectChatReplyMediaReceiptTTL())); err != nil {
+				return result, err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO stride_project_chat_reply_media_dependencies(organization_id,child_event_id,parent_event_id,ordinal,media_kind,part_id,part_revision,part_digest,authority_receipt_id,source_manifest_digest,recorded_at)
+VALUES($1,$2,$3,$4,$5,$6,1,decode($7,'hex'),$8,decode($9,'hex'),$10)
+ON CONFLICT(organization_id,child_event_id,ordinal) DO NOTHING`, snapshot.Organization.Header.ID, eventID, parent.EventID,
+				media.Ordinal, media.Kind, media.PartID, media.PartDigest, receiptID, manifest.Digest, now); err != nil {
+				return result, err
+			}
+		}
+	}
 	sourceRefs, _ := json.Marshal([]STRIDEReference{{ContractType: STRIDEContractConversationEvent, ID: eventID, Revision: 1, Digest: contentDigest}})
 	receiptID := projectChatID("project_source", operationID)
 	sourceKey := sha256Hex([]byte("project-source/v1\x00" + operationKeyDigest))
@@ -912,12 +985,12 @@ VALUES($1,$2,1,$3,$4,decode($5,'hex'),$6,decode($7,'hex'),decode($8,'hex'),$9,$1
 		groupOperationKey := sha256Hex([]byte("project-chat-source-group-send/v2\x00" + operationKey))
 		groupFingerprint := projectChatSourceGroupRequestFingerprint(snapshot, groupID, groupOperationID, groupOperationKey, manifest.Digest,
 			thread.ID, messageID, eventID, result.ProjectID, result.ProjectRevision, result.AssociationID, 2, len(partAssociations)+1)
-		_, err = tx.Exec(ctx, `INSERT INTO stride_project_chat_source_groups(organization_id,group_id,operation_id,operation_key_digest,request_fingerprint,source_manifest_digest,thread_id,message_id,conversation_event_id,conversation_event_revision,project_id,project_revision,root_association_id,root_association_revision,member_count,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,status,recorded_at)
-VALUES($1,$2,$3,decode($4,'hex'),decode($5,'hex'),decode($6,'hex'),$7,$8,$9,1,$10,$11,$12,2,$13,$14,$15,$16,decode($17,'hex'),$18,$19,'confirmed',$20)`,
+		_, err = tx.Exec(ctx, `INSERT INTO stride_project_chat_source_groups(organization_id,group_id,operation_id,operation_key_digest,request_fingerprint,source_manifest_digest,thread_id,message_id,conversation_event_id,conversation_event_revision,project_id,project_revision,root_association_id,root_association_revision,member_count,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,status,recorded_at,source_manifest_version)
+VALUES($1,$2,$3,decode($4,'hex'),decode($5,'hex'),decode($6,'hex'),$7,$8,$9,1,$10,$11,$12,2,$13,$14,$15,$16,decode($17,'hex'),$18,$19,'confirmed',$20,$21)`,
 			snapshot.Organization.Header.ID, groupID, groupOperationID, groupOperationKey, groupFingerprint, manifest.Digest, thread.ID, messageID,
 			eventID, result.ProjectID, result.ProjectRevision, result.AssociationID, len(partAssociations)+1, snapshot.Person.Header.ID,
 			snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision, snapshot.SessionHash, snapshot.ActiveSession.SessionRevision,
-			snapshot.Generation, now)
+			snapshot.Generation, now, manifest.Version)
 		if err != nil {
 			return result, err
 		}

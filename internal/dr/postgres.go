@@ -82,6 +82,7 @@ var canonicalTables = []string{
 	"stride_project_chat_source_group_invalidations", "stride_project_chat_source_group_correction_receipts",
 	"stride_project_chat_source_group_drift_receipts",
 	"stride_project_chat_source_group_authority_loss_receipts",
+	"stride_project_chat_reply_media_authority_receipts", "stride_project_chat_reply_media_dependencies",
 	"stride_rich_message_part_revisions", "stride_rich_message_parts_current",
 	"stride_mymind_sources", "stride_person_principals", "stride_registry_revisions",
 	"stride_source_derived_edges", "stride_workspace_memberships",

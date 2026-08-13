@@ -72,10 +72,10 @@ func (store *PostgresCanonicalStore) replaceProjectChatSourceGroup(ctx context.C
 	}
 	operationKey := sha256Hex([]byte("project-chat-group-correction/v1\x00" + operationID))
 	var manifestDigest, threadID, messageID, eventID string
-	var memberCount int
-	err = tx.QueryRow(ctx, `SELECT encode(source_manifest_digest,'hex'),thread_id,message_id,conversation_event_id,member_count
+	var memberCount, sourceManifestVersion int
+	err = tx.QueryRow(ctx, `SELECT encode(source_manifest_digest,'hex'),thread_id,message_id,conversation_event_id,member_count,source_manifest_version
 FROM stride_project_chat_source_groups WHERE organization_id=$1 AND group_id=$2 FOR UPDATE`, snapshot.Organization.Header.ID, groupID).
-		Scan(&manifestDigest, &threadID, &messageID, &eventID, &memberCount)
+		Scan(&manifestDigest, &threadID, &messageID, &eventID, &memberCount, &sourceManifestVersion)
 	if err != nil {
 		return result, err
 	}
@@ -120,6 +120,70 @@ WHERE member.organization_id=$1 AND member.group_id=$2 ORDER BY member.ordinal`,
 	}
 	now := time.Now().UTC()
 	replacementGroupID := projectChatID("project_source_group_correction", snapshot.Organization.Header.ID, groupID, operationID)
+	if sourceManifestVersion == projectChatSourceManifestV3 {
+		type supportMediaAuthority struct {
+			ordinal                                          int
+			kind, parentEventID, partID, partDigest          string
+			partRevision, sourceACLRevision, purgeGeneration int64
+			sourceAudience                                   []byte
+		}
+		mediaRows, mediaErr := tx.Query(ctx, `SELECT support.ordinal,support.media_kind,support.parent_event_id,support.part_id,
+support.part_revision,encode(support.part_digest,'hex'),part.source_audience,part.source_acl_revision,part.purge_generation
+FROM stride_project_chat_reply_media_dependencies support
+JOIN stride_rich_message_part_revisions part ON part.organization_id=support.organization_id
+ AND part.part_id=support.part_id AND part.revision=support.part_revision
+JOIN stride_rich_message_parts_current current_part ON current_part.organization_id=support.organization_id
+ AND current_part.part_id=support.part_id AND current_part.revision=support.part_revision
+ AND current_part.content_digest=support.part_digest
+WHERE support.organization_id=$1 AND support.child_event_id=$2 AND part.invalidated_at IS NULL
+ AND part.content_digest=support.part_digest AND part.source_audience->'principals' @> jsonb_build_array($3::text)
+ORDER BY support.ordinal`, snapshot.Organization.Header.ID, eventID, snapshot.Person.Header.ID)
+		if mediaErr != nil {
+			return result, mediaErr
+		}
+		var supportMedia []supportMediaAuthority
+		for mediaRows.Next() {
+			var media supportMediaAuthority
+			if mediaErr = mediaRows.Scan(&media.ordinal, &media.kind, &media.parentEventID, &media.partID, &media.partRevision,
+				&media.partDigest, &media.sourceAudience, &media.sourceACLRevision, &media.purgeGeneration); mediaErr != nil {
+				mediaRows.Close()
+				return result, mediaErr
+			}
+			supportMedia = append(supportMedia, media)
+		}
+		if mediaErr = mediaRows.Err(); mediaErr != nil {
+			mediaRows.Close()
+			return result, mediaErr
+		}
+		mediaRows.Close()
+		for _, media := range supportMedia {
+			mediaOperationKey := sha256Hex([]byte(fmt.Sprintf("project-chat-group-correction-reply-media/v1\x1f%s\x1f%d\x1f%s", operationKey, media.ordinal, media.partID)))
+			mediaFingerprint := sha256Hex([]byte(strings.Join([]string{"project-chat-reply-media/v1", snapshot.Organization.Header.ID,
+				eventID, media.parentEventID, fmt.Sprint(media.ordinal), media.kind, media.partID, fmt.Sprint(media.partRevision), media.partDigest, manifestDigest,
+				mediaOperationKey}, "\x1f")))
+			receiptID := projectChatID("project_group_replacement_reply_media_source", snapshot.Organization.Header.ID, groupID,
+				operationID, fmt.Sprint(media.ordinal), media.partID)
+			if _, mediaErr = tx.Exec(ctx, `INSERT INTO stride_project_chat_reply_media_authority_receipts(organization_id,receipt_id,
+child_event_id,parent_event_id,part_id,part_revision,part_digest,source_audience,source_acl_revision,purge_generation,actor_person_id,
+actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,operation_key_digest,
+				request_fingerprint,recorded_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,decode($7,'hex'),$8::jsonb,$9,$10,$11,$12,$13,
+decode($14,'hex'),$15,$16,decode($17,'hex'),decode($18,'hex'),$19,$20)`, snapshot.Organization.Header.ID, receiptID,
+				eventID, media.parentEventID, media.partID, media.partRevision, media.partDigest, media.sourceAudience, media.sourceACLRevision, media.purgeGeneration,
+				snapshot.Person.Header.ID, snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision, snapshot.SessionHash,
+				snapshot.ActiveSession.SessionRevision, snapshot.Generation, mediaOperationKey, mediaFingerprint, now,
+				now.Add(store.projectChatReplyMediaReceiptTTL())); mediaErr != nil {
+				return result, mediaErr
+			}
+		}
+		var expectedMediaCount int
+		if mediaErr = tx.QueryRow(ctx, `SELECT count(*) FROM stride_project_chat_reply_media_dependencies
+WHERE organization_id=$1 AND child_event_id=$2`, snapshot.Organization.Header.ID, eventID).Scan(&expectedMediaCount); mediaErr != nil {
+			return result, mediaErr
+		}
+		if len(supportMedia) != expectedMediaCount {
+			return result, ErrProjectAuthorityConflict
+		}
+	}
 	replacementIDs := make([]string, len(members))
 	replacementDigests := make([]string, len(members))
 	for index, member := range members {
@@ -232,11 +296,11 @@ $6::text,$7::bigint::text,encode(decode($8,'hex'),'hex'),$9::bigint::text,$10::b
 	if _, err = tx.Exec(ctx, `INSERT INTO stride_project_chat_source_groups(organization_id,group_id,operation_id,operation_key_digest,request_fingerprint,
 source_manifest_digest,thread_id,message_id,conversation_event_id,conversation_event_revision,project_id,project_revision,root_association_id,
 root_association_revision,member_count,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,
-authority_generation,status,recorded_at) VALUES($1,$2,$3,decode($4,'hex'),decode($5,'hex'),decode($6,'hex'),$7,$8,$9,1,$10,$11,$12,1,$13,
-$14,$15,$16,decode($17,'hex'),$18,$19,'confirmed',$20)`, snapshot.Organization.Header.ID, replacementGroupID, operationID,
+authority_generation,status,recorded_at,source_manifest_version) VALUES($1,$2,$3,decode($4,'hex'),decode($5,'hex'),decode($6,'hex'),$7,$8,$9,1,$10,$11,$12,1,$13,
+$14,$15,$16,decode($17,'hex'),$18,$19,'confirmed',$20,$21)`, snapshot.Organization.Header.ID, replacementGroupID, operationID,
 		replacementOperationKey, groupFingerprint, manifestDigest, threadID, messageID, eventID, result.ProjectID, result.ProjectRevision,
 		replacementIDs[0], memberCount, snapshot.Person.Header.ID, snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision,
-		snapshot.SessionHash, snapshot.ActiveSession.SessionRevision, snapshot.Generation, now); err != nil {
+		snapshot.SessionHash, snapshot.ActiveSession.SessionRevision, snapshot.Generation, now, sourceManifestVersion); err != nil {
 		return result, err
 	}
 	for index, member := range members {
@@ -388,6 +452,13 @@ func (store *PostgresCanonicalStore) invalidateProjectChatAttachmentGroupForDrif
 	return store.invalidateProjectChatSourceGroupForDrift(ctx, organizationID, groupID, operationID, "rich_message_part", "origin_revoked")
 }
 
+func (store *PostgresCanonicalStore) invalidateProjectChatAttachmentSourceGroupForDrift(ctx context.Context, organizationID, groupID, operationID, sourceID string) error {
+	if strings.TrimSpace(sourceID) == "" {
+		return ErrProjectAuthorityInvalid
+	}
+	return store.invalidateProjectChatSourceGroupForDrift(ctx, organizationID, groupID, operationID, "rich_message_part", "origin_revoked", sourceID)
+}
+
 func (store *PostgresCanonicalStore) invalidateProjectChatRootGroupForMutation(ctx context.Context, organizationID, groupID, operationID, reason string) error {
 	if !oneOf(reason, "source_edited", "source_deleted") {
 		return ErrProjectAuthorityInvalid
@@ -426,22 +497,84 @@ WHERE dependency.organization_id=$1 AND dependency.parent_event_id=$2
 	return groups, rows.Err()
 }
 
+// invalidateProjectChatReplyParentsByLegacyMutation is the server-owned
+// reverse edge for an unlinked parent edit/delete/regeneration. It invalidates
+// the exact canonical parent event first, which makes every child group
+// immediately unreadable, then durably terminalizes each child group through
+// its immutable drift receipt and four-family purge transaction. A legacy save
+// failure leaves the old body visible but its Project use unavailable; retry is
+// deterministic and convergent.
+func (store *PostgresCanonicalStore) invalidateProjectChatReplyParentsByLegacyMutation(ctx context.Context, threadID, messageID, reason string) error {
+	if store == nil || store.pool == nil || !strideIdentifier(threadID) || !strideIdentifier(messageID) ||
+		!oneOf(reason, "parent_edited", "parent_deleted", "parent_regenerated") {
+		return ErrProjectAuthorityInvalid
+	}
+	rows, err := store.pool.Query(ctx, `SELECT DISTINCT dependency.organization_id,source_group.group_id,dependency.parent_event_id
+FROM stride_project_chat_reply_dependencies dependency
+JOIN stride_project_chat_source_groups source_group ON source_group.organization_id=dependency.organization_id
+ AND source_group.conversation_event_id=dependency.child_event_id
+JOIN stride_conversation_events parent ON parent.tenant_id=dependency.organization_id AND parent.event_id=dependency.parent_event_id
+WHERE parent.thread_id=$1 AND parent.source_id=$2
+ AND NOT EXISTS(SELECT 1 FROM stride_project_chat_source_group_drift_receipts drift
+  WHERE drift.organization_id=source_group.organization_id AND drift.group_id=source_group.group_id)
+ AND NOT EXISTS(SELECT 1 FROM stride_project_chat_source_group_invalidations invalidation
+  WHERE invalidation.organization_id=source_group.organization_id AND invalidation.group_id=source_group.group_id)`, threadID, messageID)
+	if err != nil {
+		return err
+	}
+	type dependency struct{ organizationID, groupID, parentEventID string }
+	var dependencies []dependency
+	for rows.Next() {
+		var item dependency
+		if err := rows.Scan(&item.organizationID, &item.groupID, &item.parentEventID); err != nil {
+			rows.Close()
+			return err
+		}
+		dependencies = append(dependencies, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, item := range dependencies {
+		if _, err := store.pool.Exec(ctx, `UPDATE stride_conversation_events SET invalidated_at=COALESCE(invalidated_at,clock_timestamp()),
+purge_generation=CASE WHEN invalidated_at IS NULL THEN purge_generation+1 ELSE purge_generation END
+WHERE tenant_id=$1 AND event_id=$2 AND thread_id=$3 AND source_id=$4`, item.organizationID, item.parentEventID, threadID, messageID); err != nil {
+			return err
+		}
+		operationID := projectChatID("project_reply_legacy_mutation", item.organizationID, item.groupID, threadID, messageID, reason)
+		if err := store.invalidateProjectChatReplyGroupForDrift(ctx, item.organizationID, item.groupID, operationID, reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type projectChatSourceGroupRef struct {
 	organizationID string
 	groupID        string
 }
 
 func (store *PostgresCanonicalStore) activeProjectChatGroupsForAttachmentSource(ctx context.Context, sourceID string) ([]projectChatSourceGroupRef, error) {
-	rows, err := store.pool.Query(ctx, `SELECT source_group.organization_id,source_group.group_id
+	rows, err := store.pool.Query(ctx, `SELECT DISTINCT candidate.organization_id,candidate.group_id FROM (
+SELECT source_group.organization_id,source_group.group_id
 FROM stride_project_chat_source_groups source_group JOIN stride_project_chat_source_group_members member
  ON member.organization_id=source_group.organization_id AND member.group_id=source_group.group_id
 JOIN stride_rich_message_part_revisions part ON part.organization_id=member.organization_id AND part.part_id=member.subject_id
  AND part.revision=member.subject_revision
 WHERE member.subject_contract_type='rich_message_part' AND part.source_id=$1
- AND NOT EXISTS(SELECT 1 FROM stride_project_chat_source_group_drift_receipts drift
-  WHERE drift.organization_id=source_group.organization_id AND drift.group_id=source_group.group_id)
+UNION ALL
+SELECT source_group.organization_id,source_group.group_id
+FROM stride_project_chat_source_groups source_group
+JOIN stride_project_chat_reply_media_dependencies support ON support.organization_id=source_group.organization_id
+ AND support.child_event_id=source_group.conversation_event_id
+JOIN stride_rich_message_part_revisions part ON part.organization_id=support.organization_id AND part.part_id=support.part_id
+ AND part.revision=support.part_revision
+WHERE part.source_id=$1) candidate
+WHERE NOT EXISTS(SELECT 1 FROM stride_project_chat_source_group_drift_receipts drift
+  WHERE drift.organization_id=candidate.organization_id AND drift.group_id=candidate.group_id)
  AND NOT EXISTS(SELECT 1 FROM stride_project_chat_source_group_invalidations invalidation
-  WHERE invalidation.organization_id=source_group.organization_id AND invalidation.group_id=source_group.group_id)`, sourceID)
+  WHERE invalidation.organization_id=candidate.organization_id AND invalidation.group_id=candidate.group_id)`, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +590,7 @@ WHERE member.subject_contract_type='rich_message_part' AND part.source_id=$1
 	return groups, rows.Err()
 }
 
-func (store *PostgresCanonicalStore) invalidateProjectChatSourceGroupForDrift(ctx context.Context, organizationID, groupID, operationID, contractType, reason string) error {
+func (store *PostgresCanonicalStore) invalidateProjectChatSourceGroupForDrift(ctx context.Context, organizationID, groupID, operationID, contractType, reason string, sourceIDs ...string) error {
 	if store == nil || store.pool == nil || !strideIdentifier(organizationID) || !strideIdentifier(groupID) || !strideIdentifier(operationID) {
 		return ErrProjectAuthorityInvalid
 	}
@@ -480,12 +613,25 @@ WHERE organization_id=$1 AND group_id=$2 AND operation_id=$3)`, organizationID, 
 	var subjectID, subjectDigest string
 	var subjectRevision int64
 	if contractType == "rich_message_part" {
-		err = tx.QueryRow(ctx, `SELECT part.part_id,part.revision,encode(part.content_digest,'hex')
+		sourceID := ""
+		if len(sourceIDs) > 0 {
+			sourceID = strings.TrimSpace(sourceIDs[0])
+		}
+		err = tx.QueryRow(ctx, `SELECT candidate.part_id,candidate.revision,candidate.content_digest FROM (
+SELECT part.part_id,part.revision,encode(part.content_digest,'hex') AS content_digest,part.source_id,member.ordinal AS sort_ordinal
 FROM stride_project_chat_source_group_members member
 JOIN stride_rich_message_parts_current current_part ON current_part.organization_id=member.organization_id AND current_part.part_id=member.subject_id
 JOIN stride_rich_message_part_revisions part ON part.organization_id=current_part.organization_id AND part.part_id=current_part.part_id AND part.revision=current_part.revision
 WHERE member.organization_id=$1 AND member.group_id=$2 AND member.subject_contract_type='rich_message_part'
-ORDER BY member.ordinal LIMIT 1 FOR SHARE`, organizationID, groupID).Scan(&subjectID, &subjectRevision, &subjectDigest)
+UNION ALL
+SELECT part.part_id,part.revision,encode(part.content_digest,'hex'),part.source_id,100000+support.ordinal
+FROM stride_project_chat_source_groups source_group
+JOIN stride_project_chat_reply_media_dependencies support ON support.organization_id=source_group.organization_id
+ AND support.child_event_id=source_group.conversation_event_id
+JOIN stride_rich_message_parts_current current_part ON current_part.organization_id=support.organization_id AND current_part.part_id=support.part_id
+JOIN stride_rich_message_part_revisions part ON part.organization_id=current_part.organization_id AND part.part_id=current_part.part_id AND part.revision=current_part.revision
+WHERE source_group.organization_id=$1 AND source_group.group_id=$2) candidate
+WHERE $3='' OR candidate.source_id=$3 ORDER BY candidate.sort_ordinal LIMIT 1`, organizationID, groupID, sourceID).Scan(&subjectID, &subjectRevision, &subjectDigest)
 	} else if contractType == "conversation_event" {
 		err = tx.QueryRow(ctx, `SELECT member.subject_id,member.subject_revision,encode(member.subject_digest,'hex')
 FROM stride_project_chat_source_group_members member

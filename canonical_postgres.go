@@ -54,9 +54,17 @@ var (
 )
 
 type PostgresCanonicalStore struct {
-	pool      *pgxpool.Pool
-	registry  *CanonicalPayloadRegistry
-	Failpoint func(string) error
+	pool                 *pgxpool.Pool
+	registry             *CanonicalPayloadRegistry
+	Failpoint            func(string) error
+	replyMediaReceiptTTL time.Duration
+}
+
+func (store *PostgresCanonicalStore) projectChatReplyMediaReceiptTTL() time.Duration {
+	if store != nil && store.replyMediaReceiptTTL > 0 {
+		return store.replyMediaReceiptTTL
+	}
+	return 30 * time.Minute
 }
 
 func OpenPostgresCanonicalStore(ctx context.Context, databaseURL string, registry *CanonicalPayloadRegistry) (*PostgresCanonicalStore, error) {

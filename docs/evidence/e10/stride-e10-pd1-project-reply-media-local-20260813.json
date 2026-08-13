@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_project_reply_media_checkpoint",
+  "observedAt": "2026-08-13T05:25:29-07:00",
+  "status": "bounded_local_release_candidate_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "43cf8ee1eaaee5a7235525b9a1c8bb7f567ba609",
+    "canonicalPlanSha256": "aab8fdf0c647d7d94cf58b15cb10b477a9b4c2291ab704134adee147ade073c9",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "backwardCompatibility": "released_v2_manifests_tokens_and_retries_remain_byte_compatible_and_continue_to_withhold_reply_parent_media",
+    "v3Manifest": "new_project_linked_replies_sign_exact_ordered_parent_file_and_generated_image_revisions_into_one_server_resolved_v3_manifest",
+    "zeroEffectPreview": "preview_resolves_current_body_free_parent_media_authority_without_writing_canonical_rows_or_calling_a_provider",
+    "evidenceOnlyParent": "parent_media_is_admitted_as_immutable_rich_message_part_evidence_with_no_project_association_and_is_never_retagged",
+    "atomicConfirmation": "reply_event_parent_dependency_media_dependencies_authority_receipts_and_child_project_group_confirm_in_one_serializable_transaction",
+    "providerAdmission": "v3_parent_media_reaches_the_provider_only_after_group_confirmation_and_exact_before_and_after_current_source_reauthorization",
+    "mutationAndDrift": "parent_edit_delete_file_revoke_origin_delete_and_generated_image_replacement_terminalize_every_dependent_child_group_before_legacy_mutation",
+    "correction": "v3_A_to_B_group_correction_mints_fresh_support_receipts_after_the_original_receipt_expires_and_preserves_exact_reverse_drift_invalidation",
+    "ordinaryReplies": "unlinked_replies_retain_existing_authorized_parent_media_behavior",
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "aab8fdf0c647d7d94cf58b15cb10b477a9b4c2291ab704134adee147ade073c9",
+    "migrations/0023_stride_project_chat_reply_media.sql": "78c0875bd427536339ad5c5e4b64296ead63e29cf6341706206614736182c6e5",
+    "attachments.go": "666bc2fd1a3ddd9284d59e676efb46df08a4fc22a5f288d6745356515e90e54d",
+    "attachments_test.go": "82730589adb640d0aec646fe9c084c0a3a19a3a54b52339e6b7c4f6a792bcd0d",
+    "canonical_migrations_test.go": "814c265a8f0cdb8a86742e4fd911c9615b3ce0ada6ce93758e02901d692b7038",
+    "canonical_postgres.go": "5af9a738d62da969a9a0dc6a0148ae8b1eb1e9d78ba83bdc45c501246f2b53be",
+    "canonical_postgres_test.go": "859c4e061418b1697b9a39dc18e165a74e72b42f714fa29123afa56fa8577e64",
+    "home_project_context.go": "8237466c343ea355f22c4b50cae8b7539ac7e45955ff2c3025115f91d5da51d6",
+    "home_project_context_test.go": "3b23ad1a9f0b93e1fc324aef930a6c66f4a1ecc335d43eb31034ea97b62200c4",
+    "internal/dr/postgres.go": "4001ceb844d42ac776ee7bba312117ba69a61758c03d831d42002885fa131b90",
+    "scout_chat_images.go": "8812335a18a11c5320054513544b6230ecc9b6451f92e51c5c39914107c11620",
+    "scout_chat_threads.go": "0953c68a65c64fe14d5717c27af1611f1158c9e1abfca96daf7c992a1a4a2fab",
+    "stride_project_chat_group_runtime.go": "4309526e7ecb20e935667c6a4534702c255808732679f05fffaa36468b9c02cc",
+    "stride_project_chat_runtime.go": "55489625f508ee8789498443085dd6a1a4190e58dcefcca0d7f6265778ac388d",
+    "stride_project_chat_runtime_test.go": "55afc8e6f111ae985b1556d82f36f5ad25bb072594eca596f75c4b81df052eaf",
+    "stride_project_chat_sources.go": "640a97c0e1856e504129d710a4840777c2d0f10661622b2c60b2c337760e32bd"
+  },
+  "verification": {
+    "fullGo": "PASS_593.010s_all_packages_timeout_20m",
+    "focusedGo": "PASS",
+    "focusedGoRace": "PASS_23.984s",
+    "disposablePostgresV2V3SendCorrectionReplayAndDrift": "PASS",
+    "canonicalMigrationCompatibilityAndIdempotency": "PASS",
+    "goVetAll": "PASS",
+    "drRegistryAndDigest": "PASS",
+    "mobileTests": "PASS_539_of_539",
+    "mobileTypecheck": "PASS",
+    "renderedBrowserResponsiveAndProjectContracts": "PASS_17.050s",
+    "diffCheck": "PASS",
+    "boundedCritic": "PASS_no_release_blocker_on_current_migration_runtime_and_expired_receipt_correction_bytes"
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 1,
+    "productionWrites": 0,
+    "providerCallsOutsideSyntheticTests": 0,
+    "migrationInstalled": false,
+    "testFlightBuildCreated": false,
+    "compatibleExistingIosBuild": "62"
+  },
+  "openGates": [
+    "reviewed_commit_push_private_backup_migration_23_exact_vps_activation_and_release_readback",
+    "rich_meeting_record_transcript_and_ask_scout_product_flow",
+    "recurring_authorized_meeting_project_and_history_compaction",
+    "server_minted_project_bound_work_projection_and_real_research_flow",
+    "immutable_artifact_revision_lineage_and_durable_drive_open_receipt",
+    "physical_iphone_ipad_accessibility_and_provider_backed_artifact_acceptance"
+  ],
+  "exclusions": {
+    "nativeBytesChanged": false,
+    "newTestFlightBuildRequired": false,
+    "nativeRenderedOrPhysicalDeviceAccepted": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}

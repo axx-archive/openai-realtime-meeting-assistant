@@ -125,3 +125,38 @@ func TestHomeProjectContextV2BindsExactSourceManifestAndChoice(t *testing.T) {
 		t.Fatal("v1 token accepted attachments or a reply")
 	}
 }
+
+func TestHomeProjectContextV3BindsExactReplyMedia(t *testing.T) {
+	snapshot := projectChatSnapshotFixture(t)
+	key := StrideE10TenantAuthorityEnvelopeKey{ID: "home_project_reply_media_key", Version: 1, Secret: []byte(strings.Repeat("r", 32))}
+	restore := InstallStrideE10TenantAuthorityEnvelopeRuntime(&strideE10TenantEnvelopeTestKeyring{current: key, keys: map[string]StrideE10TenantAuthorityEnvelopeKey{key.ID: key}})
+	defer restore()
+	destination := homeProjectDestination{Route: "thread", ThreadID: "thread_reply_media"}
+	media := projectChatManifestReplyMedia{Ordinal: 0, Kind: "generated_image", PartID: "part_reply_image",
+		PartDigest: strings.Repeat("1", 64), SourceID: "source_reply_image", SourceRevision: "revision_reply_image",
+		BlobRef: strings.Repeat("2", 64), BlobDigest: strings.Repeat("2", 64), Mime: "image/png", Size: 64,
+		DestinationRevision: "destination_reply_media", AuthorPrincipal: "service:scout"}
+	manifest := projectChatSourceManifest{Version: projectChatSourceManifestV3, Destination: destination, TextDigest: sha256Hex([]byte("Use it")),
+		Reply: &projectChatManifestReply{ManifestVersion: projectChatSourceManifestV3, MessageID: "parent_media", EventID: "event_parent_media",
+			SourceRevision: 1, SourceDigest: strings.Repeat("3", 64), LegacyDigest: strings.Repeat("4", 64), AuthorPersonID: "service:scout",
+			AudienceDigest: strings.Repeat("5", 64), ACLRevision: 1, PurgeGeneration: 1, Media: []projectChatManifestReplyMedia{media}}}
+	manifest.Digest = projectChatManifestDigest(manifest)
+	project := homeProjectRow{ID: "project_reply_media", Revision: 1, Digest: strings.Repeat("6", 64), Title: "Reply Media"}
+	encoded, _, err := mintHomeProjectTokenV2(context.Background(), snapshot, "Use it", destination, manifest, project, "project", "selected", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveHomeProjectTokenForRetryWithManifest(context.Background(), encoded, "Use it", destination, manifest, snapshot, false)
+	if err != nil || resolved.Version != homeProjectContextV3 {
+		t.Fatalf("resolved v3=%+v err=%v", resolved, err)
+	}
+	tampered := manifest
+	reply := *manifest.Reply
+	reply.Media = append([]projectChatManifestReplyMedia(nil), manifest.Reply.Media...)
+	reply.Media[0].SourceRevision = "revision_changed"
+	tampered.Reply = &reply
+	tampered.Digest = projectChatManifestDigest(tampered)
+	if _, err := resolveHomeProjectTokenForRetryWithManifest(context.Background(), encoded, "Use it", destination, tampered, snapshot, false); err == nil {
+		t.Fatal("v3 token survived a parent media source revision change")
+	}
+}

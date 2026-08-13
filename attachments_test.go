@@ -682,6 +682,29 @@ func TestOpenAIReplyMediaContentCarriesAuthorizedGeneratedImage(t *testing.T) {
 	if linked := app.openAIReplyMediaContentForTurn(true, "aj@shareability.com", thread.ID, "generated-image-message"); len(linked) != 0 {
 		t.Fatalf("Project-linked generated-image parent reached provider media: %+v", linked)
 	}
+	meta, err := blobStatForRef(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedMedia := projectChatManifestReplyMedia{Ordinal: 0, Kind: "generated_image", SourceID: "generated-image-source",
+		SourceRevision: attachmentSourceRevision(ref, meta), BlobRef: ref, BlobDigest: ref, Mime: "image/png", Size: meta.Size,
+		DestinationRevision: scoutChatAttachmentDestinationRevision(thread)}
+	generatedReply := &projectChatManifestReply{ManifestVersion: projectChatSourceManifestV3, MessageID: "generated-image-message",
+		LegacyDigest: projectChatMessageSourceDigestV3(thread.Messages[0]), Media: []projectChatManifestReplyMedia{generatedMedia}}
+	if governed, authorized, _ := app.openAIProjectReplyMediaContentVerdict("aj@shareability.com", thread.ID, generatedReply); !authorized || len(governed) != 1 {
+		t.Fatalf("governed generated reply media authorized=%v content=%+v", authorized, governed)
+	}
+	if !app.projectChatReplyMediaManifestCurrent("aj@shareability.com", thread, generatedReply) {
+		t.Fatal("current generated reply manifest rejected before canonical commit")
+	}
+	if oldReply := *generatedReply; func() bool {
+		oldReply.ManifestVersion = projectChatSourceManifestVersion
+		oldReply.Media = nil
+		governed, authorized, _ := app.openAIProjectReplyMediaContentVerdict("aj@shareability.com", thread.ID, &oldReply)
+		return authorized && len(governed) == 0
+	}() == false {
+		t.Fatal("released v2 reply did not preserve media withholding")
+	}
 	if ordinary := app.openAIReplyMediaContentForTurn(false, "aj@shareability.com", thread.ID, "generated-image-message"); len(ordinary) != 1 {
 		t.Fatalf("ordinary generated-image reply lost media: %+v", ordinary)
 	}
@@ -706,6 +729,33 @@ func TestOpenAIReplyMediaContentCarriesAuthorizedGeneratedImage(t *testing.T) {
 	}
 	if linked := app.openAIReplyMediaContentForTurn(true, user.Email, thread.ID, fileParent.ID); len(linked) != 0 {
 		t.Fatalf("Project-linked file parent reached provider media: %+v", linked)
+	}
+	freshThread, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileIndex := scoutChatMessageIndex(freshThread, fileParent.ID)
+	if fileIndex < 0 {
+		t.Fatal("file parent missing")
+	}
+	fileMeta, err := blobStatForRef(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileMedia := projectChatManifestReplyMedia{Ordinal: 0, Kind: "file", SourceID: granted.SourceID, SourceRevision: granted.SourceRevision,
+		BlobRef: ref, BlobDigest: ref, Mime: "image/png", Size: fileMeta.Size, DestinationRevision: scoutChatAttachmentDestinationRevision(freshThread)}
+	fileReply := &projectChatManifestReply{ManifestVersion: projectChatSourceManifestV3, MessageID: fileParent.ID,
+		AuthorEmail: fileParent.AuthorEmail, LegacyDigest: projectChatMessageSourceDigestV3(freshThread.Messages[fileIndex]),
+		Media: []projectChatManifestReplyMedia{fileMedia}}
+	if governed, authorized, _ := app.openAIProjectReplyMediaContentVerdict(user.Email, thread.ID, fileReply); !authorized || len(governed) != 1 {
+		t.Fatalf("governed file reply media authorized=%v content=%+v", authorized, governed)
+	}
+	if !app.projectChatReplyMediaManifestCurrent(user.Email, freshThread, fileReply) {
+		t.Fatal("current file reply manifest rejected before canonical commit")
+	}
+	fileReply.Media[0].SourceRevision = "sha256:stale"
+	if governed, authorized, failedSource := app.openAIProjectReplyMediaContentVerdict(user.Email, thread.ID, fileReply); authorized || len(governed) != 0 || failedSource != granted.SourceID {
+		t.Fatalf("stale governed reply media authorized=%v content=%+v", authorized, governed)
 	}
 }
 

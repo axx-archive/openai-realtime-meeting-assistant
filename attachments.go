@@ -426,7 +426,7 @@ func (app *kanbanBoardApp) revokeAttachmentSource(sourceID string) error {
 		}
 		for _, group := range groups {
 			operationID := projectChatID("project_attachment_source_revoke", group.organizationID, group.groupID, sourceID)
-			if err := store.invalidateProjectChatAttachmentGroupForDrift(context.Background(), group.organizationID, group.groupID, operationID); err != nil {
+			if err := store.invalidateProjectChatAttachmentSourceGroupForDrift(context.Background(), group.organizationID, group.groupID, operationID, sourceID); err != nil {
 				return err
 			}
 		}
@@ -1361,6 +1361,133 @@ func (app *kanbanBoardApp) openAIReplyMediaContentForTurn(projectSourceBound boo
 		return nil
 	}
 	return app.openAIReplyMediaContent(viewerEmail, threadID, messageID)
+}
+
+// openAIProjectReplyMediaContentVerdict admits only the exact v3 support
+// parts already signed into the Project manifest and confirmed in PostgreSQL.
+// A valid but provider-unsupported source yields no block with authorized=true;
+// any source, blob, destination, origin, or parent snapshot drift fails closed.
+func (app *kanbanBoardApp) openAIProjectReplyMediaContentVerdict(viewerEmail, threadID string,
+	reply *projectChatManifestReply) ([]openAIInputContent, bool, string) {
+	if app == nil || reply == nil || reply.ManifestVersion != projectChatSourceManifestV3 {
+		return nil, reply != nil && reply.ManifestVersion == projectChatSourceManifestVersion, ""
+	}
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil || !projectChatReplyJournalMatchesThread(reply, thread) {
+		return nil, false, ""
+	}
+	index := scoutChatMessageIndex(thread, reply.MessageID)
+	if index < 0 {
+		return nil, false, ""
+	}
+	parent := thread.Messages[index]
+	if len(reply.Media) != len(parent.Files)+func() int {
+		if parent.Image != nil && validBlobRef(parent.Image.Ref) {
+			return 1
+		}
+		return 0
+	}() {
+		return nil, false, ""
+	}
+	content := make([]openAIInputContent, 0, len(reply.Media))
+	for ordinal, media := range reply.Media {
+		if media.Ordinal != ordinal {
+			return nil, false, media.SourceID
+		}
+		switch media.Kind {
+		case "file":
+			if ordinal >= len(parent.Files) {
+				return nil, false, media.SourceID
+			}
+			file := parent.Files[ordinal]
+			if strings.TrimSpace(file.SourceID) != media.SourceID || strings.TrimSpace(file.SourceRevision) != media.SourceRevision ||
+				strings.TrimSpace(file.Ref) != media.BlobRef || !app.committedChatAttachmentAuthorized(viewerEmail, threadID, parent.ID, file) {
+				return nil, false, media.SourceID
+			}
+			blocks := openAIAttachmentContentWithReader([]scoutChatFileAttachment{file}, func(current scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+				data, meta, readErr := getBlob(current.Ref)
+				if attachmentBlobReadAfterProbe != nil {
+					attachmentBlobReadAfterProbe(current.SourceID)
+				}
+				if readErr != nil || current.Ref != media.BlobRef || attachmentSourceRevision(current.Ref, meta) != media.SourceRevision ||
+					strings.ToLower(strings.TrimSpace(meta.Mime)) != media.Mime || meta.Size != media.Size ||
+					!app.committedChatAttachmentAuthorized(viewerEmail, threadID, parent.ID, current) {
+					return nil, blobMeta{}, false
+				}
+				return data, meta, true
+			})
+			content = append(content, blocks...)
+		case "generated_image":
+			if ordinal != len(parent.Files) || parent.Image == nil || parent.Image.Ref != media.BlobRef {
+				return nil, false, media.SourceID
+			}
+			data, meta, readErr := getBlob(media.BlobRef)
+			if readErr != nil || attachmentSourceRevision(media.BlobRef, meta) != media.SourceRevision ||
+				strings.ToLower(strings.TrimSpace(meta.Mime)) != media.Mime || meta.Size != media.Size {
+				return nil, false, media.SourceID
+			}
+			if len(data) <= attachmentMaxRequestBytes && oneOf(media.Mime, "image/png", "image/jpeg", "image/webp") {
+				content = append(content, openAIInputContent{Type: "input_image", ImageURL: "data:" + media.Mime + ";base64," + base64.StdEncoding.EncodeToString(data)})
+			}
+		default:
+			return nil, false, media.SourceID
+		}
+	}
+	postRead, _, postErr := app.scoutChatThreadByID(viewerEmail, threadID)
+	if postErr != nil || !projectChatReplyJournalMatchesThread(reply, postRead) {
+		return nil, false, ""
+	}
+	return content, true, ""
+}
+
+func (app *kanbanBoardApp) projectChatReplyMediaManifestCurrent(viewerEmail string, thread scoutChatThreadRecord,
+	reply *projectChatManifestReply) bool {
+	if app == nil || reply == nil || reply.ManifestVersion != projectChatSourceManifestV3 ||
+		!projectChatReplyJournalMatchesThread(reply, thread) {
+		return false
+	}
+	index := scoutChatMessageIndex(thread, reply.MessageID)
+	if index < 0 {
+		return false
+	}
+	parent := thread.Messages[index]
+	imageCount := 0
+	if parent.Image != nil && validBlobRef(parent.Image.Ref) {
+		imageCount = 1
+	}
+	if len(reply.Media) != len(parent.Files)+imageCount {
+		return false
+	}
+	for ordinal, media := range reply.Media {
+		if media.Ordinal != ordinal {
+			return false
+		}
+		if media.Kind == "file" {
+			if ordinal >= len(parent.Files) {
+				return false
+			}
+			file := parent.Files[ordinal]
+			if file.SourceID != media.SourceID || file.SourceRevision != media.SourceRevision || file.Ref != media.BlobRef ||
+				!app.committedChatAttachmentAuthorized(viewerEmail, thread.ID, parent.ID, file) {
+				return false
+			}
+			meta, err := blobStatForRef(media.BlobRef)
+			if err != nil || attachmentSourceRevision(media.BlobRef, meta) != media.SourceRevision || meta.Size != media.Size ||
+				strings.ToLower(strings.TrimSpace(meta.Mime)) != media.Mime {
+				return false
+			}
+			continue
+		}
+		if media.Kind != "generated_image" || ordinal != len(parent.Files) || parent.Image == nil || parent.Image.Ref != media.BlobRef {
+			return false
+		}
+		meta, err := blobStatForRef(media.BlobRef)
+		if err != nil || attachmentSourceRevision(media.BlobRef, meta) != media.SourceRevision || meta.Size != media.Size ||
+			strings.ToLower(strings.TrimSpace(meta.Mime)) != media.Mime {
+			return false
+		}
+	}
+	return true
 }
 
 // openAIReplyMediaContent carries the exact image/file from the message being

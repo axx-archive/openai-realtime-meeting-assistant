@@ -21,9 +21,21 @@ import (
 const (
 	homeProjectContextVersion = 1
 	homeProjectContextV2      = 2
+	homeProjectContextV3      = 3
 	homeProjectContextTTL     = 15 * time.Minute
 	homeProjectContextModeEnv = "STRIDE_E10_PROJECT_HOME_MODE"
 )
+
+func homeProjectTokenHasSourceManifest(version int) bool {
+	return version == homeProjectContextV2 || version == homeProjectContextV3
+}
+
+func projectChatManifestVersionForToken(version int) int {
+	if version == homeProjectContextV3 {
+		return projectChatSourceManifestV3
+	}
+	return projectChatSourceManifestVersion
+}
 
 func homeProjectFeatureEnabled(feature STRIDEFeature) bool {
 	if strideE10LiveProductRuntime.Enabled(feature) {
@@ -208,7 +220,7 @@ func homeProjectTokenMACVersion(key StrideE10TenantAuthorityEnvelopeKey, raw []b
 
 func mintHomeProjectTokenV2(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, text string, destination homeProjectDestination, manifest projectChatSourceManifest, project homeProjectRow, kind, basis string, confidence float64) (string, string, error) {
 	runtime := strideE10CurrentTenantEnvelopeRuntime()
-	if runtime == nil || runtime.keys == nil || manifest.Version != projectChatSourceManifestVersion || !isHexDigest(manifest.Digest) {
+	if runtime == nil || runtime.keys == nil || (manifest.Version != projectChatSourceManifestVersion && manifest.Version != projectChatSourceManifestV3) || !isHexDigest(manifest.Digest) {
 		return "", "", errHomeProjectUnavailable
 	}
 	key, err := runtime.keys.CurrentStrideE10TenantAuthorityEnvelopeKey(ctx)
@@ -217,8 +229,12 @@ func mintHomeProjectTokenV2(ctx context.Context, snapshot StrideE10TenantAuthori
 	}
 	now := time.Now().UTC()
 	choiceKey := stableHomeProjectChoiceKey(key, snapshot, kind, project)
+	tokenVersion := homeProjectContextV2
+	if manifest.Version == projectChatSourceManifestV3 {
+		tokenVersion = homeProjectContextV3
+	}
 	token := homeProjectContextToken{
-		Version: homeProjectContextV2, Kind: kind, TextDigest: sha256Hex([]byte(strings.TrimSpace(text))), Destination: destination,
+		Version: tokenVersion, Kind: kind, TextDigest: sha256Hex([]byte(strings.TrimSpace(text))), Destination: destination,
 		PersonID: snapshot.Person.Header.ID, OrganizationID: snapshot.Organization.Header.ID, MembershipID: snapshot.Membership.Header.ID,
 		MembershipRevision: snapshot.Membership.Header.Revision, SessionSubjectDigest: snapshot.SessionHash,
 		SessionRevision: snapshot.ActiveSession.SessionRevision, AuthorityGeneration: snapshot.Generation,
@@ -295,7 +311,7 @@ func decodeSignedHomeProjectToken(ctx context.Context, encoded string) (homeProj
 		return token, resolvedKey, errHomeProjectStale
 	}
 	key, err := runtime.keys.ResolveStrideE10TenantAuthorityEnvelopeKey(ctx, token.KeyID, token.KeyVersion)
-	if err != nil || !validStrideE10TenantEnvelopeKey(key) || (token.Version != homeProjectContextVersion && token.Version != homeProjectContextV2) || !hmac.Equal(signature, homeProjectTokenMACVersion(key, raw, token.Version)) {
+	if err != nil || !validStrideE10TenantEnvelopeKey(key) || (token.Version != homeProjectContextVersion && token.Version != homeProjectContextV2 && token.Version != homeProjectContextV3) || !hmac.Equal(signature, homeProjectTokenMACVersion(key, raw, token.Version)) {
 		return token, resolvedKey, errHomeProjectStale
 	}
 	return token, key, nil
@@ -319,9 +335,13 @@ func resolveHomeProjectTokenForRetryWithManifestState(ctx context.Context, encod
 		!stridePlainText(token.ProjectTitle, 120, true) {
 		return token, errHomeProjectStale
 	}
-	if token.Version == homeProjectContextV2 {
+	if token.Version == homeProjectContextV2 || token.Version == homeProjectContextV3 {
 		project := homeProjectRow{ID: token.ProjectID, Revision: token.ProjectRevision, Digest: token.ProjectDigest, Title: token.ProjectTitle}
-		if manifest.Version != projectChatSourceManifestVersion || !isHexDigest(manifest.Digest) || token.SourceManifestDigest != manifest.Digest ||
+		wantManifestVersion := projectChatSourceManifestVersion
+		if token.Version == homeProjectContextV3 {
+			wantManifestVersion = projectChatSourceManifestV3
+		}
+		if manifest.Version != wantManifestVersion || !isHexDigest(manifest.Digest) || token.SourceManifestDigest != manifest.Digest ||
 			(!acceptedDurable && token.ChoiceKey != stableHomeProjectChoiceKey(key, snapshot, token.Kind, project)) {
 			return token, errHomeProjectStale
 		}

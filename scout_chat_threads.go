@@ -458,12 +458,13 @@ type scoutChatProjectLinkOperation struct {
 	// SourceManifestDigest and SourceGroupID upgrade an accepted existing-thread
 	// Send to the all-or-nothing event/attachment/reply contract. Their absence
 	// is the durable v1 text-only compatibility shape.
-	SourceManifestDigest string                             `json:"sourceManifestDigest,omitempty"`
-	SourceGroupID        string                             `json:"sourceGroupId,omitempty"`
-	AssociationIDs       []string                           `json:"associationIds,omitempty"`
-	AttachmentSources    []scoutChatProjectAttachmentSource `json:"attachmentSources,omitempty"`
-	ReplySource          *scoutChatProjectReplySource       `json:"replySource,omitempty"`
-	ReservationID        string                             `json:"reservationId,omitempty"`
+	SourceManifestDigest  string                             `json:"sourceManifestDigest,omitempty"`
+	SourceManifestVersion int                                `json:"sourceManifestVersion,omitempty"`
+	SourceGroupID         string                             `json:"sourceGroupId,omitempty"`
+	AssociationIDs        []string                           `json:"associationIds,omitempty"`
+	AttachmentSources     []scoutChatProjectAttachmentSource `json:"attachmentSources,omitempty"`
+	ReplySource           *scoutChatProjectReplySource       `json:"replySource,omitempty"`
+	ReservationID         string                             `json:"reservationId,omitempty"`
 }
 
 type scoutChatProjectAttachmentSource struct {
@@ -480,16 +481,35 @@ type scoutChatProjectAttachmentSource struct {
 }
 
 type scoutChatProjectReplySource struct {
-	MessageID       string `json:"messageId"`
-	EventID         string `json:"eventId"`
-	EventRevision   int64  `json:"eventRevision"`
-	EventDigest     string `json:"eventDigest"`
-	LegacyDigest    string `json:"legacyDigest"`
-	AuthorEmail     string `json:"authorEmail"`
-	AuthorPersonID  string `json:"authorPersonId"`
-	AudienceDigest  string `json:"audienceDigest"`
-	ACLRevision     int64  `json:"aclRevision"`
-	PurgeGeneration int64  `json:"purgeGeneration"`
+	ManifestVersion int                                `json:"manifestVersion,omitempty"`
+	MessageID       string                             `json:"messageId"`
+	EventID         string                             `json:"eventId"`
+	EventRevision   int64                              `json:"eventRevision"`
+	EventDigest     string                             `json:"eventDigest"`
+	LegacyDigest    string                             `json:"legacyDigest"`
+	AuthorEmail     string                             `json:"authorEmail"`
+	AuthorPersonID  string                             `json:"authorPersonId"`
+	AudienceDigest  string                             `json:"audienceDigest"`
+	ACLRevision     int64                              `json:"aclRevision"`
+	PurgeGeneration int64                              `json:"purgeGeneration"`
+	Media           []scoutChatProjectReplyMediaSource `json:"media,omitempty"`
+}
+
+type scoutChatProjectReplyMediaSource struct {
+	Ordinal             int    `json:"ordinal"`
+	Kind                string `json:"kind"`
+	PartID              string `json:"partId"`
+	PartDigest          string `json:"partDigest"`
+	SourceID            string `json:"sourceId"`
+	SourceRevision      string `json:"sourceRevision"`
+	BlobRef             string `json:"blobRef"`
+	BlobDigest          string `json:"blobDigest"`
+	Mime                string `json:"mime"`
+	Size                int64  `json:"size"`
+	DestinationRevision string `json:"destinationRevision"`
+	OriginFileID        string `json:"originFileId,omitempty"`
+	OriginRevision      string `json:"originRevision,omitempty"`
+	AuthorPrincipal     string `json:"authorPrincipal"`
 }
 
 func firstScoutProjectTokenDigest(thread scoutChatThreadRecord, operationID string) string {
@@ -2073,8 +2093,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	projectTurnCreated := false
 	if projectLinkBinding.Token.Kind != "" {
 		if turnOperation.ID == "" || strings.TrimSpace(followUpArtifactID) != "" ||
-			(projectLinkBinding.Token.Version == homeProjectContextV2 && !projectChatManifestMatchesFiles(projectLinkBinding.Manifest, files, replyToMessageID)) ||
-			(projectLinkBinding.Token.Version != homeProjectContextV2 && (len(files) != 0 || strings.TrimSpace(replyToMessageID) != "")) {
+			(homeProjectTokenHasSourceManifest(projectLinkBinding.Token.Version) && !projectChatManifestMatchesFiles(projectLinkBinding.Manifest, files, replyToMessageID)) ||
+			(!homeProjectTokenHasSourceManifest(projectLinkBinding.Token.Version) && (len(files) != 0 || strings.TrimSpace(replyToMessageID) != "")) {
 			return nil, fmt.Errorf("Project-linked conversation turn source manifest is invalid")
 		}
 		pendingThread, _, created, beginErr := app.beginScoutExistingProjectTurn(ctx, user, thread, userMessage, turnOperation, projectLinkBinding)
@@ -2124,14 +2144,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		thread, userMessage = confirmedThread, confirmedThread.Messages[messageIndex]
 		projectTurnPrecommitted = true
 		projectTurnCreated = created
-		if projectLinkBinding.Token.Version == homeProjectContextV2 {
+		if homeProjectTokenHasSourceManifest(projectLinkBinding.Token.Version) {
 			if commitErr := app.commitScoutProjectSourceGroupAttachments(user, confirmedThread, turnOperation.ID); commitErr != nil {
 				return nil, commitErr
 			}
 		}
 		attachmentCommitted = true
 		deliverScoutChatThreadUpdateWithContext(ctx, confirmedThread, userMessage)
-		if projectLinkBinding.Token.Version == homeProjectContextV2 {
+		if homeProjectTokenHasSourceManifest(projectLinkBinding.Token.Version) {
 			groupID := projectChatID("project_source_group", projectLinkBinding.Token.OrganizationID, thread.ID, userMessage.ID, turnOperation.ID)
 			freshThread, _, freshThreadErr := app.scoutChatThreadByID(user.Email, thread.ID)
 			reauthorizeErr := withCurrentHomeProjectAuthorityRequestContext(ctx, projectLinkBinding.Token, func(snapshot StrideE10TenantAuthoritySnapshot) error {
@@ -2223,7 +2243,27 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 					return nil, ErrProjectAuthorityConflict
 				}
 				if replyToMessageID != "" {
-					openAIAttachments = append(openAIAttachments, app.openAIReplyMediaContentForTurn(true, user.Email, thread.ID, replyToMessageID)...)
+					replyMedia, replyMediaAuthorized, failedReplyMediaSource := app.openAIProjectReplyMediaContentVerdict(user.Email, thread.ID, projectLinkBinding.Manifest.Reply)
+					if !replyMediaAuthorized {
+						driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, false); journalErr != nil {
+							return nil, journalErr
+						}
+						var driftErr error
+						if failedReplyMediaSource != "" {
+							driftErr = currentHomeProjectStore().invalidateProjectChatAttachmentSourceGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID, failedReplyMediaSource)
+						} else {
+							driftErr = currentHomeProjectStore().invalidateProjectChatReplyGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID, "parent_changed")
+						}
+						if driftErr != nil {
+							return nil, driftErr
+						}
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); journalErr != nil {
+							return nil, journalErr
+						}
+						return nil, ErrProjectAuthorityConflict
+					}
+					openAIAttachments = append(openAIAttachments, replyMedia...)
 					postMediaThread, _, postMediaErr := app.scoutChatThreadByID(user.Email, thread.ID)
 					if postMediaErr != nil || !projectChatReplyJournalMatchesThread(projectLinkBinding.Manifest.Reply, postMediaThread) {
 						driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
@@ -5020,6 +5060,11 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 		}
 		return thread, message, nil
 	}
+	if store := currentHomeProjectStore(); store != nil {
+		if err := store.invalidateProjectChatReplyParentsByLegacyMutation(ctx, thread.ID, message.ID, "parent_edited"); err != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("reply source could not be edited safely: %w", err)
+		}
+	}
 	message.Text = desiredText
 	message.Files = desiredFiles
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -5227,6 +5272,10 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessageWithContext(ctx context.C
 		}
 		thread = journaled
 		sourceOperationID = operation.OperationID
+	} else if store := currentHomeProjectStore(); store != nil {
+		if err := store.invalidateProjectChatReplyParentsByLegacyMutation(ctx, thread.ID, message.ID, "parent_deleted"); err != nil {
+			return scoutChatThreadRecord{}, fmt.Errorf("reply source could not be deleted safely: %w", err)
+		}
 	}
 	deletedIDs, deletedMessages, err := applyProjectSourceDeleteToThread(&thread, messageID)
 	if err != nil {

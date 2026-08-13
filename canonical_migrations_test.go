@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 22 {
-		t.Fatalf("migration count = %d, want 22", len(migrations))
+	if len(migrations) != 23 {
+		t.Fatalf("migration count = %d, want 23", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -246,6 +246,13 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[21].SQL, "Project chat source group drift receipt requires exact drift, revoked group and four-family purge") ||
 		!strings.Contains(migrations[21].SQL, "Project chat source group request fingerprint is not reproducible") {
 		t.Fatalf("unexpected Project chat source group migration: %+v", migrations[21])
+	}
+	if len(migrations) < 23 || migrations[22].Version != 23 || migrations[22].Name != "0023_stride_project_chat_reply_media.sql" ||
+		migrations[22].SHA256 != sha256.Sum256([]byte(migrations[22].SQL)) ||
+		!strings.Contains(migrations[22].SQL, "CREATE TABLE stride_project_chat_reply_media_dependencies") ||
+		!strings.Contains(migrations[22].SQL, "source_manifest_version") ||
+		!strings.Contains(migrations[22].SQL, "stride_project_associations_authorized_current_v2") {
+		t.Fatalf("unexpected Project reply media migration: %+v", migrations[22])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",
