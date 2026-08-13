@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_release_pd1_project_source_group_checkpoint",
+  "observedAt": "2026-08-13T04:26:43-07:00",
+  "status": "bounded_exact_release_and_intended_testflight_groups_pass",
+  "source": {
+    "implementationCommit": "43103a683d5982fa7a2669e2040cc7229bb49c26",
+    "exactReleaseCommit": "43103a683d5982fa7a2669e2040cc7229bb49c26",
+    "branch": "codex/country-golf-stride",
+    "remoteMainAtRelease": "43103a683d5982fa7a2669e2040cc7229bb49c26",
+    "canonicalPlanSha256AfterReadback": "1ba4401c2638314fa8b500d86a26f7cb4f96f5bdcf5ba3523abe7f13c1066cbc",
+    "localReceipt": "stride-e10-pd1-project-source-groups-local-20260813.json",
+    "localReceiptSha256": "ec1a0987d7c7e3e930cd37b53dacaab1ad547089ca78785db6ecf9f9cfb7a522",
+    "reviewedInventorySha256": "e5370319f42f33c17c998d4d050c8fb4898cde09448dcb14183f645eacc86e35",
+    "sourceArchiveSha256": "78f688c5ac4ead9ccc45ad7b9d06bb8281e07472e35b7a00f8c7a1f4125f1e94",
+    "sourceReceiptSha256": "293d0a4c8043f445cc5daf1ae6737baa59ac3d2c7e97f57ccd77f84c206351ca"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 74,
+    "releaseCommit": "43103a683d5982fa7a2669e2040cc7229bb49c26",
+    "bundleSha256": "301b036fc0ab2afd418b80551e4fd37bdf6062790d0f6d0f25d1442b76514966",
+    "meetingassistImageId": "sha256:662ebe0672f82dad15e454f9ea2c83d4bd7b1470a2783c4e4825bf3cb5f81c18",
+    "renderRunnerImageId": "sha256:b2b56bb4a07b3d8f6fb7f4f6c8dfbed1eedd84d422aa6effc0967ef509687e68",
+    "migrationCount": 22,
+    "migrationMaxVersion": 22,
+    "migration22Sha256": "c2e696d16a51bf662af28cea42ff1cc375f5d0d1823307a1a95ab2b676f44c93",
+    "preMigrationBackup": "/opt/meetingassist-backups/stride-e10-pd1-source-groups-pre-migration22-20260813T1108Z",
+    "preMigrationBackupClass": "root_private_transaction_consistent_pgcustom_base_env_migration_ledger_and_checksum_manifest",
+    "health": "PASS_exact_release_identity",
+    "readiness": "PASS_ok_true_exact_release_identity_with_preexisting_nonrequired_canonical_shadow_degradation",
+    "renderCanary": "PASS",
+    "verification": "verified-local-unsigned"
+  },
+  "rollback": {
+    "releaseCommit": "a5a4ece5726629065ac21ae7b9e0f610db5040b8",
+    "bundleSha256": "c9e657348809091126aee4a5a9de5bbae2bdf71015f8155992e8fc84b9793468",
+    "meetingassistImageId": "sha256:e63e78935f60a547f02b23bd07eafe8f8f1e9ca1f36269c86b959cb4e6830545",
+    "renderRunnerImageId": "sha256:9dfa4791ec8e2f895946bd9ba5f51e89f67301848681bcfea8ddaaa6ada96dd1",
+    "retainedAndReadable": true,
+    "additiveMigrationCompatible": true
+  },
+  "ios": {
+    "easBuildId": "d7ad87ae-9392-411a-a274-8fe57c706ebc",
+    "appStoreConnectBuildId": "32eba7b1-f807-4d60-9f74-5b4020038d3f",
+    "version": "1.0.0",
+    "buildNumber": "62",
+    "gitCommit": "43103a683d5982fa7a2669e2040cc7229bb49c26",
+    "fingerprint": "fb4c0646c8dea6b1776e01521a1e8b42b79c0bd7",
+    "ipaSha256": "df59eeb702ff95526cb03082b8fcae21474c15c9ec32ba4b0e347080122d2c65",
+    "buildStatus": "FINISHED",
+    "submissionId": "7bd762eb-2128-40c7-82d6-b93a998bfbee",
+    "appStoreConnectAppId": "6794029943",
+    "submissionStatus": "FINISHED_UPLOAD_ACCEPTED",
+    "appleProcessing": "VALID",
+    "minimumOSVersion": "16.4",
+    "betaReviewState": "APPROVED",
+    "internalBuildState": "IN_BETA_TESTING",
+    "externalBuildState": "IN_BETA_TESTING",
+    "intendedGroups": [
+      {"name":"Team (Expo)","internal":true,"buildRelationshipVerified":true},
+      {"name":"Bonfire","internal":false,"buildRelationshipVerified":true,"testerCount":7}
+    ],
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "broadcastExtensionIdentifier": "xyz.thebonfire.app.broadcast",
+    "appAndExtensionBuildNumbersMatch": true,
+    "signedTeamIdentifier": "73PT36P58W"
+  },
+  "acceptedScope": [
+    "exact_project_source_manifest_for_text_ordered_attachments_and_reply_ancestry",
+    "atomic_root_rich_parts_reply_evidence_project_group_and_immutable_receipt",
+    "attachment_only_and_zero_to_six_file_all_or_nothing_send",
+    "cross_store_response_loss_restart_and_session_rotation_replay",
+    "whole_group_project_correction_removal_source_drift_and_authority_loss",
+    "four_family_body_free_projection_purge_per_terminal_edge",
+    "provider_zero_before_confirmation_and_current_authority_recheck",
+    "opaque_choiceKey_only_client_rebinding",
+    "migration_22_exact_installation_and_rollback_compatible_release",
+    "apple_valid_build_in_both_existing_intended_testflight_groups"
+  ],
+  "openGates": [
+    "canonical_manifest_coverage_for_reply_parent_media_sources",
+    "rich_meeting_record_transcript_and_ask_scout_product_flow",
+    "recurring_authorized_meeting_project_and_history_compaction",
+    "first_class_project_bound_work_and_artifact_spine",
+    "provider_backed_artifact_family_device_acceptance",
+    "physical_iphone_ipad_project_source_group_acceptance",
+    "tyler_named_tester_enrollment_and_physical_acceptance",
+    "approved_agentic_lab_schedule_budget_persona_and_effect_manifest",
+    "marketplace_and_fine_tuning_release_gates"
+  ],
+  "exclusions": {
+    "testerIdentityModified": false,
+    "publicTestFlightLinkModified": false,
+    "projectReplyParentMediaCanonicalized": false,
+    "nativeRenderedOrPhysicalDeviceAccepted": false,
+    "tylerEnrollmentVerified": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}
