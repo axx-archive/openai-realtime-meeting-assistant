@@ -5,6 +5,8 @@ export type Identity = {
   passkeys?: number;
   hasPasskeys?: boolean;
   themePref?: 'light' | 'dark' | 'system' | string;
+  /** Server-owned top-level shell projection. Missing/unknown fails closed to core. */
+  shellAccess?: 'core' | 'full';
   /** Only present on native login responses (X-Bonfire-Client: expo). */
   sessionToken?: string;
 };
@@ -74,6 +76,17 @@ export type HomeSnapshot = {
 };
 
 export type HomeResponse = { ok: boolean; home: HomeSnapshot };
+export type HomeProjectChoice = { title: string; token: string; suggested?: boolean };
+export type HomeProjectContextResponse = {
+  ok: true;
+  projectContext: {
+    available: boolean;
+    scopeKey?: string;
+    status: 'unlinked' | 'suggested' | 'clarify' | 'selected';
+    suggested?: HomeProjectChoice;
+    choices?: HomeProjectChoice[];
+  };
+};
 
 export type ScoutThread = {
   id: string;
@@ -131,7 +144,7 @@ export type ScoutThreadsResponse = {
   threads: ScoutThread[];
 };
 
-export type ScoutReplyState = 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+export type ScoutReplyState = 'project_pending' | 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
 
 /**
  * Durable lifecycle for the server-owned Scout reply placeholder paired with
@@ -275,6 +288,13 @@ export type ScoutMessage = {
   proposal?: ScoutProposal;
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
+  project?: {
+    status: 'pending' | 'confirmed' | 'unavailable';
+    projectId?: string;
+    projectRevision?: number;
+    title: string;
+    basis: string;
+  };
   thread?: ScoutWorkThreadRef;
   work?: ScoutWorkRecordRef;
   image?: ScoutImageRef;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,6 +68,248 @@ func TestEnsureScoutHomeOpeningIsAtomicAndIdempotent(t *testing.T) {
 	projected := app.projectScoutChatThreadForViewer(user.Email, thread)
 	if projected.OpeningOperation != nil {
 		t.Fatal("opening operation leaked through viewer projection")
+	}
+}
+
+func TestPendingScoutHomeProjectRetryRequiresExactServerJournal(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { _ = app.Close() })
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	const key = "project-response-loss-key"
+	const text = "Build the launch plan"
+	const encodedToken = "server-signed-project-token"
+	thread, _, err := app.ensureScoutHomeOpening(user, key, text)
+	if err != nil || thread.OpeningOperation == nil {
+		t.Fatalf("opening=%+v err=%v", thread, err)
+	}
+	tokenDigest := homeProjectTokenDigest(encodedToken)
+	thread.OpeningOperation.BodyDigest = scoutOpeningDigest(text, tokenDigest)
+	thread.ProjectLinkOperations = []scoutChatProjectLinkOperation{{
+		OperationID: thread.OpeningOperation.OperationID, TokenDigest: tokenDigest,
+		MessageID: thread.OpeningOperation.UserMessageID, State: "pending", ProjectKind: "project",
+		ProjectTitle: "Launch Plan", Basis: "selected",
+	}}
+	userIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.UserMessageID)
+	replyIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.ReplyMessageID)
+	thread.Messages[userIndex].Project = &scoutChatProjectContext{Status: "pending", Title: "Launch Plan", Basis: "selected"}
+	thread.Messages[replyIndex].Reply.State = scoutReplyStateProjectPending
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	if !app.acceptedScoutHomeProjectRetry(user, key, text, encodedToken) {
+		t.Fatal("exact pending response-loss retry was not recognized")
+	}
+	thread.ProjectLinkOperations[0].State = "confirmed"
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	if !app.acceptedScoutHomeProjectRetry(user, key, text, encodedToken) {
+		t.Fatal("exact completed response-loss retry was not recognized")
+	}
+	thread.ProjectLinkOperations[0].State = "failed_terminal"
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	if !app.acceptedScoutHomeProjectRetry(user, key, text, encodedToken) {
+		t.Fatal("exact terminal response-loss retry was not recognized")
+	}
+	for _, changed := range []struct{ key, text, token string }{
+		{"other-key", text, encodedToken}, {key, "Changed body", encodedToken}, {key, text, "other-token"},
+	} {
+		if app.acceptedScoutHomeProjectRetry(user, changed.key, changed.text, changed.token) {
+			t.Fatalf("changed pending retry was accepted: %+v", changed)
+		}
+	}
+	projected := app.projectScoutChatThreadForViewer(user.Email, thread)
+	if len(projected.ProjectLinkOperations) != 0 || projected.Messages[userIndex].Project == nil || projected.Messages[userIndex].Project.Title != "Launch Plan" {
+		t.Fatalf("viewer projection leaked journal or lost safe Project display: %+v", projected)
+	}
+}
+
+func TestScoutHomeProjectCompletedHTTPRetrySurvivesExpiryAndRestart(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv(homeProjectContextModeEnv, "enabled")
+	ctx, store, _ := migratedPostgresCanonicalStore(t)
+	seedProjectPostgresAuthority(t, ctx, store)
+
+	const email = "aj@shareability.com"
+	user := accountStore().findUser(email)
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	snapshot := projectChatSnapshotFixture(t)
+	snapshot.Person.AccountSubjectDigest = sha256Hex([]byte(email))
+	sessions := userSessionStore()
+	sessionToken, err := sessions.createMemberSession(email, snapshot.Person.Header.ID, snapshot.Organization.Header.ID, snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision, snapshot.ActiveSession.SessionRevision, func(string, string, string, int64) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.SessionHash = hashResetToken(sessionToken)
+	snapshot.ActiveSession.SessionSubjectDigest = snapshot.SessionHash
+	if _, err := store.pool.Exec(ctx, `DELETE FROM stride_active_organization_sessions WHERE session_subject_digest=decode($1,'hex')`, strings.Repeat("2", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(ctx, `INSERT INTO stride_active_organization_sessions(session_subject_digest,person_id,organization_id,membership_id,membership_revision,session_revision,authority_generation,status,bound_at,expires_at,updated_at) VALUES(decode($1,'hex'),$2,$3,$4,$5,$6,$6,'active',clock_timestamp()-interval '5 minutes',clock_timestamp()+interval '1 hour',clock_timestamp())`, snapshot.SessionHash, snapshot.Person.Header.ID, snapshot.Organization.Header.ID, snapshot.Membership.Header.ID, snapshot.Membership.Header.Revision, snapshot.ActiveSession.SessionRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	organizations := NewOrganizationAuthorityService()
+	organizations.persons[snapshot.Person.Header.ID] = snapshot.Person
+	organizations.accountPersons[snapshot.Person.AccountSubjectDigest] = snapshot.Person.Header.ID
+	organizations.organizations[snapshot.Organization.Header.ID] = snapshot.Organization
+	organizations.memberships[snapshot.Membership.Header.ID] = snapshot.Membership
+	organizations.sessions[snapshot.SessionHash] = snapshot.ActiveSession
+	resolver := &strideE10MainTenantAuthorityResolver{sessions: sessions, organizations: organizations, now: time.Now}
+	restoreConverter := InstallStrideE10TenantRuntimeConverter(&StrideE10TenantConverter{resolver: resolver})
+	defer restoreConverter()
+
+	priorCanonical := currentCanonicalRuntime()
+	setCanonicalRuntime(&CanonicalRuntime{mode: CanonicalModeOff, postgres: store})
+	defer setCanonicalRuntime(priorCanonical)
+	priorLive := strideE10LiveProductRuntime
+	live := NewStrideE10ProductLiveRuntime(time.Now)
+	live.setFeatureForTest(STRIDEFeatureOrganizationAuthorityRead, true)
+	live.setFeatureForTest(STRIDEFeatureOrganizationAuthorityWrite, true)
+	strideE10LiveProductRuntime = live
+	defer func() { strideE10LiveProductRuntime = priorLive }()
+
+	key := StrideE10TenantAuthorityEnvelopeKey{ID: "home_project_http_retry", Version: 1, Secret: []byte(strings.Repeat("k", 32))}
+	restoreEnvelope := InstallStrideE10TenantAuthorityEnvelopeRuntime(&strideE10TenantEnvelopeTestKeyring{current: key, keys: map[string]StrideE10TenantAuthorityEnvelopeKey{key.ID: key}})
+	defer restoreEnvelope()
+	app := newIsolatedKanbanBoardApp(t)
+	text := "Build the durable launch plan"
+	now := time.Now().UTC()
+	projectToken := homeProjectContextToken{
+		Version: homeProjectContextVersion, Kind: "create", TextDigest: sha256Hex([]byte(text)), Destination: homeProjectDestination{Route: "new-private"},
+		PersonID: snapshot.Person.Header.ID, OrganizationID: snapshot.Organization.Header.ID, MembershipID: snapshot.Membership.Header.ID,
+		MembershipRevision: snapshot.Membership.Header.Revision, SessionSubjectDigest: snapshot.SessionHash, SessionRevision: snapshot.ActiveSession.SessionRevision,
+		AuthorityGeneration: snapshot.Generation, ProjectTitle: "Launch Plan", Basis: "selected", ClassifierRevision: "project_linker_v1", Confidence: 1,
+		IssuedAt: now, ExpiresAt: now.Add(3 * time.Second), KeyID: key.ID, KeyVersion: key.Version,
+	}
+	rawToken, _ := json.Marshal(projectToken)
+	encodedToken := base64.RawURLEncoding.EncodeToString(rawToken) + "." + base64.RawURLEncoding.EncodeToString(homeProjectTokenMAC(key, rawToken))
+	body, _ := json.Marshal(map[string]any{"openingMessage": map[string]any{"text": text, "projectContextToken": encodedToken}})
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads", strings.NewReader(string(body)))
+		r.Header.Set("Authorization", "Bearer "+sessionToken)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", "project-http-retry")
+		return r
+	}
+	if err := withCurrentHomeProjectAuthority(request(), func(current StrideE10TenantAuthoritySnapshot) error {
+		if current.SessionHash != snapshot.SessionHash || current.Person.Header.ID != snapshot.Person.Header.ID || current.Organization.Header.ID != snapshot.Organization.Header.ID || current.Membership.Header.ID != snapshot.Membership.Header.ID || current.Generation != snapshot.Generation {
+			return fmt.Errorf("resolved authority mismatch: %+v", current)
+		}
+		_, resolveErr := resolveHomeProjectToken(context.Background(), encodedToken, text, homeProjectDestination{Route: "new-private"}, current)
+		return resolveErr
+	}); err != nil {
+		t.Fatalf("preflight exact authority/token: %v", err)
+	}
+
+	first := httptest.NewRecorder()
+	handleScoutHomeOpening(first, request(), app, user, "", "", "", scoutHomeOpeningMessage{Text: text, ProjectContextToken: encodedToken})
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first Send status=%d body=%s", first.Code, first.Body.String())
+	}
+	time.Sleep(time.Until(projectToken.ExpiresAt) + 50*time.Millisecond)
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newKanbanBoardApp()
+	defer restarted.Close()
+	second := httptest.NewRecorder()
+	handleScoutHomeOpening(second, request(), restarted, user, "", "", "", scoutHomeOpeningMessage{Text: text, ProjectContextToken: encodedToken})
+	if second.Code != http.StatusOK {
+		t.Fatalf("expired completed retry status=%d body=%s", second.Code, second.Body.String())
+	}
+	var response struct {
+		Replayed bool                  `json:"replayed"`
+		Thread   scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &response); err != nil || !response.Replayed || len(response.Thread.Messages) != 2 {
+		t.Fatalf("retry response=%+v err=%v body=%s", response, err, second.Body.String())
+	}
+	message := response.Thread.Messages[scoutChatMessageIndex(response.Thread, response.Thread.ID+"-user")]
+	if message.Project == nil || message.Project.Status != "confirmed" || message.Project.Title != "Launch Plan" {
+		t.Fatalf("completed Project projection=%+v", message.Project)
+	}
+	var receipts int
+	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM stride_project_chat_send_receipts WHERE organization_id=$1 AND thread_id=$2`, snapshot.Organization.Header.ID, response.Thread.ID).Scan(&receipts); err != nil || receipts != 1 {
+		t.Fatalf("durable Send receipts=%d err=%v", receipts, err)
+	}
+	confirmed, ok := restarted.scoutOpeningThreadByID(response.Thread.ID)
+	if !ok || confirmed.OpeningOperation == nil {
+		t.Fatal("confirmed internal thread missing")
+	}
+	originalJSON, _ := encodeScoutChatThread(confirmed)
+	assertConflict := func(label string, mutate func(*scoutChatThreadRecord)) {
+		t.Helper()
+		candidate := confirmed
+		candidate.Messages = append([]scoutChatMessageRecord(nil), confirmed.Messages...)
+		candidate.ProjectLinkOperations = append([]scoutChatProjectLinkOperation(nil), confirmed.ProjectLinkOperations...)
+		mutate(&candidate)
+		if err := restarted.saveScoutChatThread(candidate); err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		handleScoutHomeOpening(recorder, request(), restarted, user, "", "", "", scoutHomeOpeningMessage{Text: text, ProjectContextToken: encodedToken})
+		if recorder.Code != http.StatusConflict {
+			t.Fatalf("%s canonical disagreement status=%d body=%s", label, recorder.Code, recorder.Body.String())
+		}
+		restored, ok := decodeScoutChatThreadEntry(meetingMemoryEntry{Kind: meetingMemoryKindScoutChat, Text: originalJSON})
+		if !ok {
+			t.Fatal("could not restore confirmed fixture")
+		}
+		if err := restarted.saveScoutChatThread(restored); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertConflict("journal", func(candidate *scoutChatThreadRecord) {
+		candidate.ProjectLinkOperations[0].ProjectID = "project_corrupt"
+	})
+	assertConflict("message projection", func(candidate *scoutChatThreadRecord) {
+		index := scoutChatMessageIndex(*candidate, candidate.OpeningOperation.UserMessageID)
+		project := *candidate.Messages[index].Project
+		project.ProjectID = "project_corrupt"
+		candidate.Messages[index].Project = &project
+	})
+}
+
+func TestScoutHomeProjectAuthorityFailureTerminalizesBeforeProviderClaim(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	defer app.Close()
+	user := accountStore().findUser("aj@shareability.com")
+	thread, _, err := app.ensureScoutHomeOpening(user, "project-terminal-key", "Build the plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread.ProjectLinkOperations = []scoutChatProjectLinkOperation{{
+		OperationID: thread.OpeningOperation.OperationID, MessageID: thread.OpeningOperation.UserMessageID,
+		TokenDigest: strings.Repeat("a", 64), State: "pending", ProjectKind: "project", ProjectTitle: "Launch Plan",
+	}}
+	userIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.UserMessageID)
+	replyIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.ReplyMessageID)
+	thread.Messages[userIndex].Project = &scoutChatProjectContext{Status: "pending", Title: "Launch Plan"}
+	thread.Messages[replyIndex].Reply.State = scoutReplyStateProjectPending
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := app.failScoutHomeProjectLink(user, thread, errHomeProjectStale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoutHomeProjectOperationState(failed, failed.OpeningOperation.OperationID) != "failed_terminal" ||
+		failed.Messages[userIndex].Project == nil || failed.Messages[userIndex].Project.Status != "unavailable" ||
+		failed.Messages[replyIndex].Reply.State != scoutReplyStateCanceled {
+		t.Fatalf("terminal Project state=%+v", failed)
+	}
+	if _, _, _, claimed := app.claimScoutOpeningReply(failed.ID); claimed {
+		t.Fatal("provider claimed a Project-gated reply after terminal authority failure")
 	}
 }
 

@@ -37,6 +37,7 @@ import type {
   ArtifactDriveSaveCapability,
   ArtifactResponse,
   HomeResponse,
+  HomeProjectContextResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -291,6 +292,13 @@ export const api = {
 
   home(sessionToken: string): Promise<HomeResponse> {
     return request<HomeResponse>("/assistant/home", { sessionToken });
+  },
+
+  projectContext(
+    sessionToken: string,
+    body: { text: string; destination: { route: 'new-private' } | { route: 'thread'; threadId: string }; createTitle?: string },
+  ): Promise<HomeProjectContextResponse> {
+    return request<HomeProjectContextResponse>('/assistant/project-context', { method: 'POST', body, sessionToken });
   },
 
   meetingSpecialists(
@@ -1245,7 +1253,7 @@ export const api = {
       visibility?: string;
       intake?: string;
       operationId?: string;
-      openingMessage?: { text: string };
+      openingMessage?: { text: string; projectContextToken?: string };
     } = {},
     idempotencyKey = "",
   ): Promise<ScoutThreadDetailResponse> {

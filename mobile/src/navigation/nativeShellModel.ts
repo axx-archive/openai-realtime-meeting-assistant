@@ -1,6 +1,6 @@
 import type { RootStackParamList } from './types';
 
-export type NativeShellDestination = 'home' | 'work' | 'network' | 'work-search' | 'you';
+export type NativeShellDestination = 'home' | 'video' | 'chat' | 'work' | 'network' | 'work-search' | 'you';
 export type NativeShellLayout = 'compact' | 'sidebar';
 
 export const NATIVE_SHELL_SIDEBAR_MIN_WIDTH = 744;
@@ -8,6 +8,8 @@ export const NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE = 1.35;
 
 export const nativeShellDestinations = [
   { id: 'home', label: 'Home', route: 'Canvas', icon: 'house.fill' },
+  { id: 'video', label: 'Video', route: 'Meetings', icon: 'video.fill' },
+  { id: 'chat', label: 'Chat', route: 'Deck', params: { segment: 'threads' }, icon: 'bubble.left.and.bubble.right.fill' },
   { id: 'work', label: 'Work', route: 'WorkHome', icon: 'rectangle.3.group.fill' },
   { id: 'network', label: 'Network', route: 'NetworkHome', icon: 'point.3.connected.trianglepath.dotted' },
   { id: 'work-search', label: 'Work Search', route: 'WorkSearchHome', icon: 'magnifyingglass' },
@@ -16,17 +18,32 @@ export const nativeShellDestinations = [
   id: NativeShellDestination;
   label: string;
   route: keyof RootStackParamList;
+  params?: RootStackParamList[keyof RootStackParamList];
   icon: string;
 }>;
 
+export type NativeShellAccess = 'core' | 'full';
+
+const coreShellDestinationIDs = new Set<NativeShellDestination>(['home', 'video', 'chat']);
+
+export function nativeShellDestinationsForAccess(access: unknown) {
+  return access === 'full'
+    ? nativeShellDestinations
+    : nativeShellDestinations.filter(({ id }) => coreShellDestinationIDs.has(id));
+}
+
+export function nativeShellDestinationAllowed(destination: NativeShellDestination, access: unknown): boolean {
+  return access === 'full' || coreShellDestinationIDs.has(destination);
+}
+
 const destinationRoutes: Partial<Record<keyof RootStackParamList, NativeShellDestination>> = {
   Canvas: 'home',
+  Deck: 'chat',
+  Meetings: 'video',
   WorkHome: 'work',
-  Deck: 'work',
   Board: 'work',
   Files: 'work',
   AgentTeam: 'work',
-  Meetings: 'work',
   Memory: 'work',
   Intelligence: 'work',
   NetworkHome: 'network',
@@ -93,9 +110,9 @@ export function createNativeShellSelectionCoordinator(
   return {
     select(
       destination: (typeof nativeShellDestinations)[number],
-      navigate: (route: keyof RootStackParamList) => void,
+      navigate: (route: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => void,
     ) {
-      navigate(destination.route);
+      navigate(destination.route, 'params' in destination ? destination.params : undefined);
     },
     commit(route: keyof RootStackParamList | undefined) {
       // Full-screen and otherwise unmapped routes belong to the destination

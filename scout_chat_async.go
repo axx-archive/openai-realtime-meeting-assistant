@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	scoutReplyStateQueued    = "queued"
-	scoutReplyStateRunning   = "running"
-	scoutReplyStateCompleted = "completed"
-	scoutReplyStateFailed    = "failed"
-	scoutReplyStateCanceled  = "canceled"
+	scoutReplyStateQueued         = "queued"
+	scoutReplyStateRunning        = "running"
+	scoutReplyStateCompleted      = "completed"
+	scoutReplyStateFailed         = "failed"
+	scoutReplyStateCanceled       = "canceled"
+	scoutReplyStateProjectPending = "project_pending"
 
 	scoutHomeOpeningMaxRunes = 4000
 	scoutReplyWorkerCount    = 2
@@ -43,7 +44,7 @@ func cancelScoutOpeningReplyInThread(thread *scoutChatThreadRecord, reason strin
 		return scoutChatMessageRecord{}, false
 	}
 	message := thread.Messages[index]
-	if message.Reply.State != scoutReplyStateQueued && message.Reply.State != scoutReplyStateRunning {
+	if message.Reply.State != scoutReplyStateQueued && message.Reply.State != scoutReplyStateRunning && message.Reply.State != scoutReplyStateProjectPending {
 		return scoutChatMessageRecord{}, false
 	}
 	lifecycle := *message.Reply
@@ -60,12 +61,14 @@ func cancelScoutOpeningReplyInThread(thread *scoutChatThreadRecord, reason strin
 }
 
 type scoutHomeOpeningMessage struct {
-	Text string `json:"text"`
+	Text                string `json:"text"`
+	ProjectContextToken string `json:"projectContextToken,omitempty"`
 }
 
 var (
 	errScoutOpeningConflict = errors.New("idempotency key was already used for a different opening message")
 	errScoutOpeningKey      = errors.New("a valid Idempotency-Key is required")
+	errScoutProjectTerminal = errors.New("Project access changed before Scout could start")
 )
 
 func scoutOpeningDigest(parts ...string) string {
@@ -118,10 +121,35 @@ func handleScoutHomeOpening(w http.ResponseWriter, r *http.Request, app *kanbanB
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	thread, created, err := app.ensureScoutHomeOpening(user, key, text)
+	var projectToken homeProjectContextToken
+	if strings.TrimSpace(opening.ProjectContextToken) != "" {
+		destination := homeProjectDestination{Route: "new-private"}
+		acceptedPending := app.acceptedScoutHomeProjectRetry(user, key, text, opening.ProjectContextToken)
+		err = withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+			var resolveErr error
+			projectToken, resolveErr = resolveHomeProjectTokenForRetry(r.Context(), opening.ProjectContextToken, text, destination, snapshot, acceptedPending)
+			return resolveErr
+		})
+		if err != nil {
+			writeAuthError(w, http.StatusConflict, errHomeProjectStale.Error())
+			return
+		}
+	}
+	thread, created, err := app.ensureScoutHomeOpeningWithProject(r.Context(), user, key, text, opening.ProjectContextToken, projectToken)
 	if err != nil {
+		if errors.Is(err, errScoutProjectTerminal) && thread.ID != "" {
+			writeAuthJSON(w, http.StatusOK, map[string]any{
+				"ok": true, "created": created, "replayed": !created, "projectLinked": false,
+				"warning": errScoutProjectTerminal.Error(), "thread": app.projectScoutChatThreadForViewer(user.Email, thread),
+			})
+			return
+		}
 		if errors.Is(err, errScoutOpeningConflict) {
 			writeAuthError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if errors.Is(err, ErrProjectAuthorityConflict) {
+			writeAuthError(w, http.StatusConflict, errHomeProjectStale.Error())
 			return
 		}
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
@@ -141,10 +169,51 @@ func handleScoutHomeOpening(w http.ResponseWriter, r *http.Request, app *kanbanB
 	})
 }
 
+// acceptedScoutHomeProjectRetry proves the narrow exception used above from
+// server-only durable state. It never trusts a client thread id and never
+// projects the journal. A changed key, text, token, owner, operation body, or
+// terminal server-owned result does not need a still-valid client token.
+func (app *kanbanBoardApp) acceptedScoutHomeProjectRetry(user *userAccount, key, text, encodedProjectToken string) bool {
+	if app == nil || app.memory == nil || user == nil || strings.TrimSpace(encodedProjectToken) == "" {
+		return false
+	}
+	owner := normalizeAccountEmail(user.Email)
+	key, keyErr := normalizeScoutIdempotencyKey(key)
+	text, textErr := normalizeScoutHomeOpeningText(text)
+	if owner == "" || keyErr != nil || textErr != nil {
+		return false
+	}
+	operationDigest := scoutOpeningDigest(owner, key)
+	threadID := "scout-home-" + operationDigest[:24]
+	wantTokenDigest := homeProjectTokenDigest(encodedProjectToken)
+	for _, entry := range app.memory.snapshot(0) {
+		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
+			continue
+		}
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || thread.OpeningOperation == nil || normalizeAccountEmail(thread.OwnerEmail) != owner ||
+			thread.OpeningOperation.KeyDigest != scoutOpeningDigest(key) ||
+			thread.OpeningOperation.BodyDigest != scoutOpeningDigest(text, wantTokenDigest) {
+			return false
+		}
+		for _, operation := range thread.ProjectLinkOperations {
+			if operation.OperationID == thread.OpeningOperation.OperationID && oneOf(operation.State, "pending", "confirmed", "failed_terminal") && operation.TokenDigest == wantTokenDigest {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // ensureScoutHomeOpening persists the private thread, first user message, and
 // queued reply placeholder as one whole-thread memory record. That single
 // append is the crash-safe boundary promised by the home composer.
 func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string, text string) (scoutChatThreadRecord, bool, error) {
+	return app.ensureScoutHomeOpeningWithProject(context.Background(), user, key, text, "", homeProjectContextToken{})
+}
+
+func (app *kanbanBoardApp) ensureScoutHomeOpeningWithProject(ctx context.Context, user *userAccount, key string, text string, encodedProjectToken string, projectToken homeProjectContextToken) (scoutChatThreadRecord, bool, error) {
 	if app == nil || app.memory == nil || user == nil {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("chat thread memory is unavailable")
 	}
@@ -162,10 +231,14 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 	}
 	operationDigest := scoutOpeningDigest(owner, key)
 	threadID := "scout-home-" + operationDigest[:24]
+	projectTokenDigest := ""
+	if strings.TrimSpace(encodedProjectToken) != "" {
+		projectTokenDigest = homeProjectTokenDigest(encodedProjectToken)
+	}
 	operation := &scoutChatOpeningOperation{
 		OperationID:    "scout-opening-" + operationDigest[:24],
 		KeyDigest:      scoutOpeningDigest(key),
-		BodyDigest:     scoutOpeningDigest(text),
+		BodyDigest:     scoutOpeningDigest(text, projectTokenDigest),
 		UserMessageID:  threadID + "-user",
 		ReplyMessageID: threadID + "-scout",
 	}
@@ -182,6 +255,23 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 			return scoutChatThreadRecord{}, false, errScoutOpeningConflict
 		}
 		lock.Unlock()
+		if projectToken.Kind != "" {
+			if scoutHomeProjectOperationState(existing, existing.OpeningOperation.OperationID) == "failed_terminal" {
+				return existing, false, errScoutProjectTerminal
+			}
+			confirmed, reconcileErr := app.reconcileScoutHomeProjectLink(ctx, user, existing, key, text, projectToken)
+			if reconcileErr != nil {
+				if scoutHomeProjectTerminalError(reconcileErr) {
+					terminal, terminalErr := app.failScoutHomeProjectLink(user, existing, reconcileErr)
+					if terminalErr != nil {
+						return existing, false, terminalErr
+					}
+					return terminal, false, errScoutProjectTerminal
+				}
+				return existing, false, reconcileErr
+			}
+			existing = confirmed
+		}
 		return existing, false, nil
 	}
 
@@ -195,6 +285,9 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 		AuthorName:  scoutChatAuthorName(user),
 		AuthorEmail: owner,
 	}
+	if projectToken.Kind != "" {
+		userMessage.Project = &scoutChatProjectContext{Status: "pending", Title: projectToken.ProjectTitle, Basis: projectToken.Basis}
+	}
 	reply := scoutChatMessageRecord{
 		ID:        operation.ReplyMessageID,
 		Kind:      "message",
@@ -206,6 +299,9 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 			State:       scoutReplyStateQueued,
 			QueuedAt:    now.Format(time.RFC3339Nano),
 		},
+	}
+	if projectToken.Kind != "" {
+		reply.Reply.State = scoutReplyStateProjectPending
 	}
 	thread := scoutChatThreadRecord{
 		ID:               threadID,
@@ -219,6 +315,14 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 		Messages:         []scoutChatMessageRecord{userMessage, reply},
 		OpeningOperation: operation,
 	}
+	if projectToken.Kind != "" {
+		thread.ProjectLinkOperations = []scoutChatProjectLinkOperation{{
+			OperationID: operation.OperationID, TokenDigest: projectTokenDigest, MessageID: userMessage.ID,
+			State: "pending", ProjectKind: projectToken.Kind, ProjectID: projectToken.ProjectID,
+			ProjectRevision: projectToken.ProjectRevision, ProjectDigest: projectToken.ProjectDigest,
+			ProjectTitle: projectToken.ProjectTitle, Basis: projectToken.Basis,
+		}}
+	}
 	entryText, err := encodeScoutChatThread(thread)
 	if err == nil {
 		_, _, err = app.memory.appendScoutChatThread(thread.ID, entryText, scoutChatThreadMetadata(thread))
@@ -228,10 +332,31 @@ func (app *kanbanBoardApp) ensureScoutHomeOpening(user *userAccount, key string,
 		return scoutChatThreadRecord{}, false, err
 	}
 
-	app.observeSTRIDETeamChatMessage(thread, userMessage, "message", "")
+	if projectToken.Kind != "" {
+		confirmed, reconcileErr := app.reconcileScoutHomeProjectLink(ctx, user, thread, key, text, projectToken)
+		if reconcileErr != nil {
+			if scoutHomeProjectTerminalError(reconcileErr) {
+				terminal, terminalErr := app.failScoutHomeProjectLink(user, thread, reconcileErr)
+				if terminalErr != nil {
+					return thread, true, terminalErr
+				}
+				return terminal, true, errScoutProjectTerminal
+			}
+			return thread, true, reconcileErr
+		}
+		thread = confirmed
+	}
+	confirmedUserIndex := scoutChatMessageIndex(thread, operation.UserMessageID)
+	confirmedReplyIndex := scoutChatMessageIndex(thread, operation.ReplyMessageID)
+	if confirmedUserIndex < 0 || confirmedReplyIndex < 0 {
+		return thread, true, ErrProjectAuthorityConflict
+	}
+	confirmedUserMessage := thread.Messages[confirmedUserIndex]
+	confirmedReplyMessage := thread.Messages[confirmedReplyIndex]
+	app.observeSTRIDETeamChatMessage(thread, confirmedUserMessage, "message", "")
 	deliverScoutChatThreadMetadata(thread)
-	app.sendScoutChatThreadUpdateToViewer(owner, thread, userMessage)
-	app.sendScoutChatThreadUpdateToViewer(owner, thread, reply)
+	app.sendScoutChatThreadUpdateToViewer(owner, thread, confirmedUserMessage)
+	app.sendScoutChatThreadUpdateToViewer(owner, thread, confirmedReplyMessage)
 	return thread, true, nil
 }
 
@@ -247,8 +372,14 @@ func scoutOpeningOperationMatches(thread scoutChatThreadRecord, owner string, ex
 	userIndex := scoutChatMessageIndex(thread, actual.UserMessageID)
 	replyIndex := scoutChatMessageIndex(thread, actual.ReplyMessageID)
 	return userIndex >= 0 && replyIndex >= 0 && thread.Messages[userIndex].Role == "user" &&
-		scoutOpeningDigest(strings.TrimSpace(thread.Messages[userIndex].Text)) == actual.BodyDigest &&
+		scoutOpeningBodyMatches(thread, *actual, thread.Messages[userIndex]) &&
 		thread.Messages[replyIndex].Reply != nil && thread.Messages[replyIndex].Reply.OperationID == actual.OperationID
+}
+
+func scoutOpeningBodyMatches(thread scoutChatThreadRecord, operation scoutChatOpeningOperation, message scoutChatMessageRecord) bool {
+	text := strings.TrimSpace(message.Text)
+	return scoutOpeningDigest(text) == operation.BodyDigest ||
+		scoutOpeningDigest(text, firstScoutProjectTokenDigest(thread, operation.OperationID)) == operation.BodyDigest
 }
 
 func (app *kanbanBoardApp) startScoutOpeningReplyWorkers() {
@@ -428,7 +559,7 @@ func (app *kanbanBoardApp) claimScoutOpeningReply(threadID string) (scoutChatThr
 	replyIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.ReplyMessageID)
 	if userIndex < 0 || replyIndex < 0 || thread.Messages[replyIndex].Reply == nil ||
 		thread.Messages[replyIndex].Reply.State != scoutReplyStateQueued ||
-		scoutOpeningDigest(strings.TrimSpace(thread.Messages[userIndex].Text)) != thread.OpeningOperation.BodyDigest {
+		!scoutOpeningBodyMatches(thread, *thread.OpeningOperation, thread.Messages[userIndex]) {
 		lock.Unlock()
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, "", false
 	}
@@ -547,7 +678,7 @@ func (app *kanbanBoardApp) finishScoutOpeningReply(threadID string, leaseID stri
 		return
 	}
 	now := time.Now().UTC()
-	if thread.ArchivedAt != "" || scoutOpeningDigest(strings.TrimSpace(thread.Messages[userIndex].Text)) != thread.OpeningOperation.BodyDigest {
+	if thread.ArchivedAt != "" || !scoutOpeningBodyMatches(thread, *thread.OpeningOperation, thread.Messages[userIndex]) {
 		placeholder.Text = scoutReplyCanceledAfterEditText
 		placeholder.Reply.State = scoutReplyStateCanceled
 		placeholder.Reply.FinishedAt = now.Format(time.RFC3339Nano)

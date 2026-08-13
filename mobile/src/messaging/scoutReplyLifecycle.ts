@@ -14,6 +14,14 @@ export function scoutReplyLifecyclePresentation(
   const reply = message.reply;
   if (!reply || reply.state === 'completed') return null;
   switch (reply.state) {
+    case 'project_pending':
+      return {
+        state: 'project_pending',
+        label: 'Linking project',
+        fallbackText: '',
+        active: true,
+        retryable: false,
+      };
     case 'queued':
       return {
         state: 'queued',

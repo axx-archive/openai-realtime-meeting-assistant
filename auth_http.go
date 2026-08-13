@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -415,10 +416,54 @@ func wantsNativeSessionToken(r *http.Request) bool {
 // field when the caller is a native client that just established a session.
 func identityPayloadForRequest(r *http.Request, user *userAccount, sessionToken string) map[string]any {
 	payload := identityPayload(user)
+	token := strings.TrimSpace(sessionToken)
+	if token == "" && r != nil {
+		token = sessionTokenFromRequest(r)
+	}
+	payload["shellAccess"] = shellAccessForSession(user, token)
 	if sessionToken != "" && wantsNativeSessionToken(r) {
 		payload["sessionToken"] = sessionToken
 	}
 	return payload
+}
+
+// shellAccessForSession is the one server-owned projection that decides which
+// top-level destinations a signed-in client may advertise. The compact member
+// shell is the fail-closed default. AJ retains the founder/owner workspace even
+// while a legacy or global-person session has no active organization; everyone
+// else needs an exact current owner/admin membership on the authenticated
+// session before the unfinished Work/Network/You surfaces may be shown.
+func shellAccessForSession(user *userAccount, token string) string {
+	if user != nil && normalizeAccountEmail(user.Email) == founderOwnerEmail {
+		return "full"
+	}
+	if user == nil || strings.TrimSpace(token) == "" {
+		return "core"
+	}
+	converter := currentStrideE10TenantRuntimeConverter()
+	if converter == nil {
+		return "core"
+	}
+	resolver, ok := converter.resolver.(*strideE10MainTenantAuthorityResolver)
+	if !ok || resolver == nil {
+		return "core"
+	}
+	full := false
+	err := resolver.WithCurrentTenantAuthority(context.Background(), StrideE10TenantSurfaceHTTP, hashResetToken(token), func(snapshot StrideE10TenantAuthoritySnapshot) error {
+		if normalizeAccountEmail(snapshot.Session.Email) != normalizeAccountEmail(user.Email) ||
+			snapshot.Membership.Validate() != nil || snapshot.Membership.Status != "active" || snapshot.Membership.EndedAt != nil ||
+			snapshot.Membership.PersonID != snapshot.Session.PersonID || snapshot.Membership.OrganizationID != snapshot.Session.ActiveOrganizationID ||
+			snapshot.Membership.Header.ID != snapshot.Session.OrganizationMembershipID ||
+			snapshot.Membership.Header.Revision != snapshot.Session.OrganizationMembershipRev {
+			return ErrStrideE10TenantAuthorityStale
+		}
+		full = oneOf(snapshot.Membership.Role, "owner", "admin")
+		return nil
+	})
+	if err != nil || !full {
+		return "core"
+	}
+	return "full"
 }
 
 // userFromRequest resolves the signed-in account from the session cookie or
@@ -699,6 +744,7 @@ func identityPayload(user *userAccount) map[string]any {
 		"passkeys":      len(user.Credentials),
 		"hasPasskeys":   len(user.Credentials) > 0,
 		"themePref":     user.ThemePref,
+		"shellAccess":   shellAccessForSession(user, ""),
 	}
 }
 
@@ -730,7 +776,7 @@ func handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "could not save theme")
 		return
 	}
-	writeAuthJSON(w, http.StatusOK, identityPayload(updated))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, updated, ""))
 }
 
 func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
@@ -830,7 +876,7 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Do not re-emit sessionToken on /auth/me — the native client already
 	// holds it. Emitting it again would expand the surface of every me poll.
-	writeAuthJSON(w, http.StatusOK, identityPayload(user))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, user, ""))
 }
 
 // handleAuthNativeWebSession is a narrow bearer-to-HttpOnly-cookie bridge for
@@ -887,7 +933,7 @@ func handleAuthProfile(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "could not update profile")
 		return
 	}
-	writeAuthJSON(w, http.StatusOK, identityPayload(updated))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, updated, ""))
 }
 
 func cleanDisplayName(value string) (string, error) {

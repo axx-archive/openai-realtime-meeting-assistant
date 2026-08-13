@@ -839,6 +839,11 @@ func TestIndexRoomsArchiveSelectionFallsBackToOffice(t *testing.T) {
 	if !strings.Contains(snapshotBody, "reconcileLobbySelection()") {
 		t.Error("handleRoomsSnapshot must reconcile the lobby selection when the list lands")
 	}
+	for _, marker := range []string{"homeRoomsContextInitialized", "nextSignature !== previousSignature", "if (contextChanged) loadHomeSnapshot(true)"} {
+		if !strings.Contains(snapshotBody, marker) {
+			t.Errorf("handleRoomsSnapshot must refresh Home only after a meaningful room-context change: missing %q", marker)
+		}
+	}
 	loadBody := functionBody(html, "async function loadRoomsList()")
 	if !strings.Contains(loadBody, "reconcileLobbySelection()") {
 		t.Error("loadRoomsList must reconcile the lobby selection when the list lands")

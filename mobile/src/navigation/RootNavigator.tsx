@@ -48,6 +48,7 @@ import {
   nativeShellDestinationForRoute,
   createNativeShellSelectionCoordinator,
   nativeShellDestinations,
+  nativeShellDestinationAllowed,
   nativeShellVisibleForRoute,
 } from './nativeShellModel';
 import {
@@ -207,9 +208,16 @@ export function RootNavigator() {
   };
 
   const selectShellDestination = useCallback((destination: (typeof nativeShellDestinations)[number]) => {
-    if (!navigationRef.isReady()) return;
-    shellSelectionRef.current.select(destination, (route) => navigationRef.navigate(route as never));
-  }, []);
+    if (!navigationRef.isReady() || !nativeShellDestinationAllowed(destination.id, user?.shellAccess)) return;
+    shellSelectionRef.current.select(destination, (route, params) => navigationRef.navigate({ name: route, params } as never));
+  }, [user?.shellAccess]);
+
+  useEffect(() => {
+    if (!user || user.shellAccess === 'full' || !navigationRef.isReady()) return;
+    if (!nativeShellDestinationAllowed(activeShellDestination, user.shellAccess)) {
+      navigationRef.navigate('Canvas');
+    }
+  }, [activeShellDestination, user]);
 
   const syncActiveRoute = useCallback(() => {
     const route = navigationRef.getCurrentRoute()?.name as keyof RootStackParamList | undefined;
@@ -250,6 +258,7 @@ export function RootNavigator() {
       <PersonalRealtimeProvider onActions={handleRealtimeActions} roomActive={activeRoute === 'Room'}>
         <NativeUniversalShell
           active={activeShellDestination}
+          access={user?.shellAccess}
           keepSidebarForFocusedRoute={Boolean(user && sessionToken && activeRoute === 'Thread')}
           personalRealtimeVisible={Boolean(user && sessionToken && activeRoute !== 'Room')}
           visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}

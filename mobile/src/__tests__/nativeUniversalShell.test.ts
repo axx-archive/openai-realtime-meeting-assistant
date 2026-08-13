@@ -21,6 +21,8 @@ const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...
 test('the universal IA is exact and ordered', () => {
   assert.deepEqual(nativeShellDestinations.map(({ id, label }) => ({ id, label })), [
     { id: 'home', label: 'Home' },
+    { id: 'video', label: 'Video' },
+    { id: 'chat', label: 'Chat' },
     { id: 'work', label: 'Work' },
     { id: 'network', label: 'Network' },
     { id: 'work-search', label: 'Work Search' },
@@ -42,6 +44,8 @@ test('available width, including orientation and split view resizing, selects co
 
 test('selection feedback is deterministic and bounded', () => {
   assert.equal(nativeShellSelectionAnnouncement('home'), 'Home selected');
+  assert.equal(nativeShellSelectionAnnouncement('video'), 'Video selected');
+  assert.equal(nativeShellSelectionAnnouncement('chat'), 'Chat selected');
   assert.equal(nativeShellSelectionAnnouncement('work-search'), 'Work Search selected');
 });
 
@@ -100,10 +104,11 @@ test('mounted shell press preserves its navigator child through destination, ful
 
   const navigator = React.createElement(NavigationContainerProbe);
   let requestedRoute: string | undefined;
+  let requestedParams: unknown;
   const coordinator = createNativeShellSelectionCoordinator(message => AccessibilityInfo.announceForAccessibility(message));
-  const onSelect = (destination: (typeof nativeShellDestinations)[number]) => coordinator.select(destination, route => { requestedRoute = route });
-  const shell = (active: Parameters<typeof NativeUniversalShell>[0]['active'], visible: boolean) =>
-    React.createElement(NativeUniversalShell, { active, visible, onSelect, children: navigator });
+  const onSelect = (destination: (typeof nativeShellDestinations)[number]) => coordinator.select(destination, (route, params) => { requestedRoute = route; requestedParams = params; });
+  const shell = (active: Parameters<typeof NativeUniversalShell>[0]['active'], visible: boolean, access: 'core' | 'full' = 'full') =>
+    React.createElement(NativeUniversalShell, { active, access, visible, onSelect, children: navigator });
 
   let renderer: import('react-test-renderer').ReactTestRenderer;
   await act(async () => { renderer = create(shell('home', true)); });
@@ -117,10 +122,24 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(selected, 'work');
   assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Work selected']);
 
+  const chatPressable = renderer!.root.findByProps({ accessibilityLabel: 'Chat' });
+  await act(async () => { chatPressable.props.onPress(); });
+  assert.equal(requestedRoute, 'Deck');
+  assert.deepEqual(requestedParams, { segment: 'threads' });
+
   await act(async () => { renderer!.update(shell(selected, true)); });
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.mountID, mountID);
   assert.deepEqual(renderer!.root.findByProps({ accessibilityLabel: 'Work' }).props.accessibilityState, { selected: true });
+
+  await act(async () => { renderer!.update(shell('home', true, 'core')); });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tab' }).length, 3);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Home' }).length, 1);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Video' }).length, 1);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Chat' }).length, 1);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Work' }).length, 0);
+
+  await act(async () => { renderer!.update(shell('home', true)); });
 
   await act(async () => {
     pushThread();
@@ -152,6 +171,8 @@ test('deep destinations preserve their owning top-level context', () => {
   const coordinator = createNativeShellSelectionCoordinator(() => {}, 'work');
   assert.equal(coordinator.commit('Thread'), 'work');
   assert.equal(nativeShellDestinationForRoute('Board'), 'work');
+  assert.equal(nativeShellDestinationForRoute('Deck'), 'chat');
+  assert.equal(nativeShellDestinationForRoute('Meetings'), 'video');
   assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'network');
   assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'work-search');
   assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'you');
@@ -209,7 +230,7 @@ test('navigation integration keeps push/deep-link handling and latest-thread rou
   assert.match(root, /navigationRef\.navigate\('Thread'/);
   assert.match(root, /onStateChange=\{syncActiveRoute\}/);
   assert.match(root, /shellSelectionRef\.current\.select\(destination/);
-  assert.match(root, /navigationRef\.navigate\(route as never\)/);
+  assert.match(root, /navigationRef\.navigate\(\{ name: route, params \} as never\)/);
   assert.doesNotMatch(root, /navigationRef\.resetRoot/);
   assert.match(root, /createNativeShellSelectionCoordinator/);
   assert.match(root, /shellSelectionRef\.current\.commit\(route\)/);

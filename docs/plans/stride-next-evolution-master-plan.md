@@ -671,6 +671,8 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | PD1 Project identity / association / Project Record foundation | **Verified Complete — bounded local/default-off class** | receipt `stride-e10-pd1-project-foundation-local-20260812.json` binds migration 0018, stable organization-scoped Project identity, exact current session/source authority, correctable append-only ProjectAssociation, atomic old/new correction, synchronous source-drift unlisting plus four-family purge outbox, restart-safe permission-filtered body-free Project Record reconstruction and operation-scoped durable replay. Focused and race suites, real disposable-PostgreSQL upgrade/authority/correction/revoke/replay tests, DR, vet, 20× stress, full `go test ./...` (`536.950s`) and a fresh independent critic PASS. All Project switches remain false; no Home chip/chooser, HTTP exposure, production migration, provider call, commit, push or deploy is claimed. |
 | PD1 Project foundation / persistent personal Realtime / immediate Home taxonomy | **Verified Complete — bounded exact-release class** | local receipt `stride-e10-pd1-project-realtime-persistent-local-20260812.json` binds the exact web/native/server candidate: the Home waveform starts a durable owner-only `gpt-realtime-2.1` thread; logical human and Scout turns append to that exact thread; the voice control persists across ordinary navigation, opens the bound thread and shows truthful listening/thinking/talking/acting/error state; transient loss retries the same logical session/thread twice with strictly increasing transport revisions while stale callbacks fail closed; explicit stop, auth/session drift, room entry, backgrounding and audio-focus takeover terminate it. Web and native render the four stable category shells immediately while authorized suggestions load, keep them non-actionable until hydration and avoid composer shift. Full Go (`542.384s`), focused race, 526/526 native, typecheck, Release simulator build, vet, rendered responsive web evidence, diff-check and fresh critic pass. Release receipt `stride-e10-pd1-project-realtime-persistent-release-20260812.json` then binds exact commit `cf7240f3...` on main, VPS ledger generation 62, bundle `08f519eb...`, app image `393272fc...`, renderer image `7264176a...`, retained `7fb35f88...` rollback, public health/readiness and `verified-local-unsigned`; migration 18 is installed with reviewed checksum `39754a77...` under rollback-compatible policy. iOS Build 55 (`52ae0dd4...`, fingerprint `f6a9a4ca...`) and EAS/ASC submission `477acca1...` are `FINISHED`. This does not claim Apple `VALID` processing, intended tester-group availability, a live provider conversation, native active-control pixel proof, physical-device quality/latency, Home chief-of-staff personalization or Project-chip integration. |
 | PD1 Home chief-of-staff recommendations and immediate shells | **Verified Complete — bounded exact-release class** | The safe four-card taxonomy now paints before web authentication restoration and before the native Home request, reserves exact hydrated geometry, remains non-actionable while recommendations load and fails closed without retaining private context. The server ranks current `Needs you`, active work and exact continuation before safe fallbacks—including sparse one-thread states—detects one recurring topic across two or more already-viewer-authorized public/private conversations without mislabeling private context as team sentiment, and emits editable full-sentence suggestions with plain-language `Why this?` plus body-free source ID/revision coverage. Category selection remains local and zero-effect; Send remains the first persistence boundary. Local receipt `stride-e10-pd1-home-chief-of-staff-local-20260812.json` binds current responsive desktop/phone light/dark renders, focused normal/race tests, full Go (`540.630s`), full native 526/526, typecheck, vet, diff-check and fresh critic PASS. Release receipt `stride-e10-pd1-home-chief-of-staff-release-20260812.json` binds exact commit `fc4e3a57...` on main, VPS ledger generation 63, bundle `3d83223d...`, app image `e73f8146...`, renderer image `300316af...`, retained `cf7240f3...` rollback, public health/readiness and `verified-local-unsigned`; iOS Build 56 (`919cb22e...`, fingerprint `51bae3ea...`) finished and EAS submission `3a361594...` successfully uploaded it to App Store Connect. The session-safe performance successor receipt `stride-e10-pd1-home-immediate-session-safe-release-20260812.json` binds exact commit `ee5c2b38...` on main: static server-rendered shells paint before JavaScript, duplicate startup/event fetches coalesce per exact audience, account changes synchronously remove the prior user's private projection, and delayed prior-user responses fail closed. Full Go (`542.987s`), focused race, 526/526 native, typecheck, vet, rendered delayed-response proof and fresh critic PASS; VPS ledger generation 64 serves bundle `f111742b...`, app image `18374743...`, renderer image `acdf07f7...`, retains `fc4e3a57...` for rollback and verifies `verified-local-unsigned`. iOS Build 57 (`2ba79940...`, fingerprint `324a4815...`) is finished from the exact commit; its App Store Connect submission `bbb0c957...` remained in progress without error at receipt time. This bounded row does **not** claim Apple processing or tester-group availability, meeting-transcript/Project-state compaction, a signed suggestion token, Project chip/chooser/Send association, Project Record completion, provider synthesis or physical-device acceptance. |
+| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Verified Complete — bounded local release-candidate class** | The Project foundation is now exposed through a read-only server-owned Home context preview and an accessible web/native `Add project` / `Suggested` / selected Project control. Choosing an authorized Project, `No project`, or a new creator-private Project remains local and zero-effect; explicit Send is the first persistence boundary. A signed short-lived token binds the draft, exact destination and held organization/session/Project authority. New-private Send durably commits the private message before one replay-safe PostgreSQL transaction admits its body-free private conversation event, exact source receipt, proposed then confirmed ProjectAssociation, four projection jobs and immutable operation receipt; Scout stays fenced until confirmation. Exact retry/restart survives response loss without duplication, changed bytes conflict, stale/revoked authority fails terminal without provider work, confirmed-state corruption returns 409, and late socket frames cannot regress a confirmed link to pending. Migration 0019, focused normal/race/disposable-PostgreSQL coverage, 527/527 native, typecheck, vet, responsive dark/light desktop/phone chooser renders, diff-check and fresh critic PASS are bound by `stride-e10-pd1-home-project-video-chat-local-20260812.json`. Existing-thread Project association/correction, a full multi-source Project Record, native rendered/physical-device proof, provider-backed work and whole-PD1 acceptance remain open. |
+| PD1 Video/Chat prominence, member shell and channel stability | **Verified Complete — bounded local release-candidate class** | Desktop and native promote Video and Chat beside Home. The authenticated server projects `core` versus `full` shell access: missing/stale authority fails closed to Home/Video/Chat, AJ remains the explicit founder owner, and only an exact current organization owner/admin membership exposes Work/Network/Work Search/You. Clients hide—not merely disable—the unfinished destinations, redirect a stale direct top-level path to Home, keep keyboard/VoiceOver semantics, and retain icon-only compact navigation. Home no longer refetches recommendations after an unchanged room snapshot, its web launch geometry is stable, and generated Country Golf/channel imagery reserves exact 3:2 feed geometry before load with scroll anchoring disabled, removing the observed jitter. The Agentic Lab may cover every destination only inside its isolated synthetic authority fixtures; it is not a user-role bypass. Exact source and rendered evidence shares `stride-e10-pd1-home-project-video-chat-local-20260812.json`; native Build 58, TestFlight and VPS activation remain the controlling release gates. |
 | PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
 | PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
 | PI0-B pilot evidence/collection gate | **Not Started** | requires PI0-A baseline, PN1 and accepted PD1 pilot surfaces before any real collection |
@@ -690,12 +692,13 @@ activation remains `In Progress` or `Blocked/External Gate`.
 > foundation and persistent-personal-Realtime/immediate-Home exact release
 > rows above supersede older text that names compact meeting controls,
 > first-class Project identity or cross-navigation voice ownership as the next
-> action. Resume after exact release readback by integrating the fail-closed
-> visible Project suggestion/selection/correction chip into Home and
-> conversation Send and using permission-filtered recurring compaction to rank
-> explainable chief-of-staff suggestions from the current user's authorized
-> work, public/team conversations, meetings and Project state. Then prove one
-> server-owned Project-bound Research work
+> action. The bounded Home Project suggestion/chooser/Create and new-private
+> exact-Send association row now supersedes the prior Home-chip step. Resume
+> after exact release readback by extending the same fail-closed association and
+> correction contract to existing threads, then using permission-filtered
+> recurring compaction to rank explainable chief-of-staff suggestions from the
+> current user's authorized work, public/team conversations, meetings and
+> Project state. Then prove one server-owned Project-bound Research work
 > projection through immutable revision, rich Open, named Drive receipt/Open in
 > Drive and normal-composer edit/regenerate on web, iPhone and iPad. Apple
 > external Bonfire state and exact intended tester-group relationship readback
@@ -779,6 +782,35 @@ The fixture passes only through normal rendered desktop/iPhone/iPad interaction
 plus API/ledger evidence, with a premium-UI design critic; seeded JSON, source
 tests or invisible scaffolding alone do not count. A live organization,
 provider-backed run or enrollment remains a separate action-time authority.
+
+The Lab's first sustained company scenario is a synthetic **2026 AI venture
+studio** evaluating and building one low-up-front-capital e-commerce business.
+Its workforce spans founder/chief of staff, customer research, merchandising,
+brand/design, growth, finance, operations, engineering, legal-risk review and
+adversarial investment review. Each personality is a candidate `TeamAgent`,
+with a named job, capability manifest, bounded sources/tools/budget, direct and
+multiplayer thread participation, project assignments, human-readable work
+cards, artifacts, reviewer feedback and exact machine attribution. Recurring
+cron-triggered shifts must use the normal scheduler, Project, conversation,
+meeting, WorkRun, artifact/revision and contribution ledgers; they may not
+write a parallel simulator history. Every run binds its persona/package/runtime
+revision, authorized company-context snapshot, sources, cost, outputs,
+interventions and accepted/rejected outcome so the company brain can show what
+the studio knows, where it excels, where it repeatedly fails and who or what
+contributed. Synthetic agents never receive human credit or self-approve.
+
+Recurring execution remains off until AJ approves one exact schedule manifest:
+isolated tenant, persona roster, cadence/time zone, provider/model and aggregate
+daily/weekly spend ceilings, maximum turns/work duration, permitted effects,
+review checkpoints, stop conditions, retention and kill switch. Start with a
+deterministic manual replay, then a bounded scheduled shadow week, then a
+provider-backed pilot only under the approved budget. A useful Lab personality
+does not automatically enter the Marketplace. Graduation creates a new,
+de-identified and rights-reviewed `AgentPackageManifest` candidate from
+explicitly portable traits/capabilities, then requires fixed evals, capability
+evidence, security/privacy review, curator approval and rollback proof before a
+listing can become hireable. Company facts, chats, memories, artifacts and
+relationship history never become package training or marketplace inventory.
 
 Founder-directed post-E10 mobile reference study: after every existing E10
 implementation, release, device, service, cohort, resilience and soak
@@ -902,8 +934,8 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next:** integrate the accepted Project authority into Home/conversation as
-  a visible suggested/selected/removable/correctable chip with explicit-Send
+- **Next:** extend the accepted Project authority from the bounded new-private
+  Home Send into existing threads with explicit revision-bound correction and
   reauthorization. Build the authorized recurring compaction and deterministic
   ranking path that makes each category's suggestions feel like a grounded
   chief of staff: current commitments and blockers first, then exact

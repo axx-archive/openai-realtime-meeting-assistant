@@ -6906,6 +6906,13 @@
         padding: clamp(24px, 5vw, 56px);
       }
 
+      /* Desktop browser chrome can change the small-viewport unit after the
+         first paint. Keep the centered Home geometry on the stable viewport
+         there; phones retain svh below for real browser-bar changes. */
+      @media (min-width: 761px) {
+        .office-launch { min-height: calc(100vh - var(--shell-topbar-height, 0px)); }
+      }
+
       .office-launch__wrap {
         position: relative;
         min-width: 0;
@@ -7074,6 +7081,8 @@
       .office-launch__line {
         color: var(--text-1);
         font: 600 22px var(--font-sans);
+        line-height: 28px;
+        min-height: 28px;
         letter-spacing: -0.016em;
         text-align: center;
         margin-top: 4px;
@@ -7219,6 +7228,21 @@
       }
       .home-context-chip:hover, .home-context-chip:focus-visible { border-color: var(--line-2); color: var(--text-1); }
       .home-context-chip[hidden] { display: none; }
+
+      .home-project-chip { min-height: 44px; padding: 8px 13px; background: transparent; }
+      .home-project-chooser { width: min(430px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line-1); border-radius: 22px; background: var(--surface-1); color: var(--text-1); box-shadow: var(--shadow-3); }
+      .home-project-chooser::backdrop { background: color-mix(in srgb, #000 38%, transparent); backdrop-filter: blur(4px); }
+      .home-project-chooser__body { display: grid; gap: 10px; padding: 20px; }
+      .home-project-chooser__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .home-project-chooser__head h2 { margin: 0; font: var(--type-title-3); }
+      .home-project-chooser__close { width: 44px; height: 44px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text-1); }
+      .home-project-chooser__list { display: grid; gap: 6px; max-height: min(42vh, 360px); overflow: auto; }
+      .home-project-choice { min-height: 48px; padding: 10px 12px; border: 0; border-radius: 13px; background: transparent; color: var(--text-1); text-align: left; font: var(--type-body); }
+      .home-project-choice:hover, .home-project-choice:focus-visible, .home-project-choice[aria-checked="true"] { background: var(--surface-2); }
+      .home-project-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line-1); }
+      .home-project-create input { min-width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--line-1); border-radius: 12px; background: transparent; color: var(--text-1); outline: none; }
+      .home-project-create input:focus { border-color: var(--line-2); }
+      .home-project-create button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--text-1); color: var(--surface-1); }
 
       .home-refresh-retry {
         min-height: 40px;
@@ -9713,6 +9737,7 @@
         gap: 6px;
         min-height: 0;
         overflow-y: auto;
+        overflow-anchor: none;
         overscroll-behavior: contain;
         padding: 20px;
       }
@@ -10137,13 +10162,15 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        max-width: min(420px, 100%);
+        width: min(420px, 100%);
+        max-width: 100%;
       }
 
       .scout-chat-image__img {
         display: block;
         width: 100%;
-        height: auto;
+        height: 100%;
+        object-fit: contain;
         border: 0;
         outline: 1px solid rgba(0, 0, 0, 0.1);
         outline-offset: -1px;
@@ -10158,8 +10185,9 @@
       .scout-chat-image__preview {
         position: relative;
         display: block;
-        width: fit-content;
+        width: min(420px, 100%);
         max-width: 100%;
+        aspect-ratio: 3 / 2;
         padding: 0;
         border: 0;
         border-radius: var(--r-lg, 12px);
@@ -11251,6 +11279,28 @@
         font: inherit;
         letter-spacing: inherit;
         color: inherit;
+      }
+
+      .scout-chat-msg__project {
+        order: 2;
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        max-width: min(280px, 100%);
+        padding: 2px 8px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #chatTool .scout-chat-msg--user .scout-chat-msg__project {
+        background: color-mix(in srgb, white 14%, transparent);
+        color: color-mix(in srgb, var(--on-accent) 78%, transparent);
       }
 
       .scout-chat-text {
@@ -14405,10 +14455,10 @@
         }
 
         #chatTool .scout-chat-image__img {
-          width: auto;
+          width: 100%;
           max-width: 100%;
-          height: auto;
-          max-height: 300px;
+          height: 100%;
+          max-height: none;
           object-fit: contain;
           border: 0;
           outline: 1px solid rgba(0, 0, 0, 0.1);
@@ -14422,7 +14472,7 @@
         }
 
         #chatTool .scout-chat-image {
-          width: fit-content;
+          width: min(var(--desktop-chat-image-preview-measure), 100%);
           max-width: min(var(--desktop-chat-image-preview-measure), 100%);
         }
 
@@ -24618,7 +24668,8 @@
           padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 96px);
         }
 
-        /* the floating glass tab bar — 5 icons, --glass-chrome recipe
+        /* the floating glass tab bar — seven icon-only destinations,
+           --glass-chrome recipe
            (design mobile §3) */
         #appShell.is-authed[data-tool="office"] .tool-rail,
         .tool-rail {
@@ -24632,13 +24683,13 @@
           flex-direction: row;
           align-items: center;
           justify-content: center;
-          gap: 3px;
+          gap: 2px;
           width: max-content;
-          max-width: calc(100vw - 24px);
-          max-width: calc(100dvw - 24px);
+          max-width: calc(100vw - 16px);
+          max-width: calc(100dvw - 16px);
           height: auto;
           max-height: none;
-          padding: 7px;
+          padding: 5px;
           overflow-x: auto;
           scrollbar-width: none;
           border: 1px solid var(--glass-border);
@@ -24676,6 +24727,7 @@
         .tool-rail__account {
           display: none;
         }
+        .tool-rail__utilities { display: none; }
 
         /* the hidden workstream sub-screens (research · design · grill) have no
            dock icon of their own, so they borrow the office light while open;
@@ -25870,6 +25922,8 @@
         .office-launch__line {
           color: var(--text-1);
           font: 600 19px var(--font-sans);
+          line-height: 24px;
+          min-height: 24px;
           letter-spacing: -0.016em;
         }
 
@@ -29087,6 +29141,7 @@
           color var(--dur-fast) var(--ease),
           transform var(--dur-fast) var(--ease);
       }
+      .pd1-primary-nav__item[hidden] { display: none !important; }
       .pd1-primary-nav__item > svg:not(.pd1-primary-nav__disclosure) { width: 18px; height: 18px; }
       .pd1-primary-nav__item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       .pd1-primary-nav__item:not([data-pd1-destination="Work"]) { grid-template-columns: 18px minmax(0, 1fr); }
@@ -29103,7 +29158,7 @@
       .work-tool-menu {
         position: absolute;
         z-index: 320;
-        top: 116px;
+        top: 216px;
         left: calc(100% + 8px);
         display: grid;
         width: 226px;
@@ -29120,6 +29175,8 @@
       .work-tool-menu .tool-rail__slot { display: block; width: 100%; }
       .work-tool-menu .tool-rail__slot[hidden],
       .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="office"]),
+      .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="room"]),
+      .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="chat"]),
       .work-tool-menu .tool-rail__slot:has(.tool-rail__tool[data-tool="network"]) { display: none !important; }
       .work-tool-menu .tool-rail__tool {
         width: 100%;
@@ -29239,13 +29296,13 @@
       }
       @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         #appShell.is-authed { padding-left: 0; }
-        .pd1-primary-nav { flex-direction: row; width: auto; gap: 4px; }
+        .pd1-primary-nav { flex-direction: row; width: auto; gap: 2px; }
         .pd1-primary-nav__item,
         .pd1-primary-nav__item:not([data-pd1-destination="Work"]) {
           display: inline-grid;
           grid-template-columns: 1fr;
-          width: 44px;
-          min-width: 44px;
+          width: 40px;
+          min-width: 40px;
           height: 44px;
           padding: 0;
           border-radius: 50%;
@@ -29479,6 +29536,14 @@
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-current="page" tabindex="0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
             <span>Home</span>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-current="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="3"></rect><path d="m16 10 4-2v8l-4-2"></path></svg>
+            <span>Video</span>
+          </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-current="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+            <span>Chat</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 5V3h8v2M3 10h18"></path></svg>
@@ -29754,6 +29819,15 @@
               </form>
               <p id="homeScoutComposerStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
               <button id="homeContextChip" class="home-context-chip" type="button" aria-label="Remove continuation context" hidden></button>
+              <button id="homeProjectChip" class="home-context-chip home-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project" hidden>Add project</button>
+              <dialog id="homeProjectChooser" class="home-project-chooser" aria-labelledby="homeProjectChooserTitle">
+                <div class="home-project-chooser__body">
+                  <div class="home-project-chooser__head"><h2 id="homeProjectChooserTitle">Choose a project</h2><button id="homeProjectChooserClose" class="home-project-chooser__close pressable" type="button" aria-label="Close project chooser">×</button></div>
+                  <div id="homeProjectChoices" class="home-project-chooser__list" role="radiogroup" aria-label="Projects"></div>
+                  <form id="homeProjectCreate" class="home-project-create"><input id="homeProjectCreateTitle" maxlength="120" placeholder="New private project" aria-label="New private project name"><button type="submit">Add</button></form>
+                  <p id="homeProjectStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
+                </div>
+              </dialog>
               <button id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Home unavailable · Retry</button>
             </div>
             <div id="homeContinuity" class="home-continuity" aria-label="Your current context" aria-live="polite" hidden></div>
@@ -31819,8 +31893,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       const artifactAdminEmail = 'aj@shareability.com'
-      const PD1_DESTINATIONS = Object.freeze(['Home', 'Work', 'Network', 'Work Search', 'You'])
-      const PD1_PATHS = Object.freeze({ Home: '/', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })
+      const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Work', 'Network', 'Work Search', 'You'])
+      const PD1_CORE_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat'])
+      const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Chat: '/chat', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })
       /* auth state — the session itself lives in an HttpOnly cookie the
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
@@ -31870,6 +31945,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          live by the `rooms` office event; counters come ONLY from here, never
          from another room's participants frames. */
       var roomsList = []
+      var homeRoomsContextInitialized = false
       /* /?room=<id> boot param — preselects a room once the list hydrates. */
       var pendingRoomBootParam = ''
       /* join intent parked across a stale-build reload (join-time version
@@ -32438,6 +32514,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const homeScoutSend = document.getElementById('homeScoutSend')
       const homeScoutComposerStatus = document.getElementById('homeScoutComposerStatus')
       const homeContextChip = document.getElementById('homeContextChip')
+      const homeProjectChip = document.getElementById('homeProjectChip')
+      const homeProjectChooser = document.getElementById('homeProjectChooser')
+      const homeProjectChooserClose = document.getElementById('homeProjectChooserClose')
+      const homeProjectChoices = document.getElementById('homeProjectChoices')
+      const homeProjectCreate = document.getElementById('homeProjectCreate')
+      const homeProjectCreateTitle = document.getElementById('homeProjectCreateTitle')
+      const homeProjectStatus = document.getElementById('homeProjectStatus')
       const homeRefreshRetry = document.getElementById('homeRefreshRetry')
       const homeStarters = document.getElementById('homeStarters')
       const homeSuggestions = document.getElementById('homeSuggestions')
@@ -32452,6 +32535,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
       let selectedHomeCategoryId = ''
       let selectedHomeSuggestionDestination = null
+      let homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
+      let homeProjectGeneration = 0
+      let homeProjectTimer = 0
       let homeSnapshotGeneration = 0
       let homeSnapshotStale = false
       let homeSnapshotRequest = null
@@ -32846,6 +32932,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // responses from the prior cookie/session can never render afterward.
         authedUser = nextUser || null
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
+        syncPD1NavigationAccess()
         if (!identityChanged) {
           return
         }
@@ -33757,13 +33844,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown'
         if (![previousKey, nextKey, 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
-        const current = Math.max(0, pd1DestinationButtons.indexOf(document.activeElement))
+        const visibleButtons = pd1DestinationButtons.filter(button => !button.hidden && !button.disabled)
+        if (!visibleButtons.length) return
+        const current = Math.max(0, visibleButtons.indexOf(document.activeElement))
         const next = event.key === 'Home'
           ? 0
           : event.key === 'End'
-            ? pd1DestinationButtons.length - 1
-            : (current + (event.key === nextKey ? 1 : -1) + pd1DestinationButtons.length) % pd1DestinationButtons.length
-        const button = pd1DestinationButtons[next]
+            ? visibleButtons.length - 1
+            : (current + (event.key === nextKey ? 1 : -1) + visibleButtons.length) % visibleButtons.length
+        const button = visibleButtons[next]
         selectPD1Destination(button.dataset.pd1Destination, { focus: false })
         button.focus()
       })
@@ -33930,11 +34019,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
       officeIntelCard?.addEventListener('click', () => setActiveTool('artifacts'))
       homeScoutComposer?.addEventListener('submit', submitHomeScoutOpening)
       homeScoutInput?.addEventListener('input', () => {
+		homeProjectGeneration += 1
         if (homeScoutOpeningAttempt?.text !== homeScoutInput.value.trim()) {
           homeScoutOpeningAttempt = null
           homeScoutComposerStatus.textContent = ''
         }
         homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput.value.trim()
+		if (homeProjectContext.selected?.text !== homeScoutInput.value.trim()) homeProjectContext.selected = null
+		homeProjectContext.choices = []
+		homeProjectContext.status = 'unlinked'
+		closeHomeProjectChooser()
+		renderHomeProjectContext()
+		window.clearTimeout(homeProjectTimer)
+		homeProjectTimer = window.setTimeout(() => loadHomeProjectContext(), 220)
         renderHomeStarters()
       })
       homeContextChip?.addEventListener('click', () => {
@@ -33944,6 +34041,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
         homeContextChip.textContent = ''
         homeScoutInput?.focus()
       })
+	  homeProjectChip?.addEventListener('click', () => openHomeProjectChooser())
+	  homeProjectChooserClose?.addEventListener('click', () => closeHomeProjectChooser())
+	  homeProjectChooser?.addEventListener('close', () => homeProjectChip?.focus())
+	  homeProjectCreate?.addEventListener('submit', async event => {
+		event.preventDefault()
+		const title = homeProjectCreateTitle?.value.trim()
+		if (!title) return homeProjectCreateTitle?.focus()
+		await loadHomeProjectContext(title)
+		if (homeProjectContext.selected) closeHomeProjectChooser()
+	  })
       homeScoutInput?.addEventListener('focus', () => {
         // Personal Realtime is app-level presence. Ordinary typing does not
         // hang up the call; only explicit close, a competing microphone mode,
@@ -35573,6 +35680,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function ensureOfficeSocket() {
         if (!authedUser || guestMode) {
+		  homeProjectGeneration += 1
+		  window.clearTimeout(homeProjectTimer)
           // guests never hold an office socket — the signed-in event union
           // (board/memory/notifications) is a member surface
           return
@@ -35964,9 +36073,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function syncAuthenticatedShell() {
         const authed = Boolean(authedUser)
         appShell.classList.toggle('is-authed', authed)
+        syncPD1NavigationAccess()
         if (authed) {
           const destination = pd1DestinationForPath(location.pathname)
-          if (destination && PD1_PATHS[destination] === location.pathname) {
+          if (destination && PD1_PATHS[destination] === location.pathname && !pd1DestinationAllowed(destination)) {
+            history.replaceState({ view: 'pd1', destination: 'Home' }, '', PD1_PATHS.Home)
+            selectPD1Destination('Home', { push: false, focus: false })
+          } else if (destination && PD1_PATHS[destination] === location.pathname) {
             selectPD1Destination(destination, { push: false, focus: false })
           } else {
             syncPD1Destination(destination || ((appShell.dataset.tool || 'office') === 'office' ? 'Home' : 'Work'))
@@ -38875,8 +38988,26 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return ''
       }
 
+      function pd1DestinationAllowed(destination) {
+        return PD1_DESTINATIONS.includes(destination)
+          && (authedUser?.shellAccess === 'full' || PD1_CORE_DESTINATIONS.includes(destination))
+      }
+
+      function syncPD1NavigationAccess() {
+        const full = authedUser?.shellAccess === 'full'
+        pd1DestinationButtons.forEach(button => {
+          const allowed = full || PD1_CORE_DESTINATIONS.includes(button.dataset.pd1Destination)
+          button.hidden = !allowed
+          button.disabled = !allowed
+          button.inert = !allowed
+          button.setAttribute('aria-hidden', allowed ? 'false' : 'true')
+          if (!allowed) button.tabIndex = -1
+        })
+        if (!full) setWorkToolMenuOpen(false)
+      }
+
       function syncPD1Destination(destination) {
-        const next = PD1_DESTINATIONS.includes(destination) ? destination : 'Home'
+        const next = pd1DestinationAllowed(destination) ? destination : 'Home'
         appShell.dataset.pd1Destination = next
         const workContext = next === 'Work'
         const shellVisible = appShell.classList.contains('is-authed') && !appShell.classList.contains('is-guest')
@@ -38922,7 +39053,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function selectPD1Destination(destination, options = {}) {
-        if (!PD1_DESTINATIONS.includes(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
+        if (!pd1DestinationAllowed(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
         if (!closePD1OverlaysForNavigation()) return false
         setWorkToolMenuOpen(false)
         const path = PD1_PATHS[destination]
@@ -38935,9 +39066,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination('Home')
           return true
         }
-        if (destination === 'Work') {
+        if (destination === 'Video') {
+          clearPD1DestinationSurface()
+          setActiveTool('room', { history: false })
+          syncPD1Destination('Video')
+          return true
+        }
+        if (destination === 'Chat') {
           clearPD1DestinationSurface()
           setActiveTool('chat', { history: false })
+          syncPD1Destination('Chat')
+          return true
+        }
+        if (destination === 'Work') {
+          clearPD1DestinationSurface()
+          setActiveTool('artifacts', { history: false })
           syncPD1Destination('Work')
           return true
         }
@@ -38956,7 +39099,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function syncPD1DestinationForTool(tool) {
         clearPD1DestinationSurface()
-        syncPD1Destination(pd1DestinationForPath(location.pathname) || (tool === 'office' ? 'Home' : 'Work'))
+        const toolDestination = tool === 'office' ? 'Home' : (tool === 'room' ? 'Video' : (tool === 'chat' ? 'Chat' : 'Work'))
+        syncPD1Destination(pd1DestinationForPath(location.pathname) || toolDestination)
       }
 
       window.addEventListener('popstate', () => {
@@ -52120,6 +52264,77 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return `home-scout-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
       }
 
+	  function homeProjectDestination() {
+		return selectedHomeSuggestionDestination?.route === 'thread'
+		  ? { route: 'thread', threadId: String(selectedHomeSuggestionDestination.threadId || '') }
+		  : { route: 'new-private' }
+	  }
+
+	  function renderHomeProjectContext() {
+		if (!homeProjectChip) return
+		const selected = homeProjectContext.selected
+		homeProjectChip.hidden = !Boolean(authedUser && homeProjectContext.available)
+		homeProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : 'Add project'
+		homeProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : 'Add project')
+		if (!homeProjectChoices) return
+		const rows = [{ title: 'No project', token: '' }, ...(homeProjectContext.choices || [])]
+		homeProjectChoices.replaceChildren(...rows.map(choice => {
+		  const button = document.createElement('button')
+		  button.type = 'button'
+		  button.className = 'home-project-choice pressable'
+		  button.setAttribute('role', 'radio')
+		  button.setAttribute('aria-checked', String(String(selected?.token || '') === String(choice.token || '')))
+		  button.textContent = choice.title
+		  button.addEventListener('click', () => {
+			homeProjectContext.selected = choice.token ? { ...choice, text: homeScoutInput?.value.trim() || '' } : null
+			homeScoutOpeningAttempt = null
+			renderHomeProjectContext()
+			closeHomeProjectChooser()
+		  })
+		  return button
+		}))
+	  }
+
+	  function openHomeProjectChooser() {
+		if (!homeProjectChooser || !homeProjectContext.available) return
+		renderHomeProjectContext()
+		homeProjectStatus.textContent = ''
+		homeProjectChooser.showModal()
+		window.requestAnimationFrame(() => homeProjectChoices?.querySelector('[aria-checked="true"]')?.focus())
+	  }
+
+	  function closeHomeProjectChooser() {
+		if (homeProjectChooser?.open) homeProjectChooser.close()
+	  }
+
+	  async function loadHomeProjectContext(createTitle = '') {
+		if (!authedUser || guestMode || !homeScoutInput) return
+		const generation = ++homeProjectGeneration
+		const text = homeScoutInput.value.trim()
+		try {
+		  const response = await fetch('/assistant/project-context', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+			body: JSON.stringify({ text, destination: homeProjectDestination(), ...(createTitle ? { createTitle } : {}) })
+		  })
+		  const payload = await response.json().catch(() => ({}))
+		  if (generation !== homeProjectGeneration) return
+		  if (!response.ok) throw new Error(payload?.error || 'Project context changed. Try again.')
+		  const next = payload?.projectContext || { available: false, status: 'unlinked', choices: [] }
+		  if (homeProjectContext.scopeKey && next.scopeKey && homeProjectContext.scopeKey !== next.scopeKey) homeProjectContext.selected = null
+		  homeProjectContext = { ...homeProjectContext, ...next, choices: Array.isArray(next.choices) ? next.choices : [] }
+		  if (!next.available) homeProjectContext.selected = null
+		  if (createTitle && next.suggested?.token) homeProjectContext.selected = { ...next.suggested, text }
+		  else if (!homeProjectContext.selected && next.suggested?.token) homeProjectContext.selected = { ...next.suggested, text }
+		  if (homeProjectCreateTitle) homeProjectCreateTitle.value = ''
+		  renderHomeProjectContext()
+		} catch (error) {
+		  if (generation !== homeProjectGeneration) return
+		  homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
+		  renderHomeProjectContext()
+		  if (createTitle) homeProjectStatus.textContent = error?.message || 'Project context is unavailable.'
+		}
+	  }
+
       async function submitHomeScoutOpening(event) {
         event?.preventDefault?.()
         if (!authedUser || !homeScoutInput || homeScoutComposer?.dataset.submitting === 'true') return
@@ -52131,8 +52346,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const continuationThreadId = selectedHomeSuggestionDestination?.route === 'thread'
           ? String(selectedHomeSuggestionDestination.threadId || '')
           : ''
-        if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text || homeScoutOpeningAttempt.threadId !== continuationThreadId) {
-          homeScoutOpeningAttempt = { text, threadId: continuationThreadId, key: nextHomeScoutOpeningKey() }
+		const projectContextToken = homeProjectContext.selected?.text === text ? String(homeProjectContext.selected.token || '') : ''
+		if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text || homeScoutOpeningAttempt.threadId !== continuationThreadId || homeScoutOpeningAttempt.projectContextToken !== projectContextToken) {
+		  homeScoutOpeningAttempt = { text, threadId: continuationThreadId, projectContextToken, key: nextHomeScoutOpeningKey() }
         }
         const attempt = homeScoutOpeningAttempt
         homeScoutComposer.dataset.submitting = 'true'
@@ -52145,7 +52361,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ? await fetch(`/assistant/chat-threads/${encodeURIComponent(attempt.threadId)}/messages`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: attempt.text, operationId: attempt.key })
+				body: JSON.stringify({ text: attempt.text, operationId: attempt.key, ...(attempt.projectContextToken ? { projectContextToken: attempt.projectContextToken } : {}) })
               })
             : await fetch('/assistant/chat-threads', {
                 method: 'POST',
@@ -52153,7 +52369,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
                   'Content-Type': 'application/json',
                   'Idempotency-Key': attempt.key
                 },
-                body: JSON.stringify({ openingMessage: { text: attempt.text } })
+				body: JSON.stringify({ openingMessage: { text: attempt.text, ...(attempt.projectContextToken ? { projectContextToken: attempt.projectContextToken } : {}) } })
               })
           const payload = await response.json().catch(() => ({}))
           if (!response.ok || !payload?.thread?.id) {
@@ -52162,7 +52378,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const thread = upsertScoutChatThread(payload.thread)
           homeScoutOpeningAttempt = null
-          selectedHomeSuggestionDestination = null
+		  selectedHomeSuggestionDestination = null
+		  homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
+		  renderHomeProjectContext()
+		  homeProjectContext.selected = null
+		  renderHomeProjectContext()
           if (homeContextChip) homeContextChip.hidden = true
           homeScoutInput.value = ''
           setScoutTab('private')
@@ -52246,12 +52466,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function resetHomeProjection() {
+	        homeProjectGeneration += 1
+	        window.clearTimeout(homeProjectTimer)
 	        homeSnapshotGeneration += 1
 	        homeSnapshotRequest = null
 	        homeSnapshotRefreshQueued = false
 	        homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
 	        selectedHomeCategoryId = ''
-	        selectedHomeSuggestionDestination = null
+			  selectedHomeSuggestionDestination = null
+			  homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
+			  renderHomeProjectContext()
 	        if (homeContextChip) homeContextChip.hidden = true
 	        homeSnapshotStale = false
 	        renderHomeSnapshot()
@@ -52409,6 +52633,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }, 3000)
 	      }
 
+	      function chatMessageEventRegressesProjectAdmission(current, incoming) {
+	        const currentProject = String(current?.project?.status || '')
+	        const incomingProject = String(incoming?.project?.status || '')
+	        if (['confirmed', 'unavailable'].includes(currentProject) && incomingProject === 'pending') return true
+	        return String(current?.reply?.state || '') !== 'project_pending' && String(incoming?.reply?.state || '') === 'project_pending'
+	      }
+
 	      function handleChatThreadEvent(payload) {
 	        if (!authedUser || !payload?.id) {
 	          return
@@ -52437,7 +52668,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const messageIndex = messages.findIndex(candidate => String(candidate?.id || '') === String(message.id))
 	          if (messageIndex === -1) {
 	            existing.messages = [...messages, message]
-	          } else {
+	          } else if (!chatMessageEventRegressesProjectAdmission(messages[messageIndex], message)) {
 	            // A re-broadcast of an existing message (e.g. a thread ref whose
 	            // status just flipped to complete) replaces it in place.
 	            existing.messages = messages.map((candidate, index) => index === messageIndex ? message : candidate)
@@ -57938,6 +58169,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutReplyLifecyclePresentation(message) {
 	        const reply = message?.reply
 	        if (!reply || reply.state === 'completed') return null
+	        if (reply.state === 'project_pending') {
+	          return { state: 'project_pending', label: 'Linking project', fallbackText: '', active: true, retryable: false }
+	        }
 	        if (reply.state === 'queued') {
 	          return { state: 'queued', label: 'Scout is queued', fallbackText: '', active: true, retryable: false }
 	        }
@@ -58145,6 +58379,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        node.dataset.messageId = String(message?.id || '')
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
 	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
+	        const projectTitle = String(message?.project?.title || '').trim()
+	        if (projectTitle) {
+	          const projectStatus = message?.project?.status === 'pending' ? 'Linking' : message?.project?.status === 'unavailable' ? 'Unavailable' : 'Project'
+	          const project = bfEl('span', 'scout-chat-msg__project', `${projectStatus} · ${projectTitle}`)
+	          project.setAttribute('aria-label', `${projectStatus === 'Linking' ? 'Project link pending' : projectStatus === 'Unavailable' ? 'Project unavailable' : 'Project'}: ${projectTitle}`)
+	          const stack = node.querySelector('.scout-chat-msg__stack')
+	          const meta = stack?.querySelector('.scout-chat-msg__meta')
+	          stack?.insertBefore(project, meta || null)
+	        }
 	        // card 073: your own committed message carries the delete control —
 	        // peer and scout bubbles never do (the server enforces the same
 	        // authorship rule). It rides the article, beside the bubble, so the
@@ -70779,15 +71022,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         button.addEventListener('click', () => {
           if (!homeScoutInput || !String(suggestion?.text || '').trim()) return
           homeScoutInput.value = String(suggestion.text)
-          selectedHomeSuggestionDestination = suggestion?.destination || null
+		  selectedHomeSuggestionDestination = suggestion?.destination || null
+		  if (selectedHomeSuggestionDestination?.route === 'thread') {
+			homeProjectContext.selected = null
+			renderHomeProjectContext()
+		  }
           if (homeContextChip) {
             const title = String(selectedHomeSuggestionDestination?.title || '').trim()
             const continuing = selectedHomeSuggestionDestination?.route === 'thread' && title
             homeContextChip.hidden = !continuing
             homeContextChip.textContent = continuing ? `Continue in ${title}  ×` : ''
             homeContextChip.setAttribute('aria-label', continuing ? `Remove continuation context for ${title}` : 'Remove continuation context')
-          }
-          homeScoutInput.dispatchEvent(new Event('input', { bubbles: true }))
+		  }
+		  homeScoutInput.dispatchEvent(new Event('input', { bubbles: true }))
+		  window.clearTimeout(homeProjectTimer)
+		  loadHomeProjectContext()
           homeScoutInput.focus()
           homeScoutInput.setSelectionRange(homeScoutInput.value.length, homeScoutInput.value.length)
         })
@@ -70922,7 +71171,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           homeSnapshotRefreshQueued = false
           homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
           selectedHomeCategoryId = ''
-          selectedHomeSuggestionDestination = null
+			selectedHomeSuggestionDestination = null
+			homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
+			renderHomeProjectContext()
           if (homeContextChip) homeContextChip.hidden = true
           homeSnapshotStale = false
           setHomeRefreshFailed(false)
@@ -71436,11 +71687,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleRoomsSnapshot(payload) {
-        roomsList = Array.isArray(payload?.rooms) ? payload.rooms : []
+        const nextRooms = Array.isArray(payload?.rooms) ? payload.rooms : []
+        const previousSignature = homeRoomsContextSignature(roomsList)
+        const nextSignature = homeRoomsContextSignature(nextRooms)
+        const contextChanged = homeRoomsContextInitialized && nextSignature !== previousSignature
+        roomsList = nextRooms
+        homeRoomsContextInitialized = true
         reconcileLobbySelection()
         renderHomeLiveNow()
-        loadHomeSnapshot()
+        if (contextChanged) loadHomeSnapshot(true)
         renderLobby()
+      }
+
+      function homeRoomsContextSignature(rooms) {
+        return (Array.isArray(rooms) ? rooms : [])
+          .map(room => [String(room?.id || ''), Boolean(room?.archived), Number(room?.participantCount || 0), String(room?.state || '')].join(':'))
+          .sort()
+          .join('|')
       }
 
       async function loadRoomsList() {
@@ -71454,6 +71717,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const data = await response.json().catch(() => ({}))
           roomsList = Array.isArray(data?.rooms) ? data.rooms : []
+          homeRoomsContextInitialized = true
         } catch {
           return
         }

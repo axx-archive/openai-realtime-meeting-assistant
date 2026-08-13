@@ -64,7 +64,7 @@ test('Continue sends into the exact destination thread while arbitrary text open
   assert.match(sendBody, /if \(draftDestination\?\.route === 'thread'\)/u);
   assert.match(sendBody, /api\.sendScoutMessage\([\s\S]*draftDestination\.threadId/u);
   assert.match(sendBody, /navigation\.navigate\('Thread', \{\s+threadId: draftDestination\.threadId/u);
-  assert.match(sendBody, /const attempt = homeScoutOpeningAttempt\(openingAttemptRef\.current, draft\)/u);
+  assert.match(sendBody, /const attempt = homeScoutOpeningAttempt\(openingAttemptRef\.current, draft, undefined, projectContextToken\)/u);
   assert.match(sendBody, /createThread: \(body, idempotencyKey\) => api\.createScoutThread/u);
   assert.ok(sendBody.indexOf("draftDestination?.route === 'thread'") < sendBody.indexOf('homeScoutOpeningAttempt'));
   assert.match(screen, /Send as a new private conversation instead/u);
@@ -104,9 +104,14 @@ test('native Home expands truthful context and suggestions for accessibility tex
   assert.doesNotMatch(screen, /numberOfLines=\{2\} style=\{styles\.continuityDetail\}/u);
 });
 
-test('native Home does not claim a Project model', () => {
-  assert.doesNotMatch(screen, /projectId|project chip|createProject|Create private project/iu);
-  assert.doesNotMatch(types, /HomeProject|HomeStarterProject/u);
+test('native Home exposes Project context as a zero-effect chooser consumed only by explicit Send', () => {
+  assert.match(screen, /Chooses an authorized project for this message\. Nothing is linked until Send\./u);
+  assert.match(screen, /accessibilityLabel=\{selectedProject \? `Project: \$\{selectedProject\.title\}\. Change project` : 'Add project'\}/u);
+  assert.match(screen, /projectContextToken = projectSessionToken === sessionToken && selectedProject\?\.text === text/u);
+  assert.match(screen, /visible=\{projectChooserOpen && projectSessionToken === sessionToken\}/u);
+  assert.match(screen, /generation !== projectRequestGenerationRef\.current[\s\S]*sessionTokenRef\.current !== sessionToken/u);
+  assert.match(types, /HomeProjectContextResponse/u);
+  assert.doesNotMatch(screen, /projectId\s*:/u);
 });
 
 test('native Home has no permanent voice-policy or legacy live-line copy', () => {

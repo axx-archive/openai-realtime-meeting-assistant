@@ -49,7 +49,7 @@ func TestWebHomeScoutComposerUsesAtomicPrivateOpening(t *testing.T) {
 		`id="homeScoutInput"`,
 		`id="homeScoutComposerStatus"`,
 		"'Idempotency-Key': attempt.key",
-		"JSON.stringify({ openingMessage: { text: attempt.text } })",
+		"JSON.stringify({ openingMessage: { text: attempt.text, ...(attempt.projectContextToken ? { projectContextToken: attempt.projectContextToken } : {}) } })",
 		"homeScoutInput.value = attempt.text",
 		"setScoutTab('private')",
 		"selectScoutChatThread(thread.id)",

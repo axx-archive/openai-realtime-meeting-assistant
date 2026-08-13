@@ -271,6 +271,9 @@ export const MessageBubble = React.memo(function MessageBubble({
     [message.reactions, viewerEmail],
   );
   const timeLabel = useMemo(() => timeOf(message), [message.createdAt]);
+  const projectTitle = String(message.project?.title ?? '').trim();
+  const projectPending = message.project?.status === 'pending';
+  const projectUnavailable = message.project?.status === 'unavailable';
   const threadParticipants = useMemo(() => {
     const seen = new Set<string>();
     return threadReplies.filter((reply) => {
@@ -672,6 +675,19 @@ export const MessageBubble = React.memo(function MessageBubble({
             );
           })}
 
+          {projectTitle ? (
+            <View
+              accessible
+              accessibilityLabel={`${projectPending ? 'Project link pending' : projectUnavailable ? 'Project unavailable' : 'Project'}: ${projectTitle}`}
+              style={[styles.projectContext, own && styles.projectContextOwn]}
+            >
+              <SymbolView name="folder.fill" tintColor={own ? colors.onAccent : colors.text3} size={10} />
+              <Text numberOfLines={1} style={[styles.projectContextText, own && styles.projectContextTextOwn]}>
+                {projectPending ? 'Linking' : projectUnavailable ? 'Unavailable' : 'Project'} · {projectTitle}
+              </Text>
+            </View>
+          ) : null}
+
           {firstURL ? (
             <LinkPreviewCard
               url={firstURL}
@@ -791,6 +807,10 @@ const styles = StyleSheet.create({
   lifecycleActive: { minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: space[2] },
   lifecycleActiveText: { ...type.bodySm, color: colors.text2 },
   lifecycleCanceled: { ...type.bodySm, color: colors.text3 },
+  projectContext: { minHeight: 24, maxWidth: 250, flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: space[1], paddingHorizontal: 7, borderRadius: radius.full, backgroundColor: colors.surface3 },
+  projectContextOwn: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  projectContextText: { ...type.label, color: colors.text3, flexShrink: 1 },
+  projectContextTextOwn: { color: colors.onAccent, opacity: 0.78 },
   generatedImagePending: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[1] },
   generatedImagePendingText: { ...type.bodySm, color: colors.emberText },
   generatedImageCard: { width: 252, maxWidth: '100%', gap: space[2], marginTop: space[2] },

@@ -125,12 +125,14 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
 ]};
 let homeAvailable=true;
 let homeRequestCount=0;
+let chatMutationCount=0;
 let homeAccount='a';
+let delayProjectA=false;
 const initialHomeReadyAt=Date.now()+2000;
 let roomsMode='quiet';
 const server=http.createServer((req,res)=>{
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation);}
- if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ'}));}
+if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
  if(req.url==='/assistant/home'){
    homeRequestCount+=1;
    const payloadHome=homeAccount==='b'?JSON.parse(JSON.stringify(home).replaceAll('Country Golf','B launch')):home;
@@ -140,7 +142,23 @@ const server=http.createServer((req,res)=>{
    if(Date.now()<initialHomeReadyAt){return setTimeout(reply,initialHomeReadyAt-Date.now());}
    return reply();
  }
+ if(req.url==='/assistant/project-context'){
+   const projectAccount=homeAccount;
+   let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{
+     const body=JSON.parse(raw||'{}');
+     const text=String(body.text||'');
+     const title=projectAccount==='b'?'B Project':'Country Golf';
+     const choice={title,token:projectAccount==='b'?'opaque-b-project':'opaque-country-golf'};
+     const projectContext={available:body.destination?.route==='new-private',scopeKey:projectAccount==='b'?'scope-b':'scope-a',status:text.includes(title)?'suggested':'unlinked',choices:[choice]};
+     if(projectContext.status==='suggested')projectContext.suggested={...choice,suggested:true};
+     const reply=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,projectContext}));};
+     if(projectAccount==='a'&&delayProjectA)return setTimeout(reply,1000);
+     reply();
+   });return;
+ }
+ if(req.url.startsWith('/assistant/chat-threads')&&req.method==='POST'){chatMutationCount+=1;res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
  if(req.url==='/__home_account_b'){homeAccount='b';res.writeHead(204);return res.end();}
+ if(req.url==='/__delay_project_a'){delayProjectA=true;res.writeHead(204);return res.end();}
  if(req.url==='/__rooms_live'){roomsMode='live';res.writeHead(204);return res.end();}
  if(req.url==='/rooms'){
    const rooms=roomsMode==='live'?[{id:'weekly-product',name:'Weekly product',live:true,participantCount:3,archived:false}]:[];
@@ -162,15 +180,21 @@ const server=http.createServer((req,res)=>{
    starters:document.querySelectorAll('#homeStarters .home-starter').length,
    disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
    hydrated:document.getElementById('homeStarters').dataset.hydrated,
-   composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top
+   composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,
+   greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),
+   startersBox:document.getElementById('homeStarters').getBoundingClientRect().toJSON(),
+   wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()
  }));
  assert.equal(immediate.starters,4,'four stable Home shells paint before recommendations');
  assert.equal(immediate.disabled,4,'unhydrated Home shells are non-actionable');
  assert.equal(immediate.hydrated,'false','Home shells disclose their unhydrated state');
  await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
  assert.equal(homeRequestCount,1,'startup auth and room hydration coalesce into one Home request');
- const hydratedComposerTop=await page.evaluate(()=>document.getElementById('homeScoutComposer').getBoundingClientRect().top);
- assert.ok(Math.abs(hydratedComposerTop-immediate.composerTop)<=3,'Home hydration shifted the composer: '+immediate.composerTop+' -> '+hydratedComposerTop);
+ const hydratedGeometry=await page.evaluate(()=>({composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),startersBox:document.getElementById('homeStarters').getBoundingClientRect().toJSON(),wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()}));
+	 // Chromium can settle the centered svh flex container by one fractional
+	 // device-pixel row after first paint. Keep the bound below four CSS pixels;
+	 // card/composer dimensions remain identical and no late content is inserted.
+	 assert.ok(Math.abs(hydratedGeometry.composerTop-immediate.composerTop)<4,'Home hydration shifted geometry: '+JSON.stringify({immediate,hydratedGeometry}));
  await page.fill('#homeScoutInput','Unsent local draft');
  homeAvailable=false;
  await page.evaluate(()=>loadHomeSnapshot());
@@ -233,6 +257,23 @@ const server=http.createServer((req,res)=>{
  await page.locator('#homeSuggestions .home-suggestion').first().click();
  assert.equal(await page.locator('#homeScoutInput').inputValue(),'Explore the biggest open question in Country Golf.');
  assert.equal(new URL(page.url()).pathname,'/');
+ await page.waitForFunction(()=>document.getElementById('homeProjectChip').textContent.startsWith('Suggested ·'));
+ assert.match(await page.locator('#homeProjectChip').textContent(),/^Suggested · Country Golf$/);
+ await page.click('#homeProjectChip');
+ assert.equal(await page.locator('#homeProjectChooser').getAttribute('open'),'');
+ for(const theme of ['dark','light'])await capture('desktop-home-project-chooser',theme);
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForTimeout(100);
+ for(const theme of ['dark','light'])await capture('phone-home-project-chooser',theme);
+ await page.setViewportSize({width:1440,height:900});
+ await page.getByRole('radio',{name:'No project'}).click();
+ assert.equal(await page.locator('#homeScoutInput').inputValue(),'Explore the biggest open question in Country Golf.');
+ await page.click('#homeProjectChip');
+ await page.getByRole('radio',{name:'Country Golf'}).click();
+ assert.equal(await page.locator('#homeProjectChip').textContent(),'Project · Country Golf');
+ assert.equal(chatMutationCount,0,'Project chooser mutated chat before explicit Send');
+ await page.waitForTimeout(50);
+ await page.focus('#homeScoutInput');
  const focusedComposer=await page.evaluate(()=>({
    border:getComputedStyle(document.getElementById('homeScoutComposer')).borderColor,
    inputBackground:getComputedStyle(document.getElementById('homeScoutInput')).backgroundColor,
@@ -258,6 +299,10 @@ const server=http.createServer((req,res)=>{
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,starterCount:document.querySelectorAll('#homeStarters .home-starter').length,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
  assert.equal(phone.fits,true);assert.equal(phone.starterCount,4);assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
  await page.evaluate(async()=>{
+   await fetch('/__delay_project_a');
+   homeScoutInput.value='Country Golf';
+   homeScoutInput.dispatchEvent(new Event('input',{bubbles:true}));
+   await new Promise(resolve=>setTimeout(resolve,300));
    await fetch('/__home_account_b');
    selectedHomeSuggestionDestination={route:'thread',threadId:'country-golf'};
    setAuthenticatedUser({email:'b@example.test',name:'B'});
@@ -268,11 +313,28 @@ const server=http.createServer((req,res)=>{
    disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
    hydrated:document.getElementById('homeStarters').dataset.hydrated,
    destination:selectedHomeSuggestionDestination,
-   chipHidden:document.getElementById('homeContextChip').hidden
+   chipHidden:document.getElementById('homeContextChip').hidden,
+   projectChipHidden:document.getElementById('homeProjectChip').hidden,
+   chooserOpen:document.getElementById('homeProjectChooser').open
  }));
- assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true},'A context survived the A to B authority boundary');
+ assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true,projectChipHidden:true,chooserOpen:false},'A context survived the A to B authority boundary');
  await page.waitForFunction(()=>document.getElementById('homeStarters').dataset.hydrated==='true');
- assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false);
+ await page.waitForTimeout(1100);
+ assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false,'late A Project context rendered for B');
+	const orderedProjectFrames=await page.evaluate(()=>{
+	  scoutChatThreads=[{id:'project-order',title:'Project order',updatedAt:'2026-08-12T00:00:02Z',visibility:'private',messages:[
+	    {id:'project-user',role:'user',createdAt:'2026-08-12T00:00:00Z',project:{status:'confirmed',projectId:'project-one',projectRevision:1,title:'Launch Plan',basis:'selected'}},
+	    {id:'project-reply',role:'scout',createdAt:'2026-08-12T00:00:01Z',reply:{operationId:'operation-one',inReplyTo:'project-user',state:'queued'}}
+	  ]}];
+	  handleChatThreadEvent({id:'project-order',message:{id:'project-user',role:'user',createdAt:'2026-08-12T00:00:00Z',project:{status:'pending',title:'Launch Plan',basis:'selected'}}});
+	  handleChatThreadEvent({id:'project-order',message:{id:'project-reply',role:'scout',createdAt:'2026-08-12T00:00:01Z',reply:{operationId:'operation-one',inReplyTo:'project-user',state:'project_pending'}}});
+	  return {project:scoutChatThreads[0].messages[0].project.status,reply:scoutChatThreads[0].messages[1].reply.state};
+	});
+	assert.deepEqual(orderedProjectFrames,{project:'confirmed',reply:'queued'},'late socket frames regressed the confirmed HTTP Project response');
+ await page.evaluate(()=>signOutOfAccount());
+ await page.waitForTimeout(100);
+ const signedOutProject=await page.evaluate(()=>({chipHidden:homeProjectChip.hidden,chooserOpen:homeProjectChooser.open,oldCopy:document.querySelector('.office-launch').textContent.includes('Country Golf')}));
+ assert.deepEqual(signedOutProject,{chipHidden:true,chooserOpen:false,oldCopy:false},'Project context survived logout');
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)

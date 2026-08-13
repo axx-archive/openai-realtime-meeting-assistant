@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_home_project_video_chat_checkpoint",
+  "observedAt": "2026-08-12T17:15:45-07:00",
+  "status": "bounded_local_release_candidate_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "6d794241e414296880e9aa8f272f20937377c4dc",
+    "canonicalPlanSha256": "1124ab48ac87214595d917133a6326dda6b290a265ae7d631fd1b1998982bc91",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "homeProjectContext": "authorized_project_suggestion_chooser_and_create_intent_remain_zero_effect_until_explicit_send",
+    "projectCommit": "explicit_send_durably_admits_one_body_free_private_conversation_event_and_one_exact_revisioned_project_association_with_restart_safe_reconciliation",
+    "projectFailure": "stale_tampered_revoked_or_conflicting_project_context_fails_closed_without_provider_queue_and_preserves_the_editable_draft",
+    "projectRealtime": "confirmed_project_state_cannot_regress_to_pending_from_a_late_socket_frame",
+    "desktopNavigation": "video_and_chat_are_first_class_left_rail_destinations",
+    "nativeNavigation": "video_and_chat_are_first_class_icon_only_floating_island_destinations",
+    "shellAuthority": "server_owned_shell_access_projects_home_video_chat_to_core_members_and_full_navigation_only_to_aj_or_exact_current_owner_admin_membership",
+    "countryGolfStability": "generated_media_reserves_a_three_by_two_frame_and_the_country_golf_channel_has_less_than_one_pixel_of_geometry_shift_when_media_loads",
+    "homeLatency": "stable_launch_geometry_and_meaningful_room_context_coalescing_prevent_late_card_reloads_from_unchanged_room_snapshots",
+    "agenticLab": "venture_studio_personality_roster_marketplace_graduation_and_staged_manual_to_shadow_to_provider_pilot_are_frozen_in_the_plan_only",
+    "providerCalls": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "1124ab48ac87214595d917133a6326dda6b290a265ae7d631fd1b1998982bc91",
+    "home_project_context.go": "371afd4190ab8db57b9a7d6d43f5884f67cd6354de5fae5460e76a0b9752549a",
+    "stride_project_chat_runtime.go": "62a928d6c771c1e722be350e2d4c4ee37b0b7544a0dbc04615cdb35f77c9cc80",
+    "migrations/0019_stride_project_chat_send.sql": "53aa05d793ff7cbe5a946799807d5327c61eb3cbcc9eb783991a453a85c052e7",
+    "scout_chat_async.go": "573a0cb5e44833578d24e87d12f62c3de485a5d80f1abb37b04508578b53e82c",
+    "scout_chat_threads.go": "6d51ad337e34ab88667dcd33cb15d6bdbdef376bdcae5f9efd421b846fbb617b",
+    "auth_http.go": "0baaad51e196423651325d305de41021677066e7ad95137b1c0ac8476a2c0d87",
+    "main.go": "580ba632fd7b9a5cdf2ec31dc2ec2a4304daa097e99ea9af38696c5894d092e8",
+    "index.html": "fb42d07963efc147aa4a0945a3e9cfc8de02ac2a2f46dcbe3dcf2a1774cf842e",
+    "frontend_home_contract_test.go": "252810b44b15d4446357004e2db112475d17cb4c9d717e2b97db22b27147eabb",
+    "frontend_pd1_top_level_ia_test.go": "a00b3e55d21d9f44833cd3591d433310d51d90d3446d549d1e5e79467315d28f",
+    "frontend_chat_image_test.go": "52919dd78701c9e17004d4b6ff6c4043f0a245f24618cd14355686fda5959305",
+    "frontend_rooms_test.go": "aef302c239f30e6e411e5b190c476c6891df47a8cd9c5c12fe75f17960b18537",
+    "mobile/app.config.ts": "9e374346ee7bc08d4a9f65aaa88fecbda7bbf03de9007cae63ceb12d5f222aca",
+    "mobile/src/api/types.ts": "7f3a2f4dea2e5129aecbf878cb0d99db5024d46a672d6c4a92758dcf43d531a7",
+    "mobile/src/screens/CanvasScreen.tsx": "71fba818d031923598736e9eb6f7bffb452f7f2bbee30e225b6b149dacb4b2d6",
+    "mobile/src/navigation/nativeShellModel.ts": "ffcb8ccc015002ad3c8c909678d40e8967fb42f8e794e21472d64da01df9e8f3",
+    "mobile/src/navigation/NativeUniversalShell.tsx": "9f6da01d23915db53ec23c850b9d3cc74f64e5e2cbac1d692e70a2551695ea68",
+    "mobile/src/navigation/RootNavigator.tsx": "848e0458a3af4fc1b09b8147c5c58e7c3158c7764c377b8efd3709895ac323a6"
+  },
+  "renderedEvidence": {
+    "homeProjectDirectory": "docs/evidence/e10/rendered-pd1-home-project-send-20260812",
+    "homeProjectAggregateSha256": "74d0ac65df626e3e0442478e73c4291f7e23ea96aa6d125f43e67324f4186cc6",
+    "homeProjectSurfaces": "desktop_and_390px_dark_light_home_category_suggestions_project_chooser_confirmed_send_live_meeting_and_live_voice",
+    "videoChatDirectory": "docs/evidence/e10/rendered-pd1-video-chat-nav-20260812",
+    "videoChatAggregateSha256": "0fb8108844ed050ca935448808031210a5f5f9dfd5f1f288dc91dfdcfe47b77b",
+    "videoChatSurfaces": [
+      {"surface":"desktop_country_golf_media_stable","sha256":"a10ddf63e8677ec4cec66bbebd5e00d49f4b164fcd4e1e2e8e537775bc4cdf57"},
+      {"surface":"desktop_video_chat_nav","sha256":"bcd8e7e134ed1fe20ae09be1e728c6cc0ac83e964e9ab55bf34f02dab8450b5c"},
+      {"surface":"desktop_video_nav","sha256":"cb9643219cabc79f38d285e72e853966767715440943eb1f41978f126ea89b31"},
+      {"surface":"phone_member_core_nav","sha256":"c77c28d1c9a8643bec4c3bb957da9ccbd6aba794f41ea59a472542353a083973"},
+      {"surface":"phone_video_chat_nav","sha256":"c0fef7ab2885fda32c1049ad020a614e7e6744c231bcb6aea8bf0f958720fcf4"}
+    ]
+  },
+  "verification": {
+    "fullGo": "PASS_554.581s_all_packages",
+    "focusedGo": "PASS_12.743s",
+    "focusedGoRace": "PASS_42.893s",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_527_of_527",
+    "mobileTypecheck": "PASS",
+    "renderedBrowserNavigationHistoryFocusAndLayout": "PASS_4.812s_and_repeat",
+    "countryGolfGeometryShiftPx": "LESS_THAN_1",
+    "diffCheck": "PASS",
+    "boundedCritic": "PASS_no_blocker_or_major_after_hidden_tab_and_exact_project_replay_repairs"
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "cronScheduled": false,
+    "marketplacePublished": false
+  },
+  "openGates": [
+    "existing_thread_project_association_correction",
+    "whole_longitudinal_project_record_and_recurring_context_compaction",
+    "server_minted_first_class_work_projection_and_real_project_bound_research_flow",
+    "immutable_artifact_revision_lineage",
+    "format_native_open_and_durable_drive_receipt_on_all_devices",
+    "provider_backed_research_image_document_slides_workbook_chart_and_mixed_package_acceptance",
+    "physical_iphone_ipad_project_chooser_and_shell_acceptance",
+    "approved_venture_studio_schedule_budget_persona_and_effect_manifest",
+    "marketplace_evaluation_rights_security_and_curator_release"
+  ],
+  "exclusions": {
+    "existingThreadProjectCorrectionComplete": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "physicalDeviceAccepted": false,
+    "cronActive": false,
+    "marketplaceCandidatePublished": false,
+    "productionAccepted": false,
+    "testFlightAccepted": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}

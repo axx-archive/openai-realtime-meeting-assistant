@@ -1365,6 +1365,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	projected.VoiceSession = nil
 	projected.LegacyConversationOperations = nil
 	projected.ModerationReceipts = nil
+	projected.ProjectLinkOperations = nil
 	// Direct coworker identity comes from the signed Product ledger so an old
 	// chat record is upgraded on read without making the chat title authoritative.
 	if app != nil {

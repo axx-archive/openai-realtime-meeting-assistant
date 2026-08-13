@@ -36,7 +36,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
 	re := regexp.MustCompile(`data-pd1-destination="([^"]+)"`)
 	matches := re.FindAllStringSubmatch(nav, -1)
-	want := []string{"Home", "Work", "Network", "Work Search", "You"}
+	want := []string{"Home", "Video", "Chat", "Work", "Network", "Work Search", "You"}
 	if len(matches) != len(want) {
 		t.Fatalf("primary destination count=%d, want %d: %v", len(matches), len(want), matches)
 	}
@@ -49,7 +49,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 		`aria-label="Primary"`,
 		`data-pd1-destination="Home" aria-current="page" tabindex="0"`,
 		`data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
-		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Work', 'Network', 'Work Search', 'You'])`,
+		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Work', 'Network', 'Work Search', 'You'])`,
 		`aria-label="Application navigation"`,
 		`id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces"`,
 		`role="menuitemradio" tabindex="-1" data-tool="chat"`,
@@ -108,10 +108,12 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	for _, marker := range []string{
 		`if (!closePD1OverlaysForNavigation()) return false`,
 		`setActiveTool('office', { history: false })`,
+		`setActiveTool('room', { history: false })`,
 		`setActiveTool('chat', { history: false })`,
+		`setActiveTool('artifacts', { history: false })`,
 		`openSettings({ section: 'profile'`,
 		`window.closeStrideContributionSurface?.() === false`,
-		`const PD1_PATHS = Object.freeze({ Home: '/', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })`,
+		`const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Chat: '/chat', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })`,
 		`history.pushState({ view: 'pd1', destination }, '', path)`,
 		`selectPD1Destination(destination, { push: false, focus: true })`,
 		`setActiveTool('chat', { history: false })`,
@@ -131,8 +133,26 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 			t.Errorf("existing route/interaction behavior no longer present: %q", preserved)
 		}
 	}
-	if !strings.Contains(handler, `if (!PD1_DESTINATIONS.includes(destination) || guestMode || !appShell.classList.contains('is-authed')) return false`) {
+	if !strings.Contains(handler, `if (!pd1DestinationAllowed(destination) || guestMode || !appShell.classList.contains('is-authed')) return false`) {
 		t.Fatal("guest/unknown destination navigation is not fail closed")
+	}
+}
+
+func TestPD1ShellAccessHidesUnfinishedDestinationsAndFailsClosed(t *testing.T) {
+	html := pd1Index(t)
+	for _, marker := range []string{
+		`const PD1_CORE_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat'])`,
+		`authedUser?.shellAccess === 'full'`,
+		`button.hidden = !allowed`,
+		`button.disabled = !allowed`,
+		`button.inert = !allowed`,
+		`.pd1-primary-nav__item[hidden] { display: none !important; }`,
+		`const visibleButtons = pd1DestinationButtons.filter(button => !button.hidden && !button.disabled)`,
+		`history.replaceState({ view: 'pd1', destination: 'Home' }, '', PD1_PATHS.Home)`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("missing server-owned shell access marker %q", marker)
+		}
 	}
 }
 
@@ -217,7 +237,7 @@ func TestPD1KeyboardFocusResponsiveAndMotionContracts(t *testing.T) {
 		`min-height: 46px`,
 		`min-height: 44px`,
 		`@media (max-width: 760px)`,
-		`.pd1-primary-nav { flex-direction: row; width: auto; gap: 4px; }`,
+		`.pd1-primary-nav { flex-direction: row; width: auto; gap: 2px; }`,
 		`setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })`,
 		`.pd1-primary-nav *, .pd1-destination-surface * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }`,
 	} {
@@ -247,9 +267,10 @@ const assert = require('assert/strict');
 const { chromium } = require('playwright');
 const html = fs.readFileSync(process.env.PD1_INDEX, 'utf8');
 const projectionRequests = [];
+let shellAccess = 'full';
 const server = http.createServer((req, res) => {
   if (req.url === '/public/composer-dictation.js') { res.writeHead(200, {'content-type':'application/javascript'}); return res.end(''); }
-  if (req.url === '/auth/me') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic'})); }
+  if (req.url === '/auth/me') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic',shellAccess})); }
   if (req.url === '/api/stride/v1/mobile/surfaces/organizations') {
     res.writeHead(200, {'content-type':'application/json'});
     return res.end(JSON.stringify({availability:'available',surface:'organizations',revision:1,items:[
@@ -270,7 +291,14 @@ const server = http.createServer((req, res) => {
   await page.goto(base + '/', {waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
   await page.waitForTimeout(250);
-  await page.waitForFunction(() => document.getElementById('topbarOrganizationName').textContent === 'Synthetic Lab');
+  const organizationProjectionReady = () => document.getElementById('topbarOrganizationName').textContent === 'Synthetic Lab'
+    && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2;
+  await page.waitForFunction(organizationProjectionReady);
+  // Authentication fencing deliberately clears the prior organization before
+  // replaying the current projection. Require the settled projection rather
+  // than sampling the one-frame handoff between those two safe states.
+  await page.waitForTimeout(100);
+  await page.waitForFunction(organizationProjectionReady);
   const shellChrome = await page.evaluate(() => ({
     railWidth: document.getElementById('toolRail').getBoundingClientRect().width,
     navInsideRail: document.getElementById('toolRail').contains(document.getElementById('pd1PrimaryNav')),
@@ -288,9 +316,29 @@ const server = http.createServer((req, res) => {
   await page.click('#topbarOrganizationSwitcher');
   await page.click('#topbarOrganizationMenu [role="menuitemradio"]:has-text("Another Studio")');
   await page.waitForFunction(() => document.getElementById('settingsRegion').classList.contains('visible') && !document.querySelector('.settings-body > section[data-settings-section="organizations"]').hidden);
-  await page.keyboard.press('Escape');
+  await page.evaluate(()=>closeSettings({restoreFocus:false}));
   await page.waitForFunction(() => !document.getElementById('settingsRegion').classList.contains('visible'));
   await page.evaluate(() => { const marker=document.createElement('span'); marker.id='pd1-thread-continuity'; document.getElementById('scoutChatThread').append(marker); });
+  const shellRenderDir=String(process.env.PD1_SHELL_RENDER_DIR||'').trim();
+  if(shellRenderDir)fs.mkdirSync(shellRenderDir,{recursive:true});
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Video"]');
+  await page.waitForFunction(() => location.pathname === '/video' && document.getElementById('appShell').dataset.tool === 'room');
+  if(shellRenderDir){await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());await page.screenshot({path:path.join(shellRenderDir,'desktop-video-nav.png')});}
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Chat"]');
+  await page.waitForFunction(() => location.pathname === '/chat' && document.getElementById('appShell').dataset.tool === 'chat');
+  assert.equal(await page.locator('#pd1PrimaryNav [data-pd1-destination="Chat"]').getAttribute('aria-current'), 'page');
+  const chatNavState=await page.evaluate(()=>Object.fromEntries(['Video','Chat'].map(name=>{const node=document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]');const style=getComputedStyle(node);return[name,{current:node.getAttribute('aria-current'),background:style.backgroundColor,border:style.borderColor}]})));
+  assert.equal(chatNavState.Video.current,'false');
+  assert.equal(chatNavState.Chat.current,'page');
+  assert.notEqual(chatNavState.Chat.border,chatNavState.Video.border);
+  if(shellRenderDir){
+    await page.mouse.move(1279,799);
+    await page.evaluate(()=>document.activeElement?.blur());
+    await page.screenshot({path:path.join(shellRenderDir,'desktop-video-chat-nav.png')});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:path.join(shellRenderDir,'phone-video-chat-nav.png')});
+    await page.setViewportSize({width:1280,height:800});
+  }
   projectionRequests.length = 0;
   await page.click('#pd1PrimaryNav [data-pd1-destination="Network"]');
   await page.waitForFunction(() => location.pathname === '/network' && document.activeElement?.textContent === 'The public network is off.');
@@ -334,9 +382,9 @@ const server = http.createServer((req, res) => {
   await page.waitForFunction(() => location.pathname === '/work' && document.querySelector('#toolRail').hidden === false);
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
   assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
-  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Meetings','Conversations','Work library','Projects','Memory','Files','Agent team']);
-  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(7).fill({role:'menuitemradio',tabIndex:-1}));
-  assert.equal(await page.locator('#workToolMenu [data-tool="chat"]').getAttribute('aria-checked'), 'true');
+  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Work library','Projects','Memory','Files','Agent team']);
+  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(5).fill({role:'menuitemradio',tabIndex:-1}));
+  assert.equal(await page.locator('#workToolMenu [data-tool="artifacts"]').getAttribute('aria-checked'), 'true');
   const utilities = await page.locator('.tool-rail__utilities').evaluate(el => ({
     labels:Array.from(el.querySelectorAll('.tool-rail__label')).filter(label => label.offsetParent !== null).map(label => label.textContent.trim()),
     width:el.getBoundingClientRect().width,
@@ -356,17 +404,39 @@ const server = http.createServer((req, res) => {
   await page.keyboard.press('ArrowUp');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Work');
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Meetings');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Work library');
   assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:320,height:700});
-  const responsive = await page.locator('#pd1PrimaryNav').evaluate(el => ({direction:getComputedStyle(el).flexDirection, fits:document.documentElement.scrollWidth <= innerWidth, exact:el.scrollWidth === el.clientWidth}));
-  assert.equal(responsive.direction, 'row'); assert.equal(responsive.fits, true); assert.equal(responsive.exact, true);
+  const responsive = await page.locator('#pd1PrimaryNav').evaluate(el => ({direction:getComputedStyle(el).flexDirection, fits:document.documentElement.scrollWidth <= innerWidth, exact:el.scrollWidth === el.clientWidth,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,railWidth:el.parentElement.getBoundingClientRect().width}));
+  assert.equal(responsive.direction, 'row'); assert.equal(responsive.fits, true, JSON.stringify(responsive)); assert.equal(responsive.exact, true, JSON.stringify(responsive));
   await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Network');
   await page.setViewportSize({width:1280,height:800});
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Chat"]');
+  const stableMediaGeometry=await page.evaluate(async()=>{
+    const figure=document.createElement('figure'); figure.className='scout-chat-image';
+    const preview=document.createElement('button'); preview.className='scout-chat-image__preview';
+    const image=document.createElement('img'); image.className='scout-chat-image__img'; image.alt='Country Golf concept render';
+    preview.append(image); figure.append(preview); document.getElementById('scoutChatThread').append(figure);
+    const before=figure.getBoundingClientRect().toJSON();
+    const loaded=new Promise(resolve=>image.addEventListener('load',resolve,{once:true}));
+    image.src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024"><rect width="1536" height="1024" fill="#c7bca9"/></svg>');
+    await loaded; await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const after=figure.getBoundingClientRect().toJSON();
+    return {before,after};
+  });
+  assert.ok(stableMediaGeometry.before.width>0&&stableMediaGeometry.before.height>0,JSON.stringify(stableMediaGeometry));
+  assert.ok(Math.abs(stableMediaGeometry.before.width-stableMediaGeometry.after.width)<1&&Math.abs(stableMediaGeometry.before.height-stableMediaGeometry.after.height)<1,'Country Golf media shifted the channel: '+JSON.stringify(stableMediaGeometry));
+  if(shellRenderDir){
+    const currentDestinations=await page.locator('#pd1PrimaryNav [aria-current="page"]').evaluateAll(buttons=>buttons.map(button=>button.dataset.pd1Destination));
+    assert.deepEqual(currentDestinations,['Chat']);
+    await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());
+    const quietNav=await page.evaluate(()=>Object.fromEntries(['Home','Network'].map(name=>{const style=getComputedStyle(document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]'));return[name,{background:style.backgroundColor,border:style.borderColor}]})));
+    assert.deepEqual(quietNav.Network,quietNav.Home,JSON.stringify(quietNav));
+    await page.screenshot({path:path.join(shellRenderDir,'desktop-country-golf-media-stable.png')});
+  }
   const card = await page.evaluate(() => {
     const node=document.createElement('article'); node.className='scout-chat-research'; node.dataset.state='complete';
     node.innerHTML='<div class="scout-chat-research__body"><p>complete report</p><div class="scout-chat-research__actions"><button>view report</button></div></div>';
@@ -395,12 +465,12 @@ const server = http.createServer((req, res) => {
     return {activeBefore:Boolean(activeBefore),mismatches,synced,preview:scoutChatThreads[0].preview,status:scoutChatThreads[0].messages[0].thread.status,activeAfter:Boolean(chatThreadActiveWork(scoutChatThreads[0]))};
   });
   assert.deepEqual(terminal,{activeBefore:false,mismatches:[false,false,false,false],synced:true,preview:'Research delivered · 12 cited source links · 10 domains',status:'complete',activeAfter:false});
-  // Begin the rendered ordinary-message acceptance from a clean normal Work
+  // Begin the rendered ordinary-message acceptance from the clean Chat
   // surface. Earlier navigation/menu assertions intentionally exercise
   // overlays whose dimming must not contaminate the visual evidence.
-  await page.goto(base + '/work', {waitUntil:'domcontentloaded'});
+  await page.goto(base + '/chat', {waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
-  await page.waitForFunction(() => !document.getElementById('chatTool').hidden);
+  await page.waitForFunction(() => document.getElementById('appShell').dataset.tool==='chat' && getComputedStyle(document.getElementById('chatTool')).display!=='none');
   const shortMessageText = 'This is an ordinary message from the same person.';
   const shortMessage = {id:'message-short-prose',kind:'message',role:'user',authorName:'Synthetic',authorEmail:'synthetic@example.test',text:shortMessageText,createdAt:'2026-08-11T23:44:00Z'};
   const longMessageText = Array.from({length:14}, (_, index) => 'This is ordinary team-chat prose line ' + (index + 1) + ', with enough detail to make the rendered message taller without turning it into a document.').join(' ');
@@ -570,6 +640,16 @@ const server = http.createServer((req, res) => {
     return {preview:row.querySelector('.chat-thread-item__preview')?.textContent,timer:Boolean(row.querySelector('.chat-thread-item__work-timer'))};
   });
   assert.deepEqual(activeRowPreview,{preview:'Scout is working',timer:true});
+  shellAccess='core';
+  const memberPage=await browser.newPage({viewport:{width:390,height:844}});
+  await memberPage.goto(base+'/work',{waitUntil:'domcontentloaded'});
+  await memberPage.waitForSelector('#appShell.is-authed');
+  await memberPage.waitForFunction(()=>location.pathname==='/'&&document.getElementById('appShell').dataset.pd1Destination==='Home');
+  const memberShell=await memberPage.locator('#pd1PrimaryNav [data-pd1-destination]').evaluateAll(buttons=>buttons.map(button=>({name:button.dataset.pd1Destination,visible:!button.hidden&&!button.disabled&&getComputedStyle(button).display!=='none',display:getComputedStyle(button).display})));
+  assert.deepEqual(memberShell.filter(item=>item.visible).map(item=>item.name),['Home','Video','Chat']);
+  assert.ok(memberShell.filter(item=>!item.visible).every(item=>item.display==='none'),JSON.stringify(memberShell));
+  if(shellRenderDir)await memberPage.screenshot({path:path.join(shellRenderDir,'phone-member-core-nav.png')});
+  await memberPage.close();
   await browser.close(); server.close();
 })().catch(error => { console.error(error); server.close(); process.exit(1); });`
 	cmd := exec.Command("node", "-e", script)

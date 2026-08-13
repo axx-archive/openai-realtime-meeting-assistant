@@ -51,6 +51,21 @@ func TestIndexChatImageRenderBranch(t *testing.T) {
 	}
 }
 
+func TestIndexChatImageReservesItsFeedGeometryBeforeLoad(t *testing.T) {
+	html := readIndexForChatImage(t)
+	for _, want := range []string{
+		"aspect-ratio: 3 / 2",
+		".scout-chat-image__img {",
+		"height: 100%;",
+		"object-fit: contain;",
+		"overflow-anchor: none;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("chat media can shift a loaded channel because index.html is missing %q", want)
+		}
+	}
+}
+
 func TestIndexDirectChatImageControls(t *testing.T) {
 	html := readIndexForChatImage(t)
 	for _, want := range []string{

@@ -43,12 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 57 paints the stable Home category shell with the native screen,
-      // coalesces duplicate personalization fetches, and fences every hydrated
-      // recommendation to the exact signed-in session. It retains Build 56's
-      // chief-of-staff ranking and persistent private Realtime carrier.
+      // Build 58 adds the authorized Project suggestion/chooser and exact-Send
+      // association flow, promotes Video and Chat, and projects the core versus
+      // owner/admin shell without delaying Home. It retains Build 57's chief-
+      // of-staff ranking and persistent private Realtime carrier.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '57',
+      buildNumber: '58',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

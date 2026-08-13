@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setupAuthTestEnv(t *testing.T) {
@@ -74,14 +75,32 @@ func TestLoginSetsSessionCookieAndMeWorks(t *testing.T) {
 		t.Fatalf("expected /auth/me to return 200, got %d", recorder.Code)
 	}
 	var payload struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Email       string `json:"email"`
+		Name        string `json:"name"`
+		ShellAccess string `json:"shellAccess"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal /auth/me: %v", err)
 	}
 	if payload.Email != "aj@shareability.com" || payload.Name != "AJ" {
 		t.Errorf("unexpected identity: %+v", payload)
+	}
+	if payload.ShellAccess != "full" {
+		t.Errorf("AJ shellAccess=%q, want full", payload.ShellAccess)
+	}
+
+	memberCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	memberRequest := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	for _, cookie := range memberCookies {
+		memberRequest.AddCookie(cookie)
+	}
+	memberRecorder := httptest.NewRecorder()
+	authHandler(memberRecorder, memberRequest)
+	var memberIdentity struct {
+		ShellAccess string `json:"shellAccess"`
+	}
+	if memberRecorder.Code != http.StatusOK || json.Unmarshal(memberRecorder.Body.Bytes(), &memberIdentity) != nil || memberIdentity.ShellAccess != "core" {
+		t.Fatalf("ordinary member shell projection=%d %s, want core", memberRecorder.Code, memberRecorder.Body.String())
 	}
 }
 
@@ -100,6 +119,7 @@ func TestNativeLoginReturnsSessionTokenAndBearerAuthWorks(t *testing.T) {
 		Email        string `json:"email"`
 		Name         string `json:"name"`
 		SessionToken string `json:"sessionToken"`
+		ShellAccess  string `json:"shellAccess"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &loginPayload); err != nil {
 		t.Fatalf("unmarshal native login: %v", err)
@@ -109,6 +129,9 @@ func TestNativeLoginReturnsSessionTokenAndBearerAuthWorks(t *testing.T) {
 	}
 	if loginPayload.Email != "aj@shareability.com" {
 		t.Fatalf("unexpected email: %s", loginPayload.Email)
+	}
+	if loginPayload.ShellAccess != "full" {
+		t.Fatalf("native AJ shellAccess=%q, want full", loginPayload.ShellAccess)
 	}
 
 	// Browser-style login must NOT leak the raw session token in JSON.
@@ -150,6 +173,62 @@ func TestNativeLoginReturnsSessionTokenAndBearerAuthWorks(t *testing.T) {
 	authHandler(hdrRec, hdrReq)
 	if hdrRec.Code != http.StatusOK {
 		t.Fatalf("expected /auth/me with X-Bonfire-Session to return 200, got %d", hdrRec.Code)
+	}
+}
+
+func TestShellAccessRequiresExactCurrentOwnerOrAdminAuthority(t *testing.T) {
+	setupAuthTestEnv(t)
+	now := time.Now().UTC()
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("missing Tim fixture")
+	}
+	digest := sha256Hex([]byte(normalizeAccountEmail(user.Email)))
+	person := organizationTestPerson("person-shell-admin", 'a', now.Add(-2*time.Hour))
+	person.AccountSubjectDigest = digest
+	organizations := NewOrganizationAuthorityService()
+	if err := organizations.RegisterPerson(person); err != nil {
+		t.Fatal(err)
+	}
+	organizationID, membershipID := "organization-shell-admin", "membership-shell-admin"
+	organization := Organization{
+		Header: organizationTestHeader(STRIDEGlobalPersonTenant, organizationID, 1, STRIDEContractOrganization, 'b', now.Add(-time.Hour)),
+		Name:   "Shell Admin Studio", Slug: "shell-admin-studio", Status: "active", Discoverability: "private",
+		CreatorPersonID: person.Header.ID, PolicyRevision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
+	membership := organizationTestMembership(membershipID, person.Header.ID, organizationID, "admin", 3, now.Add(-time.Hour), "membership-shell-owner")
+	token := "shell-admin-session-token"
+	hash := hashResetToken(token)
+	active := ActiveOrganizationSession{
+		Header:               organizationTestHeader(STRIDEGlobalPersonTenant, "active-session-shell-admin", 5, STRIDEContractActiveOrganizationSession, 'c', now.Add(-time.Hour)),
+		SessionSubjectDigest: hash, PersonID: person.Header.ID, OrganizationID: organizationID, MembershipID: membershipID,
+		MembershipRevision: membership.Header.Revision, SessionRevision: 5, Status: "active", BoundAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	}
+	organizations.mu.Lock()
+	organizations.organizations[organizationID] = organization
+	organizations.memberships[membershipID] = membership
+	organizations.sessions[hash] = active
+	organizations.mu.Unlock()
+	sessions := userSessionStore()
+	sessions.mu.Lock()
+	sessions.sessions[hash] = sessionRecord{
+		Email: user.Email, Expires: active.ExpiresAt, PersonID: person.Header.ID, ActiveOrganizationID: organizationID,
+		OrganizationMembershipID: membershipID, OrganizationMembershipRev: membership.Header.Revision,
+		ActiveOrganizationSessionRev: active.SessionRevision, AccountSubjectDigest: digest, AuthorityGeneration: 5,
+	}
+	sessions.mu.Unlock()
+	restore := InstallStrideE10TenantRuntimeConverter(&StrideE10TenantConverter{resolver: &strideE10MainTenantAuthorityResolver{sessions: sessions, organizations: organizations, now: func() time.Time { return now }}})
+	t.Cleanup(restore)
+	if got := shellAccessForSession(user, token); got != "full" {
+		t.Fatalf("admin shellAccess=%q, want full", got)
+	}
+	organizations.mu.Lock()
+	next := organizations.memberships[membershipID]
+	next.Role = "member"
+	organizations.memberships[membershipID] = next
+	organizations.mu.Unlock()
+	if got := shellAccessForSession(user, token); got != "core" {
+		t.Fatalf("member shellAccess=%q, want core", got)
 	}
 }
 

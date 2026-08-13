@@ -26,6 +26,19 @@ export type SequencedChatThreadEvent = {
 
 export const maxChatThreadEventJournal = 256;
 
+export function chatMessageEventRegressesProjectAdmission(
+  current: ScoutMessage,
+  incoming: ScoutMessage,
+): boolean {
+  const currentProject = current.project?.status;
+  const incomingProject = incoming.project?.status;
+  if ((currentProject === 'confirmed' || currentProject === 'unavailable') && incomingProject === 'pending') {
+    return true;
+  }
+  return current.reply?.state !== 'project_pending'
+    && incoming.reply?.state === 'project_pending';
+}
+
 export function chatThreadEventJournalCovers(
   generationAtRequest: number,
   currentGeneration: number,
@@ -57,6 +70,7 @@ export function applyChatThreadEvent(
   if (!incoming?.id) return messages as ScoutMessage[];
   const index = messages.findIndex((message) => String(message.id) === String(incoming.id));
   if (index < 0) return [...messages, incoming];
+  if (chatMessageEventRegressesProjectAdmission(messages[index], incoming)) return messages as ScoutMessage[];
   const next = [...messages];
   next[index] = incoming;
   return next;

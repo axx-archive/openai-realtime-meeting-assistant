@@ -25,12 +25,13 @@ const (
 )
 
 type scoutConversationMessageRequest struct {
-	Text               string                    `json:"text"`
-	Files              []scoutChatFileAttachment `json:"files"`
-	ReplyToMessageID   string                    `json:"replyToMessageId"`
-	FollowUpArtifactId string                    `json:"followUpArtifactId"`
-	ToolTemplate       string                    `json:"toolTemplate"`
-	OperationID        string                    `json:"operationId"`
+	Text                string                    `json:"text"`
+	Files               []scoutChatFileAttachment `json:"files"`
+	ReplyToMessageID    string                    `json:"replyToMessageId"`
+	FollowUpArtifactId  string                    `json:"followUpArtifactId"`
+	ToolTemplate        string                    `json:"toolTemplate"`
+	OperationID         string                    `json:"operationId"`
+	ProjectContextToken string                    `json:"projectContextToken"`
 }
 
 func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Request) (scoutConversationMessageRequest, error) {
@@ -46,6 +47,7 @@ func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Reques
 	allowed := map[string]bool{
 		"text": true, "files": true, "replyToMessageId": true,
 		"followUpArtifactId": true, "toolTemplate": true, "operationId": true,
+		"projectContextToken": true,
 	}
 	for key := range object {
 		if !allowed[key] {
@@ -387,6 +389,37 @@ type scoutChatOpeningOperation struct {
 	ReplyMessageID string `json:"replyMessageId"`
 }
 
+type scoutChatProjectContext struct {
+	Status          string `json:"status"`
+	ProjectID       string `json:"projectId,omitempty"`
+	ProjectRevision int64  `json:"projectRevision,omitempty"`
+	Title           string `json:"title"`
+	Basis           string `json:"basis"`
+}
+
+type scoutChatProjectLinkOperation struct {
+	OperationID     string `json:"operationId"`
+	TokenDigest     string `json:"tokenDigest"`
+	MessageID       string `json:"messageId"`
+	State           string `json:"state"`
+	ProjectKind     string `json:"projectKind"`
+	ProjectID       string `json:"projectId,omitempty"`
+	ProjectRevision int64  `json:"projectRevision,omitempty"`
+	ProjectDigest   string `json:"projectDigest,omitempty"`
+	ProjectTitle    string `json:"projectTitle"`
+	Basis           string `json:"basis"`
+	AssociationID   string `json:"associationId,omitempty"`
+}
+
+func firstScoutProjectTokenDigest(thread scoutChatThreadRecord, operationID string) string {
+	for _, operation := range thread.ProjectLinkOperations {
+		if operation.OperationID == operationID {
+			return operation.TokenDigest
+		}
+	}
+	return ""
+}
+
 const privateRealtimeVoiceSessionBindingVersion = "private-realtime-voice-session/v1"
 
 // scoutChatVoiceSessionBinding is the durable, body-free authority binding
@@ -445,13 +478,14 @@ type scoutChatMessageRecord struct {
 	// Realtime voice). Viewer projections always remove them. They let a lost
 	// HTTP response find the already-committed conversation result without
 	// trusting a model- or client-selected tool.
-	SourceOperationID     string `json:"sourceOperationId,omitempty"`
-	SourceOperationDigest string `json:"sourceOperationDigest,omitempty"`
-	Text                  string `json:"text,omitempty"`
-	CreatedAt             string `json:"createdAt"`
-	EditedAt              string `json:"editedAt,omitempty"`
-	AuthorName            string `json:"authorName,omitempty"`
-	AuthorEmail           string `json:"authorEmail,omitempty"`
+	SourceOperationID     string                   `json:"sourceOperationId,omitempty"`
+	SourceOperationDigest string                   `json:"sourceOperationDigest,omitempty"`
+	Text                  string                   `json:"text,omitempty"`
+	Project               *scoutChatProjectContext `json:"project,omitempty"`
+	CreatedAt             string                   `json:"createdAt"`
+	EditedAt              string                   `json:"editedAt,omitempty"`
+	AuthorName            string                   `json:"authorName,omitempty"`
+	AuthorEmail           string                   `json:"authorEmail,omitempty"`
 	// Via marks messages relayed by a tool (e.g. "scout_voice" for
 	// post_to_channel from the private dashboard voice).
 	Via string `json:"via,omitempty"`
@@ -572,6 +606,9 @@ type scoutChatThreadRecord struct {
 	// AmbientMind deletion even after response loss. Viewer projections always
 	// strip this field.
 	ModerationReceipts []scoutChatModerationReceipt `json:"moderationReceipts,omitempty"`
+	// ProjectLinkOperations are the body-free cross-store reconciliation journal
+	// for explicit Send. Viewer projections remove them completely.
+	ProjectLinkOperations []scoutChatProjectLinkOperation `json:"projectLinkOperations,omitempty"`
 }
 
 func normalizePrivateRealtimeVoiceSessionID(value string) (string, error) {
@@ -927,17 +964,25 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		body, bodyErr := canonicalJSON(map[string]any{
+		bodyFields := map[string]any{
 			"threadId": threadID, "requester": normalizeAccountEmail(user.Email),
 			"text": payload.Text, "files": payload.Files,
 			"followUpArtifactId": payload.FollowUpArtifactId, "replyToMessageId": payload.ReplyToMessageID,
-		})
+		}
+		if strings.TrimSpace(payload.ProjectContextToken) != "" {
+			bodyFields["projectContextTokenDigest"] = homeProjectTokenDigest(payload.ProjectContextToken)
+		}
+		body, bodyErr := canonicalJSON(bodyFields)
 		if bodyErr != nil {
 			writeAuthError(w, http.StatusBadRequest, "conversation request is invalid")
 			return
 		}
 		bodyDigest := sha256Hex(append([]byte("conversation-http-turn/v1\x00"), body...))
 		operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
+		if strings.TrimSpace(payload.ProjectContextToken) != "" {
+			writeAuthError(w, http.StatusConflict, "Project linking for an existing thread is not available yet; your message was not sent")
+			return
+		}
 		legacyNativeOperationIssued := false
 		legacyNativeOperationReused := false
 		if operationErr != nil {

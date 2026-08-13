@@ -8,12 +8,15 @@ import { PersonalRealtimeFloatingControl } from '../realtime/PersonalRealtimeFlo
 import { useOptionalPersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import {
   nativeShellDestinations,
+  nativeShellDestinationsForAccess,
+  type NativeShellAccess,
   nativeShellLayout,
   type NativeShellDestination,
 } from './nativeShellModel';
 
 type Props = {
   active: NativeShellDestination;
+  access?: NativeShellAccess;
   children: React.ReactNode;
   keepSidebarForFocusedRoute?: boolean;
   personalRealtimeVisible?: boolean;
@@ -24,6 +27,7 @@ type Props = {
 
 export function NativeUniversalShell({
   active,
+  access,
   children,
   keepSidebarForFocusedRoute = false,
   personalRealtimeVisible = false,
@@ -34,12 +38,14 @@ export function NativeUniversalShell({
   const { width, fontScale } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const realtime = useOptionalPersonalRealtimeContext();
+  const visibleDestinations = nativeShellDestinationsForAccess(access);
   // An iPhone in landscape is wide, but it is not an iPad workspace. Keep the
   // focused conversation full-width instead of turning 874pt into a 248pt
   // desktop rail. Real iPads still adapt by width for Split View.
   const layout = nativeShellLayout(width, Platform.OS !== 'ios' || Platform.isPad, fontScale);
   const sidebar = (visible || keepSidebarForFocusedRoute) && layout === 'sidebar';
   const compact = visible && layout === 'compact';
+  const compactItemWidth = Math.max(40, Math.min(48, Math.floor((width - 38) / visibleDestinations.length)));
   return (
     <View style={styles.root}>
       {/* The navigator always occupies this exact child slot. Route, width,
@@ -57,7 +63,7 @@ export function NativeUniversalShell({
           <Text accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.sidebarBrand}>STRIDE</Text>
           <Text maxFontSizeMultiplier={2} style={styles.sidebarContext}>The network where work happens</Text>
           <View style={styles.sidebarItems}>
-            {nativeShellDestinations.map((destination) => (
+            {visibleDestinations.map((destination) => (
               <ShellItem key={destination.id} compact={false} destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
             ))}
           </View>
@@ -71,8 +77,8 @@ export function NativeUniversalShell({
           radius={radius.full}
           style={[styles.bottomRail, { bottom: Math.max(insets.bottom, space[2]) }]}
         >
-          {nativeShellDestinations.map((destination) => (
-            <ShellItem key={destination.id} compact destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
+          {visibleDestinations.map((destination) => (
+            <ShellItem key={destination.id} compact compactWidth={compactItemWidth} destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
           ))}
         </Glass>
       ) : null}
@@ -99,11 +105,13 @@ export function NativeUniversalShell({
 
 function ShellItem({
   compact,
+  compactWidth,
   destination,
   selected,
   onPress,
 }: {
   compact: boolean;
+  compactWidth?: number;
   destination: (typeof nativeShellDestinations)[number];
   selected: boolean;
   onPress: () => void;
@@ -117,6 +125,7 @@ function ShellItem({
       onPress={onPress}
       style={({ pressed }) => [
         compact ? styles.compactItem : styles.sidebarItem,
+        compact && { width: compactWidth },
         selected && (compact ? styles.compactItemSelected : styles.sidebarItemSelected),
         pressed && styles.pressed,
       ]}

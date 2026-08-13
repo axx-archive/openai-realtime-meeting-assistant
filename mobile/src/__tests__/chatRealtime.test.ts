@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   applyChatThreadEvent,
+  chatMessageEventRegressesProjectAdmission,
   chatThreadEventJournalCovers,
   isMessageRunEnd,
   reconcileChatThreadSnapshot,
@@ -31,6 +32,23 @@ test('matching chat events append, replace, and delete immediately by message id
 
   const deleted = applyChatThreadEvent(replaced, 'thread-1', { id: 'thread-1', deletedMessageId: 'one' });
   assert.deepEqual(deleted.map((message) => message.id), ['two', 'three', 'four']);
+});
+
+test('a late pre-confirmation socket frame cannot regress the Project Send response', () => {
+  const confirmed = {
+    id: 'project-user', role: 'user', createdAt: '2026-01-01T00:00:00Z',
+    project: { status: 'confirmed' as const, projectId: 'project-one', projectRevision: 1, title: 'Launch Plan', basis: 'selected' },
+  };
+  const pending = {
+    ...confirmed,
+    project: { status: 'pending' as const, title: 'Launch Plan', basis: 'selected' },
+  };
+  assert.equal(chatMessageEventRegressesProjectAdmission(confirmed, pending), true);
+  assert.equal(applyChatThreadEvent([confirmed], 'thread-1', { id: 'thread-1', message: pending })[0], confirmed);
+
+  const queued = { id: 'project-reply', role: 'scout', createdAt: '2026-01-01T00:00:01Z', reply: { operationId: 'operation-one', inReplyTo: 'project-user', state: 'queued' as const, attempt: 0 } };
+  const projectPending = { ...queued, reply: { ...queued.reply, state: 'project_pending' as const } };
+  assert.equal(applyChatThreadEvent([queued], 'thread-1', { id: 'thread-1', message: projectPending })[0], queued);
 });
 
 test('events for another thread preserve the same message array', () => {

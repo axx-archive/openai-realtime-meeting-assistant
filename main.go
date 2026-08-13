@@ -1074,6 +1074,7 @@ func main() {
 	http.HandleFunc("/.well-known/apple-app-site-association", appleAppSiteAssociationHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
 	http.HandleFunc("/assistant/home", assistantHomeHandler)
+	http.HandleFunc("/assistant/project-context", assistantProjectContextHandler)
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/attachments", assistantAttachmentUploadHandler)
@@ -2517,7 +2518,10 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-const artifactLibraryAdminEmail = "aj@shareability.com"
+const (
+	founderOwnerEmail         = "aj@shareability.com"
+	artifactLibraryAdminEmail = founderOwnerEmail
+)
 
 // isArtifactApprovalAdmin gates ONLY the external-write approval actions on
 // Codex artifacts (approve/reject). Artifact bodies, listing, editing, and

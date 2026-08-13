@@ -2,6 +2,7 @@ import type { ScoutThreadDetailResponse } from '../api/types';
 
 export type HomeScoutOpeningAttempt = {
   text: string;
+  projectContextToken?: string;
   idempotencyKey: string;
 };
 
@@ -27,16 +28,17 @@ export function homeScoutOpeningAttempt(
   current: HomeScoutOpeningAttempt | null,
   value: string,
   createKey: () => string = createHomeScoutIdempotencyKey,
+  projectContextToken = '',
 ): HomeScoutOpeningAttempt | null {
   const text = value.trim();
   if (!text) return null;
-  if (current?.text === text) return current;
-  return { text, idempotencyKey: createKey() };
+  if (current?.text === text && (current.projectContextToken ?? '') === projectContextToken) return current;
+  return { text, ...(projectContextToken ? { projectContextToken } : {}), idempotencyKey: createKey() };
 }
 
 export function homeScoutOpeningBody(attempt: HomeScoutOpeningAttempt) {
   return {
-    openingMessage: { text: attempt.text },
+    openingMessage: { text: attempt.text, ...(attempt.projectContextToken ? { projectContextToken: attempt.projectContextToken } : {}) },
   } as const;
 }
 

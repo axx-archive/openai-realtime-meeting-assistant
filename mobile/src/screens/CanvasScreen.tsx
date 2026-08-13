@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +13,7 @@ import {
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -28,6 +29,7 @@ import { createConversationOperationId } from '../conversations/newConversation'
 import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import type { HomeStarterDestination, HomeStarterSuggestion } from '../api/types';
+import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
 
@@ -87,21 +89,107 @@ export function CanvasScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [projectAvailable, setProjectAvailable] = useState(false);
+  const [projectSessionToken, setProjectSessionToken] = useState('');
+  const [projectChoices, setProjectChoices] = useState<HomeProjectChoice[]>([]);
+  const [selectedProject, setSelectedProject] = useState<(HomeProjectChoice & { text: string }) | null>(null);
+  const [projectChooserOpen, setProjectChooserOpen] = useState(false);
+  const [newProjectTitle, setNewProjectTitle] = useState('');
+  const [projectError, setProjectError] = useState('');
+  const [projectFocusGeneration, setProjectFocusGeneration] = useState(0);
   const largeHomeType = fontScale >= 1.5;
   const activeStarter = home.starters.find((starter) => starter.id === activeStarterID);
   const inputRef = useRef<TextInput>(null);
+  const draftRef = useRef(draft);
+  const draftDestinationRef = useRef<HomeStarterDestination | null>(draftDestination);
+  const projectRequestGenerationRef = useRef(0);
+  const projectScopeKeyRef = useRef('');
+  const sessionTokenRef = useRef(sessionToken);
   const openingAttemptRef = useRef<HomeScoutOpeningAttempt | null>(null);
   const threadAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  draftRef.current = draft;
+  draftDestinationRef.current = draftDestination;
+  sessionTokenRef.current = sessionToken;
   const dictation = useComposerDictation({
     context: 'scout',
     onTranscript: ({ text }) => {
+      projectRequestGenerationRef.current += 1;
       setDraft(text);
       setDraftDestination(null);
+      setProjectChoices([]);
+      setSelectedProject(null);
+      setProjectChooserOpen(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
   });
   const dictationActive = dictation.state !== 'idle';
   const dictationCanCommit = ['listening', 'held', 'error'].includes(dictation.state);
+
+  const refreshProjectContext = useCallback(async (createTitle = '') => {
+    if (!sessionToken) return;
+    const text = draft.trim();
+    const destination = draftDestination?.route === 'thread'
+      ? { route: 'thread' as const, threadId: draftDestination.threadId }
+      : { route: 'new-private' as const };
+    const destinationKey = JSON.stringify(destination);
+    const generation = ++projectRequestGenerationRef.current;
+    try {
+      const response = await api.projectContext(sessionToken, {
+        text,
+        destination,
+        ...(createTitle ? { createTitle } : {}),
+      });
+      const currentDestination = draftDestinationRef.current?.route === 'thread'
+        ? { route: 'thread' as const, threadId: draftDestinationRef.current.threadId }
+        : { route: 'new-private' as const };
+      if (generation !== projectRequestGenerationRef.current
+        || sessionTokenRef.current !== sessionToken
+        || draftRef.current.trim() !== text
+        || JSON.stringify(currentDestination) !== destinationKey) return;
+      const context = response.projectContext;
+      if (projectScopeKeyRef.current && context.scopeKey && projectScopeKeyRef.current !== context.scopeKey) {
+        setSelectedProject(null);
+      }
+      projectScopeKeyRef.current = String(context.scopeKey ?? '');
+      setProjectSessionToken(sessionToken);
+      setProjectAvailable(Boolean(context.available));
+      setProjectChoices(Array.isArray(context.choices) ? context.choices : []);
+      if (createTitle && context.suggested?.token) setSelectedProject({ ...context.suggested, text });
+      else if (context.suggested?.token) setSelectedProject((current) => current ?? { ...context.suggested!, text });
+      setProjectError('');
+    } catch (error) {
+      if (generation !== projectRequestGenerationRef.current || sessionTokenRef.current !== sessionToken) return;
+      setProjectAvailable(false);
+      setProjectSessionToken(sessionToken);
+      setProjectChoices([]);
+      setSelectedProject(null);
+      setProjectError(error instanceof Error ? error.message : 'Project context is unavailable.');
+    }
+  }, [draft, draftDestination, sessionToken]);
+
+  useEffect(() => {
+    projectRequestGenerationRef.current += 1;
+    projectScopeKeyRef.current = '';
+    setProjectAvailable(false);
+    setProjectSessionToken('');
+    setProjectChoices([]);
+    setSelectedProject(null);
+    setProjectChooserOpen(false);
+    setProjectError('');
+  }, [sessionToken]);
+
+  useFocusEffect(
+    useCallback(() => {
+      projectRequestGenerationRef.current += 1;
+      projectScopeKeyRef.current = '';
+      setProjectAvailable(false);
+      setProjectChoices([]);
+      setSelectedProject(null);
+      setProjectChooserOpen(false);
+      setProjectFocusGeneration((current) => current + 1);
+      return undefined;
+    }, [sessionToken]),
+  );
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -111,6 +199,17 @@ export function CanvasScreen() {
       hide.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionToken || draftDestination?.route === 'thread') {
+      setProjectAvailable(false);
+      setProjectChoices([]);
+      setSelectedProject(null);
+      return;
+    }
+    const timer = setTimeout(() => { void refreshProjectContext(); }, 240);
+    return () => clearTimeout(timer);
+  }, [draft, draftDestination, projectFocusGeneration, refreshProjectContext, sessionToken]);
 
   const handleTap = useCallback(async () => {
     // The cradle has one stable meaning: a full-duplex Realtime Scout call.
@@ -169,7 +268,8 @@ export function CanvasScreen() {
       }
       return;
     }
-    const attempt = homeScoutOpeningAttempt(openingAttemptRef.current, draft);
+    const projectContextToken = projectSessionToken === sessionToken && selectedProject?.text === text ? selectedProject.token : '';
+    const attempt = homeScoutOpeningAttempt(openingAttemptRef.current, draft, undefined, projectContextToken);
     if (!attempt) return;
     openingAttemptRef.current = attempt;
     setSending(true);
@@ -186,6 +286,7 @@ export function CanvasScreen() {
       threadAttemptRef.current = null;
       setDraft('');
       setDraftDestination(null);
+      setSelectedProject(null);
       Keyboard.dismiss();
       navigation.navigate('Thread', {
         threadId: result.thread.threadId,
@@ -202,7 +303,7 @@ export function CanvasScreen() {
       );
     }
     setSending(false);
-  }, [draft, draftDestination, navigation, sending, sessionToken]);
+  }, [draft, draftDestination, navigation, projectSessionToken, selectedProject, sending, sessionToken]);
 
   // The disabled mic already communicates capability. Reserve copy below the
   // composer for a real runtime problem; a permanent policy sentence is
@@ -229,11 +330,15 @@ export function CanvasScreen() {
   }, [home.continuity, navigation]);
 
   const useStarterSuggestion = useCallback((suggestion: HomeStarterSuggestion) => {
+    projectRequestGenerationRef.current += 1;
     setDraft(suggestion.text);
     setDraftDestination(suggestion.destination);
     openingAttemptRef.current = null;
     threadAttemptRef.current = null;
     setSendError('');
+    setProjectChoices([]);
+    setSelectedProject(null);
+    setProjectChooserOpen(false);
     requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.setNativeProps({
@@ -293,7 +398,11 @@ export function CanvasScreen() {
                 enterKeyHint="send"
                 maxLength={4000}
                 onChangeText={(value) => {
+                  projectRequestGenerationRef.current += 1;
                   setDraft(value);
+                  if (selectedProject?.text !== value.trim()) setSelectedProject(null);
+                  setProjectChoices([]);
+                  setProjectChooserOpen(false);
                   if (openingAttemptRef.current?.text !== value.trim()) openingAttemptRef.current = null;
                   const threadID = draftDestination?.route === 'thread' ? draftDestination.threadId : '';
                   if (threadAttemptRef.current?.key !== JSON.stringify({ threadId: threadID, text: value.trim() })) {
@@ -389,6 +498,20 @@ export function CanvasScreen() {
                   <Text maxFontSizeMultiplier={1.6} style={styles.draftDestinationActionText}>Change</Text>
                 </Pressable>
               </View>
+            ) : null}
+            {draftDestination?.route !== 'thread' && projectAvailable && projectSessionToken === sessionToken ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : 'Add project'}
+                accessibilityHint="Chooses an authorized project for this message. Nothing is linked until Send."
+                onPress={() => setProjectChooserOpen(true)}
+                style={({ pressed }) => [styles.projectChip, pressed && styles.starterPressed]}
+              >
+                <SymbolView name="folder" size={14} tintColor={colors.text3} />
+                <Text maxFontSizeMultiplier={1.8} style={styles.projectChipText}>
+                  {selectedProject ? `${selectedProject.suggested ? 'Suggested' : 'Project'} · ${selectedProject.title}` : 'Add project'}
+                </Text>
+              </Pressable>
             ) : null}
             {sendError ? <Text accessibilityRole="alert" maxFontSizeMultiplier={1.8} style={styles.sendError}>{sendError}</Text> : null}
           </View>
@@ -486,13 +609,45 @@ export function CanvasScreen() {
 
         <View style={[canvasCradleComposition.skyBelow, keyboardVisible && styles.keyboardSky]} />
       </ScrollView>
-
+		  <Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
+		<SafeAreaView style={styles.projectSheet}>
+		  <View style={styles.projectSheetHeader}>
+			<Text accessibilityRole="header" maxFontSizeMultiplier={1.8} style={styles.projectSheetTitle}>Choose a project</Text>
+			<Pressable accessibilityRole="button" accessibilityLabel="Close project chooser" onPress={() => setProjectChooserOpen(false)} style={styles.projectSheetClose}><SymbolView name="xmark" size={17} tintColor={colors.text1} /></Pressable>
+		  </View>
+		  <ScrollView contentContainerStyle={styles.projectSheetBody} keyboardShouldPersistTaps="handled">
+				{[{ title: 'No project', token: '' } as HomeProjectChoice, ...(projectSessionToken === sessionToken ? projectChoices : [])].map((choice) => {
+			  const selected = String(selectedProject?.token ?? '') === choice.token;
+			  return <Pressable key={choice.token || 'none'} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={choice.title} onPress={() => { setSelectedProject(choice.token ? { ...choice, text: draft.trim() } : null); setProjectChooserOpen(false); }} style={({ pressed }) => [styles.projectChoice, selected && styles.projectChoiceSelected, pressed && styles.starterPressed]}><Text maxFontSizeMultiplier={1.8} style={styles.projectChoiceText}>{choice.title}</Text>{selected ? <SymbolView name="checkmark" size={16} tintColor={colors.ember} /> : null}</Pressable>;
+			})}
+			<View style={styles.projectCreateRow}>
+			  <TextInput accessibilityLabel="New private project name" maxLength={120} onChangeText={setNewProjectTitle} placeholder="New private project" placeholderTextColor={colors.text3} style={styles.projectCreateInput} value={newProjectTitle} />
+			  <Pressable accessibilityRole="button" accessibilityLabel="Add new private project" disabled={!newProjectTitle.trim()} onPress={() => { const title = newProjectTitle.trim(); if (!title) return; void refreshProjectContext(title).then(() => { setNewProjectTitle(''); setProjectChooserOpen(false); }); }} style={({ pressed }) => [styles.projectCreateButton, !newProjectTitle.trim() && styles.composerSendDisabled, pressed && styles.starterPressed]}><Text style={styles.projectCreateButtonText}>Add</Text></Pressable>
+			</View>
+			{projectError ? <Text accessibilityRole="alert" maxFontSizeMultiplier={1.8} style={styles.sendError}>{projectError}</Text> : null}
+		  </ScrollView>
+		</SafeAreaView>
+	  </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgApp },
+  projectChip: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1 },
+  projectChipText: { ...type.caption, color: colors.text2 },
+  projectSheet: { flex: 1, backgroundColor: colors.bgApp },
+  projectSheetHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space[4], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
+  projectSheetTitle: { ...type.title2, color: colors.text1 },
+  projectSheetClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.surface2 },
+  projectSheetBody: { gap: space[2], padding: space[4] },
+  projectChoice: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space[3], borderRadius: radius.lg, backgroundColor: colors.surface1 },
+  projectChoiceSelected: { backgroundColor: colors.surface2 },
+  projectChoiceText: { ...type.body, color: colors.text1 },
+  projectCreateRow: { flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[3], paddingTop: space[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line1 },
+  projectCreateInput: { ...type.body, minWidth: 0, height: 48, flex: 1, paddingHorizontal: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, color: colors.text1, backgroundColor: colors.surface1 },
+  projectCreateButton: { minWidth: 64, height: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space[3], borderRadius: radius.lg, backgroundColor: colors.text1 },
+  projectCreateButtonText: { ...type.captionMedium, color: colors.bgApp },
   /**
    * Composition, not centring. Flex spacers weighted 1.25 : 1 sit the content
    * group slightly BELOW true centre.
