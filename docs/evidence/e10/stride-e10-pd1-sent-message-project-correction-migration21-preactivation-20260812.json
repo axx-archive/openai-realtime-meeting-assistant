@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_release_migration_guard_checkpoint",
+  "observedAt": "2026-08-12T23:04:00-07:00",
+  "status": "migration_21_activation_pending",
+  "implementationCommit": "ea56fc21f6f3cd54934e1e26bb264826211bdfdc",
+  "vps": {
+    "ledgerGeneration": 72,
+    "releaseCommit": "ea56fc21f6f3cd54934e1e26bb264826211bdfdc",
+    "bundleSha256": "072edbdd6add11a19360dffdce7f72d2fd0f25939c470547553ea81ef517fafb",
+    "meetingassistImageId": "sha256:0e3883884eea7862de7be9cdde762d65e5e776c037b7d5d1471af1b7cb4f01d8",
+    "renderRunnerImageId": "sha256:4ad8687a14a391febc0aa9f058cdc4eb169f9ed4d915a1196b02a516386e046e",
+    "verification": "verified-local-unsigned",
+    "migrationConfiguredMaxVersion": 20,
+    "migrationInstalledMaxVersion": 20
+  },
+  "decision": "do_not_bypass_the_cap_or_mutate_the_serving_bundle; create_a_distinct_docs_only_successor_release_then_raise_only_the_backed_up_cap_to_21_and_activate_through_the_retained_exact_release_tool",
+  "productionWrites": {
+    "releaseActivation": true,
+    "applicationData": false,
+    "migration21": false
+  },
+  "completionClaimed": false
+}
