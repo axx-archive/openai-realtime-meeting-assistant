@@ -32,7 +32,14 @@ export function chatMessageEventRegressesProjectAdmission(
 ): boolean {
   const currentProject = current.project?.status;
   const incomingProject = incoming.project?.status;
-  if ((currentProject === 'confirmed' || currentProject === 'unavailable') && incomingProject === 'pending') {
+  const currentProjectRevision = Number(current.project?.contextRevision ?? 0);
+  const incomingProjectRevision = Number(incoming.project?.contextRevision ?? 0);
+  if (incomingProjectRevision < currentProjectRevision) return true;
+  if (
+    incomingProjectRevision === currentProjectRevision
+    && (currentProject === 'confirmed' || currentProject === 'unavailable' || currentProject === 'removed')
+    && incomingProject === 'pending'
+  ) {
     return true;
   }
   return current.reply?.state !== 'project_pending'
@@ -82,9 +89,14 @@ export function reconcileChatThreadSnapshot(
   fetched: readonly ScoutMessage[],
 ): ScoutMessage[] {
   if (current === fetched) return current as ScoutMessage[];
-  if (current.length !== fetched.length) return [...fetched];
+  const currentByID = new Map(current.map((message) => [String(message.id), message]));
+  const monotonic = fetched.map((incoming) => {
+    const visible = currentByID.get(String(incoming.id));
+    return visible && chatMessageEventRegressesProjectAdmission(visible, incoming) ? visible : incoming;
+  });
+  if (current.length !== monotonic.length) return monotonic;
   for (let index = 0; index < current.length; index += 1) {
-    if (JSON.stringify(current[index]) !== JSON.stringify(fetched[index])) return [...fetched];
+    if (JSON.stringify(current[index]) !== JSON.stringify(monotonic[index])) return monotonic;
   }
   return current as ScoutMessage[];
 }

@@ -88,6 +88,31 @@ export type HomeProjectContextResponse = {
   };
 };
 
+export type ProjectCorrectionChoice = {
+  title: string;
+  token: string;
+};
+
+export type ProjectCorrectionProjection = {
+  available: boolean;
+  scopeKey: string;
+  current: {
+    title: string;
+    status: 'confirmed' | 'unavailable' | 'removed';
+    contextRevision: number;
+  };
+  choices: ProjectCorrectionChoice[];
+  remove?: ProjectCorrectionChoice;
+};
+
+export type ProjectCorrectionResponse = {
+  ok?: boolean;
+  projectCorrection?: ProjectCorrectionProjection;
+  thread?: ScoutThread & { messages?: ScoutMessage[] };
+  messages?: ScoutMessage[];
+  message?: ScoutMessage;
+};
+
 export type ScoutThread = {
   id: string;
   title?: string;
@@ -291,11 +316,14 @@ export type ScoutMessage = {
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
   project?: {
-    status: 'pending' | 'confirmed' | 'unavailable';
+    status: 'pending' | 'confirmed' | 'unavailable' | 'removed';
     projectId?: string;
     projectRevision?: number;
+    contextRevision?: number;
+    associationId?: string;
+    associationRevision?: number;
     title: string;
-    basis: string;
+    basis?: string;
   };
   thread?: ScoutWorkThreadRef;
   work?: ScoutWorkRecordRef;

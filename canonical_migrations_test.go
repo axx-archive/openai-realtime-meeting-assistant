@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 20 {
-		t.Fatalf("migration count = %d, want 20", len(migrations))
+	if len(migrations) != 21 {
+		t.Fatalf("migration count = %d, want 21", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -217,6 +217,17 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[19].SQL, "NEW.source_audience->>'visibility'<>source_event.visibility") ||
 		!strings.Contains(migrations[19].SQL, "Project chat Send receipt requires exact confirmed canonical truth") {
 		t.Fatalf("unexpected Project multiplayer chat migration: %+v", migrations[19])
+	}
+	if migrations[20].Version != 21 || migrations[20].Name != "0021_stride_project_chat_corrections.sql" ||
+		migrations[20].SHA256 != sha256.Sum256([]byte(migrations[20].SQL)) ||
+		!strings.Contains(migrations[20].SQL, "CREATE TABLE stride_project_chat_correction_receipts") ||
+		!strings.Contains(migrations[20].SQL, "CREATE TABLE stride_project_chat_correction_abandonments") ||
+		!strings.Contains(migrations[20].SQL, "CREATE TABLE stride_project_chat_source_mutation_receipts") ||
+		!strings.Contains(migrations[20].SQL, "Project chat correction requires current organization session authority") ||
+		!strings.Contains(migrations[20].SQL, "Project chat correction receipt requires exact canonical result") ||
+		!strings.Contains(migrations[20].SQL, "Project chat correction receipts are append-only") ||
+		!strings.Contains(migrations[20].SQL, "Project chat source mutation receipt requires exact invalidated canonical truth") {
+		t.Fatalf("unexpected Project chat correction migration: %+v", migrations[20])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

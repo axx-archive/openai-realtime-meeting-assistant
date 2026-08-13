@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_sent_message_project_correction_checkpoint",
+  "observedAt": "2026-08-12T22:50:00-07:00",
+  "status": "bounded_local_release_candidate_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "83e3ce41fe7a375b03e53a553d7859a5bbc24ccf",
+    "canonicalPlanSha256": "dd090a3c40ba84d097fa600910c2cceaba3f7fa9752e016bdfabae6c65647cea",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "correctionAuthority": "only_the_server_resolved_human_author_under_the_current_organization_session_may_correct_the_project_on_one_sent_message",
+    "zeroEffectReview": "opening_reviewing_selecting_cancelling_and_closing_are_read_only_and_only_explicit_update_or_remove_mutates",
+    "clientAuthority": "clients_submit_only_an_opaque_revision_bound_token_and_stable_operation_id_without_project_or_authority_identifiers",
+    "associationLineage": "project_change_or_removal_appends_revisioned_lineage_and_advances_one_message_local_context_revision_without_rebinding_the_thread",
+    "sourceMutation": "edit_or_delete_of_a_linked_source_projects_unavailable_before_canonical_invalidation_and_recomputes_preview_and_index_metadata",
+    "socketOrdering": "web_and_native_reject_lower_context_revision_and_terminal_to_pending_realtime_regressions",
+    "crossStoreRecovery": "correction_and_receipt_absent_abandonment_share_one_postgresql_advisory_lock_and_mutually_exclusive_immutable_receipts",
+    "providerCalls": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "dd090a3c40ba84d097fa600910c2cceaba3f7fa9752e016bdfabae6c65647cea",
+    "migrations/0021_stride_project_chat_corrections.sql": "3a2e1e30408d3b65ec2daa5909db0422f391b94a26808c38c49290411af5936c",
+    "stride_project_chat_correction.go": "afd8280c806f84f150920009c1f3357a2070d05036af58bedeef96a353a41589",
+    "stride_project_chat_source_mutation.go": "ae4fa013ab931584996c8a043ad54e50bbd4e3954a3c2cc755970c3bf79aa5fa",
+    "stride_project_chat_correction_test.go": "ac8aa9e8d274f7859c80d574ec19c2e7616df4764ba38da9e6f0b37c1c237b87",
+    "scout_chat_threads.go": "0e9ded76c4d35c85b37b4e8d6d308842bc31638f869ac6c2ae3a1c489f4e85a5",
+    "attachments.go": "e9900361ce74bc933476b4b448b1742de9098b3b75af7bdcef21c1ddce6afa78",
+    "authorization_surfaces.go": "4ecfb2e45ea590cd1588bbb3e60c7bce866d2fa68ddeff686deea35d45577b01",
+    "index.html": "159cca052c636e7f520a47958c890b51395ee129b1c6476e5120fd04bdd76d91",
+    "frontend_project_correction_test.go": "cbe27ec9851de2b7706616898f31ed56e4628771305595b34bcf415935e82724",
+    "frontend_desktop_chat_quality_test.go": "06e1b13d353a8da8f00403a8053ccfdba6e8e951cbda207bbf246ef91f8a8c80",
+    "mobile/app.config.ts": "7fa5a516bbe70da744a8ea67fb5a6affa3d7f7b09464290e7472c353116f4881",
+    "mobile/src/api/types.ts": "e855479592c14d74da29dcadcdde0a80e81a1b7f5ce5ce7f6c54355461f970dc",
+    "mobile/src/api/client.ts": "a0e7cc3e8082007c7693e29f1df8f63551e98ae325d8411e2e93308b871769b9",
+    "mobile/src/messaging/MessageBubble.tsx": "33143ef16b7d478f7f7d9e39c669446a28ae2cb510483f86d85cbb2ef04152ea",
+    "mobile/src/messaging/MessageActionSheet.tsx": "484ccb9629a7743c7a5a36c4946f3389c43b50cc2146d6b6ea131fa108a2bfa0",
+    "mobile/src/messaging/ProjectCorrectionSheet.tsx": "1860d1760ec442660faff2b68449684c9cb3ffa744e5c52cea421508cc4a3f0f",
+    "mobile/src/messaging/chatRealtime.ts": "f37bcc7787d7001d6b2380d8d4461706170e4db4112ceead9108377652effdb1",
+    "mobile/src/screens/ThreadScreen.tsx": "fac8d9f013a1c64b747daaf326c5e3faa7cfd8dfb46911725b9ed5f1eab7f36e",
+    "mobile/src/__tests__/projectCorrection.test.ts": "f27d13b88272afea610fdf65a80478ab4cdbb48747177312342af7be006338f4",
+    "mobile/src/__tests__/chatRealtime.test.ts": "a7d5c50e541ff01c95c5735545a496dd6a431687924d9fa5c5a5c10d8dc9da59"
+  },
+  "renderedEvidence": {
+    "directory": "docs/evidence/e10/rendered-pd1-sent-message-project-correction-20260812",
+    "aggregateSha256": "c6722c9a3ac3d9c2d6bfbd0640a2217a287ffcee9e1be394f49655839185b5cb",
+    "surfaces": [
+      {"surface":"desktop_dark","sha256":"d69ea11688e0462936bcb48378f165df8b4fc14e14f5dd33b677be9c775bf5da"},
+      {"surface":"desktop_light","sha256":"bad2913e5f67ab6bc0ad7b865f3ead1519abacad46e8a012b1f945fcc8aab170"},
+      {"surface":"phone_dark","sha256":"9c3ab0c9b830b0532d0eda05b8a25a0da9ca706e38fef1aff7f98ee958c56094"},
+      {"surface":"phone_light","sha256":"8a190487783394216d08bdaf414c39357cad2eba36f28533088c237044aa0523"}
+    ],
+    "visualReview": "PASS_unclipped_compact_clear_current_and_selected_project_44px_controls_dark_light"
+  },
+  "verification": {
+    "fullGo": "PASS_563.332s_all_packages",
+    "focusedGo": "PASS",
+    "focusedGoRace": "PASS",
+    "disposablePostgresMigrationAndRecovery": "PASS",
+    "goVetAll": "PASS",
+    "drRegistryAndDigest": "PASS",
+    "mobileTests": "PASS_537_of_537",
+    "mobileTypecheck": "PASS",
+    "renderedBrowserCorrection": "PASS",
+    "diffCheck": "PASS",
+    "boundedCritic": "PASS_no_blocker_or_major_after_linearizable_abandonment_and_correction_receipts"
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 1,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "migrationInstalled": false,
+    "testFlightBuildCreated": false
+  },
+  "openGates": [
+    "reviewed_commit_push_vps_activation_migration_21_and_exact_release_readback",
+    "ios_build_61_upload_processing_and_intended_tester_group_readback",
+    "project_linked_attachment_and_reply_source_coverage",
+    "meeting_record_and_authorized_meeting_project_history_compaction",
+    "server_minted_project_bound_work_projection_and_real_research_flow",
+    "immutable_artifact_revision_lineage_and_durable_drive_open_receipt",
+    "provider_backed_artifact_family_and_physical_device_acceptance"
+  ],
+  "exclusions": {
+    "controllerOrAdminRetagging": false,
+    "projectLinkedAttachmentsAndRepliesComplete": false,
+    "nativeRenderedOrPhysicalDeviceAccepted": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "productionAccepted": false,
+    "testFlightAccepted": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}

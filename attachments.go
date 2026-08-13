@@ -1361,11 +1361,19 @@ func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, th
 // must never be used for a durable write.
 func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
 	projected := thread
+	pendingDeletes := map[string]bool{}
+	for _, operation := range thread.ProjectSourceMutationOperations {
+		if operation.State == "pending" && operation.Kind == "delete" {
+			pendingDeletes[operation.MessageID] = true
+		}
+	}
 	projected.OpeningOperation = nil
 	projected.VoiceSession = nil
 	projected.LegacyConversationOperations = nil
 	projected.ModerationReceipts = nil
 	projected.ProjectLinkOperations = nil
+	projected.ProjectCorrectionOperations = nil
+	projected.ProjectSourceMutationOperations = nil
 	// Direct coworker identity comes from the signed Product ledger so an old
 	// chat record is upgraded on read without making the chat title authoritative.
 	if app != nil {
@@ -1377,9 +1385,15 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	if len(thread.Messages) == 0 {
 		return projected
 	}
-	projected.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
+	projected.Messages = make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	for _, message := range thread.Messages {
+		if pendingDeletes[message.ID] || (message.CausedByMessageID != "" && pendingDeletes[message.CausedByMessageID]) {
+			continue
+		}
+		projected.Messages = append(projected.Messages, message)
+	}
 	for messageIndex := range projected.Messages {
-		original := thread.Messages[messageIndex]
+		original := projected.Messages[messageIndex]
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
 		if original.Reply != nil {

@@ -390,13 +390,57 @@ type scoutChatOpeningOperation struct {
 }
 
 type scoutChatProjectContext struct {
-	Status              string `json:"status"`
+	Status string `json:"status"`
+	// ContextRevision is the message-local ordering clock for Project
+	// projection changes. It advances once for each accepted correction or
+	// removal even when the replacement association starts again at revision 1.
+	// Clients use it to reject delayed websocket/HTTP projections.
+	ContextRevision     int64  `json:"contextRevision"`
 	ProjectID           string `json:"projectId,omitempty"`
 	ProjectRevision     int64  `json:"projectRevision,omitempty"`
 	Title               string `json:"title"`
 	Basis               string `json:"basis"`
 	AssociationID       string `json:"associationId,omitempty"`
 	AssociationRevision int64  `json:"associationRevision,omitempty"`
+}
+
+type scoutChatProjectCorrectionOperation struct {
+	OperationID                  string                  `json:"operationId"`
+	TokenDigest                  string                  `json:"tokenDigest"`
+	MessageID                    string                  `json:"messageId"`
+	OrganizationID               string                  `json:"organizationId"`
+	ActorPersonID                string                  `json:"actorPersonId"`
+	ActorEmail                   string                  `json:"actorEmail"`
+	ExpectedProject              scoutChatProjectContext `json:"expectedProject"`
+	ExpectedContextRevision      int64                   `json:"expectedContextRevision"`
+	State                        string                  `json:"state"`
+	ResultStatus                 string                  `json:"resultStatus,omitempty"`
+	ResultContextRevision        int64                   `json:"resultContextRevision,omitempty"`
+	ResultProjectID              string                  `json:"resultProjectId,omitempty"`
+	ResultProjectRevision        int64                   `json:"resultProjectRevision,omitempty"`
+	ResultProjectTitle           string                  `json:"resultProjectTitle,omitempty"`
+	ResultAssociationID          string                  `json:"resultAssociationId,omitempty"`
+	ResultAssociationRevision    int64                   `json:"resultAssociationRevision,omitempty"`
+	ResultOldAssociationID       string                  `json:"resultOldAssociationId,omitempty"`
+	ResultOldAssociationRevision int64                   `json:"resultOldAssociationRevision,omitempty"`
+	ResultOldResultRevision      int64                   `json:"resultOldResultRevision,omitempty"`
+}
+
+type scoutChatProjectSourceMutationOperation struct {
+	OperationID           string                  `json:"operationId"`
+	RequestDigest         string                  `json:"requestDigest"`
+	Kind                  string                  `json:"kind"`
+	MessageID             string                  `json:"messageId"`
+	ActorEmail            string                  `json:"actorEmail"`
+	OrganizationID        string                  `json:"organizationId"`
+	ActorPersonID         string                  `json:"actorPersonId"`
+	ExpectedProject       scoutChatProjectContext `json:"expectedProject"`
+	State                 string                  `json:"state"`
+	TextPresent           bool                    `json:"textPresent,omitempty"`
+	Text                  string                  `json:"text,omitempty"`
+	ResultContextRevision int64                   `json:"resultContextRevision,omitempty"`
+	ResultSourceRevision  int64                   `json:"resultSourceRevision,omitempty"`
+	ResultEditedAt        string                  `json:"resultEditedAt,omitempty"`
 }
 
 type scoutChatProjectLinkOperation struct {
@@ -611,6 +655,16 @@ type scoutChatThreadRecord struct {
 	// ProjectLinkOperations are the body-free cross-store reconciliation journal
 	// for explicit Send. Viewer projections remove them completely.
 	ProjectLinkOperations []scoutChatProjectLinkOperation `json:"projectLinkOperations,omitempty"`
+	// ProjectCorrectionOperations are a server-only cross-store journal. The
+	// message stays unchanged until PostgreSQL commits exact correction truth;
+	// retry/restart can then finish the legacy projection without duplicating a
+	// canonical correction.
+	ProjectCorrectionOperations []scoutChatProjectCorrectionOperation `json:"projectCorrectionOperations,omitempty"`
+	// ProjectSourceMutationOperations close the JSONL/PostgreSQL crash boundary
+	// for an edit/delete of a Project-linked source. They contain only the exact
+	// authored mutation needed to finish after the canonical invalidation receipt
+	// commits and are stripped from every viewer projection.
+	ProjectSourceMutationOperations []scoutChatProjectSourceMutationOperation `json:"projectSourceMutationOperations,omitempty"`
 }
 
 func normalizePrivateRealtimeVoiceSessionID(value string) (string, error) {
@@ -895,6 +949,22 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
+		if hasPendingProjectSourceMutation(thread) {
+			mutationContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+			if reconciled, reconcileErr := kanbanApp.resumePendingProjectSourceMutations(mutationContext, user, threadID); reconcileErr == nil {
+				thread = reconciled
+			} else {
+				log.Errorf("Project-linked chat mutation remains pending for %s: %v", threadID, reconcileErr)
+			}
+		}
+		if hasPendingProjectCorrection(thread) {
+			mutationContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+			if reconciled, reconcileErr := kanbanApp.reconcileCommittedProjectCorrections(mutationContext, user, threadID); reconcileErr == nil {
+				thread = reconciled
+			} else {
+				log.Errorf("Project correction remains pending for %s: %v", threadID, reconcileErr)
+			}
+		}
 		// Per-viewer read state rides alongside the record rather than on it —
 		// the record is shared, and writing one user's read state into it would
 		// mark the thread read for the whole team (see thread_read_markers.go).
@@ -971,6 +1041,11 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "project" && (r.Method == http.MethodGet || r.Method == http.MethodPatch) {
+		handleProjectChatCorrection(w, r, user, threadID, parts[2])
 		return
 	}
 
@@ -1214,7 +1289,8 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 3 && parts[1] == "messages" && r.Method == http.MethodDelete {
-		thread, err := kanbanApp.deleteScoutChatThreadMessage(user.Email, threadID, parts[2])
+		mutationContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+		thread, err := kanbanApp.deleteScoutChatThreadMessageWithContext(mutationContext, user, threadID, parts[2])
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -1232,7 +1308,8 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message update")
 			return
 		}
-		thread, message, err := kanbanApp.editScoutChatThreadMessage(r.Context(), user, threadID, parts[2], payload.Text, payload.Files)
+		mutationContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+		thread, message, err := kanbanApp.editScoutChatThreadMessage(mutationContext, user, threadID, parts[2], payload.Text, payload.Files)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -4622,9 +4699,6 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 	if !scoutChatMessageAuthoredBy(thread, message, user.Email) {
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("you can only edit your own messages")
 	}
-	if text != nil {
-		message.Text = strings.TrimSpace(*text)
-	}
 	if files != nil {
 		currentFiles := thread.Messages[index].Files
 		if len(currentFiles) != len(preflight.Messages[preflightIndex].Files) {
@@ -4637,11 +4711,93 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 				return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat attachments changed; reload and try again")
 			}
 		}
-		message.Files = preparedFiles
 	}
-	if strings.TrimSpace(message.Text) == "" && len(message.Files) == 0 {
+	desiredText := message.Text
+	if text != nil {
+		desiredText = strings.TrimSpace(*text)
+	}
+	desiredFiles := message.Files
+	if files != nil {
+		desiredFiles = preparedFiles
+	}
+	if strings.TrimSpace(desiredText) == "" && len(desiredFiles) == 0 {
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("message text or attachment is required")
 	}
+	if files == nil {
+		requestDigest := projectSourceMutationRequestDigest("edit", thread.ID, message.ID, text != nil, desiredText)
+		operationID := projectSourceMutationOperationID("edit", thread.ID, message.ID, requestDigest)
+		for _, operation := range thread.ProjectSourceMutationOperations {
+			if operation.OperationID == operationID && operation.MessageID == message.ID && operation.ActorEmail == normalizeAccountEmail(user.Email) && operation.State == "confirmed" {
+				return thread, message, nil
+			}
+		}
+	}
+	linkedProject := message.Project != nil && message.Project.Status == "confirmed" && message.Project.AssociationID != ""
+	if !linkedProject {
+		for _, operation := range thread.ProjectSourceMutationOperations {
+			if operation.MessageID == message.ID && operation.State == "pending" {
+				linkedProject = true
+				break
+			}
+		}
+	}
+	if linkedProject {
+		if files != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("remove the message Project before changing its attachments")
+		}
+		binding, bindingErr := currentProjectChatMutationAuthorityBinding(ctx, user, thread, message)
+		if bindingErr != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("Project-linked message could not begin its safe edit: %w", bindingErr)
+		}
+		journaled, operation, _, beginErr := app.beginScoutProjectSourceMutationLocked(user, thread, index, "edit", text != nil, desiredText, binding)
+		if beginErr != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("Project-linked message could not begin its safe edit: %w", beginErr)
+		}
+		if operation.State == "confirmed" {
+			messageIndex := scoutChatMessageIndex(journaled, message.ID)
+			if messageIndex < 0 {
+				return scoutChatThreadRecord{}, scoutChatMessageRecord{}, ErrProjectAuthorityConflict
+			}
+			return journaled, journaled.Messages[messageIndex], nil
+		}
+		original, originalErr := projectSourceMutationOriginalMessage(journaled, operation)
+		if originalErr != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, originalErr
+		}
+		sourceRevision, invalidateErr := invalidateProjectChatSourceForMutation(ctx, user, journaled, original, operation.OperationID, operation.RequestDigest, "edit")
+		if invalidateErr != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("Project-linked message could not be edited safely: %w", invalidateErr)
+		}
+		thread = journaled
+		index = scoutChatMessageIndex(thread, message.ID)
+		message = thread.Messages[index]
+		message.Text = desiredText
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		message.EditedAt = now
+		thread.Messages[index] = message
+		canceledReply := scoutChatMessageRecord{}
+		canceledOpeningReply := false
+		if thread.OpeningOperation != nil && thread.OpeningOperation.UserMessageID == message.ID {
+			canceledReply, canceledOpeningReply = cancelScoutOpeningReplyInThread(&thread, scoutReplyCanceledAfterEditText, time.Now().UTC())
+		}
+		if err := markProjectSourceMutationConfirmed(&thread, operation.OperationID, sourceRevision, now); err != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+		}
+		thread.UpdatedAt = now
+		thread.Preview = scoutChatThreadPreview(thread)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+		}
+		app.observeSTRIDETeamChatMessage(thread, message, "edit", user.Email)
+		app.rebuildPrivateConversationContinuity(thread, "edit")
+		deliverScoutChatThreadUpdate(thread, message)
+		if canceledOpeningReply {
+			deliverScoutChatThreadUpdate(thread, canceledReply)
+		}
+		return thread, message, nil
+	}
+	message.Text = desiredText
+	message.Files = desiredFiles
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	message.EditedAt = now
 	thread.Messages[index] = message
@@ -4781,6 +4937,14 @@ func (app *kanbanBoardApp) updateScoutChatMessageReaction(user *userAccount, thr
 // authorEmail stamp existed carry none — in a private thread the owner-only
 // visibility already proves authorship, so those stay deletable there.
 func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, threadID string, messageID string) (scoutChatThreadRecord, error) {
+	return app.deleteScoutChatThreadMessageWithContext(context.Background(), &userAccount{Email: viewerEmail}, threadID, messageID)
+}
+
+func (app *kanbanBoardApp) deleteScoutChatThreadMessageWithContext(ctx context.Context, user *userAccount, threadID string, messageID string) (scoutChatThreadRecord, error) {
+	viewerEmail := ""
+	if user != nil {
+		viewerEmail = user.Email
+	}
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("message id is required")
@@ -4793,6 +4957,11 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
+	for _, operation := range thread.ProjectSourceMutationOperations {
+		if operation.MessageID == messageID && operation.Kind == "delete" && operation.ActorEmail == normalizeAccountEmail(viewerEmail) && operation.State == "confirmed" {
+			return thread, nil
+		}
+	}
 	index := scoutChatMessageIndex(thread, messageID)
 	if index < 0 {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat message not found")
@@ -4801,41 +4970,48 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 	if !scoutChatMessageAuthoredBy(thread, message, viewerEmail) {
 		return scoutChatThreadRecord{}, fmt.Errorf("you can only delete your own messages")
 	}
-	deletedIDs := []string{messageID}
-	deletedMessages := []scoutChatMessageRecord{message}
-	if thread.OpeningOperation != nil && thread.OpeningOperation.UserMessageID == messageID {
-		replyID := thread.OpeningOperation.ReplyMessageID
-		filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages)-1)
-		for _, candidate := range thread.Messages {
-			if candidate.ID == messageID || candidate.ID == replyID {
-				if candidate.ID == replyID {
-					deletedIDs = append(deletedIDs, replyID)
-					deletedMessages = append(deletedMessages, candidate)
-				}
-				continue
+	linkedProject := message.Project != nil && message.Project.Status == "confirmed" && message.Project.AssociationID != ""
+	if !linkedProject {
+		for _, operation := range thread.ProjectSourceMutationOperations {
+			if operation.MessageID == message.ID && operation.Kind == "delete" && operation.State == "pending" {
+				linkedProject = true
+				break
 			}
-			filtered = append(filtered, candidate)
 		}
-		thread.Messages = filtered
-		thread.OpeningOperation = nil
-	} else {
-		filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages)-1)
-		for _, candidate := range thread.Messages {
-			ordinaryGeneratedAnswer := candidate.ID != messageID &&
-				strings.TrimSpace(candidate.CausedByMessageID) == messageID &&
-				(strings.EqualFold(candidate.Role, "scout") || strings.EqualFold(candidate.Role, "assistant")) &&
-				candidate.Kind == "message" && candidate.Thread == nil && candidate.Proposal == nil &&
-				candidate.Image == nil && candidate.Manifest == nil
-			if candidate.ID == messageID || ordinaryGeneratedAnswer {
-				if ordinaryGeneratedAnswer {
-					deletedIDs = append(deletedIDs, candidate.ID)
-					deletedMessages = append(deletedMessages, candidate)
-				}
-				continue
-			}
-			filtered = append(filtered, candidate)
+	}
+	var sourceRevision int64
+	var sourceOperationID string
+	if linkedProject {
+		binding, bindingErr := currentProjectChatMutationAuthorityBinding(ctx, user, thread, message)
+		if bindingErr != nil {
+			return scoutChatThreadRecord{}, fmt.Errorf("Project-linked message could not begin its safe deletion: %w", bindingErr)
 		}
-		thread.Messages = filtered
+		journaled, operation, _, beginErr := app.beginScoutProjectSourceMutationLocked(user, thread, index, "delete", false, "", binding)
+		if beginErr != nil {
+			return scoutChatThreadRecord{}, fmt.Errorf("Project-linked message could not begin its safe deletion: %w", beginErr)
+		}
+		if operation.State == "confirmed" {
+			return journaled, nil
+		}
+		original, originalErr := projectSourceMutationOriginalMessage(journaled, operation)
+		if originalErr != nil {
+			return scoutChatThreadRecord{}, originalErr
+		}
+		sourceRevision, err = invalidateProjectChatSourceForMutation(ctx, user, journaled, original, operation.OperationID, operation.RequestDigest, "delete")
+		if err != nil {
+			return scoutChatThreadRecord{}, fmt.Errorf("Project-linked message could not be deleted safely: %w", err)
+		}
+		thread = journaled
+		sourceOperationID = operation.OperationID
+	}
+	deletedIDs, deletedMessages, err := applyProjectSourceDeleteToThread(&thread, messageID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if sourceOperationID != "" {
+		if err := markProjectSourceMutationConfirmed(&thread, sourceOperationID, sourceRevision, ""); err != nil {
+			return scoutChatThreadRecord{}, err
+		}
 	}
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)

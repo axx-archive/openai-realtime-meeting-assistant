@@ -38,6 +38,7 @@ import type {
   ArtifactResponse,
   HomeResponse,
   HomeProjectContextResponse,
+  ProjectCorrectionResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -63,11 +64,13 @@ export { setUnauthorizedHandler } from "./unauthorizedBoundary";
 
 export class BonfireApiError extends Error {
   status: number;
+  data: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, data: unknown = null) {
     super(message);
     this.name = "BonfireApiError";
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -124,7 +127,7 @@ async function requestWithResponse<T>(
       typeof (data as { error: unknown }).error === "string"
         ? (data as { error: string }).error
         : null) || `Request failed (${response.status})`;
-    throw new BonfireApiError(response.status, message);
+    throw new BonfireApiError(response.status, message, data);
   }
 
   return { data: data as T, response };
@@ -939,6 +942,29 @@ export const api = {
         body: { text, files, replyToMessageId, operationId, ...(projectContextToken ? { projectContextToken } : {}) },
         sessionToken,
       },
+    );
+  },
+
+  projectCorrection(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+  ): Promise<ProjectCorrectionResponse> {
+    return request<ProjectCorrectionResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/project`,
+      { sessionToken },
+    );
+  },
+
+  updateProjectCorrection(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+    body: { operationId: string; correctionToken: string },
+  ): Promise<ProjectCorrectionResponse> {
+    return request<ProjectCorrectionResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/project`,
+      { method: "PATCH", body, sessionToken },
     );
   },
 

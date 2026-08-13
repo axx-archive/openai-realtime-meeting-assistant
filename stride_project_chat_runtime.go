@@ -176,7 +176,7 @@ func (app *kanbanBoardApp) reconcileScoutProjectLink(ctx context.Context, user *
 		return current, nil
 	}
 	current.Messages[messageIndex].Project = &scoutChatProjectContext{
-		Status: "confirmed", ProjectID: link.ProjectID, ProjectRevision: link.ProjectRevision,
+		Status: "confirmed", ContextRevision: 1, ProjectID: link.ProjectID, ProjectRevision: link.ProjectRevision,
 		Title: link.ProjectTitle, Basis: token.Basis, AssociationID: link.AssociationID, AssociationRevision: link.AssociationRevision,
 	}
 	if replyMessageID != "" {
@@ -250,7 +250,7 @@ func (app *kanbanBoardApp) beginScoutExistingProjectTurn(ctx context.Context, us
 	if scoutChatMessageIndex(current, message.ID) >= 0 {
 		return thread, message, false, ErrProjectAuthorityConflict
 	}
-	message.Project = &scoutChatProjectContext{Status: "pending", ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, Title: binding.Token.ProjectTitle, Basis: binding.Token.Basis}
+	message.Project = &scoutChatProjectContext{Status: "pending", ContextRevision: 1, ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, Title: binding.Token.ProjectTitle, Basis: binding.Token.Basis}
 	current.ProjectLinkOperations = append(current.ProjectLinkOperations, scoutChatProjectLinkOperation{
 		OperationID: operation.ID, TokenDigest: tokenDigest, MessageID: message.ID, State: "pending", ProjectKind: binding.Token.Kind,
 		ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, ProjectDigest: binding.Token.ProjectDigest,

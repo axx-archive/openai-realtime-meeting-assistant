@@ -43,6 +43,7 @@ import type {
   DriveFileRecord,
   GiphySearchResult,
 	HomeProjectChoice,
+  ProjectCorrectionProjection,
   ScoutFileAttachment,
   ScoutMessage,
   ThreadDigestResponse,
@@ -55,6 +56,7 @@ import { firstUnreadIndex } from "../messaging/unreadBoundary";
 import { buildTimelineMarkers } from "../messaging/timelineMarkers";
 import { CatchUpSheet } from "../messaging/CatchUpSheet";
 import { MessageActionSheet } from "../messaging/MessageActionSheet";
+import { ProjectCorrectionSheet } from "../messaging/ProjectCorrectionSheet";
 import { LongMessageSheet } from "../messaging/LongMessageSheet";
 import { ThreadDetailSheet } from "../messaging/ThreadDetailSheet";
 import { MentionComposerInput } from "../messaging/MentionComposerInput";
@@ -133,6 +135,13 @@ import { createConversationOperationId } from "../conversations/newConversation"
 import { RegenerateWorkSheet } from "../artifacts/RegenerateWorkSheet";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Thread">;
+
+type ProjectCorrectionTarget = {
+  messageId: string;
+  threadId: string;
+  sessionToken: string;
+  returnFocusHandle?: number;
+};
 
 function workThreadIsActive(message: ScoutMessage): boolean {
   if (String(message.kind ?? "").toLowerCase() !== "thread" || !message.thread)
@@ -227,6 +236,7 @@ type ThreadMessageRowProps = {
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onOpenThread: (message: ScoutMessage) => void;
+  onChangeProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
 };
 
 const ThreadMessageRow = React.memo(
@@ -260,6 +270,7 @@ const ThreadMessageRow = React.memo(
     onOpenLongMessage,
     onOpenWorkArtifact,
     onOpenThread,
+    onChangeProject,
   }: ThreadMessageRowProps) {
     return (
       <>
@@ -310,6 +321,7 @@ const ThreadMessageRow = React.memo(
           onOpenReplySource={onOpenSource}
           threadReplies={item.threadReplies}
           onOpenThread={onOpenThread}
+          onChangeProject={onChangeProject}
           onOpenAttachment={onOpenAttachment}
           onLongPress={onLongPress}
           onToggleReaction={onToggleReaction}
@@ -365,7 +377,8 @@ const ThreadMessageRow = React.memo(
     previous.onOpenCatchUp === next.onOpenCatchUp &&
     previous.onOpenLongMessage === next.onOpenLongMessage &&
     previous.onOpenWorkArtifact === next.onOpenWorkArtifact &&
-    previous.onOpenThread === next.onOpenThread,
+    previous.onOpenThread === next.onOpenThread &&
+    previous.onChangeProject === next.onChangeProject,
 );
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
@@ -430,6 +443,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     own: boolean;
     attachment?: { file: ScoutFileAttachment; index: number };
   } | null>(null);
+  const [projectCorrectionTarget, setProjectCorrectionTarget] = useState<ProjectCorrectionTarget | null>(null);
+  const [projectCorrection, setProjectCorrection] = useState<ProjectCorrectionProjection | null>(null);
+  const [projectCorrectionLoading, setProjectCorrectionLoading] = useState(false);
+  const [projectCorrectionUpdating, setProjectCorrectionUpdating] = useState(false);
+  const [projectCorrectionError, setProjectCorrectionError] = useState("");
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(
     null,
   );
@@ -583,6 +601,12 @@ export function ThreadScreen({ route, navigation }: Props) {
     operationId: string;
   } | null>(null);
   const threadReplyAttemptRef = useRef<{
+    key: string;
+    operationId: string;
+  } | null>(null);
+  const projectCorrectionTargetRef = useRef<ProjectCorrectionTarget | null>(null);
+  const projectCorrectionGenerationRef = useRef(0);
+  const projectCorrectionAttemptRef = useRef<{
     key: string;
     operationId: string;
   } | null>(null);
@@ -1096,6 +1120,14 @@ export function ThreadScreen({ route, navigation }: Props) {
 		setSelectedProject(null);
 		setProjectExplicitNone(false);
 		setProjectChooserOpen(false);
+		projectCorrectionGenerationRef.current += 1;
+		projectCorrectionTargetRef.current = null;
+		projectCorrectionAttemptRef.current = null;
+		setProjectCorrectionTarget(null);
+		setProjectCorrection(null);
+		setProjectCorrectionLoading(false);
+		setProjectCorrectionUpdating(false);
+		setProjectCorrectionError("");
 	}, [route.params.threadId, sessionToken]);
 
   const applyScoutActions = useCallback(
@@ -2128,6 +2160,117 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
+  const closeProjectCorrection = useCallback(() => {
+    projectCorrectionGenerationRef.current += 1;
+    projectCorrectionTargetRef.current = null;
+    projectCorrectionAttemptRef.current = null;
+    setProjectCorrectionTarget(null);
+    setProjectCorrection(null);
+    setProjectCorrectionLoading(false);
+    setProjectCorrectionUpdating(false);
+    setProjectCorrectionError("");
+  }, []);
+
+  const loadProjectCorrection = useCallback(async (targetOverride?: ProjectCorrectionTarget) => {
+    const target = targetOverride ?? projectCorrectionTargetRef.current;
+    if (!target || !sessionToken || target.sessionToken !== sessionToken || target.threadId !== route.params.threadId) return;
+    const generation = ++projectCorrectionGenerationRef.current;
+    setProjectCorrectionLoading(true);
+    setProjectCorrectionError("");
+    try {
+      const response = await api.projectCorrection(sessionToken, target.threadId, target.messageId);
+      if (generation !== projectCorrectionGenerationRef.current || projectCorrectionTargetRef.current !== target) return;
+      if (!response.projectCorrection) throw new Error("The server did not return current Project choices.");
+      setProjectCorrection(response.projectCorrection);
+    } catch (caught) {
+      if (generation !== projectCorrectionGenerationRef.current || projectCorrectionTargetRef.current !== target) return;
+      setProjectCorrection(null);
+      setProjectCorrectionError(
+        caught instanceof BonfireApiError
+          ? caught.message
+          : caught instanceof Error
+            ? caught.message
+            : "Project choices could not be loaded.",
+      );
+    } finally {
+      if (generation === projectCorrectionGenerationRef.current && projectCorrectionTargetRef.current === target) {
+        setProjectCorrectionLoading(false);
+      }
+    }
+  }, [route.params.threadId, sessionToken]);
+
+  const openProjectCorrection = useCallback((message: ScoutMessage, returnFocusHandle?: number) => {
+    const status = message.project?.status;
+    if (!sessionToken || !isOwnMessageForViewer(message, {
+      viewerEmail: email,
+      threadVisibility,
+      threadOwnerEmail,
+    }) || (status !== "confirmed" && status !== "unavailable")) return;
+    const target: ProjectCorrectionTarget = {
+      messageId: String(message.id),
+      threadId: route.params.threadId,
+      sessionToken,
+      returnFocusHandle,
+    };
+    setActionMessage(null);
+    projectCorrectionAttemptRef.current = null;
+    projectCorrectionTargetRef.current = target;
+    setProjectCorrectionTarget(target);
+    setProjectCorrection(null);
+    setProjectCorrectionError("");
+    void loadProjectCorrection(target);
+    void Haptics.selectionAsync();
+  }, [email, loadProjectCorrection, route.params.threadId, sessionToken, threadOwnerEmail, threadVisibility]);
+
+  const submitProjectCorrection = useCallback(async (selection: { kind: "project" | "remove"; token: string; title: string }) => {
+    const target = projectCorrectionTargetRef.current;
+    const projection = projectCorrection;
+    if (!target || !projection || !sessionToken || target.sessionToken !== sessionToken || target.threadId !== route.params.threadId || projectCorrectionUpdating) return;
+    const attemptKey = `${target.threadId}:${target.messageId}:${projection.scopeKey}:${selection.token}`;
+    const attempt = projectCorrectionAttemptRef.current?.key === attemptKey
+      ? projectCorrectionAttemptRef.current
+      : { key: attemptKey, operationId: createConversationOperationId() };
+    projectCorrectionAttemptRef.current = attempt;
+    const generationAtRequest = transcriptGenerationRef.current;
+    setProjectCorrectionUpdating(true);
+    setProjectCorrectionError("");
+    try {
+      const response = await api.updateProjectCorrection(sessionToken, target.threadId, target.messageId, {
+        operationId: attempt.operationId,
+        correctionToken: selection.token,
+      });
+      if (projectCorrectionTargetRef.current !== target) return;
+      const nextMessages = response.thread?.messages ?? response.messages;
+      if (Array.isArray(nextMessages)) {
+        applyTranscriptSnapshot(generationAtRequest, nextMessages);
+      } else if (response.message) {
+        setMessages((current) => applyChatThreadEvent(current, target.threadId, { id: target.threadId, message: response.message }));
+      }
+      closeProjectCorrection();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      if (projectCorrectionTargetRef.current !== target) return;
+      const refreshed = caught instanceof BonfireApiError
+        && caught.status === 409
+        && caught.data
+        && typeof caught.data === "object"
+        && "projectCorrection" in caught.data
+        ? (caught.data as { projectCorrection?: ProjectCorrectionProjection }).projectCorrection
+        : undefined;
+      if (refreshed) {
+        projectCorrectionAttemptRef.current = null;
+        setProjectCorrection(refreshed);
+        setProjectCorrectionError("The Project changed. Review the current choice and try again.");
+      } else {
+        setProjectCorrectionError(
+          caught instanceof BonfireApiError ? caught.message : "The Project was not updated. Try again.",
+        );
+      }
+    } finally {
+      if (projectCorrectionTargetRef.current === target) setProjectCorrectionUpdating(false);
+    }
+  }, [applyTranscriptSnapshot, closeProjectCorrection, projectCorrection, projectCorrectionUpdating, route.params.threadId, sessionToken]);
+
   const openMessageActions = useCallback(
     (
       message: ScoutMessage,
@@ -2482,6 +2625,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
         onOpenThread={openThreadContext}
+        onChangeProject={openProjectCorrection}
       />
     ),
     [
@@ -2495,6 +2639,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       openLongMessage,
       openWorkArtifact,
       openThreadContext,
+      openProjectCorrection,
       regenerateGeneratedImage,
       regeneratingImageID,
       regeneratingWorkID,
@@ -2560,6 +2705,26 @@ export function ThreadScreen({ route, navigation }: Props) {
       onDelete={() => {
         if (actionMessage) confirmDelete(actionMessage.message);
       }}
+      onChangeProject={
+        actionMessage?.own && actionMessage.message.project && actionMessage.message.project.status !== "removed"
+          ? () => openProjectCorrection(actionMessage.message)
+          : undefined
+      }
+      projectChangePending={actionMessage?.message.project?.status === "pending"}
+    />
+  );
+  const renderProjectCorrectionSheet = (contained = false) => (
+    <ProjectCorrectionSheet
+      visible={Boolean(projectCorrectionTarget)}
+      contained={contained}
+      projection={projectCorrection}
+      loading={projectCorrectionLoading}
+      updating={projectCorrectionUpdating}
+      error={projectCorrectionError}
+      returnFocusHandle={projectCorrectionTarget?.returnFocusHandle}
+      onClose={closeProjectCorrection}
+      onReload={() => { void loadProjectCorrection(); }}
+      onSubmit={(selection) => { void submitProjectCorrection(selection); }}
     />
   );
   const renderLongMessageSheet = (contained = false) => (
@@ -2803,6 +2968,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           <>
             {renderLongMessageSheet(true)}
             {renderMessageActionSheet(true)}
+            {renderProjectCorrectionSheet(true)}
           </>
         }
       />
@@ -2890,6 +3056,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       />
 
       {threadContextRoot ? null : renderMessageActionSheet()}
+      {threadContextRoot ? null : renderProjectCorrectionSheet()}
 
       <KeyboardAvoidingView
         style={styles.fill}

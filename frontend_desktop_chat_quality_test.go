@@ -267,7 +267,7 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		"function desktopChatMessageIsOwn(thread, message)",
 		"function beginDesktopContextMessageEdit(thread, message, card)",
 		"function deleteDesktopContextMessage(thread, message, control)",
-		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete, onRegenerate } = {})",
+		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {})",
 		"label: 'More reply actions'",
 		"reply.setAttribute('aria-label', 'Reply in this thread')",
 		"chatContextReplyInput?.focus()",
@@ -362,7 +362,7 @@ func TestDesktopMessageOwnershipActionsUseContextualMoreMenu(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)
 	for _, want := range []string{
-		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete, onRegenerate } = {})",
+		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {})",
 		"trigger.setAttribute('aria-haspopup', 'menu')",
 		"menu.setAttribute('role', 'menu')",
 		"Edit message",

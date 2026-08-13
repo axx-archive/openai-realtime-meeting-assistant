@@ -286,7 +286,7 @@ func (app *kanbanBoardApp) ensureScoutHomeOpeningWithProject(ctx context.Context
 		AuthorEmail: owner,
 	}
 	if projectToken.Kind != "" {
-		userMessage.Project = &scoutChatProjectContext{Status: "pending", Title: projectToken.ProjectTitle, Basis: projectToken.Basis}
+		userMessage.Project = &scoutChatProjectContext{Status: "pending", ContextRevision: 1, Title: projectToken.ProjectTitle, Basis: projectToken.Basis}
 	}
 	reply := scoutChatMessageRecord{
 		ID:        operation.ReplyMessageID,

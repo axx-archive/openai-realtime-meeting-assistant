@@ -43,11 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 60 makes Chat cold entry body-free and lazy-hydrates the selected
-      // conversation so mature accounts do not crash or jitter on navigation.
-      // It retains Build 59's Project association work and prior navigation.
+      // Build 61 adds author-only, revision-bound Project correction for sent
+      // messages and keeps correction/edit/delete recovery fail closed across
+      // response loss, restart, and canonical session rotation. It retains
+      // Build 60's body-free, lazy-hydrated Chat navigation.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '60',
+      buildNumber: '61',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

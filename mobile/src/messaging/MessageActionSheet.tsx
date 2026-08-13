@@ -25,9 +25,11 @@ type Props = {
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onChangeProject?: () => void;
+  projectChangePending?: boolean;
 };
 
-export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onSaveAttachment, onReply, onEdit, onDelete }: Props) {
+export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onSaveAttachment, onReply, onEdit, onDelete, onChangeProject, projectChangePending = false }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const visibleReactions = useMemo(() => reactions.slice(0, 12), [reactions]);
@@ -152,6 +154,20 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
                 <SymbolView name="arrowshape.turn.up.left" tintColor={colors.text1} size={18} />
                 <Text style={styles.actionText}>Reply</Text>
               </Pressable>
+              {own && onChangeProject ? <View style={styles.rule} /> : null}
+              {own && onChangeProject ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Change project for this message"
+                  accessibilityState={{ disabled: projectChangePending }}
+                  disabled={projectChangePending}
+                  onPress={onChangeProject}
+                  style={({ pressed }) => [styles.action, pressed && styles.actionPressed, projectChangePending && styles.actionDisabled]}
+                >
+                  <SymbolView name="folder" tintColor={colors.text1} size={18} />
+                  <Text style={styles.actionText}>Change project</Text>
+                </Pressable>
+              ) : null}
               {own ? <View style={styles.rule} /> : null}
               {own ? (
                 <>
@@ -245,6 +261,7 @@ const styles = StyleSheet.create({
   },
   action: { minHeight: hitMin + 8, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4] },
   actionPressed: { backgroundColor: colors.surface3 },
+  actionDisabled: { opacity: 0.48 },
   actionText: { ...type.bodyMedium, color: colors.text1 },
   deleteText: { color: colors.danger },
   rule: { height: StyleSheet.hairlineWidth, marginLeft: 50, backgroundColor: colors.line1 },

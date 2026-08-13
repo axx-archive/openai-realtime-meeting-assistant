@@ -7244,6 +7244,116 @@
       .home-project-create input:focus { border-color: var(--line-2); }
       .home-project-create button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--text-1); color: var(--surface-1); }
 
+	  .project-correction-dialog {
+		width: min(480px, calc(100vw - 32px));
+		max-height: min(720px, calc(100svh - 32px));
+		padding: 0;
+		border: 0;
+		border-radius: 24px;
+		background: var(--surface-1);
+		color: var(--text-1);
+		box-shadow: var(--glass-highlight), var(--shadow-3);
+		overflow: hidden;
+	  }
+	  .project-correction-dialog::backdrop {
+		background: color-mix(in srgb, #000 42%, transparent);
+		backdrop-filter: blur(5px);
+		-webkit-backdrop-filter: blur(5px);
+	  }
+	  .project-correction-dialog__body { display: grid; gap: 16px; padding: 22px; }
+	  .project-correction-dialog__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+	  .project-correction-dialog__heading { min-width: 0; display: grid; gap: 5px; }
+	  .project-correction-dialog__heading h2 { margin: 0; font: var(--type-title-2); letter-spacing: -0.02em; text-wrap: balance; }
+	  .project-correction-dialog__heading p { margin: 0; color: var(--text-3); font: var(--type-caption); text-wrap: pretty; }
+	  .project-correction-dialog__close {
+		width: 44px;
+		height: 44px;
+		flex: none;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		border-radius: 14px;
+		background: var(--surface-2);
+		color: var(--text-1);
+		font: 500 24px/1 var(--font-sans);
+		cursor: pointer;
+		transition-property: background-color, color, transform, opacity;
+		transition-duration: var(--dur-fast);
+		transition-timing-function: var(--ease);
+	  }
+	  .project-correction-dialog__close:hover { background: var(--surface-3); }
+	  .project-correction-dialog__close:active { transform: scale(0.96); }
+	  .project-correction-dialog__current {
+		display: grid;
+		gap: 3px;
+		padding: 12px 14px;
+		border-radius: 15px;
+		background: color-mix(in srgb, var(--surface-2) 84%, transparent);
+		box-shadow: inset 0 0 0 1px var(--line-1);
+	  }
+	  .project-correction-dialog__eyebrow { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+	  .project-correction-dialog__current-title { color: var(--text-1); font: 600 14px/1.35 var(--font-sans); overflow-wrap: anywhere; text-wrap: pretty; }
+	  .project-correction-dialog__list { display: grid; gap: 6px; max-height: min(40vh, 330px); overflow-y: auto; overscroll-behavior: contain; }
+	  .project-correction-dialog__choice {
+		min-height: 52px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 20px;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 13px;
+		border: 0;
+		border-radius: 15px;
+		background: transparent;
+		color: var(--text-1);
+		font: var(--type-body);
+		text-align: left;
+		cursor: pointer;
+		transition-property: background-color, transform, box-shadow;
+		transition-duration: var(--dur-fast);
+		transition-timing-function: var(--ease);
+	  }
+	  .project-correction-dialog__choice:hover { background: var(--surface-2); }
+	  .project-correction-dialog__choice[aria-checked="true"] { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+	  .project-correction-dialog__choice:active { transform: scale(0.96); }
+	  .project-correction-dialog__choice-mark {
+		width: 18px;
+		height: 18px;
+		display: grid;
+		place-items: center;
+		border-radius: var(--r-full);
+		box-shadow: inset 0 0 0 1px var(--line-2);
+		color: transparent;
+		font: 700 11px/1 var(--font-sans);
+	  }
+	  .project-correction-dialog__choice[aria-checked="true"] .project-correction-dialog__choice-mark { background: var(--text-1); box-shadow: none; color: var(--surface-1); }
+	  .project-correction-dialog__status { min-height: 18px; margin: -4px 0 0; color: var(--danger); font: var(--type-caption); text-wrap: pretty; }
+	  .project-correction-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+	  .project-correction-dialog__action {
+		min-height: 44px;
+		padding: 0 16px;
+		border: 0;
+		border-radius: 14px;
+		background: var(--surface-2);
+		color: var(--text-1);
+		font: 600 13px/1 var(--font-sans);
+		cursor: pointer;
+		transition-property: background-color, color, transform, opacity;
+		transition-duration: var(--dur-fast);
+		transition-timing-function: var(--ease);
+	  }
+	  .project-correction-dialog__action[data-primary="true"] { background: var(--text-1); color: var(--surface-1); }
+	  .project-correction-dialog__action:not(:disabled):active { transform: scale(0.96); }
+	  .project-correction-dialog__action:disabled, .project-correction-dialog__close:disabled { opacity: 0.4; cursor: default; }
+	  .project-correction-dialog__loading { min-height: 104px; display: grid; place-items: center; color: var(--text-3); font: var(--type-caption); }
+	  .project-correction-dialog__loading[hidden] { display: none; }
+	  @media (max-width: 560px) {
+		.project-correction-dialog { width: 100%; max-width: none; max-height: min(84svh, 720px); margin: auto 0 0; border-radius: 26px 26px 0 0; }
+		.project-correction-dialog__body { gap: 14px; padding: 20px 16px max(18px, env(safe-area-inset-bottom)); }
+		.project-correction-dialog__actions { display: grid; grid-template-columns: 1fr 1fr; }
+		.project-correction-dialog__action { width: 100%; }
+	  }
+
       .home-refresh-retry {
         min-height: 40px;
         margin-top: 4px;
@@ -11377,7 +11487,20 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+		border: 0;
       }
+
+	  button.scout-chat-msg__project {
+		min-height: 40px;
+		padding: 6px 10px;
+		cursor: pointer;
+		transition-property: background-color, color, transform, box-shadow;
+		transition-duration: var(--dur-fast);
+		transition-timing-function: var(--ease);
+	  }
+	  button.scout-chat-msg__project:hover { box-shadow: inset 0 0 0 1px currentColor; }
+	  button.scout-chat-msg__project:active { transform: scale(0.96); }
+	  button.scout-chat-msg__project:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
       #chatTool .scout-chat-msg--user .scout-chat-msg__project {
         background: color-mix(in srgb, white 14%, transparent);
@@ -30506,6 +30629,25 @@
                 <p id="scoutChatProjectStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
               </div>
             </dialog>
+            <dialog id="sentMessageProjectDialog" class="project-correction-dialog" aria-labelledby="sentMessageProjectTitle" aria-describedby="sentMessageProjectDescription">
+              <form id="sentMessageProjectForm" class="project-correction-dialog__body">
+                <div class="project-correction-dialog__head">
+                  <div class="project-correction-dialog__heading">
+                    <h2 id="sentMessageProjectTitle">Change project</h2>
+                    <p id="sentMessageProjectDescription">Choose where this sent message belongs. Nothing changes until you confirm.</p>
+                  </div>
+                  <button id="sentMessageProjectClose" class="project-correction-dialog__close" type="button" aria-label="Cancel changing project">×</button>
+                </div>
+                <div id="sentMessageProjectCurrent" class="project-correction-dialog__current" hidden></div>
+                <div id="sentMessageProjectChoices" class="project-correction-dialog__list" role="radiogroup" aria-label="Authorized projects"></div>
+                <div id="sentMessageProjectLoading" class="project-correction-dialog__loading" role="status">Checking available projects…</div>
+                <p id="sentMessageProjectStatus" class="project-correction-dialog__status" role="alert" aria-live="assertive"></p>
+                <div class="project-correction-dialog__actions">
+                  <button id="sentMessageProjectCancel" class="project-correction-dialog__action" type="button">Cancel</button>
+                  <button id="sentMessageProjectSubmit" class="project-correction-dialog__action" data-primary="true" type="submit" disabled>Update project</button>
+                </div>
+              </form>
+            </dialog>
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
           </div>
           <div id="chatContextResize" class="chat-workspace-resizer chat-workspace-resizer--context" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin="360" aria-valuemax="640" aria-valuenow="440" tabindex="0" hidden></div>
@@ -32484,8 +32626,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const scoutChatProjectChip = document.getElementById('scoutChatProjectChip')
 	      const scoutChatProjectChooser = document.getElementById('scoutChatProjectChooser')
 	      const scoutChatProjectChooserClose = document.getElementById('scoutChatProjectChooserClose')
-	      const scoutChatProjectChoices = document.getElementById('scoutChatProjectChoices')
-	      const scoutChatProjectStatus = document.getElementById('scoutChatProjectStatus')
+		      const scoutChatProjectChoices = document.getElementById('scoutChatProjectChoices')
+		      const scoutChatProjectStatus = document.getElementById('scoutChatProjectStatus')
+		      const sentMessageProjectDialog = document.getElementById('sentMessageProjectDialog')
+		      const sentMessageProjectForm = document.getElementById('sentMessageProjectForm')
+		      const sentMessageProjectClose = document.getElementById('sentMessageProjectClose')
+		      const sentMessageProjectCancel = document.getElementById('sentMessageProjectCancel')
+		      const sentMessageProjectSubmit = document.getElementById('sentMessageProjectSubmit')
+		      const sentMessageProjectCurrent = document.getElementById('sentMessageProjectCurrent')
+		      const sentMessageProjectChoices = document.getElementById('sentMessageProjectChoices')
+		      const sentMessageProjectLoading = document.getElementById('sentMessageProjectLoading')
+		      const sentMessageProjectStatus = document.getElementById('sentMessageProjectStatus')
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
 	      const chatNewThread = document.getElementById('chatNewThread')
 	      const chatNewChannel = document.getElementById('chatNewChannel')
@@ -32837,6 +32988,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let scoutChatProjectGeneration = 0
 	      let scoutChatProjectTimer = 0
 	      let scoutChatMessageAttempt = null
+	      let sentMessageProjectGeneration = 0
+	      let sentMessageProjectAttempt = null
+	      let sentMessageProjectState = {
+			threadId: '', messageId: '', scopeKey: '', account: '', loading: false, saving: false,
+			available: false, current: null, choices: [], remove: null, selected: null,
+			error: '', returnFocus: null
+	      }
 	      // These states are used by authenticated bootstrap renders. Keep them
 	      // above the first renderLoginMode/syncAuthenticatedShell call so an
 	      // empty first load cannot enter a temporal-dead-zone and abort the app.
@@ -33022,18 +33180,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let personalContextBusy = false
       let personalContextMode = 'signed-out'
 
-      function setAuthenticatedUser(nextUser) {
-        const previousIdentity = String(authedUser?.email || '').trim().toLowerCase()
-        const nextIdentity = String(nextUser?.email || '').trim().toLowerCase()
-        const identityChanged = previousIdentity !== nextIdentity
+	      function setAuthenticatedUser(nextUser) {
+	        const previousIdentity = String(authedUser?.email || '').trim().toLowerCase()
+	        const nextIdentity = String(nextUser?.email || '').trim().toLowerCase()
+	        const identityChanged = previousIdentity !== nextIdentity
         // A private Realtime peer is authenticated to the identity that
         // created it. Close that browser-owned transport before publishing a
         // replacement identity so neither an active session nor a deferred
         // startup continuation can cross the account boundary. These helpers
         // are function declarations (and the private voice state is declared
         // above this setter), which keeps the boot-time auth path TDZ-safe.
-        if (identityChanged) {
-          if (privateRealtimeVoiceInFlight()) {
+	        if (identityChanged) {
+		  closeSentMessageProjectCorrection({ restoreFocus: false })
+	          if (privateRealtimeVoiceInFlight()) {
             stopRealtimeVoiceConversation({
               notifyServer: false,
               terminalReason: 'identity_changed'
@@ -34172,8 +34331,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		scoutChatProjectChooser.showModal()
 		window.requestAnimationFrame(() => scoutChatProjectChoices?.querySelector('[aria-checked="true"]')?.focus())
 	  })
-	  scoutChatProjectChooserClose?.addEventListener('click', () => scoutChatProjectChooser?.close())
-	  scoutChatProjectChooser?.addEventListener('close', () => scoutChatProjectChip?.focus())
+		  scoutChatProjectChooserClose?.addEventListener('click', () => scoutChatProjectChooser?.close())
+		  scoutChatProjectChooser?.addEventListener('close', () => scoutChatProjectChip?.focus())
+		  sentMessageProjectClose?.addEventListener('click', () => closeSentMessageProjectCorrection({ restoreFocus: true }))
+		  sentMessageProjectCancel?.addEventListener('click', () => closeSentMessageProjectCorrection({ restoreFocus: true }))
+		  sentMessageProjectForm?.addEventListener('submit', event => {
+			event.preventDefault()
+			void submitSentMessageProjectCorrection()
+		  })
+		  sentMessageProjectDialog?.addEventListener('cancel', event => {
+			event.preventDefault()
+			if (!sentMessageProjectState.saving) closeSentMessageProjectCorrection({ restoreFocus: true })
+		  })
+		  sentMessageProjectDialog?.addEventListener('click', event => {
+			if (event.target === sentMessageProjectDialog && !sentMessageProjectState.saving) closeSentMessageProjectCorrection({ restoreFocus: true })
+		  })
       homeScoutInput?.addEventListener('focus', () => {
         // Personal Realtime is app-level presence. Ordinary typing does not
         // hang up the call; only explicit close, a competing microphone mode,
@@ -52524,15 +52696,211 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		}
 	  }
 
-	  function resetScoutChatProjectContext({ reload = false } = {}) {
-		scoutChatProjectGeneration += 1
-		window.clearTimeout(scoutChatProjectTimer)
-		scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
-		renderScoutChatProjectContext()
+		  function resetScoutChatProjectContext({ reload = false } = {}) {
+			scoutChatProjectGeneration += 1
+			window.clearTimeout(scoutChatProjectTimer)
+			scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
+			renderScoutChatProjectContext()
 		if (reload && authedUser && activeScoutThreadId) {
 		  scoutChatProjectTimer = window.setTimeout(() => void loadScoutChatProjectContext(), 0)
-		}
-	  }
+			}
+		  }
+
+		  function sentMessageProjectPath(threadId, messageId) {
+			return `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/project`
+		  }
+
+		  function normalizeSentMessageProjectCorrection(raw) {
+			const source = raw && typeof raw === 'object' ? raw : {}
+			const normalizeChoice = (choice, remove = false) => {
+			  const title = String(choice?.title || '').trim()
+			  const token = String(choice?.token || '').trim()
+			  return title && token ? { title, token, remove } : null
+			}
+			const currentTitle = String(source.current?.title || '').trim()
+			const choices = Array.isArray(source.choices)
+			  ? source.choices.map(choice => normalizeChoice(choice)).filter(choice => choice && choice.title !== currentTitle)
+			  : []
+			const remove = normalizeChoice(source.remove, true)
+			return {
+			  available: Boolean(source.available),
+			  scopeKey: String(source.scopeKey || ''),
+			  current: currentTitle ? {
+				title: currentTitle,
+				status: String(source.current?.status || ''),
+				contextRevision: Math.max(0, Number(source.current?.contextRevision || 0))
+			  } : null,
+			  choices,
+			  remove
+			}
+		  }
+
+		  function sentMessageProjectTrigger(threadId, messageId) {
+			const article = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(String(messageId || ''))}"]`)
+			if (!article || String(activeScoutThreadId || '') !== String(threadId || '')) return null
+			return article.querySelector('button.scout-chat-msg__project[data-project-correction="true"]')
+		  }
+
+		  function closeSentMessageProjectCorrection({ restoreFocus = true } = {}) {
+			const prior = sentMessageProjectState
+			sentMessageProjectGeneration += 1
+			sentMessageProjectAttempt = null
+			sentMessageProjectState = {
+			  threadId: '', messageId: '', scopeKey: '', account: '', loading: false, saving: false,
+			  available: false, current: null, choices: [], remove: null, selected: null,
+			  error: '', returnFocus: null
+			}
+			if (sentMessageProjectDialog?.open) sentMessageProjectDialog.close()
+			if (!restoreFocus) return
+			window.requestAnimationFrame(() => {
+			  const target = prior.returnFocus?.isConnected
+				? prior.returnFocus
+				: sentMessageProjectTrigger(prior.threadId, prior.messageId)
+			  target?.focus?.({ preventScroll: true })
+			})
+		  }
+
+		  function renderSentMessageProjectCorrection() {
+			if (!sentMessageProjectDialog) return
+			const state = sentMessageProjectState
+			if (sentMessageProjectForm) sentMessageProjectForm.setAttribute('aria-busy', String(state.loading || state.saving))
+			if (sentMessageProjectClose) sentMessageProjectClose.disabled = state.saving
+			if (sentMessageProjectCancel) sentMessageProjectCancel.disabled = state.saving
+			if (sentMessageProjectLoading) sentMessageProjectLoading.hidden = !state.loading
+			if (sentMessageProjectCurrent) {
+			  sentMessageProjectCurrent.hidden = !state.current
+			  sentMessageProjectCurrent.replaceChildren()
+			  if (state.current) {
+				const eyebrow = bfEl('span', 'project-correction-dialog__eyebrow', state.current.status === 'unavailable' ? 'Current link unavailable' : 'Currently linked')
+				const title = bfEl('span', 'project-correction-dialog__current-title', state.current.title)
+				sentMessageProjectCurrent.append(eyebrow, title)
+			  }
+			}
+			if (sentMessageProjectChoices) {
+			  const rows = [...state.choices, ...(state.remove ? [state.remove] : [])]
+			  sentMessageProjectChoices.hidden = state.loading || !rows.length
+			  sentMessageProjectChoices.replaceChildren(...rows.map(choice => {
+				const button = document.createElement('button')
+				button.type = 'button'
+				button.className = 'project-correction-dialog__choice'
+				button.setAttribute('role', 'radio')
+				button.setAttribute('aria-checked', String(state.selected?.token === choice.token))
+				button.setAttribute('aria-label', choice.remove ? 'No project' : choice.title)
+				button.append(document.createTextNode(choice.title), bfEl('span', 'project-correction-dialog__choice-mark', '✓'))
+				button.addEventListener('click', event => {
+				  event.stopPropagation()
+				  if (sentMessageProjectState.saving) return
+				  sentMessageProjectState.selected = choice
+				  sentMessageProjectState.error = ''
+				  sentMessageProjectAttempt = null
+				  renderSentMessageProjectCorrection()
+				})
+				return button
+			  }))
+			}
+			if (sentMessageProjectStatus) sentMessageProjectStatus.textContent = state.error
+			if (sentMessageProjectSubmit) {
+			  sentMessageProjectSubmit.textContent = state.saving
+				? (state.selected?.remove ? 'Removing…' : 'Updating…')
+				: (state.selected?.remove ? 'Remove project' : 'Update project')
+			  sentMessageProjectSubmit.disabled = state.loading || state.saving || !state.available || !state.selected
+			}
+		  }
+
+		  function applySentMessageProjectCorrection(raw, { enforceScope = false } = {}) {
+			const next = normalizeSentMessageProjectCorrection(raw)
+			if (enforceScope && sentMessageProjectState.scopeKey && next.scopeKey && sentMessageProjectState.scopeKey !== next.scopeKey) {
+			  closeSentMessageProjectCorrection({ restoreFocus: false })
+			  showToast({ text: 'Project access changed. Open the message again to review it.', kind: 'note' })
+			  return false
+			}
+			sentMessageProjectState.scopeKey = next.scopeKey
+			sentMessageProjectState.available = next.available
+			sentMessageProjectState.current = next.current
+			sentMessageProjectState.choices = next.choices
+			sentMessageProjectState.remove = next.remove
+			sentMessageProjectState.selected = null
+			sentMessageProjectState.loading = false
+			sentMessageProjectState.saving = false
+			sentMessageProjectState.error = next.available ? '' : 'Project changes are not available for this message.'
+			sentMessageProjectAttempt = null
+			renderSentMessageProjectCorrection()
+			return true
+		  }
+
+		  async function openSentMessageProjectCorrection(thread, message, trigger) {
+			const threadId = String(thread?.id || '')
+			const messageId = String(message?.id || '')
+			const status = String(message?.project?.status || '')
+			if (!sentMessageProjectDialog || !threadId || !messageId || !authedUser || !desktopChatMessageIsOwn(thread, message) || !['confirmed', 'unavailable'].includes(status)) return
+			closeSentMessageProjectCorrection({ restoreFocus: false })
+			const generation = ++sentMessageProjectGeneration
+			sentMessageProjectState = {
+			  threadId, messageId, scopeKey: '', account: String(authedUser.email || '').toLowerCase(), loading: true, saving: false,
+			  available: false, current: { title: String(message.project?.title || ''), status, contextRevision: Number(message.project?.contextRevision || 0) },
+			  choices: [], remove: null, selected: null, error: '', returnFocus: trigger || document.activeElement
+			}
+			renderSentMessageProjectCorrection()
+			sentMessageProjectDialog.showModal()
+			try {
+			  const response = await fetch(sentMessageProjectPath(threadId, messageId), { method: 'GET', cache: 'no-store' })
+			  const payload = await response.json().catch(() => ({}))
+			  if (generation !== sentMessageProjectGeneration || threadId !== activeScoutThreadId || sentMessageProjectState.account !== String(authedUser?.email || '').toLowerCase()) return
+			  if (!response.ok) throw new Error(payload?.error || 'Project choices could not be loaded.')
+			  if (!applySentMessageProjectCorrection(payload?.projectCorrection)) return
+			  window.requestAnimationFrame(() => sentMessageProjectChoices?.querySelector('[role="radio"]')?.focus())
+			} catch (error) {
+			  if (generation !== sentMessageProjectGeneration) return
+			  sentMessageProjectState.loading = false
+			  sentMessageProjectState.error = error?.message || 'Project choices could not be loaded.'
+			  renderSentMessageProjectCorrection()
+			}
+		  }
+
+		  async function submitSentMessageProjectCorrection() {
+			const state = sentMessageProjectState
+			if (!state.available || !state.selected || state.saving || !authedUser || state.threadId !== activeScoutThreadId) return
+			const attemptKey = JSON.stringify({ threadId: state.threadId, messageId: state.messageId, scopeKey: state.scopeKey, correctionToken: state.selected.token })
+			sentMessageProjectAttempt = sentMessageProjectAttempt?.key === attemptKey
+			  ? sentMessageProjectAttempt
+			  : { key: attemptKey, operationId: globalThis.crypto?.randomUUID?.() || `project-correction-${Date.now()}-${Math.random().toString(16).slice(2)}` }
+			const attempt = sentMessageProjectAttempt
+			state.saving = true
+			state.error = ''
+			renderSentMessageProjectCorrection()
+			try {
+			  const response = await fetch(sentMessageProjectPath(state.threadId, state.messageId), {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ operationId: attempt.operationId, correctionToken: state.selected.token })
+			  })
+			  const payload = await response.json().catch(() => ({}))
+			  if (state !== sentMessageProjectState || state.threadId !== activeScoutThreadId || state.account !== String(authedUser?.email || '').toLowerCase()) return
+			  if (response.status === 409 && payload?.projectCorrection) {
+				if (!applySentMessageProjectCorrection(payload.projectCorrection, { enforceScope: true })) return
+				sentMessageProjectState.error = payload?.error || 'The Project changed elsewhere. Review and confirm again.'
+				renderSentMessageProjectCorrection()
+				return
+			  }
+			  if (!response.ok) throw new Error(payload?.error || 'Project could not be updated.')
+			  sentMessageProjectAttempt = null
+			  if (payload?.thread) {
+				upsertScoutChatThread(payload.thread, { select: false })
+				renderActiveScoutThread()
+			  } else if (payload?.message) {
+				handleChatThreadEvent({ id: state.threadId, message: payload.message })
+			  }
+			  const success = state.selected.remove ? 'Project removed' : `Project changed to ${state.selected.title}`
+			  closeSentMessageProjectCorrection({ restoreFocus: true })
+			  showToast({ text: success, kind: 'done' })
+			} catch (error) {
+			  if (state !== sentMessageProjectState) return
+			  state.saving = false
+			  state.error = error?.message || 'Project could not be updated.'
+			  renderSentMessageProjectCorrection()
+			  sentMessageProjectSubmit?.focus({ preventScroll: true })
+			}
+		  }
 
       async function submitHomeScoutOpening(event) {
         event?.preventDefault?.()
@@ -52653,6 +53021,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function resetPersistedScoutChatState() {
+		closeSentMessageProjectCorrection({ restoreFocus: false })
 		chatThreadsGeneration += 1
 		chatThreadsRequest = null
 		chatThreadsRefreshQueued = false
@@ -52998,6 +53367,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function chatMessageEventRegressesProjectAdmission(current, incoming) {
 	        const currentProject = String(current?.project?.status || '')
 	        const incomingProject = String(incoming?.project?.status || '')
+		const currentRevision = Math.max(0, Number(current?.project?.contextRevision || 0))
+		const incomingRevision = Math.max(0, Number(incoming?.project?.contextRevision || 0))
+		if (current?.project && incoming?.project && currentRevision > incomingRevision) return true
 	        if (['confirmed', 'unavailable'].includes(currentProject) && incomingProject === 'pending') return true
 	        return String(current?.reply?.state || '') !== 'project_pending' && String(incoming?.reply?.state || '') === 'project_pending'
 	      }
@@ -58154,8 +58526,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function selectScoutChatThread(id) {
-	        const nextThreadId = String(id || '')
+		      function selectScoutChatThread(id) {
+		        const nextThreadId = String(id || '')
+			if (nextThreadId !== activeScoutThreadId) closeSentMessageProjectCorrection({ restoreFocus: false })
 	        // A side reply is authority-bound to the thread that opened it.
 	        // Never leave that composer visible after navigation: its submit
 	        // handler intentionally posts against chatContextState.threadId.
@@ -58793,12 +59166,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        node.dataset.messageId = String(message?.id || '')
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
 	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
-	        const projectTitle = String(message?.project?.title || '').trim()
-	        if (projectTitle) {
-	          const projectStatus = message?.project?.status === 'pending' ? 'Linking' : message?.project?.status === 'unavailable' ? 'Unavailable' : 'Project'
-	          const project = bfEl('span', 'scout-chat-msg__project', `${projectStatus} · ${projectTitle}`)
-	          project.setAttribute('aria-label', `${projectStatus === 'Linking' ? 'Project link pending' : projectStatus === 'Unavailable' ? 'Project unavailable' : 'Project'}: ${projectTitle}`)
-	          const stack = node.querySelector('.scout-chat-msg__stack')
+		        const projectTitle = String(message?.project?.title || '').trim()
+		        if (projectTitle) {
+		          const projectStatus = message?.project?.status === 'pending' ? 'Linking' : message?.project?.status === 'unavailable' ? 'Unavailable' : 'Project'
+			  const correctable = desktopChatMessageIsOwn(selectedScoutChatThread(), message) && ['confirmed', 'unavailable'].includes(String(message?.project?.status || ''))
+		          const project = bfEl(correctable ? 'button' : 'span', 'scout-chat-msg__project', `${projectStatus} · ${projectTitle}`)
+			  if (correctable) {
+				project.type = 'button'
+				project.dataset.projectCorrection = 'true'
+				project.setAttribute('aria-label', `Project: ${projectTitle}. Change project for this message`)
+				project.setAttribute('aria-haspopup', 'dialog')
+				project.title = 'Change project'
+				project.addEventListener('click', () => void openSentMessageProjectCorrection(selectedScoutChatThread(), message, project))
+			  } else {
+				project.setAttribute('aria-label', `${projectStatus === 'Linking' ? 'Project link pending' : projectStatus === 'Unavailable' ? 'Project unavailable' : 'Project'}: ${projectTitle}`)
+			  }
+		          const stack = node.querySelector('.scout-chat-msg__stack')
 	          const meta = stack?.querySelector('.scout-chat-msg__meta')
 	          stack?.insertBefore(project, meta || null)
 	        }
@@ -59163,7 +59546,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !chatThreadIsChannel(thread)
 	      }
 
-      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete, onRegenerate } = {}) {
+	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {}) {
 	        const wrap = bfEl('span', 'desktop-chat-more')
 	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
 	        trigger.type = 'button'
@@ -59214,7 +59597,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
           menu.appendChild(edit)
         }
-        if (onRegenerate) {
+	        if (onRegenerate) {
           const regenerate = bfEl('button', '', 'Regenerate image')
           regenerate.type = 'button'
           regenerate.setAttribute('role', 'menuitem')
@@ -59222,9 +59605,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             close()
             onRegenerate()
           })
-          menu.appendChild(regenerate)
-        }
-        if (onDelete) {
+	          menu.appendChild(regenerate)
+	        }
+		if (onProject) {
+		  const changeProject = bfEl('button', '', 'Change project…')
+		  changeProject.type = 'button'
+		  changeProject.setAttribute('role', 'menuitem')
+		  changeProject.addEventListener('click', () => {
+			close()
+			onProject(trigger)
+		  })
+		  menu.appendChild(changeProject)
+		}
+	        if (onDelete) {
 	          const remove = bfEl('button', '', 'Delete message…')
 	          remove.type = 'button'
 	          remove.dataset.danger = 'true'
@@ -60109,11 +60502,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const activeThread = selectedScoutChatThread()
 	          const generatedImage = String(message?.kind || '') === 'image' && String(message?.image?.prompt || '').trim()
 	          if (desktopChatMessageIsOwn(activeThread, message) || generatedImage) {
-	            const more = desktopChatMoreMenuControl({
-	              label: generatedImage ? 'More image actions' : 'More message actions',
-	              onEdit: generatedImage ? null : () => beginDesktopFeedMessageEdit(activeThread, message, node),
-	              onRegenerate: generatedImage ? () => beginScoutChatImageRegenerate(message) : null,
-	              onDelete: desktopChatMessageIsOwn(activeThread, message)
+		            const more = desktopChatMoreMenuControl({
+		              label: generatedImage ? 'More image actions' : 'More message actions',
+		              onEdit: generatedImage ? null : () => beginDesktopFeedMessageEdit(activeThread, message, node),
+		              onRegenerate: generatedImage ? () => beginScoutChatImageRegenerate(message) : null,
+			      onProject: !generatedImage && ['confirmed', 'unavailable'].includes(String(message?.project?.status || ''))
+				? trigger => void openSentMessageProjectCorrection(activeThread, message, trigger)
+				: null,
+		              onDelete: desktopChatMessageIsOwn(activeThread, message)
 	                ? (control, close) => confirmDesktopFeedMessageDelete(message.id, control, close)
 	                : null
             })

@@ -51,6 +51,32 @@ test('a late pre-confirmation socket frame cannot regress the Project Send respo
   assert.equal(applyChatThreadEvent([queued], 'thread-1', { id: 'thread-1', message: projectPending })[0], queued);
 });
 
+test('Project correction context revisions reject stale and terminal-to-pending frames', () => {
+  const corrected = {
+    id: 'project-corrected', role: 'user', createdAt: '2026-01-01T00:00:00Z',
+    project: { status: 'confirmed' as const, contextRevision: 2, projectId: 'project-two', title: 'New Project', basis: 'corrected' },
+  };
+  const stale = {
+    ...corrected,
+    project: { status: 'confirmed' as const, contextRevision: 1, projectId: 'project-one', title: 'Old Project', basis: 'selected' },
+  };
+  const sameRevisionPending = {
+    ...corrected,
+    project: { status: 'pending' as const, contextRevision: 2, title: 'New Project', basis: 'corrected' },
+  };
+  assert.equal(chatMessageEventRegressesProjectAdmission(corrected, stale), true);
+  assert.equal(chatMessageEventRegressesProjectAdmission(corrected, sameRevisionPending), true);
+  assert.equal(applyChatThreadEvent([corrected], 'thread-1', { id: 'thread-1', message: stale })[0], corrected);
+
+  const removed = {
+    ...corrected,
+    project: { status: 'removed' as const, contextRevision: 3, title: '', basis: 'corrected' },
+  };
+  assert.equal(chatMessageEventRegressesProjectAdmission(removed, corrected), true);
+  assert.equal(chatMessageEventRegressesProjectAdmission(removed, { ...removed, project: { ...removed.project, status: 'pending' as const } }), true);
+  assert.equal(reconcileChatThreadSnapshot([removed], [corrected])[0], removed);
+});
+
 test('events for another thread preserve the same message array', () => {
   assert.equal(applyChatThreadEvent(messages, 'thread-1', {
     id: 'thread-2',

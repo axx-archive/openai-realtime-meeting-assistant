@@ -44,6 +44,7 @@ export type MessageBubbleProps = {
   showReplyContext?: boolean;
   threadReplies?: readonly ScoutMessage[];
   onOpenThread?: (message: ScoutMessage) => void;
+  onChangeProject?: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onLongPress?: (message: ScoutMessage, own: boolean, attachment?: { file: ScoutFileAttachment; index: number }) => void;
   onOpenAttachment?: (file: ScoutFileAttachment) => void;
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
@@ -204,6 +205,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   showReplyContext = true,
   threadReplies = [],
   onOpenThread,
+  onChangeProject,
   onLongPress,
   onOpenAttachment,
   onToggleReaction,
@@ -228,6 +230,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   workDriveSaveAvailability = 'checking',
 }: MessageBubbleProps) {
   const workDetailsTriggerRef = useRef<View>(null);
+  const projectTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
   const proposal = message.proposal;
@@ -274,6 +277,8 @@ export const MessageBubble = React.memo(function MessageBubble({
   const projectTitle = String(message.project?.title ?? '').trim();
   const projectPending = message.project?.status === 'pending';
   const projectUnavailable = message.project?.status === 'unavailable';
+  const projectRemoved = message.project?.status === 'removed';
+  const projectCorrectable = own && !projectPending && !projectRemoved && Boolean(onChangeProject);
   const threadParticipants = useMemo(() => {
     const seen = new Set<string>();
     return threadReplies.filter((reply) => {
@@ -675,17 +680,25 @@ export const MessageBubble = React.memo(function MessageBubble({
             );
           })}
 
-          {projectTitle ? (
-            <View
+          {projectTitle && !projectRemoved ? (
+            <Pressable
+              ref={projectTriggerRef}
               accessible
-              accessibilityLabel={`${projectPending ? 'Project link pending' : projectUnavailable ? 'Project unavailable' : 'Project'}: ${projectTitle}`}
+              accessibilityRole={projectCorrectable ? 'button' : undefined}
+              accessibilityState={projectPending ? { disabled: true } : undefined}
+              accessibilityLabel={projectCorrectable
+                ? `${projectUnavailable ? 'Project unavailable' : 'Project'}: ${projectTitle}. Change project`
+                : `${projectPending ? 'Project link pending' : projectUnavailable ? 'Project unavailable' : 'Project'}: ${projectTitle}`}
+              accessibilityHint={projectCorrectable ? 'Opens authorized Project choices for only this message.' : undefined}
+              disabled={!projectCorrectable}
+              onPress={() => onChangeProject?.(message, findNodeHandle(projectTriggerRef.current) ?? undefined)}
               style={[styles.projectContext, own && styles.projectContextOwn]}
             >
               <SymbolView name="folder.fill" tintColor={own ? colors.onAccent : colors.text3} size={10} />
               <Text numberOfLines={1} style={[styles.projectContextText, own && styles.projectContextTextOwn]}>
                 {projectPending ? 'Linking' : projectUnavailable ? 'Unavailable' : 'Project'} · {projectTitle}
               </Text>
-            </View>
+            </Pressable>
           ) : null}
 
           {firstURL ? (
