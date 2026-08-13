@@ -20,6 +20,7 @@ import (
 
 const (
 	homeProjectContextVersion = 1
+	homeProjectContextV2      = 2
 	homeProjectContextTTL     = 15 * time.Minute
 	homeProjectContextModeEnv = "STRIDE_E10_PROJECT_HOME_MODE"
 )
@@ -71,6 +72,8 @@ type homeProjectContextToken struct {
 	ProjectRevision      int64                  `json:"projectRevision,omitempty"`
 	ProjectDigest        string                 `json:"projectDigest,omitempty"`
 	ProjectTitle         string                 `json:"projectTitle"`
+	ChoiceKey            string                 `json:"choiceKey,omitempty"`
+	SourceManifestDigest string                 `json:"sourceManifestDigest,omitempty"`
 	Basis                string                 `json:"basis"`
 	ClassifierRevision   string                 `json:"classifierRevision"`
 	Confidence           float64                `json:"confidence"`
@@ -83,6 +86,7 @@ type homeProjectContextToken struct {
 type homeProjectChoice struct {
 	Title     string `json:"title"`
 	Token     string `json:"token"`
+	ChoiceKey string `json:"choiceKey,omitempty"`
 	Suggested bool   `json:"suggested,omitempty"`
 }
 
@@ -192,10 +196,40 @@ func boundHomeProjectForThread(ctx context.Context, snapshot StrideE10TenantAuth
 }
 
 func homeProjectTokenMAC(key StrideE10TenantAuthorityEnvelopeKey, raw []byte) []byte {
+	return homeProjectTokenMACVersion(key, raw, homeProjectContextVersion)
+}
+
+func homeProjectTokenMACVersion(key StrideE10TenantAuthorityEnvelopeKey, raw []byte, version int) []byte {
 	mac := hmac.New(sha256.New, key.Secret)
-	_, _ = mac.Write([]byte("home-project-context/v1\x00"))
+	_, _ = mac.Write([]byte(fmt.Sprintf("home-project-context/v%d\x00", version)))
 	_, _ = mac.Write(raw)
 	return mac.Sum(nil)
+}
+
+func mintHomeProjectTokenV2(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, text string, destination homeProjectDestination, manifest projectChatSourceManifest, project homeProjectRow, kind, basis string, confidence float64) (string, string, error) {
+	runtime := strideE10CurrentTenantEnvelopeRuntime()
+	if runtime == nil || runtime.keys == nil || manifest.Version != projectChatSourceManifestVersion || !isHexDigest(manifest.Digest) {
+		return "", "", errHomeProjectUnavailable
+	}
+	key, err := runtime.keys.CurrentStrideE10TenantAuthorityEnvelopeKey(ctx)
+	if err != nil || !validStrideE10TenantEnvelopeKey(key) {
+		return "", "", errHomeProjectUnavailable
+	}
+	now := time.Now().UTC()
+	choiceKey := stableHomeProjectChoiceKey(key, snapshot, kind, project)
+	token := homeProjectContextToken{
+		Version: homeProjectContextV2, Kind: kind, TextDigest: sha256Hex([]byte(strings.TrimSpace(text))), Destination: destination,
+		PersonID: snapshot.Person.Header.ID, OrganizationID: snapshot.Organization.Header.ID, MembershipID: snapshot.Membership.Header.ID,
+		MembershipRevision: snapshot.Membership.Header.Revision, SessionSubjectDigest: snapshot.SessionHash,
+		SessionRevision: snapshot.ActiveSession.SessionRevision, AuthorityGeneration: snapshot.Generation,
+		ProjectID: project.ID, ProjectRevision: project.Revision, ProjectDigest: project.Digest, ProjectTitle: project.Title,
+		ChoiceKey: choiceKey, SourceManifestDigest: manifest.Digest,
+		Basis: basis, ClassifierRevision: "project_linker_v2", Confidence: confidence,
+		IssuedAt: now, ExpiresAt: now.Add(homeProjectContextTTL), KeyID: key.ID, KeyVersion: key.Version,
+	}
+	raw, _ := json.Marshal(token)
+	encoded := base64.RawURLEncoding.EncodeToString(raw) + "." + base64.RawURLEncoding.EncodeToString(homeProjectTokenMACVersion(key, raw, token.Version))
+	return encoded, choiceKey, nil
 }
 
 func mintHomeProjectToken(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, text string, destination homeProjectDestination, project homeProjectRow, kind, basis string, confidence float64) (string, error) {
@@ -222,7 +256,9 @@ func mintHomeProjectToken(ctx context.Context, snapshot StrideE10TenantAuthority
 }
 
 func resolveHomeProjectToken(ctx context.Context, encoded, text string, destination homeProjectDestination, snapshot StrideE10TenantAuthoritySnapshot) (homeProjectContextToken, error) {
-	return resolveHomeProjectTokenForRetry(ctx, encoded, text, destination, snapshot, false)
+	manifest := projectChatSourceManifest{Version: projectChatSourceManifestVersion, Destination: destination, TextDigest: sha256Hex([]byte(strings.TrimSpace(text)))}
+	manifest.Digest = projectChatManifestDigest(manifest)
+	return resolveHomeProjectTokenForRetryWithManifest(ctx, encoded, text, destination, manifest, snapshot, false)
 }
 
 // resolveHomeProjectTokenForRetry may ignore token expiry only after the
@@ -233,33 +269,63 @@ func resolveHomeProjectToken(ctx context.Context, encoded, text string, destinat
 // durable cross-store association without turning an expired token into a new
 // capability.
 func resolveHomeProjectTokenForRetry(ctx context.Context, encoded, text string, destination homeProjectDestination, snapshot StrideE10TenantAuthoritySnapshot, acceptedPending bool) (homeProjectContextToken, error) {
+	manifest := projectChatSourceManifest{Version: projectChatSourceManifestVersion, Destination: destination, TextDigest: sha256Hex([]byte(strings.TrimSpace(text)))}
+	manifest.Digest = projectChatManifestDigest(manifest)
+	return resolveHomeProjectTokenForRetryWithManifest(ctx, encoded, text, destination, manifest, snapshot, acceptedPending)
+}
+
+func resolveHomeProjectTokenForRetryWithManifest(ctx context.Context, encoded, text string, destination homeProjectDestination, manifest projectChatSourceManifest, snapshot StrideE10TenantAuthoritySnapshot, acceptedPending bool) (homeProjectContextToken, error) {
+	return resolveHomeProjectTokenForRetryWithManifestState(ctx, encoded, text, destination, manifest, snapshot, acceptedPending, false)
+}
+
+func decodeSignedHomeProjectToken(ctx context.Context, encoded string) (homeProjectContextToken, StrideE10TenantAuthorityEnvelopeKey, error) {
 	var token homeProjectContextToken
+	var resolvedKey StrideE10TenantAuthorityEnvelopeKey
 	parts := strings.Split(encoded, ".")
 	if len(parts) != 2 {
-		return token, errHomeProjectStale
+		return token, resolvedKey, errHomeProjectStale
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil || len(raw) > 8192 || json.Unmarshal(raw, &token) != nil {
-		return token, errHomeProjectStale
+		return token, resolvedKey, errHomeProjectStale
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
 	runtime := strideE10CurrentTenantEnvelopeRuntime()
 	if err != nil || runtime == nil || runtime.keys == nil {
-		return token, errHomeProjectStale
+		return token, resolvedKey, errHomeProjectStale
 	}
 	key, err := runtime.keys.ResolveStrideE10TenantAuthorityEnvelopeKey(ctx, token.KeyID, token.KeyVersion)
-	if err != nil || !validStrideE10TenantEnvelopeKey(key) || !hmac.Equal(signature, homeProjectTokenMAC(key, raw)) {
-		return token, errHomeProjectStale
+	if err != nil || !validStrideE10TenantEnvelopeKey(key) || (token.Version != homeProjectContextVersion && token.Version != homeProjectContextV2) || !hmac.Equal(signature, homeProjectTokenMACVersion(key, raw, token.Version)) {
+		return token, resolvedKey, errHomeProjectStale
+	}
+	return token, key, nil
+}
+
+func resolveHomeProjectTokenForRetryWithManifestState(ctx context.Context, encoded, text string, destination homeProjectDestination,
+	manifest projectChatSourceManifest, snapshot StrideE10TenantAuthoritySnapshot, acceptedPending, acceptedDurable bool) (homeProjectContextToken, error) {
+	token, key, err := decodeSignedHomeProjectToken(ctx, encoded)
+	if err != nil {
+		return token, err
 	}
 	wantDestination, err := destination.normalized()
-	if err != nil || token.Version != homeProjectContextVersion || !oneOf(token.Kind, "project", "create") ||
+	if err != nil || !oneOf(token.Kind, "project", "create") ||
 		token.TextDigest != sha256Hex([]byte(strings.TrimSpace(text))) || token.Destination != wantDestination ||
 		token.PersonID != snapshot.Person.Header.ID || token.OrganizationID != snapshot.Organization.Header.ID ||
-		token.MembershipID != snapshot.Membership.Header.ID || token.MembershipRevision != snapshot.Membership.Header.Revision ||
-		token.SessionSubjectDigest != snapshot.SessionHash || token.SessionRevision != snapshot.ActiveSession.SessionRevision ||
-		token.AuthorityGeneration != snapshot.Generation || token.IssuedAt.IsZero() || token.ExpiresAt.IsZero() || !token.ExpiresAt.After(token.IssuedAt) ||
-		(!acceptedPending && !time.Now().UTC().Before(token.ExpiresAt)) ||
+		token.MembershipID != snapshot.Membership.Header.ID ||
+		(!acceptedDurable && (token.MembershipRevision != snapshot.Membership.Header.Revision ||
+			token.SessionSubjectDigest != snapshot.SessionHash || token.SessionRevision != snapshot.ActiveSession.SessionRevision ||
+			token.AuthorityGeneration != snapshot.Generation)) || token.IssuedAt.IsZero() || token.ExpiresAt.IsZero() || !token.ExpiresAt.After(token.IssuedAt) ||
+		(!acceptedPending && !acceptedDurable && !time.Now().UTC().Before(token.ExpiresAt)) ||
 		!stridePlainText(token.ProjectTitle, 120, true) {
+		return token, errHomeProjectStale
+	}
+	if token.Version == homeProjectContextV2 {
+		project := homeProjectRow{ID: token.ProjectID, Revision: token.ProjectRevision, Digest: token.ProjectDigest, Title: token.ProjectTitle}
+		if manifest.Version != projectChatSourceManifestVersion || !isHexDigest(manifest.Digest) || token.SourceManifestDigest != manifest.Digest ||
+			(!acceptedDurable && token.ChoiceKey != stableHomeProjectChoiceKey(key, snapshot, token.Kind, project)) {
+			return token, errHomeProjectStale
+		}
+	} else if len(manifest.Attachments) != 0 || manifest.Reply != nil || token.SourceManifestDigest != "" || token.ChoiceKey != "" {
 		return token, errHomeProjectStale
 	}
 	if token.Kind == "project" && (!strideIdentifier(token.ProjectID) || token.ProjectRevision < 1 || !isHexDigest(token.ProjectDigest)) {
@@ -267,6 +333,16 @@ func resolveHomeProjectTokenForRetry(ctx context.Context, encoded, text string, 
 	}
 	if token.Kind == "create" && (token.ProjectID != "" || token.ProjectRevision != 0 || token.ProjectDigest != "") {
 		return token, errHomeProjectStale
+	}
+	if acceptedDurable {
+		// The signed historical envelope remains the immutable request identity,
+		// while all subsequent authority checks must use the authenticated current
+		// session. This path is reachable only after the exact confirmed legacy
+		// journal and canonical send receipt have both been proved by the caller.
+		token.MembershipRevision = snapshot.Membership.Header.Revision
+		token.SessionSubjectDigest = snapshot.SessionHash
+		token.SessionRevision = snapshot.ActiveSession.SessionRevision
+		token.AuthorityGeneration = snapshot.Generation
 	}
 	return token, nil
 }
@@ -304,9 +380,11 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := struct {
-		Text        string                 `json:"text"`
-		Destination homeProjectDestination `json:"destination"`
-		CreateTitle string                 `json:"createTitle"`
+		Text              string                        `json:"text"`
+		Destination       homeProjectDestination        `json:"destination"`
+		CreateTitle       string                        `json:"createTitle"`
+		AttachmentHandles []projectChatAttachmentHandle `json:"attachmentHandles"`
+		ReplyToMessageID  string                        `json:"replyToMessageId"`
 	}{}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 	decoder.DisallowUnknownFields()
@@ -328,14 +406,9 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	response := homeProjectPreviewResponse{Status: "unlinked"}
 	err = withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
-		if destination.Route == "thread" {
-			thread, _, threadErr := kanbanApp.scoutChatThreadByID(user.Email, destination.ThreadID)
-			if threadErr != nil || thread.ArchivedAt != "" {
-				return errHomeProjectStale
-			}
-			if _, authorityErr := currentHomeProjectStore().projectChatSourceAuthorityForThread(r.Context(), snapshot, thread); authorityErr != nil {
-				return authorityErr
-			}
+		manifest, manifestErr := kanbanApp.resolveProjectChatSourceManifest(r.Context(), user, snapshot, payload.Text, destination, payload.AttachmentHandles, payload.ReplyToMessageID)
+		if manifestErr != nil {
+			return manifestErr
 		}
 		response.Available = true
 		response.ScopeKey = homeProjectScopeKey(snapshot)
@@ -344,11 +417,11 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 			return listErr
 		}
 		for _, project := range projects {
-			token, mintErr := mintHomeProjectToken(r.Context(), snapshot, payload.Text, destination, project, "project", "selected", 1)
+			token, choiceKey, mintErr := mintHomeProjectTokenV2(r.Context(), snapshot, payload.Text, destination, manifest, project, "project", "selected", 1)
 			if mintErr != nil {
 				return mintErr
 			}
-			response.Choices = append(response.Choices, homeProjectChoice{Title: project.Title, Token: token})
+			response.Choices = append(response.Choices, homeProjectChoice{Title: project.Title, Token: token, ChoiceKey: choiceKey})
 		}
 		if destination.Route == "thread" {
 			bound, boundErr := boundHomeProjectForThread(r.Context(), snapshot, destination.ThreadID, projects)
@@ -356,13 +429,13 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 				return boundErr
 			}
 			if bound != nil {
-				token, mintErr := mintHomeProjectToken(r.Context(), snapshot, payload.Text, destination, *bound, "project", "authoritative_context", 1)
+				token, choiceKey, mintErr := mintHomeProjectTokenV2(r.Context(), snapshot, payload.Text, destination, manifest, *bound, "project", "authoritative_context", 1)
 				if mintErr != nil {
 					return mintErr
 				}
 				// A canonical thread binding is authoritative context, not an
 				// inference. Clients display it as Project rather than Suggested.
-				choice := homeProjectChoice{Title: bound.Title, Token: token}
+				choice := homeProjectChoice{Title: bound.Title, Token: token, ChoiceKey: choiceKey}
 				response.Status, response.Suggested = "bound", &choice
 				return nil
 			}
@@ -375,12 +448,13 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 			if !stridePlainText(createTitle, 120, true) || !homeProjectFeatureEnabled(STRIDEFeatureProjectAuthorityWrite) {
 				return errHomeProjectStale
 			}
-			token, mintErr := mintHomeProjectToken(r.Context(), snapshot, payload.Text, destination, homeProjectRow{Title: createTitle}, "create", "selected", 1)
+			createProject := homeProjectRow{Title: createTitle}
+			token, choiceKey, mintErr := mintHomeProjectTokenV2(r.Context(), snapshot, payload.Text, destination, manifest, createProject, "create", "selected", 1)
 			if mintErr != nil {
 				return mintErr
 			}
 			response.Status = "selected"
-			response.Suggested = &homeProjectChoice{Title: createTitle, Token: token}
+			response.Suggested = &homeProjectChoice{Title: createTitle, Token: token, ChoiceKey: choiceKey}
 			return nil
 		}
 		type ranked struct {
@@ -401,11 +475,11 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		if len(matches) == 1 && homeProjectFeatureEnabled(STRIDEFeatureProjectSmartLink) {
 			project := matches[0].row
-			token, mintErr := mintHomeProjectToken(r.Context(), snapshot, payload.Text, destination, project, "project", "suggested", float64(matches[0].score)/100)
+			token, choiceKey, mintErr := mintHomeProjectTokenV2(r.Context(), snapshot, payload.Text, destination, manifest, project, "project", "suggested", float64(matches[0].score)/100)
 			if mintErr != nil {
 				return mintErr
 			}
-			choice := homeProjectChoice{Title: project.Title, Token: token, Suggested: true}
+			choice := homeProjectChoice{Title: project.Title, Token: token, ChoiceKey: choiceKey, Suggested: true}
 			response.Status, response.Suggested = "suggested", &choice
 		} else if len(matches) > 1 {
 			response.Status = "clarify"

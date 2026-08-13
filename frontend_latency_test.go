@@ -1066,7 +1066,7 @@ func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
 		"function appendChatRichTextNodes(container, rawText)",
 		"function appendChatInlineNodes(container, text)",
 		"function scoutChatFilePayload(file)",
-		"function renderPendingScoutFiles()",
+		"function renderPendingScoutFiles({ preserveAttempt = false } = {})",
 		"`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`",
 		"document.createElement('strong')",
 		"document.createElement('code')",

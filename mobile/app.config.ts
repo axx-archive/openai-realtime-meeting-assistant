@@ -43,12 +43,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 61 adds author-only, revision-bound Project correction for sent
-      // messages and keeps correction/edit/delete recovery fail closed across
-      // response loss, restart, and canonical session rotation. It retains
-      // Build 60's body-free, lazy-hydrated Chat navigation.
+      // Build 62 extends Project-linked turns through exact attachment source
+      // manifests and reply ancestry, all-or-nothing canonical source groups,
+      // restart-safe correction/invalidation, and session-rotation replay. It
+      // retains Build 61's sent-message correction and Build 60's body-free,
+      // lazy-hydrated Chat navigation.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '61',
+      buildNumber: '62',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

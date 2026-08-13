@@ -76,7 +76,8 @@ export type HomeSnapshot = {
 };
 
 export type HomeResponse = { ok: boolean; home: HomeSnapshot };
-export type HomeProjectChoice = { title: string; token: string; suggested?: boolean };
+export type HomeProjectChoice = { title: string; token: string; choiceKey?: string; suggested?: boolean };
+export type ProjectChatAttachmentHandle = { sourceId: string; sourceRevision: string };
 export type HomeProjectContextResponse = {
   ok: true;
   projectContext: {

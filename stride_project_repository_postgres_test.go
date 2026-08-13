@@ -320,6 +320,18 @@ VALUES('organization_project_test','turn_current',1,3,1,'turn-current','chat','t
 	if _, err := store.pool.Exec(ctx, `INSERT INTO stride_project_revisions(project_id,revision,organization_id,title,aliases,lifecycle,retention_policy,controller_memberships,audience,acl_revision,creator_person_id,created_at,updated_at,content_digest) VALUES('project_source_stale',1,'organization_project_test','Stale Source','[]','active','organization_default',$1::jsonb,$2::jsonb,1,'person_project_test',clock_timestamp(),clock_timestamp(),decode($3,'hex'))`, controllers, projectAudience, strings.Repeat("4", 64)); err != nil {
 		t.Fatal(err)
 	}
+	if err := execProjectSQLBatch(ctx, store,
+		projectSQLStatement{`INSERT INTO stride_project_thread_binding_revisions(binding_id,revision,organization_id,project_id,project_revision,thread_id,kind,state,thread_audience_revision,thread_acl_digest,actor_person_id,actor_membership_id,actor_membership_revision,bound_at,content_digest)
+VALUES('binding_project_source_stale',1,'organization_project_test','project_source_stale',1,'thread_current','primary','active',1,decode($1,'hex'),'person_project_test','membership_project_test',1,clock_timestamp(),decode($2,'hex'))`, []any{strings.Repeat("b", 64), strings.Repeat("c", 64)}},
+		projectSQLStatement{`INSERT INTO stride_project_operation_receipts(operation_id,organization_id,operation_kind,project_id,project_revision,binding_id,binding_revision,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,idempotency_key_digest,request_fingerprint,recorded_at)
+VALUES('operation_project_source_stale_create','organization_project_test','create_project','project_source_stale',1,'binding_project_source_stale',1,'person_project_test','membership_project_test',1,decode($1,'hex'),1,1,decode($2,'hex'),decode($3,'hex'),clock_timestamp())`, []any{session, strings.Repeat("d", 64), strings.Repeat("e", 64)}},
+		projectSQLStatement{`INSERT INTO stride_projects_current(project_id,revision,organization_id,lifecycle,content_digest,updated_at)
+VALUES('project_source_stale',1,'organization_project_test','active',decode($1,'hex'),clock_timestamp())`, []any{strings.Repeat("4", 64)}},
+		projectSQLStatement{`INSERT INTO stride_project_thread_bindings_current(binding_id,revision,organization_id,project_id,thread_id,kind,state,content_digest,updated_at)
+VALUES('binding_project_source_stale',1,'organization_project_test','project_source_stale','thread_current','primary','active',decode($1,'hex'),clock_timestamp())`, []any{strings.Repeat("c", 64)}},
+	); err != nil {
+		t.Fatal(err)
+	}
 	refs := `[{"contractType":"conversation_event","id":"turn_current","revision":1,"digest":"` + digest + `"}]`
 	var aclDigest string
 	if err := store.pool.QueryRow(ctx, `SELECT encode(sha256(convert_to(concat_ws(E'\x1f',tenant_id,event_id,content_revision::text,encode(content_digest,'hex'),encode(audience_digest,'hex'),visibility,acl_version::text,purge_generation::text),'UTF8')),'hex') FROM stride_conversation_events WHERE tenant_id='organization_project_test' AND event_id='turn_current'`).Scan(&aclDigest); err != nil {
@@ -332,6 +344,14 @@ VALUES('organization_project_test','turn_current',1,3,1,'turn-current','chat','t
 	if err := execProjectSQLBatch(ctx, store,
 		projectSQLStatement{`INSERT INTO stride_project_association_events(event_id,organization_id,association_id,association_revision,action,resulting_state,prior_revision,new_revision,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,idempotency_key_digest,request_fingerprint,occurred_at) VALUES('event_stale_source_propose','organization_project_test','association_stale_source',1,'propose','proposed',0,1,'person_project_test','membership_project_test',1,decode($1,'hex'),1,1,decode($2,'hex'),decode($3,'hex'),clock_timestamp())`, []any{session, strings.Repeat("5", 64), strings.Repeat("7", 64)}},
 		projectSQLStatement{`INSERT INTO stride_project_associations_current(association_id,revision,organization_id,project_id,state,content_digest,updated_at) VALUES('association_stale_source',1,'organization_project_test','project_source_stale','proposed',decode($1,'hex'),clock_timestamp())`, []any{strings.Repeat("6", 64)}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := execProjectSQLBatch(ctx, store,
+		projectSQLStatement{`INSERT INTO stride_project_association_revisions(association_id,revision,organization_id,project_id,project_revision,subject_contract_type,subject_id,subject_revision,subject_digest,source_refs,source_authority_receipt_id,evidence_coverage_digest,state,basis,classifier_revision,confidence,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,source_audience,source_acl_revision,source_acl_digest,consent_revision,purge_generation,idempotency_key_digest,expires_at,supersedes_revision,supersedes_digest,recorded_at,content_digest)
+SELECT association_id,2,organization_id,project_id,project_revision,subject_contract_type,subject_id,subject_revision,subject_digest,source_refs,source_authority_receipt_id,evidence_coverage_digest,'confirmed',basis,classifier_revision,confidence,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,source_audience,source_acl_revision,source_acl_digest,consent_revision,purge_generation,decode($1,'hex'),NULL,1,content_digest,clock_timestamp(),decode($2,'hex') FROM stride_project_association_revisions WHERE association_id='association_stale_source' AND revision=1`, []any{strings.Repeat("c", 64), strings.Repeat("d", 64)}},
+		projectSQLStatement{`INSERT INTO stride_project_association_events(event_id,organization_id,association_id,association_revision,action,resulting_state,prior_revision,new_revision,actor_person_id,actor_membership_id,actor_membership_revision,session_subject_digest,session_revision,authority_generation,idempotency_key_digest,request_fingerprint,occurred_at) VALUES('event_stale_source_confirm','organization_project_test','association_stale_source',2,'confirm','confirmed',1,2,'person_project_test','membership_project_test',1,decode($1,'hex'),1,1,decode($2,'hex'),decode($3,'hex'),clock_timestamp())`, []any{session, strings.Repeat("c", 64), strings.Repeat("e", 64)}},
+		projectSQLStatement{`UPDATE stride_project_associations_current SET revision=2,state='confirmed',content_digest=decode($1,'hex'),updated_at=clock_timestamp() WHERE association_id='association_stale_source'`, []any{strings.Repeat("d", 64)}},
 	); err != nil {
 		t.Fatal(err)
 	}

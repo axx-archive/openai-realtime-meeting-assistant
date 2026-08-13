@@ -30668,6 +30668,14 @@
               <div id="chatContextMentionPopover" class="scout-mention-popover" hidden>
                 <div id="chatContextMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
               </div>
+			  <button id="chatContextProjectChip" class="home-context-chip home-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project" hidden>Add project</button>
+			  <dialog id="chatContextProjectChooser" class="home-project-chooser" aria-labelledby="chatContextProjectChooserTitle">
+				<div class="home-project-chooser__panel">
+				  <div class="home-project-chooser__head"><h2 id="chatContextProjectChooserTitle">Choose a project</h2><button id="chatContextProjectChooserClose" class="home-project-chooser__close pressable" type="button" aria-label="Close project chooser">×</button></div>
+				  <div id="chatContextProjectChoices" class="home-project-chooser__list" role="radiogroup" aria-label="Projects"></div>
+				  <p class="home-scout-composer-status" role="status" aria-live="polite">Nothing changes until you send.</p>
+				</div>
+			  </dialog>
               <div id="chatContextReplyPending" class="chat-context-reply__pending" hidden></div>
               <div class="chat-context-reply__composer">
                 <input id="chatContextReplyFileInput" type="file" multiple hidden>
@@ -32670,6 +32678,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatContextReplyFileInput = document.getElementById('chatContextReplyFileInput')
 	      const chatContextReplyAttach = document.getElementById('chatContextReplyAttach')
 	      const chatContextReplyPending = document.getElementById('chatContextReplyPending')
+	      const chatContextProjectChip = document.getElementById('chatContextProjectChip')
+	      const chatContextProjectChooser = document.getElementById('chatContextProjectChooser')
+	      const chatContextProjectChooserClose = document.getElementById('chatContextProjectChooserClose')
+	      const chatContextProjectChoices = document.getElementById('chatContextProjectChoices')
 	      const chatContextMentionPopover = document.getElementById('chatContextMentionPopover')
 	      const chatContextMentionList = document.getElementById('chatContextMentionList')
 	      const chatWorkIndicator = document.getElementById('chatWorkIndicator')
@@ -33015,6 +33027,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatContextReturnFocus = null
 	      let chatContextGeneration = 0
 	      let chatContextReplyAttempt = null
+	      let chatContextProjectContext = { available: false, scopeKey: '', choices: [], selected: null, explicitNone: false }
+	      let chatContextProjectGeneration = 0
+	      let chatContextProjectTimer = 0
 	      let pendingScoutFiles = []
 	      let pendingDesktopReplyFiles = []
 	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
@@ -34387,8 +34402,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      chatContextReplyInput?.addEventListener('input', () => {
 	        chatContextReplyInput.style.height = 'auto'
 	        chatContextReplyInput.style.height = `${Math.min(128, Math.max(40, chatContextReplyInput.scrollHeight))}px`
+		scheduleDesktopReplyProjectContext()
 	        syncDesktopReplyComposerState()
 	      })
+	      chatContextProjectChip?.addEventListener('click', () => {
+		renderDesktopReplyProjectContext()
+		chatContextProjectChooser?.showModal()
+		window.requestAnimationFrame(() => chatContextProjectChoices?.querySelector('[aria-checked="true"]')?.focus())
+	      })
+	      chatContextProjectChooserClose?.addEventListener('click', () => chatContextProjectChooser?.close())
+	      chatContextProjectChooser?.addEventListener('close', () => chatContextProjectChip?.focus())
 	      chatContextReplyAttach?.addEventListener('click', event => openChatAttachmentSourceMenu(event.currentTarget, 'reply'))
 	      chatContextReplyFileInput?.addEventListener('change', addPendingDesktopReplyFiles)
 	      chatContextReplyForm?.addEventListener('submit', submitDesktopThreadReply)
@@ -34566,7 +34589,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         resizeScoutChatInput()
 		scoutChatMessageAttempt = null
 		scoutChatProjectGeneration += 1
-		if (scoutChatProjectContext.selected?.text !== scoutChatInput.value.trim() || scoutChatProjectContext.selected?.threadId !== activeScoutThreadId) scoutChatProjectContext.selected = null
+		if (scoutChatProjectContext.selected?.threadId !== activeScoutThreadId) scoutChatProjectContext.selected = null
 		scoutChatProjectContext.choices = []
 		scoutChatProjectContext.status = 'unlinked'
 		if (scoutChatProjectChooser?.open) scoutChatProjectChooser.close()
@@ -52652,10 +52675,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  button.type = 'button'
 		  button.className = 'home-project-choice pressable'
 		  button.setAttribute('role', 'radio')
-		  button.setAttribute('aria-checked', String(choice.token ? String(selected?.token || '') === String(choice.token) : scoutChatProjectContext.explicitNone))
+		  button.setAttribute('aria-checked', String(choice.token ? (choice.choiceKey ? selected?.choiceKey === choice.choiceKey : String(selected?.token || '') === String(choice.token)) : scoutChatProjectContext.explicitNone))
 		  button.textContent = choice.title
 		  button.addEventListener('click', () => {
-			scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId } : null
+			scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId, sourceKey: scoutChatProjectSourceKey() } : null
 			scoutChatProjectContext.explicitNone = !choice.token
 			renderScoutChatProjectContext()
 			if (scoutChatProjectChooser?.open) scoutChatProjectChooser.close()
@@ -52664,15 +52687,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		}))
 	  }
 
+	  function scoutChatProjectAttachmentHandles(files = pendingScoutFiles) {
+		return (Array.isArray(files) ? files : []).map(file => ({
+		  sourceId: String(file?.sourceId || '').trim(),
+		  sourceRevision: String(file?.sourceRevision || '').trim()
+		}))
+	  }
+
+	  function scoutChatProjectSourceKey(files = pendingScoutFiles, replyTarget = scoutChatReplyTarget) {
+		return JSON.stringify({ attachmentHandles: scoutChatProjectAttachmentHandles(files), replyToMessageId: String(replyTarget?.messageId || '') })
+	  }
+
+	  function rebindOpaqueProjectChoice(current, suggested, choices = []) {
+		if (current) {
+		  const key = String(current.choiceKey || '').trim()
+		  if (!key) return null
+		  const refreshed = [suggested, ...(Array.isArray(choices) ? choices : [])]
+			.find(choice => choice?.token && String(choice?.choiceKey || '').trim() === key)
+		  return refreshed || null
+		}
+		return suggested?.token && String(suggested?.choiceKey || '').trim() ? suggested : null
+	  }
+
+	  function scheduleScoutChatProjectContextRefresh({ preserveAttempt = false } = {}) {
+		scoutChatProjectGeneration += 1
+		if (!preserveAttempt) scoutChatMessageAttempt = null
+		window.clearTimeout(scoutChatProjectTimer)
+		if (authedUser && activeScoutThreadId) scoutChatProjectTimer = window.setTimeout(() => void loadScoutChatProjectContext(), 220)
+	  }
+
 	  async function loadScoutChatProjectContext() {
 		if (!authedUser || !activeScoutThreadId || !scoutChatInput) return
 		const generation = ++scoutChatProjectGeneration
 		const text = scoutChatInput.value.trim()
 		const threadId = activeScoutThreadId
+		const sourceKey = scoutChatProjectSourceKey()
+		const attachmentHandles = scoutChatProjectAttachmentHandles()
+		const replyToMessageId = String(scoutChatReplyTarget?.messageId || '')
 		try {
 		  const response = await fetch('/assistant/project-context', {
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
-			body: JSON.stringify({ text, destination: { route: 'thread', threadId } })
+			body: JSON.stringify({ text, destination: { route: 'thread', threadId }, attachmentHandles, ...(replyToMessageId ? { replyToMessageId } : {}) })
 		  })
 		  const payload = await response.json().catch(() => ({}))
 		  if (generation !== scoutChatProjectGeneration || threadId !== activeScoutThreadId) return
@@ -52682,12 +52737,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			scoutChatProjectContext.selected = null
 			scoutChatProjectContext.explicitNone = false
 		  }
+		  const currentSelection = scoutChatProjectContext.selected
+		  const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)
 		  scoutChatProjectContext = { ...scoutChatProjectContext, ...next, choices: Array.isArray(next.choices) ? next.choices : [] }
 		  if (!next.available) {
 			scoutChatProjectContext.selected = null
 			scoutChatProjectContext.explicitNone = false
 		  }
-		  if (!scoutChatProjectContext.selected && !scoutChatProjectContext.explicitNone && next.suggested?.token) scoutChatProjectContext.selected = { ...next.suggested, text, threadId }
+		  if (!scoutChatProjectContext.explicitNone) {
+			scoutChatProjectContext.selected = rebound ? { ...rebound, text, threadId, sourceKey } : null
+		  }
 		  renderScoutChatProjectContext()
 		} catch (_) {
 		  if (generation !== scoutChatProjectGeneration) return
@@ -53514,14 +53573,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
-		const selectedProject = scoutChatProjectContext.selected
-		if (selectedProject?.token && files.length) {
-		  showToast({ text: 'Send the Project-linked message first, then attach files in the next turn.', kind: 'note' })
+	        const selectedProject = scoutChatProjectContext.selected
+		if (selectedProject?.token && selectedProject.sourceKey !== scoutChatProjectSourceKey(files, scoutChatReplyTarget)) {
+		  showToast({ text: 'Project context is refreshing for these sources. Try Send again in a moment.', kind: 'note' })
 		  return false
 		}
 	        if (authedUser) {
-	          pendingScoutFiles = []
-	          renderPendingScoutFiles()
+		  if (pendingScoutFiles.length) {
+			pendingScoutFiles = []
+			renderPendingScoutFiles()
+		  }
 	          sendScoutChatViaOffice(trimmed, files)
 	          return true
 	        }
@@ -53549,10 +53610,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const replyTarget = scoutChatReplyTarget && (!scoutChatReplyTarget.threadId || scoutChatReplyTarget.threadId === activeScoutThreadId)
 	          ? scoutChatReplyTarget
 	          : null
+		const projectSourceKey = scoutChatProjectSourceKey(files, replyTarget)
 	        scoutFollowUpTarget = null
 	        scoutChatReplyTarget = null
 	        renderScoutFollowUpTarget()
-		const projectContextToken = !files.length && scoutChatProjectContext.selected?.text === String(text || '').trim() && scoutChatProjectContext.selected?.threadId === activeScoutThreadId
+		const projectContextToken = scoutChatProjectContext.selected?.text === String(text || '').trim() && scoutChatProjectContext.selected?.threadId === activeScoutThreadId && scoutChatProjectContext.selected?.sourceKey === projectSourceKey
 		  ? String(scoutChatProjectContext.selected.token || '')
 		  : ''
 	        const ts = new Date().toISOString()
@@ -53672,6 +53734,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			scoutChatInput.value = text
 			resizeScoutChatInput()
 			scoutChatInput.focus()
+		  }
+		  if (projectContextToken && files.length && pendingScoutFiles.length === 0) {
+			pendingScoutFiles = files.slice()
+			renderPendingScoutFiles({ preserveAttempt: true })
+		  }
+		  if (projectContextToken && replyTarget?.messageId && !scoutChatReplyTarget) {
+			scoutChatReplyTarget = replyTarget
+			renderScoutFollowUpTarget()
+			scheduleScoutChatProjectContextRefresh({ preserveAttempt: true })
 		  }
 	          const message = error.message || 'assistant query failed'
 	          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
@@ -54048,7 +54119,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return ext && ext !== name ? ext.toLowerCase() : 'file'
 	      }
 
-	      function renderPendingScoutFiles() {
+	      function renderPendingScoutFiles({ preserveAttempt = false } = {}) {
 	        if (!scoutChatPendingFiles) {
 	          return
 	        }
@@ -54058,6 +54129,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          pendingScoutFiles.splice(index, 1)
 	          renderPendingScoutFiles()
 	        })))
+		scheduleScoutChatProjectContextRefresh({ preserveAttempt })
 	      }
 
 	      function scoutChatPendingFileNode(file, onRemove) {
@@ -54192,6 +54264,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            () => {
 	              scoutChatReplyTarget = null
 	              renderScoutFollowUpTarget()
+			  scheduleScoutChatProjectContextRefresh()
 	            }
 	          ))
 	        }
@@ -60005,6 +60078,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function closeDesktopChatContext(options = {}) {
 	        chatContextGeneration += 1
+		chatContextProjectGeneration += 1
+		window.clearTimeout(chatContextProjectTimer)
+		chatContextProjectContext = { available: false, scopeKey: '', choices: [], selected: null, explicitNone: false }
+		if (chatContextProjectChooser?.open) chatContextProjectChooser.close()
+		renderDesktopReplyProjectContext()
 	        chatContextState = null
 	        closeMentionPopover()
 	        if (chatContextRail) chatContextRail.hidden = true
@@ -60023,6 +60101,75 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatContextReplySend) {
 	          chatContextReplySend.disabled = !String(chatContextReplyInput?.value || '').trim() && pendingDesktopReplyFiles.length === 0
 	        }
+	      }
+
+	      function desktopReplyProjectSourceKey(files = pendingDesktopReplyFiles, state = chatContextState) {
+		return JSON.stringify({ attachmentHandles: scoutChatProjectAttachmentHandles(files), replyToMessageId: String(state?.rootMessageId || '') })
+	      }
+
+	      function renderDesktopReplyProjectContext() {
+		const selected = chatContextProjectContext.selected
+		if (chatContextProjectChip) {
+		  chatContextProjectChip.hidden = !Boolean(chatContextState?.mode === 'thread' && chatContextProjectContext.available)
+		  chatContextProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : chatContextProjectContext.explicitNone ? 'No project' : 'Add project'
+		  chatContextProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : chatContextProjectContext.explicitNone ? 'No project. Change project' : 'Add project')
+		}
+		if (!chatContextProjectChoices) return
+		const rows = [{ title: 'No project', token: '', choiceKey: '' }, ...(chatContextProjectContext.choices || [])]
+		chatContextProjectChoices.replaceChildren(...rows.map(choice => {
+		  const button = document.createElement('button')
+		  button.type = 'button'
+		  button.className = 'home-project-choice pressable'
+		  button.setAttribute('role', 'radio')
+		  const checked = choice.token ? (choice.choiceKey ? selected?.choiceKey === choice.choiceKey : selected?.token === choice.token) : chatContextProjectContext.explicitNone
+		  button.setAttribute('aria-checked', String(checked))
+		  button.textContent = choice.title
+		  button.addEventListener('click', () => {
+			chatContextProjectContext.selected = choice.token ? { ...choice, text: String(chatContextReplyInput?.value || '').trim(), sourceKey: desktopReplyProjectSourceKey() } : null
+			chatContextProjectContext.explicitNone = !choice.token
+			renderDesktopReplyProjectContext()
+			chatContextProjectChooser?.close()
+		  })
+		  return button
+		}))
+	      }
+
+	      async function loadDesktopReplyProjectContext() {
+		const state = chatContextState
+		if (!authedUser || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
+		const generation = ++chatContextProjectGeneration
+		const text = String(chatContextReplyInput?.value || '').trim()
+		const sourceKey = desktopReplyProjectSourceKey()
+		try {
+		  const response = await fetch('/assistant/project-context', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+			body: JSON.stringify({ text, destination: { route: 'thread', threadId: state.threadId }, attachmentHandles: scoutChatProjectAttachmentHandles(pendingDesktopReplyFiles), replyToMessageId: state.rootMessageId })
+		  })
+		  const payload = await response.json().catch(() => ({}))
+		  if (generation !== chatContextProjectGeneration || state !== chatContextState) return
+		  if (!response.ok) throw new Error(payload?.error || 'Project context changed.')
+		  const next = payload?.projectContext || { available: false, choices: [] }
+		  if (chatContextProjectContext.scopeKey && next.scopeKey && chatContextProjectContext.scopeKey !== next.scopeKey) {
+			chatContextProjectContext.selected = null
+			chatContextProjectContext.explicitNone = false
+		  }
+		  const currentSelection = chatContextProjectContext.selected
+		  const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)
+		  chatContextProjectContext = { ...chatContextProjectContext, ...next, choices: Array.isArray(next.choices) ? next.choices : [] }
+		  if (!next.available) chatContextProjectContext.selected = null
+		  else if (!chatContextProjectContext.explicitNone) chatContextProjectContext.selected = rebound ? { ...rebound, text, sourceKey } : null
+		  renderDesktopReplyProjectContext()
+		} catch {
+		  if (generation !== chatContextProjectGeneration) return
+		  chatContextProjectContext = { available: false, scopeKey: '', choices: [], selected: null, explicitNone: false }
+		  renderDesktopReplyProjectContext()
+		}
+	      }
+
+	      function scheduleDesktopReplyProjectContext() {
+		chatContextProjectGeneration += 1
+		window.clearTimeout(chatContextProjectTimer)
+		if (chatContextState?.mode === 'thread') chatContextProjectTimer = window.setTimeout(() => void loadDesktopReplyProjectContext(), 220)
 	      }
 
 	      function clearPendingDesktopReplyFiles() {
@@ -60054,6 +60201,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          renderPendingDesktopReplyFiles()
 	        })))
 	        syncDesktopReplyComposerState()
+		scheduleDesktopReplyProjectContext()
 	      }
 
 	      function showDesktopChatContext({ mode, title, meta, trigger, reply = false }) {
@@ -60090,6 +60238,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reply: true
 	        })) return
 	        chatContextState = { mode: 'thread', threadId: String(thread?.id || ''), rootMessageId: String(root.id) }
+		chatContextProjectContext = { available: false, scopeKey: '', choices: [], selected: null, explicitNone: false }
+		renderDesktopReplyProjectContext()
+		scheduleDesktopReplyProjectContext()
 	        const hasReplies = desktopChatReplyTopology(messages).repliesFor(root).length > 0
 	        // A brand-new long parent must open at its beginning. Established
 	        // threads land on their latest replies, matching the reply-first
@@ -60105,7 +60256,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const files = pendingDesktopReplyFiles.slice()
 	        if ((!text && !files.length) || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
 	        chatContextReplySend.disabled = true
-	        const operationKey = JSON.stringify({ threadId: state.threadId, rootMessageId: state.rootMessageId, text, files })
+		const projectSourceKey = desktopReplyProjectSourceKey(files, state)
+		const selectedProject = chatContextProjectContext.selected
+		const projectContextToken = selectedProject?.text === text && selectedProject?.sourceKey === projectSourceKey ? String(selectedProject.token || '') : ''
+		if (selectedProject?.token && !projectContextToken) {
+		  chatContextReplySend.disabled = false
+		  showToast({ text: 'Project context is refreshing for these sources. Try Send again in a moment.', kind: 'note' })
+		  return
+		}
+	        const operationKey = JSON.stringify({ threadId: state.threadId, rootMessageId: state.rootMessageId, text, files, projectContextToken })
 	        const replyAttempt = chatContextReplyAttempt?.key === operationKey
 	          ? chatContextReplyAttempt
 	          : { key: operationKey, operationId: globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}` }
@@ -60116,13 +60275,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
 	              method: 'POST',
 	              headers: { 'Content-Type': 'application/json' },
-	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })
+	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId, ...(projectContextToken ? { projectContextToken } : {}) })
 	            })
 	          } catch {
 	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
 	              method: 'POST',
 	              headers: { 'Content-Type': 'application/json' },
-	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })
+	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId, ...(projectContextToken ? { projectContextToken } : {}) })
 	            })
 	          }
 	          const payload = await response.json().catch(() => ({}))
@@ -60136,6 +60295,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            throw new Error('Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.')
 	          }
 	          chatContextReplyAttempt = null
+		  chatContextProjectContext.selected = null
+		  chatContextProjectContext.explicitNone = false
 		          upsertScoutChatThread(payload.thread, { select: false })
 		          syncDesktopReplySurfaces(payload.thread, state.rootMessageId, { clearComposer: true, scrollRailToBottom: true })
 	        } catch (error) {

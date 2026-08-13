@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 21 {
-		t.Fatalf("migration count = %d, want 21", len(migrations))
+	if len(migrations) != 22 {
+		t.Fatalf("migration count = %d, want 22", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -228,6 +228,24 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[20].SQL, "Project chat correction receipts are append-only") ||
 		!strings.Contains(migrations[20].SQL, "Project chat source mutation receipt requires exact invalidated canonical truth") {
 		t.Fatalf("unexpected Project chat correction migration: %+v", migrations[20])
+	}
+	if migrations[21].Version != 22 || migrations[21].Name != "0022_stride_project_chat_source_groups.sql" ||
+		migrations[21].SHA256 != sha256.Sum256([]byte(migrations[21].SQL)) ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_rich_message_part_revisions") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_groups") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_group_members") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_reply_dependencies") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_group_invalidations") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_group_drift_receipts") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_group_authority_loss_receipts") ||
+		!strings.Contains(migrations[21].SQL, "CREATE TABLE stride_project_chat_source_group_correction_receipts") ||
+		!strings.Contains(migrations[21].SQL, "subject_contract_type IN ('conversation_event','rich_message_part')") ||
+		!strings.Contains(migrations[21].SQL, "Project source receipt requires exact authorized canonical rich message part") ||
+		!strings.Contains(migrations[21].SQL, "Project chat source group requires exact complete member truth") ||
+		!strings.Contains(migrations[21].SQL, "Project chat source group associations transition atomically") ||
+		!strings.Contains(migrations[21].SQL, "Project chat source group drift receipt requires exact drift, revoked group and four-family purge") ||
+		!strings.Contains(migrations[21].SQL, "Project chat source group request fingerprint is not reproducible") {
+		t.Fatalf("unexpected Project chat source group migration: %+v", migrations[21])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

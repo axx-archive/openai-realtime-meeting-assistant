@@ -57,6 +57,7 @@ import { buildTimelineMarkers } from "../messaging/timelineMarkers";
 import { CatchUpSheet } from "../messaging/CatchUpSheet";
 import { MessageActionSheet } from "../messaging/MessageActionSheet";
 import { ProjectCorrectionSheet } from "../messaging/ProjectCorrectionSheet";
+import { rebindOpaqueProjectChoice } from "../messaging/projectChoice";
 import { LongMessageSheet } from "../messaging/LongMessageSheet";
 import { ThreadDetailSheet } from "../messaging/ThreadDetailSheet";
 import { MentionComposerInput } from "../messaging/MentionComposerInput";
@@ -418,7 +419,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [messages, setMessages] = useState<ScoutMessage[]>([]);
   const [draft, setDraft] = useState("");
 	const [projectContext, setProjectContext] = useState<{ available: boolean; scopeKey: string; choices: HomeProjectChoice[] }>({ available: false, scopeKey: "", choices: [] });
-	const [selectedProject, setSelectedProject] = useState<(HomeProjectChoice & { text: string; threadId: string }) | null>(null);
+	const [selectedProject, setSelectedProject] = useState<(HomeProjectChoice & { text: string; threadId: string; sourceKey: string }) | null>(null);
 	const [projectExplicitNone, setProjectExplicitNone] = useState(false);
 	const [projectChooserOpen, setProjectChooserOpen] = useState(false);
 	const projectContextGenerationRef = useRef(0);
@@ -426,6 +427,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
+	const projectAttachmentHandles = useMemo(() => pendingFiles.map((file) => ({
+		sourceId: String(file.sourceId ?? "").trim(),
+		sourceRevision: String(file.sourceRevision ?? "").trim(),
+	})), [pendingFiles]);
+	const projectSourceKey = useMemo(() => JSON.stringify(projectAttachmentHandles), [projectAttachmentHandles]);
   const [stagingFiles, setStagingFiles] = useState<
     Array<{ id: string; name: string; mime: string; uri?: string }>
   >([]);
@@ -1085,7 +1091,6 @@ export function ThreadScreen({ route, navigation }: Props) {
 
 	useEffect(() => {
 		const generation = ++projectContextGenerationRef.current;
-		setSelectedProject((current) => current && (current.text !== draft.trim() || current.threadId !== route.params.threadId) ? null : current);
 		if (!sessionToken || editingMessage) {
 			setProjectContext({ available: false, scopeKey: "", choices: [] });
 			setSelectedProject(null);
@@ -1094,7 +1099,11 @@ export function ThreadScreen({ route, navigation }: Props) {
 			return;
 		}
 		const timer = setTimeout(() => {
-			void api.projectContext(sessionToken, { text: draft.trim(), destination: { route: "thread", threadId: route.params.threadId } }).then((response) => {
+			void api.projectContext(sessionToken, {
+				text: draft.trim(),
+				destination: { route: "thread", threadId: route.params.threadId },
+				attachmentHandles: projectAttachmentHandles,
+			}).then((response) => {
 				if (generation !== projectContextGenerationRef.current) return;
 				const next = response.projectContext;
 				setProjectContext((current) => {
@@ -1104,7 +1113,10 @@ export function ThreadScreen({ route, navigation }: Props) {
 					}
 					return { available: next.available, scopeKey: next.scopeKey ?? "", choices: Array.isArray(next.choices) ? next.choices : [] };
 				});
-				if (!projectExplicitNone && next.suggested?.token) setSelectedProject((current) => current ?? { ...next.suggested!, text: draft.trim(), threadId: route.params.threadId });
+				setSelectedProject((current) => {
+					const refreshed = rebindOpaqueProjectChoice(current, next.suggested, next.choices, projectExplicitNone);
+					return refreshed ? { ...refreshed, text: draft.trim(), threadId: route.params.threadId, sourceKey: projectSourceKey } : null;
+				});
 			}).catch(() => {
 				if (generation !== projectContextGenerationRef.current) return;
 				setProjectContext({ available: false, scopeKey: "", choices: [] });
@@ -1114,7 +1126,7 @@ export function ThreadScreen({ route, navigation }: Props) {
 			});
 		}, 220);
 		return () => clearTimeout(timer);
-	}, [draft, editingMessage, projectExplicitNone, route.params.threadId, sessionToken]);
+	}, [draft, editingMessage, projectAttachmentHandles, projectExplicitNone, projectSourceKey, route.params.threadId, sessionToken]);
 
 	useEffect(() => {
 		setSelectedProject(null);
@@ -1314,7 +1326,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   async function send(textOverride?: string) {
     const text = (textOverride ?? draft).trim();
     const messageFiles = textOverride === undefined ? pendingFiles : [];
-	const projectContextToken = !editingMessage && selectedProject?.text === text && selectedProject.threadId === route.params.threadId ? selectedProject.token : "";
+	const projectContextToken = !editingMessage && selectedProject?.text === text && selectedProject.threadId === route.params.threadId && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : "";
     if (
       !sessionToken ||
       (!text && messageFiles.length === 0) ||
@@ -1322,8 +1334,8 @@ export function ThreadScreen({ route, navigation }: Props) {
       uploading
     )
       return;
-	if (projectContextToken && messageFiles.length > 0) {
-		setError("Send the Project-linked message first, then attach files in the next turn.");
+	if (!editingMessage && selectedProject?.token && !projectContextToken) {
+		setError("Project context is refreshing for these sources. Try Send again in a moment.");
 		return;
 	}
     stopTyping();
@@ -1392,6 +1404,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     async (
       text: string,
       files: readonly ScoutFileAttachment[],
+	  projectContextToken: string,
     ): Promise<boolean> => {
       const rootID = String(threadContextRootID ?? "").trim();
       if (
@@ -1410,6 +1423,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         rootID,
         text: text.trim(),
         files,
+		projectContextToken,
       });
       const replyAttempt =
         threadReplyAttemptRef.current?.key === operationKey
@@ -1424,6 +1438,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           [...files],
           rootID,
           replyAttempt.operationId,
+		  projectContextToken,
         );
         threadReplyAttemptRef.current = null;
         applyTranscriptSnapshot(
@@ -2924,6 +2939,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       <ThreadDetailSheet
         visible={Boolean(threadContextRoot)}
         title={threadTitle}
+		threadId={route.params.threadId}
         root={threadContextRoot}
         replies={threadContextReplies}
         viewerEmail={email}
@@ -3606,8 +3622,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 			</View>
 			<ScrollView contentContainerStyle={styles.projectChoices}>
 			  {[{ title: "No project", token: "" }, ...projectContext.choices].map((choice) => {
-				const selected = choice.token ? String(selectedProject?.token ?? "") === choice.token : projectExplicitNone;
-				return <Pressable key={choice.token || "none"} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={choice.title} onPress={() => { setSelectedProject(choice.token ? { ...choice, text: draft.trim(), threadId: route.params.threadId } : null); setProjectExplicitNone(!choice.token); setProjectChooserOpen(false); }} style={({ pressed }) => [styles.projectChoice, selected && styles.projectChoiceSelected, pressed && styles.headerActionPressed]}><Text maxFontSizeMultiplier={1.8} style={styles.projectChoiceText}>{choice.title}</Text>{selected ? <SymbolView name="checkmark" size={16} tintColor={colors.ember} /> : null}</Pressable>;
+				const selected = choice.token ? (choice.choiceKey ? selectedProject?.choiceKey === choice.choiceKey : String(selectedProject?.token ?? "") === choice.token) : projectExplicitNone;
+				return <Pressable key={choice.choiceKey || choice.token || "none"} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={choice.title} onPress={() => { setSelectedProject(choice.token ? { ...choice, text: draft.trim(), threadId: route.params.threadId, sourceKey: projectSourceKey } : null); setProjectExplicitNone(!choice.token); setProjectChooserOpen(false); }} style={({ pressed }) => [styles.projectChoice, selected && styles.projectChoiceSelected, pressed && styles.headerActionPressed]}><Text maxFontSizeMultiplier={1.8} style={styles.projectChoiceText}>{choice.title}</Text>{selected ? <SymbolView name="checkmark" size={16} tintColor={colors.ember} /> : null}</Pressable>;
 			  })}
 			</ScrollView>
 			<Text style={styles.projectSheetHint}>Nothing changes until you send.</Text>

@@ -679,8 +679,33 @@ func TestOpenAIReplyMediaContentCarriesAuthorizedGeneratedImage(t *testing.T) {
 	if len(content) != 1 || content[0].Type != "input_image" || !strings.HasPrefix(content[0].ImageURL, "data:image/png;base64,") {
 		t.Fatalf("reply media=%+v, want one inline image", content)
 	}
+	if linked := app.openAIReplyMediaContentForTurn(true, "aj@shareability.com", thread.ID, "generated-image-message"); len(linked) != 0 {
+		t.Fatalf("Project-linked generated-image parent reached provider media: %+v", linked)
+	}
+	if ordinary := app.openAIReplyMediaContentForTurn(false, "aj@shareability.com", thread.ID, "generated-image-message"); len(ordinary) != 1 {
+		t.Fatalf("ordinary generated-image reply lost media: %+v", ordinary)
+	}
 	if leaked := app.openAIReplyMediaContent("outsider@example.com", thread.ID, "generated-image-message"); len(leaked) != 0 {
 		t.Fatalf("unauthorized reply media leaked: %+v", leaked)
+	}
+
+	user := accountStore().findUser("aj@shareability.com")
+	granted := grantTestPendingAttachment(t, app, user, thread, ref)
+	response, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "File parent", []scoutChatFileAttachment{{
+		Name: "parent.png", Mime: "image/png", Ref: ref, SourceID: granted.SourceID, SourceRevision: granted.SourceRevision,
+	}}, "")
+	if err != nil {
+		t.Fatalf("append file parent: %v", err)
+	}
+	fileParent, ok := response["message"].(scoutChatMessageRecord)
+	if !ok || fileParent.ID == "" {
+		t.Fatalf("file parent response=%T %+v", response["message"], response["message"])
+	}
+	if ordinary := app.openAIReplyMediaContentForTurn(false, user.Email, thread.ID, fileParent.ID); len(ordinary) != 1 {
+		t.Fatalf("ordinary file reply lost media: %+v", ordinary)
+	}
+	if linked := app.openAIReplyMediaContentForTurn(true, user.Email, thread.ID, fileParent.ID); len(linked) != 0 {
+		t.Fatalf("Project-linked file parent reached provider media: %+v", linked)
 	}
 }
 
@@ -1344,6 +1369,85 @@ func TestAttachmentBlobReadDropsBytesRevokedDuringRead(t *testing.T) {
 	t.Cleanup(func() { attachmentBlobReadAfterProbe = previousProbe })
 	if blocks := app.attachmentContentBlocksAuthorized(user, thread, []scoutChatFileAttachment{file}, reservationID); len(blocks) != 0 {
 		t.Fatalf("revoked source produced %d model blocks", len(blocks))
+	}
+}
+
+func TestCommittedOpenAIAttachmentVerdictSeparatesAuthorizationFromBlockAdmission(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "provider verdict", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range []struct {
+		name string
+		data []byte
+		mime string
+	}{
+		{name: "unsupported_gif", data: []byte("GIF89a"), mime: "image/gif"},
+		{name: "over_budget_image", data: make([]byte, anthropicMaxRequestImageBytes+1), mime: "image/png"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ref, err := putBlob(testCase.data, testCase.mime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := grantTestPendingAttachment(t, app, user, thread, ref)
+			file.Name = testCase.name
+			messageID := "provider-verdict-" + testCase.name
+			meta, _ := blobStatForRef(ref)
+			reservationID := messageID + "-reservation"
+			if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+				t.Fatal(err)
+			}
+			message := scoutChatMessageRecord{
+				ID: messageID, Kind: "message", Role: "user", Text: "provider verdict",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorEmail: user.Email,
+				Files: []scoutChatFileAttachment{file}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+				attachmentReservationID: reservationID,
+			}
+			if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+				t.Fatal(err)
+			}
+			blocks, authorized := app.committedOpenAIAttachmentContentVerdict(user.Email, thread.ID, messageID,
+				[]scoutChatFileAttachment{file})
+			if !authorized || len(blocks) != 0 {
+				t.Fatalf("authorized=%v blocks=%d, want valid source with intentional omission", authorized, len(blocks))
+			}
+		})
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	messageID := "provider-verdict-revoked"
+	meta, _ := blobStatForRef(ref)
+	reservationID := messageID + "-reservation"
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatal(err)
+	}
+	message := scoutChatMessageRecord{
+		ID: messageID, Kind: "message", Role: "user", Text: "provider verdict",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorEmail: user.Email,
+		Files: []scoutChatFileAttachment{file}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+		attachmentReservationID: reservationID,
+	}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+		t.Fatal(err)
+	}
+	previousProbe := attachmentBlobReadAfterProbe
+	attachmentBlobReadAfterProbe = func(sourceID string) {
+		if sourceID == file.SourceID {
+			_ = app.revokeAttachmentSource(sourceID)
+		}
+	}
+	t.Cleanup(func() { attachmentBlobReadAfterProbe = previousProbe })
+	blocks, authorized := app.committedOpenAIAttachmentContentVerdict(user.Email, thread.ID, messageID,
+		[]scoutChatFileAttachment{file})
+	if authorized || len(blocks) != 0 {
+		t.Fatalf("revoked during read authorized=%v blocks=%d", authorized, len(blocks))
 	}
 }
 

@@ -455,6 +455,41 @@ type scoutChatProjectLinkOperation struct {
 	ProjectTitle    string `json:"projectTitle"`
 	Basis           string `json:"basis"`
 	AssociationID   string `json:"associationId,omitempty"`
+	// SourceManifestDigest and SourceGroupID upgrade an accepted existing-thread
+	// Send to the all-or-nothing event/attachment/reply contract. Their absence
+	// is the durable v1 text-only compatibility shape.
+	SourceManifestDigest string                             `json:"sourceManifestDigest,omitempty"`
+	SourceGroupID        string                             `json:"sourceGroupId,omitempty"`
+	AssociationIDs       []string                           `json:"associationIds,omitempty"`
+	AttachmentSources    []scoutChatProjectAttachmentSource `json:"attachmentSources,omitempty"`
+	ReplySource          *scoutChatProjectReplySource       `json:"replySource,omitempty"`
+	ReservationID        string                             `json:"reservationId,omitempty"`
+}
+
+type scoutChatProjectAttachmentSource struct {
+	Ordinal             int    `json:"ordinal"`
+	SourceID            string `json:"sourceId"`
+	SourceRevision      string `json:"sourceRevision"`
+	BlobRef             string `json:"blobRef"`
+	BlobDigest          string `json:"blobDigest"`
+	Mime                string `json:"mime"`
+	Size                int64  `json:"size"`
+	DestinationRevision string `json:"destinationRevision"`
+	OriginFileID        string `json:"originFileId,omitempty"`
+	OriginRevision      string `json:"originRevision,omitempty"`
+}
+
+type scoutChatProjectReplySource struct {
+	MessageID       string `json:"messageId"`
+	EventID         string `json:"eventId"`
+	EventRevision   int64  `json:"eventRevision"`
+	EventDigest     string `json:"eventDigest"`
+	LegacyDigest    string `json:"legacyDigest"`
+	AuthorEmail     string `json:"authorEmail"`
+	AuthorPersonID  string `json:"authorPersonId"`
+	AudienceDigest  string `json:"audienceDigest"`
+	ACLRevision     int64  `json:"aclRevision"`
+	PurgeGeneration int64  `json:"purgeGeneration"`
 }
 
 func firstScoutProjectTokenDigest(thread scoutChatThreadRecord, operationID string) string {
@@ -1118,22 +1153,54 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			ID: operationID, BodyDigest: bodyDigest,
 		})
 		if encodedToken := strings.TrimSpace(payload.ProjectContextToken); encodedToken != "" {
-			if len(payload.Files) != 0 {
-				writeAuthError(w, http.StatusConflict, "Project linking with attachments is not available yet; remove the Project or attachments and try again")
-				return
-			}
 			var projectToken homeProjectContextToken
+			var projectManifest projectChatSourceManifest
 			resolveErr := withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
 				acceptedPending := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, homeProjectTokenDigest(encodedToken))
+				destination := homeProjectDestination{Route: "thread", ThreadID: threadID}
+				handles := make([]projectChatAttachmentHandle, 0, len(payload.Files))
+				for _, file := range payload.Files {
+					handles = append(handles, projectChatAttachmentHandle{SourceID: file.SourceID, SourceRevision: file.SourceRevision})
+				}
 				var tokenErr error
-				projectToken, tokenErr = resolveHomeProjectTokenForRetry(r.Context(), encodedToken, payload.Text, homeProjectDestination{Route: "thread", ThreadID: threadID}, snapshot, acceptedPending)
+				if acceptedPending {
+					if retryThread, _, retryErr := kanbanApp.scoutChatThreadByID(user.Email, threadID); retryErr == nil {
+						projectManifest, acceptedPending = projectChatManifestFromJournal(retryThread, operationID, payload.Text, destination)
+					}
+				}
+				if !acceptedPending {
+					projectManifest, tokenErr = kanbanApp.resolveProjectChatSourceManifest(r.Context(), user, snapshot, payload.Text, destination, handles, payload.ReplyToMessageID)
+				}
+				if tokenErr != nil {
+					return tokenErr
+				}
+				projectToken, tokenErr = resolveHomeProjectTokenForRetryWithManifest(r.Context(), encodedToken, payload.Text, destination, projectManifest, snapshot, acceptedPending)
+				if tokenErr != nil && acceptedPending {
+					// Session expiry/rotation cannot authorize a new turn. It may only
+					// resume an exact operation whose confirmed legacy journal, immutable
+					// canonical receipt, complete source group, and current viewer
+					// authority all agree. The signed historical token remains the body
+					// identity while downstream checks receive the current session fields.
+					candidate, _, decodeErr := decodeSignedHomeProjectToken(r.Context(), encodedToken)
+					if decodeErr == nil {
+						acceptedDurable, resumeErr := kanbanApp.acceptedScoutProjectTurnCanonicalResume(r.Context(), user, snapshot,
+							threadID, operationID, bodyDigest, homeProjectTokenDigest(encodedToken), payload.Text, candidate, projectManifest)
+						if resumeErr != nil {
+							return resumeErr
+						}
+						if acceptedDurable {
+							projectToken, tokenErr = resolveHomeProjectTokenForRetryWithManifestState(r.Context(), encodedToken, payload.Text,
+								destination, projectManifest, snapshot, true, true)
+						}
+					}
+				}
 				return tokenErr
 			})
 			if resolveErr != nil {
 				writeAuthError(w, http.StatusConflict, errHomeProjectStale.Error())
 				return
 			}
-			messageContext = withConversationProjectLink(messageContext, conversationProjectLinkBinding{EncodedToken: encodedToken, Token: projectToken})
+			messageContext = withConversationProjectLink(messageContext, conversationProjectLinkBinding{EncodedToken: encodedToken, Token: projectToken, Manifest: projectManifest})
 		}
 		// toolTemplate is retained only as a decode-only compatibility field.
 		// Normal clients cannot arm work, authority, or an output contract with
@@ -1697,7 +1764,7 @@ func (app *kanbanBoardApp) replayConversationTurnInThread(ctx context.Context, v
 		}
 		if binding := conversationProjectLinkFromContext(ctx); binding.Token.Kind != "" {
 			for _, projectOperation := range thread.ProjectLinkOperations {
-				if projectOperation.OperationID == operation.ID && projectOperation.MessageID == message.ID && projectOperation.TokenDigest == homeProjectTokenDigest(binding.EncodedToken) && oneOf(projectOperation.State, "pending", "confirmed") {
+				if projectOperation.OperationID == operation.ID && projectOperation.MessageID == message.ID && projectOperation.TokenDigest == homeProjectTokenDigest(binding.EncodedToken) && oneOf(projectOperation.State, "pending", "confirmed", "drift_pending", "drifted") {
 					return nil, false, nil
 				}
 			}
@@ -1958,7 +2025,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if addressedAgentResolved && strings.TrimSpace(addressedAgent.DisplayName) != "" {
 		visibleWorkerName = addressedAgent.DisplayName
 	}
-	deferAttachmentDerivation := (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout && !targetedAgentWork)
+	// A Project-bound v2 turn cannot expose attachment bytes, derived text, or
+	// reply media to any provider until its complete canonical source group has
+	// committed and been reauthorized. The durable Project journal below is the
+	// first write in that path.
+	deferAttachmentDerivation := projectLinkBinding.Token.Kind != "" || (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout && !targetedAgentWork)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -1979,8 +2050,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if len(openAIAttachments) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
 	}
-	if replyToMessageID != "" && app.currentOpenAIAPIKey() != "" {
-		openAIAttachments = append(openAIAttachments, app.openAIReplyMediaContent(user.Email, thread.ID, replyToMessageID)...)
+	if projectLinkBinding.Token.Kind == "" && replyToMessageID != "" && app.currentOpenAIAPIKey() != "" {
+		openAIAttachments = append(openAIAttachments, app.openAIReplyMediaContentForTurn(false, user.Email, thread.ID, replyToMessageID)...)
 	}
 
 	userMessage := scoutChatMessageRecord{
@@ -2001,14 +2072,40 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	projectTurnPrecommitted := false
 	projectTurnCreated := false
 	if projectLinkBinding.Token.Kind != "" {
-		if turnOperation.ID == "" || len(files) != 0 || strings.TrimSpace(followUpArtifactID) != "" {
-			return nil, fmt.Errorf("Project-linked conversation turn must be a text-only ordinary message")
+		if turnOperation.ID == "" || strings.TrimSpace(followUpArtifactID) != "" ||
+			(projectLinkBinding.Token.Version == homeProjectContextV2 && !projectChatManifestMatchesFiles(projectLinkBinding.Manifest, files, replyToMessageID)) ||
+			(projectLinkBinding.Token.Version != homeProjectContextV2 && (len(files) != 0 || strings.TrimSpace(replyToMessageID) != "")) {
+			return nil, fmt.Errorf("Project-linked conversation turn source manifest is invalid")
 		}
 		pendingThread, _, created, beginErr := app.beginScoutExistingProjectTurn(ctx, user, thread, userMessage, turnOperation, projectLinkBinding)
 		if beginErr != nil {
 			return nil, beginErr
 		}
-		confirmedThread, reconcileErr := app.reconcileScoutProjectLink(ctx, user, pendingThread, turnOperation.ID, userMessage.ID, "", turnOperation.ID, text, projectLinkBinding.Token)
+		if state := scoutHomeProjectOperationState(pendingThread, turnOperation.ID); oneOf(state, "drift_pending", "drifted") {
+			groupID := projectChatID("project_source_group", projectLinkBinding.Token.OrganizationID, thread.ID, userMessage.ID, turnOperation.ID)
+			driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+			if state == "drift_pending" {
+				if committed, committedErr := currentHomeProjectStore().committedProjectChatSourceGroupDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID); committedErr != nil {
+					return nil, committedErr
+				} else if committed {
+					if finalizeErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); finalizeErr != nil {
+						return nil, finalizeErr
+					}
+				} else {
+					authorityOperationID := projectChatID("project_source_group_authority_loss", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+					if authorityCommitted, authorityErr := currentHomeProjectStore().committedProjectChatSourceGroupAuthorityLoss(ctx,
+						projectLinkBinding.Token.OrganizationID, groupID, authorityOperationID); authorityErr != nil {
+						return nil, authorityErr
+					} else if authorityCommitted {
+						if finalizeErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); finalizeErr != nil {
+							return nil, finalizeErr
+						}
+					}
+				}
+			}
+			return nil, ErrProjectAuthorityConflict
+		}
+		confirmedThread, reconcileErr := app.reconcileScoutProjectLinkWithManifest(ctx, user, pendingThread, turnOperation.ID, userMessage.ID, "", turnOperation.ID, text, projectLinkBinding)
 		if reconcileErr != nil {
 			if terminal, terminalErr := app.failScoutProjectLink(user, pendingThread, turnOperation.ID, userMessage.ID, "", reconcileErr); terminalErr == nil {
 				messageIndex := scoutChatMessageIndex(terminal, userMessage.ID)
@@ -2027,8 +2124,135 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		thread, userMessage = confirmedThread, confirmedThread.Messages[messageIndex]
 		projectTurnPrecommitted = true
 		projectTurnCreated = created
+		if projectLinkBinding.Token.Version == homeProjectContextV2 {
+			if commitErr := app.commitScoutProjectSourceGroupAttachments(user, confirmedThread, turnOperation.ID); commitErr != nil {
+				return nil, commitErr
+			}
+		}
 		attachmentCommitted = true
 		deliverScoutChatThreadUpdateWithContext(ctx, confirmedThread, userMessage)
+		if projectLinkBinding.Token.Version == homeProjectContextV2 {
+			groupID := projectChatID("project_source_group", projectLinkBinding.Token.OrganizationID, thread.ID, userMessage.ID, turnOperation.ID)
+			freshThread, _, freshThreadErr := app.scoutChatThreadByID(user.Email, thread.ID)
+			reauthorizeErr := withCurrentHomeProjectAuthorityRequestContext(ctx, projectLinkBinding.Token, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+				if snapshot.Organization.Header.ID != projectLinkBinding.Token.OrganizationID {
+					return errHomeProjectStale
+				}
+				if freshThreadErr != nil {
+					return freshThreadErr
+				}
+				return currentHomeProjectStore().projectChatSourceGroupFreshAuthority(ctx, snapshot, freshThread, projectLinkBinding.Token, groupID, len(files)+1)
+			})
+			attachmentsCurrent := true
+			for _, file := range files {
+				attachmentsCurrent = attachmentsCurrent && app.committedChatAttachmentAuthorized(user.Email, thread.ID, userMessage.ID, file)
+			}
+			replyCurrent := projectChatReplyJournalMatchesThread(projectLinkBinding.Manifest.Reply, freshThread)
+			if reauthorizeErr != nil || freshThreadErr != nil || !replyCurrent || !attachmentsCurrent {
+				// Loss of the interactive session alone leaves the accepted canonical
+				// turn confirmed; an exact operation retry may resume provider admission
+				// under a new current session without minting another canonical send.
+				// Project lifecycle/revision
+				// loss is handled by the distinct authority-loss receipt path; only
+				// actual source/reply drift may enter the source-drift contracts.
+				if reauthorizeErr != nil && freshThreadErr == nil && replyCurrent && attachmentsCurrent {
+					authorityReason, authorityErr := currentHomeProjectStore().projectChatSourceGroupAuthorityLossReason(ctx,
+						projectLinkBinding.Token.OrganizationID, groupID)
+					if authorityErr != nil {
+						return nil, authorityErr
+					}
+					if authorityReason != "" {
+						authorityOperationID := projectChatID("project_source_group_authority_loss", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, false); journalErr != nil {
+							return nil, journalErr
+						}
+						if authorityLossErr := currentHomeProjectStore().invalidateProjectChatSourceGroupForAuthorityLoss(ctx,
+							projectLinkBinding.Token.OrganizationID, groupID, authorityOperationID, authorityReason); authorityLossErr != nil {
+							return nil, authorityLossErr
+						}
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); journalErr != nil {
+							return nil, journalErr
+						}
+						return nil, ErrProjectAuthorityConflict
+					}
+					return nil, reauthorizeErr
+				}
+				driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+				if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, false); journalErr != nil {
+					return nil, journalErr
+				}
+				var driftErr error
+				if !attachmentsCurrent && len(files) > 0 {
+					driftErr = currentHomeProjectStore().invalidateProjectChatAttachmentGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID)
+				} else if !replyCurrent && projectLinkBinding.Manifest.Reply != nil {
+					driftErr = currentHomeProjectStore().invalidateProjectChatReplyGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID, "parent_changed")
+				} else {
+					driftErr = currentHomeProjectStore().invalidateProjectChatSourceGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID,
+						driftOperationID, "conversation_event", "source_authority_drift")
+				}
+				if driftErr != nil {
+					return nil, driftErr
+				}
+				if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); journalErr != nil {
+					return nil, journalErr
+				}
+				return nil, ErrProjectAuthorityConflict
+			}
+			// Canonical truth is now durable and freshly authorized. Use provider-
+			// native attachment blocks without mutating Files[].Text, whose exact
+			// source digest is already part of the immutable group.
+			if app.currentOpenAIAPIKey() != "" {
+				var providerSourcesAuthorized bool
+				openAIAttachments, providerSourcesAuthorized = app.committedOpenAIAttachmentContentVerdict(user.Email, thread.ID, userMessage.ID, files)
+				// Provider block admission is intentionally narrower than source
+				// authorization: unsupported formats and request-budget omissions
+				// produce no block without revoking valid Project evidence. Recheck
+				// every exact committed source after all blob reads; only authority or
+				// readability loss terminalizes the group.
+				if len(files) > 0 && !providerSourcesAuthorized {
+					driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+					if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, false); journalErr != nil {
+						return nil, journalErr
+					}
+					if driftErr := currentHomeProjectStore().invalidateProjectChatAttachmentGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID); driftErr != nil {
+						return nil, driftErr
+					}
+					if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); journalErr != nil {
+						return nil, journalErr
+					}
+					return nil, ErrProjectAuthorityConflict
+				}
+				if replyToMessageID != "" {
+					openAIAttachments = append(openAIAttachments, app.openAIReplyMediaContentForTurn(true, user.Email, thread.ID, replyToMessageID)...)
+					postMediaThread, _, postMediaErr := app.scoutChatThreadByID(user.Email, thread.ID)
+					if postMediaErr != nil || !projectChatReplyJournalMatchesThread(projectLinkBinding.Manifest.Reply, postMediaThread) {
+						driftOperationID := projectChatID("project_source_group_drift", projectLinkBinding.Token.OrganizationID, groupID, turnOperation.ID)
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, false); journalErr != nil {
+							return nil, journalErr
+						}
+						if driftErr := currentHomeProjectStore().invalidateProjectChatReplyGroupForDrift(ctx, projectLinkBinding.Token.OrganizationID, groupID, driftOperationID, "parent_changed"); driftErr != nil {
+							return nil, driftErr
+						}
+						if journalErr := app.markScoutProjectSourceGroupDrift(user, thread.ID, turnOperation.ID, true); journalErr != nil {
+							return nil, journalErr
+						}
+						return nil, ErrProjectAuthorityConflict
+					}
+				}
+			}
+			deferAttachmentDerivation = false
+		}
+	}
+	if projectTurnPrecommitted && !projectTurnCreated {
+		freshReplayThread, _, replayErr := app.scoutChatThreadByID(user.Email, thread.ID)
+		if replayErr != nil {
+			return nil, replayErr
+		}
+		for _, candidate := range freshReplayThread.Messages {
+			if candidate.CausedByMessageID == userMessage.ID {
+				return app.committedConversationTurnResponse(ctx, user.Email, userMessage, candidate, freshReplayThread)
+			}
+		}
 	}
 	historyThread := thread
 	if projectTurnPrecommitted {

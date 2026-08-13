@@ -975,6 +975,11 @@ func (app *kanbanBoardApp) deleteAssistantFileForUser(ctx context.Context, user 
 
 	mode := "deleted"
 	var err error
+	if row.Origin != "chat" {
+		if err := app.revokeAttachmentSourcesForOrigin(fileID); err != nil {
+			return "", err
+		}
+	}
 	switch row.Origin {
 	case "deliverable":
 		artifact, ok := authorizedArtifactForActions(ctx, user, row.ArtifactID, ACLReadContent, ACLWrite)
@@ -1034,15 +1039,20 @@ func (app *kanbanBoardApp) deleteChatAttachmentFromDrive(user *userAccount, file
 	if strings.TrimSpace(file.Ref) == "" && strings.TrimSpace(file.Text) == "" {
 		return errFileSaveNotFound
 	}
+	// A Project-linked attachment is canonical source evidence. Revoke its
+	// source (and synchronously terminalize every owning source group) before
+	// changing the legacy message. A canonical failure therefore has zero
+	// legacy effect; a later legacy save failure remains fail closed because
+	// the committed grant can no longer authorize the stale file projection.
+	if strings.TrimSpace(file.SourceID) != "" {
+		if err := app.revokeAttachmentSource(file.SourceID); err != nil {
+			return err
+		}
+	}
 	thread.Messages[messageIndex].Files = append(thread.Messages[messageIndex].Files[:fileIndex], thread.Messages[messageIndex].Files[fileIndex+1:]...)
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return err
-	}
-	if strings.TrimSpace(file.SourceID) != "" {
-		if err := app.revokeAttachmentSource(file.SourceID); err != nil {
-			log.Errorf("Revoke deleted Drive chat attachment source %s failed: %v", file.SourceID, err)
-		}
 	}
 	return nil
 }

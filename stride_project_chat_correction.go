@@ -414,6 +414,14 @@ func (app *kanbanBoardApp) beginScoutProjectCorrection(user *userAccount, thread
 	if index < 0 || !projectChatMessageAuthorOnly(thread, thread.Messages[index], user) {
 		return thread, scoutChatProjectCorrectionOperation{}, false, ErrProjectAuthorityDenied
 	}
+	for _, linkOperation := range thread.ProjectLinkOperations {
+		if linkOperation.MessageID == messageID && linkOperation.SourceGroupID != "" && len(linkOperation.AssociationIDs) > 1 {
+			// The canonical group transaction owns every root/part edge. This
+			// journal remains one operation so retry can finish the exact group
+			// result after either durable store crosses its commit boundary.
+			break
+		}
+	}
 	tokenDigest := homeProjectTokenDigest(encodedToken)
 	for _, existing := range thread.ProjectCorrectionOperations {
 		if existing.OperationID != operationID {
@@ -505,6 +513,36 @@ func (app *kanbanBoardApp) applyScoutProjectCorrection(ctx context.Context, user
 	store := currentHomeProjectStore()
 	if store == nil {
 		return journaled, result, errHomeProjectUnavailable
+	}
+	if groupID, groupMembers, groupErr := store.projectChatSourceGroupForAssociation(ctx, token.OrganizationID, token.OldAssociationID); groupErr != nil {
+		return journaled, result, groupErr
+	} else if groupID != "" && groupMembers > 1 {
+		if committed, found, loadErr := store.committedProjectChatSourceGroupCorrection(ctx, operation.OrganizationID, operation.ActorPersonID,
+			operationID, token); loadErr != nil {
+			return journaled, result, loadErr
+		} else if found {
+			updated, finishErr := app.finishCommittedScoutProjectCorrection(thread.ID, message.ID, operationID, committed)
+			return updated, committed, finishErr
+		}
+		err = withCurrentProjectCorrectionAuthorityRequestContext(ctx, token, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+			var groupErr error
+			if token.Target.Kind == "remove" {
+				result, groupErr = store.removeProjectChatSourceGroup(ctx, snapshot, groupID, operationID, token)
+			} else {
+				result, groupErr = store.replaceProjectChatSourceGroup(ctx, snapshot, groupID, operationID, token)
+			}
+			return groupErr
+		})
+		if err != nil {
+			if committed, found, loadErr := store.committedProjectChatSourceGroupCorrection(ctx, operation.OrganizationID, operation.ActorPersonID,
+				operationID, token); loadErr == nil && found {
+				updated, finishErr := app.finishCommittedScoutProjectCorrection(thread.ID, message.ID, operationID, committed)
+				return updated, committed, finishErr
+			}
+			return journaled, result, err
+		}
+		updated, finishErr := app.finishScoutProjectCorrection(user, thread.ID, message.ID, operationID, result)
+		return updated, result, finishErr
 	}
 	// A prior request may have crossed the PostgreSQL commit boundary and lost
 	// its response before the legacy record finalized. Consume that immutable
@@ -1118,6 +1156,29 @@ func invalidateProjectChatSourceForMutation(ctx context.Context, user *userAccou
 	}
 	var resultRevision int64
 	err := resolver.WithCurrentTenantAuthority(ctx, StrideE10TenantSurfaceHTTP, sessionHash, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+		dependentGroups, dependencyErr := store.projectChatReplyGroupsForParent(ctx, snapshot.Organization.Header.ID,
+			projectChatID("conversation_event", snapshot.Organization.Header.ID, thread.ID, message.ID))
+		if dependencyErr != nil {
+			return dependencyErr
+		}
+		if groupID, members, groupErr := store.projectChatSourceGroupForAssociation(ctx, snapshot.Organization.Header.ID, project.AssociationID); groupErr != nil {
+			return groupErr
+		} else if groupID != "" && members > 0 {
+			driftOperationID := projectChatID("project_source_group_mutation", snapshot.Organization.Header.ID, groupID, operationID)
+			if invalidateErr := store.invalidateProjectChatRootGroupForMutation(ctx, snapshot.Organization.Header.ID, groupID,
+				driftOperationID, map[string]string{"edit": "source_edited", "delete": "source_deleted"}[kind]); invalidateErr != nil {
+				return invalidateErr
+			}
+			for _, dependentGroupID := range dependentGroups {
+				if driftErr := store.invalidateProjectChatReplyGroupForDrift(ctx, snapshot.Organization.Header.ID, dependentGroupID,
+					projectChatID("project_reply_source_mutation", snapshot.Organization.Header.ID, dependentGroupID, operationID),
+					map[string]string{"edit": "parent_edited", "delete": "parent_deleted"}[kind]); driftErr != nil {
+					return driftErr
+				}
+			}
+			resultRevision = project.AssociationRevision + 1
+			return nil
+		}
 		var invalidateErr error
 		resultRevision, invalidateErr = store.invalidateProjectChatSourceForMutation(ctx, snapshot, thread, message, operationID, requestDigest, kind)
 		return invalidateErr

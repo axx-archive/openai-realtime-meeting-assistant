@@ -15,17 +15,20 @@ import {
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { ChatMentionCandidate, ScoutFileAttachment, ScoutMessage } from '../api/types';
+import { api } from '../api/client';
+import type { ChatMentionCandidate, HomeProjectChoice, ScoutFileAttachment, ScoutMessage } from '../api/types';
 import { Glass } from '../theme/glass';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { isOwnMessageForViewer } from './messagePresentation';
 import { MessageBubble } from './MessageBubble';
 import { MentionComposerInput } from './MentionComposerInput';
 import { completeDocumentReference } from '../drive/driveModels';
+import { rebindOpaqueProjectChoice } from './projectChoice';
 
 type Props = {
   visible: boolean;
   title: string;
+  threadId: string;
   root: ScoutMessage | null;
   replies: readonly ScoutMessage[];
   viewerEmail: string;
@@ -40,7 +43,7 @@ type Props = {
   pendingFiles: readonly ScoutFileAttachment[];
   stagingFiles: ReadonlyArray<{ id: string; name: string; mime: string }>;
   onClose: () => void;
-  onSend: (text: string, files: readonly ScoutFileAttachment[]) => Promise<boolean>;
+  onSend: (text: string, files: readonly ScoutFileAttachment[], projectContextToken: string) => Promise<boolean>;
   onAddAttachment: () => void;
   onBrowseDrive: (query?: string) => void;
   documentSelection?: { key: number; name: string } | null;
@@ -68,6 +71,7 @@ type Props = {
 export function ThreadDetailSheet({
   visible,
   title,
+  threadId,
   root,
   replies,
   viewerEmail,
@@ -107,6 +111,12 @@ export function ThreadDetailSheet({
   actionOverlay,
 }: Props) {
   const [draft, setDraft] = useState('');
+	const [projectContext, setProjectContext] = useState<{ available: boolean; scopeKey: string; choices: HomeProjectChoice[] }>({ available: false, scopeKey: '', choices: [] });
+	const [selectedProject, setSelectedProject] = useState<(HomeProjectChoice & { text: string; sourceKey: string }) | null>(null);
+	const [projectExplicitNone, setProjectExplicitNone] = useState(false);
+	const [projectChooserOpen, setProjectChooserOpen] = useState(false);
+	const [projectStatus, setProjectStatus] = useState('');
+	const projectGenerationRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const sheetRef = useRef<View>(null);
   const timestampReveal = useRef(new Animated.Value(0)).current;
@@ -116,6 +126,8 @@ export function ThreadDetailSheet({
   const [keyboardOffset, setKeyboardOffset] = useState(8);
 
   const conversation = useMemo(() => root ? [root, ...replies] : [], [replies, root]);
+	const attachmentHandles = useMemo(() => pendingFiles.map((file) => ({ sourceId: String(file.sourceId ?? '').trim(), sourceRevision: String(file.sourceRevision ?? '').trim() })), [pendingFiles]);
+	const projectSourceKey = useMemo(() => JSON.stringify({ attachmentHandles, replyToMessageId: String(root?.id ?? '') }), [attachmentHandles, root?.id]);
 
   const measureSheetKeyboardOffset = useCallback(() => {
     requestAnimationFrame(() => {
@@ -142,6 +154,45 @@ export function ThreadDetailSheet({
     previousReplyCountRef.current = replies.length;
   }, [root?.id, visible]);
 
+	useEffect(() => {
+		const generation = ++projectGenerationRef.current;
+		if (!visible || !sessionToken || !threadId || !root?.id) {
+			setProjectContext({ available: false, scopeKey: '', choices: [] });
+			setSelectedProject(null);
+			setProjectExplicitNone(false);
+			setProjectChooserOpen(false);
+			return;
+		}
+		const timer = setTimeout(() => {
+			void api.projectContext(sessionToken, {
+				text: draft.trim(), destination: { route: 'thread', threadId }, attachmentHandles, replyToMessageId: String(root.id),
+			}).then((response) => {
+				if (generation !== projectGenerationRef.current) return;
+				const next = response.projectContext;
+				setProjectStatus('');
+				setProjectContext((current) => {
+					if (current.scopeKey && next.scopeKey && current.scopeKey !== next.scopeKey) {
+						setSelectedProject(null);
+						setProjectExplicitNone(false);
+					}
+					return { available: next.available, scopeKey: next.scopeKey ?? '', choices: next.choices ?? [] };
+				});
+				setSelectedProject((current) => {
+					const refreshed = rebindOpaqueProjectChoice(current, next.suggested, next.choices, projectExplicitNone);
+					return refreshed ? { ...refreshed, text: draft.trim(), sourceKey: projectSourceKey } : null;
+				});
+			}).catch(() => {
+				if (generation !== projectGenerationRef.current) return;
+				setProjectContext({ available: false, scopeKey: '', choices: [] });
+				setSelectedProject(null);
+				setProjectExplicitNone(false);
+				setProjectChooserOpen(false);
+				setProjectStatus('Project context is unavailable for these sources.');
+			});
+		}, 220);
+		return () => clearTimeout(timer);
+	}, [attachmentHandles, draft, projectExplicitNone, projectSourceKey, root?.id, sessionToken, threadId, visible]);
+
   useEffect(() => {
     if (!visible) return;
     if (replies.length > previousReplyCountRef.current) {
@@ -160,8 +211,17 @@ export function ThreadDetailSheet({
   const submit = async () => {
     const text = draft.trim();
     if ((!text && pendingFiles.length === 0) || sending || uploading) return;
-    if (await onSend(text, pendingFiles)) {
+	const projectContextToken = selectedProject?.text === text && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : '';
+	if (selectedProject?.token && !projectContextToken) {
+	  setProjectStatus('Project context is refreshing for these sources. Try Send again in a moment.');
+	  return;
+	}
+    if (await onSend(text, pendingFiles, projectContextToken)) {
       setDraft('');
+	  setProjectStatus('');
+	  setSelectedProject(null);
+	  setProjectExplicitNone(false);
+	  setProjectChooserOpen(false);
     }
   };
 
@@ -269,8 +329,20 @@ export function ThreadDetailSheet({
             {replies.length === 0 ? <View style={styles.emptyBreath} /> : null}
           </ScrollView>
 
-          {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+		  {error || projectStatus ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error || projectStatus}</Text> : null}
           <Glass radius={radius.xl} style={styles.composer}>
+			{projectContext.available ? (
+			  <Pressable
+				accessibilityRole="button"
+				accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : projectExplicitNone ? 'No project. Change project' : 'Add project'}
+				accessibilityHint="Opens the authorized Project chooser. Nothing changes until you send."
+				onPress={() => setProjectChooserOpen(true)}
+				style={({ pressed }) => [styles.projectChip, pressed && styles.pressed]}
+			  >
+				<SymbolView name="folder" size={14} tintColor={colors.emberText} />
+				<Text numberOfLines={1} maxFontSizeMultiplier={1.8} style={styles.projectChipText}>{selectedProject ? `${selectedProject.suggested ? 'Suggested' : 'Project'} · ${selectedProject.title}` : projectExplicitNone ? 'No project' : 'Add project'}</Text>
+			  </Pressable>
+			) : null}
             {pendingFiles.length > 0 || stagingFiles.length > 0 ? (
               <View accessibilityLabel="Reply attachments" style={styles.pendingFiles}>
                 {stagingFiles.map((file) => (
@@ -333,6 +405,21 @@ export function ThreadDetailSheet({
               </Pressable>
             </View>
           </Glass>
+		  <Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
+			<SafeAreaView style={styles.projectSheet}>
+			  <View style={styles.projectSheetHeader}>
+				<Text accessibilityRole="header" style={styles.projectSheetTitle}>Choose a project</Text>
+				<Pressable accessibilityRole="button" accessibilityLabel="Close project chooser" onPress={() => setProjectChooserOpen(false)} style={({ pressed }) => [styles.projectSheetClose, pressed && styles.pressed]}><SymbolView name="xmark" size={17} tintColor={colors.text1} /></Pressable>
+			  </View>
+			  <ScrollView contentContainerStyle={styles.projectChoices}>
+				{[{ title: 'No project', token: '', choiceKey: '' }, ...projectContext.choices].map((choice) => {
+				  const selected = choice.token ? (choice.choiceKey ? selectedProject?.choiceKey === choice.choiceKey : selectedProject?.token === choice.token) : projectExplicitNone;
+				  return <Pressable key={choice.choiceKey || choice.token || 'none'} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={choice.title} onPress={() => { setSelectedProject(choice.token ? { ...choice, text: draft.trim(), sourceKey: projectSourceKey } : null); setProjectExplicitNone(!choice.token); setProjectChooserOpen(false); }} style={({ pressed }) => [styles.projectChoice, selected && styles.projectChoiceSelected, pressed && styles.pressed]}><Text maxFontSizeMultiplier={1.8} style={styles.projectChoiceText}>{choice.title}</Text>{selected ? <SymbolView name="checkmark" size={16} tintColor={colors.ember} /> : null}</Pressable>;
+				})}
+			  </ScrollView>
+			  <Text style={styles.projectSheetHint}>Nothing changes until you send.</Text>
+			</SafeAreaView>
+		  </Modal>
           {actionOverlay}
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -359,6 +446,17 @@ const styles = StyleSheet.create({
   emptyBreath: { height: space[10] },
   error: { ...type.caption, color: colors.danger, paddingHorizontal: space[5], paddingBottom: space[2] },
   composer: { minHeight: 58, maxHeight: 360, gap: space[2], marginHorizontal: space[4], marginTop: space[2], marginBottom: space[3], padding: 7 },
+	projectChip: { minHeight: hitMin, maxWidth: '100%', alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, borderRadius: radius.full, backgroundColor: colors.surface3 },
+	projectChipText: { ...type.captionMedium, minWidth: 0, flexShrink: 1, color: colors.text1 },
+	projectSheet: { flex: 1, backgroundColor: colors.bgApp },
+	projectSheetHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space[5], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
+	projectSheetTitle: { ...type.title2, color: colors.text1 },
+	projectSheetClose: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, backgroundColor: colors.surface3 },
+	projectChoices: { padding: space[4], gap: space[2] },
+	projectChoice: { minHeight: hitMin, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[3], paddingHorizontal: space[4], paddingVertical: space[3], borderRadius: radius.lg, backgroundColor: colors.surface2 },
+	projectChoiceSelected: { borderWidth: 1, borderColor: colors.ember },
+	projectChoiceText: { ...type.body, flex: 1, color: colors.text1 },
+	projectSheetHint: { ...type.caption, color: colors.text3, paddingHorizontal: space[5], paddingBottom: space[5] },
   composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space[2] },
   attachment: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
   input: { flex: 1, minHeight: hitMin, maxHeight: 328, justifyContent: 'center', paddingTop: 10, paddingBottom: 4 },

@@ -299,7 +299,13 @@ export const api = {
 
   projectContext(
     sessionToken: string,
-    body: { text: string; destination: { route: 'new-private' } | { route: 'thread'; threadId: string }; createTitle?: string },
+    body: {
+      text: string;
+      destination: { route: 'new-private' } | { route: 'thread'; threadId: string };
+      createTitle?: string;
+      attachmentHandles?: Array<{ sourceId: string; sourceRevision: string }>;
+      replyToMessageId?: string;
+    },
   ): Promise<HomeProjectContextResponse> {
     return request<HomeProjectContextResponse>('/assistant/project-context', { method: 'POST', body, sessionToken });
   },

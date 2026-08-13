@@ -81,16 +81,17 @@ func TestDesktopExistingThreadProjectChoiceStaysZeroEffectUntilSend(t *testing.T
 	for _, want := range []string{
 		`id="scoutChatProjectChip"`,
 		`id="scoutChatProjectChooser"`,
-		`body: JSON.stringify({ text, destination: { route: 'thread', threadId } })`,
+		`body: JSON.stringify({ text, destination: { route: 'thread', threadId }, attachmentHandles, ...(replyToMessageId ? { replyToMessageId } : {}) })`,
 		`const rows = [{ title: 'No project', token: '' }, ...(scoutChatProjectContext.choices || [])]`,
-		`scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId } : null`,
+		`scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId, sourceKey: scoutChatProjectSourceKey() } : null`,
 		`scoutChatProjectContext.explicitNone = !choice.token`,
-		`!scoutChatProjectContext.explicitNone && next.suggested?.token`,
+		`const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)`,
+		`scoutChatProjectContext.selected = rebound ? { ...rebound, text, threadId, sourceKey } : null`,
 		`if (projectContextToken && !followUp) messagePayload.projectContextToken = projectContextToken`,
 		`scoutChatMessageAttempt = scoutChatMessageAttempt?.key === attemptKey`,
 		`messagePayload.operationId = scoutChatMessageAttempt.operationId`,
 		`if (projectContextToken && scoutChatInput)`,
-		`Send the Project-linked message first, then attach files in the next turn.`,
+		`Project context is refreshing for these sources. Try Send again in a moment.`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("existing-thread Project flow missing %q", want)
@@ -106,6 +107,70 @@ func TestDesktopExistingThreadProjectChoiceStaysZeroEffectUntilSend(t *testing.T
 		if strings.Contains(chooser, forbidden) {
 			t.Fatalf("Project chooser has a forbidden pre-Send effect or authority field %q", forbidden)
 		}
+	}
+}
+
+func TestDesktopThreadReplyProjectChoiceBindsExactSourcesUntilSend(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`id="chatContextProjectChip"`,
+		`id="chatContextProjectChooser"`,
+		`replyToMessageId: state.rootMessageId`,
+		`attachmentHandles: scoutChatProjectAttachmentHandles(pendingDesktopReplyFiles)`,
+		`const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)`,
+		`chatContextProjectContext.selected = rebound ? { ...rebound, text, sourceKey } : null`,
+		`selectedProject?.sourceKey === projectSourceKey`,
+		`...(projectContextToken ? { projectContextToken } : {})`,
+		`chatContextReplyAttempt = replyAttempt`,
+		`if (projectContextToken && replyTarget?.messageId && !scoutChatReplyTarget)`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("desktop reply Project flow missing %q", want)
+		}
+	}
+	start := strings.Index(html, "function renderDesktopReplyProjectContext")
+	end := strings.Index(html[start:], "async function loadDesktopReplyProjectContext")
+	if start < 0 || end < 0 {
+		t.Fatal("desktop reply Project chooser boundary missing")
+	}
+	chooser := html[start : start+end]
+	for _, forbidden := range []string{"/messages", "WorkRun", "toolTemplate", "projectId"} {
+		if strings.Contains(chooser, forbidden) {
+			t.Fatalf("desktop reply Project chooser caused a mutation: %q", forbidden)
+		}
+	}
+}
+
+func TestDesktopProjectRefreshFailsSafeWhenOpaqueChoiceIdentityDisappears(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	start := strings.Index(html, "function rebindOpaqueProjectChoice")
+	endMarker := "\n\t  function scheduleScoutChatProjectContextRefresh"
+	end := strings.Index(html[start:], endMarker)
+	if start < 0 || end < 0 {
+		t.Fatal("opaque Project choice helper boundary missing")
+	}
+	helper := html[start : start+end]
+	script := "'use strict'; const assert=require('node:assert/strict');\n" + helper + `
+const current={title:'Country Golf',token:'token-old',choiceKey:'choice-a'};
+const refreshed={title:'Country Golf renamed',token:'token-new',choiceKey:'choice-a'};
+const replacement={title:'Ball Dogs',token:'token-b',choiceKey:'choice-b'};
+assert.deepEqual(rebindOpaqueProjectChoice(current,replacement,[refreshed]),refreshed);
+assert.equal(rebindOpaqueProjectChoice(current,replacement,[replacement]),null);
+assert.equal(rebindOpaqueProjectChoice({...current,choiceKey:''},replacement,[replacement]),null);
+assert.equal(rebindOpaqueProjectChoice(null,{...replacement,choiceKey:''},[replacement]),null);
+assert.deepEqual(rebindOpaqueProjectChoice(null,replacement,[]),replacement);
+`
+	command := exec.Command("node", "-e", script)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("opaque Project choice behavior failed: %v\n%s", err, output)
 	}
 }
 
@@ -186,7 +251,7 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
      const body=JSON.parse(raw||'{}');
      const text=String(body.text||'');
      const title=projectAccount==='b'?'B Project':'Country Golf';
-     const choice={title,token:projectAccount==='b'?'opaque-b-project':'opaque-country-golf'};
+     const choice={title,token:projectAccount==='b'?'opaque-b-project':'opaque-country-golf',choiceKey:projectAccount==='b'?'choice-b-project':'choice-country-golf'};
      const threadDestination=body.destination?.route==='thread';
      const projectContext={available:body.destination?.route==='new-private'||threadDestination,scopeKey:projectAccount==='b'?'scope-b':'scope-a',status:threadDestination?'bound':(text.includes(title)?'suggested':'unlinked'),choices:[choice]};
      if(projectContext.status==='suggested'||projectContext.status==='bound')projectContext.suggested={...choice,suggested:projectContext.status==='suggested'};

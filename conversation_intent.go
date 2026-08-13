@@ -60,6 +60,7 @@ type conversationTurnOperationContextKey struct{}
 type conversationProjectLinkBinding struct {
 	EncodedToken string
 	Token        homeProjectContextToken
+	Manifest     projectChatSourceManifest
 }
 
 type conversationProjectLinkContextKey struct{}

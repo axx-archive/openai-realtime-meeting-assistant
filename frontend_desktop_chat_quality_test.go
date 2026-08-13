@@ -327,7 +327,7 @@ func TestDesktopThreadReplyRailMatchesFeedMediaAndComposerCapabilities(t *testin
 		`id="chatContextReplyPending"`,
 		"function addPendingDesktopReplyFiles()",
 		"pendingDesktopReplyFiles.push(await scoutChatFilePayload(file))",
-		"JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId })",
+		"JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId, ...(projectContextToken ? { projectContextToken } : {}) })",
 		"up to 6 files per reply",
 	} {
 		if !strings.Contains(html, want) {

@@ -327,6 +327,7 @@ const server = http.createServer((req, res) => {
   await page.click('#pd1PrimaryNav [data-pd1-destination="Chat"]');
   await page.waitForFunction(() => location.pathname === '/chat' && document.getElementById('appShell').dataset.tool === 'chat');
   assert.equal(await page.locator('#pd1PrimaryNav [data-pd1-destination="Chat"]').getAttribute('aria-current'), 'page');
+  await page.waitForTimeout(180);
   const chatNavState=await page.evaluate(()=>Object.fromEntries(['Video','Chat'].map(name=>{const node=document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]');const style=getComputedStyle(node);return[name,{current:node.getAttribute('aria-current'),background:style.backgroundColor,border:style.borderColor}]})));
   assert.equal(chatNavState.Video.current,'false');
   assert.equal(chatNavState.Chat.current,'page');

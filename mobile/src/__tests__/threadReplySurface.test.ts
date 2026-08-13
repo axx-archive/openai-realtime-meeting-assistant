@@ -35,7 +35,7 @@ test('thread replies use a native dismissible page sheet with their own composer
   assert.match(sheetSource, /<MentionComposerInput/);
   assert.match(sheetSource, /candidates=\{mentionCandidates\}/);
   assert.match(sheetSource, /accessibilityLabel="Reply in thread"/);
-  assert.match(sheetSource, /onSend\(text, pendingFiles\)/);
+  assert.match(sheetSource, /onSend\(text, pendingFiles, projectContextToken\)/);
   assert.match(sheetSource, /accessibilityLabel="Add attachment to reply"/);
   assert.match(sheetSource, /accessibilityLabel="Reply attachments"/);
   assert.match(screenSource, /text\.trim\(\),\s*\[\.\.\.files\],\s*rootID/s);

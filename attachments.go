@@ -418,9 +418,22 @@ func (app *kanbanBoardApp) revokeAttachmentSource(sourceID string) error {
 	if app == nil || strings.TrimSpace(sourceID) == "" {
 		return fmt.Errorf("attachment source is unavailable")
 	}
+	sourceID = strings.TrimSpace(sourceID)
+	if store := currentHomeProjectStore(); store != nil {
+		groups, err := store.activeProjectChatGroupsForAttachmentSource(context.Background(), sourceID)
+		if err != nil {
+			return err
+		}
+		for _, group := range groups {
+			operationID := projectChatID("project_attachment_source_revoke", group.organizationID, group.groupID, sourceID)
+			if err := store.invalidateProjectChatAttachmentGroupForDrift(context.Background(), group.organizationID, group.groupID, operationID); err != nil {
+				return err
+			}
+		}
+	}
 	app.pendingAttachmentUploadsMu.Lock()
 	defer app.pendingAttachmentUploadsMu.Unlock()
-	grant, ok := app.pendingAttachmentUploads[strings.TrimSpace(sourceID)]
+	grant, ok := app.pendingAttachmentUploads[sourceID]
 	if !ok {
 		return fmt.Errorf("attachment source is unavailable")
 	}
@@ -429,6 +442,27 @@ func (app *kanbanBoardApp) revokeAttachmentSource(sourceID string) error {
 	grant.ReservedAt = time.Time{}
 	app.pendingAttachmentUploads[grant.SourceID] = grant
 	return app.persistAttachmentSourceStoreLocked()
+}
+
+func (app *kanbanBoardApp) revokeAttachmentSourcesForOrigin(originFileID string) error {
+	originFileID = strings.TrimSpace(originFileID)
+	if app == nil || originFileID == "" {
+		return nil
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	var sourceIDs []string
+	for sourceID, grant := range app.pendingAttachmentUploads {
+		if grant.OriginFileID == originFileID && grant.State != attachmentSourceRevoked {
+			sourceIDs = append(sourceIDs, sourceID)
+		}
+	}
+	app.pendingAttachmentUploadsMu.Unlock()
+	for _, sourceID := range sourceIDs {
+		if err := app.revokeAttachmentSource(sourceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (app *kanbanBoardApp) attachmentSourceAuthorizedForRead(user *userAccount, destination scoutChatThreadRecord, file scoutChatFileAttachment, reservationID string) bool {
@@ -1293,8 +1327,16 @@ func (app *kanbanBoardApp) committedAttachmentContentBlocks(viewerEmail string, 
 }
 
 func (app *kanbanBoardApp) committedOpenAIAttachmentContent(viewerEmail string, threadID string, messageID string, files []scoutChatFileAttachment) []openAIInputContent {
-	return openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+	content, _ := app.committedOpenAIAttachmentContentVerdict(viewerEmail, threadID, messageID, files)
+	return content
+}
+
+func (app *kanbanBoardApp) committedOpenAIAttachmentContentVerdict(viewerEmail string, threadID string, messageID string,
+	files []scoutChatFileAttachment) ([]openAIInputContent, bool) {
+	authorized := true
+	content := openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
 		if !app.committedChatAttachmentAuthorized(viewerEmail, threadID, messageID, file) {
+			authorized = false
 			return nil, blobMeta{}, false
 		}
 		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
@@ -1303,10 +1345,22 @@ func (app *kanbanBoardApp) committedOpenAIAttachmentContent(viewerEmail string, 
 		}
 		if err != nil || attachmentSourceRevision(strings.TrimSpace(file.Ref), meta) != strings.TrimSpace(file.SourceRevision) ||
 			!app.committedChatAttachmentAuthorized(viewerEmail, threadID, messageID, file) {
+			authorized = false
 			return nil, blobMeta{}, false
 		}
 		return data, meta, true
 	})
+	return content, authorized && app.committedAttachmentsAuthorized(viewerEmail, threadID, messageID, files)
+}
+
+// openAIReplyMediaContentForTurn keeps Project-bound reply ancestry honest.
+// Until parent media is represented as exact canonical evidence, only ordinary
+// unlinked replies may forward those bytes to a provider.
+func (app *kanbanBoardApp) openAIReplyMediaContentForTurn(projectSourceBound bool, viewerEmail, threadID, messageID string) []openAIInputContent {
+	if projectSourceBound {
+		return nil
+	}
+	return app.openAIReplyMediaContent(viewerEmail, threadID, messageID)
 }
 
 // openAIReplyMediaContent carries the exact image/file from the message being

@@ -78,6 +78,11 @@ var canonicalTables = []string{
 	"stride_project_correction_receipts", "stride_project_operation_receipts", "stride_project_projection_outbox", "stride_project_revisions", "stride_project_thread_binding_revisions",
 	"stride_project_source_authority_receipts", "stride_project_thread_bindings_current", "stride_projects_current",
 	"stride_project_chat_send_receipts", "stride_project_chat_correction_receipts", "stride_project_chat_correction_abandonments", "stride_project_chat_source_mutation_receipts",
+	"stride_project_chat_source_groups", "stride_project_chat_source_group_members", "stride_project_chat_reply_dependencies",
+	"stride_project_chat_source_group_invalidations", "stride_project_chat_source_group_correction_receipts",
+	"stride_project_chat_source_group_drift_receipts",
+	"stride_project_chat_source_group_authority_loss_receipts",
+	"stride_rich_message_part_revisions", "stride_rich_message_parts_current",
 	"stride_mymind_sources", "stride_person_principals", "stride_registry_revisions",
 	"stride_source_derived_edges", "stride_workspace_memberships",
 }
