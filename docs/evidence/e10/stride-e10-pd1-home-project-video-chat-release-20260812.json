@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "stride-e10-pd1-home-project-video-chat-release-20260812",
+  "recordedAt": "2026-08-13T00:38:53Z",
+  "localEvidence": "stride-e10-pd1-home-project-video-chat-local-20260812.json",
+  "source": {
+    "releaseCommit": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "branch": "codex/country-golf-stride",
+    "main": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "workingBranch": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "cleanReleaseInventoryCount": 380,
+    "cleanReleaseInventorySha256": "b9fda3751e08c9d43ead5e6cc36e38ddd7ce68ecd5603de085383606c5b67667",
+    "sourceArchiveSha256": "114967a3d54f3dd8bc41b17cb405244bf7135ad399f53e17af0d1fa66c77aea3",
+    "sourceReceiptSha256": "b1d52122246f5b4168b4a0031a5b1633aa4fe55d5ca44c0a1f70fa0daafe27e5"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 67,
+    "releaseCommit": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "releaseDir": "/opt/meetingassist-releases/741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "bundleSha256": "0967116aeeab0d0f0d13aba0c7eb089efcc7e3b76c2963615649d9e6c4b9bb02",
+    "applicationImageId": "sha256:903b46566e96f8ba62ede0f348cfd0ad808f700cfc2b3352872bf6a324a9d7b8",
+    "renderRunnerImageId": "sha256:6e3fe3f8e769d3c818a3be3e6a5379875a33b694b6d47130c3ee956c390713da",
+    "releaseReceiptSha256": "3ee0deeef53a14db3b397ba9a241d42ef26b9f3c6b0f86d26a0f5566443acbfe",
+    "buildManifestSha256": "3f11ad10087611b3d42f23ea8a26b261248300531b890d4997d1ab90e74ebb28",
+    "verifier": "verified-local-unsigned",
+    "publicHealthRelease": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "publicReadinessRelease": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "rollback": {
+      "releaseCommit": "ee5c2b386f535320a7fad5888fd512851c832b01",
+      "bundleSha256": "f111742b14218bcea769594f76fc8a9d2cbe85dd214185e75621920f596baf2b",
+      "applicationImageId": "sha256:1837474359a91e413db45f06e7cfac6f607fbf46212495c106de527effb1c7db",
+      "renderRunnerImageId": "sha256:acdf07f714dab127a783af0ebdb201c62e4db11259097aea272b960d8efcd557"
+    }
+  },
+  "migration": {
+    "canonicalMigrationMaxVersion": 19,
+    "allowFutureMigrationsForRollback": true,
+    "version18Sha256": "39754a773f2dc3df66054e91fd87f54a1b9c805b1909a6e0bee55fd6da470b96",
+    "version19Sha256": "53aa05d793ff7cbe5a946799807d5327c61eb3cbcc9eb783991a453a85c052e7",
+    "version19Applied": true,
+    "productionMessageOrProjectRowsMutatedByVerification": false
+  },
+  "ios": {
+    "version": "1.0.0",
+    "buildNumber": "58",
+    "easBuildId": "12203373-4ac8-4c9d-8db6-53e03e1a0dcb",
+    "easBuildStatus": "FINISHED",
+    "gitCommit": "741e02845add0c300646bb1a9ac7c56bac2e4e33",
+    "fingerprint": "af65baea438e7fe8bde00fe06a187e5650574691",
+    "submissionId": "ab45e425-3895-4a67-92ac-5a4cda641365",
+    "submissionStatusAtReceipt": "FINISHED_UPLOAD_TO_APP_STORE_CONNECT",
+    "ascAppId": "6794029943",
+    "appleProcessingStatus": "processing_not_yet_read_back",
+    "intendedTesterGroupStatus": "not_yet_read_back"
+  },
+  "validation": {
+    "fullGo": "PASS; go test ./... -count=1; root package 554.581s",
+    "focusedGo": "PASS; 12.743s",
+    "focusedRace": "PASS; 42.893s",
+    "goVet": "PASS",
+    "native": "PASS; 527/527",
+    "nativeTypecheck": "PASS",
+    "renderedWeb": "PASS; responsive Home Project chooser, core/full shell, Video/Chat and Country Golf stable-media geometry",
+    "critic": "PASS; no blocker or major finding after exact-replay, late-socket and hidden-tab repairs",
+    "diffCheck": "PASS"
+  },
+  "claim": {
+    "complete": [
+      "reviewed commit is on main and the working branch",
+      "exact clean-archive VPS build and durable activation",
+      "migration 19 is installed with the reviewed checksum under rollback-compatible policy",
+      "public health, readiness, images and release ledger identity agree",
+      "the exact prior bundle and images remain retained for rollback",
+      "Project-linked new-private Home Send, Video and Chat prominence, role-filtered shell and Country Golf geometry are released",
+      "EAS iOS Build 58 finished from the exact release commit",
+      "Build 58 was successfully uploaded to App Store Connect"
+    ],
+    "notClaimed": [
+      "authenticated production Project create or association observation",
+      "Build 58 Apple processing completion or intended tester-group availability",
+      "existing-thread Project correction or complete longitudinal Project Record",
+      "provider-backed artifact-family acceptance",
+      "physical iPhone or iPad acceptance",
+      "venture-studio cron activation, provider spend or Marketplace publication",
+      "legacy STRIDE snapshot reducer recovery",
+      "whole-PD1 or whole-E10 completion"
+    ]
+  },
+  "knownDegradation": {
+    "legacyStrideSnapshotReducer": "fail_closed_invalid_registry_entry",
+    "impactOnThisClaim": "excluded_from_bounded_project_home_release_claim",
+    "canonicalHealthAndReadiness": "passing"
+  },
+  "preserved": [
+    "digitalocean_meeting_data live volume",
+    "pre-existing untracked Home and meeting-control rendered evidence",
+    "unrelated stride-site worktree content",
+    "prior exact release directory and images"
+  ],
+  "next": "Extend exact Project association and correction to existing threads, then complete authorized recurring Project context compaction and one Project-bound Research request through a server-owned evolving card, immutable revisions, rich Open, a durable named Drive receipt and normal-composer edit or regenerate before reusing that spine for every artifact family. Keep venture-studio cron and Marketplace publication off until an exact cadence, budget, effect and review manifest is approved."
+}
