@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "exact_release_pd1_sent_message_project_correction_checkpoint",
+  "observedAt": "2026-08-12T23:10:00-07:00",
+  "status": "bounded_exact_release_and_app_store_upload_pass",
+  "source": {
+    "implementationCommit": "ea56fc21f6f3cd54934e1e26bb264826211bdfdc",
+    "exactReleaseCommit": "a5a4ece5726629065ac21ae7b9e0f610db5040b8",
+    "branch": "codex/country-golf-stride",
+    "remoteMain": "a5a4ece5726629065ac21ae7b9e0f610db5040b8",
+    "canonicalPlanSha256AfterReadback": "f1304f362b474f0a84d3c4a3f1a86184ef9c792fd47af7aacbf21e77893b69ce",
+    "localReceipt": "stride-e10-pd1-sent-message-project-correction-local-20260812.json",
+    "localReceiptSha256": "0db2718731d0cbb2b050bb0371a8d9e97041f62fc34ab498be0c1510eb5a0ff3",
+    "migrationGuardReceipt": "stride-e10-pd1-sent-message-project-correction-migration21-preactivation-20260812.json"
+  },
+  "vps": {
+    "host": "thebonfire.xyz",
+    "ledgerGeneration": 73,
+    "releaseCommit": "a5a4ece5726629065ac21ae7b9e0f610db5040b8",
+    "bundleSha256": "c9e657348809091126aee4a5a9de5bbae2bdf71015f8155992e8fc84b9793468",
+    "meetingassistImageId": "sha256:e63e78935f60a547f02b23bd07eafe8f8f1e9ca1f36269c86b959cb4e6830545",
+    "renderRunnerImageId": "sha256:9dfa4791ec8e2f895946bd9ba5f51e89f67301848681bcfea8ddaaa6ada96dd1",
+    "migrationCount": 21,
+    "migrationMaxVersion": 21,
+    "migration21Sha256": "3a2e1e30408d3b65ec2daa5909db0422f391b94a26808c38c49290411af5936c",
+    "migrationCapBackup": "/opt/meetingassist-backups/release-env-pre-migration21-20260813T0605Z.env",
+    "health": "PASS_exact_release_identity",
+    "readiness": "PASS_ok_true_exact_release_identity_with_preexisting_nonrequired_canonical_shadow_degradation",
+    "renderCanary": "PASS",
+    "verification": "verified-local-unsigned"
+  },
+  "rollback": {
+    "releaseCommit": "ea56fc21f6f3cd54934e1e26bb264826211bdfdc",
+    "bundleSha256": "072edbdd6add11a19360dffdce7f72d2fd0f25939c470547553ea81ef517fafb",
+    "meetingassistImageId": "sha256:0e3883884eea7862de7be9cdde762d65e5e776c037b7d5d1471af1b7cb4f01d8",
+    "renderRunnerImageId": "sha256:4ad8687a14a391febc0aa9f058cdc4eb169f9ed4d915a1196b02a516386e046e",
+    "retainedAndReadable": true,
+    "additiveMigrationCompatible": true
+  },
+  "ios": {
+    "buildId": "35f97e8f-5b5a-41b0-8b99-8c8c554248c3",
+    "version": "1.0.0",
+    "buildNumber": "61",
+    "gitCommit": "ea56fc21f6f3cd54934e1e26bb264826211bdfdc",
+    "fingerprint": "25e1f180adb3fd81216f7299c324c186f8578e1f",
+    "buildStatus": "FINISHED",
+    "submissionId": "23e7d9a3-fcf7-4119-b224-981d58b57c7b",
+    "appStoreConnectAppId": "6794029943",
+    "submissionStatus": "FINISHED_UPLOAD_ACCEPTED",
+    "appleProcessing": "PENDING_READBACK",
+    "intendedTestFlightGroupAvailability": "NOT_PROVEN"
+  },
+  "acceptedScope": [
+    "author_only_sent_message_project_correction_on_web_and_native",
+    "read_only_review_and_explicit_update_or_remove_boundary",
+    "opaque_revision_bound_client_token_and_server_owned_authority",
+    "append_only_project_association_correction_or_removal_lineage",
+    "monotonic_project_context_revision_and_late_socket_rejection",
+    "project_linked_source_edit_delete_invalidation_preview_rebuild_and_live_fanout",
+    "linearizable_cross_store_correction_or_abandonment_recovery",
+    "migration_21_exact_installation_and_rollback_compatible_release"
+  ],
+  "openGates": [
+    "apple_processing_and_exact_intended_testflight_group_readback",
+    "project_linked_attachment_and_reply_source_coverage",
+    "rich_meeting_record_transcript_and_ask_scout_product_flow",
+    "recurring_authorized_meeting_project_and_history_compaction",
+    "first_class_project_bound_work_and_artifact_spine",
+    "provider_backed_artifact_family_device_acceptance",
+    "physical_iphone_ipad_project_correction_acceptance",
+    "approved_agentic_lab_schedule_budget_persona_and_effect_manifest",
+    "marketplace_and_fine_tuning_release_gates"
+  ],
+  "exclusions": {
+    "appleProcessingComplete": false,
+    "intendedTestFlightGroupAvailable": false,
+    "controllerOrAdminRetagging": false,
+    "projectLinkedAttachmentsComplete": false,
+    "meetingRecordRedesignComplete": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "physicalDeviceAccepted": false,
+    "cronActive": false,
+    "marketplaceCandidatePublished": false,
+    "fineTuningAuthorized": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}
