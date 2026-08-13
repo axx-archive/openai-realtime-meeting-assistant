@@ -29,6 +29,33 @@ const (
 // Tables would split the team permanently with no natural repair.
 var ensureTableMu sync.Mutex
 
+// ensureTableForIndex keeps the body-free Chat directory body-free. A healthy
+// flagged Table can be proven entirely from commit-time metadata; only legacy,
+// missing, or damaged states fall through to the exact decode/repair path.
+func (app *kanbanBoardApp) ensureTableForIndex(ownerEmail string) error {
+	return app.ensureTableForIndexEntries(ownerEmail, app.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0))
+}
+
+func (app *kanbanBoardApp) ensureTableForIndexEntries(ownerEmail string, entries []meetingMemoryEntry) error {
+	if app == nil || app.memory == nil {
+		return fmt.Errorf("chat memory is unavailable")
+	}
+	for _, entry := range entries {
+		if entry.Kind != meetingMemoryKindScoutChat {
+			continue
+		}
+		metadata := entry.Metadata
+		if strings.EqualFold(strings.TrimSpace(metadata["table"]), "true") &&
+			strings.EqualFold(strings.TrimSpace(metadata["title"]), tableThreadTitle) &&
+			strings.TrimSpace(metadata["archivedAt"]) == "" &&
+			normalizeScoutChatVisibility(metadata["visibility"]) == scoutChatVisibilityPublic {
+			return nil
+		}
+	}
+	_, err := app.ensureTable(ownerEmail)
+	return err
+}
+
 // findTableThread returns the flagged Table, scanning every thread rather than
 // one viewer's visible set — the Table is shared, so "does it exist" is not a
 // per-viewer question.
@@ -42,22 +69,30 @@ func (app *kanbanBoardApp) findTableThread() (scoutChatThreadRecord, bool) {
 	var adoptable scoutChatThreadRecord
 	var foundAdoptable bool
 
-	for _, entry := range app.memory.snapshot(0) {
-		thread, ok := decodeScoutChatThreadEntry(entry)
+	for _, entry := range app.memory.metadataSnapshot(0) {
+		if entry.Kind != meetingMemoryKindScoutChat {
+			continue
+		}
+		metadata := entry.Metadata
+		flagged := strings.EqualFold(strings.TrimSpace(metadata["table"]), "true")
+		adoptableTitle := strings.EqualFold(strings.TrimSpace(metadata["title"]), tableThreadTitle) || strings.EqualFold(strings.TrimSpace(metadata["title"]), legacyTableThreadTitle)
+		adoptableAudience := strings.TrimSpace(metadata["archivedAt"]) == "" && normalizeScoutChatVisibility(metadata["visibility"]) == scoutChatVisibilityPublic
+		if !flagged && (!adoptableTitle || !adoptableAudience || foundAdoptable) {
+			continue
+		}
+		fullEntry, exists := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, entry.ID)
+		if !exists {
+			continue
+		}
+		thread, ok := decodeScoutChatThreadEntry(fullEntry)
 		if !ok {
 			continue
 		}
-		if thread.Table {
+		if flagged || thread.Table {
 			return thread, true
 		}
-		if !foundAdoptable &&
-			thread.ArchivedAt == "" &&
-			scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
-			(strings.EqualFold(strings.TrimSpace(thread.Title), tableThreadTitle) ||
-				strings.EqualFold(strings.TrimSpace(thread.Title), legacyTableThreadTitle)) {
-			adoptable = thread
-			foundAdoptable = true
-		}
+		adoptable = thread
+		foundAdoptable = true
 	}
 	return adoptable, foundAdoptable
 }

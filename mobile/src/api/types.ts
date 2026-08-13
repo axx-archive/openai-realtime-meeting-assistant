@@ -104,6 +104,8 @@ export type ScoutThread = {
   unreadCount?: number;
   /** Anchors the client's "new messages" divider. */
   lastReadMessageId?: string;
+  /** Body-free current work projection used by the lightweight Chat index. */
+  activeWork?: Pick<ScoutMessage, 'createdAt' | 'thread'>;
   messages?: ScoutMessage[];
   lastMessage?: {
     text?: string;

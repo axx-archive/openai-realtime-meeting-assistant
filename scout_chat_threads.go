@@ -747,18 +747,38 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		includeArchived := strings.EqualFold(r.URL.Query().Get("archived"), "true") || strings.EqualFold(r.URL.Query().Get("includeArchived"), "true")
+		indexOnly := strings.EqualFold(r.URL.Query().Get("view"), "index")
 		// Provision the Table lazily on first list. A team chat that requires
 		// an admin setup step before the first message does not get a first
 		// message. A failure here must not blank the list — the user still has
 		// every other thread, and the next load retries.
-		if _, err := kanbanApp.ensureTable(user.Email); err != nil {
-			log.Errorf("Failed to ensure the Table thread: %v", err)
+		var tableErr error
+		var indexEntries []meetingMemoryEntry
+		if indexOnly {
+			kanbanApp.scheduleScoutChatIndexMetadataBackfill()
+			indexEntries = kanbanApp.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
+			tableErr = kanbanApp.ensureTableForIndexEntries(user.Email, indexEntries)
+			if tableErr == nil {
+				indexEntries = kanbanApp.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
+			}
+		} else {
+			_, tableErr = kanbanApp.ensureTable(user.Email)
 		}
+		if tableErr != nil {
+			log.Errorf("Failed to ensure the Table thread: %v", tableErr)
+		}
+		threads := selectScoutChatThreadsListProjection(
+			indexOnly,
+			func() []map[string]any {
+				return kanbanApp.scoutChatThreadsIndexViewFromEntries(user.Email, includeArchived, 100, indexEntries)
+			},
+			func() []map[string]any { return kanbanApp.scoutChatThreadsView(user.Email, includeArchived, 100) },
+		)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true,
-			// The view adds per-viewer unreadCount / lastReadMessageId, which
-			// must not live on the shared persisted record.
-			"threads": kanbanApp.scoutChatThreadsView(user.Email, includeArchived, 100),
+			// The index is deliberately body-free. Exact conversation and
+			// per-viewer read state are hydrated only after a thread is opened.
+			"threads": threads,
 		})
 	case http.MethodPost:
 		payload := struct {
@@ -831,6 +851,17 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// selectScoutChatThreadsListProjection owns the performance boundary between
+// Chat navigation and exact conversation hydration. Keep the functions lazy:
+// evaluating the full projection before selecting the index would decode every
+// thread body and re-authorize every attachment on the cold navigation path.
+func selectScoutChatThreadsListProjection(indexOnly bool, index, full func() []map[string]any) []map[string]any {
+	if indexOnly {
+		return index()
+	}
+	return full()
+}
+
 func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	if !websocketOriginAllowed(r) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
@@ -897,7 +928,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 				writeScoutChatThreadError(w, err)
 				return
 			}
-			writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+			writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": scoutChatThreadMutationView(thread)})
 			return
 		}
 		archived := true
@@ -909,7 +940,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": scoutChatThreadMutationView(thread)})
 		return
 	}
 
@@ -1240,6 +1271,27 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+func scoutChatThreadMutationView(thread scoutChatThreadRecord) map[string]any {
+	row := map[string]any{
+		"id":         thread.ID,
+		"title":      thread.Title,
+		"ownerEmail": thread.OwnerEmail,
+		"visibility": scoutChatThreadVisibility(thread),
+		"createdAt":  thread.CreatedAt,
+		"updatedAt":  thread.UpdatedAt,
+		"preview":    thread.Preview,
+		"table":      thread.Table,
+	}
+	if members := scoutChatThreadMemberEmails(thread); len(members) > 0 {
+		row["memberEmails"] = members
+	}
+	if thread.ArchivedAt != "" {
+		row["archivedAt"] = thread.ArchivedAt
+		row["archived"] = true
+	}
+	return row
 }
 
 const maxLegacyConversationOperationAliases = 64
@@ -5867,18 +5919,12 @@ func (app *kanbanBoardApp) scoutChatThreadByID(ownerEmail string, threadID strin
 	if ownerEmail == "" || threadID == "" {
 		return scoutChatThreadRecord{}, meetingMemoryEntry{}, fmt.Errorf("chat thread not found")
 	}
-	for _, entry := range app.memory.snapshot(0) {
-		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
-			continue
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, threadID)
+	if ok {
+		thread, decoded := decodeScoutChatThreadEntry(entry)
+		if decoded && scoutChatThreadAllowsViewer(thread, ownerEmail) {
+			return thread, entry, nil
 		}
-		thread, ok := decodeScoutChatThreadEntry(entry)
-		if !ok {
-			break
-		}
-		if !scoutChatThreadAllowsViewer(thread, ownerEmail) {
-			break
-		}
-		return thread, entry, nil
 	}
 	return scoutChatThreadRecord{}, meetingMemoryEntry{}, fmt.Errorf("chat thread not found")
 }
@@ -5925,14 +5971,19 @@ func decodeScoutChatThreadEntry(entry meetingMemoryEntry) (scoutChatThreadRecord
 
 func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 	metadata := map[string]string{
-		"ownerEmail": normalizeAccountEmail(thread.OwnerEmail),
-		"title":      strings.TrimSpace(thread.Title),
-		"preview":    strings.TrimSpace(thread.Preview),
-		"visibility": scoutChatThreadVisibility(thread),
-		"createdAt":  strings.TrimSpace(thread.CreatedAt),
-		"updatedAt":  strings.TrimSpace(thread.UpdatedAt),
-		"source":     "scout_chat",
-		"status":     "active",
+		"ownerEmail":      normalizeAccountEmail(thread.OwnerEmail),
+		"title":           strings.TrimSpace(thread.Title),
+		"preview":         strings.TrimSpace(thread.Preview),
+		"visibility":      scoutChatThreadVisibility(thread),
+		"createdAt":       strings.TrimSpace(thread.CreatedAt),
+		"updatedAt":       strings.TrimSpace(thread.UpdatedAt),
+		"source":          "scout_chat",
+		"status":          "active",
+		"archivedAt":      "",
+		"memberEmails":    "",
+		"activeWork":      "",
+		"messageActivity": "[]",
+		"messageCount":    strconv.Itoa(len(thread.Messages)),
 	}
 	if strings.TrimSpace(thread.CreatedBy) != "" {
 		metadata["createdBy"] = strings.TrimSpace(thread.CreatedBy)
@@ -5944,7 +5995,100 @@ func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 		metadata["archivedAt"] = strings.TrimSpace(thread.ArchivedAt)
 		metadata["status"] = "archived"
 	}
+	if thread.Table {
+		metadata["table"] = "true"
+	}
+	if len(thread.Messages) > 0 {
+		start := len(thread.Messages) - 100
+		if start < 0 {
+			start = 0
+		}
+		activity := make([]scoutChatMessageRecord, 0, len(thread.Messages)-start)
+		for _, message := range thread.Messages[start:] {
+			activity = append(activity, scoutChatMessageRecord{ID: message.ID, AuthorEmail: message.AuthorEmail, CreatedAt: message.CreatedAt})
+		}
+		if encoded, err := json.Marshal(activity); err == nil {
+			metadata["messageActivity"] = string(encoded)
+		}
+	}
+	activeStatuses := map[string]bool{"queued": true, "running": true, "approval_required": true, "needs_input": true, "parked": true}
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		if message.Thread == nil || !activeStatuses[strings.ToLower(strings.TrimSpace(message.Thread.Status))] {
+			continue
+		}
+		// Navigation needs the truthful timer/phase, not the request body. Keep
+		// the derived row small enough to remain safe on a hundred-thread index.
+		work := *message.Thread
+		work.Query = ""
+		active := struct {
+			CreatedAt string              `json:"createdAt"`
+			Thread    *scoutChatThreadRef `json:"thread"`
+		}{CreatedAt: message.CreatedAt, Thread: &work}
+		if encoded, err := json.Marshal(active); err == nil {
+			metadata["activeWork"] = string(encoded)
+		}
+		break
+	}
 	return metadata
+}
+
+func (app *kanbanBoardApp) scheduleScoutChatIndexMetadataBackfill() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	app.scoutChatIndexBackfillOnce.Do(func() {
+		go func() {
+			_ = app.memory.backfillScoutChatIndexMetadata()
+		}()
+	})
+}
+
+// backfillScoutChatIndexMetadata upgrades legacy thread rows under one store
+// lock and one durable rewrite. It never replaces Text, so a concurrent send
+// cannot be overwritten by a stale body snapshot.
+func (store *meetingMemoryStore) backfillScoutChatIndexMetadata() error {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	type rollback struct {
+		index int
+		prior meetingMemoryEntry
+	}
+	applied := []rollback{}
+	for index, prior := range store.entries {
+		if prior.Kind != meetingMemoryKindScoutChat {
+			continue
+		}
+		if _, current := prior.Metadata["messageActivity"]; current {
+			continue
+		}
+		thread, ok := decodeScoutChatThreadEntry(prior)
+		if !ok {
+			continue
+		}
+		entry := cloneMemoryEntry(prior)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]string{}
+		}
+		for key, value := range scoutChatThreadMetadata(thread) {
+			entry.Metadata[key] = value
+		}
+		store.entries[index] = entry
+		applied = append(applied, rollback{index: index, prior: prior})
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+	if err := store.rewriteLocked(true); err != nil {
+		for _, stale := range applied {
+			store.entries[stale.index] = stale.prior
+		}
+		return err
+	}
+	return nil
 }
 
 func (app *kanbanBoardApp) sanitizeScoutChatFiles(ctx context.Context, user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) ([]scoutChatFileAttachment, error) {

@@ -43,12 +43,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 59 extends the authorized Project chooser and exact-Send
-      // association flow into existing private and multiplayer threads. It
-      // retains Build 58's Video/Chat prominence, core-versus-owner shell,
-      // chief-of-staff Home and persistent private Realtime carrier.
+      // Build 60 makes Chat cold entry body-free and lazy-hydrates the selected
+      // conversation so mature accounts do not crash or jitter on navigation.
+      // It retains Build 59's Project association work and prior navigation.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '59',
+      buildNumber: '60',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

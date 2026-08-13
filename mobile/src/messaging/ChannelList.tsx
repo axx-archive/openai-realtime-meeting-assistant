@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -38,7 +38,8 @@ type ChannelListProps = {
 /* channel-terminal-preview-contract:start */
 function terminalPreviewHasActiveWork(thread: ScoutThread): boolean {
   const activeStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked']);
-  return (Array.isArray(thread.messages) ? thread.messages : []).some((message) => (
+  const messages = Array.isArray(thread.messages) ? thread.messages : thread.activeWork ? [thread.activeWork] : [];
+  return messages.some((message) => (
     Boolean(message.thread)
       && activeStatuses.has(String(message.thread?.status ?? '').toLowerCase())
   ));
@@ -47,6 +48,22 @@ function terminalPreviewHasActiveWork(thread: ScoutThread): boolean {
 function ordinaryPreview(thread: ScoutThread): string {
   const last = thread.lastMessage?.text || thread.preview || '';
   return String(last).replace(/\s+/g, ' ').trim();
+}
+
+function chatIndexMetadata(thread: ScoutThread): Partial<ScoutThread> {
+  return {
+    id: thread.id,
+    title: thread.title,
+    visibility: thread.visibility,
+    ownerEmail: thread.ownerEmail,
+    memberEmails: thread.memberEmails,
+    updatedAt: thread.updatedAt,
+    createdAt: thread.createdAt,
+    preview: thread.preview,
+    table: thread.table,
+    archived: thread.archived,
+    activeWork: thread.activeWork,
+  };
 }
 
 function timeAgo(raw: unknown): string {
@@ -127,6 +144,8 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
   const office = useOfficeEvents();
   const navigation = useNavigation<ChannelNav>();
   const [threads, setThreads] = useState<ScoutThread[]>([]);
+  const [threadsSessionToken, setThreadsSessionToken] = useState<string | null>(null);
+  const [attemptedSessionToken, setAttemptedSessionToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingThreadID, setEditingThreadID] = useState<string | null>(null);
@@ -135,22 +154,69 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
   const [clock, setClock] = useState(() => Date.now());
   const renameInFlightRef = useRef<string | null>(null);
   const longPressedThreadRef = useRef<string | null>(null);
+  const loadRequestRef = useRef<Promise<void> | null>(null);
+  const loadQueuedRef = useRef(false);
+  const loadGenerationRef = useRef(0);
+  const sessionTokenRef = useRef(sessionToken);
+  const threadsRef = useRef(threads);
+  sessionTokenRef.current = sessionToken;
+  threadsRef.current = threads;
   const { fontScale } = useWindowDimensions();
   const largeText = fontScale >= THREAD_LARGE_TEXT_FONT_SCALE;
-  const rows = useMemo(() => channelListRows(threads), [threads]);
-  const hasActiveWork = useMemo(() => threads.some((thread) => Boolean(channelActiveWork(thread))), [threads]);
+  const scopedThreads = threadsSessionToken === sessionToken ? threads : [];
+  const scopedEditingThreadID = threadsSessionToken === sessionToken ? editingThreadID : null;
+  const rows = useMemo(() => channelListRows(scopedThreads), [scopedThreads]);
+  const hasActiveWork = useMemo(() => scopedThreads.some((thread) => Boolean(channelActiveWork(thread))), [scopedThreads]);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
-    setError(null);
-    try {
-      const response = await api.scoutThreads(sessionToken);
-      setThreads(response.threads ?? []);
-    } catch (err) {
-      setError(err instanceof BonfireApiError ? err.message : 'Could not load threads.');
-    } finally {
-      setLoading(false);
+    if (loadRequestRef.current) {
+      loadQueuedRef.current = true;
+      return loadRequestRef.current;
     }
+    const generation = loadGenerationRef.current;
+    const token = sessionToken;
+    setAttemptedSessionToken(token);
+    setError(null);
+    let request!: Promise<void>;
+    request = (async () => {
+      try {
+        const response = await api.scoutThreadIndex(token);
+        if (generation !== loadGenerationRef.current || token !== sessionTokenRef.current) return;
+        setThreads(response.threads ?? []);
+        setThreadsSessionToken(token);
+      } catch (err) {
+        if (generation !== loadGenerationRef.current || token !== sessionTokenRef.current) return;
+        if (threadsRef.current.length === 0) setError(err instanceof BonfireApiError ? err.message : 'Could not load threads.');
+      } finally {
+        if (generation === loadGenerationRef.current && token === sessionTokenRef.current) setLoading(false);
+        if (loadRequestRef.current === request) loadRequestRef.current = null;
+        if (loadQueuedRef.current && generation === loadGenerationRef.current && token === sessionTokenRef.current) {
+          loadQueuedRef.current = false;
+          setTimeout(() => {
+            if (generation === loadGenerationRef.current && token === sessionTokenRef.current) void load();
+          }, 0);
+        }
+      }
+    })();
+    loadRequestRef.current = request;
+    return request;
+  }, [sessionToken]);
+
+  useEffect(() => {
+    loadGenerationRef.current += 1;
+    loadRequestRef.current = null;
+    loadQueuedRef.current = false;
+    setThreads([]);
+    setThreadsSessionToken(null);
+    setAttemptedSessionToken(null);
+    setError(null);
+    setLoading(Boolean(sessionToken));
+	setEditingThreadID(null);
+	setTitleDraft('');
+	setRenameError(null);
+	renameInFlightRef.current = null;
+	longPressedThreadRef.current = null;
   }, [sessionToken]);
 
   useFocusEffect(
@@ -196,11 +262,14 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
 
     renameInFlightRef.current = threadID;
     setRenameError(null);
+    const generation = loadGenerationRef.current;
+    const token = sessionToken;
     try {
       const response = await api.updateScoutThread(sessionToken, threadID, { title });
+      if (generation !== loadGenerationRef.current || token !== sessionTokenRef.current) return;
       setThreads((current) => current.map((candidate) => (
         String(candidate.id) === threadID
-          ? { ...candidate, ...(response.thread ?? {}), title }
+          ? { ...candidate, ...chatIndexMetadata(response.thread ?? { id: threadID }), title, messages: undefined }
           : candidate
       )));
       setEditingThreadID(null);
@@ -208,16 +277,29 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
       Keyboard.dismiss();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
+      if (generation !== loadGenerationRef.current || token !== sessionTokenRef.current) return;
       setRenameError(err instanceof BonfireApiError ? err.message : 'Could not rename that thread.');
     } finally {
       if (renameInFlightRef.current === threadID) renameInFlightRef.current = null;
     }
   }, [editingThreadID, sessionToken, titleDraft]);
 
-  if (loading) {
-    return <ActivityIndicator color={colors.accent} style={styles.loading} />;
+  if (loading || (threadsSessionToken !== sessionToken && attemptedSessionToken !== sessionToken)) {
+    return (
+      <View accessibilityLabel="Loading channels and private chats" accessibilityRole="progressbar" style={styles.loadingSkeleton}>
+        {Array.from({ length: 6 }, (_, index) => (
+          <View key={`thread-loading-${index}`} style={styles.loadingRow}>
+            <View style={styles.loadingIcon} />
+            <View style={styles.loadingCopy}>
+              <View style={[styles.loadingLine, index % 2 === 0 ? styles.loadingLineShort : null]} />
+              <View style={[styles.loadingLine, styles.loadingLineMuted]} />
+            </View>
+          </View>
+        ))}
+      </View>
+    );
   }
-  if (error) {
+  if (error && !scopedThreads.length) {
     return (
       <Pressable
         accessibilityRole="button"
@@ -227,7 +309,7 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
       </Pressable>
     );
   }
-  if (!threads.length) {
+  if (!scopedThreads.length) {
     return <Text style={styles.empty}>No threads yet. Hold the mic and say something.</Text>;
   }
 
@@ -236,7 +318,7 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
       {renameError ? <Text accessibilityRole="alert" style={styles.renameError}>{renameError}</Text> : null}
       <FlashList
         data={rows}
-        extraData={{ clock, editingThreadID, largeText, selectedThreadId, titleDraft }}
+        extraData={{ clock, editingThreadID: scopedEditingThreadID, largeText, selectedThreadId, titleDraft }}
         keyExtractor={(row) => row.id}
         getItemType={(row) => row.kind}
         maxItemsInRecyclePool={32}
@@ -251,7 +333,7 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
             const body = channelTerminalPreview(thread);
             const unread = Math.max(0, Number(thread.unreadCount ?? 0));
             const threadID = String(thread.id);
-            const editing = editingThreadID === threadID;
+            const editing = scopedEditingThreadID === threadID;
             const working = channelActiveWork(thread);
             const bonfire = isBonfireChat(thread);
             return (
@@ -339,7 +421,13 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
 const styles = StyleSheet.create({
   listRoot: { flex: 1, minHeight: 0 },
   listContent: { paddingBottom: space[8] },
-  loading: { paddingVertical: space[8] },
+  loadingSkeleton: { paddingHorizontal: space[2], paddingVertical: space[3], gap: space[2] },
+  loadingRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[3] },
+  loadingIcon: { width: 30, height: 30, borderRadius: radius.md, backgroundColor: colors.surface2 },
+  loadingCopy: { flex: 1, gap: 8 },
+  loadingLine: { width: '82%', height: 8, borderRadius: radius.full, backgroundColor: colors.surface2 },
+  loadingLineShort: { width: '56%' },
+  loadingLineMuted: { opacity: 0.62 },
   section: { gap: 1 },
   sectionLabel: {
     ...type.label,

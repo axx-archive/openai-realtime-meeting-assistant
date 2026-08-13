@@ -9225,6 +9225,87 @@
         display: none;
       }
 
+      .chat-thread-skeleton {
+        pointer-events: none;
+        min-height: 54px;
+        align-items: center;
+      }
+
+      .chat-thread-skeleton__icon,
+      .chat-thread-skeleton__line {
+        display: block;
+        background: color-mix(in srgb, var(--text-3) 13%, transparent);
+        animation: chat-skeleton-pulse 1.15s ease-in-out infinite alternate;
+      }
+
+      .chat-thread-skeleton__icon {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        border-radius: 10px;
+      }
+
+      .chat-thread-skeleton__copy {
+        flex: 1;
+        display: grid;
+        gap: 8px;
+      }
+
+      .chat-thread-skeleton__line {
+        height: 8px;
+        border-radius: 999px;
+      }
+
+      .chat-thread-skeleton__line:first-child { width: 58%; }
+      .chat-thread-skeleton__line:last-child { width: 82%; opacity: .72; }
+
+      .scout-chat-loading {
+        width: min(620px, calc(100% - 32px));
+        margin: auto auto 18%;
+        display: grid;
+        gap: 14px;
+      }
+
+      .scout-chat-loading__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-loading__bubble {
+        height: 58px;
+        border-radius: 18px;
+        background: color-mix(in srgb, var(--text-3) 10%, transparent);
+        animation: chat-skeleton-pulse 1.15s ease-in-out infinite alternate;
+      }
+
+      .scout-chat-loading__bubble:nth-child(2) { width: 72%; }
+      .scout-chat-loading__bubble:nth-child(3) { width: 48%; justify-self: end; }
+      .scout-chat-loading__bubble:nth-child(4) { width: 84%; }
+
+      .scout-chat-empty__action {
+        min-height: 44px;
+        margin-top: 14px;
+        padding: 0 18px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        cursor: pointer;
+      }
+
+      @keyframes chat-skeleton-pulse {
+        from { opacity: .52; }
+        to { opacity: 1; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .chat-thread-skeleton__icon,
+        .chat-thread-skeleton__line,
+        .scout-chat-loading__bubble { animation: none; }
+      }
+
       /* card 070: both sections are always on screen, so each caption headlines
          its own list — no scope toggle to lean on anymore */
       .chat-threads__section-head {
@@ -24253,13 +24334,7 @@
           max-height: min(260px, 32svh);
         }
 
-        /* chat tool folds to the conversation alone; the single thread
-           is already the active one */
-        .chat-threads {
-          display: none;
-        }
-
-        .scout-chat-thread {
+		.scout-chat-thread {
           padding: 14px 16px;
         }
 
@@ -32792,6 +32867,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      // wanted cadence changes (15s on the chat tool, 45s elsewhere)
 	      let chatThreadPollMs = 0
 	      let chatThreadsFingerprint = ''
+	      let chatThreadsLoading = false
+	      let chatThreadsRequest = null
+	      let chatThreadsRefreshQueued = false
+	      let chatThreadsGeneration = 0
+	      const scoutChatThreadRequests = new Map()
+	      const scoutChatHydrationRetries = new Map()
 	      // inline thread-rename state (D7)
 	      let chatRenameActive = false
 	      // mobile stacked navigator (design mobile §6): threads ↔ convo
@@ -32972,7 +33053,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // Home recommendations and their exact thread destinations are private
         // authority projections. Remove them synchronously after publishing the
         // replacement identity, before that account's shell can paint or fetch.
-        resetHomeProjection()
+	        resetPersistedScoutChatState()
         // Authentication transitions are a hard privacy boundary. Fence any
         // in-flight fetch for the prior account and remove its projection from
         // the DOM before the new account can load.
@@ -49399,7 +49480,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             // so a (re)connect catches up on anything missed while offline
             console.debug('office socket granted', message.data)
             if (authedUser) {
-              loadScoutChatThreads({ onlyIfChanged: true })
+              loadScoutChatThreads({ onlyIfChanged: true, queueIfBusy: true })
             }
             break
           case 'board':
@@ -52537,17 +52618,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return scoutChatThreads.find(thread => String(thread?.id || '') === activeScoutThreadId) || null
 	      }
 
-		      function upsertScoutChatThread(thread, options = {}) {
-		        if (!thread?.id) {
-		          return null
-		        }
+	      function upsertScoutChatThread(thread, options = {}) {
+	        if (!thread?.id) {
+	          return null
+	        }
+		if (Array.isArray(thread.messages) && options.complete !== false) thread = { ...thread, messagesLoaded: true }
 		        const id = String(thread.id)
 		        const current = scoutChatThreads.find(candidate => String(candidate?.id || '') === id)
 		        const incomingUpdatedAt = String(thread.updatedAt || '')
 		        const currentUpdatedAt = String(current?.updatedAt || '')
-		        const revisionKey = value => value.replace(/(?:\.(\d+))?Z$/, (_, fraction = '') => `.${fraction.padEnd(9, '0').slice(0, 9)}Z`)
-		        const incomingRevision = revisionKey(incomingUpdatedAt)
-		        const currentRevision = revisionKey(currentUpdatedAt)
+		        const incomingRevision = scoutChatThreadRevisionKey(incomingUpdatedAt)
+		        const currentRevision = scoutChatThreadRevisionKey(currentUpdatedAt)
 		        // HTTP responses and socket frames race independently. updatedAt is
 		        // the server-owned thread revision, so a delayed response must never
 		        // replace a newer socket projection (or resurrect an edited/deleted
@@ -52572,6 +52653,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function resetPersistedScoutChatState() {
+		chatThreadsGeneration += 1
+		chatThreadsRequest = null
+		chatThreadsRefreshQueued = false
+		chatThreadsLoading = false
+		scoutChatThreadRequests.clear()
+		scoutChatHydrationRetries.clear()
+		chatRenameActive = false
+		if (chatConvoRenameInput) chatConvoRenameInput.value = ''
 	        scoutChatThreads = []
 	        activeScoutThreadId = ''
 	        pendingScoutFiles = []
@@ -52600,7 +52689,136 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function chatThreadsListFingerprint(threads) {
-	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}:${(thread?.messages || []).length}`).join('|')
+	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}`).join('|')
+	      }
+
+	      function chatThreadSkeletonNode() {
+		const row = bfEl('div', 'chat-thread-item chat-thread-skeleton')
+		row.setAttribute('aria-hidden', 'true')
+		const copy = bfEl('span', 'chat-thread-skeleton__copy')
+		copy.append(bfEl('span', 'chat-thread-skeleton__line'), bfEl('span', 'chat-thread-skeleton__line'))
+		row.append(bfEl('span', 'chat-thread-skeleton__icon'), copy)
+		return row
+	      }
+
+	      function renderChatThreadLoading() {
+		if (!chatThreadsLoading || scoutChatThreads.length) return
+		chatChannelsEmpty.hidden = true
+		chatDefaultThread.hidden = true
+		chatChannelThreads.replaceChildren(chatThreadSkeletonNode(), chatThreadSkeletonNode())
+		chatAgentThreads.replaceChildren(chatThreadSkeletonNode(), chatThreadSkeletonNode(), chatThreadSkeletonNode())
+	      }
+
+	      function renderScoutChatConversationLoading() {
+		clearScoutChatThreadNodes()
+		scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(node => node.remove())
+		const loading = bfEl('div', 'scout-chat-loading')
+		loading.setAttribute('role', 'status')
+		loading.setAttribute('aria-live', 'polite')
+		loading.append(
+		  bfEl('span', 'scout-chat-loading__label', 'Loading conversation'),
+		  bfEl('span', 'scout-chat-loading__bubble'),
+		  bfEl('span', 'scout-chat-loading__bubble'),
+		  bfEl('span', 'scout-chat-loading__bubble')
+		)
+		scoutChatThread.insertBefore(loading, scoutChatThinking)
+	      }
+
+	      function renderScoutChatConversationLoadError(threadId) {
+		if (activeScoutThreadId !== threadId) return
+		clearScoutChatThreadNodes()
+		const state = bfEl('div', 'scout-chat-empty')
+		const inner = bfEl('div', 'scout-chat-empty__inner')
+		inner.append(
+		  bfEl('span', 'scout-chat-empty__eyebrow', 'Conversation unavailable'),
+		  bfEl('h2', 'scout-chat-empty__title', 'This chat did not load'),
+		  bfEl('p', 'scout-chat-empty__body', 'Your conversation is still safe. Try loading it again.')
+		)
+		const retry = bfEl('button', 'scout-chat-empty__action', 'Try again')
+		retry.type = 'button'
+		retry.addEventListener('click', () => { renderScoutChatConversationLoading(); void hydrateScoutChatThread(threadId) })
+		inner.appendChild(retry)
+		state.appendChild(inner)
+		scoutChatThread.insertBefore(state, scoutChatThinking)
+	      }
+
+	      function scoutChatThreadRevisionKey(value) {
+		return String(value || '').replace(/(?:\.(\d+))?Z$/, (_, fraction = '') => `.${fraction.padEnd(9, '0').slice(0, 9)}Z`)
+	      }
+
+	      function scoutChatThreadRevisionCompare(left, right) {
+		return scoutChatThreadRevisionKey(left).localeCompare(scoutChatThreadRevisionKey(right))
+	      }
+
+	      function mergeScoutChatIndexRows(rows) {
+		const currentByID = new Map(scoutChatThreads.map(thread => [String(thread?.id || ''), thread]))
+		return rows.map(row => {
+		  const current = currentByID.get(String(row?.id || ''))
+		  const revisionOrder = scoutChatThreadRevisionCompare(current?.updatedAt, row?.updatedAt)
+		  if (current && revisionOrder > 0) return current
+		  if (current?.messagesLoaded === true && revisionOrder === 0) {
+			return { ...row, ...current, unreadCount: row.unreadCount, lastReadMessageId: row.lastReadMessageId, messagesLoaded: true }
+		  }
+		  if (current && revisionOrder === 0) return { ...row, ...current, messagesLoaded: current.messagesLoaded === true }
+		  return { ...row, messagesLoaded: false, messages: undefined }
+		})
+	      }
+
+	      async function hydrateScoutChatThread(threadId) {
+		const id = String(threadId || '')
+		if (!authedUser || !id) return null
+		const existing = scoutChatThreads.find(thread => String(thread?.id || '') === id)
+		if (existing?.messagesLoaded === true) return existing
+		if (scoutChatThreadRequests.has(id)) return scoutChatThreadRequests.get(id)
+		const generation = chatThreadsGeneration
+		const account = String(authedUser.email || '').toLowerCase()
+		let retryNewerRevision = false
+		let retryRevision = ''
+		const request = (async () => {
+		  try {
+			const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(id)}`, { cache: 'no-store' })
+			if (!response.ok) {
+			  if (generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase()) renderScoutChatConversationLoadError(id)
+			  return null
+			}
+			const payload = await response.json()
+			if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()) return null
+			const hydrated = payload?.thread ? { ...payload.thread, messagesLoaded: true } : null
+			if (!hydrated?.id) return null
+			const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === id)
+			if (index < 0) return null
+			const current = scoutChatThreads[index]
+			if (scoutChatThreadRevisionCompare(current?.updatedAt, hydrated.updatedAt) > 0) {
+			  retryRevision = scoutChatThreadRevisionKey(current?.updatedAt)
+			  const prior = scoutChatHydrationRetries.get(id)
+			  const count = prior?.revision === retryRevision ? prior.count : 0
+			  if (count < 2) {
+				retryNewerRevision = true
+				scoutChatHydrationRetries.set(id, { revision: retryRevision, count: count + 1 })
+			  } else if (activeScoutThreadId === id) {
+				renderScoutChatConversationLoadError(id)
+			  }
+			  return current
+			}
+			scoutChatHydrationRetries.delete(id)
+			scoutChatThreads[index] = { ...current, ...hydrated }
+			if (activeScoutThreadId === id) renderActiveScoutThread()
+			return scoutChatThreads[index]
+		  } catch {
+			if (generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase()) renderScoutChatConversationLoadError(id)
+			return null
+		  } finally {
+			if (scoutChatThreadRequests.get(id) === request) scoutChatThreadRequests.delete(id)
+			const current = scoutChatThreads.find(thread => String(thread?.id || '') === id)
+			if (retryNewerRevision && current && current.messagesLoaded !== true && generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase()) {
+			  window.setTimeout(() => {
+				if (generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase() && !scoutChatThreadRequests.has(id)) void hydrateScoutChatThread(id)
+			  }, 120)
+			}
+		  }
+		})()
+		scoutChatThreadRequests.set(id, request)
+		return request
 	      }
 
 	      // Per-thread unread dots ride a device-local lastSeen map: the poll
@@ -52679,14 +52897,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          resetPersistedScoutChatState()
 	          return
 	        }
+		if (chatThreadsRequest) {
+		  if (options.queueIfBusy) chatThreadsRefreshQueued = true
+		  return chatThreadsRequest
+		}
+		const generation = chatThreadsGeneration
+		const account = String(authedUser.email || '').toLowerCase()
+		chatThreadsLoading = true
+		renderChatThreadLoading()
+		chatThreadsRequest = (async () => {
 	        try {
-	          const response = await fetch('/assistant/chat-threads', { cache: 'no-store' })
+	          const response = await fetch('/assistant/chat-threads?view=index', { cache: 'no-store' })
 	          if (!response.ok) {
 	            return
 	          }
 	          const payload = await response.json()
+		  if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()) return
 	          const presentationFixture = pd1PresentationWorkFixtureThread()
-	          const threads = presentationFixture ? [presentationFixture] : (Array.isArray(payload?.threads) ? payload.threads : [])
+	          const threads = presentationFixture
+			? [{ ...presentationFixture, messagesLoaded: true }]
+			: mergeScoutChatIndexRows(Array.isArray(payload?.threads) ? payload.threads : [])
 	          const fingerprint = chatThreadsListFingerprint(threads)
 	          if (options.onlyIfChanged && fingerprint === chatThreadsFingerprint) {
 	            return
@@ -52708,9 +52938,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // hidden until the next socket event.
 	          window.requestAnimationFrame(syncDesktopActiveWorkIndicator)
 	          renderOfficeRecentThreads()
+		  const conversationVisible = !phoneLayoutQuery.matches || mobileChatView === 'convo'
+		  if (!presentationFixture && activeScoutThreadId && conversationVisible) void hydrateScoutChatThread(activeScoutThreadId)
 	        } catch {
 	          // Persistent chat can refresh again; keep the current in-memory view.
+	        } finally {
+		  if (generation === chatThreadsGeneration) {
+			chatThreadsLoading = false
+			chatThreadsRequest = null
+			if (!scoutChatThreads.length) renderChatAgentThreads()
+			if (chatThreadsRefreshQueued) {
+			  chatThreadsRefreshQueued = false
+			  queueMicrotask(() => void loadScoutChatThreads({ onlyIfChanged: true }))
+			}
+		  }
 	        }
+	      })()
+	      return chatThreadsRequest
 	      }
 
 	      // Poll = true reconciliation: chat_thread events on the office/room
@@ -52747,7 +52991,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        chatThreadNotificationNudgeTimer = window.setTimeout(() => {
 	          chatThreadNotificationNudgeTimer = 0
-	          loadScoutChatThreads({ onlyIfChanged: true })
+	          loadScoutChatThreads({ onlyIfChanged: true, queueIfBusy: true })
 	        }, 3000)
 	      }
 
@@ -52766,38 +53010,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const existing = scoutChatThreads.find(thread => String(thread?.id || '') === id)
 	        if (!existing) {
 	          // A channel this client has never loaded — refresh the list.
-	          loadScoutChatThreads({ onlyIfChanged: true })
+	          loadScoutChatThreads({ onlyIfChanged: true, queueIfBusy: true })
 	          return
 	        }
-	        existing.title = payload.title || existing.title
-	        existing.preview = payload.preview || existing.preview
-	        existing.updatedAt = payload.updatedAt || existing.updatedAt
-	        existing.visibility = payload.visibility || existing.visibility
+		if (payload.updatedAt && existing.updatedAt && scoutChatThreadRevisionCompare(payload.updatedAt, existing.updatedAt) < 0) return
+		const candidate = {
+		  ...existing,
+		  title: payload.title || existing.title,
+		  preview: payload.preview || existing.preview,
+		  updatedAt: payload.updatedAt || existing.updatedAt,
+		  visibility: payload.visibility || existing.visibility,
+		  messages: Array.isArray(existing.messages) ? [...existing.messages] : existing.messages,
+		}
 	        // card 073: a deletion travels as deletedMessageId instead of a
 	        // message — drop the bubble here (idempotent when this tab already
 	        // removed it on its own DELETE response)
 	        if (payload.deletedMessageId) {
-	          removeScoutChatThreadMessage(id, String(payload.deletedMessageId))
+		  const deletedID = String(payload.deletedMessageId)
+		  candidate.messages = (Array.isArray(candidate.messages) ? candidate.messages : []).filter(entry => String(entry?.id || '') !== deletedID)
+		  upsertScoutChatThread(candidate, { select: false, complete: candidate.messagesLoaded === true })
+		  if (activeScoutThreadId === id) renderActiveScoutThread()
 	          return
 	        }
 	        const message = payload.message
 	        if (message?.id) {
-	          const messages = Array.isArray(existing.messages) ? existing.messages : []
+	          const messages = Array.isArray(candidate.messages) ? candidate.messages : []
 	          const messageIndex = messages.findIndex(candidate => String(candidate?.id || '') === String(message.id))
 	          if (messageIndex === -1) {
-	            existing.messages = [...messages, message]
+	            candidate.messages = [...messages, message]
 	          } else if (!chatMessageEventRegressesProjectAdmission(messages[messageIndex], message)) {
 	            // A re-broadcast of an existing message (e.g. a thread ref whose
 	            // status just flipped to complete) replaces it in place.
-	            existing.messages = messages.map((candidate, index) => index === messageIndex ? message : candidate)
+	            candidate.messages = messages.map((entry, index) => index === messageIndex ? message : entry)
 	          }
 		        }
-	        upsertScoutChatThread(existing, { select: false })
+	        upsertScoutChatThread(candidate, { select: false, complete: candidate.messagesLoaded === true })
 	        loadHomeSnapshot(true)
 		        if (activeScoutThreadId === id) {
 		          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
-		            const root = desktopChatReplyTopology(existing.messages).rootFor(message)
-		            syncDesktopReplySurfaces(existing, root?.id || message.replyTo.messageId)
+		            const root = desktopChatReplyTopology(candidate.messages).rootFor(message)
+		            syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId)
 		            return
 		          }
 		          // a scout reply arriving over the socket respects the thinking
@@ -57611,7 +57863,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      const chatActiveWorkStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked'])
 
 	      function chatThreadActiveWork(thread) {
-	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : (thread?.activeWork ? [thread.activeWork] : [])
 	        for (let index = messages.length - 1; index >= 0; index -= 1) {
 	          const message = messages[index]
 	          if (!message?.thread) continue
@@ -57750,6 +58002,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const active = String(thread.id || '') === activeScoutThreadId
 	        const item = document.createElement('div')
 	        item.className = 'chat-thread-item chat-thread-item--with-action'
+		item.dataset.threadId = String(thread.id || '')
 	        item.setAttribute('role', 'button')
 	        item.tabIndex = 0
 	        item.setAttribute('aria-pressed', active ? 'true' : 'false')
@@ -57838,6 +58091,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!chatAgentThreads) {
 	          return
 	        }
+		if (chatThreadsLoading && !scoutChatThreads.length) {
+		  renderChatThreadLoading()
+		  return
+		}
 	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
 	        hideChatChannelActivityPopover()
 	        // card 070: no scope toggle — both audiences render at once into their
@@ -57862,6 +58119,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
 	      }
 
+	      function syncChatThreadSelection(nextId) {
+		for (const row of document.querySelectorAll('.chat-thread-item[data-thread-id]')) {
+		  row.setAttribute('aria-pressed', String(row.dataset.threadId || '') === String(nextId || '') ? 'true' : 'false')
+		}
+		if (chatDefaultThread) chatDefaultThread.setAttribute('aria-pressed', nextId ? 'false' : 'true')
+	      }
+
 	      // the phone chat is a stacked navigator: the data attribute drives
 	      // which pane the ≤640px cascade shows; inert on desktop
 	      function setMobileChatView(view) {
@@ -57878,7 +58142,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (mobileChatView === 'convo' && wasThreads && !chatHistoryPopping && phoneLayoutQuery.matches) {
 	          try { history.pushState({ view: 'convo', thread: activeScoutThreadId || '' }, '') } catch (_) {}
 	        }
-	        if (mobileChatView === 'convo' && scoutChatThread) {
+	        if (mobileChatView === 'convo' && phoneLayoutQuery.matches && scoutChatThread) {
 	          // Pin to the latest message: the thread's nodes were appended
 	          // while the phone convo pane was display:none, so every
 	          // scrollTop write was a no-op and opening a thread landed at
@@ -57910,8 +58174,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          markChatThreadSeen(selectedScoutChatThread())
 	        }
 	        hideScoutChatThinking()
-	        renderChatAgentThreads()
+		syncChatThreadSelection(nextThreadId)
 	        renderActiveScoutThread()
+		void hydrateScoutChatThread(nextThreadId)
 	      }
 
 	      // ---------- thread renaming (D7) ----------
@@ -58004,7 +58269,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!response.ok) {
 	            throw new Error(payload.error || 'could not rename thread')
 	          }
-	          upsertScoutChatThread(payload.thread)
+	          upsertScoutChatThread({ ...thread, ...payload.thread, messages: thread.messages, messagesLoaded: thread.messagesLoaded === true })
 	          renderActiveScoutThread()
 	          showToast({ text: `renamed · ${oldTitle} → ${payload.thread.title}`, kind: 'done' })
 	        } catch (error) {
@@ -58035,7 +58300,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
+        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -58231,6 +58496,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // own ghost launches) own; nothing typed inside them is lost
 	        scoutChatThread.querySelectorAll('.goalcard').forEach(node => node.remove())
 	        const thread = selectedScoutChatThread()
+		if (thread && thread.messagesLoaded !== true) {
+		  syncChatConvoHeader()
+		  renderScoutChatDestination()
+		  renderScoutChatConversationLoading()
+		  return
+		}
 	        const priorSeenAt = desktopChatLayoutQuery.matches && thread?.id
 	          ? String(chatThreadSeenMap()[String(thread.id)] || '')
 	          : ''
@@ -58261,6 +58532,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const feedMessages = desktopChatLayoutQuery.matches
 	          ? messages.filter(message => !message?.replyTo?.messageId)
 	          : messages
+		const boundedFeedMessages = feedMessages.slice(-scoutChatMaxNodes)
 	        if (!messages.length) {
 	          remountGhostGoalCards()
 	          if (!scoutChatThread.querySelector('.goalcard')) {
@@ -58274,14 +58546,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-chat-brain-chip, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        let unreadBoundaryMounted = false
-	        feedMessages.forEach((message, messageIndex) => {
+	        boundedFeedMessages.forEach((message, messageIndex) => {
 	          if (!unreadBoundaryMounted && priorSeenAt && String(message?.createdAt || '') > priorSeenAt) {
 	            const boundary = desktopChatUnreadBoundaryNode()
 	            // the boundary names its debt — "n new messages", not a bare
 	            // word. Machine records (run-log stages, proposals, manifests)
 	            // are not messages and must not inflate the count; thread-kind
 	            // records DO count — a workstream landing is real catch-up debt.
-	            const remaining = feedMessages.slice(messageIndex).filter(record =>
+	            const remaining = boundedFeedMessages.slice(messageIndex).filter(record =>
 	              !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
 	            ).length
 	            boundary.textContent = remaining === 1 ? '1 new message' : `${remaining} new messages`

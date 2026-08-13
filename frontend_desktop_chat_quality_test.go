@@ -444,7 +444,7 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 	for signature, wants := range map[string][]string{
 		"function handleChatThreadEvent(payload)": {
 			"desktopChatLayoutQuery.matches && message?.replyTo?.messageId",
-			"syncDesktopReplySurfaces(existing, root?.id || message.replyTo.messageId)",
+			"syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId)",
 		},
 		"function removeScoutChatThreadMessage(threadId, messageId)": {
 			"desktopChatLayoutQuery.matches && replyRoot?.id",
@@ -473,7 +473,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	for _, want := range []string{
 		"const feedMessages = desktopChatLayoutQuery.matches",
 		"messages.filter(message => !message?.replyTo?.messageId)",
-		"feedMessages.forEach((message, messageIndex) =>",
+		"boundedFeedMessages.forEach((message, messageIndex) =>",
 	} {
 		if !strings.Contains(renderBody, want) {
 			t.Errorf("desktop root-only feed projection missing %q", want)
@@ -499,7 +499,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 		"if (chatContextState.mode === 'thread')",
 		"const feedMessages = desktopChatLayoutQuery.matches",
 		"messages.filter(message => !message?.replyTo?.messageId)",
-		"feedMessages.forEach((message, messageIndex) =>",
+		"boundedFeedMessages.forEach((message, messageIndex) =>",
 		"openDesktopMessageContext(message, document.activeElement)",
 	} {
 		if !strings.Contains(html, want) {
@@ -526,7 +526,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	if strings.Contains(eventBody, "messages.push(message)") || strings.Contains(eventBody, "messages[messageIndex] = message") {
 		t.Fatal("live chat events must replace the messages array so cached reply topology cannot go stale")
 	}
-	for _, want := range []string{"existing.messages = [...messages, message]", "existing.messages = messages.map("} {
+	for _, want := range []string{"candidate.messages = [...messages, message]", "candidate.messages = messages.map("} {
 		if !strings.Contains(eventBody, want) {
 			t.Errorf("live reply invalidation contract missing %q", want)
 		}

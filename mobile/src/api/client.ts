@@ -815,6 +815,14 @@ export const api = {
     });
   },
 
+  scoutThreadIndex(
+    sessionToken: string,
+  ): Promise<ScoutThreadsResponse> {
+    return request<ScoutThreadsResponse>('/assistant/chat-threads?view=index', {
+      sessionToken,
+    });
+  },
+
   scoutThread(
     sessionToken: string,
     threadId: string,

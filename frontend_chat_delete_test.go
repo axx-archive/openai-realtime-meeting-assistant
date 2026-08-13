@@ -93,7 +93,9 @@ func TestIndexScoutThreadMessageDeleteWiring(t *testing.T) {
 	if threadEvent == "" {
 		t.Fatal("could not extract handleChatThreadEvent body")
 	}
-	if !strings.Contains(threadEvent, "payload.deletedMessageId") || !strings.Contains(threadEvent, "removeScoutChatThreadMessage(id, String(payload.deletedMessageId))") {
-		t.Fatal("handleChatThreadEvent must route deletedMessageId through removeScoutChatThreadMessage")
+	if !strings.Contains(threadEvent, "payload.deletedMessageId") ||
+		!strings.Contains(threadEvent, "candidate.messages = (Array.isArray(candidate.messages) ? candidate.messages : []).filter") ||
+		!strings.Contains(threadEvent, "upsertScoutChatThread(candidate") {
+		t.Fatal("handleChatThreadEvent must apply a deletion immutably at the event revision")
 	}
 }

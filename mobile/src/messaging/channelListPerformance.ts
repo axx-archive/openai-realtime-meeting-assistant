@@ -14,7 +14,11 @@ export type ChannelListRow =
   | { kind: 'thread'; id: string; thread: ScoutThread };
 
 export function channelActiveWork(thread: ScoutThread): ChannelActiveWork | null {
-  const messages = Array.isArray(thread.messages) ? thread.messages : [];
+  const messages = Array.isArray(thread.messages)
+    ? thread.messages
+    : thread.activeWork
+      ? [{ id: `active-${thread.id}`, role: 'scout', ...thread.activeWork } as ScoutMessage]
+      : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (!message.thread || !activeWorkStatuses.has(String(message.thread.status ?? '').toLowerCase())) continue;

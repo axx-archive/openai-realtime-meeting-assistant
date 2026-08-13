@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -204,6 +205,108 @@ func TestThreadReadMarkersAreKeyedByAllThreeParts(t *testing.T) {
 	}
 	if got := lookupThreadReadMarker("tenant-a", "aj@x.com", "pricing").LastReadMessageID; got != "m3" {
 		t.Fatalf("aj/pricing = %q, want m3", got)
+	}
+}
+
+func TestScoutChatThreadsIndexViewIsBodyFreeAndViewerAuthorized(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	private, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Private strategy", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private.Messages = []scoutChatMessageRecord{{ID: "secret-message", Role: "user", Text: strings.Repeat("private body ", 500), AuthorEmail: "aj@shareability.com"}}
+	if err := app.saveScoutChatThread(private); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Country Golf", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel.Messages = []scoutChatMessageRecord{
+		{ID: "public-message", Role: "user", Text: strings.Repeat("public body ", 500), AuthorEmail: "aj@shareability.com", CreatedAt: "2026-08-12T19:00:00Z"},
+		{ID: "viewer-message", Role: "user", Text: "own reply", AuthorEmail: "tim@shareability.com", CreatedAt: "2026-08-12T19:01:00Z"},
+	}
+	if err := app.saveScoutChatThread(channel); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := app.scoutChatThreadsIndexView("tim@shareability.com", false, 100)
+	if len(rows) != 1 || rows[0]["id"] != channel.ID || rows[0]["messagesLoaded"] != false {
+		t.Fatalf("index rows=%#v, want only the body-free public channel", rows)
+	}
+	if rows[0]["unreadCount"] != 1 || rows[0]["messageCount"] != 2 {
+		t.Fatalf("index viewer/count projection=%#v, want one unread of two", rows[0])
+	}
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte("public body")) || bytes.Contains(encoded, []byte("secret-message")) || bytes.Contains(encoded, []byte(`"messages":`)) {
+		t.Fatalf("index leaked conversation body/shape: %s", encoded)
+	}
+}
+
+func TestScoutChatThreadsIndexSelectionNeverEvaluatesTheFullProjection(t *testing.T) {
+	indexCalls := 0
+	got := selectScoutChatThreadsListProjection(
+		true,
+		func() []map[string]any {
+			indexCalls++
+			return []map[string]any{{"id": "fast-index"}}
+		},
+		func() []map[string]any {
+			t.Fatal("body-free index evaluated the full conversation projection")
+			return nil
+		},
+	)
+	if indexCalls != 1 || len(got) != 1 || got[0]["id"] != "fast-index" {
+		t.Fatalf("index calls=%d projection=%#v", indexCalls, got)
+	}
+}
+
+func TestScoutChatThreadsIndexClearsTerminalWorkAndDeletedActivity(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Lifecycle", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread.Messages = []scoutChatMessageRecord{{ID: "work", Role: "scout", CreatedAt: "2026-08-12T19:00:00Z", Thread: &scoutChatThreadRef{ID: "run", Status: "running", Query: "private request body"}}}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	rows := app.scoutChatThreadsIndexView("aj@shareability.com", false, 100)
+	if len(rows) != 1 || rows[0]["activeWork"] == nil {
+		t.Fatalf("running work missing from body-free index: %#v", rows)
+	}
+	encoded, _ := json.Marshal(rows[0]["activeWork"])
+	if bytes.Contains(encoded, []byte("private request body")) || bytes.Contains(encoded, []byte(`"query"`)) {
+		t.Fatalf("active-work projection leaked request body: %s", encoded)
+	}
+	thread.Messages[0].Thread.Status = "complete"
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	rows = app.scoutChatThreadsIndexView("aj@shareability.com", false, 100)
+	if rows[0]["activeWork"] != nil {
+		t.Fatalf("terminal work remained active: %#v", rows[0])
+	}
+	thread.Messages = nil
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	rows = app.scoutChatThreadsIndexView("aj@shareability.com", false, 100)
+	if rows[0]["messageCount"] != 0 || rows[0]["unreadCount"] != 0 {
+		t.Fatalf("deleted activity remained in index: %#v", rows[0])
+	}
+}
+
+func TestScoutChatThreadMutationViewNeverReturnsConversationBodies(t *testing.T) {
+	view := scoutChatThreadMutationView(scoutChatThreadRecord{ID: "thread", Title: "Renamed", Messages: []scoutChatMessageRecord{{ID: "secret", Text: strings.Repeat("body", 1000)}}})
+	encoded, _ := json.Marshal(view)
+	if bytes.Contains(encoded, []byte("secret")) || bytes.Contains(encoded, []byte(`"messages"`)) {
+		t.Fatalf("mutation response leaked conversation: %s", encoded)
 	}
 }
 

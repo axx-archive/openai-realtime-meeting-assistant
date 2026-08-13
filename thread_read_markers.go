@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -198,6 +201,113 @@ func (app *kanbanBoardApp) scoutChatThreadsView(viewerEmail string, includeArchi
 		// The client anchors its "new messages" divider on this.
 		row["lastReadMessageId"] = marker.LastReadMessageID
 		view = append(view, row)
+	}
+	return view
+}
+
+// scoutChatThreadsIndexView is the fast, body-free navigation projection.
+//
+// The original list route serialized every message in as many as 100 threads
+// and re-authorized every attachment before the browser could paint a single
+// channel row. On a real account that made first entry to Chat look empty for
+// several seconds and then shift all at once. The index contains only fields
+// already visible in the thread rail plus per-viewer unread state. A selected
+// conversation is loaded through the existing exact-thread GET, where message
+// and attachment authority is rechecked normally.
+func (app *kanbanBoardApp) scoutChatThreadsIndexView(viewerEmail string, includeArchived bool, limit int) []map[string]any {
+	if app == nil || app.memory == nil {
+		return []map[string]any{}
+	}
+	return app.scoutChatThreadsIndexViewFromEntries(viewerEmail, includeArchived, limit, app.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0))
+}
+
+func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail string, includeArchived bool, limit int, entries []meetingMemoryEntry) []map[string]any {
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	markers := snapshotThreadReadStore().Markers
+	markerFor := func(threadID string) threadReadMarker {
+		want := threadReadMarker{UserEmail: viewerEmail, ThreadID: threadID}
+		for _, marker := range markers {
+			if sameReadMarkerKey(marker, want) {
+				return marker
+			}
+		}
+		return threadReadMarker{}
+	}
+	view := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != meetingMemoryKindScoutChat || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, viewerEmail) {
+			continue
+		}
+		archivedAt := strings.TrimSpace(entry.Metadata["archivedAt"])
+		if archivedAt != "" && !includeArchived {
+			continue
+		}
+		row := map[string]any{
+			"id":             entry.ID,
+			"title":          entry.Metadata["title"],
+			"preview":        entry.Metadata["preview"],
+			"ownerEmail":     entry.Metadata["ownerEmail"],
+			"visibility":     entry.Metadata["visibility"],
+			"createdAt":      entry.Metadata["createdAt"],
+			"updatedAt":      entry.Metadata["updatedAt"],
+			"messagesLoaded": false,
+		}
+		if createdBy := strings.TrimSpace(entry.Metadata["createdBy"]); createdBy != "" {
+			row["createdBy"] = createdBy
+		}
+		if members := strings.TrimSpace(entry.Metadata["memberEmails"]); members != "" {
+			row["memberEmails"] = strings.Split(members, ",")
+		}
+		if archivedAt != "" {
+			row["archivedAt"] = archivedAt
+		}
+		if strings.EqualFold(strings.TrimSpace(entry.Metadata["table"]), "true") || strings.EqualFold(strings.TrimSpace(entry.Metadata["title"]), "Bonfire Chat") {
+			row["table"] = true
+		}
+		if activeWork := strings.TrimSpace(entry.Metadata["activeWork"]); activeWork != "" {
+			var projected struct {
+				CreatedAt string `json:"createdAt"`
+				Thread    struct {
+					ID              string  `json:"id"`
+					Mode            string  `json:"mode"`
+					Status          string  `json:"status"`
+					ArtifactID      string  `json:"artifactId,omitempty"`
+					AgentName       string  `json:"agentName,omitempty"`
+					CurrentStage    string  `json:"currentStage,omitempty"`
+					ProgressPercent float64 `json:"progressPercent,omitempty"`
+					ProgressNote    string  `json:"progressNote,omitempty"`
+					StartedAt       string  `json:"startedAt,omitempty"`
+				} `json:"thread"`
+			}
+			if json.Unmarshal([]byte(activeWork), &projected) == nil && strings.TrimSpace(projected.Thread.ID) != "" {
+				status := strings.ToLower(strings.TrimSpace(projected.Thread.Status))
+				if status == "queued" || status == "running" || status == "approval_required" || status == "needs_input" || status == "parked" {
+					row["activeWork"] = projected
+				}
+			}
+		}
+		marker := markerFor(entry.ID)
+		activity := []scoutChatMessageRecord{}
+		if encoded := strings.TrimSpace(entry.Metadata["messageActivity"]); encoded != "" {
+			_ = json.Unmarshal([]byte(encoded), &activity)
+		}
+		row["unreadCount"] = threadUnreadCount(activity, marker.ReadAt, viewerEmail)
+		row["lastReadMessageId"] = marker.LastReadMessageID
+		if messageCount, err := strconv.Atoi(strings.TrimSpace(entry.Metadata["messageCount"])); err == nil && messageCount >= 0 {
+			row["messageCount"] = messageCount
+		}
+		view = append(view, row)
+	}
+	sort.SliceStable(view, func(left, right int) bool {
+		leftTable, _ := view[left]["table"].(bool)
+		rightTable, _ := view[right]["table"].(bool)
+		if leftTable != rightTable {
+			return leftTable
+		}
+		return strings.Compare(fmt.Sprint(view[left]["updatedAt"]), fmt.Sprint(view[right]["updatedAt"])) > 0
+	})
+	if limit > 0 && len(view) > limit {
+		view = view[:limit]
 	}
 	return view
 }

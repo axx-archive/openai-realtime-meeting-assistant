@@ -1564,6 +1564,45 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 	return cloneMemoryEntries(tailMemoryEntries(store.visibleEntriesLocked(), limit))
 }
 
+// metadataSnapshot copies navigation/search metadata without cloning entry
+// bodies. Chat bodies can contain years of messages and attachments, while a
+// rail row needs only the server-authored metadata duplicated at commit time.
+func (store *meetingMemoryStore) metadataSnapshot(limit int) []meetingMemoryEntry {
+	return store.metadataSnapshotOfKind("", limit)
+}
+
+func (store *meetingMemoryStore) metadataSnapshotOfKind(kind string, limit int) []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+	kind = strings.TrimSpace(kind)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	// Walk the canonical entries directly. visibleEntriesLocked also runs
+	// stripOversizeBody over every body; metadata callers intentionally need
+	// neither the body copy nor that UTF-8/truncation work.
+	visible := make([]meetingMemoryEntry, 0, len(store.entries))
+	for _, entry := range store.entries {
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		if kind != "" && entry.Kind != kind {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	entries := tailMemoryEntries(visible, limit)
+	result := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		metadata := make(map[string]string, len(entry.Metadata))
+		for key, value := range entry.Metadata {
+			metadata[key] = value
+		}
+		result = append(result, meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata})
+	}
+	return result
+}
+
 // maxPromptBodyBytes is the store-layer cap on how many bytes of one entry's
 // Text may ride a visible snapshot into a prompt-feeding lane (Track-2 Wave 0
 // root-cause token fix). 8KB clears every real transcript (max observed ~7.2KB)

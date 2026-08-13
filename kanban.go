@@ -265,12 +265,13 @@ func realtimeUsageTokens(usage *kanbanRealtimeUsage, entry *llmUsageEntry) bool 
 }
 
 type kanbanBoardApp struct {
-	mu               sync.Mutex
-	cards            []kanbanCard
-	nextCreatedIndex int
-	updatedAt        time.Time
-	handledCalls     map[string]struct{}
-	memory           *meetingMemoryStore
+	mu                         sync.Mutex
+	cards                      []kanbanCard
+	nextCreatedIndex           int
+	updatedAt                  time.Time
+	handledCalls               map[string]struct{}
+	memory                     *meetingMemoryStore
+	scoutChatIndexBackfillOnce sync.Once
 	// pendingAttachmentUploads are short-lived server-minted source objects for
 	// composer uploads. A raw content hash is never authority: the uploader must
 	// own a live grant until the blob is durably referenced by an authorized
