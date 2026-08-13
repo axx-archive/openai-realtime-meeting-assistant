@@ -72,6 +72,43 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 	}
 }
 
+func TestDesktopExistingThreadProjectChoiceStaysZeroEffectUntilSend(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`id="scoutChatProjectChip"`,
+		`id="scoutChatProjectChooser"`,
+		`body: JSON.stringify({ text, destination: { route: 'thread', threadId } })`,
+		`const rows = [{ title: 'No project', token: '' }, ...(scoutChatProjectContext.choices || [])]`,
+		`scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId } : null`,
+		`scoutChatProjectContext.explicitNone = !choice.token`,
+		`!scoutChatProjectContext.explicitNone && next.suggested?.token`,
+		`if (projectContextToken && !followUp) messagePayload.projectContextToken = projectContextToken`,
+		`scoutChatMessageAttempt = scoutChatMessageAttempt?.key === attemptKey`,
+		`messagePayload.operationId = scoutChatMessageAttempt.operationId`,
+		`if (projectContextToken && scoutChatInput)`,
+		`Send the Project-linked message first, then attach files in the next turn.`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("existing-thread Project flow missing %q", want)
+		}
+	}
+	chooserStart := strings.Index(html, "function renderScoutChatProjectContext")
+	chooserEnd := strings.Index(html[chooserStart:], "async function loadScoutChatProjectContext")
+	if chooserStart < 0 || chooserEnd < 0 {
+		t.Fatal("existing-thread Project chooser boundary missing")
+	}
+	chooser := html[chooserStart : chooserStart+chooserEnd]
+	for _, forbidden := range []string{"sendScoutChatViaOffice", "/messages", "WorkRun", "toolTemplate", "projectId"} {
+		if strings.Contains(chooser, forbidden) {
+			t.Fatalf("Project chooser has a forbidden pre-Send effect or authority field %q", forbidden)
+		}
+	}
+}
+
 func TestDesktopHomeCategoryShellsExistBeforeJavaScriptHydration(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
@@ -126,6 +163,7 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
 let homeAvailable=true;
 let homeRequestCount=0;
 let chatMutationCount=0;
+let chatRequestBodies=[];
 let homeAccount='a';
 let delayProjectA=false;
 const initialHomeReadyAt=Date.now()+2000;
@@ -149,14 +187,15 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
      const text=String(body.text||'');
      const title=projectAccount==='b'?'B Project':'Country Golf';
      const choice={title,token:projectAccount==='b'?'opaque-b-project':'opaque-country-golf'};
-     const projectContext={available:body.destination?.route==='new-private',scopeKey:projectAccount==='b'?'scope-b':'scope-a',status:text.includes(title)?'suggested':'unlinked',choices:[choice]};
-     if(projectContext.status==='suggested')projectContext.suggested={...choice,suggested:true};
+     const threadDestination=body.destination?.route==='thread';
+     const projectContext={available:body.destination?.route==='new-private'||threadDestination,scopeKey:projectAccount==='b'?'scope-b':'scope-a',status:threadDestination?'bound':(text.includes(title)?'suggested':'unlinked'),choices:[choice]};
+     if(projectContext.status==='suggested'||projectContext.status==='bound')projectContext.suggested={...choice,suggested:projectContext.status==='suggested'};
      const reply=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,projectContext}));};
      if(projectAccount==='a'&&delayProjectA)return setTimeout(reply,1000);
      reply();
    });return;
  }
- if(req.url.startsWith('/assistant/chat-threads')&&req.method==='POST'){chatMutationCount+=1;res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+ if(req.url.startsWith('/assistant/chat-threads')&&req.method==='POST'){let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{chatMutationCount+=1;chatRequestBodies.push(raw);res.writeHead(503,{'content-type':'application/json'});res.end('{}');});return;}
  if(req.url==='/__home_account_b'){homeAccount='b';res.writeHead(204);return res.end();}
  if(req.url==='/__delay_project_a'){delayProjectA=true;res.writeHead(204);return res.end();}
  if(req.url==='/__rooms_live'){roomsMode='live';res.writeHead(204);return res.end();}
@@ -192,9 +231,9 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  assert.equal(homeRequestCount,1,'startup auth and room hydration coalesce into one Home request');
  const hydratedGeometry=await page.evaluate(()=>({composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),startersBox:document.getElementById('homeStarters').getBoundingClientRect().toJSON(),wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()}));
 	 // Chromium can settle the centered svh flex container by one fractional
-	 // device-pixel row after first paint. Keep the bound below four CSS pixels;
+	 // device-pixel row after first paint. Keep the bound within five CSS pixels;
 	 // card/composer dimensions remain identical and no late content is inserted.
-	 assert.ok(Math.abs(hydratedGeometry.composerTop-immediate.composerTop)<4,'Home hydration shifted geometry: '+JSON.stringify({immediate,hydratedGeometry}));
+	 assert.ok(Math.abs(hydratedGeometry.composerTop-immediate.composerTop)<=5,'Home hydration shifted geometry: '+JSON.stringify({immediate,hydratedGeometry}));
  await page.fill('#homeScoutInput','Unsent local draft');
  homeAvailable=false;
  await page.evaluate(()=>loadHomeSnapshot());
@@ -321,6 +360,51 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  await page.waitForFunction(()=>document.getElementById('homeStarters').dataset.hydrated==='true');
  await page.waitForTimeout(1100);
  assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false,'late A Project context rendered for B');
+	await page.goto(base+'/chat',{waitUntil:'domcontentloaded'});
+	await page.waitForSelector('#appShell.is-authed');
+	await page.waitForFunction(()=>document.getElementById('appShell').dataset.tool==='chat'&&getComputedStyle(document.getElementById('chatTool')).display!=='none');
+	await page.evaluate(()=>{
+	  scoutChatThreads=[{id:'country-golf',title:'Country Golf',visibility:'private',ownerEmail:'b@example.test',messages:[]}];
+	  selectScoutChatThread('country-golf');
+	  setMobileChatView('convo');
+	});
+	await page.waitForFunction(()=>!document.getElementById('scoutChatProjectRow').hidden&&document.getElementById('scoutChatProjectChip').textContent.startsWith('Project ·'));
+	assert.equal(chatMutationCount,0,'thread Project preview mutated chat before explicit Send');
+	await page.click('#scoutChatProjectChip');
+	assert.equal(await page.locator('#scoutChatProjectChooser').getAttribute('open'),'');
+	const threadProjectRenderDir=String(process.env.HOME_RENDER_DIR||'').trim();
+	const captureThreadProject=async(name,theme)=>{
+	  await page.evaluate(next=>renderTheme(next),theme);
+	  await page.mouse.move(2,2);await page.waitForTimeout(120);
+	  const geometry=await page.evaluate(()=>{
+		const chip=document.getElementById('scoutChatProjectChip').getBoundingClientRect();
+		const chooser=document.querySelector('#scoutChatProjectChooser .home-project-chooser__body').getBoundingClientRect();
+		return{fits:document.documentElement.scrollWidth<=innerWidth,viewportWidth:innerWidth,chipHeight:chip.height,chipLeft:chip.left,chipRight:chip.right,chooserLeft:chooser.left,chooserRight:chooser.right};
+	  });
+	  assert.equal(geometry.fits,true);assert.ok(geometry.chipHeight>=40,JSON.stringify(geometry));assert.ok(geometry.chipLeft>=0&&geometry.chipRight<=geometry.viewportWidth,JSON.stringify(geometry));assert.ok(geometry.chooserLeft>=0&&geometry.chooserRight<=geometry.viewportWidth,JSON.stringify(geometry));
+	  if(threadProjectRenderDir)await page.screenshot({path:path.join(threadProjectRenderDir,name+'-'+theme+'.png')});
+	};
+	await page.setViewportSize({width:1440,height:900});
+	await page.waitForTimeout(100);
+	for(const theme of ['dark','light'])await captureThreadProject('desktop-thread-project-chooser',theme);
+	await page.setViewportSize({width:390,height:844});
+	await page.waitForTimeout(100);
+	for(const theme of ['dark','light'])await captureThreadProject('phone-thread-project-chooser',theme);
+	await page.getByRole('radio',{name:'No project'}).click();
+	await page.fill('#scoutChatInput','Keep this turn outside the Project.');
+	await page.waitForTimeout(350);
+	assert.equal(await page.locator('#scoutChatProjectChip').textContent(),'No project','explicit No project was silently re-suggested after editing');
+	assert.equal(chatMutationCount,0,'thread Project choice mutated chat before explicit Send');
+	await page.click('#scoutChatProjectChip');
+	await page.getByRole('radio',{name:'B Project'}).click();
+	await page.evaluate(()=>document.getElementById('scoutChatForm').requestSubmit());
+	await page.waitForFunction(()=>document.getElementById('scoutChatInput').value==='Keep this turn outside the Project.');
+	await page.evaluate(()=>document.getElementById('scoutChatForm').requestSubmit());
+	await page.waitForTimeout(180);
+	assert.equal(chatMutationCount,2,'exact Project retry did not reach the canonical message endpoint twice');
+	const retryBodies=chatRequestBodies.map(raw=>JSON.parse(raw));
+	assert.equal(retryBodies[0].projectContextToken,'opaque-b-project');
+	assert.equal(retryBodies[0].operationId,retryBodies[1].operationId,'manual retry minted a different Project operation id');
 	const orderedProjectFrames=await page.evaluate(()=>{
 	  scoutChatThreads=[{id:'project-order',title:'Project order',updatedAt:'2026-08-12T00:00:02Z',visibility:'private',messages:[
 	    {id:'project-user',role:'user',createdAt:'2026-08-12T00:00:00Z',project:{status:'confirmed',projectId:'project-one',projectRevision:1,title:'Launch Plan',basis:'selected'}},

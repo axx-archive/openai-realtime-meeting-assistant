@@ -127,6 +127,11 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(requestedRoute, 'Deck');
   assert.deepEqual(requestedParams, { segment: 'threads' });
 
+  const videoPressable = renderer!.root.findByProps({ accessibilityLabel: 'Video' });
+  await act(async () => { videoPressable.props.onPress(); });
+  assert.equal(requestedRoute, 'Deck');
+  assert.deepEqual(requestedParams, { segment: 'rooms' });
+
   await act(async () => { renderer!.update(shell(selected, true)); });
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.mountID, mountID);
@@ -172,6 +177,9 @@ test('deep destinations preserve their owning top-level context', () => {
   assert.equal(coordinator.commit('Thread'), 'work');
   assert.equal(nativeShellDestinationForRoute('Board'), 'work');
   assert.equal(nativeShellDestinationForRoute('Deck'), 'chat');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');
   assert.equal(nativeShellDestinationForRoute('Meetings'), 'video');
   assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'network');
   assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'work-search');
@@ -233,7 +241,7 @@ test('navigation integration keeps push/deep-link handling and latest-thread rou
   assert.match(root, /navigationRef\.navigate\(\{ name: route, params \} as never\)/);
   assert.doesNotMatch(root, /navigationRef\.resetRoot/);
   assert.match(root, /createNativeShellSelectionCoordinator/);
-  assert.match(root, /shellSelectionRef\.current\.commit\(route\)/);
+  assert.match(root, /shellSelectionRef\.current\.commit\(route, currentRoute\?\.params\)/);
   assert.match(root, /<Stack\.Screen[\s\S]*?name="Thread"[\s\S]*?component=\{ThreadScreen\}/);
   assert.match(root, /<Stack\.Screen name="Room" component=\{RoomScreen\}/);
   assert.match(root, /name="NetworkSearch" component=\{WorkSearchHomeScreen\}/);

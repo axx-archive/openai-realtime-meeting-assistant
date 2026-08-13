@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 19 {
-		t.Fatalf("migration count = %d, want 19", len(migrations))
+	if len(migrations) != 20 {
+		t.Fatalf("migration count = %d, want 20", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -210,6 +210,13 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[18].SQL, "Project chat Send receipt requires exact confirmed canonical truth") ||
 		!strings.Contains(migrations[18].SQL, "Project chat Send receipts are append-only") {
 		t.Fatalf("unexpected Project chat Send migration: %+v", migrations[18])
+	}
+	if migrations[19].Version != 20 || migrations[19].Name != "0020_stride_project_multiplayer_chat.sql" ||
+		migrations[19].SHA256 != sha256.Sum256([]byte(migrations[19].SQL)) ||
+		!strings.Contains(migrations[19].SQL, "source_event.visibility IN ('private','project','channel')") ||
+		!strings.Contains(migrations[19].SQL, "NEW.source_audience->>'visibility'<>source_event.visibility") ||
+		!strings.Contains(migrations[19].SQL, "Project chat Send receipt requires exact confirmed canonical truth") {
+		t.Fatalf("unexpected Project multiplayer chat migration: %+v", migrations[19])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

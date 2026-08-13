@@ -12,6 +12,7 @@ import {
   findNodeHandle,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -41,6 +42,7 @@ import type {
   ChatMentionCandidate,
   DriveFileRecord,
   GiphySearchResult,
+	HomeProjectChoice,
   ScoutFileAttachment,
   ScoutMessage,
   ThreadDigestResponse,
@@ -402,6 +404,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const iPadWorkspace = workspaceLayout.conversationPane;
   const [messages, setMessages] = useState<ScoutMessage[]>([]);
   const [draft, setDraft] = useState("");
+	const [projectContext, setProjectContext] = useState<{ available: boolean; scopeKey: string; choices: HomeProjectChoice[] }>({ available: false, scopeKey: "", choices: [] });
+	const [selectedProject, setSelectedProject] = useState<(HomeProjectChoice & { text: string; threadId: string }) | null>(null);
+	const [projectExplicitNone, setProjectExplicitNone] = useState(false);
+	const [projectChooserOpen, setProjectChooserOpen] = useState(false);
+	const projectContextGenerationRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -1052,6 +1059,45 @@ export function ThreadScreen({ route, navigation }: Props) {
     ],
   );
 
+	useEffect(() => {
+		const generation = ++projectContextGenerationRef.current;
+		setSelectedProject((current) => current && (current.text !== draft.trim() || current.threadId !== route.params.threadId) ? null : current);
+		if (!sessionToken || editingMessage) {
+			setProjectContext({ available: false, scopeKey: "", choices: [] });
+			setSelectedProject(null);
+			setProjectExplicitNone(false);
+			setProjectChooserOpen(false);
+			return;
+		}
+		const timer = setTimeout(() => {
+			void api.projectContext(sessionToken, { text: draft.trim(), destination: { route: "thread", threadId: route.params.threadId } }).then((response) => {
+				if (generation !== projectContextGenerationRef.current) return;
+				const next = response.projectContext;
+				setProjectContext((current) => {
+					if (current.scopeKey && next.scopeKey && current.scopeKey !== next.scopeKey) {
+						setSelectedProject(null);
+						setProjectExplicitNone(false);
+					}
+					return { available: next.available, scopeKey: next.scopeKey ?? "", choices: Array.isArray(next.choices) ? next.choices : [] };
+				});
+				if (!projectExplicitNone && next.suggested?.token) setSelectedProject((current) => current ?? { ...next.suggested!, text: draft.trim(), threadId: route.params.threadId });
+			}).catch(() => {
+				if (generation !== projectContextGenerationRef.current) return;
+				setProjectContext({ available: false, scopeKey: "", choices: [] });
+				setSelectedProject(null);
+				setProjectExplicitNone(false);
+				setProjectChooserOpen(false);
+			});
+		}, 220);
+		return () => clearTimeout(timer);
+	}, [draft, editingMessage, projectExplicitNone, route.params.threadId, sessionToken]);
+
+	useEffect(() => {
+		setSelectedProject(null);
+		setProjectExplicitNone(false);
+		setProjectChooserOpen(false);
+	}, [route.params.threadId, sessionToken]);
+
   const applyScoutActions = useCallback(
     (raw: unknown) => {
       if (!Array.isArray(raw)) return;
@@ -1236,6 +1282,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   async function send(textOverride?: string) {
     const text = (textOverride ?? draft).trim();
     const messageFiles = textOverride === undefined ? pendingFiles : [];
+	const projectContextToken = !editingMessage && selectedProject?.text === text && selectedProject.threadId === route.params.threadId ? selectedProject.token : "";
     if (
       !sessionToken ||
       (!text && messageFiles.length === 0) ||
@@ -1243,6 +1290,10 @@ export function ThreadScreen({ route, navigation }: Props) {
       uploading
     )
       return;
+	if (projectContextToken && messageFiles.length > 0) {
+		setError("Send the Project-linked message first, then attach files in the next turn.");
+		return;
+	}
     stopTyping();
     setSending(true);
     setError(null);
@@ -1251,6 +1302,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       threadId: route.params.threadId,
       text,
       files: messageFiles,
+	  projectContextToken,
     });
     const messageAttempt =
       messageSendAttemptRef.current?.key === operationKey
@@ -1273,12 +1325,16 @@ export function ThreadScreen({ route, navigation }: Props) {
             messageFiles,
             "",
             messageAttempt.operationId,
+			projectContextToken,
           );
       if (!editingMessage) messageSendAttemptRef.current = null;
       if (textOverride === undefined) {
         setDraft("");
         setPendingFiles([]);
-        setEditingMessage(null);
+		setEditingMessage(null);
+		setSelectedProject(null);
+		setProjectExplicitNone(false);
+		setProjectChooserOpen(false);
       }
       applyTranscriptSnapshot(
         generationAtRequest,
@@ -3155,7 +3211,20 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        {!editingMessage ? (
+		{!editingMessage && projectContext.available ? (
+		  <Pressable
+			accessibilityRole="button"
+			accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : projectExplicitNone ? "No project. Change project" : "Add project"}
+			accessibilityHint="Opens the authorized Project chooser. Nothing changes until you send."
+			onPress={() => setProjectChooserOpen(true)}
+			style={({ pressed }) => [styles.projectChip, pressed && styles.headerActionPressed]}
+		  >
+			<SymbolView name="link" size={14} tintColor={colors.text2} />
+			<Text numberOfLines={1} maxFontSizeMultiplier={1.8} style={styles.projectChipText}>{selectedProject ? `${selectedProject.suggested ? "Suggested" : "Project"} · ${selectedProject.title}` : projectExplicitNone ? "No project" : "Add project"}</Text>
+		  </Pressable>
+		) : null}
+
+		{!editingMessage ? (
           <Glass radius={radius.xl} style={styles.composer}>
             {pendingFiles.length > 0 || stagingFiles.length > 0 || uploading ? (
               <View style={styles.pendingFiles}>
@@ -3362,6 +3431,21 @@ export function ThreadScreen({ route, navigation }: Props) {
             </View>
           </Glass>
         ) : null}
+		<Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
+		  <SafeAreaView style={styles.projectSheet}>
+			<View style={styles.projectSheetHeader}>
+			  <Text accessibilityRole="header" style={styles.projectSheetTitle}>Choose a project</Text>
+			  <Pressable accessibilityRole="button" accessibilityLabel="Close project chooser" onPress={() => setProjectChooserOpen(false)} style={({ pressed }) => [styles.projectSheetClose, pressed && styles.headerActionPressed]}><SymbolView name="xmark" size={17} tintColor={colors.text1} /></Pressable>
+			</View>
+			<ScrollView contentContainerStyle={styles.projectChoices}>
+			  {[{ title: "No project", token: "" }, ...projectContext.choices].map((choice) => {
+				const selected = choice.token ? String(selectedProject?.token ?? "") === choice.token : projectExplicitNone;
+				return <Pressable key={choice.token || "none"} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={choice.title} onPress={() => { setSelectedProject(choice.token ? { ...choice, text: draft.trim(), threadId: route.params.threadId } : null); setProjectExplicitNone(!choice.token); setProjectChooserOpen(false); }} style={({ pressed }) => [styles.projectChoice, selected && styles.projectChoiceSelected, pressed && styles.headerActionPressed]}><Text maxFontSizeMultiplier={1.8} style={styles.projectChoiceText}>{choice.title}</Text>{selected ? <SymbolView name="checkmark" size={16} tintColor={colors.ember} /> : null}</Pressable>;
+			  })}
+			</ScrollView>
+			<Text style={styles.projectSheetHint}>Nothing changes until you send.</Text>
+		  </SafeAreaView>
+		</Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
     </View>
@@ -3802,6 +3886,29 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: space[2],
   },
+	projectChip: {
+		minHeight: hitMin,
+		maxWidth: "88%",
+		alignSelf: "flex-start",
+		flexDirection: "row",
+		alignItems: "center",
+		gap: space[2],
+		marginHorizontal: space[5],
+		marginBottom: space[2],
+		paddingHorizontal: space[3],
+		borderRadius: radius.full,
+		backgroundColor: colors.surface2,
+	},
+	projectChipText: { ...type.captionMedium, color: colors.text2, flexShrink: 1 },
+	projectSheet: { flex: 1, backgroundColor: colors.surface1, paddingHorizontal: space[5] },
+	projectSheetHeader: { minHeight: 64, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+	projectSheetTitle: { ...type.title2, color: colors.text1 },
+	projectSheetClose: { width: hitMin, height: hitMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.surface2 },
+	projectChoices: { gap: space[2], paddingBottom: space[6] },
+	projectChoice: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[3], paddingHorizontal: space[4], borderRadius: radius.lg },
+	projectChoiceSelected: { backgroundColor: colors.surface2 },
+	projectChoiceText: { ...type.body, color: colors.text1, flexShrink: 1 },
+	projectSheetHint: { ...type.caption, color: colors.text3, textAlign: "center", paddingVertical: space[4] },
   mic: {
     width: hitMin,
     height: hitMin,

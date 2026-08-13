@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -167,6 +169,28 @@ ORDER BY lower(revision.title),revision.project_id`, snapshot.Organization.Heade
 	return result, rows.Err()
 }
 
+func boundHomeProjectForThread(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, threadID string, visible []homeProjectRow) (*homeProjectRow, error) {
+	store := currentHomeProjectStore()
+	if store == nil || !strideIdentifier(threadID) {
+		return nil, errHomeProjectUnavailable
+	}
+	var projectID string
+	err := store.pool.QueryRow(ctx, `SELECT project_id FROM stride_project_thread_bindings_current WHERE organization_id=$1 AND thread_id=$2 AND state='active'`, snapshot.Organization.Header.ID, threadID).Scan(&projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for index := range visible {
+		if visible[index].ID == projectID {
+			project := visible[index]
+			return &project, nil
+		}
+	}
+	return nil, errHomeProjectStale
+}
+
 func homeProjectTokenMAC(key StrideE10TenantAuthorityEnvelopeKey, raw []byte) []byte {
 	mac := hmac.New(sha256.New, key.Secret)
 	_, _ = mac.Write([]byte("home-project-context/v1\x00"))
@@ -274,7 +298,8 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !websocketOriginAllowed(r) || userFromRequest(r) == nil {
+	user := userFromRequest(r)
+	if !websocketOriginAllowed(r) || user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
@@ -304,7 +329,13 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 	response := homeProjectPreviewResponse{Status: "unlinked"}
 	err = withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
 		if destination.Route == "thread" {
-			return nil
+			thread, _, threadErr := kanbanApp.scoutChatThreadByID(user.Email, destination.ThreadID)
+			if threadErr != nil || thread.ArchivedAt != "" {
+				return errHomeProjectStale
+			}
+			if _, authorityErr := currentHomeProjectStore().projectChatSourceAuthorityForThread(r.Context(), snapshot, thread); authorityErr != nil {
+				return authorityErr
+			}
 		}
 		response.Available = true
 		response.ScopeKey = homeProjectScopeKey(snapshot)
@@ -319,8 +350,28 @@ func assistantProjectContextHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			response.Choices = append(response.Choices, homeProjectChoice{Title: project.Title, Token: token})
 		}
+		if destination.Route == "thread" {
+			bound, boundErr := boundHomeProjectForThread(r.Context(), snapshot, destination.ThreadID, projects)
+			if boundErr != nil {
+				return boundErr
+			}
+			if bound != nil {
+				token, mintErr := mintHomeProjectToken(r.Context(), snapshot, payload.Text, destination, *bound, "project", "authoritative_context", 1)
+				if mintErr != nil {
+					return mintErr
+				}
+				// A canonical thread binding is authoritative context, not an
+				// inference. Clients display it as Project rather than Suggested.
+				choice := homeProjectChoice{Title: bound.Title, Token: token}
+				response.Status, response.Suggested = "bound", &choice
+				return nil
+			}
+		}
 		createTitle := strings.TrimSpace(payload.CreateTitle)
 		if createTitle != "" {
+			if destination.Route == "thread" {
+				return errHomeProjectStale
+			}
 			if !stridePlainText(createTitle, 120, true) || !homeProjectFeatureEnabled(STRIDEFeatureProjectAuthorityWrite) {
 				return errHomeProjectStale
 			}

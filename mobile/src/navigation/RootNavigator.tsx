@@ -220,8 +220,9 @@ export function RootNavigator() {
   }, [activeShellDestination, user]);
 
   const syncActiveRoute = useCallback(() => {
-    const route = navigationRef.getCurrentRoute()?.name as keyof RootStackParamList | undefined;
-    setActiveShellDestination(shellSelectionRef.current.commit(route));
+    const currentRoute = navigationRef.getCurrentRoute();
+    const route = currentRoute?.name as keyof RootStackParamList | undefined;
+    setActiveShellDestination(shellSelectionRef.current.commit(route, currentRoute?.params));
     setActiveRoute(route);
   }, []);
 

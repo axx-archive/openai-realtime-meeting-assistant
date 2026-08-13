@@ -82,8 +82,8 @@ func TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift(t *testing.T) {
 		t.Fatalf("second migration apply: %v", err)
 	}
 	var count int
-	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 19 {
-		t.Fatalf("migration rows=%d err=%v, want 19", count, err)
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 20 {
+		t.Fatalf("migration rows=%d err=%v, want 20", count, err)
 	}
 	if _, err := store.pool.Exec(ctx, "UPDATE schema_migrations SET sha256=decode($1,'hex') WHERE version=1", strings.Repeat("0", 64)); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestPostgresCanonicalMigrationCompatibilityCapAndFutureTolerance(t *testing
 	if identityTable != nil {
 		t.Fatalf("migration 14 table exists under cap: %q", *identityTable)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (20,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (21,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ApplyMigrations(ctx); err != nil {

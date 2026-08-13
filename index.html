@@ -14775,6 +14775,19 @@
             0 10px 28px rgba(0, 0, 0, 0.1);
         }
 
+        #chatTool .scout-chat-project-row {
+          width: min(1120px, calc(100% - 56px));
+          min-height: 44px;
+          box-sizing: border-box;
+          margin: 0 auto 6px;
+          display: flex;
+          align-items: center;
+        }
+
+        #chatTool .scout-chat-project-row[hidden] { display: none; }
+        #chatTool .scout-chat-project-chip { margin: 0; background: transparent; }
+        #chatTool .chat-conversation[data-audience="private"] .scout-chat-project-row { width: min(880px, calc(100% - 56px)); }
+
         #chatTool .chat-conversation[data-audience="private"] .scout-chat-destination,
         #chatTool .chat-conversation[data-audience="private"] .scout-chat-form {
           width: min(880px, calc(100% - 56px));
@@ -30388,6 +30401,9 @@
               </button>
               <span id="chatWorkIndicatorActions" class="chat-work-indicator__actions" hidden></span>
             </div>
+            <div id="scoutChatProjectRow" class="scout-chat-project-row" hidden>
+              <button id="scoutChatProjectChip" class="home-context-chip home-project-chip scout-chat-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project">Add project</button>
+            </div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -30408,6 +30424,13 @@
                 </svg>
               </button>
             </form>
+            <dialog id="scoutChatProjectChooser" class="home-project-chooser" aria-labelledby="scoutChatProjectChooserTitle">
+              <div class="home-project-chooser__body">
+                <div class="home-project-chooser__head"><h2 id="scoutChatProjectChooserTitle">Choose a project</h2><button id="scoutChatProjectChooserClose" class="home-project-chooser__close pressable" type="button" aria-label="Close project chooser">×</button></div>
+                <div id="scoutChatProjectChoices" class="home-project-chooser__list" role="radiogroup" aria-label="Projects"></div>
+                <p id="scoutChatProjectStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
+              </div>
+            </dialog>
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
           </div>
           <div id="chatContextResize" class="chat-workspace-resizer chat-workspace-resizer--context" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin="360" aria-valuemax="640" aria-valuenow="440" tabindex="0" hidden></div>
@@ -32382,6 +32405,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
+	      const scoutChatProjectRow = document.getElementById('scoutChatProjectRow')
+	      const scoutChatProjectChip = document.getElementById('scoutChatProjectChip')
+	      const scoutChatProjectChooser = document.getElementById('scoutChatProjectChooser')
+	      const scoutChatProjectChooserClose = document.getElementById('scoutChatProjectChooserClose')
+	      const scoutChatProjectChoices = document.getElementById('scoutChatProjectChoices')
+	      const scoutChatProjectStatus = document.getElementById('scoutChatProjectStatus')
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
 	      const chatNewThread = document.getElementById('chatNewThread')
 	      const chatNewChannel = document.getElementById('chatNewChannel')
@@ -32729,6 +32758,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let scoutOfficeChatTurns = []
 	      let scoutChatThreads = []
 	      let activeScoutThreadId = ''
+	      let scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
+	      let scoutChatProjectGeneration = 0
+	      let scoutChatProjectTimer = 0
+	      let scoutChatMessageAttempt = null
 	      // These states are used by authenticated bootstrap renders. Keep them
 	      // above the first renderLoginMode/syncAuthenticatedShell call so an
 	      // empty first load cannot enter a temporal-dead-zone and abort the app.
@@ -34051,6 +34084,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		await loadHomeProjectContext(title)
 		if (homeProjectContext.selected) closeHomeProjectChooser()
 	  })
+	  scoutChatProjectChip?.addEventListener('click', () => {
+		if (!scoutChatProjectContext.available || !scoutChatProjectChooser) return
+		renderScoutChatProjectContext()
+		if (scoutChatProjectStatus) scoutChatProjectStatus.textContent = ''
+		scoutChatProjectChooser.showModal()
+		window.requestAnimationFrame(() => scoutChatProjectChoices?.querySelector('[aria-checked="true"]')?.focus())
+	  })
+	  scoutChatProjectChooserClose?.addEventListener('click', () => scoutChatProjectChooser?.close())
+	  scoutChatProjectChooser?.addEventListener('close', () => scoutChatProjectChip?.focus())
       homeScoutInput?.addEventListener('focus', () => {
         // Personal Realtime is app-level presence. Ordinary typing does not
         // hang up the call; only explicit close, a competing microphone mode,
@@ -34269,6 +34311,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
       artifactShareButton?.addEventListener('click', toggleArtifactSharePanel)
       scoutChatInput.addEventListener('input', () => {
         resizeScoutChatInput()
+		scoutChatMessageAttempt = null
+		scoutChatProjectGeneration += 1
+		if (scoutChatProjectContext.selected?.text !== scoutChatInput.value.trim() || scoutChatProjectContext.selected?.threadId !== activeScoutThreadId) scoutChatProjectContext.selected = null
+		scoutChatProjectContext.choices = []
+		scoutChatProjectContext.status = 'unlinked'
+		if (scoutChatProjectChooser?.open) scoutChatProjectChooser.close()
+		renderScoutChatProjectContext()
+		window.clearTimeout(scoutChatProjectTimer)
+		scoutChatProjectTimer = window.setTimeout(() => void loadScoutChatProjectContext(), 220)
       })
       scoutChatInput.addEventListener('keydown', event => {
         // Never send mid-IME-composition: the Enter that confirms a
@@ -52335,6 +52386,73 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		}
 	  }
 
+	  function renderScoutChatProjectContext() {
+		const selected = scoutChatProjectContext.selected
+		if (scoutChatProjectRow) scoutChatProjectRow.hidden = !Boolean(authedUser && activeScoutThreadId && scoutChatProjectContext.available)
+		if (!scoutChatProjectChip) return
+		scoutChatProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : scoutChatProjectContext.explicitNone ? 'No project' : 'Add project'
+		scoutChatProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : scoutChatProjectContext.explicitNone ? 'No project. Change project' : 'Add project')
+		if (!scoutChatProjectChoices) return
+		const rows = [{ title: 'No project', token: '' }, ...(scoutChatProjectContext.choices || [])]
+		scoutChatProjectChoices.replaceChildren(...rows.map(choice => {
+		  const button = document.createElement('button')
+		  button.type = 'button'
+		  button.className = 'home-project-choice pressable'
+		  button.setAttribute('role', 'radio')
+		  button.setAttribute('aria-checked', String(choice.token ? String(selected?.token || '') === String(choice.token) : scoutChatProjectContext.explicitNone))
+		  button.textContent = choice.title
+		  button.addEventListener('click', () => {
+			scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId } : null
+			scoutChatProjectContext.explicitNone = !choice.token
+			renderScoutChatProjectContext()
+			if (scoutChatProjectChooser?.open) scoutChatProjectChooser.close()
+		  })
+		  return button
+		}))
+	  }
+
+	  async function loadScoutChatProjectContext() {
+		if (!authedUser || !activeScoutThreadId || !scoutChatInput) return
+		const generation = ++scoutChatProjectGeneration
+		const text = scoutChatInput.value.trim()
+		const threadId = activeScoutThreadId
+		try {
+		  const response = await fetch('/assistant/project-context', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+			body: JSON.stringify({ text, destination: { route: 'thread', threadId } })
+		  })
+		  const payload = await response.json().catch(() => ({}))
+		  if (generation !== scoutChatProjectGeneration || threadId !== activeScoutThreadId) return
+		  if (!response.ok) throw new Error(payload?.error || 'Project context changed. Try again.')
+		  const next = payload?.projectContext || { available: false, status: 'unlinked', choices: [] }
+		  if (scoutChatProjectContext.scopeKey && next.scopeKey && scoutChatProjectContext.scopeKey !== next.scopeKey) {
+			scoutChatProjectContext.selected = null
+			scoutChatProjectContext.explicitNone = false
+		  }
+		  scoutChatProjectContext = { ...scoutChatProjectContext, ...next, choices: Array.isArray(next.choices) ? next.choices : [] }
+		  if (!next.available) {
+			scoutChatProjectContext.selected = null
+			scoutChatProjectContext.explicitNone = false
+		  }
+		  if (!scoutChatProjectContext.selected && !scoutChatProjectContext.explicitNone && next.suggested?.token) scoutChatProjectContext.selected = { ...next.suggested, text, threadId }
+		  renderScoutChatProjectContext()
+		} catch (_) {
+		  if (generation !== scoutChatProjectGeneration) return
+		  scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
+		  renderScoutChatProjectContext()
+		}
+	  }
+
+	  function resetScoutChatProjectContext({ reload = false } = {}) {
+		scoutChatProjectGeneration += 1
+		window.clearTimeout(scoutChatProjectTimer)
+		scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
+		renderScoutChatProjectContext()
+		if (reload && authedUser && activeScoutThreadId) {
+		  scoutChatProjectTimer = window.setTimeout(() => void loadScoutChatProjectContext(), 0)
+		}
+	  }
+
       async function submitHomeScoutOpening(event) {
         event?.preventDefault?.()
         if (!authedUser || !homeScoutInput || homeScoutComposer?.dataset.submitting === 'true') return
@@ -52772,6 +52890,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
+		const selectedProject = scoutChatProjectContext.selected
+		if (selectedProject?.token && files.length) {
+		  showToast({ text: 'Send the Project-linked message first, then attach files in the next turn.', kind: 'note' })
+		  return false
+		}
 	        if (authedUser) {
 	          pendingScoutFiles = []
 	          renderPendingScoutFiles()
@@ -52805,6 +52928,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutFollowUpTarget = null
 	        scoutChatReplyTarget = null
 	        renderScoutFollowUpTarget()
+		const projectContextToken = !files.length && scoutChatProjectContext.selected?.text === String(text || '').trim() && scoutChatProjectContext.selected?.threadId === activeScoutThreadId
+		  ? String(scoutChatProjectContext.selected.token || '')
+		  : ''
 	        const ts = new Date().toISOString()
 	        const optimisticMessage = scoutChatMessageNode('user', text, ts, files)
 	        optimisticMessage.dataset.delivery = 'sending'
@@ -52836,10 +52962,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const messagePayload = followUp
 	            ? { text, files, followUpArtifactId: followUp.artifactId }
 	            : { text, files }
-	          messagePayload.operationId = globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`
+		  if (projectContextToken && !followUp) messagePayload.projectContextToken = projectContextToken
 	          if (replyTarget?.messageId) {
 	            messagePayload.replyToMessageId = replyTarget.messageId
 	          }
+		  const attemptKey = JSON.stringify({ threadId: thread.id, ...messagePayload })
+		  scoutChatMessageAttempt = scoutChatMessageAttempt?.key === attemptKey
+			? scoutChatMessageAttempt
+			: { key: attemptKey, operationId: globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}` }
+		  messagePayload.operationId = scoutChatMessageAttempt.operationId
 	          const requestBody = JSON.stringify(messagePayload)
 	          const postMessage = () => fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
 	            method: 'POST',
@@ -52858,6 +52989,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!response.ok) {
 	            throw new Error(payload.error || 'assistant query failed')
 	          }
+		  scoutChatMessageAttempt = null
 	          const finish = () => {
 	            hideScoutChatThinking()
 	            if (payload.artifact) {
@@ -52871,6 +53003,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
 	              updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
 	            }
+			// Project and No-project selections apply to exactly one outgoing
+			// turn. Refresh canonical thread context after every accepted send.
+			resetScoutChatProjectContext({ reload: true })
 	            if (payload.boardAction?.surface === 'board') {
 	              setActiveTool('board')
 	              if (payload.boardAction.requestedIntent === 'clear' && !payload.boardAction.mutationExecuted) {
@@ -52909,6 +53044,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          hideScoutChatThinking()
 	          optimisticMessage.dataset.delivery = 'failed'
 	          optimisticState.textContent = 'not sent'
+		  if (projectContextToken && scoutChatInput) {
+			scoutChatInput.value = text
+			resizeScoutChatInput()
+			scoutChatInput.focus()
+		  }
 	          const message = error.message || 'assistant query failed'
 	          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
           updateChatThreadItem(message, new Date().toISOString())
@@ -57759,6 +57899,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          closeDesktopChatContext({ restoreFocus: false })
 	        }
 	        activeScoutThreadId = nextThreadId
+	        scoutChatMessageAttempt = null
+	        resetScoutChatProjectContext({ reload: true })
 	        // opening a thread cancels an in-flight rename (design §7.6)
 	        chatRenameActive = false
 	        // Desktop captures the prior marker during render so it can place an

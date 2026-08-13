@@ -52,6 +52,18 @@ type conversationTurnOperation struct {
 
 type conversationTurnOperationContextKey struct{}
 
+// conversationProjectLinkBinding is a server-resolved, request-scoped
+// capability. The client supplies only the signed opaque token; handlers
+// resolve it under the held organization session before attaching it here.
+// Downstream chat code may persist the exact operation/message binding, but it
+// must never reconstruct Project authority from ids or display text.
+type conversationProjectLinkBinding struct {
+	EncodedToken string
+	Token        homeProjectContextToken
+}
+
+type conversationProjectLinkContextKey struct{}
+
 type conversationProviderCallCounter struct{ Calls int }
 
 type conversationProviderCallCounterContextKey struct{}
@@ -92,6 +104,22 @@ func conversationTurnOperationFromContext(ctx context.Context) conversationTurnO
 	operation.ID = strings.TrimSpace(operation.ID)
 	operation.BodyDigest = strings.TrimSpace(operation.BodyDigest)
 	return operation
+}
+
+func withConversationProjectLink(ctx context.Context, binding conversationProjectLinkBinding) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, conversationProjectLinkContextKey{}, binding)
+}
+
+func conversationProjectLinkFromContext(ctx context.Context) conversationProjectLinkBinding {
+	if ctx == nil {
+		return conversationProjectLinkBinding{}
+	}
+	binding, _ := ctx.Value(conversationProjectLinkContextKey{}).(conversationProjectLinkBinding)
+	binding.EncodedToken = strings.TrimSpace(binding.EncodedToken)
+	return binding
 }
 
 func withConversationProviderCallCounter(ctx context.Context) (context.Context, *conversationProviderCallCounter) {

@@ -695,16 +695,23 @@ activation remains `In Progress` or `Blocked/External Gate`.
 > first-class Project identity or cross-navigation voice ownership as the next
 > action. The bounded Home Project suggestion/chooser/Create and new-private
 > exact-Send association and Video/Chat/core-shell rows now serve from exact
-> release `741e0284...`; Build 58 is uploaded to App Store Connect. Resume by
-> extending the same fail-closed association and
-> correction contract to existing threads, then using permission-filtered
+> release `741e0284...`; Build 58 is uploaded to App Store Connect. The bounded
+> text-only existing-thread Project association is now a local Build 59 release
+> candidate: private, organization-channel and exact member-scoped threads use
+> the same fail-closed signed-token/explicit-Send contract, preserve the human
+> message before reconciliation and fence provider/work until canonical
+> confirmation. The mobile Video destination now opens live room discovery;
+> the distinct permanent Meetings library contract is frozen below rather than
+> being mislabeled as Video. Ship and read back that exact checkpoint, then resume with the
+> sent-message Project correction sheet and Project-linked attachment/reply
+> source coverage before using permission-filtered
 > recurring compaction to rank explainable chief-of-staff suggestions from the
 > current user's authorized work, public/team conversations, meetings and
 > Project state. Then prove one server-owned Project-bound Research work
 > projection through immutable revision, rich Open, named Drive receipt/Open in
 > Drive and normal-composer edit/regenerate on web, iPhone and iPad. Apple
 > external Bonfire state and exact intended tester-group relationship readback
-> for Builds 54-58 remain a release follow-up, not permission to reopen the accepted
+> for Builds 54-59 remain a release follow-up, not permission to reopen the accepted
 > local or VPS checkpoint.
 
 ### Dependency-ordered remaining waves and stop/resume points
@@ -800,6 +807,24 @@ revision, authorized company-context snapshot, sources, cost, outputs,
 interventions and accepted/rejected outcome so the company brain can show what
 the studio knows, where it excels, where it repeatedly fails and who or what
 contributed. Synthetic agents never receive human credit or self-approve.
+
+The Lab is also the seed **evaluation environment** for the Agent Marketplace,
+not an automatic publishing or training pipeline. Each venture-studio job is a
+separate candidate package with its own frozen role/personality contract,
+capability manifest, collaboration and social-behavior corpus, work-quality
+evals, cost/latency envelope, failure history and human-reviewed performance
+receipts. Marketplace packaging and model fine-tuning are distinct governed
+changes. Packaging may promote explicitly portable instructions, tools and
+de-identified examples after rights review. Fine-tuning may use only a
+separately consented, minimized, provenance-complete training dataset with a
+named purpose, retention, deletion/rollback path, held-out evals and explicit
+human approval. Tenant conversations, meetings, company-brain facts,
+relationship memory, customer material, work artifacts and contribution
+history are excluded by default; local usefulness never implies permission to
+train a model or sell a personality. A passing package can be hired by Bonfire
+or another organization only after its advertised job outcomes pass the same
+normal thread, meeting, Project, artifact, correction, authority and
+attribution gates that produced the evidence.
 
 Recurring execution remains off until AJ approves one exact schedule manifest:
 isolated tenant, persona roster, cadence/time zone, provider/model and aggregate
@@ -1407,6 +1432,44 @@ ephemeral receipt without rewriting ProjectAssociation history. Receipt expiry
 alone cannot leave Home, Work, Board or Project Record caches stale; canonical
 source revocation/change fails the authorized-current view synchronously and
 enqueues all four body-free purge projections for restart-safe convergence.
+
+The same Project accessory is available in every eligible existing private or
+multiplayer thread composer. The server first derives the exact thread and
+source audience; the client never declares whether a thread is private,
+Project, channel or organization-visible. An active canonical thread binding
+appears as **Project · {title}** with basis **Thread project**. A person may
+choose **No project** for only the outgoing turn or select another authorized
+Project for only that turn; neither action rebinds the thread, retags prior
+messages or changes its audience. Rebinding a thread is a separate explicit
+governed command. Creating a Project from an existing shared thread is not
+available in this checkpoint because **Create private project** has a
+creator-only primary-thread contract.
+
+Explicit Send atomically appends the human message and a body-free pending
+Project-link journal to the durable thread before any provider, agent or
+WorkRun starts. The server then reauthorizes the exact active organization and
+session, source-message revision and audience, Project revision and current
+thread destination, and confirms the association in the canonical store. A
+transient canonical-store failure leaves the message visibly **Project link
+pending** and restart/retry resumes the same operation; a terminal stale,
+revoked or unauthorized binding leaves the message safe and visibly
+**Project unavailable**, starts no downstream work, and preserves the retry
+action. Exact replay returns the same message and association; the same
+operation key with changed message or Project bytes conflicts. A crash after
+association confirmation but before a Scout response may resume only after the
+server proves that no caused-by answer, proposal or run already exists.
+
+A sent message's Project chip opens an explicit correction sheet. Correction
+binds the exact current association and source-message revision and offers only
+currently authorized Projects plus **No project**. Choosing a row is local;
+**Update project** is the mutation boundary. The server performs one
+append-only CAS transition, synchronously unlists the old Project projection,
+adds the authorized replacement or removal, queues restart-safe purge/rebuild
+work and returns the new association revision. It never edits message text,
+widens the thread audience, moves files or silently changes historical
+contributions. Concurrent/stale correction, Project/source/ACL drift,
+organization switch and response-loss replay fail closed with the current
+truth needed to refresh the sheet.
 
 One canonical, tenant-and-organization-scoped `Project` aggregate—not a chat
 title, free-form tag, title-derived slug or agent guess—owns immutable identity,
@@ -4045,6 +4108,12 @@ Desktop chat is not a stretched mobile transcript. It uses the available canvas 
 
 ### 6.4 Meetings
 
+- **Video is the live-room destination.** Selecting Video on web, iPhone or
+  iPad opens room discovery/current rooms and never substitutes the historical
+  Meetings library. The Meetings library is a separate permanent-record
+  surface reachable from the live room's recap/transcript actions and the
+  governed Work/meeting-history entry point; returning preserves the exact
+  originating room, thread and scroll/focus context.
 - Recording/listening state reflects the real capture path and consent state.
 - Passive transcription and analysis run only for authorized participants/tracks/scopes.
 - Saying “Scout …” or tapping Ask Scout engages it; ordinary human speech never receives an unsolicited answer.
@@ -4055,6 +4124,30 @@ Desktop chat is not a stretched mobile transcript. It uses the available canvas 
 - Scout introduces the specialist from a server-built brief. The roster and active-speaker state clearly distinguish humans, Scout, and the specialist; participant details expose the agent profile and why it is present.
 - Humans may interrupt either agent. Scout chairs the exchange, and a human or Scout can say “thanks Mary,” tap **Remove**, or disable specialists for the room. The specialist stops listening, speaking, using tools, and accruing usage after teardown; the meeting itself continues.
 - A specialist idea is attributed conversation evidence. It may inform analysis or Suggested Work, but it does not launch work, publish, or change company truth without the existing verification and human-approval paths.
+
+Each completed sitting produces one evolving **Meeting Record**, not a raw
+timestamped digest card. Its compact library row names the meeting honestly
+and previews the most important authorized outcome rather than truncating a
+model dump. Opening it shows, in order: an executive recap; what everyone
+needs to know; decisions and their status; commitments/follow-ups with owner,
+due state and linked Work/Project; blockers, risks and unresolved questions;
+referenced people, Projects and artifacts; source coverage/freshness/gaps; and
+the exact speaker-attributed transcript. Every asserted item retains
+resolvable transcript segment/revision edges and correction state. A missing
+owner, due date or decision is shown as unresolved, never invented.
+
+**Open transcript** deep-links to the exact sitting and evidence range with
+speaker/time navigation, search and return-to-record context. **Ask Scout
+about this meeting** starts a private, ordinary conversation already bound to
+the exact Meeting Record revision and the requester's current authorization;
+answers cite the relevant transcript intervals, distinguish transcript truth
+from analysis, and say unavailable when coverage or authority is insufficient.
+The question does not widen the meeting audience, rewrite the record, create
+work or publish an answer. An explicit follow-up action may propose governed
+work through the normal Project/approval/card spine. Edits, transcript
+corrections, consent withdrawal, source deletion, Project correction and
+participant-access changes reproject or unlist affected claims and search
+rows restart-safely; historical summary prose cannot outlive its sources.
 
 ### 6.5 Five-minute, thirty-minute, and late-join recall
 

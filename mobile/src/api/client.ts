@@ -922,12 +922,13 @@ export const api = {
     files: ScoutFileAttachment[] = [],
     replyToMessageId = "",
     operationId = "",
+	projectContextToken = "",
   ): Promise<ScoutThreadDetailResponse> {
     return request<ScoutThreadDetailResponse>(
       `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages`,
       {
         method: "POST",
-        body: { text, files, replyToMessageId, operationId },
+        body: { text, files, replyToMessageId, operationId, ...(projectContextToken ? { projectContextToken } : {}) },
         sessionToken,
       },
     );

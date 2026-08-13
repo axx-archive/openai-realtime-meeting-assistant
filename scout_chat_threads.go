@@ -390,11 +390,13 @@ type scoutChatOpeningOperation struct {
 }
 
 type scoutChatProjectContext struct {
-	Status          string `json:"status"`
-	ProjectID       string `json:"projectId,omitempty"`
-	ProjectRevision int64  `json:"projectRevision,omitempty"`
-	Title           string `json:"title"`
-	Basis           string `json:"basis"`
+	Status              string `json:"status"`
+	ProjectID           string `json:"projectId,omitempty"`
+	ProjectRevision     int64  `json:"projectRevision,omitempty"`
+	Title               string `json:"title"`
+	Basis               string `json:"basis"`
+	AssociationID       string `json:"associationId,omitempty"`
+	AssociationRevision int64  `json:"associationRevision,omitempty"`
 }
 
 type scoutChatProjectLinkOperation struct {
@@ -979,10 +981,6 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		bodyDigest := sha256Hex(append([]byte("conversation-http-turn/v1\x00"), body...))
 		operationID, operationErr := normalizeScoutIdempotencyKey(payload.OperationID)
-		if strings.TrimSpace(payload.ProjectContextToken) != "" {
-			writeAuthError(w, http.StatusConflict, "Project linking for an existing thread is not available yet; your message was not sent")
-			return
-		}
 		legacyNativeOperationIssued := false
 		legacyNativeOperationReused := false
 		if operationErr != nil {
@@ -1013,6 +1011,24 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		messageContext = withConversationTurnOperation(messageContext, conversationTurnOperation{
 			ID: operationID, BodyDigest: bodyDigest,
 		})
+		if encodedToken := strings.TrimSpace(payload.ProjectContextToken); encodedToken != "" {
+			if len(payload.Files) != 0 {
+				writeAuthError(w, http.StatusConflict, "Project linking with attachments is not available yet; remove the Project or attachments and try again")
+				return
+			}
+			var projectToken homeProjectContextToken
+			resolveErr := withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+				acceptedPending := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, homeProjectTokenDigest(encodedToken))
+				var tokenErr error
+				projectToken, tokenErr = resolveHomeProjectTokenForRetry(r.Context(), encodedToken, payload.Text, homeProjectDestination{Route: "thread", ThreadID: threadID}, snapshot, acceptedPending)
+				return tokenErr
+			})
+			if resolveErr != nil {
+				writeAuthError(w, http.StatusConflict, errHomeProjectStale.Error())
+				return
+			}
+			messageContext = withConversationProjectLink(messageContext, conversationProjectLinkBinding{EncodedToken: encodedToken, Token: projectToken})
+		}
 		// toolTemplate is retained only as a decode-only compatibility field.
 		// Normal clients cannot arm work, authority, or an output contract with
 		// it; the five-way server router owns those decisions from natural text.
@@ -1550,6 +1566,13 @@ func (app *kanbanBoardApp) replayConversationTurnInThread(ctx context.Context, v
 			response, responseErr := app.committedConversationTurnResponse(ctx, viewerEmail, message, card, saved)
 			return response, true, responseErr
 		}
+		if binding := conversationProjectLinkFromContext(ctx); binding.Token.Kind != "" {
+			for _, projectOperation := range thread.ProjectLinkOperations {
+				if projectOperation.OperationID == operation.ID && projectOperation.MessageID == message.ID && projectOperation.TokenDigest == homeProjectTokenDigest(binding.EncodedToken) && oneOf(projectOperation.State, "pending", "confirmed") {
+					return nil, false, nil
+				}
+			}
+		}
 		return nil, true, fmt.Errorf("conversation turn is durably pending reconciliation; no duplicate work was started")
 	}
 	return nil, false, nil
@@ -1717,6 +1740,7 @@ func scoutDirectReplyResponseStyle(base string) string {
 func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, replyToMessageID string, toolTemplate string) (map[string]any, error) {
 	ctx, providerCallCounter := withConversationProviderCallCounter(ctx)
 	turnOperation := conversationTurnOperationFromContext(ctx)
+	projectLinkBinding := conversationProjectLinkFromContext(ctx)
 	if turnOperation.ID != "" || turnOperation.BodyDigest != "" {
 		operationID, operationErr := normalizeScoutIdempotencyKey(turnOperation.ID)
 		if operationErr != nil || !isHexDigest(turnOperation.BodyDigest) {
@@ -1845,14 +1869,64 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		attachmentDestinationRevision: attachmentDestinationRevision,
 		attachmentReservationID:       attachmentReservationID,
 	}
-	history := app.scoutChatHistoryForViewer(user.Email, thread)
+	projectTurnPrecommitted := false
+	projectTurnCreated := false
+	if projectLinkBinding.Token.Kind != "" {
+		if turnOperation.ID == "" || len(files) != 0 || strings.TrimSpace(followUpArtifactID) != "" {
+			return nil, fmt.Errorf("Project-linked conversation turn must be a text-only ordinary message")
+		}
+		pendingThread, _, created, beginErr := app.beginScoutExistingProjectTurn(ctx, user, thread, userMessage, turnOperation, projectLinkBinding)
+		if beginErr != nil {
+			return nil, beginErr
+		}
+		confirmedThread, reconcileErr := app.reconcileScoutProjectLink(ctx, user, pendingThread, turnOperation.ID, userMessage.ID, "", turnOperation.ID, text, projectLinkBinding.Token)
+		if reconcileErr != nil {
+			if terminal, terminalErr := app.failScoutProjectLink(user, pendingThread, turnOperation.ID, userMessage.ID, "", reconcileErr); terminalErr == nil {
+				messageIndex := scoutChatMessageIndex(terminal, userMessage.ID)
+				if messageIndex < 0 {
+					return nil, ErrProjectAuthorityConflict
+				}
+				deliverScoutChatThreadUpdateWithContext(ctx, terminal, terminal.Messages[messageIndex])
+				return map[string]any{"ok": true, "message": terminal.Messages[messageIndex], "thread": terminal, "projectUnavailable": true}, nil
+			}
+			return nil, reconcileErr
+		}
+		messageIndex := scoutChatMessageIndex(confirmedThread, userMessage.ID)
+		if messageIndex < 0 || confirmedThread.Messages[messageIndex].Project == nil || confirmedThread.Messages[messageIndex].Project.Status != "confirmed" {
+			return nil, ErrProjectAuthorityConflict
+		}
+		thread, userMessage = confirmedThread, confirmedThread.Messages[messageIndex]
+		projectTurnPrecommitted = true
+		projectTurnCreated = created
+		attachmentCommitted = true
+		deliverScoutChatThreadUpdateWithContext(ctx, confirmedThread, userMessage)
+	}
+	historyThread := thread
+	if projectTurnPrecommitted {
+		historyThread.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
+		for index := range historyThread.Messages {
+			if historyThread.Messages[index].ID == userMessage.ID {
+				historyThread.Messages = append(historyThread.Messages[:index], historyThread.Messages[index+1:]...)
+				break
+			}
+		}
+	}
+	history := app.scoutChatHistoryForViewer(user.Email, historyThread)
 
 	// @-mention bell nudges are collaborative-channel behavior only, and only
 	// for messages that actually persisted: every commit in this function goes
 	// through commitUserMessage, which fires the mention notifications exactly
 	// once, on the first successful save. Private threads stay a 1:1 with
 	// Scout — nobody else can read them, so nobody gets paged into them.
-	mentionsPending := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic
+	mentionsPending := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && !projectTurnPrecommitted
+	if projectTurnPrecommitted && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		// Projection is idempotent and must also run on a restart/retry that
+		// confirms a previously pending message. Mentions remain first-save only.
+		app.observeSTRIDETeamChatMessage(thread, userMessage, "message", "")
+		if projectTurnCreated {
+			app.notifyScoutChatTargets(thread, userMessage)
+		}
+	}
 	commitUserMessage := func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
 		// A response caused by a threaded human reply belongs to that same side
 		// conversation. Persist the immutable ancestry on every immediate Scout
@@ -1873,6 +1947,19 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			role := strings.ToLower(strings.TrimSpace(messages[index].Role))
 			if role != "user" && strings.TrimSpace(messages[index].CausedByMessageID) == "" {
 				messages[index].CausedByMessageID = userMessage.ID
+			}
+		}
+		if projectTurnPrecommitted {
+			filtered := messages[:0]
+			for _, message := range messages {
+				if message.Role == "user" && message.ID == userMessage.ID {
+					continue
+				}
+				filtered = append(filtered, message)
+			}
+			messages = filtered
+			if len(messages) == 0 {
+				return thread, nil
 			}
 		}
 		saved, err := app.commitScoutChatThreadMessagesWithContext(ctx, user.Email, threadID, messages...)

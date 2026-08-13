@@ -8,7 +8,7 @@ export const NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE = 1.35;
 
 export const nativeShellDestinations = [
   { id: 'home', label: 'Home', route: 'Canvas', icon: 'house.fill' },
-  { id: 'video', label: 'Video', route: 'Meetings', icon: 'video.fill' },
+  { id: 'video', label: 'Video', route: 'Deck', params: { segment: 'rooms' }, icon: 'video.fill' },
   { id: 'chat', label: 'Chat', route: 'Deck', params: { segment: 'threads' }, icon: 'bubble.left.and.bubble.right.fill' },
   { id: 'work', label: 'Work', route: 'WorkHome', icon: 'rectangle.3.group.fill' },
   { id: 'network', label: 'Network', route: 'NetworkHome', icon: 'point.3.connected.trianglepath.dotted' },
@@ -89,7 +89,13 @@ export function nativeShellLayout(
 
 export function nativeShellDestinationForRoute(
   route: keyof RootStackParamList | undefined,
+  params?: unknown,
 ): NativeShellDestination {
+  if (route === 'Deck' && params && typeof params === 'object') {
+    const segment = (params as { segment?: unknown }).segment;
+    if (segment === 'rooms') return 'video';
+    if (segment === 'work') return 'work';
+  }
   return (route && destinationRoutes[route]) || 'home';
 }
 
@@ -114,11 +120,13 @@ export function createNativeShellSelectionCoordinator(
     ) {
       navigate(destination.route, 'params' in destination ? destination.params : undefined);
     },
-    commit(route: keyof RootStackParamList | undefined) {
+    commit(route: keyof RootStackParamList | undefined, params?: unknown) {
       // Full-screen and otherwise unmapped routes belong to the destination
       // that opened them. They hide shell chrome but must not silently select
       // Home or announce a destination the user did not choose.
-      const next = route && destinationRoutes[route];
+      const next = route === 'Deck'
+        ? nativeShellDestinationForRoute(route, params)
+        : route && destinationRoutes[route];
       if (!next) return committed;
       if (next !== committed) {
         committed = next;

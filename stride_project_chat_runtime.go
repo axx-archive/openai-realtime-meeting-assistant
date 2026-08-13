@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,19 +13,111 @@ import (
 )
 
 type confirmedProjectChatLink struct {
-	ProjectID       string
-	ProjectRevision int64
-	ProjectDigest   string
-	ProjectTitle    string
-	AssociationID   string
+	ProjectID           string
+	ProjectRevision     int64
+	ProjectDigest       string
+	ProjectTitle        string
+	AssociationID       string
+	AssociationRevision int64
+}
+
+type projectChatSourceAuthority struct {
+	SourceType  string
+	Visibility  string
+	Principals  []string
+	ACLRevision int64
+}
+
+func privateProjectChatSourceAuthority(personID string) projectChatSourceAuthority {
+	return projectChatSourceAuthority{SourceType: "private_chat_message", Visibility: "private", Principals: []string{personID}, ACLRevision: 1}
+}
+
+func (v projectChatSourceAuthority) validate(actorPersonID string) error {
+	if !oneOf(v.SourceType, "private_chat_message", "channel_chat_message") ||
+		!oneOf(v.Visibility, "private", "project", "channel") || v.ACLRevision < 1 || !strideIdentifier(actorPersonID) {
+		return ErrProjectAuthorityInvalid
+	}
+	seen := map[string]bool{}
+	foundActor := false
+	for _, principal := range v.Principals {
+		if !strideIdentifier(principal) || seen[principal] {
+			return ErrProjectAuthorityInvalid
+		}
+		seen[principal] = true
+		foundActor = foundActor || principal == actorPersonID
+	}
+	if !foundActor || len(v.Principals) == 0 || (v.Visibility == "private" && len(v.Principals) != 1) {
+		return ErrProjectAuthorityDenied
+	}
+	return nil
 }
 
 func projectChatID(prefix string, parts ...string) string {
 	return prefix + "_" + sha256Hex([]byte(strings.Join(parts, "\x00")))[:32]
 }
 
+// projectChatSourceAuthorityForThread resolves the current canonical people
+// behind the legacy chat audience while holding the Project transaction's
+// organization boundary. Missing mappings fail only Project linking; they can
+// never widen the ordinary chat audience or manufacture Person ids from email.
+func (store *PostgresCanonicalStore) projectChatSourceAuthorityForThread(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, thread scoutChatThreadRecord) (projectChatSourceAuthority, error) {
+	if store == nil || store.pool == nil || !scoutChatThreadAllowsViewer(thread, snapshot.Session.Email) {
+		return projectChatSourceAuthority{}, ErrProjectAuthorityDenied
+	}
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate {
+		authority := privateProjectChatSourceAuthority(snapshot.Person.Header.ID)
+		return authority, authority.validate(snapshot.Person.Header.ID)
+	}
+	authority := projectChatSourceAuthority{SourceType: "channel_chat_message", ACLRevision: 1}
+	if scoutChatThreadIsOrganizationPublic(thread) {
+		authority.Visibility = "channel"
+		rows, err := store.pool.Query(ctx, `SELECT person_id FROM stride_organization_memberships_current WHERE organization_id=$1 AND status='active' ORDER BY person_id`, snapshot.Organization.Header.ID)
+		if err != nil {
+			return authority, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var personID string
+			if err := rows.Scan(&personID); err != nil {
+				return authority, err
+			}
+			authority.Principals = append(authority.Principals, personID)
+		}
+		if err := rows.Err(); err != nil {
+			return authority, err
+		}
+	} else {
+		authority.Visibility = "project"
+		for _, email := range scoutChatThreadMemberEmails(thread) {
+			accountDigest := sha256Hex([]byte(normalizeAccountEmail(email)))
+			var personID string
+			err := store.pool.QueryRow(ctx, `SELECT mapping.person_id
+FROM stride_account_person_mappings_current mapping
+JOIN stride_organization_memberships_current membership ON membership.person_id=mapping.person_id
+WHERE mapping.account_subject_digest=decode($1,'hex') AND mapping.status='active'
+  AND membership.organization_id=$2 AND membership.status='active'`, accountDigest, snapshot.Organization.Header.ID).Scan(&personID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return authority, ErrProjectAuthorityDenied
+			}
+			if err != nil {
+				return authority, err
+			}
+			authority.Principals = append(authority.Principals, personID)
+		}
+		sort.Strings(authority.Principals)
+	}
+	return authority, authority.validate(snapshot.Person.Header.ID)
+}
+
 func (app *kanbanBoardApp) reconcileScoutHomeProjectLink(ctx context.Context, user *userAccount, thread scoutChatThreadRecord, key, text string, token homeProjectContextToken) (scoutChatThreadRecord, error) {
 	if user == nil || thread.ID == "" || thread.OpeningOperation == nil || token.Kind == "" {
+		return thread, ErrProjectAuthorityInvalid
+	}
+	return app.reconcileScoutProjectLink(ctx, user, thread, thread.OpeningOperation.OperationID, thread.OpeningOperation.UserMessageID, thread.OpeningOperation.ReplyMessageID, key, text, token)
+}
+
+func (app *kanbanBoardApp) reconcileScoutProjectLink(ctx context.Context, user *userAccount, thread scoutChatThreadRecord, operationID, messageID, replyMessageID, key, text string, token homeProjectContextToken) (scoutChatThreadRecord, error) {
+	if user == nil || thread.ID == "" || !strideIdentifier(operationID) || !strideIdentifier(messageID) || token.Kind == "" {
 		return thread, ErrProjectAuthorityInvalid
 	}
 	store := currentHomeProjectStore()
@@ -33,8 +126,12 @@ func (app *kanbanBoardApp) reconcileScoutHomeProjectLink(ctx context.Context, us
 	}
 	var link confirmedProjectChatLink
 	err := withCurrentHomeProjectAuthorityRequestContext(ctx, token, func(snapshot StrideE10TenantAuthoritySnapshot) error {
+		sourceAuthority, sourceErr := store.projectChatSourceAuthorityForThread(ctx, snapshot, thread)
+		if sourceErr != nil {
+			return sourceErr
+		}
 		var linkErr error
-		link, linkErr = store.confirmHomeProjectChatSend(ctx, snapshot, thread, thread.OpeningOperation.UserMessageID, key, text, token)
+		link, linkErr = store.confirmProjectChatSend(ctx, snapshot, thread, messageID, key, text, token, sourceAuthority)
 		return linkErr
 	})
 	if err != nil {
@@ -51,7 +148,7 @@ func (app *kanbanBoardApp) reconcileScoutHomeProjectLink(ctx context.Context, us
 	alreadyConfirmed := false
 	for index := range current.ProjectLinkOperations {
 		operation := &current.ProjectLinkOperations[index]
-		if operation.OperationID != thread.OpeningOperation.OperationID {
+		if operation.OperationID != operationID {
 			continue
 		}
 		alreadyConfirmed = operation.State == "confirmed"
@@ -67,26 +164,28 @@ func (app *kanbanBoardApp) reconcileScoutHomeProjectLink(ctx context.Context, us
 		operation.AssociationID = link.AssociationID
 		found = true
 	}
-	messageIndex := scoutChatMessageIndex(current, thread.OpeningOperation.UserMessageID)
+	messageIndex := scoutChatMessageIndex(current, messageID)
 	if !found || messageIndex < 0 {
 		return thread, ErrProjectAuthorityConflict
 	}
 	if alreadyConfirmed {
 		project := current.Messages[messageIndex].Project
-		if project == nil || project.Status != "confirmed" || project.ProjectID != link.ProjectID || project.ProjectRevision != link.ProjectRevision || project.Title != link.ProjectTitle {
+		if project == nil || project.Status != "confirmed" || project.ProjectID != link.ProjectID || project.ProjectRevision != link.ProjectRevision || project.Title != link.ProjectTitle || project.AssociationID != link.AssociationID || project.AssociationRevision != link.AssociationRevision {
 			return thread, ErrProjectAuthorityConflict
 		}
 		return current, nil
 	}
 	current.Messages[messageIndex].Project = &scoutChatProjectContext{
 		Status: "confirmed", ProjectID: link.ProjectID, ProjectRevision: link.ProjectRevision,
-		Title: link.ProjectTitle, Basis: token.Basis,
+		Title: link.ProjectTitle, Basis: token.Basis, AssociationID: link.AssociationID, AssociationRevision: link.AssociationRevision,
 	}
-	replyIndex := scoutChatMessageIndex(current, thread.OpeningOperation.ReplyMessageID)
-	if replyIndex < 0 || current.Messages[replyIndex].Reply == nil || current.Messages[replyIndex].Reply.State != scoutReplyStateProjectPending {
-		return thread, ErrProjectAuthorityConflict
+	if replyMessageID != "" {
+		replyIndex := scoutChatMessageIndex(current, replyMessageID)
+		if replyIndex < 0 || current.Messages[replyIndex].Reply == nil || current.Messages[replyIndex].Reply.State != scoutReplyStateProjectPending {
+			return thread, ErrProjectAuthorityConflict
+		}
+		current.Messages[replyIndex].Reply.State = scoutReplyStateQueued
 	}
-	current.Messages[replyIndex].Reply.State = scoutReplyStateQueued
 	if err := app.saveScoutChatThread(current); err != nil {
 		return thread, err
 	}
@@ -102,6 +201,80 @@ func scoutHomeProjectOperationState(thread scoutChatThreadRecord, operationID st
 	return ""
 }
 
+func (app *kanbanBoardApp) acceptedScoutProjectTurnRetry(user *userAccount, threadID, operationID, bodyDigest, tokenDigest string) bool {
+	if app == nil || user == nil || !strideIdentifier(threadID) || !strideIdentifier(operationID) || !isHexDigest(bodyDigest) || !isHexDigest(tokenDigest) {
+		return false
+	}
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return false
+	}
+	for _, operation := range thread.ProjectLinkOperations {
+		if operation.OperationID != operationID || operation.TokenDigest != tokenDigest || !oneOf(operation.State, "pending", "confirmed") {
+			continue
+		}
+		messageIndex := scoutChatMessageIndex(thread, operation.MessageID)
+		return messageIndex >= 0 && thread.Messages[messageIndex].SourceOperationID == operationID && thread.Messages[messageIndex].SourceOperationDigest == bodyDigest
+	}
+	return false
+}
+
+func (app *kanbanBoardApp) beginScoutExistingProjectTurn(ctx context.Context, user *userAccount, thread scoutChatThreadRecord, message scoutChatMessageRecord, operation conversationTurnOperation, binding conversationProjectLinkBinding) (scoutChatThreadRecord, scoutChatMessageRecord, bool, error) {
+	if app == nil || user == nil || !strideIdentifier(thread.ID) || !strideIdentifier(message.ID) || !strideIdentifier(operation.ID) || !isHexDigest(operation.BodyDigest) || binding.Token.Kind != "project" || binding.Token.Destination != (homeProjectDestination{Route: "thread", ThreadID: thread.ID}) {
+		return thread, message, false, ErrProjectAuthorityInvalid
+	}
+	lock := app.scoutChatThreadLock(thread.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	current, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil || current.ArchivedAt != "" {
+		if err == nil {
+			err = errHomeProjectStale
+		}
+		return thread, message, false, err
+	}
+	tokenDigest := homeProjectTokenDigest(binding.EncodedToken)
+	for _, existing := range current.ProjectLinkOperations {
+		if existing.OperationID != operation.ID {
+			continue
+		}
+		if existing.TokenDigest != tokenDigest || existing.MessageID != message.ID || existing.ProjectKind != binding.Token.Kind || existing.ProjectID != binding.Token.ProjectID || existing.ProjectRevision != binding.Token.ProjectRevision || existing.ProjectDigest != binding.Token.ProjectDigest || existing.ProjectTitle != binding.Token.ProjectTitle || existing.Basis != binding.Token.Basis {
+			return thread, message, false, ErrProjectAuthorityConflict
+		}
+		messageIndex := scoutChatMessageIndex(current, message.ID)
+		if messageIndex < 0 || current.Messages[messageIndex].SourceOperationDigest != operation.BodyDigest {
+			return thread, message, false, ErrProjectAuthorityConflict
+		}
+		return current, current.Messages[messageIndex], false, nil
+	}
+	if scoutChatMessageIndex(current, message.ID) >= 0 {
+		return thread, message, false, ErrProjectAuthorityConflict
+	}
+	message.Project = &scoutChatProjectContext{Status: "pending", ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, Title: binding.Token.ProjectTitle, Basis: binding.Token.Basis}
+	current.ProjectLinkOperations = append(current.ProjectLinkOperations, scoutChatProjectLinkOperation{
+		OperationID: operation.ID, TokenDigest: tokenDigest, MessageID: message.ID, State: "pending", ProjectKind: binding.Token.Kind,
+		ProjectID: binding.Token.ProjectID, ProjectRevision: binding.Token.ProjectRevision, ProjectDigest: binding.Token.ProjectDigest,
+		ProjectTitle: binding.Token.ProjectTitle, Basis: binding.Token.Basis,
+	})
+	current.Messages = append(current.Messages, message)
+	updateScoutChatThreadSummary(&current, message, scoutChatMessageRecord{})
+	if err := app.saveScoutChatThread(current); err != nil {
+		return thread, message, false, err
+	}
+	deliverScoutChatThreadUpdateWithContext(ctx, current, message)
+	if scoutChatThreadVisibility(current) == scoutChatVisibilityPublic {
+		// The durable human message is immediately part of deterministic
+		// continuity, but the public Product/proactive observers stay fenced
+		// until the canonical Project association has confirmed.
+		if _, _, continuityErr := app.rebuildConversationContinuity(current, "message"); continuityErr != nil {
+			log.Errorf("ConversationContinuity rebuild unavailable: %v", continuityErr)
+		}
+	} else {
+		app.rebuildPrivateConversationContinuity(current, "message")
+	}
+	return current, message, true, nil
+}
+
 func scoutHomeProjectTerminalError(err error) bool {
 	return errors.Is(err, errHomeProjectStale) || errors.Is(err, ErrProjectAuthorityDenied) ||
 		errors.Is(err, ErrProjectAuthorityInvalid) || errors.Is(err, ErrProjectAuthorityConflict) ||
@@ -111,6 +284,13 @@ func scoutHomeProjectTerminalError(err error) bool {
 
 func (app *kanbanBoardApp) failScoutHomeProjectLink(user *userAccount, thread scoutChatThreadRecord, cause error) (scoutChatThreadRecord, error) {
 	if app == nil || user == nil || thread.OpeningOperation == nil || !scoutHomeProjectTerminalError(cause) {
+		return thread, cause
+	}
+	return app.failScoutProjectLink(user, thread, thread.OpeningOperation.OperationID, thread.OpeningOperation.UserMessageID, thread.OpeningOperation.ReplyMessageID, cause)
+}
+
+func (app *kanbanBoardApp) failScoutProjectLink(user *userAccount, thread scoutChatThreadRecord, operationID, messageID, replyMessageID string, cause error) (scoutChatThreadRecord, error) {
+	if app == nil || user == nil || !strideIdentifier(operationID) || !strideIdentifier(messageID) || !scoutHomeProjectTerminalError(cause) {
 		return thread, cause
 	}
 	lock := app.scoutChatThreadLock(thread.ID)
@@ -123,7 +303,7 @@ func (app *kanbanBoardApp) failScoutHomeProjectLink(user *userAccount, thread sc
 	found := false
 	for index := range current.ProjectLinkOperations {
 		operation := &current.ProjectLinkOperations[index]
-		if operation.OperationID != thread.OpeningOperation.OperationID {
+		if operation.OperationID != operationID {
 			continue
 		}
 		if operation.State == "confirmed" {
@@ -136,20 +316,25 @@ func (app *kanbanBoardApp) failScoutHomeProjectLink(user *userAccount, thread sc
 		operation.State = "failed_terminal"
 		found = true
 	}
-	messageIndex := scoutChatMessageIndex(current, thread.OpeningOperation.UserMessageID)
-	replyIndex := scoutChatMessageIndex(current, thread.OpeningOperation.ReplyMessageID)
-	if !found || messageIndex < 0 || replyIndex < 0 || current.Messages[replyIndex].Reply == nil {
+	messageIndex := scoutChatMessageIndex(current, messageID)
+	if !found || messageIndex < 0 {
 		return thread, ErrProjectAuthorityConflict
 	}
 	if current.Messages[messageIndex].Project != nil {
 		current.Messages[messageIndex].Project.Status = "unavailable"
 	}
-	reply := current.Messages[replyIndex].Reply
-	reply.State = scoutReplyStateCanceled
-	reply.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	reply.LeaseID, reply.LeaseExpiresAt, reply.ErrorCode = "", "", ""
-	reply.Retryable = false
-	current.Messages[replyIndex].Text = "Scout did not run because Project access changed. Your message is safe in this private conversation."
+	if replyMessageID != "" {
+		replyIndex := scoutChatMessageIndex(current, replyMessageID)
+		if replyIndex < 0 || current.Messages[replyIndex].Reply == nil {
+			return thread, ErrProjectAuthorityConflict
+		}
+		reply := current.Messages[replyIndex].Reply
+		reply.State = scoutReplyStateCanceled
+		reply.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		reply.LeaseID, reply.LeaseExpiresAt, reply.ErrorCode = "", "", ""
+		reply.Retryable = false
+		current.Messages[replyIndex].Text = "Scout did not run because Project access changed. Your message is safe in this conversation."
+	}
 	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	current.Preview = trimForStorage(current.Messages[messageIndex].Text, 140)
 	if err := app.saveScoutChatThread(current); err != nil {
@@ -179,12 +364,19 @@ func withCurrentHomeProjectAuthorityRequestContext(ctx context.Context, token ho
 }
 
 func (store *PostgresCanonicalStore) confirmHomeProjectChatSend(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, thread scoutChatThreadRecord, messageID, operationKey, text string, token homeProjectContextToken) (confirmedProjectChatLink, error) {
+	return store.confirmProjectChatSend(ctx, snapshot, thread, messageID, operationKey, text, token, privateProjectChatSourceAuthority(snapshot.Person.Header.ID))
+}
+
+func (store *PostgresCanonicalStore) confirmProjectChatSend(ctx context.Context, snapshot StrideE10TenantAuthoritySnapshot, thread scoutChatThreadRecord, messageID, operationKey, text string, token homeProjectContextToken, sourceAuthority projectChatSourceAuthority) (confirmedProjectChatLink, error) {
 	var result confirmedProjectChatLink
 	if store == nil || store.pool == nil || token.OrganizationID != snapshot.Organization.Header.ID || token.PersonID != snapshot.Person.Header.ID ||
-		thread.ID == "" || messageID == "" || strings.TrimSpace(text) == "" || !oneOf(token.Kind, "project", "create") {
+		thread.ID == "" || messageID == "" || strings.TrimSpace(text) == "" || !oneOf(token.Kind, "project", "create") || sourceAuthority.validate(snapshot.Person.Header.ID) != nil {
 		return result, ErrProjectAuthorityInvalid
 	}
-	requestFingerprint := sha256Hex([]byte(strings.Join([]string{snapshot.Organization.Header.ID, thread.ID, messageID, strings.TrimSpace(text), token.Kind, token.ProjectID, fmt.Sprint(token.ProjectRevision), token.ProjectDigest, token.ProjectTitle, token.Basis}, "\x00")))
+	if token.Kind == "create" && sourceAuthority.Visibility != "private" {
+		return result, ErrProjectAuthorityDenied
+	}
+	requestFingerprint := sha256Hex([]byte(strings.Join([]string{snapshot.Organization.Header.ID, thread.ID, messageID, strings.TrimSpace(text), token.Kind, token.ProjectID, fmt.Sprint(token.ProjectRevision), token.ProjectDigest, token.ProjectTitle, token.Basis, sourceAuthority.SourceType, sourceAuthority.Visibility, strings.Join(sourceAuthority.Principals, ","), fmt.Sprint(sourceAuthority.ACLRevision)}, "\x00")))
 	operationKeyDigest := sha256Hex([]byte("project-chat-send/v1\x00" + operationKey))
 	operationID := projectChatID("project_send", snapshot.Organization.Header.ID, thread.ID, messageID)
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -203,6 +395,7 @@ FROM stride_project_chat_send_receipts WHERE organization_id=$1 AND operation_id
 		if err := tx.QueryRow(ctx, `SELECT encode(content_digest,'hex'),title FROM stride_project_revisions WHERE project_id=$1 AND revision=$2 AND organization_id=$3`, result.ProjectID, result.ProjectRevision, snapshot.Organization.Header.ID).Scan(&result.ProjectDigest, &result.ProjectTitle); err != nil {
 			return result, err
 		}
+		result.AssociationRevision = 2
 		return result, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -267,13 +460,13 @@ VALUES($1,$2,'create_project',$3,1,$4,1,$5,$6,$7,decode($8,'hex'),$9,$10,decode(
 
 	eventID := projectChatID("conversation_event", snapshot.Organization.Header.ID, thread.ID, messageID)
 	contentDigest := sha256Hex([]byte(strings.TrimSpace(text)))
-	audience, _ := json.Marshal(STRIDEAudience{Visibility: "private", Principals: []string{snapshot.Person.Header.ID}})
+	audience, _ := json.Marshal(STRIDEAudience{Visibility: sourceAuthority.Visibility, Principals: sourceAuthority.Principals})
 	var sequence int64
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(sequence),0)+1 FROM stride_conversation_events WHERE tenant_id=$1`, snapshot.Organization.Header.ID).Scan(&sequence); err != nil {
 		return result, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO stride_conversation_events(tenant_id,event_id,event_revision,sequence,schema_version,idempotency_key,source_type,source_id,thread_id,author_principal,author_name,occurred_at,ingested_at,event_type,content_revision,content_digest,audience_digest,visibility,acl_version,retention_policy,purge_generation,provenance,body_ref,structured_refs)
-VALUES($1,$2,1,$3,1,$4,'private_chat_message',$5,$6,$7,$8,$9,$9,'message',1,decode($10,'hex'),sha256(convert_to($11::jsonb::text,'UTF8')),'private',1,'organization_default',1,'client',$12,'[]')`, snapshot.Organization.Header.ID, eventID, sequence, operationID, messageID, thread.ID, snapshot.Person.Header.ID, scoutChatAuthorName(&userAccount{Name: snapshot.Person.Header.ID}), now, contentDigest, audience, "scout-chat://"+thread.ID+"/"+messageID)
+VALUES($1,$2,1,$3,1,$4,$5,$6,$7,$8,$9,$10,$10,'message',1,decode($11,'hex'),sha256(convert_to($12::jsonb::text,'UTF8')),$13,$14,'organization_default',1,'client',$15,'[]')`, snapshot.Organization.Header.ID, eventID, sequence, operationID, sourceAuthority.SourceType, messageID, thread.ID, snapshot.Person.Header.ID, scoutChatAuthorName(&userAccount{Name: snapshot.Person.Header.ID}), now, contentDigest, audience, sourceAuthority.Visibility, sourceAuthority.ACLRevision, "scout-chat://"+thread.ID+"/"+messageID)
 	if err != nil {
 		return result, err
 	}
@@ -337,6 +530,7 @@ VALUES($1,$2,decode($3,'hex'),decode($4,'hex'),$5,$6,$7,1,$8,$9,$10,2,$11,$12,$1
 	if err = tx.Commit(ctx); err != nil {
 		return result, err
 	}
+	result.AssociationRevision = 2
 	return result, nil
 }
 

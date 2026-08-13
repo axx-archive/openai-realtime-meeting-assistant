@@ -82,7 +82,7 @@ export type HomeProjectContextResponse = {
   projectContext: {
     available: boolean;
     scopeKey?: string;
-    status: 'unlinked' | 'suggested' | 'clarify' | 'selected';
+    status: 'unlinked' | 'suggested' | 'clarify' | 'selected' | 'bound';
     suggested?: HomeProjectChoice;
     choices?: HomeProjectChoice[];
   };

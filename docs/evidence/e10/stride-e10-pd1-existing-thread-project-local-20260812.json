@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_existing_thread_project_checkpoint",
+  "observedAt": "2026-08-13T02:13:09Z",
+  "status": "bounded_local_release_candidate_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "02e9afa195993b967aee92c50749daf3d49cb066",
+    "canonicalPlanSha256": "a160d42f983e1d63c9093d5c165a9e14bc272dac310d0ffb2d441503ff5414a1",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "existingThreadProjectContext": "authorized_private_organization_channel_and_exact_member_scoped_threads_offer_a_compact_project_chooser_with_no_project_and_zero_effect_until_explicit_send",
+    "sourceAuthority": "thread_visibility_and_exact_audience_are_derived_server_side_from_current_canonical_person_organization_membership_and_thread_authority",
+    "projectCommit": "explicit_text_only_send_durably_preserves_the_human_message_then_confirms_one_body_free_revisioned_project_association_before_provider_or_work_execution",
+    "projectFailure": "transient_failure_remains_pending_and_exact_retry_reuses_the_operation_identity_while_terminal_drift_preserves_the_message_as_project_unavailable_and_runs_no_provider",
+    "projectRealtime": "confirmed_or_unavailable_project_state_cannot_regress_to_pending_from_a_late_socket_frame",
+    "videoNavigation": "web_and_native_video_open_live_room_discovery_while_the_permanent_meetings_record_library_remains_a_distinct_planned_surface",
+    "agentMarketplace": "venture_studio_agent_packages_and_any_fine_tuning_are_separate_consent_rights_evaluation_and_release_gates_in_the_canonical_plan",
+    "providerCalls": 0,
+    "productionMutations": 0
+  },
+  "selectedFileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "a160d42f983e1d63c9093d5c165a9e14bc272dac310d0ffb2d441503ff5414a1",
+    "conversation_intent.go": "68077c41218f15bfc0d83ba22a5c46faa9ecf138a461af1e746fe68b2319e268",
+    "home_project_context.go": "3b518bad08128c26ad1e95e4ac4c6d35af997c4d79e1f3eb26ef73ead49a5d2a",
+    "scout_chat_threads.go": "c6729bb16ee32821f20350de9fc1d5acd394a196d0931fffceab5f60f293f39a",
+    "stride_project_chat_runtime.go": "38e5b4cbdf08128523c47d68e802a06c9e66fadd561a1e1852621d52c4124591",
+    "migrations/0020_stride_project_multiplayer_chat.sql": "f7da39aeea30db98655f8a982a50c98e834c914914fb6f13fcab1c3a838ba60c",
+    "index.html": "1f88a62163c6bf1770e916521c2878ecb6a887cf74a0fccd049b4781e6ec2a30",
+    "frontend_home_contract_test.go": "4c86a31e641463e8ec6d62966c30b1777678669b8a2764491e860ae2c5a2395c",
+    "mobile/app.config.ts": "3ae1e78096195c4c17638dbe60a470181490dbd4d01fe1a4bf21b52e6a64c059",
+    "mobile/src/navigation/nativeShellModel.ts": "c2d640bb85909d7b330760a417ce8a22febb925b133797df822e78be5438cd19",
+    "mobile/src/navigation/RootNavigator.tsx": "b7c079b5750f00adeabe62eb08ebea1e2d78ae62877633aa4d9182ba1fdf512c",
+    "mobile/src/screens/ThreadScreen.tsx": "83707e297be561928c6b2a7838b5f90dec59be7bd9e151c265ab8b242113a2d3",
+    "mobile/src/__tests__/threadProjectContext.test.ts": "6ab4d0bb88aca0f8874bc6efd5b772a7b86471efcd5bca49acab3659c6d4254d",
+    "mobile/src/__tests__/nativeUniversalShell.test.ts": "8d0ce1ca47687f45f804a818186749075139e9a7dde85d73171315d3a21948a4"
+  },
+  "renderedEvidence": {
+    "directory": "docs/evidence/e10/rendered-pd1-existing-thread-project-20260812",
+    "surfaces": [
+      {"surface":"desktop_thread_project_chooser_dark_1440x900","sha256":"d033e5a64a65816791df7882fc298c9c475dee347a2291eede088bf38a98c2fc"},
+      {"surface":"desktop_thread_project_chooser_light_1440x900","sha256":"c5978ea36e867deaf6cbfe5c5c9ad6e96b28b602402b815f33395a44ebcaf783"},
+      {"surface":"phone_thread_project_chooser_dark_390x844","sha256":"90c0638928481310758a9b69adaee03e90bf3513e4c04941e56dd4f81f36691f"},
+      {"surface":"phone_thread_project_chooser_light_390x844","sha256":"4a0f0072164f392c16543dee5595d38878731dbf42a2bc6c2488e9f0590f0fb7"}
+    ]
+  },
+  "verification": {
+    "fullGo": "PASS_553.227s_all_packages_timeout_15m",
+    "focusedGo": "PASS_all_packages_project_migration_home_meeting_control",
+    "focusedGoRace": "PASS_27.428s",
+    "goVetAll": "PASS",
+    "mobileTests": "PASS_529_of_529",
+    "mobileTypecheck": "PASS",
+    "renderedWebProjectChooser": "PASS_desktop_phone_dark_light_zero_effect_exact_retry_and_late_socket_ordering",
+    "nativeVideoRoute": "PASS_video_to_deck_rooms_with_route_aware_tab_selection",
+    "diffCheck": "PASS",
+    "boundedCritic": "PASS_no_blocker_or_major_after_exact_retry_and_true_desktop_render_repairs"
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "cronScheduled": false,
+    "marketplacePublished": false
+  },
+  "openGates": [
+    "sent_message_project_correction",
+    "project_linked_attachment_and_reply_source_coverage",
+    "meeting_record_library_rich_recap_transcript_and_ask_scout",
+    "whole_longitudinal_project_record_and_recurring_context_compaction",
+    "server_minted_first_class_work_projection_and_real_project_bound_research_flow",
+    "immutable_artifact_revision_lineage_and_format_native_open_drive_receipt",
+    "provider_backed_artifact_family_acceptance",
+    "physical_iphone_ipad_project_chooser_video_route_and_meeting_record_acceptance",
+    "approved_venture_studio_schedule_budget_persona_and_effect_manifest",
+    "marketplace_evaluation_rights_security_and_curator_release"
+  ],
+  "exclusions": {
+    "sentMessageProjectCorrectionComplete": false,
+    "projectLinkedAttachmentsComplete": false,
+    "meetingRecordRedesignComplete": false,
+    "wholeProjectRecordComplete": false,
+    "providerBackedArtifactsAccepted": false,
+    "physicalDeviceAccepted": false,
+    "cronActive": false,
+    "marketplaceCandidatePublished": false,
+    "productionAccepted": false,
+    "testFlightAccepted": false,
+    "wholePD1Complete": false,
+    "wholeE10Complete": false
+  }
+}
