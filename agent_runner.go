@@ -1242,6 +1242,7 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 		maxBatch = configured
 	}
 	roomID = normalizeRoomID(roomID)
+	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
 
 	servicePrincipal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
 	baselineID := app.ambientAgentWindowBaseline(agent, roomID)
@@ -1320,6 +1321,42 @@ func (app *kanbanBoardApp) ensureAmbientAgentRoomBaseline(agent ambientAgentConf
 	}
 	app.setAmbientAgentBaselineIDLocked(key, baseline)
 	return baseline
+}
+
+// repairAmbientContinuityFromCurrentMeeting is the narrow recovery path for a
+// room-scoped meeting worker whose legacy office history has no single durable
+// consumed-through cursor. It never guesses across old meetings and never
+// replays them. Once a new active sitting supplies an exact clean suffix, the
+// worker durably anchors immediately before that suffix, closes only the
+// ambiguity circuit, and can process the current meeting normally.
+func (app *kanbanBoardApp) repairAmbientContinuityFromCurrentMeeting(agent ambientAgentConfig, roomID string) bool {
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	checkpoint, ok, err := app.ambientScopeCheckpoint(key)
+	if err != nil || !ok || strings.TrimSpace(checkpoint.WindowID) != "" || checkpoint.BlockedReason != ambientContinuityAmbiguous {
+		return false
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	blocked := failure != nil && failure.continuityOpen && !failure.persistenceOpen
+	app.mu.Unlock()
+	if !blocked {
+		return false
+	}
+	baseline, admitted := app.meetingAnalysisCurrentMeetingBootstrapBaseline(agent, roomID)
+	if !admitted {
+		return false
+	}
+	if err := app.persistAmbientCheckpointBaseline(agent, baseline, roomID); err != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", roomID, err)
+		return false
+	}
+	app.setAmbientAgentBaselineID(key, baseline)
+	if err := app.clearAmbientAgentFailure(key); err != nil {
+		return false
+	}
+	log.Infof("%s repaired ambiguous legacy continuity at the exact active-meeting boundary", key)
+	return true
 }
 
 // ambientAgentRunLock returns the per-agent mutex that serializes whole
