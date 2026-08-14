@@ -63,7 +63,12 @@ services:
       # gate, but retain the bounded window for required-mode recovery rather
       # than declaring that healthy process terminally unhealthy mid-proof.
       start_period: 300s
-    mem_limit: 1024m
+    # Live meeting intelligence can briefly exceed 1 GiB while a digest/model
+    # pass overlaps active WebRTC media, even though the Go heap returns below
+    # 400 MiB afterward. A 1 GiB cgroup limit OOM-kills the entire room process
+    # and disconnects every participant, so retain headroom for that bounded
+    # transient working set.
+    mem_limit: 3072m
     # Rides both networks: the egress-less render_internal leg exists ONLY so
     # the render sidecar can POST its callback here.
     networks:

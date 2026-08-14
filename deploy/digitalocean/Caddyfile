@@ -1,5 +1,11 @@
 {$MEETING_HOST} {
 	encode zstd gzip
+	# The public brand now lives at workinstride.xyz. Keep the product's APIs,
+	# auth callbacks, guest links, and explicit /login entrypoint on Bonfire;
+	# redirect only the bare marketing/home URL so native and signed-in flows
+	# are never widened or broken by the public-site cutover.
+	@public_home path /
+	redir @public_home https://workinstride.xyz 308
 	@media_soak path /internal/media-soak/*
 	handle @media_soak {
 		@media_soak_denied not remote_ip {$BONFIRE_MEDIA_SOAK_COLLECTOR_CIDR:127.0.0.1/32}
