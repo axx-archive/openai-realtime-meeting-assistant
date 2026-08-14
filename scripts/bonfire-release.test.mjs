@@ -312,7 +312,7 @@ function renderedComposeConfig(receipt = makeReceipt()) {
         ],
         ports: [port('40000-40100', '40000-40100', 'udp')],
         healthcheck: { test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz'], interval: '30s', timeout: '5s', retries: 3, start_period: '5m0s' },
-        mem_limit: '1g', networks: { default: null, render_internal: null },
+        mem_limit: '3g', networks: { default: null, render_internal: null },
         depends_on: { 'canonical-postgres': { condition: 'service_healthy', required: true } }, restart: 'unless-stopped'
       },
       'canonical-postgres': {
@@ -389,6 +389,7 @@ function composeV514NormalizedConfig(receipt = makeReceipt()) {
     if (service.command === undefined) service.command = null
     if (service.entrypoint === undefined) service.entrypoint = null
     if (service.env_file) service.env_file = service.env_file.map(path => ({ path }))
+    if (service.mem_limit === '3g') service.mem_limit = '3221225472'
     if (service.mem_limit === '1g') service.mem_limit = '1073741824'
     if (service.mem_limit === '256m') service.mem_limit = '268435456'
     if (service.shm_size === '64m') service.shm_size = '67108864'
