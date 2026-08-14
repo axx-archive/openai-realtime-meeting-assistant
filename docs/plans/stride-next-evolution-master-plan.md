@@ -50,7 +50,29 @@ installed with reviewed checksums `39754a773f2dc3df...` and
 `53aa05d793ff7cbe...`; runtime migration cap 19 and future-version tolerance
 keep the retained additive-schema rollback compatible.
 
-Native Build 58 is the newest exact uploaded mobile carrier. EAS build
+The authoritative 2026-08-14 Priority-1 successor is now exact server release
+`b891f8a8c78ab9c8d6ad83fb482910ed01bf49d0`, serving at ledger generation 78
+from bundle `15509d1efea0a41c76e8970cf5f532657d72f789e3bb9ea20c9af79f0720fedc`.
+The application image is `sha256:b5d02f510c45ac34969be5d48f415f9028e65972388adf5f603ccbffd2612c97`
+and the renderer is `sha256:0ca3b543bdc4133d9e15793e6abfc5b01266fa2b80b5e2d0f7232b2e94899cd0`.
+The retained verifier, running images, Caddy, ledger and public health agree
+under `verified-local-unsigned`; independent external attestation remains open.
+This successor contains the Priority-1 meeting-intelligence, workstream,
+Realtime-control, mobile-crash and AppIcon repairs. Its exact release receipt is
+`docs/evidence/e10/stride-e10-priority1-production-release-20260814.json`.
+
+iOS Build 63 is the corresponding mobile carrier for implementation commit
+`bad0ae4c451a2e78637c5cc9efdf66009cbd73e5`. EAS build
+`573b4227-7226-41fb-95a0-299e5b118aea` is `FINISHED` with fingerprint
+`f3401d6b32a083d3ee301dca3e5f5ad5f101818a`; submission
+`ab157c6e-291d-46cf-b610-1153d5bb8849` was handed to Apple. Apple processing,
+exact tester-group availability and physical-device acceptance remain pending
+and must not be inferred from the successful upload. Per founder direction,
+physical iPhone availability is a post-build acceptance lane rather than a
+prerequisite for producing or submitting critical builds.
+
+The historical Build 58 checkpoint below is retained for its exact evidence;
+Build 63 above is now the newest submitted mobile carrier. EAS build
 `12203373-4ac8-4c9d-8db6-53e03e1a0dcb` is `FINISHED` from the same exact
 release commit and fingerprint `af65baea438e7fe8bde00fe06a187e5650574691`; the
 app plus broadcast extension both report version 1.0.0, build 58. Exact EAS
@@ -289,7 +311,7 @@ source-grounded `@Scout what did I miss?` path remain available. This is the
 correct local fail-closed release behavior, not evidence that the physical
 room-voice qualification corpus has passed.
 
-The final 2026-08-14 local rebaseline closes the candidate-only implementation
+The final 2026-08-14 local rebaseline closed the candidate-only implementation
 and regression boundary for this Priority-1 slice. The full root Go package
 passed in 601.262 seconds; the remaining Go packages, `go vet ./...`, the
 559-test native suite, native TypeScript, focused normal/race current-source
@@ -304,6 +326,16 @@ provider/current-day canary, live worker recovery, release activation,
 sustained readiness window or permission to replay production dead letters.
 The scoped hashes and exact external boundary are frozen in
 `docs/evidence/e10/stride-e10-priority1-final-local-gate-20260814.json`.
+
+That local boundary is now superseded for release state by the exact production
+receipt `stride-e10-priority1-production-release-20260814.json`: server commit
+`b891f8a8...` is live, Build 63 is in Apple processing, Meeting Digest is
+enabled with its supervisor registered and running, and day/entity folds are
+current. The two pre-existing ambiguous meeting-digest scopes and 51 historical
+dead letters were deliberately not replayed. The released repair may establish
+a safe baseline only at the exact next active-sitting boundary; current-day
+voice/text/agent parity and sustained readiness remain the next acceptance
+gate.
 
 ### One bounded, evidence-preserving intelligence stack
 
@@ -448,7 +480,7 @@ and a lossless, rollback-safe inventory proving every historical card is either
 projected into an exact successor Work record or retained behind a read-only
 legacy compatibility path.
 
-The current local candidate implements the first exact retirement slice. Web
+The released Priority-1 candidate implements the first exact retirement slice. Web
 and native composers render no manual Project control and issue no automatic
 Project preflight. Private conversation-backed Work can carry a server-minted,
 body-free affinity receipt when one currently readable public Project title is
@@ -486,14 +518,16 @@ agent jobs receive no Board snapshot or `board_update` memory; they use only
 current authorized sources plus server-owned Work/Project bindings. Web Board
 opens are retired and native legacy Board routes land in Work, while a deterministic body-free retirement
 inventory accounts for every persisted card by digest as either exact linked
-artifact history or `legacy_only`. This is local and unreleased. Focused normal
+artifact history or `legacy_only`. This retirement slice is live in server
+commit `b891f8a8...`, and iOS Build 63 carries the corresponding client removal
+while Apple processes the upload. Focused normal
 and race tests, the full Go suite, `go vet`, desktop/390px rendered correction
 journeys, the 559-test native suite and TypeScript typecheck are green. A local
 Release-simulator build also compiles the current native source and carries the
 current light, dark and tinted App Icon catalog. Broader evidence-based
-cross-source clustering beyond the closed exact candidate families, a signed
-carrier from the exact reviewed source, physical-device acceptance and an exact
-reviewed release remain before the workstream model is complete.
+cross-source clustering beyond the closed exact candidate families, Apple
+processing/tester-group readback and physical-device acceptance remain before
+the workstream model is complete.
 
 Meeting affinity may not be implemented by treating a legacy Board card as the
 new authority edge. Its successor contract binds the exact current Meeting
@@ -1102,7 +1136,7 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | PD1 Project identity / association / Project Record foundation | **Verified Complete — bounded local/default-off class** | receipt `stride-e10-pd1-project-foundation-local-20260812.json` binds migration 0018, stable organization-scoped Project identity, exact current session/source authority, correctable append-only ProjectAssociation, atomic old/new correction, synchronous source-drift unlisting plus four-family purge outbox, restart-safe permission-filtered body-free Project Record reconstruction and operation-scoped durable replay. Focused and race suites, real disposable-PostgreSQL upgrade/authority/correction/revoke/replay tests, DR, vet, 20× stress, full `go test ./...` (`536.950s`) and a fresh independent critic PASS. All Project switches remain false; no Home chip/chooser, HTTP exposure, production migration, provider call, commit, push or deploy is claimed. |
 | PD1 Project foundation / persistent personal Realtime / immediate Home taxonomy | **Verified Complete — bounded exact-release class** | local receipt `stride-e10-pd1-project-realtime-persistent-local-20260812.json` binds the exact web/native/server candidate: the Home waveform starts a durable owner-only `gpt-realtime-2.1` thread; logical human and Scout turns append to that exact thread; the voice control persists across ordinary navigation, opens the bound thread and shows truthful listening/thinking/talking/acting/error state; transient loss retries the same logical session/thread twice with strictly increasing transport revisions while stale callbacks fail closed; explicit stop, auth/session drift, room entry, backgrounding and audio-focus takeover terminate it. Web and native render the four stable category shells immediately while authorized suggestions load, keep them non-actionable until hydration and avoid composer shift. Full Go (`542.384s`), focused race, 526/526 native, typecheck, Release simulator build, vet, rendered responsive web evidence, diff-check and fresh critic pass. Release receipt `stride-e10-pd1-project-realtime-persistent-release-20260812.json` then binds exact commit `cf7240f3...` on main, VPS ledger generation 62, bundle `08f519eb...`, app image `393272fc...`, renderer image `7264176a...`, retained `7fb35f88...` rollback, public health/readiness and `verified-local-unsigned`; migration 18 is installed with reviewed checksum `39754a77...` under rollback-compatible policy. iOS Build 55 (`52ae0dd4...`, fingerprint `f6a9a4ca...`) and EAS/ASC submission `477acca1...` are `FINISHED`. This does not claim Apple `VALID` processing, intended tester-group availability, a live provider conversation, native active-control pixel proof, physical-device quality/latency, Home chief-of-staff personalization or Project-chip integration. |
 | PD1 Home chief-of-staff recommendations and immediate shells | **Verified Complete — bounded exact-release class** | The safe four-card taxonomy now paints before web authentication restoration and before the native Home request, reserves exact hydrated geometry, remains non-actionable while recommendations load and fails closed without retaining private context. The server ranks current `Needs you`, active work and exact continuation before safe fallbacks—including sparse one-thread states—detects one recurring topic across two or more already-viewer-authorized public/private conversations without mislabeling private context as team sentiment, and emits editable full-sentence suggestions with plain-language `Why this?` plus body-free source ID/revision coverage. Category selection remains local and zero-effect; Send remains the first persistence boundary. Local receipt `stride-e10-pd1-home-chief-of-staff-local-20260812.json` binds current responsive desktop/phone light/dark renders, focused normal/race tests, full Go (`540.630s`), full native 526/526, typecheck, vet, diff-check and fresh critic PASS. Release receipt `stride-e10-pd1-home-chief-of-staff-release-20260812.json` binds exact commit `fc4e3a57...` on main, VPS ledger generation 63, bundle `3d83223d...`, app image `e73f8146...`, renderer image `300316af...`, retained `cf7240f3...` rollback, public health/readiness and `verified-local-unsigned`; iOS Build 56 (`919cb22e...`, fingerprint `51bae3ea...`) finished and EAS submission `3a361594...` successfully uploaded it to App Store Connect. The session-safe performance successor receipt `stride-e10-pd1-home-immediate-session-safe-release-20260812.json` binds exact commit `ee5c2b38...` on main: static server-rendered shells paint before JavaScript, duplicate startup/event fetches coalesce per exact audience, account changes synchronously remove the prior user's private projection, and delayed prior-user responses fail closed. Full Go (`542.987s`), focused race, 526/526 native, typecheck, vet, rendered delayed-response proof and fresh critic PASS; VPS ledger generation 64 serves bundle `f111742b...`, app image `18374743...`, renderer image `acdf07f7...`, retains `fc4e3a57...` for rollback and verifies `verified-local-unsigned`. iOS Build 57 (`2ba79940...`, fingerprint `324a4815...`) is finished from the exact commit; its App Store Connect submission `bbb0c957...` remained in progress without error at receipt time. This bounded row does **not** claim Apple processing or tester-group availability, meeting-transcript/Project-state compaction, a signed suggestion token, Project chip/chooser/Send association, Project Record completion, provider synthesis or physical-device acceptance. |
-| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Superseded — historical released foundation** | The exact-release receipts and canonical ProjectAssociation history from this row remain valid historical evidence, but its `Add project` / `Suggested` / `No project` composer UX is no longer the controlling product contract. The Priority-1 workstream decision above retires manual Project attachment across Home, channel, private-chat and reply composers. New ordinary turns must carry no client-selected Project token; server-owned, source-grounded workstream affinity may associate resulting work only after current authorization and must abstain when ambiguous. Existing signed tokens and associations remain readable for replay, correction and nondestructive migration. The current retirement implementation is local and unreleased; the previously released clients remain unchanged until an exact reviewed release and physical-device acceptance complete. |
+| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Superseded — historical released foundation** | The exact-release receipts and canonical ProjectAssociation history from this row remain valid historical evidence, but its `Add project` / `Suggested` / `No project` composer UX is no longer the controlling product contract. The Priority-1 workstream decision above retires manual Project attachment across Home, channel, private-chat and reply composers. New ordinary turns must carry no client-selected Project token; server-owned, source-grounded workstream affinity may associate resulting work only after current authorization and must abstain when ambiguous. Existing signed tokens and associations remain readable for replay, correction and nondestructive migration. The retirement implementation is live in server release `b891f8a8...`; iOS Build 63 contains the corresponding client removal and is awaiting Apple processing/device acceptance. |
 | PD1 Video/Chat prominence, member shell and channel stability | **Verified Complete — bounded exact-release class** | Desktop and native promote Video and Chat beside Home. The authenticated server projects `core` versus `full` shell access: missing/stale authority fails closed to Home/Video/Chat, AJ remains the explicit founder owner, and only an exact current organization owner/admin membership exposes Work/Network/Work Search/You. Clients hide—not merely disable—the unfinished destinations, redirect a stale direct top-level path to Home, keep keyboard/VoiceOver semantics, and retain icon-only compact navigation. Home no longer refetches recommendations after an unchanged room snapshot, its web launch geometry is stable, and generated Country Golf/channel imagery reserves exact 3:2 feed geometry before load with scroll anchoring disabled, removing the observed jitter. The Agentic Lab may cover every destination only inside its isolated synthetic authority fixtures; it is not a user-role bypass. Exact local source/rendered evidence and the release evidence are the same receipts named in the preceding row. Build 58 Apple processing, exact tester-group availability, physical-device proof and whole-PD1 acceptance remain open. |
 | PD1 Chat cold-load/crash and navigation stability | **Verified Complete — bounded exact-release class** | The web and native Chat rails now load from a body-free, viewer-authorized thread index and hydrate only the selected conversation. Cold entry reserves stable public/private rows; iPhone/iPad state is session-bound on the first frame; refreshes are single-flight and account/generation fenced; background failure preserves a usable list; exact-thread detail stays bounded; web socket/index/detail merges are monotonic; and desktop/iPad rendering constructs only the newest 200 messages. Legacy metadata is upgraded once under the store lock without replacing message bodies, while rename/archive responses remain metadata-only. Exact commit `d319c768...` is on main and serves from VPS ledger generation 71, bundle `d8210f3f...`, app image `412b5ca8...`, renderer image `3cc8cebf...`, with `7bf81f06...` retained for rollback and `verified-local-unsigned`. Focused rendered/source tests, focused race, vet, native typecheck, 531/531 native tests and a fresh independent critic PASS bind the bounded hotfix. iOS Build 60 (`b26bfeac...`, fingerprint `8d0a81d0...`) finished from the same exact commit and EAS submission `4b870fa5...` finished successfully. Apple processing, intended tester-group availability, physical-device observation and whole-PD1 acceptance remain open. |
 | PD1 author-only sent-message Project correction and linked-source invalidation | **Verified Complete — bounded exact-release class** | An author-owned confirmed Project chip on a sent message opens an accessible web/native review surface. Reading the choices, selecting another authorized Project, selecting No project, cancelling or closing remain zero-effect; only explicit Update/Remove mutates. The client submits only an opaque revision-bound correction token and stable operation ID. The server reauthorizes the exact author, organization session, message, source and Project; atomically appends old/new association lineage or removal; advances a message-local context revision; synchronously unlists old truth and queues four-family projection work. Late socket frames cannot regress the visible result. Edit/delete of a linked source first projects unavailable, durably invalidates canonical authority, recomputes the list preview and recovers from an immutable receipt. Cross-store response loss and restart fail closed: correction and abandonment share one PostgreSQL advisory lock and mutually exclusive immutable receipts, so neither a late correction nor a receipt-absent recovery can resurrect contradictory Project truth. Migration 0021, focused normal/race/disposable-PostgreSQL and DR gates, full Go (`563.332s`), 537/537 native tests/typecheck, responsive dark/light desktop/phone renders, vet, diff-check and a fresh independent critic PASS are bound by `stride-e10-pd1-sent-message-project-correction-local-20260812.json`. Release receipt `stride-e10-pd1-sent-message-project-correction-release-20260812.json` binds the exact operational readback. Implementation commit `ea56fc21...` and docs-only exact-release successor `a5a4ece5...` are on main. The successor serves from VPS ledger generation 73, bundle `c9e65734...`, app image `e63e7893...` and renderer image `9dfa4791...`, retains `ea56fc21...` as rollback and verifies `verified-local-unsigned`. Migration 21 is installed at reviewed checksum `3a2e1e30...` after a private backup of the migration-20 environment. iOS Build 61 (`35f97e8f...`, fingerprint `25e1f180...`) finished from the exact implementation commit and EAS submission `23e7d9a3...` finished, proving upload acceptance only. This row does not claim Project-linked attachment/reply completion, controller/admin retagging, native simulator pixels, Apple processing/intended tester-group availability, physical-device acceptance, full Project Record, provider-backed work or whole-PD1 completion. |
@@ -1172,13 +1206,14 @@ system, and serialized integration across overlapping web/mobile code. Bounded
 read-only research and independent critics may run concurrently and hand back
 artifacts; they do not edit the product or create competing systems.
 
-**2026-08-14 resume refinement:** Priority 1 is locally verified for the
-bounded dirty-candidate class described above. The phrase “immediate resume
-lane” in order 3 now means its reviewed archive, exact VPS activation,
-current-day provider/readiness readback and signed physical-device acceptance;
-it does not reopen locally green source work or imply that those external gates
-have passed. Other safe local PD1 work may proceed without representing the
-Priority-1 lane as live.
+**2026-08-14 resume refinement:** Priority 1 is released for its exact server
+and submitted-mobile implementation class. The phrase “immediate resume lane”
+in order 3 now means the first active-sitting continuity repair, current-day
+provider/readiness parity and post-build physical-device acceptance. Device
+availability does not block critical builds; it remains the founder-owned
+acceptance loop as Build 63 and later candidates arrive. Other safe PD1 work
+may proceed without representing live meeting/provider quality or historical
+replay as accepted.
 
 | Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
 |---|---|---|---|
@@ -1194,6 +1229,14 @@ Priority-1 lane as live.
 | 8 — later | **PI0-B + PN2-PN5**, cohort/activation owners. | private dashboards/collection receipt, ordered human pilot, Explore, sponsored agent, open-web moderation/cache purge; independent critics | per-capability kill switches and purge; no universe-wide activation |
 | 9 — final | **W7/W8 resilience and soak**, release operator plus independent observer. | restrictive network, four-root encrypted offsite restore, HA/rollback, external attestation, exact final fixture, five cohorts, >=24h/10 sittings | retained prior release/images/data authority; any mismatch or prohibited leakage rolls back and stops |
 | 10 — post-E10 next | **Physical iPhone messaging-reference study**, Product Design owner, only after every order 0-9 obligation is accepted. Observe the founder's installed ChatGPT iPhone and Slack iPhone apps plus iMessage as the hybrid personal/multiplayer reference; compare them with the accepted desktop findings and turn the evidence into the next STRIDE chat/thread design decision. | founder-connected physical iPhone; exact app/version/device context; bounded journey manifest; screenshots/notes with private content minimized; comparative decision package covering personal continuity, group participation, agent/work state, attachments, notifications, reply/reaction grammar, handoff and accessibility; independent design critic | observational only; no account/message/contact mutation, no product edit, and no reopening accepted E10 scope during the study; unavailable until the founder connects and authorizes inspection of the physical phone |
+
+The order-3 row retains the serialized implementation history, but its older
+`77787371...`/Build 62/local-only wording is superseded by the 2026-08-14
+Priority-1 receipt: server release `b891f8a8...` is live and Build 63 is in
+Apple processing. The current order-3 stop point is the first active-sitting
+continuity/current-day recall proof, followed by founder device acceptance as
+builds arrive; physical iPhone availability does not pause implementation or
+submission.
 
 Founder-directed PD1 reference study: before the serialized product migration,
 observe the **native ChatGPT macOS app (not ChatGPT web)** as the primary desktop
@@ -1438,12 +1481,13 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next — Priority 1:** repair live meeting capture/digest cursor truth and
-  deliver the continuous meeting-intelligence stack above: rolling contiguous
-  analysis, one evolving correction-aware Meeting Record, bounded day/company
-  compaction and one authorized recall plane for Realtime voice, typed Scout
-  and agents. Only after the current-day parity, restart, privacy, bounded-work
-  and live readiness gates pass, extend that same compaction into the
+- **Next — Priority 1:** observe the first active sitting on release
+  `b891f8a8...`, prove its clean current suffix repairs the exact ambiguous
+  Meeting Digest scope, and run current-day parity through private Realtime,
+  typed Scout and a named agent. Apple processing and founder device acceptance
+  for Build 63 run alongside that live gate and do not block later critical
+  builds. Only after current-day parity, restart, privacy, bounded-work and live
+  readiness pass, extend that same compaction into the
   deterministic ranking path that makes each category's suggestions feel like
   a grounded chief of staff: current commitments and blockers first, then
   exact continuation, Project relevance, meeting/team recurrence and safe
