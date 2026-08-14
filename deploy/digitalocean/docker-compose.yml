@@ -20,6 +20,14 @@ services:
     environment:
       BONFIRE_CODEX_QUEUE_PATH: /app/codex-queue/jobs
       BONFIRE_CODEX_HEARTBEAT_PATH: /app/codex-queue/heartbeat.json
+      # Meeting intelligence is a required production capability. Keep the
+      # current-source workers explicitly enabled even when the long-lived
+      # secret-bearing env file still carries a legacy disable flag. Backfill
+      # remains off; the bootstrap seam admits only the active sitting.
+      MEETING_DIGEST_DISABLED: "false"
+      MEETING_DIGEST_BACKFILL: "false"
+      MEETING_DIGEST_CURRENT_MEETING_BOOTSTRAP: "true"
+      MEETING_BRAIN_CURRENT_MEETING_BOOTSTRAP: "true"
       # The render profile uses a purpose-specific queue volume. It never
       # receives the company-brain meeting_data volume.
       BONFIRE_RENDER_QUEUE_PATH: /app/render-queue/jobs
