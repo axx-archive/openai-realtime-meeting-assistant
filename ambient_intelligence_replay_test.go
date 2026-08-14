@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -170,6 +171,48 @@ type replayTestRunner struct {
 	usage  AmbientReplayUsage
 	onCall func(int)
 	err    error
+}
+
+type replayTestPromoter struct {
+	calls       int
+	manifest    string
+	executionID string
+	input       []AmbientReplayArtifact
+	err         error
+}
+
+type replayPostgresReceiptPromoter struct {
+	store   *PostgresAmbientReplayStore
+	receipt AmbientReplayPromotionReceipt
+}
+
+func (promoter *replayPostgresReceiptPromoter) PromoteAmbientReplay(ctx context.Context, manifest AmbientReplayManifest, executionID string, artifacts []AmbientReplayArtifact) error {
+	meetingArtifacts := make([]AmbientReplayArtifact, 0, 1)
+	for _, artifact := range artifacts {
+		if artifact.Kind == "meeting_digest" {
+			meetingArtifacts = append(meetingArtifacts, artifact)
+		}
+	}
+	stageDigest, err := digestAmbientReplayArtifacts(meetingArtifacts)
+	if err != nil || len(meetingArtifacts) != 1 {
+		return ErrAmbientReplayDrift
+	}
+	promoter.receipt = AmbientReplayPromotionReceipt{
+		ManifestDigest: manifest.Digest, ExecutionID: executionID, TenantID: manifest.TenantID, RoomID: manifest.RoomID, SittingID: manifest.SittingID,
+		SourceManifestDigest: manifest.SourceManifestDigest, MeetingDigestStageOutputDigest: stageDigest,
+		CanonicalMeetingDigestBodyHash: digestBrainString("canonical replay meeting digest"), ApprovalReference: manifest.ApprovalReference,
+		RollbackFloor: manifest.RollbackFloor, ReleaseCommit: manifest.ReleaseCommit, RecordedAt: time.Now().UTC(),
+	}
+	_, err = promoter.store.CommitAmbientReplayPromotionReceipt(ctx, promoter.receipt)
+	return err
+}
+
+func (promoter *replayTestPromoter) PromoteAmbientReplay(_ context.Context, manifest AmbientReplayManifest, executionID string, input []AmbientReplayArtifact) error {
+	promoter.calls++
+	promoter.manifest = manifest.Digest
+	promoter.executionID = executionID
+	promoter.input = append([]AmbientReplayArtifact(nil), input...)
+	return promoter.err
 }
 
 func (r *replayTestRunner) RunAmbientReplayStage(_ context.Context, m AmbientReplayManifest, stage AmbientReplayStageSpec, input []AmbientReplayArtifact) (AmbientReplayStageResult, error) {
@@ -346,6 +389,36 @@ func TestAmbientReplayExecuteRevalidatesEveryStageAndChainsOnlyManifestArtifacts
 	}
 	if store.status[manifest.Digest] != "completed" {
 		t.Fatalf("status=%s", store.status[manifest.Digest])
+	}
+}
+
+func TestAmbientReplayPromotionRunsAfterFinalRevalidationAndBeforeCompletion(t *testing.T) {
+	engine, authority, store, manifest := replayPlanForTest(t, []string{"brain", "meeting_digest"})
+	engine.Runner = &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}}
+	promoter := &replayTestPromoter{}
+	engine.Promoter = promoter
+	execution, err := engine.Execute(context.Background(), manifest.Digest, manifest.AuthorizedBy)
+	if err != nil || execution.Status != "completed" {
+		t.Fatalf("execution=%+v err=%v", execution, err)
+	}
+	if promoter.calls != 1 || promoter.manifest != manifest.Digest || promoter.executionID != execution.ExecutionID || len(promoter.input) != 2 || promoter.input[0].Kind != "brain" || promoter.input[1].Kind != "meeting_digest" {
+		t.Fatalf("promoter=%+v execution=%+v", promoter, execution)
+	}
+	if authority.revalidations != len(manifest.Stages)+2 {
+		t.Fatalf("revalidations=%d, want plan plus every stage plus promotion", authority.revalidations)
+	}
+	if store.status[manifest.Digest] != "completed" {
+		t.Fatalf("manifest status=%q", store.status[manifest.Digest])
+	}
+
+	failedEngine, _, failedStore, failedManifest := replayPlanForTest(t, []string{"brain"})
+	failedEngine.Runner = &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}}
+	failedEngine.Promoter = &replayTestPromoter{err: ErrAmbientReplayUnavailable}
+	if _, err := failedEngine.Execute(context.Background(), failedManifest.Digest, failedManifest.AuthorizedBy); !errors.Is(err, ErrAmbientReplayUnavailable) {
+		t.Fatalf("promotion failure err=%v", err)
+	}
+	if failedStore.status[failedManifest.Digest] != "failed" {
+		t.Fatalf("failed promotion left manifest status=%q", failedStore.status[failedManifest.Digest])
 	}
 }
 
@@ -552,6 +625,42 @@ func TestPostgresAmbientReplayStorePersistsManifestCursorAndReceipts(t *testing.
 	}
 }
 
+func TestPostgresAmbientReplayPromotionReceiptRequiresCompletedExactStageAndIsImmutable(t *testing.T) {
+	ctx, canonical, _ := migratedPostgresCanonicalStore(t)
+	store := &PostgresAmbientReplayStore{pool: canonical.pool}
+	now := time.Now().UTC().Truncate(time.Second)
+	authority := &replayTestAuthority{snapshot: replayFixture(now.Add(-time.Hour), 2)}
+	engine := &AmbientReplayEngine{Authority: authority, Store: store, Now: func() time.Time { return now }, NewID: func() string { return "34343434-3434-4434-8434-343434343434" }}
+	manifest, err := engine.Plan(ctx, AmbientReplayPlanRequest{IdempotencyKey: digestBrainString("postgres-promotion-plan-key"), TenantID: "bonfire", RoomID: officeRoomID,
+		StageNames: []string{"brain", "meeting_digest"}, AuthorizedBy: "aj@shareability.com", ApprovalReference: replayTestApprovalReference,
+		RollbackFloor: replayTestRollbackFloor, ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Runner = &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}}
+	promoter := &replayPostgresReceiptPromoter{store: store}
+	engine.Promoter = promoter
+	execution, err := engine.Execute(ctx, manifest.Digest, manifest.AuthorizedBy)
+	if err != nil || execution.Status != "completed" {
+		t.Fatalf("execution=%+v err=%v", execution, err)
+	}
+	var count int
+	if err := canonical.pool.QueryRow(ctx, `SELECT count(*) FROM ambient_intelligence_replay_promotions WHERE manifest_digest=decode($1,'hex')`, manifest.Digest).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("promotion receipts=%d err=%v", count, err)
+	}
+	if created, err := store.CommitAmbientReplayPromotionReceipt(ctx, promoter.receipt); err != nil || created {
+		t.Fatalf("receipt replay created=%v err=%v", created, err)
+	}
+	if _, err := canonical.pool.Exec(ctx, `UPDATE ambient_intelligence_replay_promotions SET sitting_id='tampered' WHERE manifest_digest=decode($1,'hex')`, manifest.Digest); err == nil || !strings.Contains(err.Error(), "promotion receipts are immutable") {
+		t.Fatalf("immutable update err=%v", err)
+	}
+	tampered := promoter.receipt
+	tampered.MeetingDigestStageOutputDigest = digestBrainString("wrong stage output")
+	if _, err := store.CommitAmbientReplayPromotionReceipt(ctx, tampered); !errors.Is(err, ErrAmbientReplayDrift) {
+		t.Fatalf("wrong stage receipt err=%v", err)
+	}
+}
+
 func TestPostgresAmbientReplayStorePlanRetryIgnoresGeneratedAt(t *testing.T) {
 	ctx, canonical, _ := migratedPostgresCanonicalStore(t)
 	store := &PostgresAmbientReplayStore{pool: canonical.pool}
@@ -699,5 +808,25 @@ func TestAmbientReplayRuntimeDefaultsOffAndCannotExecute(t *testing.T) {
 	}
 	if currentAmbientReplayEngine() != nil {
 		t.Fatal("off runtime installed an engine")
+	}
+}
+
+func TestAmbientReplayExecuteModeCannotClaimReadyWithoutCanonicalPromotion(t *testing.T) {
+	previous := ambientReplayRuntimeSnapshot()
+	ambientReplayRuntime.Lock()
+	ambientReplayRuntime.status = AmbientReplayRuntimeStatus{
+		Mode: "execute", Enabled: true, Database: true, PlannerConfigured: true,
+		ExecutorConfigured: true, PromotionConfigured: false, Ready: false,
+		Error: "canonical replay promotion adapter has not been installed",
+	}
+	ambientReplayRuntime.Unlock()
+	t.Cleanup(func() {
+		ambientReplayRuntime.Lock()
+		ambientReplayRuntime.status = previous
+		ambientReplayRuntime.Unlock()
+	})
+	status := ambientReplayRuntimeSnapshot()
+	if status.Ready || status.PromotionConfigured || status.Error != "canonical replay promotion adapter has not been installed" {
+		t.Fatalf("execute runtime falsely claimed canonical repair readiness: %+v", status)
 	}
 }

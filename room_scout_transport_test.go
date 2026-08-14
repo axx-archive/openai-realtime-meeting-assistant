@@ -569,6 +569,10 @@ func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 
 func TestJoinConferenceRoomWiresNamedRoomScoutFactoryWithoutDialing(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv(roomScoutVoiceModeEnv, "qualified")
+	receipt := strings.Repeat("a", 64)
+	t.Setenv(roomScoutVoiceQualificationEnv, receipt)
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(func(candidate string) bool { return candidate == receipt }))
 	t.Setenv("MEETING_BRAIN_DISABLED", "1")
 	t.Setenv("MEETING_BOARD_DISABLED", "1")
 	t.Setenv("RESEARCH_SUGGESTIONS_DISABLED", "1")

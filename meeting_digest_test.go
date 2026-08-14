@@ -80,6 +80,11 @@ func TestMeetingDigestWorkerProducesAnchoredImportanceJSON(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want 1", calls)
 	}
+	for _, downstream := range []string{dayDigestAgentName, entityLedgerAgentName} {
+		if rooms := app.drainAmbientAgentPendingRooms(downstream); len(rooms) != 1 || rooms[0] != officeRoomID {
+			t.Fatalf("%s nudge rooms=%v, want office immediately after current digest", downstream, rooms)
+		}
+	}
 	if entry.Kind != meetingMemoryKindMeetingDigest || digestEntryKey(entry) != meetingID {
 		t.Fatalf("digest kind/key = %s/%s, want %s/%s", entry.Kind, digestEntryKey(entry), meetingMemoryKindMeetingDigest, meetingID)
 	}
@@ -1203,12 +1208,34 @@ func TestMeetingDigestProducerBlanksFabricatedAnchor(t *testing.T) {
 
 	appendTestTranscript(t, app, "tx-1", "Real captured line.")
 	meetingID := app.memory.currentMeetingID(officeRoomID)
+	prior, appended, appendErr := app.memory.appendAttributedTranscriptWithMetadata(
+		"tx-prior", "item-tx-prior", "AJ", "high", "Old captured line.", map[string]string{"meetingId": meetingID},
+	)
+	if appendErr != nil || !appended {
+		t.Fatalf("append prior transcript: appended=%v err=%v", appended, appendErr)
+	}
+	replacement, appended, appendErr := app.memory.appendAttributedTranscriptWithMetadata(
+		"tx-replacement", "item-tx-replacement", "AJ", "high", "Corrected captured line.", map[string]string{
+			"meetingId": meetingID, "correctionState": "corrected", "supersedesId": prior.ID,
+		},
+	)
+	if appendErr != nil || !appended {
+		t.Fatalf("append replacement transcript: appended=%v err=%v", appended, appendErr)
+	}
+	withdrawn, appended, appendErr := app.memory.appendAttributedTranscriptWithMetadata(
+		"tx-withdrawn", "item-tx-withdrawn", "AJ", "high", "Withdrawn captured line.", map[string]string{
+			"meetingId": meetingID, "correctionState": "withdrawn",
+		},
+	)
+	if appendErr != nil || !appended {
+		t.Fatalf("append withdrawn transcript: appended=%v err=%v", appended, appendErr)
+	}
 	appendDigestTestBrain(t, app, "brain-1", meetingID,
 		"## Overview\nnotes.\n## Transcript reference\ntx-1",
 		map[string]string{"fromTranscriptCreatedAt": "2026-07-06T16:55:00Z", "throughTranscriptCreatedAt": "2026-07-06T17:10:00Z"})
 
 	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-		return `{"meetingId":"x","topics":[{"t":"real","anchor":"tx-1","importance":3},{"t":"ghost","anchor":"tx-does-not-exist","importance":3}]}`, nil
+		return `{"meetingId":"x","topics":[{"t":"real","anchor":"tx-1","importance":3},{"t":"replacement","anchor":"` + replacement.ID + `","importance":3},{"t":"prior","anchor":"` + prior.ID + `","importance":3},{"t":"withdrawn","anchor":"` + withdrawn.ID + `","importance":3},{"t":"ghost","anchor":"tx-does-not-exist","importance":3}]}`, nil
 	}
 	entry, err := app.runAmbientAgentOnce(meetingDigestAgent(), context.Background(), "test-key", responder, 1)
 	if err != nil {
@@ -1225,8 +1252,71 @@ func TestMeetingDigestProducerBlanksFabricatedAnchor(t *testing.T) {
 	if byTopic["real"].Anchor != "tx-1" {
 		t.Fatalf("valid anchor blanked: %+v", byTopic["real"])
 	}
+	if byTopic["replacement"].Anchor != replacement.ID {
+		t.Fatalf("current corrected replacement blanked: %+v", byTopic["replacement"])
+	}
+	for _, topic := range []string{"prior", "withdrawn"} {
+		if byTopic[topic].Anchor != "" {
+			t.Fatalf("noncurrent %s anchor survived producer verification: %+v", topic, byTopic[topic])
+		}
+	}
 	if byTopic["ghost"].Anchor != "" {
 		t.Fatalf("fabricated anchor not blanked (transcript-id set unenforced): %+v", byTopic["ghost"])
+	}
+}
+
+func TestDigestTranscriptIDSetUsesOnlyCurrentMeetingSegments(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	app := newKanbanBoardApp()
+	meetingID := "meeting-digest-current-anchors"
+	appendTranscript := func(id, text string, metadata map[string]string) meetingMemoryEntry {
+		t.Helper()
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		metadata["meetingId"] = meetingID
+		entry, appended, err := app.memory.appendAttributedTranscriptWithMetadata(id, "item-"+id, "AJ", "high", text, metadata)
+		if err != nil || !appended {
+			t.Fatalf("append transcript %s: appended=%v err=%v", id, appended, err)
+		}
+		return entry
+	}
+
+	current := appendTranscript("segment-current", "Current source", nil)
+	prior := appendTranscript("segment-prior", "Prior source", nil)
+	replacement := appendTranscript("segment-replacement", "Corrected source", map[string]string{
+		"correctionState": "corrected",
+		"supersedesId":    prior.ID,
+	})
+	withdrawn := appendTranscript("segment-withdrawn", "Withdrawn source", map[string]string{"correctionState": "withdrawn"})
+	foreign, appended, err := app.memory.appendAttributedTranscriptWithMetadata(
+		"segment-foreign", "item-foreign", "AJ", "high", "Other meeting", map[string]string{"meetingId": "meeting-other"},
+	)
+	if err != nil || !appended {
+		t.Fatalf("append foreign transcript: appended=%v err=%v", appended, err)
+	}
+
+	ids := app.digestTranscriptIDSet(meetingID)
+	for _, expected := range []string{current.ID, replacement.ID} {
+		if _, ok := ids[expected]; !ok {
+			t.Fatalf("current digest source %s missing from %v", expected, ids)
+		}
+	}
+	for _, rejected := range []string{prior.ID, withdrawn.ID, foreign.ID} {
+		if _, ok := ids[rejected]; ok {
+			t.Fatalf("noncurrent or foreign digest source %s admitted", rejected)
+		}
+	}
+
+	allWithdrawnMeetingID := "meeting-digest-all-withdrawn"
+	if _, appended, err := app.memory.appendAttributedTranscriptWithMetadata(
+		"segment-only-withdrawn", "item-only-withdrawn", "AJ", "high", "No longer current",
+		map[string]string{"meetingId": allWithdrawnMeetingID, "correctionState": "withdrawn"},
+	); err != nil || !appended {
+		t.Fatalf("append all-withdrawn transcript: appended=%v err=%v", appended, err)
+	}
+	if ids := app.digestTranscriptIDSet(allWithdrawnMeetingID); ids == nil || len(ids) != 0 {
+		t.Fatalf("all-withdrawn digest sources=%v, want non-nil empty current set", ids)
 	}
 }
 

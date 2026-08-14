@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1155,6 +1156,51 @@ func TestLatestCompanyDigestLatestOnly(t *testing.T) {
 	}
 	if currentCount != 1 {
 		t.Fatalf("current company digests = %d, want exactly 1 (latest-only fold)", currentCount)
+	}
+}
+
+func TestDigestsInRangeVisitsOnlyIndexedCurrentWindowDespiteLargeUnrelatedLedger(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 1000; index++ {
+		if _, _, err := store.appendAmbientEntry(meetingMemoryKindNote, fmt.Sprintf("unrelated-%04d", index), "Unrelated durable memory body", map[string]string{"visibility": "organization"}); err != nil {
+			t.Fatalf("append unrelated %d: %v", index, err)
+		}
+	}
+	if _, err := store.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-window", `{"meetingId":"meeting-window"}`, map[string]string{
+		"meetingId": "meeting-window", digestSpanStartMetadataKey: "2026-08-13T16:00:00Z", digestSpanEndMetadataKey: "2026-08-13T16:45:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.upsertDigest(meetingMemoryKindDayDigest, "2026-08-13", `{"day":"2026-08-13"}`, map[string]string{digestDayMetadataKey: "2026-08-13"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-other-day", `{"meetingId":"meeting-other-day"}`, map[string]string{
+		"meetingId": "meeting-other-day", digestSpanStartMetadataKey: "2026-07-01T16:00:00Z", digestSpanEndMetadataKey: "2026-07-01T16:45:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	visits := 0
+	store.digestEntryVisitHook = func() { visits++ }
+	got := store.digestsInRange(time.Date(2026, 8, 13, 0, 0, 0, 0, meetingTimeLocation()), time.Date(2026, 8, 14, 0, 0, 0, 0, meetingTimeLocation()))
+	if len(got) != 2 {
+		t.Fatalf("got=%v, want current meeting + day digest", got)
+	}
+	if visits != 2 {
+		t.Fatalf("indexed range visited %d rows, want exactly 2 current candidates independent of 1000 unrelated rows", visits)
+	}
+	reloaded, err := newMeetingMemoryStore(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadVisits := 0
+	reloaded.digestEntryVisitHook = func() { reloadVisits++ }
+	reloadedGot := reloaded.digestsInRange(time.Date(2026, 8, 13, 0, 0, 0, 0, meetingTimeLocation()), time.Date(2026, 8, 14, 0, 0, 0, 0, meetingTimeLocation()))
+	if len(reloadedGot) != 2 || reloadVisits != 2 {
+		t.Fatalf("restart rebuilt range index got=%d visits=%d, want 2/2", len(reloadedGot), reloadVisits)
 	}
 }
 

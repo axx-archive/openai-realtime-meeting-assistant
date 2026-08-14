@@ -971,6 +971,9 @@ func scoutChatInlineAnalysisRequest(text string) bool {
 	if normalized == "" {
 		return false
 	}
+	if conversationRequestsDurableMeetingWork(normalized) {
+		return false
+	}
 	for _, durable := range []string{"research:", "deep research", "research pass", "create a report", "produce a report", "prepare a deck", "full audit", "market research"} {
 		if strings.Contains(normalized, durable) {
 			return false

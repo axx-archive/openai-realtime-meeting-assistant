@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -227,5 +228,48 @@ func TestCatchMeUpToolDeliversPrivateEvidenceLinkedNotification(t *testing.T) {
 	if len(notifications) != 1 || !strings.Contains(asString(notifications[0]["text"]), "Private pre-join decision.") ||
 		!strings.Contains(asString(notifications[0]["text"]), "[evidence:") {
 		t.Fatalf("private notification=%+v", notifications)
+	}
+}
+
+func TestRoomScoutLateJoinCatchUpUsesExactAdmissionEvidenceWithoutRealtimeOrGenericModel(t *testing.T) {
+	email := "aj@shareability.com"
+	roomID := "room-catch-chat"
+	app, sittingID := setupCatchUpApp(t, roomID, email, time.Now().UTC().Add(-time.Minute), 21)
+	defer app.Close()
+	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
+	state.mediaGen = 3
+	state.mediaSittingID = sittingID
+	app.mu.Unlock()
+	app.catchUpRecapResolver = catchUpRecapResolverFunc(func(_ context.Context, request BrainRetrievalRequest) (BrainRetrievalResult, error) {
+		return validCatchUpRetrieval(t, request, "Decision: keep background transcription and let late joiners ask Scout in meeting chat.", RecallSourceFresh), nil
+	})
+
+	var modelCalls atomic.Int64
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		modelCalls.Add(1)
+		return "generic model answer", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	scope := RoomScoutScope{RoomID: roomID, SittingID: sittingID, MediaGeneration: 3}
+	app.runRoomScoutTextMention(scope, "@Scout what did I miss?", "human-message-1", email, "AJ")
+
+	if modelCalls.Load() != 0 {
+		t.Fatalf("generic model calls=%d, want deterministic exact catch-up", modelCalls.Load())
+	}
+	entries := app.memory.snapshotForMeeting(sittingID, 0)
+	var answer *meetingMemoryEntry
+	for index := range entries {
+		entry := entries[index]
+		if entry.Metadata["speaker"] == scoutParticipantName && entry.Metadata["meetingCatchUp"] == "true" {
+			answer = &entry
+		}
+	}
+	if answer == nil || !strings.Contains(answer.Text, "Decision: keep background transcription") ||
+		!strings.Contains(answer.Text, "[evidence:") || answer.Metadata["replyTo"] != "human-message-1" ||
+		answer.Metadata["provider"] != "stride" || answer.Metadata["model"] != "deterministic-extractive-catch-up/v1" {
+		t.Fatalf("room catch-up answer=%+v entries=%+v", answer, entries)
 	}
 }

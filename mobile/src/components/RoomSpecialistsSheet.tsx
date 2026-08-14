@@ -25,6 +25,7 @@ type Props = {
   onResolve: (invitation: StrideMeetingSpecialistInvitation, decision: 'approved' | 'declined' | 'dismissed') => void;
   onSetScout: (action: 'invite' | 'dismiss') => void;
   pending: boolean;
+  scoutVoiceEnabled: boolean;
   status: StrideMeetingSpecialistStatus | null;
   visible: boolean;
 };
@@ -77,7 +78,7 @@ function limitsSummary(invitation: StrideMeetingSpecialistInvitation): string {
   return `${numberLabel(limits?.turnBudget)} turns · ${durationLabel(limits?.audioBudgetSeconds)} audio · ${numberLabel(limits?.tokenBudget)} tokens · ${durationLabel(limits?.maxFloorLeaseSeconds)} max floor`;
 }
 
-export function RoomSpecialistsSheet({ agents, error, loading, onClose, onRequest, onResolve, onSetScout, pending, status, visible }: Props) {
+export function RoomSpecialistsSheet({ agents, error, loading, onClose, onRequest, onResolve, onSetScout, pending, scoutVoiceEnabled, status, visible }: Props) {
   const insets = useSafeAreaInsets();
   const scout = agents.find((agent) => agent.id === 'scout');
   return (
@@ -94,14 +95,14 @@ export function RoomSpecialistsSheet({ agents, error, loading, onClose, onReques
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={[styles.card, styles.scoutCard, shadow[1]]}>
+		  {scoutVoiceEnabled ? <View style={[styles.card, styles.scoutCard, shadow[1]]}>
             <View style={styles.agentHeading}>
               <View style={[styles.agentColor, { backgroundColor: scout?.color ?? '#FF6B35' }]} />
               <View style={styles.agentHeadingCopy}>
                 <Text style={styles.cardTitle}>Scout</Text>
                 <Text style={styles.cardMeta}>{scout ? scout.voiceState : 'Available'}</Text>
-              </View>
-            </View>
+			  </View>
+			  </View>
             <Text style={styles.purpose}>Your always-available company agent. Invite Scout when you want him listening and responding as an audible participant.</Text>
             <Text style={styles.approvalState}>{scout
               ? 'Scout is visible to everyone in this sitting. Dismissing him leaves meeting transcription running.'
@@ -109,7 +110,7 @@ export function RoomSpecialistsSheet({ agents, error, loading, onClose, onReques
             <Pressable accessibilityRole="button" disabled={pending} onPress={() => onSetScout(scout ? 'dismiss' : 'invite')} style={({ pressed }) => [scout ? styles.secondary : styles.primary, pressed && styles.pressed]}>
               <Text style={scout ? styles.secondaryText : styles.primaryText}>{scout ? 'Dismiss Scout' : 'Invite Scout'}</Text>
             </Pressable>
-          </View>
+          </View> : null}
           {loading ? <View style={styles.loading}><ActivityIndicator color={colors.text1} /><Text style={styles.body}>Checking this meeting…</Text></View> : null}
           {error ? <View style={styles.noticeError}><Text style={styles.noticeTitle}>Couldn’t load agents</Text><Text style={styles.body}>{error}</Text></View> : null}
           {!loading && !error && status ? (

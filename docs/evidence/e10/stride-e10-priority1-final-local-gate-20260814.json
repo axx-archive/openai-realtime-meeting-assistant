@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "stride-e10-priority1-final-local-gate",
+  "capturedAt": "2026-08-14T11:52:49Z",
+  "status": "local_candidate_pass_external_release_device_and_live_acceptance_pending",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "baselineCommit": "9cfb43ed0d9c8f08df27429479ee5a44987a1b5d",
+    "candidateState": "dirty_uncommitted_local_only",
+    "dirtyEntryCount": 189,
+    "gitStatusSha256": "0c00953455735f1ae28530b8e657062312240e086fc0e7f163df4fa3825787e4",
+    "trackedBinaryDiffSha256ExcludingStrideSite": "62843981e4097d92fd02b70c41b2c332b0930759b99b5c5700d2e6bd19cdedab",
+    "unrelatedWorkPreserved": [
+      "stride-site/",
+      "all pre-existing dirty work outside the integrated candidate"
+    ],
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "signedCarrierCreated": false,
+    "physicalDeviceAccepted": false,
+    "productionMutations": 0
+  },
+  "locallyVerifiedOutcomes": {
+    "meetingRecall": "typed Scout, private Realtime and named agents use one current-authorized Meeting Record projection; ranged recall never asks for an already-owned transcript",
+    "currentSourceCompaction": "correction, withdrawal, deletion, quarantine or authority loss closes stale entity facts and excludes stale meeting/day/company prose before replacement",
+    "ambientScope": "room, sitting and media generation remain exact through transcript, brain, meeting digest and company rollup",
+    "boundedWork": "meeting/day/current-source indexes and projections do not clone or scan the lifetime unrelated memory ledger for the accepted query",
+    "roomFallback": "unqualified in-room voice is hidden while passive capture, analysis, meeting chat and explicit @Scout catch-up remain available",
+    "workstreamModel": "manual Project attachment and active Board/Kanban product authority are retired; resulting Work owns reviewable Project correction",
+    "native": "private Realtime control recovery and current light/dark/tinted AppIcon sources pass local native and Release-simulator gates"
+  },
+  "verification": {
+    "fullRootGo": "PASS: go test . -count=1; 601.262s",
+    "remainingGoPackages": "PASS",
+    "goVet": "PASS: go vet ./...",
+    "native": "PASS: 559/559",
+    "nativeTypecheck": "PASS",
+    "focusedCurrentSourceRace": "PASS",
+    "focusedExactMediaGenerationRace": "PASS",
+    "renderedRoomControl": "PASS: TestDesktopMeetingControlIslandRenderedResponsiveFocusAndGuestChat; 2.097s",
+    "diffCheck": "PASS: git diff --check"
+  },
+  "selectedFileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "9e67a676fc87ecb59563768cc832a4feb5a13724b9da0614037608b5becbaf72",
+    "agent_runner.go": "768248157115aee3e1e4581de577821a8a0e1657b1acbd63542d80269011b518",
+    "agent_runner_test.go": "0bc07471800b2b99f119c5270c7c555b37aa5677e71417887a595533ff18b2d5",
+    "cross_meeting_briefing.go": "e22c5d1670b6031574afbe085284591ba8f1ef712ac1d5b6ca37a245fcfdb4ab",
+    "cross_meeting_briefing_test.go": "4c0dfbea5a4d078bbf8c345d79ab705e1a9e3ad5e50f27651e3c00b6d72a4d32",
+    "entity_ledger.go": "beeb34fe471ce7c5b6f034b91b997cab4f508d4d5673b7d26f94681d49913029",
+    "entity_ledger_test.go": "31ecd923d5f7ac80a8619ccea656b14012663ea84638951b708e89fddf2e44e7",
+    "company_digest.go": "2814b41634fe5ce7ef8ec78e2fbfba15648b85dce334a38a1c3b093260bd372e",
+    "company_digest_test.go": "87a97fe78d4c032ae146e2846ef2fa9a5c0844e0a62d58d1f2c295d7f18dbf4a",
+    "memory_query.go": "2e7cba496e74e318edffc301c8f208cfc3930d91014e9692d58c933aa1843b75",
+    "memory_query_test.go": "8d9c63be663c23b8948c8ec3e01a1e7151f1ca6a24f12ea4edde9465a9ced17a",
+    "recall_e2e_test.go": "7428f2d11e69c394b91c6b6f52d88b5d23085b34e83cab217d2dd7dab5e8c9a3",
+    "listen_only_test.go": "c9a66b916eb95aa8f66d594f86ce383e23938cc9d7d5b66a5ed1d2905dd37333",
+    "rooms_acceptance_test.go": "731b64cac7f54f061fdbd240282120f070e2fd757585adde1d951850f8e21b85",
+    "meetings_test.go": "339cd88c56a371b7fafbce19618d3cb495d76d0cd3a094532864afedfcdeb7cf",
+    "index.html": "572c6edb916454913ba7a6b2edb2c4aec58baa6c13b3394fabfc1940e459ce2d",
+    "frontend_meeting_control_island_test.go": "e22422620742b687ff7ee81c4a06e51377ac6f9d3404d55b60bfb463f763c698",
+    "meeting_records.go": "d5a759d55020a0cf8598afb28a79f2bfff00198158e111d9b01fc6408a78182d",
+    "meeting_digest.go": "916243554fb61b4d91173628748cc2fb02c7735b4331f2fe6f672b13918801e6",
+    "workstream_affinity.go": "7a2a5c943ddfc1b7cabb04f5c27a2e80ce7e8b45eb6df58f6ce2b83909289aee",
+    "room_scout_voice_gate.go": "e40879a41f91372eb58aa3df3e555d64d715daaf47a67bb97887609609bcb27d"
+  },
+  "renderedEvidence": {
+    "directory": "docs/evidence/e10/priority1-meeting-recall-room-fallback-20260814",
+    "readmeSha256": "f4d3ed1dd46468df3f05e01c0639b09e60c6c8e555dbec2098336e79b558be59",
+    "candidateManifestSha256": "26d5680e395ab2d4db782738151e4d69945caec826a4ed3c67a35996d7e43496",
+    "imageSumsSha256": "beb8c5d2d3b14995eb79a090698cc1760c8c4e8f780f4cd639126abc091977b0",
+    "permanentMeetingRecordEvidence": "historical exact-hash checkpoint; recapture from the reviewed release archive is still required"
+  },
+  "physicalDeviceReadOnlyObservation": {
+    "observedAt": "2026-08-14T11:57:14Z",
+    "tool": "xcrun xctrace list devices",
+    "device": "aj",
+    "deviceIdentifier": "00008150-0001391401D8401C",
+    "osVersion": "26.6",
+    "state": "offline",
+    "installedBuildReadable": false,
+    "writes": 0
+  },
+  "liveReadOnlyObservation": {
+    "observedAt": "2026-08-14T11:58:06Z",
+    "host": "thebonfire.xyz",
+    "servingCommit": "777873712c24da48f63364d9e42fc52a02a62954",
+    "releaseQualified": false,
+    "externallyAttested": false,
+    "meetingDigest": {
+      "enabled": false,
+      "registered": false,
+      "deadLetters": 51,
+      "lastSuccessAt": "2026-07-11T03:36:45.833573761Z"
+    },
+    "priorityCapabilities": {
+      "meetingSTT": "degraded_stale",
+      "privateVoice": "degraded_stale",
+      "typedScoutAnswer": "degraded_stale",
+      "typedScoutRouter": "degraded_stale",
+      "brain": "degraded_stale",
+      "recap": "degraded_stale",
+      "roomVoice": "degraded_disconnected"
+    },
+    "retiredBoardWorker": "still_enabled_degraded",
+    "canonicalShadow": {
+      "healthy": false,
+      "dirtyHighWater": 41472,
+      "reconciledHighWater": 8532,
+      "repairCandidates": 134
+    },
+    "offsiteBackup": "dormant",
+    "writes": 0
+  },
+  "externalGates": [
+    "review and intentionally isolate one exact release archive without unrelated dirty work",
+    "commit and push only under current explicit Git authority",
+    "activate the exact VPS release through the receipted release procedure and verify public identity plus retained rollback",
+    "repair or deliberately replay production meeting-digest dead letters under approved source, spend and rollback authority",
+    "prove current-day typed Scout and private Realtime parity against the same live meeting corpus",
+    "create a signed iOS carrier, verify AppIcon catalog identity and clean-install it on the intended iPhone and iPad",
+    "accept chat, waveform, private Realtime, meeting capture/recall and accessibility on physical devices",
+    "complete the in-room voice qualification corpus or keep the room voice entry and audio track absent",
+    "hold the sustained readiness window required by the controlling ledger"
+  ],
+  "notClaimed": [
+    "whole E10 completion",
+    "a reviewed commit, push, deployment, TestFlight build or production activation",
+    "production worker recovery or dead-letter replay",
+    "physical-device correction of Build 62 behavior",
+    "in-room Realtime qualification",
+    "external attestation, W5/W6 services, resilience, cohorts or soak"
+  ]
+}

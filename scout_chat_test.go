@@ -237,8 +237,8 @@ func TestScoutChatOrdinaryQuestionOmitsBoardJSONFromModelInput(t *testing.T) {
 	if _, err := app.resolveAssistantQueryContext(context.Background(), "Is a YouTube-centric rodeo media platform viable?", nil); err != nil {
 		t.Fatalf("resolve strategy question: %v", err)
 	}
-	if !strings.Contains(capturedInput, "Omitted because the user did not ask about board") {
-		t.Fatalf("model input did not mark board context omitted: %s", capturedInput)
+	if !strings.Contains(capturedInput, "Archived filing surfaces are not answer sources") {
+		t.Fatalf("model input did not retire Board context: %s", capturedInput)
 	}
 	for _, leaked := range []string{`"status"`, `"owner"`, `"tags"`, "Finish RTP HEVC Packetizer"} {
 		if strings.Contains(capturedInput, leaked) {

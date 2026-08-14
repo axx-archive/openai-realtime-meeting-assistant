@@ -60,7 +60,7 @@ func TestResponseDoneInterruptedStatusSkipsToolCalls(t *testing.T) {
 func TestResponseDoneCompletedStatusStillExecutesToolCalls(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	observeChatFeed(t, app)
-	before := len(app.snapshotState().Cards)
+	before := len(app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0))
 
 	app.handleRealtimeEvent([]byte(`{
 		"type": "response.done",
@@ -68,16 +68,14 @@ func TestResponseDoneCompletedStatusStillExecutesToolCalls(t *testing.T) {
 			"status": "completed",
 			"output": [{
 				"type": "function_call",
-				"name": "create_ticket",
+				"name": "create_artifact",
 				"call_id": "call-completed-status",
-				"arguments": "{\"title\":\"Completed response card\"}"
+				"arguments": "{\"mode\":\"artifacts\",\"query\":\"Completed response artifact\",\"content\":\"Complete\"}"
 			}]
 		}
 	}`))
 
-	if after := len(app.snapshotState().Cards); after != before+1 {
-		t.Fatalf("completed response did not execute the tool call: %d -> %d cards", before, after)
-	}
+	waitForRealtimeArtifactCount(t, app, before+1)
 }
 
 // TestEmptyToolArgumentsOnFinalEventSkippedSilently covers a barge-in before

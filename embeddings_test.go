@@ -380,6 +380,12 @@ func buildFusionStore(t *testing.T) *meetingMemoryStore {
 		// "Seoul" land it on the Korea concept vector.
 		{ID: "runlog-korea", Kind: meetingMemoryKindRunLog, Text: "Samsung Seoul rollout collaboration.", CreatedAt: base.Add(4 * time.Hour)},
 	}
+	// This fixture replaces the resident ledger directly rather than appending
+	// through the store. Rebuild the same process-local navigation indexes that
+	// newMeetingMemoryStore reconstructs on restart; otherwise the current
+	// company/meeting digest lane is absent for fixture-only reasons and the
+	// lexical decoy incorrectly appears to lead the context.
+	store.rebuildMeetingEntryIndexesLocked()
 	return store
 }
 

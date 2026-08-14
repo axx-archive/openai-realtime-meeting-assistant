@@ -167,52 +167,65 @@ func (app *kanbanBoardApp) currentMeetingIntelligenceRuntime(roomID string) meet
 
 func meetingIntelligenceTranscriptCursor(store *meetingMemoryStore, meetingID string) meetingIntelligenceTranscript {
 	cursor := meetingIntelligenceTranscript{State: "not_listening", SequenceComplete: true}
-	if store == nil || strings.TrimSpace(meetingID) == "" {
+	meetingID = strings.TrimSpace(meetingID)
+	if store == nil || meetingID == "" {
 		return cursor
 	}
 	store.mu.Lock()
-	defer store.mu.Unlock()
+	entries := cloneMemoryEntries(store.entries)
+	boundComplete, hasBoundCompleteness := store.meetingTranscriptSequenceComplete[meetingID]
+	store.mu.Unlock()
+	segments := meetingRecordSegments(entries, meetingID)
 	var lastAt time.Time
 	var firstMeetingSequence uint64
+	seenMeetingSequences := map[uint64]struct{}{}
 	sequenceCounts := make(map[uint64]int)
-	for _, entry := range store.entries {
+	for _, entry := range entries {
 		if entry.Kind != meetingMemoryKindTranscript {
 			continue
 		}
-		sequence, err := strconv.ParseUint(strings.TrimSpace(entry.Metadata["captureSequence"]), 10, 64)
-		if err == nil && sequence > 0 {
+		if sequence, ok := entryCaptureSequence(entry); ok {
 			sequenceCounts[sequence]++
 		}
-		if memoryEntryIsMediaSoakCanary(entry) || strings.TrimSpace(entry.Metadata["meetingId"]) != strings.TrimSpace(meetingID) {
-			continue
-		}
+	}
+	for _, segment := range segments {
 		cursor.SegmentCount++
-		if err != nil || sequence == 0 {
+		sequence := segment.CaptureSequence
+		if sequence == 0 {
 			cursor.SequenceComplete = false
 		} else {
+			if _, duplicate := seenMeetingSequences[sequence]; duplicate {
+				cursor.SequenceComplete = false
+			}
+			seenMeetingSequences[sequence] = struct{}{}
 			if firstMeetingSequence == 0 || sequence < firstMeetingSequence {
 				firstMeetingSequence = sequence
 			}
 		}
-		if err == nil && sequence > cursor.CaptureHighWater {
+		if sequence > cursor.CaptureHighWater {
 			cursor.CaptureHighWater = sequence
-			cursor.LastSegmentID = entry.ID
+			cursor.LastSegmentID = segment.ID
 		}
-		if entry.CreatedAt.After(lastAt) {
-			lastAt = entry.CreatedAt.UTC()
+		capturedAt, _ := time.Parse(time.RFC3339Nano, segment.At)
+		if capturedAt.After(lastAt) {
+			lastAt = capturedAt.UTC()
 			if cursor.LastSegmentID == "" {
-				cursor.LastSegmentID = entry.ID
+				cursor.LastSegmentID = segment.ID
 			}
 		}
 	}
 	if firstMeetingSequence > 0 && cursor.CaptureHighWater >= firstMeetingSequence {
-		for sequence := firstMeetingSequence; ; sequence++ {
-			if sequenceCounts[sequence] != 1 {
-				cursor.SequenceComplete = false
-				break
-			}
-			if sequence == cursor.CaptureHighWater {
-				break
+		if hasBoundCompleteness {
+			cursor.SequenceComplete = cursor.SequenceComplete && boundComplete
+		} else {
+			for sequence := firstMeetingSequence; ; sequence++ {
+				if sequenceCounts[sequence] != 1 {
+					cursor.SequenceComplete = false
+					break
+				}
+				if sequence == cursor.CaptureHighWater {
+					break
+				}
 			}
 		}
 	}
@@ -222,22 +235,102 @@ func meetingIntelligenceTranscriptCursor(store *meetingMemoryStore, meetingID st
 	return cursor
 }
 
-// immutableMeetingIntelligenceStoreSnapshot captures transcript rows and their
-// digest/brain successors in one store generation. All later cursor, fallback,
-// and recap reads operate on this immutable clone, so a live append cannot land
-// between the transcript high-water and digest selection.
-func immutableMeetingIntelligenceStoreSnapshot(store *meetingMemoryStore) *meetingMemoryStore {
-	if store == nil {
+// immutableMeetingIntelligenceStoreSnapshot captures only one meeting's
+// transcript rows and digest/brain successors in one store generation. All
+// later cursor, fallback, and recap reads operate on this immutable clone, so a
+// live append cannot land between the transcript high-water and digest
+// selection. The maintained meeting directory keeps this read proportional to
+// the selected sitting rather than the lifetime memory ledger.
+func immutableMeetingIntelligenceStoreSnapshot(store *meetingMemoryStore, meetingID string) *meetingMemoryStore {
+	meetingID = strings.TrimSpace(meetingID)
+	if store == nil || meetingID == "" {
 		return nil
 	}
 	store.mu.Lock()
-	entries := cloneMemoryEntries(store.entries)
-	meetingIDs := make(map[string]string, len(store.meetingIDs))
-	for roomID, meetingID := range store.meetingIDs {
-		meetingIDs[roomID] = meetingID
+	if store.meetingEntryIndexes == nil {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	indexes := store.meetingEntryIndexes[meetingID]
+	entries := make([]meetingMemoryEntry, 0, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.meetingEntryVisitHook != nil {
+			store.meetingEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		entries = append(entries, cloneMemoryEntry(entry))
+	}
+	sequenceComplete := true
+	var firstSequence, lastSequence uint64
+	for _, segment := range meetingRecordSegments(entries, meetingID) {
+		if segment.CaptureSequence == 0 {
+			sequenceComplete = false
+			continue
+		}
+		if firstSequence == 0 || segment.CaptureSequence < firstSequence {
+			firstSequence = segment.CaptureSequence
+		}
+		if segment.CaptureSequence > lastSequence {
+			lastSequence = segment.CaptureSequence
+		}
+	}
+	if firstSequence > 0 {
+		sequenceComplete = sequenceComplete && store.captureSequenceRangeCompleteLocked(firstSequence, lastSequence)
 	}
 	store.mu.Unlock()
-	return &meetingMemoryStore{entries: entries, meetingIDs: meetingIDs, seen: map[string]struct{}{}}
+	snapshot := &meetingMemoryStore{
+		entries: entries, meetingIDs: map[string]string{}, seen: map[string]struct{}{},
+		meetingTranscriptSequenceComplete: map[string]bool{meetingID: sequenceComplete},
+	}
+	// The clone is a standalone read generation. Rebuild the same body-free
+	// navigation indexes that a restarted store derives from JSONL; otherwise
+	// current digests and exact meeting rows vanish only inside the supposedly
+	// immutable snapshot, making healthy analysis look perpetually behind.
+	snapshot.rebuildMeetingEntryIndexesLocked()
+	return snapshot
+}
+
+func bindMeetingTranscriptSequenceCompleteness(filtered, source *meetingMemoryStore, meetingID string) {
+	meetingID = strings.TrimSpace(meetingID)
+	if filtered == nil || source == nil || meetingID == "" {
+		return
+	}
+	filtered.mu.Lock()
+	entries := cloneMemoryEntries(filtered.entries)
+	filtered.mu.Unlock()
+	sequenceComplete := true
+	var firstSequence, lastSequence uint64
+	for _, segment := range meetingRecordSegments(entries, meetingID) {
+		if segment.CaptureSequence == 0 {
+			sequenceComplete = false
+			continue
+		}
+		if firstSequence == 0 || segment.CaptureSequence < firstSequence {
+			firstSequence = segment.CaptureSequence
+		}
+		if segment.CaptureSequence > lastSequence {
+			lastSequence = segment.CaptureSequence
+		}
+	}
+	if firstSequence > 0 {
+		source.mu.Lock()
+		if source.meetingEntryIndexes == nil {
+			source.rebuildMeetingEntryIndexesLocked()
+		}
+		sequenceComplete = sequenceComplete && source.captureSequenceRangeCompleteLocked(firstSequence, lastSequence)
+		source.mu.Unlock()
+	}
+	filtered.mu.Lock()
+	if filtered.meetingTranscriptSequenceComplete == nil {
+		filtered.meetingTranscriptSequenceComplete = map[string]bool{}
+	}
+	filtered.meetingTranscriptSequenceComplete[meetingID] = sequenceComplete
+	filtered.mu.Unlock()
 }
 
 func meetingIntelligenceTranscriptCaptureHighWater(store *meetingMemoryStore, transcriptID string) uint64 {
@@ -321,36 +414,62 @@ func meetingIntelligenceFactSourceCount(payload meetingDigestPayload) int {
 	return len(sources)
 }
 
-func meetingIntelligenceRecapFromDigest(payload meetingDigestPayload) *meetingIntelligenceRecap {
+func meetingIntelligenceRecapFromProjection(projection *meetingRecordProjection) *meetingIntelligenceRecap {
+	if projection == nil || !projection.hasDigest {
+		return nil
+	}
+	payload := projection.payload
 	recap := &meetingIntelligenceRecap{
-		Title:         strings.TrimSpace(payload.Title),
+		Title:         "",
 		Topics:        make([]meetingIntelligenceFact, 0, len(payload.Topics)),
 		Decisions:     make([]meetingIntelligenceFact, 0, len(payload.Decisions)),
 		Actions:       make([]meetingIntelligenceFact, 0, len(payload.ActionItems)),
 		OpenQuestions: make([]meetingIntelligenceFact, 0, len(payload.OpenQuestions)),
 		Risks:         []meetingIntelligenceFact{},
-		Themes:        append([]string(nil), payload.Themes...),
-		SourceCount:   meetingIntelligenceFactSourceCount(payload),
+		// Digest themes have no individual source edge in the current schema.
+		// Do not present them as current live facts until that contract exists.
+		Themes: []string{},
+	}
+	sources := map[string]struct{}{}
+	ground := func(anchor string) (meetingRecordSourceRef, bool) {
+		refs, ok := projection.groundedSource(anchor)
+		if !ok || len(refs) != 1 {
+			return meetingRecordSourceRef{}, false
+		}
+		sources[refs[0].SegmentID] = struct{}{}
+		return refs[0], true
 	}
 	for _, topic := range payload.Topics {
 		if text := strings.TrimSpace(topic.T); text != "" {
-			recap.Topics = append(recap.Topics, meetingIntelligenceFact{Text: text, SourceID: strings.TrimSpace(topic.Anchor), At: strings.TrimSpace(topic.At)})
+			if source, ok := ground(topic.Anchor); ok {
+				recap.Topics = append(recap.Topics, meetingIntelligenceFact{Text: text, SourceID: source.SegmentID, At: strings.TrimSpace(topic.At)})
+			}
 		}
 	}
 	for _, decision := range payload.Decisions {
 		if text := strings.TrimSpace(decision.D); text != "" {
-			recap.Decisions = append(recap.Decisions, meetingIntelligenceFact{Text: text, Owner: strings.TrimSpace(decision.By), Status: strings.TrimSpace(decision.Status), SourceID: strings.TrimSpace(decision.Anchor), At: strings.TrimSpace(decision.At)})
+			if source, ok := ground(decision.Anchor); ok {
+				recap.Decisions = append(recap.Decisions, meetingIntelligenceFact{Text: text, Owner: strings.TrimSpace(decision.By), Status: strings.TrimSpace(decision.Status), SourceID: source.SegmentID, At: strings.TrimSpace(decision.At)})
+			}
 		}
 	}
 	for _, action := range payload.ActionItems {
 		if text := strings.TrimSpace(action.A); text != "" {
-			recap.Actions = append(recap.Actions, meetingIntelligenceFact{Text: text, Owner: strings.TrimSpace(action.Owner), Status: strings.TrimSpace(action.Status), SourceID: strings.TrimSpace(action.Anchor), At: strings.TrimSpace(action.At)})
+			if source, ok := ground(action.Anchor); ok {
+				recap.Actions = append(recap.Actions, meetingIntelligenceFact{Text: text, Owner: strings.TrimSpace(action.Owner), Status: strings.TrimSpace(action.Status), SourceID: source.SegmentID, At: strings.TrimSpace(action.At)})
+			}
 		}
 	}
 	for _, question := range payload.OpenQuestions {
 		if text := strings.TrimSpace(question.Q); text != "" {
-			recap.OpenQuestions = append(recap.OpenQuestions, meetingIntelligenceFact{Text: text, SourceID: strings.TrimSpace(question.Anchor), At: strings.TrimSpace(question.At)})
+			if source, ok := ground(question.Anchor); ok {
+				recap.OpenQuestions = append(recap.OpenQuestions, meetingIntelligenceFact{Text: text, SourceID: source.SegmentID, At: strings.TrimSpace(question.At)})
+			}
 		}
+	}
+	recap.SourceCount = len(sources)
+	if recap.SourceCount > 0 {
+		recap.Title = strings.TrimSpace(payload.Title)
 	}
 	return recap
 }
@@ -368,7 +487,7 @@ func (app *kanbanBoardApp) meetingIntelligenceSnapshot(roomID string, now time.T
 		now = time.Now().UTC()
 	}
 	now = now.UTC()
-	return app.meetingIntelligenceSnapshotFromStore(record, roomID, now, immutableMeetingIntelligenceStoreSnapshot(app.memory))
+	return app.meetingIntelligenceSnapshotFromStore(record, roomID, now, immutableMeetingIntelligenceStoreSnapshot(app.memory, record.ID))
 }
 
 func (app *kanbanBoardApp) meetingIntelligenceSnapshotFromStore(record meetingRecord, roomID string, now time.Time, store *meetingMemoryStore) *meetingIntelligenceSnapshot {
@@ -392,11 +511,12 @@ func (app *kanbanBoardApp) meetingIntelligenceSnapshotFromStore(record meetingRe
 	var recap *meetingIntelligenceRecap
 	digestID := ""
 	digestContentRevision := ""
-	if digest, found := store.latestDigestPerMeeting()[record.ID]; found {
-		if payload, parsed := parseMeetingDigest(digest.Text); parsed {
+	if digest, found := store.currentDigest(meetingMemoryKindMeetingDigest, record.ID); found {
+		if _, parsed := parseMeetingDigest(digest.Text); parsed {
 			digestID = digest.ID
 			digestContentRevision = temporalDigest(digest.Text)
-			recap = meetingIntelligenceRecapFromDigest(payload)
+			projection := newMeetingRecordProjection(record, store.entries, nil, now)
+			recap = meetingIntelligenceRecapFromProjection(projection)
 			notes.Revision = digest.ID
 			notes.UpdatedAt = digest.CreatedAt.UTC().Format(time.RFC3339Nano)
 			notes.GroundedThrough = strings.TrimSpace(digest.Metadata[digestSpanEndMetadataKey])
@@ -463,6 +583,7 @@ func (app *kanbanBoardApp) memberMeetingIntelligenceSnapshots(ctx context.Contex
 	if scoped == nil || scoped.memory == nil {
 		return nil, nil
 	}
+	bindMeetingTranscriptSequenceCompleteness(scoped.memory, app.memory, record.ID)
 	transcript := currentMeetingTranscriptSnapshotFromStore(scoped.memory, record, roomID)
 	intelligence := app.meetingIntelligenceSnapshotFromStore(record, roomID, now, scoped.memory)
 	current, stillActive := app.meetings.activeRecord(roomID)
@@ -487,7 +608,7 @@ func (app *kanbanBoardApp) meetingIntelligenceSnapshotForScope(scope RoomScoutSc
 	if !active || record.ID != scope.SittingID || app.roomMediaGeneration(scope.RoomID) != scope.MediaGeneration {
 		return nil
 	}
-	snapshot := app.meetingIntelligenceSnapshotFromStore(record, scope.RoomID, now, immutableMeetingIntelligenceStoreSnapshot(app.memory))
+	snapshot := app.meetingIntelligenceSnapshotFromStore(record, scope.RoomID, now, immutableMeetingIntelligenceStoreSnapshot(app.memory, record.ID))
 	if snapshot == nil || snapshot.MeetingID != scope.SittingID {
 		return nil
 	}

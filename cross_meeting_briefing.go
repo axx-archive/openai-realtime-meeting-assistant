@@ -42,6 +42,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -68,8 +69,9 @@ const (
 	meetingDetailAnchorRadius = 3
 
 	// briefing sources, stamped on the result for provenance.
-	briefingSourceDigests   = "digests"
-	briefingSourceMapReduce = "map_reduce"
+	briefingSourceDigests           = "digests"
+	briefingSourceMapReduce         = "map_reduce"
+	briefingSourceCurrentTranscript = "current_transcript"
 )
 
 // briefingDay is one local calendar day of a cross-meeting briefing: the
@@ -263,6 +265,67 @@ func (app *kanbanBoardApp) composeBriefingFromDigests(rangeStart time.Time, rang
 	return result
 }
 
+func (app *kanbanBoardApp) currentSourceMeetingBriefingDigest(digest meetingMemoryEntry) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || digest.Kind != meetingMemoryKindMeetingDigest || !digestEntryCurrent(digest) || memoryEntryHiddenFromRecall(digest) {
+		return meetingMemoryEntry{}, false
+	}
+	meetingID := strings.TrimSpace(digestEntryKey(digest))
+	payload, ok := parseMeetingDigest(digest.Text)
+	if !ok || meetingID == "" {
+		return meetingMemoryEntry{}, false
+	}
+	projection := &meetingRecordProjection{
+		segments:              meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID),
+		segmentByID:           map[string]meetingRecordTranscriptSegment{},
+		digest:                digest,
+		payload:               payload,
+		hasDigest:             true,
+		digestSourceRevisions: parseMeetingRecordDigestSourceRevisions(digest),
+	}
+	for _, segment := range projection.segments {
+		projection.segmentByID[segment.ID] = segment
+	}
+	filtered := payload
+	filtered.Topics = nil
+	filtered.Decisions = nil
+	filtered.ActionItems = nil
+	filtered.OpenQuestions = nil
+	// Themes currently have no individual source edge. They are useful model
+	// output, but not safe current recall material after a correction.
+	filtered.Themes = nil
+	for _, fact := range payload.Topics {
+		if _, current := projection.groundedSource(fact.Anchor); current {
+			filtered.Topics = append(filtered.Topics, fact)
+		}
+	}
+	for _, fact := range payload.Decisions {
+		if _, current := projection.groundedSource(fact.Anchor); current {
+			filtered.Decisions = append(filtered.Decisions, fact)
+		}
+	}
+	for _, fact := range payload.ActionItems {
+		if _, current := projection.groundedSource(fact.Anchor); current {
+			filtered.ActionItems = append(filtered.ActionItems, fact)
+		}
+	}
+	for _, fact := range payload.OpenQuestions {
+		if _, current := projection.groundedSource(fact.Anchor); current {
+			filtered.OpenQuestions = append(filtered.OpenQuestions, fact)
+		}
+	}
+	if len(filtered.Topics)+len(filtered.Decisions)+len(filtered.ActionItems)+len(filtered.OpenQuestions) == 0 {
+		return meetingMemoryEntry{}, false
+	}
+	body, err := json.Marshal(filtered)
+	if err != nil {
+		return meetingMemoryEntry{}, false
+	}
+	current := cloneMemoryEntry(digest)
+	current.Text = string(body)
+	stampMeetingRecordBodyDigest(&current)
+	return current, true
+}
+
 // parseDayDigestPayload decodes a stored day_digest body (the producers write
 // strict JSON; tolerate stray fences the parseMeetingDigest way).
 func parseDayDigestPayload(text string) (dayDigestPayload, bool) {
@@ -287,24 +350,92 @@ func (app *kanbanBoardApp) composeCrossMeetingBriefing(rangeStart time.Time, ran
 		return crossMeetingBriefingResult{RangeStart: rangeStart, RangeEnd: rangeEnd, Source: briefingSourceDigests}
 	}
 	meetingDigests := map[string]meetingMemoryEntry{}
+	// Day digests are compact navigation artifacts, not independent source
+	// authority. Re-fold the currently grounded meeting digests instead of
+	// allowing a stale day rollup to resurrect a corrected meeting claim.
 	dayDigests := map[string]meetingMemoryEntry{}
 	for _, digest := range app.memory.digestsInRange(rangeStart, rangeEnd) {
 		switch digest.Kind {
 		case meetingMemoryKindMeetingDigest:
 			if key := digestEntryKey(digest); key != "" {
-				meetingDigests[key] = digest
-			}
-		case meetingMemoryKindDayDigest:
-			day := strings.TrimSpace(digest.Metadata[digestDayMetadataKey])
-			if day == "" {
-				day = digestEntryKey(digest)
-			}
-			if day != "" {
-				dayDigests[day] = digest
+				if current, ok := app.currentSourceMeetingBriefingDigest(digest); ok {
+					meetingDigests[key] = current
+				}
 			}
 		}
 	}
 	return app.composeBriefingFromDigests(rangeStart, rangeEnd, meetingDigests, dayDigests, briefingSourceDigests, 0)
+}
+
+func briefingTranscriptExcerpt(text string) string {
+	text = strings.TrimSpace(text)
+	const limit = 320
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "…"
+}
+
+// buildCurrentTranscriptBriefing is the provider-independent fail-safe for a
+// meeting whose derived notes are absent or no longer current. It never tries
+// to synthesize a decision or action from raw speech: it returns a small set
+// of exact, current transcript excerpts and labels analysis as catching up.
+// Corrections are projected through meetingRecordSegments, so a superseded or
+// withdrawn line cannot come back through this fallback.
+func (app *kanbanBoardApp) buildCurrentTranscriptBriefing(rangeStart, rangeEnd time.Time) crossMeetingBriefingResult {
+	if app == nil || app.memory == nil || !rangeEnd.After(rangeStart) {
+		return crossMeetingBriefingResult{RangeStart: rangeStart, RangeEnd: rangeEnd, Source: briefingSourceCurrentTranscript}
+	}
+	groups := app.memory.briefingSourceEntriesInRange(rangeStart, rangeEnd)
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(left, right int) bool {
+		leftAt := groups[keys[left]][0].CreatedAt
+		rightAt := groups[keys[right]][0].CreatedAt
+		if !leftAt.Equal(rightAt) {
+			return leftAt.Before(rightAt)
+		}
+		return keys[left] < keys[right]
+	})
+	omitted := 0
+	if len(keys) > mapReduceMaxMeetings {
+		omitted = len(keys) - mapReduceMaxMeetings
+		keys = keys[omitted:]
+	}
+	digests := map[string]meetingMemoryEntry{}
+	for _, key := range keys {
+		segments := meetingRecordSegments(app.memory.snapshotForMeeting(key, 0), key)
+		current := make([]meetingRecordTranscriptSegment, 0, len(segments))
+		for _, segment := range segments {
+			at, err := time.Parse(time.RFC3339Nano, segment.At)
+			if err != nil || at.Before(rangeStart) || !at.Before(rangeEnd) || strings.TrimSpace(segment.Text) == "" {
+				continue
+			}
+			current = append(current, segment)
+		}
+		if len(current) == 0 {
+			continue
+		}
+		if len(current) > briefingRenderTopicCap {
+			current = current[len(current)-briefingRenderTopicCap:]
+		}
+		windowStart, _ := time.Parse(time.RFC3339Nano, current[0].At)
+		windowEnd, _ := time.Parse(time.RFC3339Nano, current[len(current)-1].At)
+		payload := meetingDigestPayload{MeetingID: key, Title: app.meetingRecordTitle(key), Day: dayBucket(windowEnd)}
+		for _, segment := range current {
+			payload.Topics = append(payload.Topics, meetingDigestTopic{
+				T: briefingTranscriptExcerpt(segment.Text), Anchor: segment.ID, At: segment.At, Importance: 1,
+			})
+		}
+		entry, err := syntheticBriefingDigestEntry(key, payload, windowStart, windowEnd)
+		if err == nil {
+			digests[key] = entry
+		}
+	}
+	return app.composeBriefingFromDigests(rangeStart, rangeEnd, digests, nil, briefingSourceCurrentTranscript, omitted)
 }
 
 /* ---------- rendering ---------- */
@@ -480,6 +611,8 @@ func renderCrossMeetingBriefing(briefing crossMeetingBriefingResult) string {
 
 	if briefing.Source == briefingSourceMapReduce {
 		builder.WriteString("\n(Composed on demand from raw meeting memory — stored digests did not cover this range.)\n")
+	} else if briefing.Source == briefingSourceCurrentTranscript {
+		builder.WriteString("\n(Analysis is catching up. These are bounded excerpts from the current captured transcript, not inferred decisions or actions.)\n")
 	}
 	if briefing.OmittedMeetings > 0 {
 		builder.WriteString(fmt.Sprintf("\n(%d more meeting(s) in range were omitted by the briefing cap.)\n", briefing.OmittedMeetings))
@@ -523,9 +656,42 @@ func (app *kanbanBoardApp) rangedBriefingAnswer(query string) (string, bool) {
 		}
 	}
 	if briefing.empty() {
+		briefing = app.buildCurrentTranscriptBriefing(rangeStart, rangeEnd)
+	}
+	if briefing.empty() {
 		return "", false
 	}
 	return renderCrossMeetingBriefing(briefing), true
+}
+
+// conversationMeetingBriefingRange recognizes the narrow, read-only
+// conversation intent that already names both its source and time boundary.
+// Voice and text still submit only natural language; the server owns this
+// routing decision and resolves it against the requester's authorized meeting
+// memory. This prevents the generic classifier from asking the user to choose
+// Calendar versus transcripts when they already asked for captured meetings.
+func conversationMeetingBriefingRange(utterance string, now time.Time) (string, bool) {
+	normalized := strings.ToLower(canonicalizeBoardText(utterance))
+	if normalized == "" {
+		return "", false
+	}
+	meetingNamed := strings.Contains(normalized, "meeting") || strings.Contains(normalized, "meetings") ||
+		strings.Contains(normalized, "call") || strings.Contains(normalized, "calls")
+	if !meetingNamed {
+		return "", false
+	}
+	briefingIntent := strings.Contains(normalized, "catch me up") || strings.Contains(normalized, "catch us up") ||
+		strings.Contains(normalized, "recap") || strings.Contains(normalized, "what happened") ||
+		strings.Contains(normalized, "what did i miss") || strings.Contains(normalized, "what did we discuss") ||
+		strings.Contains(normalized, "what was discussed") || strings.Contains(normalized, "anything interesting") ||
+		strings.Contains(normalized, "summarize") || strings.Contains(normalized, "summary")
+	if !briefingIntent {
+		return "", false
+	}
+	if _, _, ok := relativeQueryTimeRange(normalized, now); !ok {
+		return "", false
+	}
+	return strings.TrimSpace(utterance), true
 }
 
 /* ---------- tools ---------- */
@@ -599,6 +765,9 @@ func (app *kanbanBoardApp) crossMeetingBriefingTool(args map[string]any) (map[st
 			}
 		}
 	}
+	if briefing.empty() {
+		briefing = app.buildCurrentTranscriptBriefing(rangeStart, rangeEnd)
+	}
 
 	if briefing.empty() {
 		return map[string]any{
@@ -628,7 +797,20 @@ func (app *kanbanBoardApp) crossMeetingBriefingToolForPrincipal(args map[string]
 	if app == nil || app.memory == nil {
 		return nil, false, fmt.Errorf("meeting memory is unavailable")
 	}
-	return app.scopedRecallApp(context.Background(), principal).crossMeetingBriefingTool(args)
+	rangeStart, rangeEnd, _, err := briefingRangeFromArgs(args, time.Now())
+	if err != nil {
+		return nil, false, err
+	}
+	app.mu.Lock()
+	apiKey, model := app.apiKey, app.model
+	app.mu.Unlock()
+	scoped := &kanbanBoardApp{
+		memory:   app.meetingBriefingStoreForPrincipal(principal, rangeStart, rangeEnd),
+		meetings: app.meetings,
+		apiKey:   apiKey,
+		model:    model,
+	}
+	return scoped.crossMeetingBriefingTool(args)
 }
 
 // getMeetingDetail is the get_meeting_detail dispatch body: the drill-down
@@ -695,7 +877,7 @@ func (app *kanbanBoardApp) getMeetingDetail(args map[string]any) (map[string]any
 			location := meetingTimeLocation()
 			result["captured"] = fmt.Sprintf("%s–%s", coverage.SpanStart.In(location).Format("15:04"), coverage.SpanEnd.In(location).Format("15:04"))
 		}
-		if digest, ok := app.memory.latestDigestPerMeeting()[meetingID]; ok {
+		if digest, ok := app.memory.currentDigest(meetingMemoryKindMeetingDigest, meetingID); ok {
 			result["digest"] = digest.Text
 			found = true
 		}
@@ -776,7 +958,7 @@ func (app *kanbanBoardApp) meetingCoverageDetail(meetingID string) meetingCovera
 		return summary
 	}
 	stamped := ""
-	if digest, ok := app.memory.latestDigestPerMeeting()[meetingID]; ok {
+	if digest, ok := app.memory.currentDigest(meetingMemoryKindMeetingDigest, meetingID); ok {
 		if start, end, spanOK := parseDigestSpanMetadata(digest); spanOK {
 			summary.SpanStart, summary.SpanEnd = start, end
 		}

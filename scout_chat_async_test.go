@@ -130,7 +130,7 @@ func TestPendingScoutHomeProjectRetryRequiresExactServerJournal(t *testing.T) {
 	}
 }
 
-func TestScoutHomeProjectCompletedHTTPRetrySurvivesExpiryAndRestart(t *testing.T) {
+func TestScoutHomeProjectNewSendIsRetiredButCompletedHTTPRetrySurvivesExpiryAndRestart(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv(homeProjectContextModeEnv, "enabled")
 	ctx, store, _ := migratedPostgresCanonicalStore(t)
@@ -212,8 +212,15 @@ func TestScoutHomeProjectCompletedHTTPRetrySurvivesExpiryAndRestart(t *testing.T
 
 	first := httptest.NewRecorder()
 	handleScoutHomeOpening(first, request(), app, user, "", "", "", scoutHomeOpeningMessage{Text: text, ProjectContextToken: encodedToken})
-	if first.Code != http.StatusAccepted {
-		t.Fatalf("first Send status=%d body=%s", first.Code, first.Body.String())
+	if first.Code != http.StatusConflict || !strings.Contains(first.Body.String(), errManualProjectAttachmentRetired.Error()) {
+		t.Fatalf("new manual Project Send status=%d body=%s", first.Code, first.Body.String())
+	}
+	if _, found := app.scoutOpeningThreadByID("scout-home-" + scoutOpeningDigest(normalizeAccountEmail(user.Email), "project-http-retry")[:24]); found {
+		t.Fatal("retired manual Project Send created a thread")
+	}
+	seeded, created, err := app.ensureScoutHomeOpeningWithProject(context.Background(), user, "project-http-retry", text, encodedToken, projectToken)
+	if err != nil || !created || seeded.OpeningOperation == nil {
+		t.Fatalf("seed historical accepted operation created=%v thread=%+v err=%v", created, seeded, err)
 	}
 	time.Sleep(time.Until(projectToken.ExpiresAt) + 50*time.Millisecond)
 	if err := app.Close(); err != nil {
@@ -241,6 +248,12 @@ func TestScoutHomeProjectCompletedHTTPRetrySurvivesExpiryAndRestart(t *testing.T
 	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM stride_project_chat_send_receipts WHERE organization_id=$1 AND thread_id=$2`, snapshot.Organization.Header.ID, response.Thread.ID).Scan(&receipts); err != nil || receipts != 1 {
 		t.Fatalf("durable Send receipts=%d err=%v", receipts, err)
 	}
+	// The successful replay queues the ordinary Scout answer. Join that worker
+	// before deliberately corrupting the whole-thread journal below: production
+	// writers serialize through the thread lock, while a raw test save racing a
+	// legitimate reply-lifecycle save can otherwise have its synthetic
+	// corruption overwritten and turn this into an order-dependent false pass.
+	restarted.stopScoutOpeningReplyWorkers()
 	confirmed, ok := restarted.scoutOpeningThreadByID(response.Thread.ID)
 	if !ok || confirmed.OpeningOperation == nil {
 		t.Fatal("confirmed internal thread missing")
@@ -438,6 +451,37 @@ func TestScoutHomeOpeningHandlerReturnsBeforeProviderAndCompletesPlaceholder(t *
 	completed := waitForScoutOpeningReplyState(t, app, payload.Thread.ID, scoutReplyStateCompleted)
 	if len(completed.Messages) != 2 || completed.Messages[1].ID != payload.Thread.Messages[1].ID || !strings.Contains(completed.Messages[1].Text, "pilot scope") {
 		t.Fatalf("completed thread=%+v", completed)
+	}
+}
+
+func TestScoutHomeOpeningUsesAuthorizedMeetingBriefingBeforeGenericProvider(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user missing")
+	}
+	now := time.Now().In(meetingTimeLocation())
+	digest := `{"meetingId":"home-opening-meeting","title":"Launch review","day":"` + now.Format("2006-01-02") + `",` +
+		`"decisions":[{"d":"Keep the Friday launch with AJ as rollback owner","status":"decided","importance":5}]}`
+	upsertBriefingTestDigest(t, app, "home-opening-meeting", digest, now.Format("2006-01-02"), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		t.Fatalf("Home meeting briefing reached generic provider workflow %q", request.Workflow)
+		return "", nil
+	})
+	thread, _, err := app.ensureScoutHomeOpening(user, "home-meeting-briefing-key", "Catch me up on today's meetings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := app.resolveScoutOpeningReply(context.Background(), user, thread, thread.Messages[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resolved.Text, "Keep the Friday launch") || resolved.CausedByMessageID != thread.Messages[0].ID || providerCalls != 0 {
+		t.Fatalf("resolved=%+v providerCalls=%d", resolved, providerCalls)
 	}
 }
 

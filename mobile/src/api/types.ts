@@ -76,6 +76,110 @@ export type HomeSnapshot = {
 };
 
 export type HomeResponse = { ok: boolean; home: HomeSnapshot };
+
+export type MeetingRecordSourceRef = {
+  segmentId: string;
+  revision: string;
+  speaker?: string;
+  at: string;
+  correctionState: 'current' | 'unresolved' | string;
+};
+
+export type MeetingRecordClaim = {
+  kind: 'topic' | 'decision' | 'commitment' | 'unresolved_question' | string;
+  text: string;
+  owner?: string;
+  ownerState?: 'resolved' | 'unresolved' | string;
+  dueState?: 'resolved' | 'unresolved' | string;
+  workState?: 'resolved' | 'unresolved' | string;
+  projectState?: 'resolved' | 'unresolved' | string;
+  work?: MeetingRecordReference[];
+  projects?: MeetingRecordReference[];
+  status: string;
+  sources: MeetingRecordSourceRef[];
+  importance?: number;
+};
+
+export type MeetingRecordIndexItem = {
+  contract: 'meeting-record-v1';
+  id: string;
+  roomId: string;
+  title: string;
+  outcomePreview: string;
+  recordRevision: string;
+  startedAt: string;
+  endedAt?: string;
+  active: boolean;
+  durationSeconds: number;
+  participants: string[];
+  coverageState: string;
+  decisionCount: number;
+  commitmentCount: number;
+  unresolvedCount: number;
+  transcriptCount: number;
+};
+
+export type MeetingRecordTranscriptSegment = {
+  id: string;
+  revision: string;
+  speaker?: string;
+  at: string;
+  text: string;
+  source: string;
+  captureSequence?: number;
+  correctionState: string;
+};
+
+export type MeetingRecordReference = {
+  id: string;
+  title: string;
+  kind: string;
+  openKind?: string;
+  openId?: string;
+};
+
+export type MeetingRecordDetail = MeetingRecordIndexItem & {
+  executiveRecap: MeetingRecordClaim[];
+  needsToKnow: MeetingRecordClaim[];
+  decisions: MeetingRecordClaim[];
+  commitments: MeetingRecordClaim[];
+  blockers: MeetingRecordClaim[];
+  people: string[];
+  work: MeetingRecordReference[];
+  projects: MeetingRecordReference[];
+  artifacts: MeetingRecordReference[];
+  coverage: {
+    state: string;
+    transcriptCount: number;
+    transcriptThrough?: string;
+    analysisThrough?: string;
+    unavailableClaims: number;
+    gaps: string[];
+    listenOnly: boolean;
+  };
+  transcript: {
+    segments: MeetingRecordTranscriptSegment[];
+    nextCursor?: string;
+    hasMore: boolean;
+    query?: string;
+  };
+};
+
+export type MeetingRecordIndexResponse = {
+  ok: boolean;
+  contract: 'meeting-record-v1';
+  meetings: MeetingRecordIndexItem[];
+  nextCursor?: string;
+  hasMore?: boolean;
+  serverNow?: string;
+};
+
+export type MeetingRecordDetailResponse = {
+  ok: boolean;
+  meeting: MeetingRecordDetail;
+  serverNow?: string;
+};
+
 export type HomeProjectChoice = { title: string; token: string; choiceKey?: string; suggested?: boolean };
 export type ProjectChatAttachmentHandle = { sourceId: string; sourceRevision: string };
 export type HomeProjectContextResponse = {
@@ -112,6 +216,25 @@ export type ProjectCorrectionResponse = {
   thread?: ScoutThread & { messages?: ScoutMessage[] };
   messages?: ScoutMessage[];
   message?: ScoutMessage;
+};
+
+export type WorkstreamCorrectionProjection = {
+  available: boolean;
+  scopeKey: string;
+  current: {
+    title: string;
+    status: 'current' | 'none' | 'unavailable';
+    revision: number;
+  };
+  choices: ProjectCorrectionChoice[];
+  remove?: ProjectCorrectionChoice;
+};
+
+export type WorkstreamCorrectionResponse = {
+  ok: boolean;
+  workstreamCorrection?: WorkstreamCorrectionProjection;
+  artifact?: { id: string; metadata?: Record<string, string> };
+  replayed?: boolean;
 };
 
 export type ScoutThread = {
@@ -205,6 +328,8 @@ export type ScoutWorkThreadRef = {
   followUpStatus?: string;
   attentionReason?: 'output_truncated' | 'quality_gate_failed' | 'provider_unavailable' | 'work_failed';
   startedAt?: string;
+  projectId?: string;
+  projectTitle?: string;
   resultTitle?: string;
   resultPreview?: string;
   provenance?: string;
@@ -361,7 +486,12 @@ export type ScoutMessageReaction = {
 };
 
 export type ScoutAnswerSource = {
-  messageId: string;
+	kind?: 'meeting_transcript' | string;
+	messageId?: string;
+	meetingId?: string;
+	segmentId?: string;
+	revision?: string;
+	at?: string;
   author?: string;
   /** The phrase the answer provably quotes — why this was cited. */
   quote: string;
@@ -629,6 +759,10 @@ export type RoomAgentParticipant = {
 export type RoomAgentsResponse = {
   ok: boolean;
   agents: RoomAgentParticipant[];
+  voice?: {
+    enabled: boolean;
+    reason: 'qualified' | 'quality_gate_pending' | string;
+  };
 };
 
 export type StrideTeamSeat = {

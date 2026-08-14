@@ -237,8 +237,10 @@ func TestDesktopLongConversationStaysAMessageAndUsesTheThreadInspector(t *testin
 			t.Errorf("Show more must be a visible, directional affordance: missing %q", want)
 		}
 	}
+	if strings.Contains(html, `#chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatForm`) {
+		t.Error("opening the independent reply workstation must not hide the main-channel composer")
+	}
 	for _, want := range []string{
-		`#chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatForm`,
 		`@media (min-width: 861px) and (max-width: 1599px)`,
 		`#chatTool:has(#chatContextRail:not([hidden])) .chat-threads`,
 		`@media (min-width: 861px) and (max-width: 1099px)`,

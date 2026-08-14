@@ -13,13 +13,14 @@ import (
 // is currently available; ContextRefs names the exact authorized sources that
 // must stay bound to any proposal and worker launch.
 type scoutChatSourceNeed struct {
-	Required    bool
-	Work        bool
-	Missing     bool
-	FileName    string
-	FileSize    int64
-	StoredOnly  bool
-	ContextRefs []string
+	Required       bool
+	Work           bool
+	Missing        bool
+	FileName       string
+	FileSize       int64
+	StoredOnly     bool
+	MissingMessage string
+	ContextRefs    []string
 }
 
 func scoutTextHasWord(text string, candidates ...string) bool {
@@ -189,6 +190,9 @@ func formatScoutFileSize(size int64) string {
 }
 
 func scoutChatMissingSourceMessage(need scoutChatSourceNeed) string {
+	if message := strings.TrimSpace(need.MissingMessage); message != "" {
+		return message
+	}
 	name := strings.TrimSpace(need.FileName)
 	if name == "" {
 		return "I understand the task, but I don't have a readable source yet. Attach the PDF/deck here, or name an ingested file in Files. Nothing is running yet; once I can read it, I'll prepare the work for approval and keep the status in this thread."

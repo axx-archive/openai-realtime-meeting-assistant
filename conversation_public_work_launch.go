@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // startAcceptedPublicScoutWorkstream is the single audience-bound adapter for
@@ -36,6 +37,15 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWorkstream(
 	}
 	if strings.TrimSpace(source.MessageID) == "" {
 		return nil, fmt.Errorf("proposal source message is unavailable")
+	}
+	sourceIndex := scoutChatMessageIndex(thread, source.MessageID)
+	if sourceIndex < 0 {
+		return nil, fmt.Errorf("proposal source message is unavailable")
+	}
+	sourceMessage := thread.Messages[sourceIndex]
+	_, currentSource, sourceErr := scoutChatSourceWindow(thread, source.MessageID)
+	if sourceErr != nil || currentSource.MessageDigest != source.MessageDigest || currentSource.WindowDigest != source.WindowDigest {
+		return nil, fmt.Errorf("proposal source changed before work could start")
 	}
 	if !app.assistantContextRefsReadable(ctx, user, proposal.ContextRefs) {
 		return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
@@ -72,6 +82,15 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWorkstream(
 				Source: proposalSourceChatRouter, ProposalID: proposalMessageID,
 				Path: "chat_workstream", Proposer: normalizeAccountEmail(user.Email),
 			},
+		}
+		if affinity, affinityFound := app.resolveWorkstreamAffinityWithContext(ctx, user, thread, sourceMessage, objective, time.Now().UTC()); affinityFound {
+			encodedAffinity, affinityErr := encodeWorkstreamAffinity(affinity)
+			if affinityErr != nil {
+				return nil, affinityErr
+			}
+			spec.WorkstreamAffinity = encodedAffinity
+			spec.ProjectWorkID = affinity.ProjectThreadID
+			spec.ProjectWorkTitle = affinity.ProjectTitle
 		}
 		if delegated {
 			coordinator := ""

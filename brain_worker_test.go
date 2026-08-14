@@ -29,6 +29,19 @@ func authorizeBrainWorkerTest(t *testing.T, app *kanbanBoardApp) *ConsentLaneAut
 	return authority
 }
 
+func TestMeetingBrainPriorityOneCadenceUsesEventWakeAndSixtySecondShortFlush(t *testing.T) {
+	agent := meetingBrainAgent()
+	if agent.interval() != defaultMeetingBrainInterval || agent.interval() != 5*time.Minute {
+		t.Fatalf("meeting brain recovery interval=%s, want five minutes", agent.interval())
+	}
+	if agent.nudgeAge() != defaultMeetingBrainNudgeMaxAge || agent.nudgeAge() != time.Minute {
+		t.Fatalf("meeting brain short-exchange freshness=%s, want one minute", agent.nudgeAge())
+	}
+	if agent.minBatch() != defaultMeetingBrainMinTranscripts || agent.minBatch() != 4 {
+		t.Fatalf("meeting brain immediate batch=%d, want four finalized turns", agent.minBatch())
+	}
+}
+
 func TestMeetingBrainWithdrawalDuringBlockedProviderProducesNoArtifact(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
@@ -141,6 +154,9 @@ func TestMeetingBrainWorkerWritesSummaryForNewTranscripts(t *testing.T) {
 	}
 	if remaining := app.memory.unsummarizedTranscripts(10); len(remaining) != 0 {
 		t.Fatalf("unsummarized transcripts=%d, want 0", len(remaining))
+	}
+	if rooms := app.drainAmbientAgentPendingRooms(meetingDigestAgentName); len(rooms) != 1 || rooms[0] != officeRoomID {
+		t.Fatalf("meeting digest nudge rooms=%v, want current room immediately after brain append", rooms)
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 // a tenant_id column. QueryPurgeStates compares it with information_schema so a
 // migration cannot add a tenant-only table without also updating this gate.
 var tenantBearingTables = []string{
-	"ambient_intelligence_replay_manifests", "approvals", "brain_projection_backfill_requests", "brain_projection_checkpoints",
+	"ambient_intelligence_replay_manifests", "ambient_intelligence_replay_promotions", "approvals", "brain_projection_backfill_requests", "brain_projection_checkpoints",
 	"brain_projection_work", "canonical_events", "catch_up_publications", "consent_records",
 	"jobs", "object_grants", "object_revisions", "objects", "org_memberships", "principals",
 	"purge_ledger", "retention_state", "revision_bodies", "stride_contract_revisions",
@@ -36,7 +36,7 @@ var tenantBearingTables = []string{
 // when a canonical table is added without joining this registry.
 var canonicalTables = []string{
 	"ambient_intelligence_replay_cursors", "ambient_intelligence_replay_manifests",
-	"ambient_intelligence_replay_sources", "ambient_intelligence_replay_stage_receipts",
+	"ambient_intelligence_replay_promotions", "ambient_intelligence_replay_sources", "ambient_intelligence_replay_stage_receipts",
 	"approval_endorsements", "approvals", "blobs", "brain_projection_backfill_requests",
 	"brain_projection_checkpoints", "brain_projection_work", "canonical_events",
 	"catch_up_publications", "consent_records", "execution_receipts", "jobs",

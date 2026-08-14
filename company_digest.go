@@ -193,6 +193,12 @@ func describeLedgerDelta(entry meetingMemoryEntry) (string, bool) {
 	builder.WriteString(event.Op)
 	builder.WriteString(" ")
 	builder.WriteString(event.Record.Entity)
+	if strings.TrimSpace(event.Reason) == ledgerReasonSourceNoLongerCurrent {
+		// The stale title is historical evidence, not model context. The current
+		// deterministic state below contains any corrected replacement.
+		builder.WriteString(": source no longer current")
+		return builder.String(), true
+	}
 	builder.WriteString(": ")
 	builder.WriteString(event.Record.Title)
 	if status := strings.TrimSpace(event.Record.Status); status != "" {
@@ -321,6 +327,7 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 	}
 
 	deltas := make([]string, 0, len(inputs))
+	sourceClosure := false
 	for _, input := range inputs {
 		// §6.4 (RATIFIED 2026-07-09): listen-only-sitting deltas flow into the
 		// company narrative like any other material — external-meeting memory
@@ -329,6 +336,16 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 		if line, ok := describeLedgerDelta(input); ok {
 			deltas = append(deltas, line)
 		}
+		var event ledgerEventPayload
+		if json.Unmarshal([]byte(input.Text), &event) == nil && strings.TrimSpace(event.Reason) == ledgerReasonSourceNoLongerCurrent {
+			sourceClosure = true
+		}
+	}
+	if sourceClosure {
+		// Prior narrative is unstructured and cannot be selectively
+		// reauthorized. Rebuild from current state and body-free deltas instead
+		// of risking resurrection of corrected or withdrawn wording.
+		priorNarrative = ""
 	}
 
 	model := meetingBrainModel()

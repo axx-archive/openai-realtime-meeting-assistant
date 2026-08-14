@@ -1115,6 +1115,7 @@ func main() {
 	http.HandleFunc("/assistant/files/move", assistantFileMoveHandler)
 	http.HandleFunc("/assistant/files/save", assistantFileSaveHandler)
 	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
+	http.HandleFunc("/assistant/meetings/", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
@@ -1157,6 +1158,7 @@ func main() {
 	// 404 unless explicit media-soak mode and its purpose-scoped token are set.
 	http.HandleFunc("/internal/media-soak/", mediaSoakObserverHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
+	http.HandleFunc("/artifacts/workstream", artifactWorkstreamCorrectionHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)
 	http.HandleFunc("/artifacts/render", artifactRenderHandler)
@@ -1459,7 +1461,6 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"backup":           readinessBackupSnapshot(),
 			"agents": map[string]any{
 				"brain":          readinessAgentSnapshot(meetingBrainAgent()),
-				"board":          readinessAgentSnapshot(meetingBoardAgent()),
 				"missionIntel":   readinessAgentSnapshot(missionIntelligenceAgent()),
 				"codexRunner":    readinessCodexRunnerSnapshot(),
 				"renderRunner":   readinessRenderRunnerSnapshot(),
@@ -2286,10 +2287,10 @@ func shouldServeIndexHTML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
-// assistantBoardHandler serves the kanban board snapshot to any authenticated
-// session. Reads must not require joining the video call: the board state is
-// server-side, and office/chat sessions have no room websocket. Native manual
-// edits use the sibling session-authenticated cards endpoint.
+// assistantBoardHandler preserves the authenticated legacy route without
+// reopening the retired Kanban surface. Historical data stays in its original
+// store and is accounted for by retiredBoardInventory; active clients and
+// agents must use conversation-backed Work instead.
 func assistantBoardHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -2309,11 +2310,7 @@ func assistantBoardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"board":      kanbanApp.snapshotState(),
-		"projection": kanbanApp.boardProjectionForViewer(r.Context(), user),
-	})
+	writeAuthError(w, http.StatusGone, ErrBoardRetired.Error())
 }
 
 // assistantMemoryHandler serves the memory timeline (same projection the room
@@ -2492,18 +2489,9 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Private Realtime tool %q failed for %s: %v", name, user.Email, err)
 	}
 
-	// RW1 (kanban-card-108): a private-dashboard Scout-voice board mutation has
-	// to reach every signed-in client the way the room-voice path (the
-	// applyToolCallArgs caller at kanban.go ~2861) and manual ws edits
-	// (broadcastManualBoardMutation) already do — otherwise the office board only
-	// picks up the change on a manual browser reload. The board/undo snapshots are
-	// idempotent, so the harmless extra snapshot from a non-board changed tool
-	// (create_package etc.) is sanctioned by the fan-out doctrine; changed is
-	// never true on the error path. refreshRealtimeBoardContext refreshes only the
-	// OFFICE realtime session (safe — the private session is browser-owned).
+	// The conversation router owns any current Work effect. Never fan archived
+	// Board state back into signed-in clients after a private voice action.
 	if changed {
-		broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
-		broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
 		kanbanApp.refreshRealtimeBoardContext(name)
 	}
 
@@ -2648,10 +2636,28 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Signal capture (signals.go): snapshot the prior body BEFORE the update
 		// so a real human edit can store its section-level diff summary.
-		artifact, updated, err := kanbanApp.updateOSArtifactWithMetadata(payload.ID, payload.Title, payload.Text, user.Name, metadata)
+		var artifact meetingMemoryEntry
+		var updated bool
+		// A Project-bound deliverable may only be edited while its exact source
+		// turn and Project association are still current. Hold the originating
+		// conversation's mutation fence through the artifact header CAS so a
+		// simultaneous source edit/delete/correction cannot authorize revision N
+		// and then let this request write revision N+1 after authority moved.
+		err := kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
+			var updateErr error
+			artifact, updated, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(
+				resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior)),
+				payload.ID,
+				payload.Title,
+				payload.Text,
+				user.Name,
+				metadata,
+			)
+			return updateErr
+		})
 		if err != nil {
 			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, ErrAgentThreadSourceChanged) || strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
 			writeAuthError(w, status, err.Error())
@@ -6101,12 +6107,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "agent_participants", kanbanApp.roomAgentParticipantsSnapshot(connRoomID)); err != nil {
 				log.Errorf("Failed to send agent participant state: %v", err)
 			}
-			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
-				log.Errorf("Failed to send Kanban board state: %v", err)
-			}
-			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
-				log.Errorf("Failed to send undo state: %v", err)
-			}
 			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), kanbanApp.recallPrincipalForMemberRoom(sessionEmail, connRoomID), 20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
 			}
@@ -6191,14 +6191,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}); err != nil {
 				log.Errorf("Failed to send office grant: %v", err)
 			}
-			// Direct replay of the signed-in-safe state: this socket is not
-			// in peerConnections, so broadcasts alone cannot seed it.
-			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
-				log.Errorf("Failed to send Kanban board state: %v", err)
-			}
-			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
-				log.Errorf("Failed to send undo state: %v", err)
-			}
+			// Direct replay of current signed-in-safe state: this socket is not
+			// in peerConnections, so broadcasts alone cannot seed it. Retired
+			// Board snapshots are intentionally absent.
 			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), recallPrincipalForUser(sessionUser), 20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
 			}
@@ -6286,12 +6281,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				return
 			}
 			if guest == nil {
-				if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
-					log.Errorf("Failed to send Kanban board state after media join: %v", err)
-				}
-				if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
-					log.Errorf("Failed to send undo state after media join: %v", err)
-				}
 				// The socket is now in the exact scoped fan-out pool. Replaying the
 				// same atomic pair once more makes pre-registration transcript arrivals
 				// visible; later arrivals are delivered live. Client reducers merge by
@@ -6650,55 +6639,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			payload["roomId"] = connRoomID
 			broadcastScopedRoomKanbanEvent(RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}, "room_chat_delete", payload)
 		case "manual_create_ticket":
-			if !participantAccepted {
-				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
-				continue
-			}
-			args, err := manualBoardArgs(message)
-			if err != nil {
-				sendManualBoardError(c, err)
-				continue
-			}
-			// human-created cards are never drafts (D4) — only the board
-			// worker may set the draft flag
-			delete(args, "draft")
-			broadcastManualBoardMutation(c, currentParticipantName(), "created a card", func() (map[string]any, bool, error) {
-				return kanbanApp.createTicket(args)
-			})
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{"kind": "error", "text": ErrBoardRetired.Error(), "createdAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			continue
 		case "manual_update_ticket":
-			if !participantAccepted {
-				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
-				continue
-			}
-			args, err := manualBoardArgs(message)
-			if err != nil {
-				sendManualBoardError(c, err)
-				continue
-			}
-			broadcastManualBoardMutation(c, currentParticipantName(), "updated a card", func() (map[string]any, bool, error) {
-				return kanbanApp.updateTicketDetails(args)
-			})
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{"kind": "error", "text": ErrBoardRetired.Error(), "createdAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			continue
 		case "manual_delete_ticket":
-			if !participantAccepted {
-				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
-				continue
-			}
-			args, err := manualBoardArgs(message)
-			if err != nil {
-				sendManualBoardError(c, err)
-				continue
-			}
-			broadcastManualBoardMutation(c, currentParticipantName(), "deleted a card", func() (map[string]any, bool, error) {
-				return kanbanApp.deleteTicket(args)
-			})
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{"kind": "error", "text": ErrBoardRetired.Error(), "createdAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			continue
 		case "undo_delete_ticket":
-			if !participantAccepted {
-				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
-				continue
-			}
-			broadcastManualBoardMutation(c, currentParticipantName(), "restored the last deleted card", func() (map[string]any, bool, error) {
-				return kanbanApp.restoreLastDeletedTicket()
-			})
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{"kind": "error", "text": ErrBoardRetired.Error(), "createdAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			continue
 		case "archive_meeting":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before archiving the meeting.")
@@ -6905,19 +6856,12 @@ func answerAssistantQueryForClient(c *threadSafeWriter, query string, principal 
 }
 
 func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action string, apply func() (map[string]any, bool, error)) {
-	_, changed, err := apply()
-	if err != nil {
-		sendManualBoardError(c, err)
-		return
-	}
-	if !changed {
-		return
-	}
-
-	broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
-	broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
-	broadcastAssistantEvent("action", fmt.Sprintf("%s %s", actor, action), nil)
-	kanbanApp.refreshRealtimeBoardContext(action)
+	_ = actor
+	_ = action
+	_ = apply
+	// Kept as the websocket-handler source boundary and as a fail-closed seam
+	// for old callers. Never evaluate the mutation closure.
+	sendManualBoardError(c, ErrBoardRetired)
 }
 
 // Helper to make Gorilla Websockets threadsafe.

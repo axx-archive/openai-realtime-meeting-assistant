@@ -24,16 +24,14 @@ test('only the signed correction token crosses the native mutation boundary', ()
   assert.doesNotMatch(client, /updateProjectCorrection[\s\S]{0,700}projectId/u);
 });
 
-test('author-owned terminal Project chips and message actions open correction while pending is disabled', () => {
+test('manual Project correction remains unreachable from active native chat surfaces', () => {
   const bubble = source('src', 'messaging', 'MessageBubble.tsx');
   const actions = source('src', 'messaging', 'MessageActionSheet.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
   assert.match(bubble, /projectCorrectable = own && !projectPending && !projectRemoved/u);
-  assert.match(bubble, /\. Change project`/u);
   assert.match(actions, /accessibilityLabel="Change project for this message"/u);
-  assert.match(actions, /accessibilityState=\{\{ disabled: projectChangePending \}\}/u);
-  assert.match(thread, /isOwnMessageForViewer\(message, \{[\s\S]*viewerEmail: email/u);
-  assert.match(thread, /status !== "confirmed" && status !== "unavailable"/u);
+  assert.doesNotMatch(thread, /onChangeProject=\{openProjectCorrection\}/u);
+  assert.doesNotMatch(thread, /Add project/u);
 });
 
 test('correction retry is stable and account or thread changes clear all authority state', () => {

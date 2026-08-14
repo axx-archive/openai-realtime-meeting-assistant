@@ -122,6 +122,436 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
+## 2026-08-13 Priority 1 — continuous meeting intelligence and universal recall
+
+This is the first product/reliability lane ahead of further Meeting Record
+polish, chief-of-staff ranking, additional artifact families or later network
+work. A meeting that STRIDE was authorized to capture must become continuously
+useful company memory: accurately transcribed, incrementally analyzed,
+correction-aware, compacted without losing its evidence, and recallable through
+the same authority service by private Realtime voice, typed Scout, room Scout,
+named agents and governed workers. A user asking “catch me up on today’s
+meetings” must not choose between Calendar and notes, upload a transcript the
+system already owns, or know which internal memory layer is healthy.
+
+The 2026-08-13 read-only live diagnosis makes this priority operational rather
+than aspirational. The exact voice utterance was captured correctly, but the
+generic conversation router asked the user to choose a source. At the same
+time `/readyz` reported stale meeting-transcript and brain work, disabled and
+dead-lettered meeting/day digest work, and durable-cursor ambiguity; transient
+Office control reconnects also cancelled accepted private voice tool calls.
+The current Realtime model is not the source of truth or authority and cannot
+repair those server-owned failures. The immediate slice therefore routes an
+explicit time-ranged meeting recap from private voice or typed Scout
+deterministically to the same authorized meeting briefing and prevents a
+reconnectable control-socket loss from aborting an otherwise current voice
+session. That slice is a containment fix, not completion of this lane.
+
+A second read-only observation after the local Priority-1 candidate was frozen
+confirms that production has not crossed this boundary. At
+`2026-08-14T06:33:44Z`, `thebonfire.xyz` still served exact release
+`777873712c24da48f63364d9e42fc52a02a62954`, not the current dirty candidate.
+Its public `/readyz` reported `meetingDigest.enabled=false`, 51 meeting-digest
+dead letters and a last meeting-digest success on 2026-07-11; the current brain,
+recap, typed Scout, private Realtime and meeting-STT lanes were stale or
+degraded; the historical Board worker was still enabled and degraded; and the
+old in-room Realtime lane remained enabled. `/healthz` also reported that the
+serving release lacked the required external attestation. This is live evidence
+that a locally green candidate, an older TestFlight build and the serving VPS
+are three different products. No Priority-1 completion or app-icon/Project/
+Board/room-voice fix may be claimed live until one exact reviewed release is
+activated, publicly identity-verified, installed on the physical devices and
+accepted against the provider/current-day meeting corpus below.
+
+A third read-only public check at `2026-08-14T10:03:20Z` confirmed the same
+serving release and boundary rather than a transient recovery. Meeting STT,
+recap, private voice, typed Scout routing/answering and Brain were all
+stale/degraded; `meetingDigest` remained disabled with 51 dead letters and no
+registered worker; the retired Board worker was still enabled/degraded;
+canonical shadow remained unhealthy (`dirtyHighWater=41430`,
+`reconciledHighWater=8532`); and the release still lacked the required external
+attestation. The local exact-meeting snapshot now avoids cloning the lifetime
+memory ledger, remains correct across interleaved room capture sequences and
+projects only current corrected transcript sources, but none of those local
+repairs are serving until the reviewed release/device gates are explicitly
+authorized and passed. The live recap now also reprojects every digest claim
+through the same exact current segment revision used by the permanent Meeting
+Record: corrected, withdrawn or superseded source prose disappears immediately
+while the transcript remains available and analysis truthfully reports
+`catching_up`.
+
+The cross-meeting briefing used by typed Scout, private Realtime and named
+agents now follows that same source contract. A stored meeting digest
+contributes only facts whose anchor is still the exact current transcript
+revision; the read path re-folds those meeting facts and never treats a stored
+day digest as independent authority. When analysis is missing, stale or
+invalidated by a correction, the provider-independent fallback returns at most
+six bounded current transcript excerpts per meeting, labels analysis as
+`catching_up`, and does not fabricate decisions or actions. Executable normal
+and race regressions prove a correction removes the prior wording from both
+the meeting digest and stale day rollup, preserves the corrected transcript,
+and keeps a 1,000-row unrelated ledger tail out of the request work. This is a
+local correctness repair; the live disabled/dead-lettered digest workers and
+stale serving release remain an external release/operations gate.
+
+Company-scale compaction now obeys the same rule. Before a rebuilt meeting
+digest can update the entity ledger, the ledger reprojects every existing
+record through its exact current transcript or decision anchors. Model silence
+does not erase a still-current fact; an actual correction, withdrawal,
+deletion, quarantine or authorization loss closes the old temporal validity
+window first, then a replacement fact may open a new source-bound record. The
+closure delta is body-free, and the next company digest drops its entire prior
+unstructured narrative rather than asking a model to selectively remember
+which prose became stale. Read-side recall also withholds any company digest
+whose exact ledger-event cursor is behind, so typed and voice agents cannot
+consume the older projection while the nudge-driven compactor catches up.
+Focused normal and race tests prove model silence is a no-op, corrected wording
+closes and replaces the old record, the obsolete title never enters the company
+regeneration prompt, and a cursor-stale company digest is excluded from recall.
+The generic memory window shared by typed Scout, private Realtime, named agents
+and tool calls now enforces the boundary too: raw transcript rows must be the
+exact current segment revision; Brain prose must bind one complete still-current
+transcript window; derived decisions must retain a current source Brain; meeting
+digests are reprojected fact by fact; unbound recursive day summaries are
+withheld; and company summaries must be caught up to the newest ledger event.
+The deterministic ranged briefing continues to regroup those exact meeting
+facts by day, so removing an unsafe stored day summary does not remove the
+user's ability to ask what happened this week.
+
+The same boundary explains the founder's 2026-08-13 phone capture of the
+manual `Add project` accessory. A read-only EAS inventory at
+`2026-08-14T06:47:40Z` found Build 62 as the newest finished iOS artifact:
+build `d7ad87ae-9392-411a-a274-8fe57c706ebc`, commit
+`43103a683d5982fa7a2669e2040cc7229bb49c26`, fingerprint
+`fb4c0646c8dea6b1776e01521a1e8b42b79c0bd7`. That exact source still mounts
+the `Add project` composer accessory, a first-class native Board destination
+and an in-room Board action. It already enables the separate private Realtime
+voice flag, so a nonresponsive white-circle control in that carrier is not
+explained by a disabled build flag. The current local candidate removes the
+manual Project and Board surfaces and contains later control-channel recovery,
+meeting-recall and AppIcon repairs, but no new signed carrier was created and
+the connected iPhone was offline during inspection. Build 62's EAS identity
+therefore explains what that artifact can contain; it does not prove which
+build is installed on the physical phone or close any device acceptance gate.
+
+The current local Priority-1 candidate now extends that same boundary through
+agent work without widening authority. A natural request such as “analyze
+today's meetings and prepare a report” mints one body-free, server-signed
+manifest of the exact authorized Meeting Record revisions in the range. Typed
+Scout can analyze its bounded current projection immediately; an approved or
+direct private worker stores that manifest and reauthorizes every record at
+provider admission. A changed, withdrawn, newly private or differently owned
+record fails closed instead of falling back to ambient memory. The projection
+contains grounded decisions, commitments, open questions and exact segment
+anchors, using a small transcript fallback only when rolling analysis has not
+landed. Current digest and raw fallback reads are backed by restart-rebuilt
+day/key indexes, and the final principal-authorized projection is assembled
+from only those indexed candidates. A verified stress case with 1,000
+unrelated durable memories inspects exactly the one authorized current digest
+in the requested day rather than scanning or cloning the lifetime ledger.
+This candidate is locally verified and not yet released; it does not by itself
+re-enable the disabled production analysis workers or authorize historical
+replay. The restart path now also has separate, default-off activation fences
+for transcript→brain and brain→meeting-digest: each may admit only a clean
+suffix belonging to the exact active sitting after restart, and refuses an
+interleaved or ambiguous source stream. This makes future/current meeting
+repair possible without quietly consuming the historical backlog; production
+activation still requires the release and live gates below. Fresh brain writes
+now wake meeting-digest immediately; accepted meeting digests wake the day fold
+and entity ledger; durable ledger-event batches wake the thin company digest.
+The configured six- and thirty-minute intervals are therefore recovery floors,
+not the normal freshness cadence, and focused normal/race tests bind every
+downstream wake. Historical repair is now also locally dependency-complete at
+the canonical boundary: a default-off, approval-bound replay validates one
+exact sitting/source manifest, runs bounded shadow stages, writes a hidden
+body journal, commits an immutable body-free PostgreSQL promotion receipt, and
+only then replaces the current Meeting Record digest. A crash after the
+receipt but before the JSONL projection is recovered receipt-first on restart
+without another model call or duplicate digest; a journal without a receipt
+stays invisible and inert. The promoted digest is clamped and re-grounded to
+the exact current transcript IDs/revisions before publication, then wakes the
+day and entity folds. This closes the local historical canonical-promotion
+mechanism, but it remains default-off and unreleased until the corpus,
+physical-device, live-readback and sustained-readiness gates below pass.
+
+The local candidate also binds the founder's flagship recall request through
+three real product seams rather than three hand-built answers: typed Scout, a
+session-bound private Realtime thread and a named private agent all resolve the
+same exact current Meeting Record projection, decisions, open questions,
+sources and coverage. The named-agent response keeps that agent's identity
+instead of being mislabeled Scout, and the test proves zero generic-provider
+fallback. Shared-room voice remains unqualified, so web and native now hide
+the `Agent team` entry unless a current-room Scout/specialist voice route is
+qualified or an already-present agent still needs dismissal. The availability
+projection is bound to the exact account/room and refreshed on entry; stale
+results cannot reopen it. Meeting chat, passive transcript/analysis and the
+source-grounded `@Scout what did I miss?` path remain available. This is the
+correct local fail-closed release behavior, not evidence that the physical
+room-voice qualification corpus has passed.
+
+The final 2026-08-14 local rebaseline closes the candidate-only implementation
+and regression boundary for this Priority-1 slice. The full root Go package
+passed in 601.262 seconds; the remaining Go packages, `go vet ./...`, the
+559-test native suite, native TypeScript, focused normal/race current-source
+recall and exact media-generation tests, the refreshed responsive room-control
+render, and `git diff --check` all pass. The current-source chain now closes a
+stale entity fact before replacement, clears stale company narrative, fences
+generic typed/voice/named-agent memory to exact current transcript and ledger
+high-waters, and preserves exact room/sitting/media-generation identity through
+ambient analysis. This is an exact dirty-worktree local checkpoint only. It
+does not create a reviewed Git archive, signed carrier, physical-device result,
+provider/current-day canary, live worker recovery, release activation,
+sustained readiness window or permission to replay production dead letters.
+The scoped hashes and exact external boundary are frozen in
+`docs/evidence/e10/stride-e10-priority1-final-local-gate-20260814.json`.
+
+### One bounded, evidence-preserving intelligence stack
+
+1. **Authoritative capture.** Finalized transcript segments are append-only
+   source revisions keyed by organization, room, sitting, speaker, capture
+   sequence and source time. Consent, audience, correction, withdrawal and
+   deletion are source truth. Reconnect, duplicate and out-of-order delivery
+   advance only a verified contiguous high-water; no derived layer may bridge
+   a gap silently.
+2. **Rolling interval analysis.** While a sitting is active, an event-driven
+   debounce analyzes only newly finalized contiguous segments, normally within
+   30–60 seconds, with a forced final flush at close. It emits typed candidates
+   for topics, decisions, commitments, owners, due states, blockers, risks,
+   questions, disagreement and referenced artifacts. Every asserted item
+   retains exact segment/revision edges and an inference/quote distinction.
+   Corrections and withdrawals invalidate overlapping intervals and enqueue a
+   deterministic rebuild rather than editing historical prose in place.
+3. **One evolving Meeting Record.** Interval deltas fold idempotently into the
+   sitting’s current record and coverage receipt: transcript-through,
+   analysis-through, unresolved gaps, freshness and correction state. Closing
+   a sitting produces the final current revision within two minutes without
+   creating a second competing digest.
+4. **Hierarchical compaction, not endless prompt logs.** Raw transcript remains
+   durable evidence outside model context. Agents receive a body-bounded
+   projection assembled from the current Meeting Record, relevant interval
+   deltas and the smallest exact transcript windows needed to support the
+   answer. Current meeting records fold into a deterministic local-day digest,
+   then into typed company ledgers for active decisions, commitments, risks,
+   topics and open questions. Supersession, resolution and revocation remove
+   stale claims from current macro state while retaining governed lineage.
+   Prompt size and retrieval work are bounded independently of transcript age
+   or total meeting count. A digest claim whose exact segment revision has
+   changed is omitted and surfaced as an analysis gap; when no current claim
+   remains, the bounded current transcript is exposed as evidence instead of
+   allowing stale prose to survive or making the meeting disappear.
+5. **One server-owned recall plane.** Every surface calls the same service with
+   the current principal plus a natural-language time/meeting/topic request.
+   The server resolves timezone and source range, applies authorization before
+   search, selects current Meeting Records and exact evidence windows, and
+   returns a typed coverage/freshness envelope. Models may summarize that
+   bounded result; they never select provider, authority, raw tenant scope or
+   an unrestricted recall tool. Realtime voice and text therefore cannot
+   disagree about which meeting memory exists.
+6. **Truthful fallback.** If rolling analysis is late but finalized transcript
+   is current, recall synthesizes from exact transcript windows and reports the
+   analysis gap. If capture has a gap, authority is lost or no authorized
+   meeting exists, it says so without leaking existence or inventing coverage.
+   It never asks the user for a source already owned by the service. A stale or
+   dead-lettered derived layer cannot claim healthy merely because raw capture
+   is still accepting writes.
+
+### In-room agent voice is optional; meeting intelligence is not
+
+Passive authorized transcription, continuous analysis, the evolving Meeting
+Record and text recall are the dependable product. An always-listening Scout or
+specialist voice inside a video room is an optional presentation layer over
+that truth; it may not be retained merely because the provider supports
+speech-to-speech. It ships only if a physical-device, real-room corpus proves
+that it can follow the current multi-person conversation, preserve speaker and
+turn identity, retrieve the same current Meeting Record/interval analysis as
+typed Scout, answer without asking for an already-owned transcript, respect
+human interruption and floor control, and respond quickly enough to feel like
+part of the call rather than a delayed recording.
+
+The go/no-go gate is explicit. Across the preregistered late-join, “what did I
+miss?”, decision, commitment, correction, topic-change, cross-talk, noise,
+barge-in and reconnect cases, in-room Realtime 2.1 must have zero unauthorized
+source disclosure or invented meeting claims; 100% of asserted claims must
+resolve to current evidence; meeting-set, decision and coverage results must
+match typed Scout; p50 end-of-utterance to first audio must be at most 1.2
+seconds and p95 at most 2.5 seconds; and ≥95% of judged turns must be useful
+without repetition or repair. A ten-sitting physical iPhone/iPad/web soak must
+also have no lost floor, acoustic loop, transcript contamination, human-media
+failure or stale-context answer. Provider contract success or one staged demo
+does not pass this gate.
+
+If the lane misses that bar, remove its in-room voice entry point, agent audio
+track and implied live presence from the release. Keep background capture and
+analysis running independently, and keep meeting chat as the explicit agent
+interface. An authorized participant can type `@Scout what did I miss?`; the
+server resolves the participant's exact first-admission/current interval,
+returns a concise source-grounded catch-up with decisions, commitments,
+blockers, open questions and coverage/gaps, and posts evidence links/cards in
+the meeting chat. The same path handles other explicit `@Scout` meeting
+questions and remains usable when voice, audio publication or the Realtime
+provider is disabled. Plain meeting chatter never summons an agent.
+
+This fail-closed decision is scoped to voice published *inside a shared video
+room*. It must not disable the separate private personal Realtime control on
+Home. The native production profile keeps that private lane enabled; it owns
+one authenticated private Scout thread, uses the common authorized meeting
+recall plane and renders truthful connecting/listening/thinking/acting/talking
+state. Room voice remains behind the trusted qualification gate above.
+
+### Work belongs to the brain, not a composer chip or Kanban board
+
+Project and workstream association is server-owned interpretation over current
+authorized company truth. People do not attach a Project while composing a
+message, choose `No project`, or manage the brain by filing conversation turns
+into buckets. Public channels, private Scout conversations, Meeting Records,
+artifacts and accepted work continuously advance a body-bounded workstream
+model with exact source edges, confidence, correction and revocation. Ambiguous
+association remains explicit and reviewable in the resulting work—not silently
+guessed at Send—and a correction teaches the current workstream projection
+without rewriting the underlying conversation.
+
+The inference order is governed rather than fuzzy. Work launched from a
+current public Project channel belongs to that same channel without requiring
+the person to repeat its title, and it can never jump to a different readable
+channel. Private work may inherit a Project only from one unique current
+server-owned source edge—an exact named Project, a current corrected Work
+continuity receipt, or a current Meeting claim→Work→Project chain. Competing,
+stale or merely lexical candidates abstain. A later semantic classifier may
+rank only that authorized candidate set and cannot mint authority; accepted
+Work/Project correction updates the body-free continuity projection used by
+future turns. Legacy Board tags, card titles and column placement are never an
+inference feature or source of authority.
+
+The released `Add project` / `Suggested` composer accessories are therefore
+retired across Home, channel, private-chat and reply composers. Existing signed
+tokens and ProjectAssociation rows remain readable for exact historical replay
+and correction, but new ordinary turns do not accept client-selected Project
+authority. Any future review control belongs on the resulting workstream or
+Project record, after the brain has explained its evidence, never before the
+person can speak.
+
+The Kanban Board is also retired as a primary product surface. Cards, columns,
+drag state and a general-purpose Board destination are not the organizing
+model for STRIDE. Historical board data remains preserved and governed during
+migration—no destructive deletion or authority widening—but new user-facing
+work is presented as evolving workstreams, decisions, commitments, artifacts,
+owners, blockers and next actions derived from conversation and meetings. Old
+Board deep links remain read-only compatibility routes until each exact record
+has a non-Kanban Work destination; new navigation, room controls and agent
+actions may not send a person to the Board.
+
+Acceptance requires: zero visible manual Project attachment affordances; zero
+new composer-selected Project tokens; public/private/meeting source parity in
+the workstream resolver; source-grounded association explanations and
+corrections; no Board entry in web/native primary, Work or in-room navigation;
+and a lossless, rollback-safe inventory proving every historical card is either
+projected into an exact successor Work record or retained behind a read-only
+legacy compatibility path.
+
+The current local candidate implements the first exact retirement slice. Web
+and native composers render no manual Project control and issue no automatic
+Project preflight. Private conversation-backed Work can carry a server-minted,
+body-free affinity receipt when one currently readable public Project title is
+named unambiguously or when the current bounded conversation window contains
+accepted, still-current Work for exactly one Project. The continuity receipt
+binds that supporting artifact and its source; a correction or source edit
+invalidates descendants, and two competing current Projects abstain.
+Public-channel Work binds to its own exact
+channel without requiring the title to be repeated; it may not expose or jump
+to a different Project merely because the requester can read it. Both paths abstain on ambiguity or stale
+authority, and delegated agents preserve the same receipt. A revision-bound
+Meeting Record conversation can seed its first exact Project without asking the
+person to name or file it: one current grounded commitment or action claim must
+resolve through one current delivered Work artifact to one current readable
+Project. Legacy claim-to-card metadata may locate that support chain during
+migration, but the accepted affinity receipt contains only the Meeting/claim
+revision, authorized Work artifact header and exact Project; the Board/card
+identity is discarded and never becomes authority. Multiple Projects,
+tag/title-only matches, withdrawn claims, stale artifact headers or changed
+Project authority abstain. After one such exact Meeting-backed Work item is
+accepted, later work in that same current Meeting Record conversation may
+continue without repeating the Project title; every currentness and provider
+seam recursively rechecks the Meeting, claim, Work and Project.
+
+An author can correct a mistaken association only on the resulting Work. The
+web/native review surface reads current authorized Project choices, sends one
+opaque result-and-session-bound token plus a stable operation ID, and appends a
+body-free correction receipt. `No project` is an explicit continuity barrier;
+a Project correction becomes the sole current Work continuity edge. Neither
+operation edits the source message or Meeting, and response loss replays the
+same accepted receipt instead of duplicating history. Board mutation tools,
+HTTP/WebSocket writes, background Board synthesis, callback auto-advance and
+new proposal/package card linkage are disabled. New OpenAI, Anthropic and Codex
+agent jobs receive no Board snapshot or `board_update` memory; they use only
+current authorized sources plus server-owned Work/Project bindings. Web Board
+opens are retired and native legacy Board routes land in Work, while a deterministic body-free retirement
+inventory accounts for every persisted card by digest as either exact linked
+artifact history or `legacy_only`. This is local and unreleased. Focused normal
+and race tests, the full Go suite, `go vet`, desktop/390px rendered correction
+journeys, the 559-test native suite and TypeScript typecheck are green. A local
+Release-simulator build also compiles the current native source and carries the
+current light, dark and tinted App Icon catalog. Broader evidence-based
+cross-source clustering beyond the closed exact candidate families, a signed
+carrier from the exact reviewed source, physical-device acceptance and an exact
+reviewed release remain before the workstream model is complete.
+
+Meeting affinity may not be implemented by treating a legacy Board card as the
+new authority edge. Its successor contract binds the exact current Meeting
+Record revision and supporting claim/segment revisions to the resulting Work
+record, then binds that Work record to one current Project only when the same
+authorized evidence proves the association and destination audience. A source
+correction, withdrawal, Meeting revision change, Work correction or Project
+authority change invalidates the current association without rewriting the
+meeting. Historical card-to-Project links may seed a migration candidate, but
+remain `legacy_only` until that exact successor receipt is accepted; they are
+never sufficient on their own for new provider admission or user-facing
+Project attribution.
+
+### Durable operation and acceptance gates
+
+- Each sitting/source family owns a restart-safe contiguous cursor, source
+  digest and projection revision. Ambiguous cursors reconcile from immutable
+  source identity or fail closed and rebuild; they may not remain indefinitely
+  degraded. Replays are idempotent across process restart and provider response
+  loss.
+- Live targets: p95 finalized transcript availability no more than 5 seconds;
+  p95 rolling-analysis lag no more than 90 seconds; final Meeting Record no more
+  than 2 minutes after close; current-day macro fold no more than 2 minutes
+  behind its newest authorized Meeting Record. Readiness reports each layer’s
+  high-water, lag, gap, dead-letter count and last successful rebuild.
+- A frozen corpus covers exact five-minute, thirty-minute, late-join, today,
+  yesterday, named-meeting and cross-meeting questions; corrections,
+  withdrawals, consent and participant-access changes; long and silent
+  sittings; restart, duplicate, delayed and out-of-order delivery; and injected
+  analysis lag. Every asserted claim resolves to current evidence, privacy
+  negatives have zero disclosure, and raw-transcript fallback is 100% for
+  injected analysis lag.
+- The flagship parity case runs the founder’s exact utterance through private
+  Realtime, typed Scout and a named agent. All three return the same authorized
+  meeting set, key decisions/callouts, coverage and gaps; no generic source
+  clarification or user-supplied transcript is requested. A transient Office
+  reconnect does not cancel accepted work, while logout/session or authority
+  change still stops it synchronously.
+- A separate in-room go/no-go packet runs the voice corpus and the text fallback
+  from the same immutable release. A failed voice gate proves the room exposes
+  no voice-agent affordance or track while background transcription/analysis
+  and explicit `@Scout what did I miss?` remain available and source-identical.
+- Native release evidence extracts the exact signed IPA's icon catalog, proves
+  the `Stride` Icon Composer group and light/dark/tinted renditions match the
+  canonical generated sources, then clean-installs that build on the intended
+  iPhone/iPad and captures the home-screen icon. A source PNG, simulator cache
+  or successful EAS build alone cannot close an observed icon regression.
+- Rollout repairs durable cursor/dead-letter truth first, rebuilds derived
+  projections from authoritative segments, shadow-compares old and new recall,
+  then switches voice, text and worker readers together. Raw transcript is
+  never deleted as a rollout shortcut. Rollback restores the prior read path
+  without losing newly captured source events.
+
+The lane is complete only after local normal/race/restart tests, large-history
+bounded-work evidence, rendered voice/text behavior, physical iPhone/iPad
+acceptance, live current-day readback and a sustained readiness window all
+agree. A targeted routing test or one successful demo is not completion.
+
 ## 2026-08-10 founder reconciliation checkpoint — controlling resume state
 
 This checkpoint re-baselines the same E10 goal; it does not create another
@@ -620,7 +1050,7 @@ The closed acceptance catalog covers every advertised venture-work family:
 | Data table, chart and visualization | source-bound table plus reusable chart/image and workbook/document embedding | **Not Started** as a complete advertised family |
 | Meeting recap, briefing, decision log and action plan | source-linked document/work objects with exact meeting window | **In Progress** — foundations exist; conversational-vs-work and export/device matrix pending |
 | Artifact revision, redline, summarize, translate and regenerate | new revision linked to prior artifact; old revision retained; exact diff/status | **In Progress** — regenerate/follow-up foundations exist; document/deck/sheet/image parity pending |
-| Project plan, task board and operating plan | governed board/work objects and outcome receipt, not a prose-only claim | **In Progress** — board tools exist; new conversational router/journal admission pending |
+| Project plan and operating plan | one evolving governed Work record with explicit decisions, commitments, owners, blockers, next actions, artifacts and outcome receipt—not a prose-only claim or Kanban board | **In Progress** — the conversation-first Work carrier and exact workstream affinity/correction foundations exist; provider-backed plan artifacts, full lifecycle parity and web/native rendered acceptance remain pending. Board tools are retired and cannot satisfy this family. |
 | Mixed investor or diligence package | manifest-bound research + memo + deck + workbook + imagery + source register; atomic package preview/export | **In Progress** — Packaging Studio foundations exist; successful OpenAI-only live package and platform parity pending |
 | Scheduled or recurring private work | visible schedule, next run, pause/cancel, per-run WorkRun/artifact receipts | **In Progress** — study/design evidence exists; product acceptance pending |
 | Code, repository, browser, deployment or external execution handoff | explicit scoped handoff, approval/authority gate and execution receipt; never impersonated by Scout | **In Progress** — Codex lane remains separately fenced and GPT-5.6 migration pending |
@@ -672,12 +1102,14 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | PD1 Project identity / association / Project Record foundation | **Verified Complete — bounded local/default-off class** | receipt `stride-e10-pd1-project-foundation-local-20260812.json` binds migration 0018, stable organization-scoped Project identity, exact current session/source authority, correctable append-only ProjectAssociation, atomic old/new correction, synchronous source-drift unlisting plus four-family purge outbox, restart-safe permission-filtered body-free Project Record reconstruction and operation-scoped durable replay. Focused and race suites, real disposable-PostgreSQL upgrade/authority/correction/revoke/replay tests, DR, vet, 20× stress, full `go test ./...` (`536.950s`) and a fresh independent critic PASS. All Project switches remain false; no Home chip/chooser, HTTP exposure, production migration, provider call, commit, push or deploy is claimed. |
 | PD1 Project foundation / persistent personal Realtime / immediate Home taxonomy | **Verified Complete — bounded exact-release class** | local receipt `stride-e10-pd1-project-realtime-persistent-local-20260812.json` binds the exact web/native/server candidate: the Home waveform starts a durable owner-only `gpt-realtime-2.1` thread; logical human and Scout turns append to that exact thread; the voice control persists across ordinary navigation, opens the bound thread and shows truthful listening/thinking/talking/acting/error state; transient loss retries the same logical session/thread twice with strictly increasing transport revisions while stale callbacks fail closed; explicit stop, auth/session drift, room entry, backgrounding and audio-focus takeover terminate it. Web and native render the four stable category shells immediately while authorized suggestions load, keep them non-actionable until hydration and avoid composer shift. Full Go (`542.384s`), focused race, 526/526 native, typecheck, Release simulator build, vet, rendered responsive web evidence, diff-check and fresh critic pass. Release receipt `stride-e10-pd1-project-realtime-persistent-release-20260812.json` then binds exact commit `cf7240f3...` on main, VPS ledger generation 62, bundle `08f519eb...`, app image `393272fc...`, renderer image `7264176a...`, retained `7fb35f88...` rollback, public health/readiness and `verified-local-unsigned`; migration 18 is installed with reviewed checksum `39754a77...` under rollback-compatible policy. iOS Build 55 (`52ae0dd4...`, fingerprint `f6a9a4ca...`) and EAS/ASC submission `477acca1...` are `FINISHED`. This does not claim Apple `VALID` processing, intended tester-group availability, a live provider conversation, native active-control pixel proof, physical-device quality/latency, Home chief-of-staff personalization or Project-chip integration. |
 | PD1 Home chief-of-staff recommendations and immediate shells | **Verified Complete — bounded exact-release class** | The safe four-card taxonomy now paints before web authentication restoration and before the native Home request, reserves exact hydrated geometry, remains non-actionable while recommendations load and fails closed without retaining private context. The server ranks current `Needs you`, active work and exact continuation before safe fallbacks—including sparse one-thread states—detects one recurring topic across two or more already-viewer-authorized public/private conversations without mislabeling private context as team sentiment, and emits editable full-sentence suggestions with plain-language `Why this?` plus body-free source ID/revision coverage. Category selection remains local and zero-effect; Send remains the first persistence boundary. Local receipt `stride-e10-pd1-home-chief-of-staff-local-20260812.json` binds current responsive desktop/phone light/dark renders, focused normal/race tests, full Go (`540.630s`), full native 526/526, typecheck, vet, diff-check and fresh critic PASS. Release receipt `stride-e10-pd1-home-chief-of-staff-release-20260812.json` binds exact commit `fc4e3a57...` on main, VPS ledger generation 63, bundle `3d83223d...`, app image `e73f8146...`, renderer image `300316af...`, retained `cf7240f3...` rollback, public health/readiness and `verified-local-unsigned`; iOS Build 56 (`919cb22e...`, fingerprint `51bae3ea...`) finished and EAS submission `3a361594...` successfully uploaded it to App Store Connect. The session-safe performance successor receipt `stride-e10-pd1-home-immediate-session-safe-release-20260812.json` binds exact commit `ee5c2b38...` on main: static server-rendered shells paint before JavaScript, duplicate startup/event fetches coalesce per exact audience, account changes synchronously remove the prior user's private projection, and delayed prior-user responses fail closed. Full Go (`542.987s`), focused race, 526/526 native, typecheck, vet, rendered delayed-response proof and fresh critic PASS; VPS ledger generation 64 serves bundle `f111742b...`, app image `18374743...`, renderer image `acdf07f7...`, retains `fc4e3a57...` for rollback and verifies `verified-local-unsigned`. iOS Build 57 (`2ba79940...`, fingerprint `324a4815...`) is finished from the exact commit; its App Store Connect submission `bbb0c957...` remained in progress without error at receipt time. This bounded row does **not** claim Apple processing or tester-group availability, meeting-transcript/Project-state compaction, a signed suggestion token, Project chip/chooser/Send association, Project Record completion, provider synthesis or physical-device acceptance. |
-| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Verified Complete — bounded exact-release class** | The Project foundation is now exposed through a read-only server-owned Home context preview and an accessible web/native `Add project` / `Suggested` / selected Project control. Choosing an authorized Project, `No project`, or a new creator-private Project remains local and zero-effect; explicit Send is the first persistence boundary. A signed short-lived token binds the draft, exact destination and held organization/session/Project authority. New-private Send durably commits the private message before one replay-safe PostgreSQL transaction admits its body-free private conversation event, exact source receipt, proposed then confirmed ProjectAssociation, four projection jobs and immutable operation receipt; Scout stays fenced until confirmation. Exact retry/restart survives response loss without duplication, changed bytes conflict, stale/revoked authority fails terminal without provider work, confirmed-state corruption returns 409, and late socket frames cannot regress a confirmed link to pending. Migration 0019, focused normal/race/disposable-PostgreSQL coverage, 527/527 native, typecheck, vet, responsive dark/light desktop/phone chooser renders, diff-check and fresh critic PASS are bound by `stride-e10-pd1-home-project-video-chat-local-20260812.json`. Release receipt `stride-e10-pd1-home-project-video-chat-release-20260812.json` binds exact commit `741e0284...` on main, VPS ledger generation 67, bundle `0967116a...`, app image `903b4656...`, renderer image `6e3fe3f8...`, retained `ee5c2b38...` rollback, migration 19 checksum `53aa05d7...`, public health/readiness and `verified-local-unsigned`. iOS Build 58 (`12203373...`, fingerprint `af65baea...`) finished from the exact commit and submission `ab45e425...` successfully uploaded it to App Store Connect. Existing-thread Project association/correction, a full multi-source Project Record, authenticated live Project-flow observation, Apple processing/tester-group proof, native rendered/physical-device proof, provider-backed work and whole-PD1 acceptance remain open. |
+| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Superseded — historical released foundation** | The exact-release receipts and canonical ProjectAssociation history from this row remain valid historical evidence, but its `Add project` / `Suggested` / `No project` composer UX is no longer the controlling product contract. The Priority-1 workstream decision above retires manual Project attachment across Home, channel, private-chat and reply composers. New ordinary turns must carry no client-selected Project token; server-owned, source-grounded workstream affinity may associate resulting work only after current authorization and must abstain when ambiguous. Existing signed tokens and associations remain readable for replay, correction and nondestructive migration. The current retirement implementation is local and unreleased; the previously released clients remain unchanged until an exact reviewed release and physical-device acceptance complete. |
 | PD1 Video/Chat prominence, member shell and channel stability | **Verified Complete — bounded exact-release class** | Desktop and native promote Video and Chat beside Home. The authenticated server projects `core` versus `full` shell access: missing/stale authority fails closed to Home/Video/Chat, AJ remains the explicit founder owner, and only an exact current organization owner/admin membership exposes Work/Network/Work Search/You. Clients hide—not merely disable—the unfinished destinations, redirect a stale direct top-level path to Home, keep keyboard/VoiceOver semantics, and retain icon-only compact navigation. Home no longer refetches recommendations after an unchanged room snapshot, its web launch geometry is stable, and generated Country Golf/channel imagery reserves exact 3:2 feed geometry before load with scroll anchoring disabled, removing the observed jitter. The Agentic Lab may cover every destination only inside its isolated synthetic authority fixtures; it is not a user-role bypass. Exact local source/rendered evidence and the release evidence are the same receipts named in the preceding row. Build 58 Apple processing, exact tester-group availability, physical-device proof and whole-PD1 acceptance remain open. |
 | PD1 Chat cold-load/crash and navigation stability | **Verified Complete — bounded exact-release class** | The web and native Chat rails now load from a body-free, viewer-authorized thread index and hydrate only the selected conversation. Cold entry reserves stable public/private rows; iPhone/iPad state is session-bound on the first frame; refreshes are single-flight and account/generation fenced; background failure preserves a usable list; exact-thread detail stays bounded; web socket/index/detail merges are monotonic; and desktop/iPad rendering constructs only the newest 200 messages. Legacy metadata is upgraded once under the store lock without replacing message bodies, while rename/archive responses remain metadata-only. Exact commit `d319c768...` is on main and serves from VPS ledger generation 71, bundle `d8210f3f...`, app image `412b5ca8...`, renderer image `3cc8cebf...`, with `7bf81f06...` retained for rollback and `verified-local-unsigned`. Focused rendered/source tests, focused race, vet, native typecheck, 531/531 native tests and a fresh independent critic PASS bind the bounded hotfix. iOS Build 60 (`b26bfeac...`, fingerprint `8d0a81d0...`) finished from the same exact commit and EAS submission `4b870fa5...` finished successfully. Apple processing, intended tester-group availability, physical-device observation and whole-PD1 acceptance remain open. |
 | PD1 author-only sent-message Project correction and linked-source invalidation | **Verified Complete — bounded exact-release class** | An author-owned confirmed Project chip on a sent message opens an accessible web/native review surface. Reading the choices, selecting another authorized Project, selecting No project, cancelling or closing remain zero-effect; only explicit Update/Remove mutates. The client submits only an opaque revision-bound correction token and stable operation ID. The server reauthorizes the exact author, organization session, message, source and Project; atomically appends old/new association lineage or removal; advances a message-local context revision; synchronously unlists old truth and queues four-family projection work. Late socket frames cannot regress the visible result. Edit/delete of a linked source first projects unavailable, durably invalidates canonical authority, recomputes the list preview and recovers from an immutable receipt. Cross-store response loss and restart fail closed: correction and abandonment share one PostgreSQL advisory lock and mutually exclusive immutable receipts, so neither a late correction nor a receipt-absent recovery can resurrect contradictory Project truth. Migration 0021, focused normal/race/disposable-PostgreSQL and DR gates, full Go (`563.332s`), 537/537 native tests/typecheck, responsive dark/light desktop/phone renders, vet, diff-check and a fresh independent critic PASS are bound by `stride-e10-pd1-sent-message-project-correction-local-20260812.json`. Release receipt `stride-e10-pd1-sent-message-project-correction-release-20260812.json` binds the exact operational readback. Implementation commit `ea56fc21...` and docs-only exact-release successor `a5a4ece5...` are on main. The successor serves from VPS ledger generation 73, bundle `c9e65734...`, app image `e63e7893...` and renderer image `9dfa4791...`, retains `ea56fc21...` as rollback and verifies `verified-local-unsigned`. Migration 21 is installed at reviewed checksum `3a2e1e30...` after a private backup of the migration-20 environment. iOS Build 61 (`35f97e8f...`, fingerprint `25e1f180...`) finished from the exact implementation commit and EAS submission `23e7d9a3...` finished, proving upload acceptance only. This row does not claim Project-linked attachment/reply completion, controller/admin retagging, native simulator pixels, Apple processing/intended tester-group availability, physical-device acceptance, full Project Record, provider-backed work or whole-PD1 completion. |
 | PD1 Project-linked attachment and reply source groups | **Verified Complete — bounded exact-release class** | Existing-thread web and native composers now preview and explicitly send an exact source manifest over normalized text, destination authority, ordered server-issued attachment handles and same-thread reply ancestry. The server durably journals one pending human turn, then atomically confirms one body-free root event, zero-to-six immutable rich-part revisions, the evidence-only reply dependency, every Project association edge and one immutable group receipt before provider admission. Attachment-only turns, response-loss/restart replay, session rotation, Project A→B/A→none correction, root/part/parent mutation, attachment/origin revocation, Project archive/audience loss and four-family purge are all fail-closed and all-or-nothing. Current Project/thread/group/blob/parent authority is rechecked immediately before provider work; unsupported or over-budget but still-authorized files remain valid evidence; Project-bound replies intentionally withhold parent media until every such media source is represented canonically. Opaque `choiceKey` rebinding clears rather than silently switching when authority changes. Migration 0022, full Go (`587.752s`), focused normal/race/disposable-PostgreSQL/DR gates, vet, 539/539 native tests/typecheck, responsive rendered browser journeys and a fresh independent critic PASS bind `stride-e10-pd1-project-source-groups-local-20260813.json`. Exact implementation commit `43103a68...` is on main and serves from VPS ledger generation 74, bundle `301b036f...`, app image `662ebe06...` and renderer image `b2b56bb4...`; migration 22 is installed at checksum `c2e696d1...` after a private transaction-consistent migration-21 backup, `a5a4ece5...` is retained for rollback and the serving bundle verifies `verified-local-unsigned`. iOS Build 62 (`d7ad87ae...`, fingerprint `fb4c0646...`, IPA `df59eeb7...`) finished from the same exact commit; submission `7bd762eb...` uploaded it, Apple processing is `VALID`, beta review is `APPROVED`, and the exact build is `IN_BETA_TESTING` in both existing `Team (Expo)` and `Bonfire` groups. Canonical parent-media inclusion, native simulator pixels, physical-device acceptance, Tyler enrollment, full Project Record, provider-backed work and whole-PD1 remain open. |
 | PD1 Project reply-parent media source evidence | **Verified Complete — bounded exact-release class** | Project-linked replies now mint a backward-compatible signed v3 source manifest that binds the exact replied-to event plus every ordered parent file or generated-image revision. Preview is read-only; explicit Send admits each parent-media source as an immutable evidence-only RichMessagePart and exact authority receipt before confirming the child Project group. Parent media never receives a ProjectAssociation and is never retagged. Released v2 retries remain byte-compatible and intentionally continue withholding parent media. V3 provider admission occurs only after canonical confirmation and exact before/after source reauthorization; missing, changed, revoked or unreadable parent evidence atomically hides and terminalizes the whole child group with four-family purge, while ordinary unlinked replies retain their existing authorized-media behavior. A→B correction mints fresh support-media receipts even after the original receipt expires, response-loss replay remains exact, and parent/file/image mutations traverse reverse dependencies before legacy mutation. Migration 0023, full Go (`593.010s`), focused disposable-PostgreSQL/race/DR gates, vet, 539/539 native tests/typecheck, rendered web Project journeys, diff-check and a fresh independent critic PASS bind `stride-e10-pd1-project-reply-media-local-20260813.json`. Exact implementation commit `77787371...` is on main and serves from VPS ledger generation 75, bundle `c10f4ce2...`, app image `3fc3cf70...` and renderer image `a77bde25...`; migration 23 is installed at checksum `78c0875b...` after a private transaction-consistent migration-22 backup, `43103a68...` is retained for rollback and the serving bundle verifies `verified-local-unsigned`. No mobile bytes changed, so Apple-valid Build 62 remains the current compatible client and no new TestFlight build was required. Physical-device acceptance, full Project Record, provider-backed artifacts and whole-PD1 remain open. |
+| PD1 permanent Meeting Record | **In Progress — current functional gate passes; candidate-wide render/release proof pending** | One evolving, permanent and paginated Meeting Record now projects exact current-source transcript segments, claims, corrections, gaps, artifacts and governed Ask Scout/follow-up state across web and native. Video remains room discovery; Meetings is a distinct historical library with exact source focus, record/room return, fail-closed reauthorization, Dynamic Type and accessible corrected/unavailable state. The body-free directory is bounded and indexed, survives more than 200 records/restart, rejects duplicate IDs and uses opaque non-leaking cursors. A retired Board card is no longer presented as current Work: only a current viewer-authorized successor artifact can resolve the Work link, and executable web/native regressions prove that the link opens that exact artifact while a legacy-only card remains unresolved; Project links require the same exact durable origin rather than title/tag inference. Current focused normal/race Go, 9/9 native Meeting, full native and TypeScript gates pass. The images under `docs/evidence/e10/rendered-meeting-record-20260813/` are explicitly historical and do not bind the current dirty bytes, so the prior `Verified Complete` label was too strong. A current candidate-wide desktop/phone/iPhone/iPad/AXXXL recapture, reviewed source/archive identity, full root/vet gate, physical-device acceptance and the degraded live meeting STT, room voice, Scout, digest-worker, canonical-shadow and backup/restore gates remain open. No production data was read or mutated for this local repair. |
+| PD1 Project-bound Research work projection | **Verified Complete — bounded local candidate class** | One confirmed Project-linked private conversation turn now launches one server-owned Research workstream and one evolving work card carrying the exact current Project. The same immutable artifact advances through a human edit and evidence-grade regeneration; rich Open, artifact reads/edits, follow-up, terminal publication, share/blob and Drive surfaces all re-check the canonical Project/source association. Save uses the exact body-free disposition and named Drive receipt, settles to **Open in Drive**, and selects the exact saved file. Source or Project invalidation makes provider publication, edit, regeneration, read and Drive projection fail closed while preserving the last accepted artifact. Focused normal/race authority tests, rendered desktop/390px Open/Save/Regenerate journeys, an executable production native work-card action test, 549/549 native tests, typecheck, vet and the full Go gate bind `docs/evidence/e10/rendered-project-bound-research-20260813/README.md`; its scoped `CANDIDATE-MANIFEST.txt` SHA-256 is `be5f2635...` and image `SHA256SUMS` is `6ccf7d18...`. This candidate is dirty/uncommitted, unreleased and not live; it does not claim a paid/current-generation provider run, native simulator pixels, physical devices, remaining deliverable families, production release or whole-PD1 completion. |
 | PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
 | PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
 | PI0-B pilot evidence/collection gate | **Not Started** | requires PI0-A baseline, PN1 and accepted PD1 pilot surfaces before any real collection |
@@ -722,11 +1154,11 @@ activation remains `In Progress` or `Blocked/External Gate`.
 > migration high-water is 22 at checksum `c2e696d1...`, public probes and
 > `verified-local-unsigned` agree, and `a5a4ece5...` remains rollback. iOS Build
 > 62 (`d7ad87ae...`, fingerprint `fb4c0646...`) is Apple `VALID`, beta-review
-> `APPROVED` and `IN_BETA_TESTING` in both intended groups. Resume with
-> canonical parent-media coverage before using permission-filtered
-> recurring compaction to rank explainable chief-of-staff suggestions from the
-> current user's authorized work, public/team conversations, meetings and
-> Project state. Then prove one server-owned Project-bound Research work
+> `APPROVED` and `IN_BETA_TESTING` in both intended groups. Canonical
+> parent-media coverage now serves from exact release `77787371...` at ledger
+> generation 75 with migration 23, and the permanent Meeting Record described
+> above is verified only as a bounded local candidate on the current dirty
+> worktree. Resume by proving one server-owned Project-bound Research work
 > projection through immutable revision, rich Open, named Drive receipt/Open in
 > Drive and normal-composer edit/regenerate on web, iPhone and iPad. Apple
 > external Bonfire state and exact intended tester-group relationship readback
@@ -740,12 +1172,20 @@ system, and serialized integration across overlapping web/mobile code. Bounded
 read-only research and independent critics may run concurrently and hand back
 artifacts; they do not edit the product or create competing systems.
 
+**2026-08-14 resume refinement:** Priority 1 is locally verified for the
+bounded dirty-candidate class described above. The phrase “immediate resume
+lane” in order 3 now means its reviewed archive, exact VPS activation,
+current-day provider/readiness readback and signed physical-device acceptance;
+it does not reopen locally green source work or imply that those external gates
+have passed. Other safe local PD1 work may proceed without representing the
+Priority-1 lane as live.
+
 | Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
 |---|---|---|---|
-| 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 38-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
+| 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 39-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
 | 1 — complete | **PD0 representative browser prototype and system freeze**, single Product Design owner. The comparative study, ChatGPT Workstream extension, Work presentation lifecycle and fail-closed Work→Network bridge passed independent critics. | exact studies/manifests; 13-journey validator; four synchronized J4 postimages; desktop/430 iPhone/1180 iPad reference captures; screenshot SHA/dimension verifier; Network value withholding; independent critic PASS | complete only for the bounded browser-reference class; no native/product/device/provider/Drive/publication/activation claim |
 | 2 — complete for the local/default-off class | **OpenAI-only conversational work runtime**, one provider/runtime owner. Inventory, function-tool design `c5363c31...`, isolated carrier `7064ee32...`, five-way router `10948ff1...`, complete local provider/model/restart gate `9c83c4b1...` and concrete adapter receipt `20ebacf8...` are independently accepted on exact dirty bytes. `report_goal_state`, `answer_memory_question`, `create_artifact` and `update_artifact` bind to governed product services under the frozen journal; every other tool is unavailable. | exact approved model/effort map; natural text/voice/Scout/direct-agent intent corpus; five server outcomes; exact tool authority/restart/final-use journal; tool-specific pre/post/reconcile/final-use and projection tests; no visible/client tool preselection; no-Anthropic negatives; full Go `515.862s`; 488/488 native tests and typecheck; provider receipts and independent critics | deterministic/providerless paths stay intact; four-tool integration remains default-off; managed custody and live activation remain gated; zero provider calls and zero production mutations in verification; no activation until exact project/cost authority and reviewed release receipts |
-| 3 — in progress; Project-linked Home/text/correction/attachment/reply source-group and parent-media exact releases complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; `1c1a07e9...` plus live receipt `4466e8e4...` bind the third release `7fb35f88...`; the Project/Realtime receipts bind exact release `cf7240f3...`; the Home recommendation/performance receipts bind release `ee5c2b38...`; the Project-linked Home plus Video/Chat/core-shell receipts bind release `741e0284...`; the existing-thread Project/navigation checkpoint binds predecessor `7bf81f06...`, migration 20 and Build 59; the body-free/lazy Chat cold-load checkpoint binds release `d319c768...` and Build 60; the sent-message correction receipts bind release `a5a4ece5...`, migration 21 and Build 61; the attachment/reply source-group receipts bind predecessor `43103a68...`, migration 22 and Build 62 in both intended TestFlight groups; and the reply-parent media receipts bind current release `77787371...` and migration 23 while retaining compatible Build 62. Resume the rich Meeting Record and authorized meeting/Project/history compaction. Then prove one server-owned Project-bound Research work projection through immutable revision, rich Open, durable named Drive receipt/Open in Drive and normal-composer edit/regenerate. Extend the reusable contract across the remaining artifact families and complete functional/device accessibility. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; critic | retain live release `77787371...`, rollback `43103a68...` and exact compatible Build 62; migration 23 is installed, additive and rollback-compatible; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
+| 3 — in progress; **Priority 1 meeting-intelligence recovery is the immediate resume lane**; Project-linked Home/text/correction/source groups/parent media exact releases complete; Meeting Record and Project-bound Research local candidates complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; `1c1a07e9...` plus live receipt `4466e8e4...` bind the third release `7fb35f88...`; the Project/Realtime receipts bind exact release `cf7240f3...`; the Home recommendation/performance receipts bind release `ee5c2b38...`; the Project-linked Home plus Video/Chat/core-shell receipts bind release `741e0284...`; the existing-thread Project/navigation checkpoint binds predecessor `7bf81f06...`, migration 20 and Build 59; the body-free/lazy Chat cold-load checkpoint binds release `d319c768...` and Build 60; the sent-message correction receipts bind release `a5a4ece5...`, migration 21 and Build 61; the attachment/reply source-group receipts bind predecessor `43103a68...`, migration 22 and Build 62 in both intended TestFlight groups; and the reply-parent media receipts bind current release `77787371...` and migration 23 while retaining compatible Build 62. The rich Meeting Record and the exact Project-bound Research work journey are now locally complete for their bounded candidate classes: permanent record/source/link governance plus one evolving Project work card/artifact through edit, regenerate, rich Open, named Drive receipt/Open and fail-closed source invalidation. Both remain dirty, unreleased and not live. Resume first with the Priority-1 capture/cursor repair, rolling analysis, bounded hierarchical compaction and one authorized recall plane shared by Realtime voice, typed Scout and agents; only after its live/current-day gates pass proceed to broader chief-of-staff ranking, remaining deliverable families and functional/device accessibility. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; critic | retain live release `77787371...`, rollback `43103a68...` and exact compatible Build 62; migration 23 is installed, additive and rollback-compatible; local candidates remain local-only until reviewed commit/release; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
 | 3a — next after exact release/readback | **Founder-directed STRIDE organization and cross-org profile proof**, identity/organization authority owner. Resolve the canonical AJ and Tyler people, confirm no organization/name collision, create one private `STRIDE` organization, attach both exact members and prove that governed contributions from multiple organizations project into each person's core profile without cross-tenant body or membership leakage. General onboarding/invite/join UX remains later. | exact pre/post person/org/membership IDs and generations; backup/rollback; consent and audit receipt; active signed ContributionAttestations plus released-field manifests; correction/revocation/leave/delete rebuild and zero-disclosure corpus; desktop/iPhone/iPad profile render and independent critic | production data mutation is limited to the exact named organization/memberships after current readback; no duplicate people, inferred public/shared org, onboarding policy, search/contact activation or private-source copying |
 | 4 — next | **PI0-A baseline and installation design**, instrumentation owner; no collection. | signed baseline, event/schema/source digests, off/no-byte parity, privacy/export/purge/restore tests, critic | collection and emitters remain off; remove candidate installation without touching source data |
 | 5 — next | **PN1 safe projections default off**, PN authority owner after PD0+PI0-A. | migrations/PG, current-authority/CAS/ACL, purge/rebuild/restore, fixture render and critic; every PN switch false | drop candidate projections through governed rollback; private W4 remains authority |
@@ -872,7 +1312,25 @@ founder connects the phone at the end.
 
 ### Now / next / later
 
-- **Now:** the isolated authority-filtered carrier, five-way
+- **Now:** the Project-bound Research journey passes its bounded local
+  candidate gate on the current dirty worktree: exact Project/source authority,
+  one evolving work card and artifact, human edit, evidence-grade regeneration,
+  rich Open, named Drive receipt/Open in Drive, desktop/compact-web actions and
+  executable native action parity all agree. It is uncommitted, unreleased and
+  not live. The permanent Meeting Record functional gate passes for permanent
+  indexed pagination, exact current sources and successor-artifact/Project
+  claim links, governed Ask Scout/follow-up, web/native source and return
+  behavior and accessibility. Its prior rendered evidence is historical rather
+  than current-candidate proof, so this row remains In Progress until the exact
+  current archive is recaptured and independently accepted. It is uncommitted,
+  unreleased and not live. The public app still serves exact release
+  `777873712c24da48f63364d9e42fc52a02a62954` from VPS ledger generation 75;
+  read-only health is healthy, while readiness remains degraded for meeting
+  STT, room voice/Scout freshness, the disabled meeting-digest worker with 51
+  dead letters, canonical-shadow repair debt, and unverified offsite restore.
+  Those are explicit live/external gates, not evidence against the bounded
+  local record candidate and not permission to mutate production. The isolated
+  authority-filtered carrier, five-way
   text/voice/Scout/direct-agent router, exact founder provider/model matrix,
   goal-route restart fence, four concrete product adapters and bounded
   synthetic Agentic Lab journey now pass their exact local/default-off gates
@@ -980,16 +1438,17 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next:** extend the released Project-linked source manifest through
-  canonical parent-media coverage before
-  building the authorized recurring compaction and deterministic
-  ranking path that makes each category's suggestions feel like a grounded
-  chief of staff: current commitments and blockers first, then exact
-  continuation, Project relevance, meeting/team recurrence and safe generic
-  fallback, with a body-minimized **Why this?** trail and immediate revocation
-  invalidation. Then prove one Project-bound Research request through one
-  evolving server-owned work card, rich Open, exact named Drive receipt/Open in
-  Drive and immutable normal-composer edit/regenerate on web, iPhone and iPad.
+- **Next — Priority 1:** repair live meeting capture/digest cursor truth and
+  deliver the continuous meeting-intelligence stack above: rolling contiguous
+  analysis, one evolving correction-aware Meeting Record, bounded day/company
+  compaction and one authorized recall plane for Realtime voice, typed Scout
+  and agents. Only after the current-day parity, restart, privacy, bounded-work
+  and live readiness gates pass, extend that same compaction into the
+  deterministic ranking path that makes each category's suggestions feel like
+  a grounded chief of staff: current commitments and blockers first, then
+  exact continuation, Project relevance, meeting/team recurrence and safe
+  generic fallback, with a body-minimized **Why this?** trail and immediate
+  revocation invalidation.
   Reuse that contract for the remaining artifact families, then complete the functional/device accessibility and
   measured-performance matrix; finish the PI0-A baseline, then build and gate
   PN1 default-off authority. Actual editable-PPTX presentation acceptance

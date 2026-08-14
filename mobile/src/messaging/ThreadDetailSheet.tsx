@@ -24,6 +24,11 @@ import { MessageBubble } from './MessageBubble';
 import { MentionComposerInput } from './MentionComposerInput';
 import { completeDocumentReference } from '../drive/driveModels';
 import { rebindOpaqueProjectChoice } from './projectChoice';
+import {
+	explicitProjectAttachmentEnabled,
+  safeProjectContextFromResponse,
+  shouldRequestReplyThreadProjectContext,
+} from './projectContextPreflight';
 
 type Props = {
   visible: boolean;
@@ -59,7 +64,9 @@ type Props = {
   resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onSaveWorkArtifact: (message: ScoutMessage) => void;
+  onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact: (message: ScoutMessage) => void;
   savingWorkID?: string | null;
   regeneratingWorkID?: string | null;
@@ -102,7 +109,9 @@ export function ThreadDetailSheet({
   resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onChangeWorkProject,
   onSaveWorkArtifact,
+  onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
   savingWorkID,
   regeneratingWorkID,
@@ -163,12 +172,24 @@ export function ThreadDetailSheet({
 			setProjectChooserOpen(false);
 			return;
 		}
+		// A closed reply sheet (and an ordinary unlinked reply) performs no Project
+		// preflight. The optional accessory becomes live only after an explicit
+		// chooser press or while refreshing an existing exact selection.
+		if (!shouldRequestReplyThreadProjectContext({
+			visible,
+			sessionToken,
+			threadId,
+			rootMessageId: String(root.id),
+			chooserOpen: projectChooserOpen,
+			hasSelectedProject: Boolean(selectedProject),
+		})) return;
 		const timer = setTimeout(() => {
 			void api.projectContext(sessionToken, {
 				text: draft.trim(), destination: { route: 'thread', threadId }, attachmentHandles, replyToMessageId: String(root.id),
 			}).then((response) => {
 				if (generation !== projectGenerationRef.current) return;
-				const next = response.projectContext;
+				const next = safeProjectContextFromResponse(response);
+				if (!next) throw new Error('Project context is unavailable.');
 				setProjectStatus('');
 				setProjectContext((current) => {
 					if (current.scopeKey && next.scopeKey && current.scopeKey !== next.scopeKey) {
@@ -191,7 +212,7 @@ export function ThreadDetailSheet({
 			});
 		}, 220);
 		return () => clearTimeout(timer);
-	}, [attachmentHandles, draft, projectExplicitNone, projectSourceKey, root?.id, sessionToken, threadId, visible]);
+	}, [attachmentHandles, draft, projectChooserOpen, projectExplicitNone, projectSourceKey, root?.id, sessionToken, threadId, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -211,8 +232,8 @@ export function ThreadDetailSheet({
   const submit = async () => {
     const text = draft.trim();
     if ((!text && pendingFiles.length === 0) || sending || uploading) return;
-	const projectContextToken = selectedProject?.text === text && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : '';
-	if (selectedProject?.token && !projectContextToken) {
+	const projectContextToken = explicitProjectAttachmentEnabled && selectedProject?.text === text && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : '';
+	if (explicitProjectAttachmentEnabled && selectedProject?.token && !projectContextToken) {
 	  setProjectStatus('Project context is refreshing for these sources. Try Send again in a moment.');
 	  return;
 	}
@@ -315,7 +336,9 @@ export function ThreadDetailSheet({
                       resolvingProposal={resolvingProposalID === String(message.id)}
                       onOpenLongMessage={onOpenLongMessage}
                       onOpenWorkArtifact={onOpenWorkArtifact}
+                      onChangeWorkProject={onChangeWorkProject}
                       onSaveWorkArtifact={onSaveWorkArtifact}
+                      onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}
                       onRegenerateWorkArtifact={onRegenerateWorkArtifact}
                       savingWork={savingWorkID === String(message.id)}
                       regeneratingWork={regeneratingWorkID === String(message.id)}
@@ -331,18 +354,6 @@ export function ThreadDetailSheet({
 
 		  {error || projectStatus ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error || projectStatus}</Text> : null}
           <Glass radius={radius.xl} style={styles.composer}>
-			{projectContext.available ? (
-			  <Pressable
-				accessibilityRole="button"
-				accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : projectExplicitNone ? 'No project. Change project' : 'Add project'}
-				accessibilityHint="Opens the authorized Project chooser. Nothing changes until you send."
-				onPress={() => setProjectChooserOpen(true)}
-				style={({ pressed }) => [styles.projectChip, pressed && styles.pressed]}
-			  >
-				<SymbolView name="folder" size={14} tintColor={colors.emberText} />
-				<Text numberOfLines={1} maxFontSizeMultiplier={1.8} style={styles.projectChipText}>{selectedProject ? `${selectedProject.suggested ? 'Suggested' : 'Project'} · ${selectedProject.title}` : projectExplicitNone ? 'No project' : 'Add project'}</Text>
-			  </Pressable>
-			) : null}
             {pendingFiles.length > 0 || stagingFiles.length > 0 ? (
               <View accessibilityLabel="Reply attachments" style={styles.pendingFiles}>
                 {stagingFiles.map((file) => (
@@ -405,7 +416,7 @@ export function ThreadDetailSheet({
               </Pressable>
             </View>
           </Glass>
-		  <Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
+		  <Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
 			<SafeAreaView style={styles.projectSheet}>
 			  <View style={styles.projectSheetHeader}>
 				<Text accessibilityRole="header" style={styles.projectSheetTitle}>Choose a project</Text>

@@ -1542,6 +1542,7 @@ func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, th
 // must never be used for a durable write.
 func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
 	projected := thread
+	meetingRecordCurrent := app == nil || app.meetingRecordConversationBindingCurrent(viewerEmail, thread)
 	pendingDeletes := map[string]bool{}
 	for _, operation := range thread.ProjectSourceMutationOperations {
 		if operation.State == "pending" && operation.Kind == "delete" {
@@ -1550,11 +1551,16 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	}
 	projected.OpeningOperation = nil
 	projected.VoiceSession = nil
+	projected.MeetingRecord = nil
 	projected.LegacyConversationOperations = nil
 	projected.ModerationReceipts = nil
 	projected.ProjectLinkOperations = nil
 	projected.ProjectCorrectionOperations = nil
 	projected.ProjectSourceMutationOperations = nil
+	if thread.MeetingRecord != nil && !meetingRecordCurrent {
+		projected.Title = "Meeting Record conversation"
+		projected.Preview = "The bound Meeting Record revision is unavailable"
+	}
 	// Direct coworker identity comes from the signed Product ledger so an old
 	// chat record is upgraded on read without making the chat title authoritative.
 	if app != nil {
@@ -1570,6 +1576,23 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	for _, message := range thread.Messages {
 		if pendingDeletes[message.ID] || (message.CausedByMessageID != "" && pendingDeletes[message.CausedByMessageID]) {
 			continue
+		}
+		if !meetingRecordCurrent {
+			role := strings.ToLower(strings.TrimSpace(message.Role))
+			if role == "scout" || role == "assistant" {
+				message.Text = "This Meeting Record answer is unavailable because its exact source revision is no longer authorized."
+				message.Sources = nil
+				message.IntentOutcome = string(conversationIntentUnavailable)
+				message.Thread = nil
+				message.Work = nil
+				message.Proposal = nil
+				message.Choices = nil
+				message.Manifest = nil
+				message.Image = nil
+				message.ImageGeneration = nil
+				message.Reply = nil
+				message.Files = nil
+			}
 		}
 		projected.Messages = append(projected.Messages, message)
 	}

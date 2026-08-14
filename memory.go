@@ -166,6 +166,12 @@ const (
 	// mint-free (appendAmbientEntry) with a pre-stamped meetingId so appending at
 	// idle never opens a phantom sitting.
 	meetingMemoryKindDeadLetter = "dead_letter"
+	// meetingMemoryKindAmbientReplayPromotion is the hidden, body-bearing side
+	// of the PostgreSQL replay promotion receipt. It is written before the
+	// body-free authority receipt so a crash after PostgreSQL commit can finish
+	// the exact canonical meeting digest without calling a model again. The
+	// relevance/UI-state fences keep this recovery journal out of recall.
+	meetingMemoryKindAmbientReplayPromotion = "ambient_replay_promotion"
 	// meetingMemoryKindChatDelete is the own-chat delete tombstone (memory study
 	// 1.5b, gap #13): deleteRoomChatMessage hard-deletes the message content (that
 	// is the point of a delete), but a dated "message deleted by <author>" stub
@@ -393,6 +399,45 @@ type meetingMemoryStore struct {
 	path    string
 	entries []meetingMemoryEntry
 	seen    map[string]struct{}
+	// meetingEntryIndexes is a process-local body-free directory from durable
+	// meeting id to canonical entry positions. It keeps Meeting navigation
+	// proportional to the selected 60/200 records instead of rescanning the
+	// entire memory ledger while holding the writer lock.
+	meetingEntryIndexes map[string][]int
+	// meetingEntryVisitHook is a test-only observation seam invoked once for
+	// each durable row a bounded Meeting Record read actually inspects. It is
+	// protected by mu and nil in production.
+	meetingEntryVisitHook func()
+	// transcriptCaptureSequences is the sorted, body-free durable capture
+	// ledger. DuplicateCaptureSequences contains only sequence values observed
+	// more than once. Together they let one meeting prove that its global
+	// capture interval has neither a missing reservation nor an identity
+	// collision without scanning or cloning every transcript body.
+	transcriptCaptureSequences          []uint64
+	transcriptDuplicateCaptureSequences []uint64
+	// meetingTranscriptSequenceComplete is populated on request-local frozen
+	// stores. It binds the selected meeting's current transcript bounds to the
+	// global durable capture ledger from the same source generation.
+	meetingTranscriptSequenceComplete map[string]bool
+	// currentDigestIndexes and currentDigestDayIndexes are process-local,
+	// body-free pointers into the durable JSONL ledger. They keep current
+	// meeting/day recall proportional to the requested calendar window rather
+	// than to years of transcripts, chat, artifacts, and superseded digests.
+	currentDigestIndexes    map[string]map[string]int
+	currentDigestDayIndexes map[string]map[string]map[string]int
+	// digestEntryVisitHook is a test-only observation seam invoked once per
+	// indexed current digest inspected by a ranged read. Nil in production.
+	digestEntryVisitHook func()
+	// briefingSourceDayIndexes is a process-local, body-free calendar index for
+	// raw transcript/brain rows, active-decision candidates, and synthesis
+	// dead letters. A meeting briefing therefore scales with its requested
+	// dates, not with the lifetime size of the memory ledger.
+	briefingSourceDayIndexes map[string][]int
+	// briefingEntryVisitHook is the matching test-only observation seam.
+	briefingEntryVisitHook func()
+	// authorizationEntryVisitHook observes how many durable candidates a
+	// principal-scoped recall projection inspects. It is nil outside tests.
+	authorizationEntryVisitHook func()
 	// meetingIDs is the per-room active meeting id (multi-room W2): keyed by
 	// normalized room id (normalizeRoomID — absent metadata.roomId == office),
 	// one sitting id per room, minted lazily and rotated independently so one
@@ -415,6 +460,20 @@ type meetingMemoryEntry struct {
 	Text      string            `json:"text"`
 	CreatedAt time.Time         `json:"createdAt"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	// BodyDigest is a process-local navigation optimization. It is derived
+	// from Text on load/write and deliberately never changes legacy JSONL or
+	// canonical metadata bytes.
+	BodyDigest string `json:"-"`
+}
+
+func stampMeetingRecordBodyDigest(entry *meetingMemoryEntry) {
+	if entry == nil || (entry.Kind != meetingMemoryKindTranscript && !isMeetingDigestKind(entry.Kind)) {
+		return
+	}
+	// Server-owned and recomputed from the normalized body. This lets the
+	// Meeting index copy stable revisions from metadata without cloning or
+	// re-hashing years of transcript bodies on every navigation.
+	entry.BodyDigest = sha256Hex([]byte(entry.Text))
 }
 
 type meetingMemoryMatch struct {
@@ -424,11 +483,15 @@ type meetingMemoryMatch struct {
 
 func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	store := &meetingMemoryStore{
-		path:              path,
-		seen:              map[string]struct{}{},
-		meetingIDs:        map[string]string{},
-		bootLatestIDs:     map[string]string{},
-		bootLatestRoomIDs: map[string]map[string]string{},
+		path:                     path,
+		seen:                     map[string]struct{}{},
+		meetingEntryIndexes:      map[string][]int{},
+		currentDigestIndexes:     map[string]map[string]int{},
+		currentDigestDayIndexes:  map[string]map[string]map[string]int{},
+		briefingSourceDayIndexes: map[string][]int{},
+		meetingIDs:               map[string]string{},
+		bootLatestIDs:            map[string]string{},
+		bootLatestRoomIDs:        map[string]map[string]string{},
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -459,6 +522,10 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 			if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
 				log.Warnf("Skipping malformed memory entry: %v", err)
 			} else if strings.TrimSpace(entry.ID) != "" && strings.TrimSpace(entry.Text) != "" {
+				// Historical JSONL is left byte-for-byte untouched. The body is
+				// already resident during load, so deriving the missing digest in
+				// memory is race-free and avoids an unsafe startup rewrite.
+				stampMeetingRecordBodyDigest(&entry)
 				store.entries = append(store.entries, entry)
 				store.seen[entry.ID] = struct{}{}
 				if !memoryEntryHiddenFromRecall(entry) {
@@ -478,6 +545,7 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 		}
 	}
 	store.backfillArtifactAuthorizationProjections()
+	store.rebuildMeetingEntryIndexesLocked()
 
 	// resume the in-flight meetings after a restart, PER ROOM (multi-room W2):
 	// for each room (absent metadata.roomId == office), if that room's newest
@@ -522,6 +590,121 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 
 	return store, nil
+}
+
+func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
+	store.meetingEntryIndexes = map[string][]int{}
+	store.transcriptCaptureSequences = nil
+	store.transcriptDuplicateCaptureSequences = nil
+	store.currentDigestIndexes = map[string]map[string]int{}
+	store.currentDigestDayIndexes = map[string]map[string]map[string]int{}
+	store.briefingSourceDayIndexes = map[string][]int{}
+	for index, entry := range store.entries {
+		store.indexMeetingEntryLocked(index, entry)
+	}
+}
+
+func (store *meetingMemoryStore) indexMeetingEntryLocked(index int, entry meetingMemoryEntry) {
+	if entry.Kind == meetingMemoryKindTranscript {
+		if sequence, ok := entryCaptureSequence(entry); ok {
+			position := sort.Search(len(store.transcriptCaptureSequences), func(candidate int) bool {
+				return store.transcriptCaptureSequences[candidate] >= sequence
+			})
+			if position < len(store.transcriptCaptureSequences) && store.transcriptCaptureSequences[position] == sequence {
+				duplicate := sort.Search(len(store.transcriptDuplicateCaptureSequences), func(candidate int) bool {
+					return store.transcriptDuplicateCaptureSequences[candidate] >= sequence
+				})
+				if duplicate == len(store.transcriptDuplicateCaptureSequences) || store.transcriptDuplicateCaptureSequences[duplicate] != sequence {
+					store.transcriptDuplicateCaptureSequences = append(store.transcriptDuplicateCaptureSequences, 0)
+					copy(store.transcriptDuplicateCaptureSequences[duplicate+1:], store.transcriptDuplicateCaptureSequences[duplicate:])
+					store.transcriptDuplicateCaptureSequences[duplicate] = sequence
+				}
+			} else {
+				store.transcriptCaptureSequences = append(store.transcriptCaptureSequences, 0)
+				copy(store.transcriptCaptureSequences[position+1:], store.transcriptCaptureSequences[position:])
+				store.transcriptCaptureSequences[position] = sequence
+			}
+		}
+	}
+	if meetingID := strings.TrimSpace(entry.Metadata["meetingId"]); meetingID != "" {
+		if store.meetingEntryIndexes == nil {
+			store.meetingEntryIndexes = map[string][]int{}
+		}
+		store.meetingEntryIndexes[meetingID] = append(store.meetingEntryIndexes[meetingID], index)
+	}
+	if briefingRangeSourceKind(entry.Kind) && !entry.CreatedAt.IsZero() {
+		if store.briefingSourceDayIndexes == nil {
+			store.briefingSourceDayIndexes = map[string][]int{}
+		}
+		day := dayBucket(entry.CreatedAt)
+		store.briefingSourceDayIndexes[day] = append(store.briefingSourceDayIndexes[day], index)
+	}
+	if !isMeetingDigestKind(entry.Kind) || !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+		return
+	}
+	key := digestEntryKey(entry)
+	if key == "" {
+		return
+	}
+	if store.currentDigestIndexes == nil {
+		store.currentDigestIndexes = map[string]map[string]int{}
+	}
+	if store.currentDigestIndexes[entry.Kind] == nil {
+		store.currentDigestIndexes[entry.Kind] = map[string]int{}
+	}
+	if prior, exists := store.currentDigestIndexes[entry.Kind][key]; exists && prior >= 0 && prior < len(store.entries) && store.entries[prior].CreatedAt.After(entry.CreatedAt) {
+		return
+	}
+	store.currentDigestIndexes[entry.Kind][key] = index
+	if store.currentDigestDayIndexes == nil {
+		store.currentDigestDayIndexes = map[string]map[string]map[string]int{}
+	}
+	if store.currentDigestDayIndexes[entry.Kind] == nil {
+		store.currentDigestDayIndexes[entry.Kind] = map[string]map[string]int{}
+	}
+	for _, day := range digestIndexDays(entry) {
+		if store.currentDigestDayIndexes[entry.Kind][day] == nil {
+			store.currentDigestDayIndexes[entry.Kind][day] = map[string]int{}
+		}
+		store.currentDigestDayIndexes[entry.Kind][day][key] = index
+	}
+}
+
+func (store *meetingMemoryStore) captureSequenceRangeCompleteLocked(first, last uint64) bool {
+	if store == nil || first == 0 || last < first || last-first == ^uint64(0) {
+		return false
+	}
+	left := sort.Search(len(store.transcriptCaptureSequences), func(index int) bool {
+		return store.transcriptCaptureSequences[index] >= first
+	})
+	right := sort.Search(len(store.transcriptCaptureSequences), func(index int) bool {
+		return store.transcriptCaptureSequences[index] > last
+	})
+	if uint64(right-left) != last-first+1 {
+		return false
+	}
+	duplicate := sort.Search(len(store.transcriptDuplicateCaptureSequences), func(index int) bool {
+		return store.transcriptDuplicateCaptureSequences[index] >= first
+	})
+	return duplicate == len(store.transcriptDuplicateCaptureSequences) || store.transcriptDuplicateCaptureSequences[duplicate] > last
+}
+
+func briefingRangeSourceKind(kind string) bool {
+	switch kind {
+	case meetingMemoryKindTranscript, meetingMemoryKindBrain, meetingMemoryKindDecision, meetingMemoryKindDeadLetter:
+		return true
+	}
+	return false
+}
+
+func (store *meetingMemoryStore) rebuildMeetingEntryIndexesIfChangedLocked(previous meetingMemoryEntry, next meetingMemoryEntry) {
+	if strings.TrimSpace(previous.Metadata["meetingId"]) != strings.TrimSpace(next.Metadata["meetingId"]) ||
+		previous.Kind != next.Kind || digestEntryKey(previous) != digestEntryKey(next) ||
+		digestEntryCurrent(previous) != digestEntryCurrent(next) || memoryEntryRelevance(previous) != memoryEntryRelevance(next) ||
+		previous.CreatedAt != next.CreatedAt || previous.Metadata[digestSpanStartMetadataKey] != next.Metadata[digestSpanStartMetadataKey] ||
+		previous.Metadata[digestSpanEndMetadataKey] != next.Metadata[digestSpanEndMetadataKey] || previous.Metadata[digestDayMetadataKey] != next.Metadata[digestDayMetadataKey] {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
 }
 
 // bootBaselineIDOfKind returns the ID of the newest entry of kind that was
@@ -1054,13 +1237,16 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 	}
 	entry.Metadata["updatedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 	entry.Text = text
+	stampMeetingRecordBodyDigest(&entry)
 	if contentChanged {
 		entry.Metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(entry)
 	}
 
 	store.entries[index] = entry
+	store.rebuildMeetingEntryIndexesIfChangedLocked(previousEntry, entry)
 	if err := store.rewriteLocked(false); err != nil {
 		store.entries[index] = previousEntry
+		store.rebuildMeetingEntryIndexesIfChangedLocked(entry, previousEntry)
 		return meetingMemoryEntry{}, false, err
 	}
 
@@ -1357,10 +1543,13 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 		return cloneMemoryEntry(entry), false, nil
 	}
 	entry.Text = text
+	stampMeetingRecordBodyDigest(&entry)
 
 	store.entries[index] = entry
+	store.rebuildMeetingEntryIndexesIfChangedLocked(previousEntry, entry)
 	if err := store.rewriteLocked(false); err != nil {
 		store.entries[index] = previousEntry
+		store.rebuildMeetingEntryIndexesIfChangedLocked(entry, previousEntry)
 		return meetingMemoryEntry{}, false, err
 	}
 
@@ -1516,6 +1705,7 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 		}
 	}
 	entry.Metadata = stamped
+	stampMeetingRecordBodyDigest(&entry)
 
 	raw, err := json.Marshal(entry)
 	if err != nil {
@@ -1530,6 +1720,7 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 	}
 
 	store.entries = append(store.entries, entry)
+	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	store.seen[entry.ID] = struct{}{}
 
 	return entry, true, nil
@@ -1716,12 +1907,26 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	entries := make([]meetingMemoryEntry, 0, len(store.entries))
-	for _, entry := range store.visibleEntriesLocked() {
-		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
+	// The durable meeting directory is rebuilt at startup and maintained at
+	// every append/rewrite. Reading one meeting must never clone or scan years
+	// of unrelated Chat, artifact, and reflection bodies.
+	if store.meetingEntryIndexes == nil {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	indexes := store.meetingEntryIndexes[meetingID]
+	entries := make([]meetingMemoryEntry, 0, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(store.entries) {
 			continue
 		}
-		entries = append(entries, entry)
+		if store.meetingEntryVisitHook != nil {
+			store.meetingEntryVisitHook()
+		}
+		stored := store.entries[index]
+		if strings.TrimSpace(stored.Metadata["meetingId"]) != meetingID || stored.Kind == meetingMemoryKindSlopPass || stored.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(stored) {
+			continue
+		}
+		entries = append(entries, stripOversizeBody(stored))
 	}
 
 	return cloneMemoryEntries(tailMemoryEntries(entries, limit))
@@ -2136,7 +2341,7 @@ func isMeetingDigestKind(kind string) bool {
 // in-flight meeting id across a restart.
 func isAmbientBookkeepingMemoryKind(kind string) bool {
 	switch kind {
-	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass:
+	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass, meetingMemoryKindAmbientReplayPromotion:
 		return true
 	}
 	return isMeetingDigestKind(kind)
@@ -2220,6 +2425,7 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 		CreatedAt: time.Now().UTC(),
 		Metadata:  stamped,
 	}
+	stampMeetingRecordBodyDigest(&entry)
 
 	// Supersede in place. The loop archives EVERY current match (not just the
 	// newest) so a crash that once left two current digests self-heals on the
@@ -2246,6 +2452,7 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 	}
 
 	store.entries = append(store.entries, entry)
+	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	store.seen[id] = struct{}{}
 
 	var err error
@@ -2261,6 +2468,7 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 		for _, stale := range superseded {
 			store.entries[stale.index] = stale.prior
 		}
+		store.rebuildMeetingEntryIndexesLocked()
 		return meetingMemoryEntry{}, err
 	}
 
@@ -2331,6 +2539,7 @@ func (store *meetingMemoryStore) appendAmbientEntry(kind string, id string, text
 		return meetingMemoryEntry{}, false, err
 	}
 	store.entries = append(store.entries, entry)
+	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	store.seen[entry.ID] = struct{}{}
 
 	return cloneMemoryEntry(entry), true, nil
@@ -2374,27 +2583,39 @@ func (store *meetingMemoryStore) latestDigestPerMeeting() map[string]meetingMemo
 	defer store.mu.Unlock()
 
 	latest := make(map[string]meetingMemoryEntry)
-	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindMeetingDigest {
+	for key, index := range store.currentDigestIndexes[meetingMemoryKindMeetingDigest] {
+		if index < 0 || index >= len(store.entries) {
 			continue
 		}
+		entry := store.entries[index]
 		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
-		key := digestEntryKey(entry)
-		if key == "" {
+		if digestEntryKey(entry) != key || key == "" {
 			continue
 		}
-		if prior, ok := latest[key]; ok && prior.CreatedAt.After(entry.CreatedAt) {
-			continue
-		}
-		latest[key] = entry
-	}
-	for key, entry := range latest {
 		latest[key] = cloneMemoryEntry(entry)
 	}
 
 	return latest
+}
+
+func (store *meetingMemoryStore) currentDigest(kind, key string) (meetingMemoryEntry, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, false
+	}
+	kind, key = strings.TrimSpace(kind), strings.TrimSpace(key)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	index, found := store.currentDigestIndexes[kind][key]
+	if !found || index < 0 || index >= len(store.entries) {
+		return meetingMemoryEntry{}, false
+	}
+	entry := store.entries[index]
+	if entry.Kind != kind || digestEntryKey(entry) != key || !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+		return meetingMemoryEntry{}, false
+	}
+	return cloneMemoryEntry(entry), true
 }
 
 // digestSpan resolves the window a digest covers, for range matching:
@@ -2433,6 +2654,46 @@ func digestSpan(entry meetingMemoryEntry, location *time.Location) (time.Time, t
 	return entry.CreatedAt, entry.CreatedAt
 }
 
+const digestIndexMaxDays = 400
+
+func digestIndexDays(entry meetingMemoryEntry) []string {
+	start, end := digestSpan(entry, meetingTimeLocation())
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return nil
+	}
+	location := meetingTimeLocation()
+	day := start.In(location)
+	day = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, location)
+	last := end.In(location)
+	last = time.Date(last.Year(), last.Month(), last.Day(), 0, 0, 0, 0, location)
+	days := make([]string, 0, 4)
+	for !day.After(last) && len(days) < digestIndexMaxDays {
+		days = append(days, day.Format(dayBucketLayout))
+		day = day.AddDate(0, 0, 1)
+	}
+	return days
+}
+
+func digestQueryDays(start, end time.Time) ([]string, bool) {
+	if start.IsZero() || end.IsZero() || !end.After(start) {
+		return nil, false
+	}
+	location := meetingTimeLocation()
+	day := start.In(location)
+	day = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, location)
+	lastInstant := end.Add(-time.Nanosecond).In(location)
+	last := time.Date(lastInstant.Year(), lastInstant.Month(), lastInstant.Day(), 0, 0, 0, 0, location)
+	days := make([]string, 0, 8)
+	for !day.After(last) {
+		if len(days) >= digestIndexMaxDays {
+			return nil, false
+		}
+		days = append(days, day.Format(dayBucketLayout))
+		day = day.AddDate(0, 0, 1)
+	}
+	return days, true
+}
+
 // digestsInRange returns the current day_digests whose local calendar day
 // falls in [start, end] plus the current meeting_digests whose covered span
 // overlaps it, oldest-first by covered window. Both bounds are inclusive.
@@ -2451,10 +2712,33 @@ func (store *meetingMemoryStore) digestsInRange(start time.Time, end time.Time) 
 		start time.Time
 	}
 	matched := make([]rangedDigest, 0, 16)
-	for _, entry := range store.entries {
-		switch entry.Kind {
-		case meetingMemoryKindDayDigest, meetingMemoryKindMeetingDigest:
-		default:
+	indexes := map[int]struct{}{}
+	if days, indexed := digestQueryDays(start, end); indexed {
+		for _, kind := range []string{meetingMemoryKindDayDigest, meetingMemoryKindMeetingDigest} {
+			for _, day := range days {
+				for _, index := range store.currentDigestDayIndexes[kind][day] {
+					indexes[index] = struct{}{}
+				}
+			}
+		}
+	} else {
+		// Compatibility for deliberately enormous internal/test ranges. Normal
+		// conversation ranges are capped and always use the indexed path.
+		for index, entry := range store.entries {
+			if entry.Kind == meetingMemoryKindDayDigest || entry.Kind == meetingMemoryKindMeetingDigest {
+				indexes[index] = struct{}{}
+			}
+		}
+	}
+	for index := range indexes {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.digestEntryVisitHook != nil {
+			store.digestEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindDayDigest && entry.Kind != meetingMemoryKindMeetingDigest {
 			continue
 		}
 		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
@@ -2496,18 +2780,25 @@ func (store *meetingMemoryStore) latestCompanyDigest() (meetingMemoryEntry, bool
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	for index := len(store.entries) - 1; index >= 0; index-- {
-		entry := store.entries[index]
-		if entry.Kind != meetingMemoryKindCompanyDigest {
+	var latest meetingMemoryEntry
+	found := false
+	for key, index := range store.currentDigestIndexes[meetingMemoryKindCompanyDigest] {
+		if index < 0 || index >= len(store.entries) {
 			continue
 		}
+		entry := store.entries[index]
 		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
-		return cloneMemoryEntry(entry), true
+		if digestEntryKey(entry) != key || (found && !entry.CreatedAt.After(latest.CreatedAt)) {
+			continue
+		}
+		latest, found = entry, true
 	}
-
-	return meetingMemoryEntry{}, false
+	if !found {
+		return meetingMemoryEntry{}, false
+	}
+	return cloneMemoryEntry(latest), true
 }
 
 // transcriptWindowAround resolves a digest anchor to its verbatim exchange:
@@ -2627,9 +2918,11 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 
 	removed := cloneMemoryEntry(store.entries[index])
 	store.entries = append(store.entries[:index], store.entries[index+1:]...)
+	store.rebuildMeetingEntryIndexesLocked()
 	if err := store.rewriteLocked(false); err != nil {
 		// restore the in-memory slice so a failed rewrite is not silently lossy.
 		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+		store.rebuildMeetingEntryIndexesLocked()
 		return meetingMemoryEntry{}, false, err
 	}
 	delete(store.seen, id)
@@ -2673,8 +2966,10 @@ func (store *meetingMemoryStore) deleteOSArtifactWithProjection(id string) (meet
 		Actor:         "system",
 	})
 	store.entries = append(store.entries[:index], store.entries[index+1:]...)
+	store.rebuildMeetingEntryIndexesLocked()
 	if err := store.rewriteLocked(false); err != nil {
 		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+		store.rebuildMeetingEntryIndexesLocked()
 		revokeArtifactDeletionProjection(projection)
 		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, err
 	}
@@ -2690,7 +2985,7 @@ func (store *meetingMemoryStore) deleteOSArtifactWithProjection(id string) (meet
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -2888,7 +3183,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindAgentMindPosition && kind != meetingMemoryKindScoutAttention && kind != meetingMemoryKindConversationContinuity && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindNarrative && kind != meetingMemoryKindReflection && kind != meetingMemoryKindLedgerEvent && !isMeetingDigestKind(kind) {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindAgentMindPosition && kind != meetingMemoryKindScoutAttention && kind != meetingMemoryKindConversationContinuity && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindNarrative && kind != meetingMemoryKindReflection && kind != meetingMemoryKindLedgerEvent && kind != meetingMemoryKindAmbientReplayPromotion && !isMeetingDigestKind(kind) {
 		// digest kinds and ledger events take the structure-preserving branch
 		// below: their bodies are strict JSON (like mission_insight) and the
 		// whitespace collapse would mutate content inside JSON string values;

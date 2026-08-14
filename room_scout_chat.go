@@ -87,6 +87,24 @@ func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, questio
 			map[string]string{"followThroughId": record.ID, "followThroughStatus": record.Status, "destinationThreadId": record.DestinationThreadID})
 		return
 	}
+	if roomScoutLateJoinCatchUpRequested(question) {
+		ctx, cancel := context.WithTimeout(context.Background(), meetingRecapRequestTimeout)
+		defer cancel()
+		response, err := app.exactCatchUpRecapWithComposer(ctx, requesterEmail, scope.RoomID, "", nil)
+		if err != nil {
+			log.Errorf("Room @Scout catch-up failed room=%s sitting=%s: %v", scope.RoomID, scope.SittingID, err)
+			app.publishRoomScoutTextFailure(scope, replyTo)
+			return
+		}
+		answer := strings.TrimSpace(response.Headline + "\n\n" + response.Recap)
+		app.publishRoomScoutTextAnswer(scope, replyTo, answer, map[string]string{
+			"meetingCatchUp": "true",
+			"coverage":       string(response.Coverage.Status),
+			"provider":       "stride",
+			"model":          "deterministic-extractive-catch-up/v1",
+		})
+		return
+	}
 	principal := sharedRoomRecallPrincipal(scope.RoomID, scope.SittingID)
 	principal.MediaGeneration = scope.MediaGeneration
 	question = app.prepareSTRIDERoomRequesterModelQuery(scope, requesterEmail, requesterName, question)
@@ -109,6 +127,27 @@ func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, questio
 		return
 	}
 	app.publishRoomScoutTextAnswer(scope, replyTo, answer, nil)
+}
+
+func roomScoutLateJoinCatchUpRequested(question string) bool {
+	if !scoutChatMentionsScout(question) {
+		return false
+	}
+	normalized := strings.ToLower(normalizeRoomChatText(question))
+	normalized = strings.ReplaceAll(normalized, "@scout", " ")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	for _, phrase := range []string{
+		"what did i miss",
+		"what have i missed",
+		"catch me up",
+		"what happened before i joined",
+		"i just joined what happened",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // prepareSTRIDERoomRequesterModelQuery preserves who asked without turning a

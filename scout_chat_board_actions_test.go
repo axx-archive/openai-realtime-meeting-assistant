@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -74,8 +73,8 @@ func TestScoutChatClearBoardIsReadOnlyAndProviderFenced(t *testing.T) {
 	if !ok {
 		t.Fatalf("boardAction type=%T, want *scoutChatBoardAction", response["boardAction"])
 	}
-	if action.Surface != "board" || action.Action != "open" || action.RequestedIntent != scoutChatBoardIntentClear || action.ActiveCardCount != len(before.Cards) || !action.ReadOnly || action.MutationExecuted || action.Reason != "durable_trash_required" {
-		t.Fatalf("boardAction=%#v, want read-only clear intent + exact count %d", action, len(before.Cards))
+	if action.Surface != "artifacts" || action.Action != "open" || action.RequestedIntent != scoutChatBoardIntentClear || action.ActiveCardCount != 0 || !action.ReadOnly || action.MutationExecuted || action.Reason != "board_retired" {
+		t.Fatalf("boardAction=%#v, want retired compatibility redirect to Work", action)
 	}
 	after := kanbanApp.snapshotState()
 	if !reflect.DeepEqual(after, before) {
@@ -89,8 +88,8 @@ func TestScoutChatClearBoardIsReadOnlyAndProviderFenced(t *testing.T) {
 		t.Fatal("persisted Board bytes changed during a read-only clear request")
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
-	if len(saved.Messages) != 2 || saved.Messages[1].Role != "scout" || !strings.Contains(saved.Messages[1].Text, strconv.Itoa(len(before.Cards))+" items") || !strings.Contains(saved.Messages[1].Text, "haven’t changed anything") {
-		t.Fatalf("persisted conversation=%#v, want user + exact-count no-mutation reply", saved.Messages)
+	if len(saved.Messages) != 2 || saved.Messages[1].Role != "scout" || !strings.Contains(saved.Messages[1].Text, "Board is retired") || !strings.Contains(saved.Messages[1].Text, "Nothing was changed") {
+		t.Fatalf("persisted conversation=%#v, want user + retirement no-mutation reply", saved.Messages)
 	}
 }
 
@@ -124,14 +123,14 @@ func TestScoutChatOpenBoardReturnsReadOnlyNavigation(t *testing.T) {
 		t.Fatalf("provider calls=%d response=%v, want deterministic read", providerCalls, response)
 	}
 	action, ok := response["boardAction"].(*scoutChatBoardAction)
-	if !ok || action.RequestedIntent != scoutChatBoardIntentOpen || action.ActiveCardCount != len(before.Cards) || !action.ReadOnly || action.MutationExecuted {
-		t.Fatalf("boardAction=%#v, want open + exact read-only count %d", action, len(before.Cards))
+	if !ok || action.Surface != "artifacts" || action.RequestedIntent != scoutChatBoardIntentOpen || action.ActiveCardCount != 0 || !action.ReadOnly || action.MutationExecuted || action.Reason != "board_retired" {
+		t.Fatalf("boardAction=%#v, want retired compatibility redirect to Work", action)
 	}
 	if after := kanbanApp.snapshotState(); !reflect.DeepEqual(after, before) {
 		t.Fatalf("open Board mutated state: before=%#v after=%#v", before, after)
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
-	if len(saved.Messages) != 2 || !strings.Contains(saved.Messages[1].Text, strconv.Itoa(len(before.Cards))+" items") {
-		t.Fatalf("persisted conversation=%#v, want exact-count navigation reply", saved.Messages)
+	if len(saved.Messages) != 2 || !strings.Contains(saved.Messages[1].Text, "Board is retired") || !strings.Contains(saved.Messages[1].Text, "open Work") {
+		t.Fatalf("persisted conversation=%#v, want retirement redirect", saved.Messages)
 	}
 }

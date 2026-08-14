@@ -42,10 +42,13 @@ func TestOpenAIToolManifestV1ClosedAdmissionAndStrictSchemas(t *testing.T) {
 			t.Fatalf("required admitted tool %q is absent", name)
 		}
 	}
-	for _, name := range []string{"publish_artifact", "launch_agent_thread", "create_ticket", "request_coworker_help", "initiate_goal"} {
+	for _, name := range []string{"publish_artifact", "launch_agent_thread", "request_coworker_help", "initiate_goal"} {
 		if !all[name] || admitted[name] {
 			t.Fatalf("known tool %q is not explicitly unadmitted", name)
 		}
+	}
+	if all["create_ticket"] {
+		t.Fatal("retired Board mutation survived in the OpenAI tool catalog")
 	}
 	if len(manifest.responsesTools()) != 4 {
 		t.Fatalf("provider saw %d tools, want four", len(manifest.responsesTools()))

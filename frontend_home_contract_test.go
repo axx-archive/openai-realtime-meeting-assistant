@@ -72,76 +72,42 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 	}
 }
 
-func TestDesktopExistingThreadProjectChoiceStaysZeroEffectUntilSend(t *testing.T) {
+func TestDesktopExistingThreadRetiresManualProjectAttachment(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(raw)
 	for _, want := range []string{
-		`id="scoutChatProjectChip"`,
-		`id="scoutChatProjectChooser"`,
-		`body: JSON.stringify({ text, destination: { route: 'thread', threadId }, attachmentHandles, ...(replyToMessageId ? { replyToMessageId } : {}) })`,
-		`const rows = [{ title: 'No project', token: '' }, ...(scoutChatProjectContext.choices || [])]`,
-		`scoutChatProjectContext.selected = choice.token ? { ...choice, text: scoutChatInput?.value.trim() || '', threadId: activeScoutThreadId, sourceKey: scoutChatProjectSourceKey() } : null`,
-		`scoutChatProjectContext.explicitNone = !choice.token`,
-		`const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)`,
-		`scoutChatProjectContext.selected = rebound ? { ...rebound, text, threadId, sourceKey } : null`,
-		`if (projectContextToken && !followUp) messagePayload.projectContextToken = projectContextToken`,
-		`scoutChatMessageAttempt = scoutChatMessageAttempt?.key === attemptKey`,
-		`messagePayload.operationId = scoutChatMessageAttempt.operationId`,
-		`if (projectContextToken && scoutChatInput)`,
-		`Project context is refreshing for these sources. Try Send again in a moment.`,
+		`const explicitProjectAttachmentEnabled = false`,
+		`if (!explicitProjectAttachmentEnabled) return`,
+		`const projectContextToken = explicitProjectAttachmentEnabled && scoutChatProjectContext.selected`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("existing-thread Project flow missing %q", want)
+			t.Fatalf("retired existing-thread Project contract missing %q", want)
 		}
 	}
-	chooserStart := strings.Index(html, "function renderScoutChatProjectContext")
-	chooserEnd := strings.Index(html[chooserStart:], "async function loadScoutChatProjectContext")
-	if chooserStart < 0 || chooserEnd < 0 {
-		t.Fatal("existing-thread Project chooser boundary missing")
-	}
-	chooser := html[chooserStart : chooserStart+chooserEnd]
-	for _, forbidden := range []string{"sendScoutChatViaOffice", "/messages", "WorkRun", "toolTemplate", "projectId"} {
-		if strings.Contains(chooser, forbidden) {
-			t.Fatalf("Project chooser has a forbidden pre-Send effect or authority field %q", forbidden)
-		}
+	if strings.Contains(html, `id="scoutChatProjectChip"`) {
+		t.Fatal("manual existing-thread Project control remains in rendered markup")
 	}
 }
 
-func TestDesktopThreadReplyProjectChoiceBindsExactSourcesUntilSend(t *testing.T) {
+func TestDesktopThreadReplyRetiresManualProjectAttachment(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(raw)
 	for _, want := range []string{
-		`id="chatContextProjectChip"`,
-		`id="chatContextProjectChooser"`,
-		`replyToMessageId: state.rootMessageId`,
-		`attachmentHandles: scoutChatProjectAttachmentHandles(pendingDesktopReplyFiles)`,
-		`const rebound = rebindOpaqueProjectChoice(currentSelection, next.suggested, next.choices)`,
-		`chatContextProjectContext.selected = rebound ? { ...rebound, text, sourceKey } : null`,
-		`selectedProject?.sourceKey === projectSourceKey`,
-		`...(projectContextToken ? { projectContextToken } : {})`,
-		`chatContextReplyAttempt = replyAttempt`,
-		`if (projectContextToken && replyTarget?.messageId && !scoutChatReplyTarget)`,
+		`chatContextProjectChip.hidden = !explicitProjectAttachmentEnabled`,
+		`const projectContextToken = explicitProjectAttachmentEnabled && selectedProject`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("desktop reply Project flow missing %q", want)
+			t.Fatalf("retired desktop reply Project contract missing %q", want)
 		}
 	}
-	start := strings.Index(html, "function renderDesktopReplyProjectContext")
-	end := strings.Index(html[start:], "async function loadDesktopReplyProjectContext")
-	if start < 0 || end < 0 {
-		t.Fatal("desktop reply Project chooser boundary missing")
-	}
-	chooser := html[start : start+end]
-	for _, forbidden := range []string{"/messages", "WorkRun", "toolTemplate", "projectId"} {
-		if strings.Contains(chooser, forbidden) {
-			t.Fatalf("desktop reply Project chooser caused a mutation: %q", forbidden)
-		}
+	if strings.Contains(html, `id="chatContextProjectChip"`) {
+		t.Fatal("manual reply Project control remains in rendered markup")
 	}
 }
 
@@ -227,6 +193,7 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
 ]};
 let homeAvailable=true;
 let homeRequestCount=0;
+let projectContextRequestCount=0;
 let chatMutationCount=0;
 let chatRequestBodies=[];
 let homeAccount='a';
@@ -245,7 +212,8 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
    if(Date.now()<initialHomeReadyAt){return setTimeout(reply,initialHomeReadyAt-Date.now());}
    return reply();
  }
- if(req.url==='/assistant/project-context'){
+	 if(req.url==='/assistant/project-context'){
+	   projectContextRequestCount+=1;
    const projectAccount=homeAccount;
    let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{
      const body=JSON.parse(raw||'{}');
@@ -361,21 +329,8 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  await page.locator('#homeSuggestions .home-suggestion').first().click();
  assert.equal(await page.locator('#homeScoutInput').inputValue(),'Explore the biggest open question in Country Golf.');
  assert.equal(new URL(page.url()).pathname,'/');
- await page.waitForFunction(()=>document.getElementById('homeProjectChip').textContent.startsWith('Suggested ·'));
- assert.match(await page.locator('#homeProjectChip').textContent(),/^Suggested · Country Golf$/);
- await page.click('#homeProjectChip');
- assert.equal(await page.locator('#homeProjectChooser').getAttribute('open'),'');
- for(const theme of ['dark','light'])await capture('desktop-home-project-chooser',theme);
- await page.setViewportSize({width:390,height:844});
- await page.waitForTimeout(100);
- for(const theme of ['dark','light'])await capture('phone-home-project-chooser',theme);
- await page.setViewportSize({width:1440,height:900});
- await page.getByRole('radio',{name:'No project'}).click();
- assert.equal(await page.locator('#homeScoutInput').inputValue(),'Explore the biggest open question in Country Golf.');
- await page.click('#homeProjectChip');
- await page.getByRole('radio',{name:'Country Golf'}).click();
- assert.equal(await page.locator('#homeProjectChip').textContent(),'Project · Country Golf');
- assert.equal(chatMutationCount,0,'Project chooser mutated chat before explicit Send');
+	 assert.equal(await page.locator('#homeProjectChip').count(),0,'retired Home Project control remains in the DOM');
+	 assert.equal(projectContextRequestCount,0,'retired Home Project control requested a preflight');
  await page.waitForTimeout(50);
  await page.focus('#homeScoutInput');
  const focusedComposer=await page.evaluate(()=>({
@@ -403,8 +358,7 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,starterCount:document.querySelectorAll('#homeStarters .home-starter').length,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
  assert.equal(phone.fits,true);assert.equal(phone.starterCount,4);assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
  await page.evaluate(async()=>{
-   await fetch('/__delay_project_a');
-   homeScoutInput.value='Country Golf';
+	   homeScoutInput.value='Country Golf';
    homeScoutInput.dispatchEvent(new Event('input',{bubbles:true}));
    await new Promise(resolve=>setTimeout(resolve,300));
    await fetch('/__home_account_b');
@@ -418,10 +372,10 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
    hydrated:document.getElementById('homeStarters').dataset.hydrated,
    destination:selectedHomeSuggestionDestination,
    chipHidden:document.getElementById('homeContextChip').hidden,
-   projectChipHidden:document.getElementById('homeProjectChip').hidden,
+	   projectChipPresent:Boolean(document.getElementById('homeProjectChip')),
    chooserOpen:document.getElementById('homeProjectChooser').open
  }));
- assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true,projectChipHidden:true,chooserOpen:false},'A context survived the A to B authority boundary');
+	 assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true,projectChipPresent:false,chooserOpen:false},'A context survived the A to B authority boundary');
  await page.waitForFunction(()=>document.getElementById('homeStarters').dataset.hydrated==='true');
  await page.waitForTimeout(1100);
  assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false,'late A Project context rendered for B');
@@ -433,43 +387,14 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
 	  selectScoutChatThread('country-golf');
 	  setMobileChatView('convo');
 	});
-	await page.waitForFunction(()=>!document.getElementById('scoutChatProjectRow').hidden&&document.getElementById('scoutChatProjectChip').textContent.startsWith('Project ·'));
-	assert.equal(chatMutationCount,0,'thread Project preview mutated chat before explicit Send');
-	await page.click('#scoutChatProjectChip');
-	assert.equal(await page.locator('#scoutChatProjectChooser').getAttribute('open'),'');
-	const threadProjectRenderDir=String(process.env.HOME_RENDER_DIR||'').trim();
-	const captureThreadProject=async(name,theme)=>{
-	  await page.evaluate(next=>renderTheme(next),theme);
-	  await page.mouse.move(2,2);await page.waitForTimeout(120);
-	  const geometry=await page.evaluate(()=>{
-		const chip=document.getElementById('scoutChatProjectChip').getBoundingClientRect();
-		const chooser=document.querySelector('#scoutChatProjectChooser .home-project-chooser__body').getBoundingClientRect();
-		return{fits:document.documentElement.scrollWidth<=innerWidth,viewportWidth:innerWidth,chipHeight:chip.height,chipLeft:chip.left,chipRight:chip.right,chooserLeft:chooser.left,chooserRight:chooser.right};
-	  });
-	  assert.equal(geometry.fits,true);assert.ok(geometry.chipHeight>=40,JSON.stringify(geometry));assert.ok(geometry.chipLeft>=0&&geometry.chipRight<=geometry.viewportWidth,JSON.stringify(geometry));assert.ok(geometry.chooserLeft>=0&&geometry.chooserRight<=geometry.viewportWidth,JSON.stringify(geometry));
-	  if(threadProjectRenderDir)await page.screenshot({path:path.join(threadProjectRenderDir,name+'-'+theme+'.png')});
-	};
-	await page.setViewportSize({width:1440,height:900});
-	await page.waitForTimeout(100);
-	for(const theme of ['dark','light'])await captureThreadProject('desktop-thread-project-chooser',theme);
-	await page.setViewportSize({width:390,height:844});
-	await page.waitForTimeout(100);
-	for(const theme of ['dark','light'])await captureThreadProject('phone-thread-project-chooser',theme);
-	await page.getByRole('radio',{name:'No project'}).click();
-	await page.fill('#scoutChatInput','Keep this turn outside the Project.');
-	await page.waitForTimeout(350);
-	assert.equal(await page.locator('#scoutChatProjectChip').textContent(),'No project','explicit No project was silently re-suggested after editing');
-	assert.equal(chatMutationCount,0,'thread Project choice mutated chat before explicit Send');
-	await page.click('#scoutChatProjectChip');
-	await page.getByRole('radio',{name:'B Project'}).click();
-	await page.evaluate(()=>document.getElementById('scoutChatForm').requestSubmit());
-	await page.waitForFunction(()=>document.getElementById('scoutChatInput').value==='Keep this turn outside the Project.');
-	await page.evaluate(()=>document.getElementById('scoutChatForm').requestSubmit());
-	await page.waitForTimeout(180);
-	assert.equal(chatMutationCount,2,'exact Project retry did not reach the canonical message endpoint twice');
-	const retryBodies=chatRequestBodies.map(raw=>JSON.parse(raw));
-	assert.equal(retryBodies[0].projectContextToken,'opaque-b-project');
-	assert.equal(retryBodies[0].operationId,retryBodies[1].operationId,'manual retry minted a different Project operation id');
+		assert.equal(await page.locator('#scoutChatProjectRow').count(),0,'retired thread Project control remains in the DOM');
+		assert.equal(projectContextRequestCount,0,'retired thread Project control requested a preflight');
+		await page.fill('#scoutChatInput','Keep this turn in brain-owned context.');
+		await page.evaluate(()=>document.getElementById('scoutChatForm').requestSubmit());
+		await page.waitForTimeout(250);
+		assert.equal(chatMutationCount,1,'ordinary Send did not reach the canonical message endpoint once');
+		const retryBodies=chatRequestBodies.map(raw=>JSON.parse(raw));
+		assert.equal('projectContextToken' in retryBodies[0],false,'retired Project token reached Send');
 	const orderedProjectFrames=await page.evaluate(()=>{
 	  scoutChatThreads=[{id:'project-order',title:'Project order',updatedAt:'2026-08-12T00:00:02Z',visibility:'private',messages:[
 	    {id:'project-user',role:'user',createdAt:'2026-08-12T00:00:00Z',project:{status:'confirmed',projectId:'project-one',projectRevision:1,title:'Launch Plan',basis:'selected'}},
@@ -482,8 +407,8 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
 	assert.deepEqual(orderedProjectFrames,{project:'confirmed',reply:'queued'},'late socket frames regressed the confirmed HTTP Project response');
  await page.evaluate(()=>signOutOfAccount());
  await page.waitForTimeout(100);
- const signedOutProject=await page.evaluate(()=>({chipHidden:homeProjectChip.hidden,chooserOpen:homeProjectChooser.open,oldCopy:document.querySelector('.office-launch').textContent.includes('Country Golf')}));
- assert.deepEqual(signedOutProject,{chipHidden:true,chooserOpen:false,oldCopy:false},'Project context survived logout');
+	 const signedOutProject=await page.evaluate(()=>({chipPresent:Boolean(document.getElementById('homeProjectChip')),chooserOpen:homeProjectChooser.open,oldCopy:document.querySelector('.office-launch').textContent.includes('Country Golf')}));
+	 assert.deepEqual(signedOutProject,{chipPresent:false,chooserOpen:false,oldCopy:false},'Project context survived logout');
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)

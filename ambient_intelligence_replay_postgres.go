@@ -15,6 +15,131 @@ import (
 
 type PostgresAmbientReplayStore struct{ pool *pgxpool.Pool }
 
+func (store *PostgresAmbientReplayStore) LoadAmbientReplayPromotionReceipt(ctx context.Context, manifestDigestText string) (AmbientReplayPromotionReceipt, bool, error) {
+	if store == nil || store.pool == nil || !isHexDigest(manifestDigestText) {
+		return AmbientReplayPromotionReceipt{}, false, ErrAmbientReplayInvalid
+	}
+	manifestDigest, _ := hex.DecodeString(manifestDigestText)
+	var receipt AmbientReplayPromotionReceipt
+	var sourceDigest, stageDigest, bodyDigest []byte
+	err := store.pool.QueryRow(ctx, `SELECT execution_id::text,tenant_id,room_id,sitting_id,source_manifest_digest,
+		meeting_digest_stage_output_digest,canonical_meeting_digest_body_digest,approval_reference,rollback_floor,release_commit,recorded_at
+		FROM ambient_intelligence_replay_promotions WHERE manifest_digest=$1`, manifestDigest).Scan(&receipt.ExecutionID, &receipt.TenantID,
+		&receipt.RoomID, &receipt.SittingID, &sourceDigest, &stageDigest, &bodyDigest, &receipt.ApprovalReference, &receipt.RollbackFloor,
+		&receipt.ReleaseCommit, &receipt.RecordedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AmbientReplayPromotionReceipt{}, false, nil
+	}
+	if err != nil {
+		return AmbientReplayPromotionReceipt{}, false, err
+	}
+	receipt.ManifestDigest = manifestDigestText
+	receipt.SourceManifestDigest = hex.EncodeToString(sourceDigest)
+	receipt.MeetingDigestStageOutputDigest = hex.EncodeToString(stageDigest)
+	receipt.CanonicalMeetingDigestBodyHash = hex.EncodeToString(bodyDigest)
+	return receipt, true, nil
+}
+
+// FinalizePromotedExecution is the receipt-first crash recovery boundary. A
+// committed promotion is canonical truth even when the process died after the
+// PostgreSQL transaction and before the ordinary execution completion update;
+// recovery therefore does not depend on the expired execution lease.
+func (store *PostgresAmbientReplayStore) FinalizePromotedExecution(ctx context.Context, receipt AmbientReplayPromotionReceipt, at time.Time) error {
+	if store == nil || store.pool == nil || !isHexDigest(receipt.ManifestDigest) || strings.TrimSpace(receipt.ExecutionID) == "" || at.IsZero() {
+		return ErrAmbientReplayInvalid
+	}
+	manifestDigest, _ := hex.DecodeString(receipt.ManifestDigest)
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var status, executionID string
+	if err := tx.QueryRow(ctx, `SELECT status,execution_id::text FROM ambient_intelligence_replay_manifests
+		WHERE manifest_digest=$1 FOR UPDATE`, manifestDigest).Scan(&status, &executionID); err != nil {
+		return err
+	}
+	var receiptExecutionID string
+	if err := tx.QueryRow(ctx, `SELECT execution_id::text FROM ambient_intelligence_replay_promotions
+		WHERE manifest_digest=$1`, manifestDigest).Scan(&receiptExecutionID); err != nil {
+		return err
+	}
+	if executionID != receipt.ExecutionID || receiptExecutionID != receipt.ExecutionID {
+		return ErrAmbientReplayDrift
+	}
+	if status == "completed" {
+		return tx.Commit(ctx)
+	}
+	if status != "running" {
+		return ErrAmbientReplayDrift
+	}
+	tag, err := tx.Exec(ctx, `UPDATE ambient_intelligence_replay_manifests SET status='completed',completed_at=$2,
+		lease_expires_at=NULL,last_error_code=NULL WHERE manifest_digest=$1 AND status='running'`, manifestDigest, at.UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrAmbientReplayDrift
+	}
+	return tx.Commit(ctx)
+}
+
+func (store *PostgresAmbientReplayStore) CommitAmbientReplayPromotionReceipt(ctx context.Context, receipt AmbientReplayPromotionReceipt) (bool, error) {
+	if store == nil || store.pool == nil || !isHexDigest(receipt.ManifestDigest) || !isHexDigest(receipt.SourceManifestDigest) ||
+		!isHexDigest(receipt.MeetingDigestStageOutputDigest) || !isHexDigest(receipt.CanonicalMeetingDigestBodyHash) ||
+		strings.TrimSpace(receipt.ExecutionID) == "" || strings.TrimSpace(receipt.TenantID) == "" ||
+		strings.TrimSpace(receipt.RoomID) == "" || strings.TrimSpace(receipt.SittingID) == "" || receipt.RecordedAt.IsZero() {
+		return false, ErrAmbientReplayInvalid
+	}
+	manifestDigest, _ := hex.DecodeString(receipt.ManifestDigest)
+	sourceDigest, _ := hex.DecodeString(receipt.SourceManifestDigest)
+	stageDigest, _ := hex.DecodeString(receipt.MeetingDigestStageOutputDigest)
+	bodyDigest, _ := hex.DecodeString(receipt.CanonicalMeetingDigestBodyHash)
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "ambient-replay-promotion\x1f"+receipt.ManifestDigest); err != nil {
+		return false, err
+	}
+	var executionID, tenantID, roomID, sittingID, approval, rollback, release string
+	var existingSource, existingStage, existingBody []byte
+	var recordedAt time.Time
+	existingErr := tx.QueryRow(ctx, `SELECT execution_id::text,tenant_id,room_id,sitting_id,source_manifest_digest,
+		meeting_digest_stage_output_digest,canonical_meeting_digest_body_digest,approval_reference,rollback_floor,release_commit,recorded_at
+		FROM ambient_intelligence_replay_promotions WHERE manifest_digest=$1 FOR UPDATE`, manifestDigest).Scan(&executionID, &tenantID, &roomID, &sittingID,
+		&existingSource, &existingStage, &existingBody, &approval, &rollback, &release, &recordedAt)
+	if existingErr == nil {
+		if executionID != receipt.ExecutionID || tenantID != receipt.TenantID || roomID != normalizeRoomID(receipt.RoomID) || sittingID != receipt.SittingID ||
+			hex.EncodeToString(existingSource) != receipt.SourceManifestDigest || hex.EncodeToString(existingStage) != receipt.MeetingDigestStageOutputDigest ||
+			hex.EncodeToString(existingBody) != receipt.CanonicalMeetingDigestBodyHash || approval != receipt.ApprovalReference || rollback != receipt.RollbackFloor ||
+			release != receipt.ReleaseCommit || !recordedAt.Equal(receipt.RecordedAt.UTC()) {
+			return false, ErrAmbientReplayDrift
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if !errors.Is(existingErr, pgx.ErrNoRows) {
+		return false, existingErr
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO ambient_intelligence_replay_promotions (
+		manifest_digest,execution_id,tenant_id,room_id,sitting_id,source_manifest_digest,meeting_digest_stage_output_digest,
+		canonical_meeting_digest_body_digest,approval_reference,rollback_floor,release_commit,recorded_at
+	) VALUES ($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+	`, manifestDigest, receipt.ExecutionID, receipt.TenantID, normalizeRoomID(receipt.RoomID), receipt.SittingID,
+		sourceDigest, stageDigest, bodyDigest, receipt.ApprovalReference, receipt.RollbackFloor, receipt.ReleaseCommit, receipt.RecordedAt.UTC())
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (store *PostgresAmbientReplayStore) SaveManifest(ctx context.Context, manifest AmbientReplayManifest) (AmbientReplayManifest, bool, error) {
 	if store == nil || store.pool == nil || !isHexDigest(manifest.Digest) {
 		return AmbientReplayManifest{}, false, ErrAmbientReplayUnavailable

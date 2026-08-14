@@ -30,9 +30,10 @@ func sendOfficeHello(t *testing.T, conn *websocket.Conn) map[string]any {
 }
 
 // TestWebsocketOfficeHelloDeliversSignedInStateWithoutRoomSeat proves the
-// office hello grants signed-in event delivery — grant, board, undo, memory,
+// office hello grants current signed-in event delivery — grant, memory,
 // meeting, room-chat history, notification backlog, and codex proposals — all
-// without admitting the session into the room or taking a seat.
+// without admitting the session into the room or taking a seat. Retired Board
+// and undo snapshots are deliberately absent.
 func TestWebsocketOfficeHelloDeliversSignedInStateWithoutRoomSeat(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
@@ -47,8 +48,6 @@ func TestWebsocketOfficeHelloDeliversSignedInStateWithoutRoomSeat(t *testing.T) 
 
 	// The replay set follows the grant in order; each direct send must land.
 	for _, event := range []string{
-		"board",
-		"undo_available",
 		"memory",
 		"meeting",
 		"room_chat_history",

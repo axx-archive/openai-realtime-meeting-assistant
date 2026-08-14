@@ -13,15 +13,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
-import type { ProjectCorrectionProjection } from '../api/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 type Selection = { kind: 'project' | 'remove'; token: string; title: string };
 
+type CorrectionProjection = {
+  scopeKey: string;
+  current: { title: string; status: string; contextRevision?: number; revision?: number };
+  choices: Array<{ title: string; token: string }>;
+  remove?: { title: string; token: string };
+};
+
 type Props = {
   visible: boolean;
   contained?: boolean;
-  projection: ProjectCorrectionProjection | null;
+  projection: CorrectionProjection | null;
   loading: boolean;
   updating: boolean;
   error: string;
@@ -29,6 +35,7 @@ type Props = {
   onClose: () => void;
   onReload: () => void;
   onSubmit: (selection: Selection) => void;
+  subject?: 'message' | 'work';
 };
 
 export function ProjectCorrectionSheet({
@@ -42,10 +49,11 @@ export function ProjectCorrectionSheet({
   onClose,
   onReload,
   onSubmit,
+  subject = 'message',
 }: Props) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const titleRef = useRef<Text>(null);
-  const projectionKey = `${projection?.scopeKey ?? ''}:${projection?.current.contextRevision ?? 0}`;
+  const projectionKey = `${projection?.scopeKey ?? ''}:${projection?.current.contextRevision ?? projection?.current.revision ?? 0}`;
 
   useEffect(() => {
     setSelection(null);
@@ -73,11 +81,11 @@ export function ProjectCorrectionSheet({
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text ref={titleRef} accessible accessibilityRole="header" style={styles.title}>Change project</Text>
-          <Text style={styles.subtitle}>This changes only this message.</Text>
+          <Text style={styles.subtitle}>{subject === 'work' ? 'This corrects this Work and future continuity. The source conversation stays unchanged.' : 'This changes only this message.'}</Text>
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Close project correction"
+          accessibilityLabel={`Close ${subject === 'work' ? 'Work' : 'message'} project correction`}
           disabled={updating}
           onPress={close}
           style={({ pressed }) => [styles.close, pressed && styles.pressed, updating && styles.disabled]}
@@ -152,7 +160,7 @@ export function ProjectCorrectionSheet({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={selection?.kind === 'remove' ? 'Remove project from message' : 'Update project for message'}
+              accessibilityLabel={selection?.kind === 'remove' ? `Remove project from ${subject}` : `Update project for ${subject}`}
               disabled={!selection || updating}
               onPress={() => selection && onSubmit(selection)}
               style={({ pressed }) => [styles.update, pressed && styles.pressed, (!selection || updating) && styles.disabled]}

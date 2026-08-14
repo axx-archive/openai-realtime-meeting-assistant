@@ -125,6 +125,58 @@ func TestCompanyDigestIsLedgerStateViewPlusThinNarrative(t *testing.T) {
 	}
 }
 
+func TestCompanyDigestDropsPriorNarrativeAndStaleTitleAfterExactSourceClosure(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	const meetingID = "meeting-company-source-correction"
+	oldPayload := meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "OBSOLETE-COMPANY-CANARY ship Friday", By: "attributed to AJ", Status: "decided",
+		Anchor: "company-source-old", At: "2026-07-06T10:06:00Z", Importance: 5,
+	}}}
+	upsertLedgerTestDigest(t, app, meetingID, oldPayload)
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	first := runCompanyPass(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return "OBSOLETE-COMPANY-CANARY remains in the prior running narrative.", nil
+	})
+	if !strings.Contains(first.Text, "OBSOLETE-COMPANY-CANARY") {
+		t.Fatalf("initial company digest=%s, want stale canary fixture", first.Text)
+	}
+
+	state := app.memory.ledgerState()
+	oldRecords := ledgerRecordsOfEntity(state, ledgerEntityDecision)
+	if len(oldRecords) != 1 || len(oldRecords[0].Anchors) != 1 {
+		t.Fatalf("initial ledger=%+v, want one exact decision anchor", oldRecords)
+	}
+	replacement := appendCorrectedLedgerTranscript(
+		t, app, meetingID, "company-source-corrected", oldRecords[0].Anchors[0],
+		"Hold until security review is complete.",
+	)
+	correctedPayload := meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Hold until security review is complete", By: "attributed to AJ", Status: "decided",
+		Anchor: replacement.ID, At: "2026-07-06T10:07:00Z", Importance: 5,
+	}}}
+	upsertLedgerTestDigest(t, app, meetingID, correctedPayload)
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	var got openAITextRequest
+	refreshed := runCompanyPass(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		got = request
+		return "Current company state reflects the corrected source.", nil
+	})
+	if strings.Contains(got.Input, "OBSOLETE-COMPANY-CANARY") || strings.Contains(got.Input, "# Previous narrative") {
+		t.Fatalf("source closure leaked stale prose into company regeneration:\n%s", got.Input)
+	}
+	if !strings.Contains(got.Input, "close decision: source no longer current") {
+		t.Fatalf("company regeneration lacks the body-free source closure delta:\n%s", got.Input)
+	}
+	payload, ok := parseCompanyDigest(refreshed.Text)
+	if !ok || len(payload.State.Decisions) != 1 || payload.State.Decisions[0].Title != "Hold until security review is complete" {
+		t.Fatalf("refreshed company state=%+v ok=%v, want only corrected decision", payload.State.Decisions, ok)
+	}
+	if strings.Contains(refreshed.Text, "OBSOLETE-COMPANY-CANARY") {
+		t.Fatalf("refreshed company digest resurrected stale prose: %s", refreshed.Text)
+	}
+}
+
 // Amendment A2's core prohibition: T4 never re-summarizes summaries. The
 // narrative prompt is deltas + compact state records — day digest bodies,
 // meeting digest JSON, brain prose, and artifact blobs are structurally

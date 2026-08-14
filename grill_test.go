@@ -43,7 +43,7 @@ func TestGrillSessionSwapsInstructionsAndToolChoice(t *testing.T) {
 	}
 
 	instructions := app.sessionInstructions()
-	for _, want := range []string{defaultGrillPersona, "the Boot Barn licensing pitch", "one sharp question at a time", "end_grill_session", "wake-phrase requirement", "Do not mutate the Kanban board"} {
+	for _, want := range []string{defaultGrillPersona, "the Boot Barn licensing pitch", "one sharp question at a time", "end_grill_session", "wake-phrase requirement", "The Kanban Board is retired"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("grill instructions missing %q: %s", want, instructions)
 		}

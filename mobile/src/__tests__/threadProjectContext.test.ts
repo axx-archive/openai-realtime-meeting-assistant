@@ -3,23 +3,72 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { rebindOpaqueProjectChoice } from '../messaging/projectChoice';
+import {
+  explicitProjectAttachmentEnabled,
+  safeProjectContextFromResponse,
+  shouldRequestMainThreadProjectContext,
+  shouldRequestReplyThreadProjectContext,
+} from '../messaging/projectContextPreflight';
 
 const screen = readFileSync(path.resolve(import.meta.dirname, '..', 'screens', 'ThreadScreen.tsx'), 'utf8');
 const client = readFileSync(path.resolve(import.meta.dirname, '..', 'api', 'client.ts'), 'utf8');
 const detail = readFileSync(path.resolve(import.meta.dirname, '..', 'messaging', 'ThreadDetailSheet.tsx'), 'utf8');
+const canvas = readFileSync(path.resolve(import.meta.dirname, '..', 'screens', 'CanvasScreen.tsx'), 'utf8');
 
-test('native existing threads keep Project choice zero-effect until explicit Send', () => {
-  assert.match(screen, /attachmentHandles: projectAttachmentHandles/u);
-  assert.match(screen, /accessibilityHint="Opens the authorized Project chooser\. Nothing changes until you send\."/u);
-  assert.match(screen, /accessibilityRole="radio"/u);
-  assert.match(screen, /\[\{ title: "No project", token: "" \}, \.\.\.projectContext\.choices\]/u);
-  assert.match(screen, /projectExplicitNone \? "No project" : "Add project"/u);
-  assert.match(screen, /setProjectExplicitNone\(!choice\.token\)/u);
-  assert.match(screen, /rebindOpaqueProjectChoice\(current, next\.suggested, next\.choices, projectExplicitNone\)/u);
-  assert.match(screen, /projectContextToken = !editingMessage && selectedProject\?\.text === text/u);
-  assert.match(screen, /projectContextToken,\s*\);/u);
-  assert.match(screen, /selectedProject\.sourceKey === projectSourceKey/u);
-  assert.doesNotMatch(screen, /Send the Project-linked message first, then attach files in the next turn/u);
+test('native chat retires manual Project attachment and sends no composer-selected token', () => {
+  assert.equal(explicitProjectAttachmentEnabled, false);
+  assert.match(screen, /projectContextToken = explicitProjectAttachmentEnabled && !editingMessage/u);
+  assert.match(detail, /projectContextToken = explicitProjectAttachmentEnabled && selectedProject/u);
+  assert.match(canvas, /projectContextToken = explicitProjectAttachmentEnabled && projectSessionToken/u);
+  assert.match(screen, /visible=\{explicitProjectAttachmentEnabled && projectChooserOpen/u);
+  assert.match(detail, /visible=\{explicitProjectAttachmentEnabled && projectChooserOpen/u);
+  assert.match(canvas, /visible=\{explicitProjectAttachmentEnabled && projectChooserOpen/u);
+  for (const source of [screen, detail, canvas]) assert.doesNotMatch(source, /Add project/u);
+  assert.doesNotMatch(screen, /onChangeProject=\{openProjectCorrection\}/u);
+});
+
+test('opening ordinary Chat and Scout threads performs no automatic Project preflight', () => {
+  assert.equal(shouldRequestMainThreadProjectContext({ sessionToken: 'session', editingMessage: false, chooserOpen: false, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestMainThreadProjectContext({ sessionToken: 'session', editingMessage: false, chooserOpen: true, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestMainThreadProjectContext({ sessionToken: 'session', editingMessage: false, chooserOpen: false, hasSelectedProject: true }), false);
+  assert.equal(shouldRequestMainThreadProjectContext({ sessionToken: 'session', editingMessage: true, chooserOpen: true, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestMainThreadProjectContext({ sessionToken: null, editingMessage: false, chooserOpen: true, hasSelectedProject: false }), false);
+  assert.match(screen, /shouldRequestMainThreadProjectContext/u);
+  assert.doesNotMatch(screen, /accessibilityHint="Opens the authorized Project chooser/u);
+  assert.equal(shouldRequestReplyThreadProjectContext({ visible: true, sessionToken: 'session', threadId: 'thread', rootMessageId: 'root', chooserOpen: false, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestReplyThreadProjectContext({ visible: true, sessionToken: 'session', threadId: 'thread', rootMessageId: 'root', chooserOpen: true, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestReplyThreadProjectContext({ visible: false, sessionToken: 'session', threadId: 'thread', rootMessageId: 'root', chooserOpen: true, hasSelectedProject: false }), false);
+  assert.equal(shouldRequestReplyThreadProjectContext({ visible: true, sessionToken: 'session', threadId: '', rootMessageId: 'root', chooserOpen: true, hasSelectedProject: false }), false);
+  assert.match(detail, /shouldRequestReplyThreadProjectContext/u);
+  assert.doesNotMatch(detail, /accessibilityHint="Opens the authorized Project chooser/u);
+});
+
+test('missing or malformed Project envelopes fail safe instead of crashing Release renders', () => {
+  assert.equal(safeProjectContextFromResponse(undefined), null);
+  assert.equal(safeProjectContextFromResponse({ ok: true }), null);
+  assert.equal(safeProjectContextFromResponse({ ok: true, projectContext: {} }), null);
+  assert.equal(safeProjectContextFromResponse({ ok: true, projectContext: { available: 'yes' } }), null);
+  assert.deepEqual(safeProjectContextFromResponse({
+    ok: true,
+    projectContext: {
+      available: true,
+      scopeKey: 'scope-a',
+      choices: [
+        { title: 'Country Golf', token: 'token-a', choiceKey: 'choice-a' },
+        null,
+        { title: 'missing token' },
+      ],
+      suggested: { title: 'Country Golf', token: 'token-a', choiceKey: 'choice-a', suggested: true },
+    },
+  }), {
+    available: true,
+    scopeKey: 'scope-a',
+    choices: [{ title: 'Country Golf', token: 'token-a', choiceKey: 'choice-a' }],
+    suggested: { title: 'Country Golf', token: 'token-a', choiceKey: 'choice-a', suggested: true },
+  });
+  assert.match(screen, /safeProjectContextFromResponse\(response\)/u);
+  assert.match(detail, /safeProjectContextFromResponse\(response\)/u);
+  assert.match(canvas, /safeProjectContextFromResponse\(response\)/u);
 });
 
 test('native reply sheet binds Project preview to the exact root and ordered attachments', () => {

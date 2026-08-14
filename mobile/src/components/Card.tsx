@@ -4,10 +4,16 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type AccessibilityState,
   type ViewStyle,
 } from 'react-native';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
+
+function scalableText<T extends { readonly lineHeight: number }>(value: T) {
+  const { lineHeight: _fixedLineHeight, ...style } = value;
+  return style;
+}
 
 type Props = {
   title: string;
@@ -37,21 +43,25 @@ export function Card({
   style,
   children,
 }: Props) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = Number.isFinite(fontScale) && fontScale >= 1.35;
   const content = (
     <>
-      <View style={styles.row}>
-        <Text style={styles.title} numberOfLines={2}>
+      <View style={[styles.row, largeText && styles.rowLargeText]}>
+        <Text maxFontSizeMultiplier={2} style={styles.title}>
           {title}
         </Text>
         {badge ? (
           <View
             style={[
               styles.badge,
+              largeText && styles.badgeLargeText,
               badgeTone === 'live' && styles.badgeLive,
               badgeTone === 'warn' && styles.badgeWarn,
             ]}
           >
             <Text
+              maxFontSizeMultiplier={2}
               style={[
                 styles.badgeText,
                 badgeTone === 'live' && styles.badgeTextLive,
@@ -64,11 +74,11 @@ export function Card({
         ) : null}
       </View>
       {subtitle ? (
-        <Text style={styles.subtitle} numberOfLines={3}>
+        <Text maxFontSizeMultiplier={2} style={styles.subtitle}>
           {subtitle}
         </Text>
       ) : null}
-      {meta ? <Text style={styles.meta}>{meta}</Text> : null}
+      {meta ? <Text maxFontSizeMultiplier={2} style={styles.meta}>{meta}</Text> : null}
       {children}
     </>
   );
@@ -114,19 +124,26 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 10,
   },
+  rowLargeText: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   title: {
     flex: 1,
-    ...type.headline,
+    // Fixed token line-heights clip Google Sans at accessibility content
+    // sizes. Let the platform derive a scaled line box and keep the full
+    // card copy available instead of truncating it by line count.
+    ...scalableText(type.headline),
     color: colors.text1,
   },
   subtitle: {
     marginTop: 6,
-    ...type.bodySm,
+    ...scalableText(type.bodySm),
     color: colors.text2,
   },
   meta: {
     marginTop: 10,
-    ...type.label,
+    ...scalableText(type.label),
     color: colors.text3,
     textTransform: 'none',
   },
@@ -136,6 +153,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: colors.surface3,
   },
+  badgeLargeText: {
+    alignSelf: 'flex-start',
+  },
   badgeLive: {
     backgroundColor: colors.liveSoft,
   },
@@ -143,7 +163,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warnSoft,
   },
   badgeText: {
-    ...type.label,
+    ...scalableText(type.label),
     color: colors.text2,
     textTransform: 'uppercase',
   },

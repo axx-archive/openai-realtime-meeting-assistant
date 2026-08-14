@@ -285,11 +285,21 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	}
 }
 
-func TestAssistantQueryAnswersFromBoardWithoutRoom(t *testing.T) {
+func TestAssistantQueryAnswersWorkStatusFromCurrentBrainWithoutBoard(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "current-work-test"
+	kanbanApp.mu.Unlock()
+	var capturedInput string
+	previousResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		capturedInput = request.Input
+		return "I could not find a source-current Work record for that exact name.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = previousResponder })
 
 	req := httptest.NewRequest(http.MethodPost, "/assistant/query", strings.NewReader(`{"query":"what is the status of Finish RTP HEVC Packetizer?","mode":"chat"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -312,14 +322,17 @@ func TestAssistantQueryAnswersFromBoardWithoutRoom(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Source != "board" {
-		t.Fatalf("source=%q, want board", payload.Source)
+	if payload.Source != "assistant" {
+		t.Fatalf("source=%q, want current assistant synthesis", payload.Source)
 	}
 	if payload.Mode != "chat" || payload.User != "AJ" {
 		t.Fatalf("payload mode/user=%q/%q, want chat/AJ", payload.Mode, payload.User)
 	}
-	if !strings.Contains(payload.Answer, "Finish RTP HEVC Packetizer") {
-		t.Fatalf("answer=%q, want board card answer", payload.Answer)
+	if !strings.Contains(payload.Answer, "source-current Work") {
+		t.Fatalf("answer=%q, want source-current abstention", payload.Answer)
+	}
+	if strings.Contains(capturedInput, `"owner"`) || strings.Contains(capturedInput, `"status"`) || !strings.Contains(capturedInput, "Archived filing surfaces are not answer sources") {
+		t.Fatalf("model input reopened retired Board authority: %s", capturedInput)
 	}
 }
 
@@ -778,7 +791,7 @@ func TestArtifactsOpenToAllSignedInUsersExceptExternalWriteApproval(t *testing.T
 	}
 }
 
-func TestAssistantBoardAndMemoryReadableWithoutRoomJoin(t *testing.T) {
+func TestAssistantMemoryAndCurrentWorkSurfacesReadableWithoutRoomJoin(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -790,7 +803,6 @@ func TestAssistantBoardAndMemoryReadableWithoutRoomJoin(t *testing.T) {
 		handler http.HandlerFunc
 		key     string
 	}{
-		{name: "board", path: "/assistant/board", handler: assistantBoardHandler, key: "board"},
 		{name: "memory", path: "/assistant/memory", handler: assistantMemoryHandler, key: "memory"},
 		{name: "agent mind", path: "/assistant/agent-mind", handler: assistantAgentMindHandler, key: "positions"},
 		{name: "meetings", path: "/assistant/meetings", handler: assistantMeetingsHandler, key: "meetings"},

@@ -16,7 +16,7 @@ import (
 const (
 	openAIToolManifestVersion  = "stride-openai-tools-v1"
 	openAIToolSchemaVersion    = "strict-schema-v1"
-	openAIToolManifestV1SHA256 = "215a734ddc6d56b991b3d5a185bc50881f18dbbc3263f312318791bf83c7735a"
+	openAIToolManifestV1SHA256 = "f579c6e7ffc09decfa726e50e344934b46cff0ebd6b6f05a3a28220831ed6a44"
 )
 
 var openAIAdmittedToolNames = map[string]struct{}{

@@ -338,7 +338,7 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 	if boolEnv(agent.backfillEnv) {
 		return "", "", nil
 	}
-	if baseline, admitted := app.meetingDigestCurrentMeetingBootstrapBaseline(agent, roomID); admitted {
+	if baseline, admitted := app.meetingAnalysisCurrentMeetingBootstrapBaseline(agent, roomID); admitted {
 		return baseline, "", nil
 	}
 	baselineID, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID)
@@ -1619,9 +1619,8 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 
 // closeFlushChain is the ordered agent chain a CLOSING meeting flushes, in
 // dependency order so each stage consumes what the previous one just landed:
-// the original archive four (brain summarizes the final transcript window,
-// the decision ledger and board consume it, mission intel titles the RIGHT
-// record before rotation), the narrative maintainer (axx/main: storyline
+// brain summarizes the final transcript window, the decision ledger consumes
+// it, mission intel titles the RIGHT record before rotation, then the narrative maintainer (axx/main: storyline
 // dossiers fold the meeting in), then the Track-2 rollup tiers — meeting digest
 // (consumes the fresh brains: the closing meeting's cumulative T2 digest),
 // day digest (folds the fresh meeting digests into the local-day T3 slices),
@@ -1638,7 +1637,6 @@ func closeFlushChain() []ambientAgentConfig {
 	return []ambientAgentConfig{
 		meetingBrainAgent(),
 		decisionLedgerAgent(),
-		meetingBoardAgent(),
 		missionIntelligenceAgent(),
 		narrativeMaintainerAgent(),
 		meetingDigestAgent(),
@@ -1820,7 +1818,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 }
 
 func compatibleAmbientScopePrefix(inputs []meetingMemoryEntry) []meetingMemoryEntry {
-	roomID, sittingID := "", ""
+	roomID, sittingID, mediaGeneration := "", "", ""
 	for index, entry := range inputs {
 		visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
 		if visibility != "room" && visibility != "room_only" {
@@ -1828,11 +1826,12 @@ func compatibleAmbientScopePrefix(inputs []meetingMemoryEntry) []meetingMemoryEn
 		}
 		entryRoom := normalizeRoomID(entry.Metadata["roomId"])
 		entrySitting := firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"]))
+		entryGeneration := strings.TrimSpace(entry.Metadata["mediaGeneration"])
 		if roomID == "" {
-			roomID, sittingID = entryRoom, entrySitting
+			roomID, sittingID, mediaGeneration = entryRoom, entrySitting, entryGeneration
 			continue
 		}
-		if entryRoom != roomID || entrySitting != sittingID {
+		if entryRoom != roomID || entrySitting != sittingID || entryGeneration != mediaGeneration {
 			return inputs[:index]
 		}
 	}
@@ -1847,6 +1846,9 @@ func ambientDerivedScopeMetadata(inputs []meetingMemoryEntry) map[string]string 
 			metadata["visibility"] = "room_only"
 			metadata["roomId"] = normalizeRoomID(entry.Metadata["roomId"])
 			metadata["sittingId"] = firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"]))
+			if generation := strings.TrimSpace(entry.Metadata["mediaGeneration"]); generation != "" {
+				metadata["mediaGeneration"] = generation
+			}
 		}
 	}
 	return metadata
@@ -1868,7 +1870,13 @@ func ambientServicePrincipalForInputs(inputs []meetingMemoryEntry) RecallPrincip
 	if len(inputs) > 0 {
 		sittingID = firstNonEmptyString(strings.TrimSpace(inputs[0].Metadata["sittingId"]), strings.TrimSpace(inputs[0].Metadata["meetingId"]))
 	}
-	return sharedRoomRecallPrincipal(roomID, sittingID)
+	principal := sharedRoomRecallPrincipal(roomID, sittingID)
+	if len(inputs) > 0 {
+		if generation, err := strconv.ParseUint(strings.TrimSpace(inputs[0].Metadata["mediaGeneration"]), 10, 64); err == nil {
+			principal.MediaGeneration = generation
+		}
+	}
+	return principal
 }
 
 func (store *meetingMemoryStore) latestEntryIDOfKind(kind string) string {

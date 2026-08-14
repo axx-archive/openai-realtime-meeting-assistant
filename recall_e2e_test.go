@@ -18,7 +18,8 @@ package main
 //       null-meetingId huddle), organized sections, importance-ranked,
 //       hedged attribution, verbatim ledger decisions — never keyword scraps.
 //   G2  the same query's MODEL input is token-bounded and the base64
-//       artifact blob is structurally absent; the pinned digest lane leads.
+//       artifact blob is structurally absent; exact-source meeting digests
+//       lead while unbound recursive day summaries stay out.
 //   G3  "status of the pricing sheet" answers LEDGER-first: closed history
 //       (done, owner, validity window) stays findable.
 //   G4  "what did we decide on the launch date" ranks the CURRENT decision
@@ -59,6 +60,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -148,10 +150,13 @@ func recallGoldEntries(fx *recallGoldFixture) []meetingMemoryEntry {
 			Metadata: map[string]string{"meetingId": meetingID, "speaker": speaker, "source": "transcript_lane"},
 		}
 	}
-	brain := func(id, meetingID, text string, at, from, through time.Time) meetingMemoryEntry {
+	brain := func(id, meetingID, text string, at, from, through time.Time, fromID, throughID string, count int) meetingMemoryEntry {
 		metadata := map[string]string{
 			"fromTranscriptCreatedAt":    from.Format(time.RFC3339),
 			"throughTranscriptCreatedAt": through.Format(time.RFC3339),
+			"fromTranscriptId":           fromID,
+			"throughTranscriptId":        throughID,
+			"transcriptCount":            strconv.Itoa(count),
 		}
 		if meetingID != "" {
 			metadata["meetingId"] = meetingID
@@ -173,12 +178,13 @@ func recallGoldEntries(fx *recallGoldFixture) []meetingMemoryEntry {
 		tx("tx-a4", fx.meetingA, "Caitlyn", "Stripe sandbox access is blocked for the payments test.", fx.at(fx.day1, 10, 12)),
 		brain("brain-a1", fx.meetingA,
 			"## Overview\nPackaging pilot kickoff: vendor Zebra chosen, launch targeted for July 24, Tyler owns the pricing sheet, Stripe sandbox access blocked.\n## Transcript reference\ntx-a1, tx-a2, tx-a3, tx-a4",
-			fx.at(fx.day1, 10, 30), fx.at(fx.day1, 10, 0), fx.at(fx.day1, 10, 15)),
+			fx.at(fx.day1, 10, 30), fx.at(fx.day1, 10, 0), fx.at(fx.day1, 10, 15), "tx-a1", "tx-a4", 4),
 		decision("dec-gold-1", fx.meetingA, "Choose vendor Zebra for the packaging pilot.", fx.at(fx.day1, 11, 0)),
-		// ---- day 1: legacy huddle (null meetingId — pre-scoping history) ----
-		brain("brain-legacy-1", "",
+		// ---- day 1: migrated legacy huddle (now exact-source bound) ----
+		tx("tx-legacy-1", fx.legacyKey, "Joel", "I resolved the login outage.", fx.at(fx.day1, 12, 0)),
+		brain("brain-legacy-1", fx.legacyKey,
 			"## Overview\nLegacy huddle: Joel resolved the login outage.",
-			fx.at(fx.day1, 12, 0), fx.at(fx.day1, 12, 0), fx.at(fx.day1, 12, 0)),
+			fx.at(fx.day1, 12, 1), fx.at(fx.day1, 12, 0), fx.at(fx.day1, 12, 0), "tx-legacy-1", "tx-legacy-1", 1),
 		// ---- day 1: the artifact blob (the 2.6MB-class pathology) ----
 		{
 			ID: "art-gold-blob", Kind: meetingMemoryKindOSArtifact,
@@ -190,19 +196,22 @@ func recallGoldEntries(fx *recallGoldFixture) []meetingMemoryEntry {
 		tx("tx-c1", fx.meetingC, "Erick", "Warehouse audit kicked off.", fx.at(fx.day1, 19, 30)),
 		brain("brain-c1", fx.meetingC,
 			"## Overview\nOps marathon: warehouse audit kicked off.\n## Transcript reference\ntx-c1",
-			fx.at(fx.day1, 20, 0), fx.at(fx.day1, 19, 0), fx.at(fx.day1, 19, 45)),
+			fx.at(fx.day1, 20, 0), fx.at(fx.day1, 19, 0), fx.at(fx.day1, 19, 45), "tx-c1", "tx-c1", 1),
+		tx("tx-c-mid", fx.meetingC, "Erick", "The overnight shift coverage plan is active.", fx.at(fx.day2, 6, 0)),
 		// ---- day 2: meeting B (pricing sync) ----
 		tx("tx-b1", fx.meetingB, "AJ", "The launch moves out a week to July 31.", fx.at(fx.day2, 9, 0)),
 		tx("tx-b2", fx.meetingB, "Caitlyn", "Stripe sandbox access is still blocked.", fx.at(fx.day2, 9, 5)),
+		tx("tx-b4", fx.meetingB, "Tyler", "The pricing sheet is done.", fx.at(fx.day2, 9, 6)),
+		tx("tx-b3", fx.meetingB, "AJ", "We need warehouse audit staffing.", fx.at(fx.day2, 9, 8)),
 		brain("brain-b1", fx.meetingB,
 			"## Overview\nPricing sync: launch moved to July 31 (July 24 superseded), pricing sheet done, Stripe sandbox still blocked.\n## Transcript reference\ntx-b1, tx-b2",
-			fx.at(fx.day2, 9, 30), fx.at(fx.day2, 9, 0), fx.at(fx.day2, 9, 10)),
+			fx.at(fx.day2, 9, 30), fx.at(fx.day2, 9, 0), fx.at(fx.day2, 9, 10), "tx-b1", "tx-b3", 4),
 		decision("dec-gold-2", fx.meetingB, "Launch moved to July 31.", fx.at(fx.day2, 10, 0)),
 		// ---- day 3: marathon meeting C ends ----
 		tx("tx-c2", fx.meetingC, "Erick", "Warehouse audit finished with two findings to file.", fx.at(fx.day3, 7, 30)),
 		brain("brain-c2", fx.meetingC,
 			"## Overview\nOps marathon wrap: audit finished, two findings to file (Erick).\n## Transcript reference\ntx-c2",
-			fx.at(fx.day3, 9, 0), fx.at(fx.day2, 22, 0), fx.at(fx.day3, 7, 45)),
+			fx.at(fx.day3, 9, 0), fx.at(fx.day2, 6, 0), fx.at(fx.day3, 7, 45), "tx-c-mid", "tx-c2", 2),
 	}
 }
 
@@ -242,16 +251,17 @@ func (fx *recallGoldFixture) meetingDigestJSON(key string) (string, bool) {
 				// against meeting C's "Warehouse audit kickoff" (token jaccard
 				// 0.5): the pass must spend its ONE batched adjudication call
 				// here, and the "different" verdict must keep two records.
-				{T: "Warehouse audit staffing", At: fx.rfc(fx.day2, 9, 8), Importance: 2},
+				{T: "Warehouse audit staffing", Anchor: "tx-b3", At: fx.rfc(fx.day2, 9, 8), Importance: 2},
 			},
 			Decisions: []meetingDigestDecision{
-				// carried-forward continuity row: the day-1 call flipped
-				// terminal on day 2 → the ledger CLOSES its validity window.
-				{D: "Target the launch for July 24", By: "attributed to AJ", Status: "superseded", Anchor: "tx-a3", At: fx.rfc(fx.day2, 9, 0), Importance: 4},
+				// The day-2 source itself says the prior call moved, so this
+				// terminal continuity fact is bound to current day-2 evidence rather
+				// than reaching across meetings to reuse the old source anchor.
+				{D: "Target the launch for July 24", By: "attributed to AJ", Status: "superseded", Anchor: "tx-b1", At: fx.rfc(fx.day2, 9, 0), Importance: 4},
 				{D: "Launch moved to July 31", By: "attributed to AJ", Status: "decided", Anchor: "tx-b1", At: fx.rfc(fx.day2, 9, 0), Importance: 5},
 			},
 			ActionItems: []meetingDigestAction{
-				{A: "Draft the pricing sheet", Owner: "Tyler", Status: "done", At: fx.rfc(fx.day2, 9, 5), Importance: 3},
+				{A: "Draft the pricing sheet", Owner: "Tyler", Status: "done", Anchor: "tx-b4", At: fx.rfc(fx.day2, 9, 5), Importance: 3},
 			},
 			OpenQuestions: []meetingDigestQuestion{
 				{Q: "Stripe sandbox access blocked for the payments test", Anchor: "tx-b2", At: fx.rfc(fx.day2, 9, 5), Importance: 4},
@@ -264,7 +274,7 @@ func (fx *recallGoldFixture) meetingDigestJSON(key string) (string, bool) {
 			Attendees: []string{"Erick"},
 			Topics: []meetingDigestTopic{
 				{T: "Warehouse audit kickoff", Anchor: "tx-c1", At: fx.rfc(fx.day1, 19, 30), Importance: 3},
-				{T: "Overnight shift coverage plan", At: fx.rfc(fx.day2, 6, 0), Importance: 2},
+				{T: "Overnight shift coverage plan", Anchor: "tx-c-mid", At: fx.rfc(fx.day2, 6, 0), Importance: 2},
 			},
 			ActionItems: []meetingDigestAction{
 				{A: "File the warehouse audit findings", Owner: "Erick", Status: "open", Anchor: "tx-c2", At: fx.rfc(fx.day3, 7, 30), Importance: 4},
@@ -275,7 +285,7 @@ func (fx *recallGoldFixture) meetingDigestJSON(key string) (string, bool) {
 		payload = meetingDigestPayload{
 			MeetingID: key, Title: "Legacy huddle", Day: fx.d1,
 			Topics: []meetingDigestTopic{
-				{T: "Login outage resolved by Joel", At: fx.rfc(fx.day1, 12, 0), Importance: 3},
+				{T: "Login outage resolved by Joel", Anchor: "tx-legacy-1", At: fx.rfc(fx.day1, 12, 0), Importance: 3},
 			},
 		}
 	default:
@@ -575,23 +585,19 @@ func TestRecallGoldEvalSet(t *testing.T) {
 		if len(contextEntries) == 0 {
 			t.Fatal("ranged query returned no context")
 		}
-		// the pinned digest lane leads: day rollups first, oldest day first
-		if contextEntries[0].Kind != meetingMemoryKindDayDigest {
-			t.Fatalf("context[0] kind=%s, want the day digest lane to lead", contextEntries[0].Kind)
+		// Generic model context may receive exact-source meeting facts, but the
+		// recursively summarized day tier has no per-fact authority edge and is
+		// therefore withheld. The deterministic briefing path re-folds days.
+		if contextEntries[0].Kind != meetingMemoryKindMeetingDigest {
+			t.Fatalf("context[0] kind=%s, want an exact-source meeting digest", contextEntries[0].Kind)
 		}
-		days := map[string]bool{}
 		meetings := map[string]bool{}
 		for _, entry := range contextEntries {
 			switch entry.Kind {
 			case meetingMemoryKindDayDigest:
-				days[entry.Metadata[digestDayMetadataKey]] = true
+				t.Fatalf("unbound day digest entered generic model context: %+v", entry)
 			case meetingMemoryKindMeetingDigest:
 				meetings[digestEntryKey(entry)] = true
-			}
-		}
-		for _, day := range []string{fx.d1, fx.d2, fx.d3} {
-			if !days[day] {
-				t.Fatalf("context missing day digest %s (got %v)", day, days)
 			}
 		}
 		for _, key := range []string{fx.meetingA, fx.meetingB, fx.meetingC, fx.legacyKey} {

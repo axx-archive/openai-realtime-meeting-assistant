@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Alert,
   Dimensions,
   FlatList,
@@ -15,6 +16,7 @@ import {
   Text,
   TextInput,
   View,
+  findNodeHandle,
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -74,6 +76,8 @@ type Props = {
   onModeChange: (mode: RoomConversationMode) => void;
   onSendMessage: (text: string) => boolean;
   onOpenArtifact?: (artifactId: string, title: string) => void;
+  meetingRecordAvailable?: boolean;
+  onOpenMeetingRecord?: (mode: Exclude<RoomConversationMode, 'chat'>) => void;
 };
 
 function normalizedIdentity(value: unknown): string {
@@ -227,6 +231,8 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   onModeChange,
   onSendMessage,
   onOpenArtifact,
+  meetingRecordAvailable,
+  onOpenMeetingRecord,
 }: Props) {
   const safeArea = useSafeAreaInsets();
   const chatListRef = useRef<FlatList<ChatItem>>(null);
@@ -238,6 +244,44 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(8);
+  const recapListRef = useRef<ScrollView>(null);
+  const meetingRecordButtonRef = useRef<React.ElementRef<typeof Pressable>>(null);
+  const transcriptOffsetRef = useRef(0);
+  const recapOffsetRef = useRef(0);
+  const restoreMeetingOriginRef = useRef(false);
+
+  useEffect(() => {
+    if (!visible || !restoreMeetingOriginRef.current || mode === 'chat') return;
+    restoreMeetingOriginRef.current = false;
+    requestAnimationFrame(() => {
+      if (mode === 'transcript') transcriptListRef.current?.scrollToOffset({ offset: transcriptOffsetRef.current, animated: false });
+      else recapListRef.current?.scrollTo({ y: recapOffsetRef.current, animated: false });
+      requestAnimationFrame(() => {
+        const handle = findNodeHandle(meetingRecordButtonRef.current);
+        if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+      });
+    });
+  }, [mode, visible]);
+
+  const openPermanentRecord = useCallback(() => {
+    if (mode === 'chat' || !meetingRecordAvailable || !onOpenMeetingRecord) return;
+    restoreMeetingOriginRef.current = true;
+    onOpenMeetingRecord(mode);
+  }, [meetingRecordAvailable, mode, onOpenMeetingRecord]);
+
+  const meetingRecordAction = meetingRecordAvailable && mode !== 'chat' ? (
+    <Pressable
+      ref={meetingRecordButtonRef}
+      accessibilityHint="Opens the permanent governed record. Back returns to this exact live meeting view."
+      accessibilityLabel="Open permanent Meeting Record"
+      accessibilityRole="button"
+      onPress={openPermanentRecord}
+      style={({ pressed }) => [styles.meetingRecordAction, pressed && styles.pressed]}
+    >
+      <SymbolView name="doc.text.magnifyingglass" tintColor="#FF8A5B" size={15} />
+      <Text style={styles.meetingRecordActionText}>Open Meeting Record</Text>
+    </Pressable>
+  ) : null;
 
   const measureSheetKeyboardOffset = useCallback(() => {
     requestAnimationFrame(() => {
@@ -599,6 +643,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
           </>
         ) : mode === 'transcript' ? (
           <FlatList
+            ListHeaderComponent={meetingRecordAction}
             ListEmptyComponent={(
               <View style={styles.emptyState}>
                 <SymbolView name="captions.bubble" tintColor="rgba(255,255,255,0.35)" size={28} />
@@ -613,7 +658,10 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             onLayout={transcriptTail.onLayout}
             onMomentumScrollBegin={transcriptTail.onMomentumScrollBegin}
             onMomentumScrollEnd={transcriptTail.onMomentumScrollEnd}
-            onScroll={transcriptTail.onScroll}
+            onScroll={(event) => {
+              transcriptOffsetRef.current = event.nativeEvent.contentOffset.y;
+              transcriptTail.onScroll(event);
+            }}
             onScrollBeginDrag={transcriptTail.onScrollBeginDrag}
             onScrollEndDrag={transcriptTail.onScrollEndDrag}
             ref={transcriptListRef}
@@ -622,7 +670,14 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             style={styles.list}
           />
         ) : (
-          <ScrollView contentContainerStyle={[styles.recapContent, { paddingBottom: Math.max(safeArea.bottom, space[6]) }]} style={styles.list}>
+          <ScrollView
+            contentContainerStyle={[styles.recapContent, { paddingBottom: Math.max(safeArea.bottom, space[6]) }]}
+            onScroll={(event) => { recapOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+            ref={recapListRef}
+            scrollEventThrottle={100}
+            style={styles.list}
+          >
+            {meetingRecordAction}
             <View style={styles.recapStatusCard}>
               <View style={styles.recapStatusRow}>
                 <View style={[styles.recapStatusDot, intelligence?.transcript.state !== 'listening' && styles.recapStatusDotWarning]} />
@@ -744,6 +799,8 @@ const styles = StyleSheet.create({
   recapFactCopy: { minWidth: 0, flex: 1, gap: 2 },
   recapFactText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
   recapFactMeta: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
+  meetingRecordAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.36)', backgroundColor: 'rgba(255,90,25,0.08)' },
+  meetingRecordActionText: { ...type.button, color: '#FF8A5B' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
   scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: 'rgba(255,90,25,0.10)' },
   scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },

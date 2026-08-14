@@ -20,8 +20,7 @@ test('private Scout realtime is owned above navigation and Canvas only controls 
   assert.ok(providerCloseIndex > navigationIndex);
   assert.match(canvas, /const realtime = usePersonalRealtimeContext\(\)/);
   assert.doesNotMatch(canvas, /from '\.\.\/realtime\/usePersonalRealtime'/);
-  assert.match(canvas, /if \(realtime\.active\)[\s\S]*realtime\.stop\('completed'\)/);
-  assert.match(canvas, /await realtime\.start\(\)/);
+  assert.match(canvas, /await runPersonalRealtimeTap\(realtime\)/);
   const sendOpening = canvas.slice(canvas.indexOf('const sendOpening'), canvas.indexOf('const voiceNotice'));
   assert.doesNotMatch(sendOpening, /realtime\.stop/);
 });

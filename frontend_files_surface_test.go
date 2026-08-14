@@ -217,7 +217,12 @@ func TestIndexArtifactStageSaveToFiles(t *testing.T) {
 	for _, want := range []string{
 		"function artifactQualifiesForFiles(entry)",
 		"function artifactSaveToFilesControl(entry, options = {})",
-		"fetch('/assistant/files/save', {",
+		"fetch('/api/artifact-drive-saves/v1', {",
+		"sameArtifactDispositionRef(receipt?.artifact, dispositionRef)",
+		"async function openDriveFileByID(fileId)",
+		"button.textContent = 'Open in Drive'",
+		"scout-chat-work-card__project",
+		"Project · ${projectTitle}",
 		"body: JSON.stringify({ artifactId })",
 		"const readyLabel = String(options.readyLabel || 'Save to Drive')",
 		"const savedLabel = String(options.savedLabel || 'Saved to Drive')",

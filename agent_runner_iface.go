@@ -20,7 +20,7 @@ type AgentJob struct {
 	Mode        string            // research|design|grill|workflow|artifacts|goal
 	Objective   string            // the user's goal text (thread.Query)
 	Authority   string            // read_only|workspace_write|external_write
-	Context     AgentJobContext   // board snapshot, memory window, domain vocab
+	Context     AgentJobContext   // current authorized source window and domain vocab
 	Origin      map[string]string // originKind/originId/originMeetingId (delivery)
 	RequestedBy string            // signed-in email; provenance + authority checks
 
@@ -33,11 +33,23 @@ type AgentJob struct {
 	thread scoutAgentThread // full launch record for the wrapper providers
 }
 
-// AgentJobContext is the read-only working context handed to a runner. It is a
-// snapshot taken at launch so a slow provider never reads a mutating board.
+// AgentJobContext is the read-only working context handed to a runner. Board is
+// retained only for decoding older provider receipts; new jobs leave it empty
+// and use current authorized sources plus server-owned Work/Project bindings.
 type AgentJobContext struct {
 	Board  kanbanBoardState
 	Memory []meetingMemoryEntry
+}
+
+func activeAgentMemory(entries []meetingMemoryEntry) []meetingMemoryEntry {
+	filtered := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindBoardUpdate {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 // AgentCapabilities is what a provider can physically do. The /goal engine
@@ -108,7 +120,7 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 	principal, principalOK := app.agentThreadRecallPrincipal(requestedBy, meta)
 	var memory []meetingMemoryEntry
 	if principalOK {
-		memory = app.memorySnapshotForPrincipal(context.Background(), principal, 20)
+		memory = activeAgentMemory(app.memorySnapshotForPrincipal(context.Background(), principal, 20))
 	}
 	job := AgentJob{
 		JobID:       thread.ID,
@@ -117,7 +129,7 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 		Mode:        thread.Mode,
 		Objective:   firstNonEmptyString(strings.TrimSpace(meta["objective"]), thread.Query),
 		Authority:   authority,
-		Context:     AgentJobContext{Board: app.snapshotState(), Memory: memory},
+		Context:     AgentJobContext{Memory: memory},
 		Origin:      agentJobOrigin(meta),
 		RequestedBy: requestedBy,
 		thread:      thread,

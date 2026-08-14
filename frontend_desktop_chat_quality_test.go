@@ -234,6 +234,20 @@ func TestDesktopChatSendRenderIsOneScrollStableTransaction(t *testing.T) {
 
 func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 	html := desktopChatQualityHTML(t)
+	if strings.Contains(html, `#chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatForm`) {
+		t.Fatal("opening a side reply thread still hides the independent main-channel composer")
+	}
+	for _, want := range []string{
+		`<form id="scoutChatForm" class="scout-chat-form">`,
+		`<form id="chatContextReplyForm" class="chat-context-reply" hidden>`,
+		`scoutChatForm.addEventListener('submit', sendScoutChatFromForm)`,
+		`chatContextReplyForm?.addEventListener('submit', submitDesktopThreadReply)`,
+		`replyToMessageId: state.rootMessageId`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("desktop dual-composer contract missing %q", want)
+		}
+	}
 	if strings.Contains(html, "No replies yet. Start the side conversation here.") {
 		t.Fatal("desktop thread rail still renders the redundant empty-state instruction")
 	}

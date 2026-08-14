@@ -125,6 +125,10 @@ func handleScoutHomeOpening(w http.ResponseWriter, r *http.Request, app *kanbanB
 	if strings.TrimSpace(opening.ProjectContextToken) != "" {
 		destination := homeProjectDestination{Route: "new-private"}
 		acceptedPending := app.acceptedScoutHomeProjectRetry(user, key, text, opening.ProjectContextToken)
+		if !acceptedPending {
+			writeAuthError(w, http.StatusConflict, errManualProjectAttachmentRetired.Error())
+			return
+		}
 		err = withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
 			var resolveErr error
 			projectToken, resolveErr = resolveHomeProjectTokenForRetry(r.Context(), opening.ProjectContextToken, text, destination, snapshot, acceptedPending)
@@ -611,6 +615,28 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 	// on events that happened after it was asked.
 	var history []scoutChatTurn
 	query := strings.TrimSpace(userMessage.Text)
+	// Home is another entrance into the same private Scout conversation, not a
+	// different intelligence product. Resolve an explicit meeting/time request
+	// through the server-owned briefing plane before the generic router/provider
+	// so a brand-new conversation has exact parity with an existing typed thread
+	// and Realtime voice.
+	if !conversationRequestsDurableMeetingWork(query) {
+		if briefingRange, ok := conversationMeetingBriefingRange(query, time.Now()); ok {
+			principal := app.recallPrincipalForMemberRoom(user.Email, app.memberCurrentRoom(user.Email))
+			briefing, _, err := app.crossMeetingBriefingToolForPrincipal(map[string]any{"range": briefingRange}, principal)
+			if err != nil {
+				return scoutChatMessageRecord{}, err
+			}
+			answer := strings.TrimSpace(asString(briefing["briefing"]))
+			if answer == "" {
+				answer = "Nothing currently authorized was captured in meeting memory for that range."
+			}
+			return scoutChatMessageRecord{
+				Kind: "message", Role: "scout", AuthorName: scoutParticipantName,
+				IntentOutcome: string(conversationIntentConversationalReply), CausedByMessageID: userMessage.ID, Text: answer,
+			}, nil
+		}
+	}
 	if verdict := app.routeScoutChatTurn(ctx, query, history); verdict != nil {
 		if proposal := verdict.proposal; proposal != nil {
 			return scoutChatMessageRecord{Kind: scoutChatMessageKindProposal, Role: "scout", Text: proposal.Summary, Proposal: proposal, proposalSource: verdict.source}, nil

@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 23 {
-		t.Fatalf("migration count = %d, want 23", len(migrations))
+	if len(migrations) != 24 {
+		t.Fatalf("migration count = %d, want 24", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -253,6 +253,13 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[22].SQL, "source_manifest_version") ||
 		!strings.Contains(migrations[22].SQL, "stride_project_associations_authorized_current_v2") {
 		t.Fatalf("unexpected Project reply media migration: %+v", migrations[22])
+	}
+	if len(migrations) < 24 || migrations[23].Version != 24 || migrations[23].Name != "0024_ambient_replay_promotions.sql" ||
+		migrations[23].SHA256 != sha256.Sum256([]byte(migrations[23].SQL)) ||
+		!strings.Contains(migrations[23].SQL, "CREATE TABLE ambient_intelligence_replay_promotions") ||
+		!strings.Contains(migrations[23].SQL, "ambient replay promotion requires exact completed meeting digest stage") ||
+		!strings.Contains(migrations[23].SQL, "ambient replay promotion receipts are immutable") {
+		t.Fatalf("unexpected ambient replay promotion migration: %+v", migrations[23])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

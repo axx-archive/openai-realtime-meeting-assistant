@@ -154,7 +154,6 @@ function WorkSegment() {
     hint: string;
     icon: SFSymbol;
   }> = [
-    { route: 'Board', label: 'Board', hint: 'Cards and decisions', icon: 'rectangle.3.group.fill' },
     { route: 'Profile', label: 'Profile', hint: 'Identity and public profile', icon: 'person.crop.circle.fill' },
     { route: 'WorkRecord', label: 'Work record', hint: 'Verified contributions and organizations', icon: 'checkmark.seal.fill' },
     { route: 'NetworkPreview', label: 'Network', hint: 'Preview, search, contact, and blocks', icon: 'point.3.connected.trianglepath.dotted' },

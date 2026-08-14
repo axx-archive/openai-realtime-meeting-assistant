@@ -395,11 +395,10 @@ func TestIndexUnifiedPushChannelConsumer(t *testing.T) {
 		"osEventsDispatchHandlers(event)",
 		// rich consumers fetch-by-ref, coalesced so a burst is one fetch
 		"function osEventsRefetchPackages()",
-		"function osEventsRefetchBoard()",
 		"loadPackages(true)",
 		"const osEventsRefetchDebounceMs = 500",
 		"osEventsPackagesTimer = setTimeout(",
-		"osEventsBoardTimer = setTimeout(",
+		"scheduleArtifactProgressRefresh(event.ref)",
 		// every kind is routed
 		"case 'artifact_completed':",
 		"case 'artifact_progress':",

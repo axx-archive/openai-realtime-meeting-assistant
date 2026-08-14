@@ -216,6 +216,8 @@ type scoutChatThreadRef struct {
 	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
 	AttentionReason string  `json:"attentionReason,omitempty"`
 	StartedAt       string  `json:"startedAt,omitempty"`
+	ProjectID       string  `json:"projectId,omitempty"`
+	ProjectTitle    string  `json:"projectTitle,omitempty"`
 }
 
 // scoutChatWorkRecordRef is the conversation projection of a governed Work
@@ -344,6 +346,7 @@ func scoutChatThreadRefForAgent(thread scoutAgentThread, profile STRIDEProductAg
 		AgentID: profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
 		CurrentStage: thread.Artifact.Metadata["currentStage"], ProgressPercent: progress,
 		ProgressNote: thread.Artifact.Metadata["progressNote"], AttentionReason: scoutChatThreadAttentionReason(thread.Artifact.Metadata), StartedAt: thread.Artifact.Metadata["startedAt"],
+		ProjectID: thread.Artifact.Metadata["projectWorkId"], ProjectTitle: thread.Artifact.Metadata["projectWorkTitle"],
 	}
 }
 
@@ -698,6 +701,11 @@ type scoutChatThreadRecord struct {
 	// VoiceSession is server-only. It binds an explicit private Realtime session
 	// to this exact owner-only thread and is stripped from every viewer response.
 	VoiceSession *scoutChatVoiceSessionBinding `json:"voiceSession,omitempty"`
+	// MeetingRecord is a server-only, body-free binding for an ordinary private
+	// conversation opened from a permanent Meeting Record. Every turn
+	// reauthorizes the exact record revision and transcript sources before model
+	// admission; viewer projections strip this journal field.
+	MeetingRecord *scoutChatMeetingRecordBinding `json:"meetingRecord,omitempty"`
 	// LegacyConversationOperations are server-only compatibility aliases. They
 	// never appear in viewer projections and cannot select a tool or authority.
 	LegacyConversationOperations []scoutChatLegacyConversationOperation `json:"legacyConversationOperations,omitempty"`
@@ -1173,10 +1181,16 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			ID: operationID, BodyDigest: bodyDigest,
 		})
 		if encodedToken := strings.TrimSpace(payload.ProjectContextToken); encodedToken != "" {
+			tokenDigest := homeProjectTokenDigest(encodedToken)
+			acceptedRetry := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, tokenDigest)
+			if !acceptedRetry {
+				writeAuthError(w, http.StatusConflict, errManualProjectAttachmentRetired.Error())
+				return
+			}
 			var projectToken homeProjectContextToken
 			var projectManifest projectChatSourceManifest
 			resolveErr := withCurrentHomeProjectAuthority(r, func(snapshot StrideE10TenantAuthoritySnapshot) error {
-				acceptedPending := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, homeProjectTokenDigest(encodedToken))
+				acceptedPending := acceptedRetry
 				destination := homeProjectDestination{Route: "thread", ThreadID: threadID}
 				handles := make([]projectChatAttachmentHandle, 0, len(payload.Files))
 				for _, file := range payload.Files {
@@ -1758,6 +1772,24 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 }
 
 func (app *kanbanBoardApp) replayConversationTurnInThread(ctx context.Context, viewerEmail string, thread scoutChatThreadRecord, operation conversationTurnOperation) (map[string]any, bool, error) {
+	if thread.MeetingRecord != nil && !app.meetingRecordConversationBindingCurrent(viewerEmail, thread) {
+		projected := app.projectScoutChatThreadForViewer(viewerEmail, thread)
+		for _, message := range projected.Messages {
+			if message.SourceOperationID != operation.ID {
+				continue
+			}
+			if message.SourceOperationDigest != operation.BodyDigest {
+				return nil, true, fmt.Errorf("%w: conversation operation id was reused with different content", ErrSTRIDEConversationConflict)
+			}
+			for _, candidate := range projected.Messages {
+				if candidate.CausedByMessageID == message.ID {
+					return map[string]any{"ok": true, "message": message, "answer": candidate, "thread": projected,
+						"intentOutcome": candidate.IntentOutcome, "replayed": true, "providerCalls": 0, "providerExecutionFenced": true}, true, nil
+				}
+			}
+			return nil, true, fmt.Errorf("Meeting Record conversation is unavailable at its bound revision")
+		}
+	}
 	for _, message := range thread.Messages {
 		if message.SourceOperationID != operation.ID {
 			continue
@@ -1978,6 +2010,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		if replay, found, replayErr := app.replayConversationTurnInThread(ctx, user.Email, thread, turnOperation); found || replayErr != nil {
 			return replay, replayErr
 		}
+	}
+	if thread.MeetingRecord != nil && (len(files) > 0 || strings.TrimSpace(replyToMessageID) != "" ||
+		strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != "" || projectLinkBinding.Token.Kind != "") {
+		return nil, fmt.Errorf("Meeting Record questions accept text only and do not widen their exact source window")
 	}
 	replyTo, err := scoutChatReplyRefFromThread(thread, replyToMessageID)
 	if err != nil {
@@ -2305,6 +2341,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}
 	}
 	history := app.scoutChatHistoryForViewer(user.Email, historyThread)
+	var meetingConversation *meetingRecordConversationContext
 
 	// @-mention bell nudges are collaborative-channel behavior only, and only
 	// for messages that actually persisted: every commit in this function goes
@@ -2369,6 +2406,28 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	response := map[string]any{
 		"ok":      true,
 		"message": userMessage,
+	}
+	if thread.MeetingRecord != nil {
+		meetingConversation, err = app.currentMeetingRecordConversationContext(ctx, user, thread)
+		if err != nil {
+			unavailable := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+				AuthorName: scoutParticipantName, IntentOutcome: string(conversationIntentUnavailable), CausedByMessageID: userMessage.ID,
+				Text:      "This Meeting Record is unavailable at its bound revision. I did not search a wider audience or launch any work.",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailable)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailable
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			response["unavailable"] = map[string]any{"code": "meeting_record_unavailable", "message": unavailable.Text}
+			response["providerCalls"] = 0
+			response["providerExecutionFenced"] = true
+			return response, nil
+		}
 	}
 
 	// Image requests use the router's proposal-shaped output only as an internal
@@ -2467,6 +2526,27 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != ""
 	if explicitScoutEngagement {
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
+		_, directMeetingBriefing := conversationMeetingBriefingRange(text, time.Now())
+		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil &&
+			(!directMeetingBriefing || conversationRequestsDurableMeetingWork(text)) {
+			principal := app.recallPrincipalForMemberRoom(user.Email, app.memberCurrentRoom(user.Email))
+			meetingRef, meetingSourceRequested, meetingRefErr := app.meetingRangeContextRefForPrincipal(ctx, principal, text, time.Now())
+			if meetingRefErr != nil {
+				return nil, meetingRefErr
+			}
+			if meetingSourceRequested {
+				sourceNeed.Required = true
+				sourceNeed.Work = sourceNeed.Work || conversationRequestsDurableMeetingWork(text)
+				sourceNeed.FileName = ""
+				sourceNeed.FileSize = 0
+				sourceNeed.StoredOnly = false
+				sourceNeed.Missing = strings.TrimSpace(meetingRef) == ""
+				sourceNeed.MissingMessage = "I couldn't find any currently authorized Meeting Records in that range. I did not widen into another person's meetings or launch source-free work."
+				if meetingRef != "" {
+					sourceNeed.ContextRefs = canonicalAssistantContextRefs(append(sourceNeed.ContextRefs, meetingRef))
+				}
+			}
+		}
 		if sourceNeed.Required && sourceNeed.Missing {
 			assistantMessage := scoutChatMissingSourceResponse(sourceNeed)
 			assistantMessage.IntentOutcome = string(conversationIntentUnavailable)
@@ -2486,6 +2566,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			return response, nil
 		}
 		ctx = withAssistantContextRefs(ctx, sourceNeed.ContextRefs)
+	}
+	if meetingConversation != nil {
+		if ref := meetingConversation.contextRef(); ref != "" {
+			sourceNeed.ContextRefs = canonicalAssistantContextRefs(append(sourceNeed.ContextRefs, ref))
+			ctx = withAssistantContextRefs(ctx, sourceNeed.ContextRefs)
+		}
 	}
 
 	// A follow-up reply re-runs an existing agent-thread artifact in place
@@ -2772,6 +2858,54 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
+	// An ordinary private conversation that explicitly asks for a time-ranged
+	// meeting briefing already identifies its governed source: the requester's
+	// current, authorized meeting memory. Route voice and typed Scout through the
+	// same deterministic recall plane instead of letting the generic classifier
+	// ask whether to use Calendar or user-provided notes. Public channels never
+	// widen into private meeting memory, and an exact Meeting Record conversation
+	// remains confined to its bound sitting above.
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil && !conversationRequestsDurableMeetingWork(text) {
+		if briefingRange, ok := conversationMeetingBriefingRange(text, time.Now()); ok {
+			principal := app.recallPrincipalForMemberRoom(user.Email, app.memberCurrentRoom(user.Email))
+			briefing, _, briefingErr := app.crossMeetingBriefingToolForPrincipal(map[string]any{"range": briefingRange}, principal)
+			if briefingErr != nil {
+				return nil, briefingErr
+			}
+			answerText := strings.TrimSpace(asString(briefing["briefing"]))
+			if answerText == "" {
+				answerText = "Nothing currently authorized was captured in meeting memory for that range."
+			}
+			assistantMessage := scoutChatMessageRecord{
+				ID:   fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind: "message",
+				Role: "scout",
+				// The recall service is shared, but a current named-agent thread
+				// must keep its visible worker identity. Returning the same governed
+				// briefing as "Scout" would make universal recall look like a silent
+				// agent handoff even though no handoff occurred.
+				AuthorName:        visibleWorkerName,
+				IntentOutcome:     string(conversationIntentConversationalReply),
+				CausedByMessageID: userMessage.ID,
+				Text:              answerText,
+				CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentConversationalReply)
+			response["meetingBriefing"] = map[string]any{
+				"range":    briefing["range"],
+				"source":   briefing["source"],
+				"coverage": briefing["coverage"],
+			}
+			return response, nil
+		}
+	}
+
 	// Direct Board navigation and whole-board destructive language are product
 	// controls, never generic work. Resolve them before the rich-action,
 	// workstream, router, and Q&A paths so no model can turn "clear the Board"
@@ -2887,6 +3021,30 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			}
 		}
 	}
+	if meetingConversation != nil {
+		switch routedIntent.Outcome {
+		case conversationIntentStartPrivateWork:
+			if routedIntent.Work == nil {
+				routedIntent = unavailableConversationDecision("meeting_record_action_unavailable", "That follow-up could not be bound to governed work.", proposalSourceDeterministicGuard)
+				break
+			}
+			work := *routedIntent.Work
+			effectClass := conversationWorkRequiredEffectClass(work, "")
+			if effectClass == "" {
+				effectClass = "governed_effect"
+			}
+			routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
+				EffectClass: effectClass,
+				Summary:     "Meeting follow-up work needs your approval before it starts from this exact record.",
+				Work:        &work,
+			}, Source: routedIntent.Source}
+		case conversationIntentConversationalReply, conversationIntentClarifyOnce, conversationIntentUnavailable, conversationIntentApprovalRequired:
+			// Ordinary answers stay transcript-only. Explicit governed work uses
+			// the existing held proposal and acceptance spine below.
+		default:
+			routedIntent = unavailableConversationDecision("meeting_record_action_unavailable", "That Meeting follow-up is not admitted by the governed work spine.", proposalSourceDeterministicGuard)
+		}
+	}
 	// Work requested from a public/channel surface is never silently converted
 	// into a private launch. Preserve channel mention policy and hold the exact
 	// server-minted work at an audience-expansion confirmation boundary.
@@ -2900,7 +3058,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
 	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {
-		result, changed, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
+		result, _, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
 		answerText := ""
 		if actionErr != nil {
 			answerText = "I couldn't do that: " + actionErr.Error() + "."
@@ -2930,11 +3088,6 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
 		if result != nil {
 			response["actions"] = result["actions"]
-		}
-		if changed {
-			broadcastSignedInKanbanEvent("board", app.snapshotState())
-			broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
-			app.refreshRealtimeBoardContext(routedVerdict.action.ToolID)
 		}
 		return response, nil
 	}
@@ -3140,6 +3293,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// ConversationContinuity adds only body-free revision/source/gap metadata;
 	// raw turn bodies remain the current thread's ACL-governed history.
 	modelQuery = app.prepareConversationContinuityModelQuery(user.Email, thread, modelQuery)
+	if meetingConversation != nil {
+		modelQuery = meetingConversation.modelQuery(text)
+	}
 
 	// The signed, default-off coworker preview adds only body-free STRIDE
 	// authority/freshness lineage to the existing public-channel query. Chat
@@ -3188,7 +3344,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			}
 			return launched, nil
 		}
-		modelQuery = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, modelQuery)
+		if meetingConversation == nil {
+			modelQuery = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, modelQuery)
+		}
 	}
 
 	responseStyle := scoutChatResponseStyle(thread)
@@ -3199,6 +3357,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// of fuzzy memory hits. Legacy ask-bar callers may still use that fallback;
 	// a conversational Scout turn requires an actual model answer.
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, responseStyle))
+	if meetingConversation != nil {
+		answerContext = withAssistantExactSourceContext(answerContext)
+	}
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		// Public-channel turns carry a structured identity/lineage envelope for
 		// the model, but retrieval must rank against what the person actually
@@ -3246,6 +3407,15 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if answer == "" {
 		answer = "no answer yet"
 	}
+	sources := groundAnswerInMessages(answer, thread.Messages, 3)
+	if meetingConversation != nil {
+		sources = meetingConversation.groundAnswer(answer, 4)
+		if len(sources) == 0 {
+			answer = "I can’t ground that answer in a currently authorized transcript interval, so it’s unavailable."
+		} else if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "transcript:") {
+			answer = "Transcript: " + answer
+		}
+	}
 	assistantMessage := scoutChatMessageRecord{
 		ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 		Kind:          "message",
@@ -3258,7 +3428,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// thread's own messages, never by "it was in my context window" — an
 		// answer that quotes nothing carries no chips, visibly, rather than
 		// borrowing unearned authority (design §10, shell §13.5).
-		Sources: groundAnswerInMessages(answer, thread.Messages, 3),
+		Sources: sources,
 	}
 	saved, err := commitUserMessage(userMessage, assistantMessage)
 	if err != nil {
@@ -6419,10 +6589,16 @@ func decodeScoutChatThreadEntry(entry meetingMemoryEntry) (scoutChatThreadRecord
 }
 
 func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
+	title := strings.TrimSpace(thread.Title)
+	preview := strings.TrimSpace(thread.Preview)
+	if thread.MeetingRecord != nil {
+		title = "Meeting Record conversation"
+		preview = "Private conversation bound to an exact Meeting Record revision"
+	}
 	metadata := map[string]string{
 		"ownerEmail":      normalizeAccountEmail(thread.OwnerEmail),
-		"title":           strings.TrimSpace(thread.Title),
-		"preview":         strings.TrimSpace(thread.Preview),
+		"title":           title,
+		"preview":         preview,
 		"visibility":      scoutChatThreadVisibility(thread),
 		"createdAt":       strings.TrimSpace(thread.CreatedAt),
 		"updatedAt":       strings.TrimSpace(thread.UpdatedAt),
@@ -6433,6 +6609,12 @@ func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 		"activeWork":      "",
 		"messageActivity": "[]",
 		"messageCount":    strconv.Itoa(len(thread.Messages)),
+	}
+	// Home recommendation synthesis reads this compact, body-minimized record
+	// from metadata only. It is regenerated at every thread persistence boundary
+	// so its high-water and invalidation receipt cannot lag the saved source.
+	if encoded, err := json.Marshal(homeConversationCompactionForThread(thread)); err == nil {
+		metadata[homeConversationCompactionKey] = string(encoded)
 	}
 	if strings.TrimSpace(thread.CreatedBy) != "" {
 		metadata["createdBy"] = strings.TrimSpace(thread.CreatedBy)
@@ -6511,7 +6693,9 @@ func (store *meetingMemoryStore) backfillScoutChatIndexMetadata() error {
 		if prior.Kind != meetingMemoryKindScoutChat {
 			continue
 		}
-		if _, current := prior.Metadata["messageActivity"]; current {
+		_, hasActivity := prior.Metadata["messageActivity"]
+		_, hasHomeCompaction := prior.Metadata[homeConversationCompactionKey]
+		if hasActivity && hasHomeCompaction {
 			continue
 		}
 		thread, ok := decodeScoutChatThreadEntry(prior)

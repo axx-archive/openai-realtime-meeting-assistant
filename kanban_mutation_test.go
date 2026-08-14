@@ -222,7 +222,7 @@ func TestAddKeyDateToolUpdatesCardWithoutChangingNotes(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	card := app.snapshotState().Cards[0]
 
-	if _, changed, err := app.applyToolCallArgs("add_key_date", map[string]any{
+	if _, changed, err := app.applyRetiredMeetingBoardToolCallArgs("add_key_date", map[string]any{
 		"card_id": card.ID,
 		"label":   "PDF to investors",
 		"date":    "May 24",
@@ -291,7 +291,7 @@ func TestRemoveKeyDatesToolClearsCardDates(t *testing.T) {
 		t.Fatal("updateTicket changed=false, want true")
 	}
 
-	if _, changed, err := app.applyToolCallArgs("remove_key_dates", map[string]any{
+	if _, changed, err := app.applyRetiredMeetingBoardToolCallArgs("remove_key_dates", map[string]any{
 		"card_id":    card.ID,
 		"remove_all": true,
 	}); err != nil {

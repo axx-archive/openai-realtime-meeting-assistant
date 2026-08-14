@@ -166,6 +166,27 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 			Authority: work.Authority, Visibility: scoutChatVisibilityPrivate,
 			Launch: launchFunnelLineage{Source: source, ProposalID: work.ApprovedProposalID, Path: launchPath, Proposer: normalizeAccountEmail(user.Email)},
 		}
+		if work.Mode == "research" && userMessage.Project != nil {
+			projectBinding, bindingErr := app.projectWorkBindingForLaunch(ctx, currentSourceThread, userMessage)
+			if bindingErr != nil {
+				return nil, bindingErr
+			}
+			encodedBinding, bindingErr := encodeProjectWorkBinding(projectBinding)
+			if bindingErr != nil {
+				return nil, bindingErr
+			}
+			spec.ProjectWorkBinding = encodedBinding
+			spec.ProjectWorkID = projectBinding.ProjectID
+			spec.ProjectWorkTitle = projectBinding.ProjectTitle
+		} else if affinity, found := app.resolveWorkstreamAffinityWithContext(ctx, user, currentSourceThread, userMessage, work.Objective, time.Now().UTC()); found {
+			encodedAffinity, affinityErr := encodeWorkstreamAffinity(affinity)
+			if affinityErr != nil {
+				return nil, affinityErr
+			}
+			spec.WorkstreamAffinity = encodedAffinity
+			spec.ProjectWorkID = affinity.ProjectThreadID
+			spec.ProjectWorkTitle = affinity.ProjectTitle
+		}
 		delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
 		if work.AgentID != "" {
 			delegatedProfile, delegated = app.strideAgentContextForChatWork(work.AgentID, thread, work.Mode)
@@ -253,7 +274,8 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		AuthorName: scoutParticipantName, IntentOutcome: string(conversationIntentStartPrivateWork),
 		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
 		CreatedAt: now.Format(time.RFC3339Nano), CausedByMessageID: userMessage.ID,
-		Thread: &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID},
+		Thread: &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
+			ProjectID: launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]},
 	}
 	if work.AgentID != "" && work.AgentName != "" {
 		assistantMessage.AuthorName = work.AgentName
@@ -338,6 +360,10 @@ func conversationWorkerSpec(identity agentThreadGoalSpec, request agentThreadGoa
 	identity.Authority = request.Authority
 	identity.Visibility = request.Visibility
 	identity.PackageID = request.PackageID
+	identity.ProjectWorkBinding = request.ProjectWorkBinding
+	identity.ProjectWorkID = request.ProjectWorkID
+	identity.ProjectWorkTitle = request.ProjectWorkTitle
+	identity.WorkstreamAffinity = request.WorkstreamAffinity
 	identity.Launch = request.Launch
 	return identity
 }

@@ -218,9 +218,9 @@ func TestConcurrentToolCallHandlingExecutesOnce(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	item := kanbanRealtimeOutputItem{
 		Type:      "function_call",
-		Name:      "create_ticket",
+		Name:      "create_artifact",
 		CallID:    "call-concurrent",
-		Arguments: `{"title":"Concurrency card","notes":"Created exactly once.","owner":"AJ","tags":["test"],"status":"Backlog"}`,
+		Arguments: `{"mode":"artifacts","query":"Concurrency artifact","content":"Created exactly once."}`,
 	}
 
 	var wg sync.WaitGroup
@@ -233,15 +233,7 @@ func TestConcurrentToolCallHandlingExecutesOnce(t *testing.T) {
 	}
 	wg.Wait()
 
-	created := 0
-	for _, card := range app.snapshotState().Cards {
-		if card.Title == "Concurrency card" {
-			created++
-		}
-	}
-	if created != 1 {
-		t.Fatalf("concurrent handling created %d cards, want exactly 1", created)
-	}
+	waitForRealtimeArtifactCount(t, app, 1)
 }
 
 // TestArmedNoOpToolResultStillSpeaks covers "hey scout, move X to done" when X

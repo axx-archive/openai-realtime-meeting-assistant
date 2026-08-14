@@ -396,7 +396,6 @@ export function usePersonalRealtime(options: {
     if (
       !sessionToken
       || !lease?.isCurrent()
-      || !officeControlChannelIsLive(sessionToken)
       || !toolAbortController
       || toolAbortController.signal.aborted
       || handledCallsRef.current.has(call.callId)
@@ -413,11 +412,23 @@ export function usePersonalRealtime(options: {
       return;
     }
     try {
+      const controlReady = await waitForOfficeControlChannel(
+        sessionToken,
+        () => (
+          generationRef.current === connectionGeneration
+          && leaseRef.current === lease
+          && lease.isCurrent()
+          && !toolAbortController.signal.aborted
+        ),
+      );
+      if (!controlReady) {
+        sendToolOutput(call.callId, { ok: false, error: 'Scout could not re-establish its authenticated control channel.' });
+        return;
+      }
       if (
         generationRef.current !== connectionGeneration
         || leaseRef.current !== lease
         || !lease.isCurrent()
-        || !officeControlChannelIsLive(sessionToken)
         || toolAbortController.signal.aborted
       ) return;
       const response = await api.realtimeTool(
@@ -433,7 +444,6 @@ export function usePersonalRealtime(options: {
         generationRef.current !== connectionGeneration
         || leaseRef.current !== lease
         || !lease.isCurrent()
-        || !officeControlChannelIsLive(sessionToken)
         || toolAbortController.signal.aborted
       ) return;
       if (response.actions?.length) onActionsRef.current?.(response.actions);
@@ -443,7 +453,6 @@ export function usePersonalRealtime(options: {
         generationRef.current !== connectionGeneration
         || leaseRef.current !== lease
         || !lease.isCurrent()
-        || !officeControlChannelIsLive(sessionToken)
         || toolAbortController.signal.aborted
       ) return;
       sendToolOutput(call.callId, { ok: false, error: userFacingRealtimeError(toolError) });

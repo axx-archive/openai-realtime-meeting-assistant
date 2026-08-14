@@ -774,7 +774,11 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	}
 	app.mu.Lock()
 	app.apiKey = apiKey
-	app.roomScoutFactory = app.productionRoomScoutTransportFactory(apiKey)
+	if currentRoomScoutVoiceAvailability().Enabled {
+		app.roomScoutFactory = app.productionRoomScoutTransportFactory(apiKey)
+	} else {
+		app.roomScoutFactory = nil
+	}
 	app.mu.Unlock()
 	// W4 (§4.4/§9.10, the plan's ONE deliberate behavior change): the office
 	// transcription lane and the Scout Realtime peer are no longer boot-started
@@ -1634,10 +1638,9 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 		"# Role and objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime conversation outside the video room.",
 		"# One conversation contract\nFor every completed, meaningful user utterance, call route_conversation_turn exactly once with the user's exact words before answering or acting. The server returns exactly one outcome: conversational_reply, clarify_once, start_private_work, approval_required, or unavailable. Speak that result plainly. Use do_nothing only for silence, noise, or an abandoned fragment.",
 		"# Authority boundary\nYou never choose a tool, deliverable template, model, provider, reasoning effort, budget, authority, channel, audience, or effect. route_conversation_turn accepts natural language only. The server may start safe private work, hold a governed effect for approval, ask one clarification, or report a capability unavailable. Never claim work started, changed, sent, published, deleted, or saved unless the returned server result says so.",
-		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. Direct board, artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
-		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
+		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. The Kanban Board is retired. Direct artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly after the server outcome. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
+		"# Behavior\nAnswer directly and briefly after the server outcome. Current Work and Project context is server-resolved from authorized conversations, Meeting Records, files, and artifacts. If that context is unavailable or ambiguous, say so instead of guessing.",
 	}, "\n\n")
 }
 
@@ -2458,7 +2461,7 @@ func scoutSpokenResponseInstructions() string {
 		"Do not repeat or mention the wake phrase.",
 		"If the tool result contains an answer or reason, say it plainly.",
 		"If work was started, say only one short sentence that it started and the room work card will show progress. Do not summarize the work request, artifact, workflow, or metadata.",
-		"If the tool result completed a board update, acknowledge it in one short sentence.",
+		"If the tool result completed an app update, acknowledge it in one short sentence.",
 	}, " ")
 }
 
@@ -2474,42 +2477,28 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		voiceControlState = "active: every clear room request is addressed to you until the user turns the shared room voice island off."
 	}
 	return strings.Join([]string{
-		"# Role and Objective\nYou are Scout, the Stride voice operator for live meetings, app navigation, durable artifacts, meeting memory, and the Kanban board. Keep the app useful with minimal chatter.",
-		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
+		"# Role and Objective\nYou are Scout, the Stride voice operator for live meetings, app navigation, durable conversation-backed Work, and meeting memory. Keep the app useful with minimal chatter.",
+		fmt.Sprintf("# People\nKnown meeting participants: %s.", strings.Join(meetingParticipantNames, ", ")),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
-		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
-		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
+		"# Language\nIf a transcript includes a speaker label such as Sean:, use it only as speaker context. Do not turn ordinary meeting discussion into a filing-system task.",
+		"# Reasoning\nFor simple recall and navigation requests, act quickly. For multi-step work, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
 		"# Voice latency and brevity\nMove immediately. For launch_agent_thread, call the tool with no spoken preamble. Before any other slow tool, use at most one short acknowledgement. After a tool result, speak one sentence of at most twelve words. For direct answers, use at most two short sentences unless the room explicitly asks for detail. Never narrate reasoning, restate the request, list workflow metadata, or read an artifact scaffold aloud.",
 		"# Voice control mode\n" + voiceControlState + " This is the shared room Realtime 2 Scout, fed by room audio and heard by everyone in the room. The private Scout chat outside the room is a separate per-user surface; open chat with control_app instead of joining or controlling the room for private conversation requests. When active, answer simple capability, help, navigation, and status questions directly unless a listed tool is needed. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
-		"# Preambles\nDo not speak preambles for routine app or board updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
-		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
-		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
-		"# Entity capture\nPreserve exact names, brands, owners, card titles, dates, and project terms. For high-precision identifiers or ambiguous names, normalize only what is clear. If multiple interpretations are plausible, call do_nothing with one clarification question.",
-		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
-		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
-		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
-		"# App control\nUse control_app when the user asks you to open or show a Stride surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, memory, and files. Files is the shared drive of every uploaded document, deck, and image — open it when the user asks for the files, the drive, or an uploaded document. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
+		"# Preambles\nDo not speak preambles for routine app updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
+		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or workstream names. If the exact entity is unclear, call do_nothing with a concise clarification question.",
+		"# Entity capture\nPreserve exact names, brands, owners, dates, and project terms. For high-precision identifiers or ambiguous names, normalize only what is clear. If multiple interpretations are plausible, call do_nothing with one clarification question.",
+		"# App control\nUse control_app when the user asks you to open or show a Stride surface. Available surfaces are office, room, chat, artifacts, research, design, grill, memory, and files. Files is the shared drive of every uploaded document, deck, and image — open it when the user asks for the files, the drive, or an uploaded document. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
 		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening in the room, turn off shared room voice, end the vocal room conversation, close the room voice island, or stop room Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording; this switch is room-wide for every participant, and after it changes you should make one short group announcement that recording is on or off. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
-		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. When the user says \"after this meeting/call, remind…\" or asks for the reminder once the meeting is over, pass deliver \"after_meeting\" so it queues until the meeting is archived. Do not use send_notification for routine acknowledgements or board updates.",
+		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. When the user says \"after this meeting/call, remind…\" or asks for the reminder once the meeting is over, pass deliver \"after_meeting\" so it queues until the meeting is archived. Do not use send_notification for routine acknowledgements.",
 		"# Channels\nUse post_to_channel when a user says put/post/share that in #channel or tell the team in a channel; quote their content faithfully, never embellish. Use mention to flag one person by name. create_channel makes a new public team channel, but only from a user's private Scout — tell room requesters to create channels from their private Scout or the chat surface.",
 		"# Meeting recap\nUse meeting_interval_recall when someone asks what happened in exactly the last 5 or 30 minutes of the current meeting; speak the bounded evidence-backed result and its coverage caveat. Use meeting_recap when someone asks where are we, recap this meeting, or what did I miss in THIS meeting; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell. When the catch-up spans MULTIPLE meetings or days — what did I miss this week, what happened yesterday, catch me up since last week — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; speak the top decisions and blockers only. Use get_meeting_detail with a meeting_id for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Grill sessions\nUse start_grill_session when a user says grill us, pressure-test us, or play investor on a topic; you will switch into the named persona and question the room. Use end_grill_session when anyone asks to stop grilling or stand down — a graded report thread is filed automatically.",
 		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. A separate background workflow ticker may later launch proposals a human has already approved, but proposing itself starts nothing. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
-		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
-		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
-		"# Invocation\nWhen voice control mode is inactive, the server creates a response only for a clear utterance that mentions Scout or Scott anywhere, or a natural follow-up during the short engagement window after Scout speaks. Treat Scout's name as an address, not content to save on the board. If the server has not admitted a turn, no response is created.",
+		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
+		"# Invocation\nWhen voice control mode is inactive, the server creates a response only for a clear utterance that mentions Scout or Scott anywhere, or a natural follow-up during the short engagement window after Scout speaks. Treat Scout's name as an address, not content to save. If the server has not admitted a turn, no response is created.",
 		"# Verbosity\nPrefer tools over text replies. Keep spoken responses to one short sentence unless the user asks for a memory answer; for memory answers, give the headline first and only the most useful details.",
 	}, "\n\n")
-}
-
-func (app *kanbanBoardApp) boardContextJSON() string {
-	raw, err := json.Marshal(app.snapshotState().Cards)
-	if err != nil {
-		return "[]"
-	}
-
-	return string(raw)
 }
 
 type orchestratorToolPolicy struct {
@@ -2521,9 +2510,6 @@ type orchestratorToolPolicy struct {
 // the master Kanban tool definitions. Tools absent here are never exposed to
 // the orchestrator; every present tool declares both authority and effects.
 var orchestratorToolPolicies = map[string]orchestratorToolPolicy{
-	"create_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"}, "move_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"},
-	"add_tags": {codexJobAuthorityWorkspaceWrite, "board_write"}, "add_key_date": {codexJobAuthorityWorkspaceWrite, "board_write"},
-	"remove_key_dates": {codexJobAuthorityWorkspaceWrite, "board_write"}, "update_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"},
 	"create_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"}, "update_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"},
 	"answer_memory_question": {codexJobAuthorityReadOnly, "read"}, "note_for_the_record": {codexJobAuthorityWorkspaceWrite, "memory_write"},
 	"meeting_interval_recall": {codexJobAuthorityReadOnly, "read"}, "cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
@@ -2717,7 +2703,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "control_app",
-			"description": "Open or focus a Stride surface such as artifacts, memory, chat, research, design, grill, board, room, or office. For requests to open chat, start a chat, start a conversational thread, begin a discussion thread, or talk privately to Scout, open chat; the current Chat app has one private Scout thread that can be reset for a new conversation. Use artifact_id when selecting a known saved artifact.",
+			"description": "Open or focus a Stride surface such as artifacts, memory, chat, research, design, grill, room, or office. For requests to open chat, start a chat, start a conversational thread, begin a discussion thread, or talk privately to Scout, open chat; the current Chat app has one private Scout thread that can be reset for a new conversation. Use artifact_id when selecting a known saved artifact.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2933,7 +2919,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "create_package",
-			"description": "Create a venture package — a first-class IP mission binder that collects the artifacts, board cards, decisions, and channel moving one piece of IP through the pipeline.",
+			"description": "Create a venture package — a first-class IP mission binder that collects the artifacts, decisions, and channel moving one piece of IP through the pipeline.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2947,7 +2933,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "attach_to_package",
-			"description": "Attach an existing artifact, board card, channel, or decision to a venture package so the binder stays the one place holding the IP's moving parts.",
+			"description": "Attach an existing artifact, channel, or decision to a venture package so the binder stays the one place holding the IP's moving parts.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3290,7 +3276,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "do_nothing",
-			"description": "Use this when the user is not asking to operate on the Kanban board, is only wrapping up, or says a handoff phrase like That's it from me.",
+			"description": "Use this when the user is not asking to use an available tool, is only wrapping up, or says a handoff phrase like That's it from me.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3305,7 +3291,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 	// every Realtime surface has one stable tool contract. The handler performs
 	// the authoritative preview/activation, room, consent and audience checks.
 	tools = append(tools, strideTemporalRecallToolDefinition())
-	return tools
+	return withoutRetiredBoardTools(tools)
 }
 
 func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
@@ -3824,8 +3810,6 @@ func (app *kanbanBoardApp) finishToolCallInEpoch(workCtx context.Context, epoch 
 		return ErrRoomScoutFence
 	}
 
-	broadcastSignedInKanbanEvent("board", app.snapshotState())
-	broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
 	broadcastAssistantEvent("action", humanizeToolName(outputItem.Name)+" complete", map[string]any{"tool": outputItem.Name})
 	if err := app.SendEvent(app.sessionUpdateEvent()); err != nil {
 		log.Errorf("Failed to refresh Kanban Realtime session: %v", err)
@@ -4008,6 +3992,9 @@ func (app *kanbanBoardApp) markCallHandled(callID string) bool {
 }
 
 func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]any) (map[string]any, bool, error) {
+	if boardMutationToolRetired(toolName) {
+		return nil, false, ErrBoardRetired
+	}
 	switch toolName {
 	case "create_ticket":
 		return app.createTicket(args)

@@ -29,12 +29,12 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 		}
 		last = at
 	}
-	for _, secondary := range []string{"#roomBoardToggle", "#consentToggle", "#roomChatToggle", "#recordMeeting", "#inviteToggle", "#roomScoutQuickAction", "#archiveMeeting"} {
+	for _, secondary := range []string{"#consentToggle", "#roomChatToggle", "#recordMeeting", "#inviteToggle", "#roomScoutQuickAction", "#archiveMeeting"} {
 		if !strings.Contains(html, `#appShell.is-in-room[data-tool="room"] .meeting-bar `+secondary) {
 			t.Fatalf("secondary action %s is not removed from the primary island", secondary)
 		}
 	}
-	for _, menuItem := range []string{`id="roomMoreChat"`, `id="roomMoreRecap"`, `id="roomMoreTranscript"`, `id="roomMoreRecord"`, `id="roomMorePeople"`, `id="roomMoreSpecialists"`, `id="roomMoreInvite"`, `id="roomMoreBoard"`, `id="roomMoreConsent"`, `id="roomMoreWorkspace"`, `id="roomMoreArchive"`} {
+	for _, menuItem := range []string{`id="roomMoreChat"`, `id="roomMoreRecap"`, `id="roomMoreTranscript"`, `id="roomMoreRecord"`, `id="roomMorePeople"`, `id="roomMoreSpecialists"`, `id="roomMoreInvite"`, `id="roomMoreConsent"`, `id="roomMoreWorkspace"`, `id="roomMoreArchive"`} {
 		if !strings.Contains(controls, menuItem) {
 			t.Fatalf("More menu does not own %s", menuItem)
 		}
@@ -45,7 +45,7 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 	if strings.Contains(html, `#appShell.is-guest.is-in-room .room-more`) {
 		t.Fatal("guest-safe Chat must remain reachable through More")
 	}
-	for _, destination := range []string{`roomChatInput.focus()`, `roomMeetingRecapTab?.focus()`, `roomMeetingTranscriptTab?.focus()`, `roomBoardPanel?.focus?.()`, `artifactSearch?.focus()`} {
+	for _, destination := range []string{`roomChatInput.focus()`, `roomMeetingRecapTab?.focus()`, `roomMeetingTranscriptTab?.focus()`, `artifactSearch?.focus()`} {
 		if !strings.Contains(html, destination) {
 			t.Fatalf("More action lacks an explicit visible focus destination: %s", destination)
 		}
@@ -53,8 +53,13 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 			t.Fatal("Agent team must restore focus to the visible More button, never a hidden menu item")
 		}
 	}
-	if !strings.Contains(html, `roomMoreWorkspaceButton.hidden = Boolean(guestMode)`) || !strings.Contains(html, `roomMoreBoardButton.hidden = Boolean(guestMode)`) {
+	if !strings.Contains(html, `roomMoreWorkspaceButton.hidden = Boolean(guestMode)`) {
 		t.Fatal("member-only workspace actions are not hidden independently from guest-safe Chat")
+	}
+	for _, retired := range []string{`id="roomBoardToggle"`, `id="roomBoardPanel"`, `id="roomMoreBoard"`, `id="toolBoard"`} {
+		if strings.Contains(html, retired) {
+			t.Fatalf("retired Board control remains mounted: %s", retired)
+		}
 	}
 }
 
@@ -102,7 +107,7 @@ const server=http.createServer((req,res)=>{
      for(const button of document.querySelectorAll('.meeting-bar .controls button')){button.disabled=false;button.style.display=primary.has(button.id)?'grid':'none';}
      document.querySelector('.meeting-bar .controls__divider').style.display='block';document.querySelector('.meeting-bar .room-more').style.display='block';
    },theme); await page.waitForTimeout(20);
-   if(open)await page.evaluate(()=>{const menu=document.getElementById('roomMoreMenu');for(const item of menu.querySelectorAll('button')){item.hidden=false;item.disabled=false;item.style.display='flex'}menu.hidden=false;menu.style.display='grid';document.getElementById('roomMoreToggle').setAttribute('aria-expanded','true');}); else await page.evaluate(()=>{const menu=document.getElementById('roomMoreMenu');menu.hidden=true;menu.style.display='none';document.getElementById('roomMoreToggle').setAttribute('aria-expanded','false')});
+	   if(open)await page.evaluate(()=>{syncRoomMoreActions();const menu=document.getElementById('roomMoreMenu');for(const item of menu.querySelectorAll('button'))item.style.display=item.hidden?'none':'flex';menu.hidden=false;menu.style.display='grid';document.getElementById('roomMoreToggle').setAttribute('aria-expanded','true');}); else await page.evaluate(()=>{const menu=document.getElementById('roomMoreMenu');menu.hidden=true;menu.style.display='none';document.getElementById('roomMoreToggle').setAttribute('aria-expanded','false')});
    const state=await page.evaluate(()=>{
      const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-authed','is-in-room');
      document.querySelector('.meeting-bar').style.setProperty('display','flex','important');document.getElementById('presentationTile').style.display='grid';
@@ -119,17 +124,24 @@ const server=http.createServer((req,res)=>{
  await capture({name:'desktop-1440',width:1440,height:900},'light',true);
  await capture({name:'desktop-768',width:768,height:900},'light',false);
  await capture({name:'desktop-320',width:320,height:700},'dark',false);
- await capture({name:'desktop-320',width:320,height:700},'dark',true);
+	 await capture({name:'desktop-320',width:320,height:700},'dark',true);
+	 assert.equal(await page.locator('#roomMoreBoard').count(),0,'retired Board action remains mounted in the meeting menu');
  await page.setViewportSize({width:1280,height:800}); await page.evaluate(()=>{renderTheme('dark');const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-authed','is-in-room');document.querySelector('.meeting-bar').style.display='block';document.querySelector('.meeting-bar .controls').style.display='inline-flex';document.getElementById('roomChatInput').disabled=false;document.getElementById('roomMoreMenu').hidden=false;document.getElementById('roomMoreMenu').style.display='grid';});
  await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');document.getElementById('roomMoreRecap').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomMeetingRecapTab');
  await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');setRoomMoreOpen(true);document.getElementById('roomMoreTranscript').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomMeetingTranscriptTab');
- await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');document.getElementById('roomChatInput').disabled=false;setRoomMoreOpen(true);document.getElementById('roomMoreChat').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomChatInput');
+ await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');ws={readyState:WebSocket.OPEN};updateRoomChatAvailability();setRoomMoreOpen(true);document.getElementById('roomMoreChat').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomChatInput');
+ const unqualified=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:false};roomScoutVoiceAvailability={enabled:false,reason:'quality_gate_pending'};roomAgentParticipants=[];syncRoomMoreActions();setRoomMoreOpen(true);return {hidden:document.getElementById('roomMoreSpecialists').hidden,chatHidden:document.getElementById('roomMoreChat').hidden}});
+ assert.deepEqual(unqualified,{hidden:true,chatHidden:false},'unqualified voice agents must disappear while meeting chat stays available');
+ await page.evaluate(()=>{meetingSpecialistsSnapshot={available:true};syncRoomMoreActions()});
  await page.evaluate(()=>setRoomMoreOpen(true)); await page.waitForTimeout(1); await page.evaluate(()=>document.getElementById('roomMoreSpecialists').click()); await page.waitForFunction(()=>!document.getElementById('meetingSpecialistsPanel').hidden);
  await page.evaluate(()=>document.getElementById('meetingSpecialistsClose').click()); assert.equal(await page.evaluate(()=>document.activeElement?.id),'roomMoreToggle');
- await page.evaluate(()=>{guestMode=true;document.getElementById('appShell').classList.add('is-guest');syncRoomMoreActions();setRoomMoreOpen(true)});
+ await page.evaluate(()=>{guestMode=true;const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-guest','is-in-room');syncRoomMoreActions();setRoomMoreOpen(true)});
  const guest=await page.locator('#roomMoreMenu button').evaluateAll(items=>items.filter(item=>!item.hidden).map(item=>item.textContent.trim()));
  assert.ok(guest.includes('Chat')); assert.ok(!guest.includes('Agent team')&&!guest.includes('Board')&&!guest.includes('Open advanced workspace')&&!guest.includes('Invite people')&&!guest.includes('Send notes'),guest.join(','));
- await page.evaluate(()=>{document.getElementById('roomChatInput').disabled=false;document.getElementById('roomMoreChat').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomChatInput');
+	 await page.evaluate(()=>{const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-in-room');ws={readyState:WebSocket.OPEN};updateRoomChatAvailability();syncRoomMoreActions();document.getElementById('roomMoreChat').click()});
+	 await page.waitForTimeout(50);
+	 const guestChatFocus=await page.evaluate(()=>{const input=document.getElementById('roomChatInput');const panel=document.getElementById('roomChatPanel');const rail=document.querySelector('.scout-rail');return {active:document.activeElement?.id||document.activeElement?.tagName||'',disabled:input.disabled,panelHidden:panel.hidden,roomChatOpen:document.getElementById('appShell').classList.contains('is-room-chat-open'),mode:roomMeetingMode,railDisplay:getComputedStyle(rail).display,inputDisplay:getComputedStyle(input).display,inputRects:input.getClientRects().length};});
+	 assert.equal(guestChatFocus.active,'roomChatInput',JSON.stringify(guestChatFocus));
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)

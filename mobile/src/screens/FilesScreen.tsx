@@ -340,7 +340,7 @@ const FileRow = memo(function FileRow({
   );
 });
 
-export function FilesScreen(_props: Props) {
+export function FilesScreen({ navigation, route }: Props) {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const requestVersion = useRef(0);
@@ -620,6 +620,19 @@ export function FilesScreen(_props: Props) {
     },
     [busy, sessionToken],
   );
+
+  useEffect(() => {
+    const fileId = String(route.params?.fileId ?? '').trim();
+    if (!fileId || loading || busy) return;
+    const file = files.find((candidate) => candidate.id === fileId);
+    navigation.setParams({ fileId: undefined });
+    if (!file) {
+      setActionError('That saved Drive file is unavailable.');
+      return;
+    }
+    setActiveFolderId(file.folderId);
+    openFile(file);
+  }, [busy, files, loading, navigation, openFile, route.params?.fileId]);
 
   const shareFile = useCallback(
     (file: FileRecord) => {

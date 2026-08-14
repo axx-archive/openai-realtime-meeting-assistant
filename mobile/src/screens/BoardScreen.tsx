@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
 import type { BoardCard, BoardCardInput, BoardResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
@@ -21,6 +22,7 @@ import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { colors, space, type } from '../theme/tokens';
+import type { RootStackParamList } from '../navigation/types';
 
 function cardColumn(card: BoardCard): string {
   return String(card.column || card.status || 'backlog').toLowerCase();
@@ -60,7 +62,9 @@ function editorForCard(card?: BoardCard): CardEditor {
   };
 }
 
-export function BoardScreen() {
+type Props = NativeStackScreenProps<RootStackParamList, 'Board'>;
+
+export function BoardScreen({ navigation, route }: Props) {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const [cards, setCards] = useState<BoardCard[]>([]);
@@ -133,6 +137,14 @@ export function BoardScreen() {
       setProjectFilter('all');
     }
   }, [projectFilter, projectOptions]);
+
+	useEffect(() => {
+		const cardID = String(route.params?.cardId || '').trim();
+		if (!cardID || loading) return;
+		const exact = cards.find(card => String(card.id) === cardID);
+		navigation.setParams({ cardId: undefined });
+		if (exact) setEditor(editorForCard(exact));
+	}, [cards, loading, navigation, route.params?.cardId]);
 
   async function resolveDraft(card: BoardCard, action: 'accept' | 'dismiss', reason = '') {
     if (!sessionToken || resolvingDraft) return;

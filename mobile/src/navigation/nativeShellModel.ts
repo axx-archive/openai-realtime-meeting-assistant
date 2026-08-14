@@ -39,7 +39,9 @@ export function nativeShellDestinationAllowed(destination: NativeShellDestinatio
 const destinationRoutes: Partial<Record<keyof RootStackParamList, NativeShellDestination>> = {
   Canvas: 'home',
   Deck: 'chat',
-  Meetings: 'video',
+  // Permanent governed records belong to Work. Video remains the distinct
+  // live-room discovery/delivery surface.
+  Meetings: 'work',
   WorkHome: 'work',
   Board: 'work',
   Files: 'work',

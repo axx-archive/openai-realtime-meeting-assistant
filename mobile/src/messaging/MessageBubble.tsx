@@ -5,7 +5,7 @@ import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
 import { useMappingHelper } from '@shopify/flash-list';
 
-import type { ScoutFileAttachment, ScoutMessage, ScoutWorkThreadRef } from '../api/types';
+import type { ScoutAnswerSource, ScoutFileAttachment, ScoutMessage, ScoutWorkThreadRef } from '../api/types';
 import { authenticatedFileHeaders, authenticatedFileUrl } from '../files/fileActions';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
 import { LinkPreviewCard } from './LinkPreviewCard';
@@ -39,7 +39,7 @@ export type MessageBubbleProps = {
   sessionToken: string;
   viewerEmail: string;
   timestampReveal: Animated.Value;
-  onOpenSource?: (messageId: string) => void;
+  onOpenSource?: (source: ScoutAnswerSource) => void;
   onOpenReplySource?: (messageId: string) => void;
   showReplyContext?: boolean;
   threadReplies?: readonly ScoutMessage[];
@@ -51,10 +51,12 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onChangeWorkProject?: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
   proposalObjective?: string;
   onChangeProposalObjective?: (message: ScoutMessage, objective: string) => void;
   onSaveWorkArtifact?: (message: ScoutMessage) => void;
+  onOpenSavedWorkArtifact?: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact?: (message: ScoutMessage) => void;
   onSaveImage?: (message: ScoutMessage) => void;
   onRegenerateImage?: (message: ScoutMessage) => void;
@@ -212,10 +214,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetryReply,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onChangeWorkProject,
   onResolveProposal,
   proposalObjective,
   onChangeProposalObjective,
   onSaveWorkArtifact,
+  onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
   onSaveImage,
   onRegenerateImage,
@@ -230,6 +234,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   workDriveSaveAvailability = 'checking',
 }: MessageBubbleProps) {
   const workDetailsTriggerRef = useRef<View>(null);
+  const workProjectTriggerRef = useRef<View>(null);
   const projectTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
@@ -470,6 +475,12 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               </View>
               <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || workThread.query}</Text>
+              {String(workThread.ref.projectTitle ?? '').trim() ? (
+                <View accessible accessibilityLabel={`Project: ${String(workThread.ref.projectTitle).trim()}`} style={styles.workProjectChip}>
+                  <SymbolView name="folder.fill" tintColor={colors.emberText} size={12} />
+                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={1} style={styles.workProjectText}>Project · {String(workThread.ref.projectTitle).trim()}</Text>
+                </View>
+              ) : null}
               {workThread.active ? (
                 <Text
                   accessibilityRole="progressbar"
@@ -489,13 +500,17 @@ export const MessageBubble = React.memo(function MessageBubble({
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>
-                  {!workThread.governedRecord ? <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : workDriveSaveAvailability === 'available' ? 'Save deliverable to Drive' : workDriveSaveAvailability === 'checking' ? 'Checking Save to Drive availability' : 'Save to Drive unavailable'} accessibilityState={{ disabled: savingWork || workSaved || workDriveSaveAvailability !== 'available' }} disabled={savingWork || workSaved || workDriveSaveAvailability !== 'available'} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved || workDriveSaveAvailability !== 'available') && styles.workResultDisabled]}>
+                  {!workThread.governedRecord ? <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Open saved deliverable in Drive' : workDriveSaveAvailability === 'available' ? 'Save deliverable to Drive' : workDriveSaveAvailability === 'checking' ? 'Checking Save to Drive availability' : 'Save to Drive unavailable'} accessibilityState={{ disabled: savingWork || (!workSaved && workDriveSaveAvailability !== 'available') }} disabled={savingWork || (!workSaved && workDriveSaveAvailability !== 'available')} onPress={() => workSaved ? onOpenSavedWorkArtifact?.(message) : onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || (!workSaved && workDriveSaveAvailability !== 'available')) && styles.workResultDisabled]}>
                     {savingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="externaldrive.fill" tintColor={colors.emberText} size={14} />}
-                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : workDriveSaveAvailability === 'checking' ? 'Checking…' : workDriveSaveAvailability === 'unavailable' ? 'Unavailable' : 'Save'}</Text>
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{workSaved ? 'Open in Drive' : savingWork ? 'Saving…' : workDriveSaveAvailability === 'checking' ? 'Checking…' : workDriveSaveAvailability === 'unavailable' ? 'Unavailable' : 'Save'}</Text>
                   </Pressable> : null}
                   {!workThread.governedRecord ? <Pressable accessibilityRole="button" accessibilityLabel="Edit prompt and regenerate deliverable" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
                     {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Regenerate'}</Text>
+                  </Pressable> : null}
+                  {String(workThread.ref.artifactId ?? '').trim() && onChangeWorkProject ? <Pressable ref={workProjectTriggerRef} accessibilityRole="button" accessibilityLabel={`${String(workThread.ref.projectTitle ?? '').trim() ? 'Change' : 'Set'} project for this Work`} accessibilityHint="Corrects the Work result and future continuity without changing the source conversation." onPress={() => onChangeWorkProject(message, findNodeHandle(workProjectTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed]}>
+                    <SymbolView name="folder.fill" tintColor={colors.emberText} size={14} />
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{String(workThread.ref.projectTitle ?? '').trim() ? 'Change project' : 'Set project'}</Text>
                   </Pressable> : null}
                 </View>
               ) : workThread.failed ? (
@@ -763,11 +778,11 @@ export const MessageBubble = React.memo(function MessageBubble({
           <View style={styles.sources}>
             {sources.map((source, index) => (
               <Pressable
-                key={getMappingKey(source.messageId, index)}
+				key={getMappingKey(source.messageId || source.segmentId || `source-${index}`, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Source: ${source.author || 'a message'} — ${source.quote}`}
-                accessibilityHint="Scrolls to the source message"
-                onPress={() => onOpenSource?.(source.messageId)}
+				accessibilityHint={source.kind === 'meeting_transcript' ? 'Opens the exact Meeting Record transcript interval' : 'Scrolls to the source message'}
+				onPress={() => onOpenSource?.(source)}
                 style={({ pressed }) => [styles.sourceChip, pressed && styles.sourcePressed]}
               >
                 <SymbolView name="quote.opening" tintColor={colors.emberText} size={10} />
@@ -865,6 +880,8 @@ const styles = StyleSheet.create({
 	workStatusTextNeedsInput: { color: colors.emberText },
   workStatusTextFailed: { color: colors.danger },
   workQuery: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
+  workProjectChip: { minHeight: 28, maxWidth: '100%', alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  workProjectText: { ...type.captionMedium, color: colors.emberText, flexShrink: 1 },
   workProgressCopy: { ...type.captionMedium, color: colors.emberText },
   workAttentionCopy: { ...type.bodySm, color: colors.text2, lineHeight: 19 },
   workPreview: { ...type.bodySm, color: colors.text2 },

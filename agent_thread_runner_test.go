@@ -161,7 +161,7 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 			t.Fatalf("instructions missing %q: %s", want, captured.Instructions)
 		}
 	}
-	if !strings.Contains(captured.Input, thread.Query) || !strings.Contains(captured.Input, "Board and memory context") {
+	if !strings.Contains(captured.Input, thread.Query) || !strings.Contains(captured.Input, "Current authorized context") || strings.Contains(captured.Input, "Board and memory context") {
 		t.Fatalf("input=%q, want thread query and context", captured.Input)
 	}
 	if captured.MaxOutputTokens != defaultResearchAgentThreadMaxOutputTokens {

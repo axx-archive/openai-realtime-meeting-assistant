@@ -8,11 +8,17 @@ import {
   Text,
   View,
   type ViewStyle,
+  type ScrollView as ScrollViewType,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { SymbolView } from 'expo-symbols';
 import { colors, space, type } from '../theme/tokens';
+
+function scalableText<T extends { readonly lineHeight: number }>(value: T) {
+  const { lineHeight: _fixedLineHeight, ...style } = value;
+  return style;
+}
 
 type Props = {
   title?: string;
@@ -26,6 +32,7 @@ type Props = {
   scroll?: boolean;
   right?: React.ReactNode;
   style?: ViewStyle;
+  scrollRef?: React.RefObject<ScrollViewType | null>;
 };
 
 /** Phone workspace chrome — topbar title scale from live tool titles. */
@@ -41,6 +48,7 @@ export function Screen({
   scroll = true,
   right,
   style,
+  scrollRef,
 }: Props) {
   const navigation = useNavigation();
   const canGoBack = navigation.canGoBack();
@@ -60,8 +68,8 @@ export function Screen({
             </Pressable>
           ) : null}
           <View style={styles.headerText}>
-            {title ? <Text style={styles.title}>{title}</Text> : null}
-            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+            {title ? <Text maxFontSizeMultiplier={2} style={styles.title}>{title}</Text> : null}
+            {subtitle ? <Text maxFontSizeMultiplier={2} style={styles.subtitle}>{subtitle}</Text> : null}
           </View>
           {right}
         </View>
@@ -90,6 +98,7 @@ export function Screen({
     <SafeAreaView style={[styles.safe, style]} edges={['top', 'left', 'right']}>
       {scroll ? (
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           refreshControl={
@@ -152,12 +161,15 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   title: {
-    ...type.title1,
+    // Fixed token line-heights clip Google Sans at accessibility content
+    // sizes. Omit the key entirely so optimized bundles also let the platform
+    // derive the scaled line box.
+    ...scalableText(type.title1),
     color: colors.text1,
   },
   subtitle: {
     marginTop: 4,
-    ...type.caption,
+    ...scalableText(type.caption),
     color: colors.text2,
   },
   loading: {
@@ -172,7 +184,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: colors.danger,
-    ...type.bodySm,
+    ...scalableText(type.bodySm),
   },
   retry: {
     marginTop: 8,

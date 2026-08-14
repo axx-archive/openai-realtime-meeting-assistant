@@ -3425,6 +3425,92 @@
         border-color: var(--line-2);
       }
 
+      .meeting-record__section {
+        margin-top: 18px;
+      }
+
+      .meeting-record__heading {
+        margin: 0 0 8px;
+        color: var(--text-1);
+        font: 600 13px/1.35 var(--font-sans);
+      }
+
+      .meeting-record__claim {
+        padding: 8px 0 8px 12px;
+        border-left: 2px solid var(--accent);
+      }
+
+      .meeting-record__claim + .meeting-record__claim {
+        margin-top: 5px;
+      }
+
+      .meeting-record__claim-text {
+        color: var(--text-1);
+        font: 400 13px/1.5 var(--font-sans);
+      }
+
+      .meeting-record__claim-meta,
+      .meeting-record__source,
+      .meeting-record__empty,
+      .meeting-record__coverage {
+        margin-top: 4px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .meeting-record__coverage-gap {
+        margin-top: 6px;
+        color: var(--text-2);
+        font: 400 12.5px/1.45 var(--font-sans);
+      }
+
+      .meeting-record__action {
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: 600 12.5px var(--font-sans);
+        cursor: pointer;
+      }
+
+      .meeting-record__action:hover {
+        border-color: var(--line-2);
+      }
+
+      .meeting-record__search {
+        width: 100%;
+        min-height: 42px;
+        margin: 10px 0 4px;
+        padding: 0 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: 400 13px var(--font-sans);
+      }
+
+      .meeting-record__transcript-row {
+        padding: 10px 0;
+        border-top: 1px solid var(--line-1);
+      }
+
+      .meeting-record__transcript-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--text-3);
+        font: var(--type-label);
+      }
+
+      .meeting-record__transcript-text {
+        margin-top: 5px;
+        color: var(--text-1);
+        font: 400 13px/1.55 var(--font-sans);
+      }
+
       /* entries that aren't meeting-shaped keep the log-row idiom, boxed */
       .memory-loose {
         border-radius: 16px;
@@ -3594,6 +3680,27 @@
         text-transform: lowercase;
         color: var(--text-3);
       }
+
+	  button.meeting-record__source {
+		appearance: none;
+		border: 0;
+		background: transparent;
+		padding: 0;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	  }
+
+	  .room-meeting-record-action {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		width: 100%;
+		margin-bottom: 12px;
+		backdrop-filter: blur(14px);
+	  }
 
       .assistant-link {
         justify-self: start;
@@ -13840,19 +13947,6 @@
           justify-content: center;
         }
 
-        /* A message thread owns the active reply composer. Retaining the
-           channel/private composer beneath it created two competing input
-           targets and collapsed the center pane at laptop widths. */
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatDestination,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutFollowUpTarget,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatPendingFiles,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutMentionPopover,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutDeliverablesPopover,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatForm,
-        #chatTool:has(#chatContextReplyForm:not([hidden])) #scoutChatHint {
-          display: none;
-        }
-
 	        #chatTool .scout-starter,
 	        #chatTool .scout-chat-brain-chip,
 	        #chatTool .scout-followup-chip,
@@ -14913,6 +15007,19 @@
           font-variant-numeric: tabular-nums;
         }
 
+        #chatTool .scout-chat-work-card__project {
+          width: fit-content;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          padding: 3px 8px;
+          border-radius: var(--r-full);
+          background: var(--ember-soft);
+          color: var(--ember-text);
+          font: var(--type-caption-medium);
+        }
+
         #chatTool .scout-chat-work-card__progress {
           width: min(280px, 48%);
           height: 2px;
@@ -15146,6 +15253,19 @@
 	        color: var(--text-2);
 	        font: var(--type-caption);
 	        font-variant-numeric: tabular-nums;
+	      }
+
+	      #chatTool .scout-chat-work-card__project {
+	        width: fit-content;
+	        max-width: 100%;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	        padding: 3px 8px;
+	        border-radius: var(--r-full);
+	        background: var(--ember-soft);
+	        color: var(--ember-text);
+	        font: var(--type-caption-medium);
 	      }
 
 	      #chatTool .scout-chat-work-card__progress {
@@ -24901,7 +25021,10 @@
           height: auto;
           max-height: none;
           padding: 5px;
-          overflow-x: auto;
+          /* The Work menu is a child of this fixed dock and opens upward.
+             Horizontal overflow clipped the entire menu outside the dock's
+             56px box on phones, making every Work destination untappable. */
+          overflow: visible;
           scrollbar-width: none;
           border: 1px solid var(--glass-border);
           border-radius: var(--r-full);
@@ -29400,6 +29523,7 @@
       .work-tool-menu .tool-rail__tool:hover { transform: none; background: var(--surface-3); color: var(--text-1); }
       .work-tool-menu .tool-rail__tool:active { transform: scale(var(--press-scale)); }
       .work-tool-menu .tool-rail__label {
+        display: inline-block;
         position: static;
         translate: none;
         padding: 0;
@@ -29744,32 +29868,32 @@
           <span class="wordmark topbar__wordmark" aria-hidden="true"></span>
         </span>
         <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-current="page" tabindex="0">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
             <span>Home</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-current="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-label="Video" aria-current="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="3"></rect><path d="m16 10 4-2v8l-4-2"></path></svg>
             <span>Video</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-current="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-label="Chat" aria-current="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
             <span>Chat</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 5V3h8v2M3 10h18"></path></svg>
             <span>Work</span>
             <svg class="pd1-primary-nav__disclosure" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 3 3-3 3"></path></svg>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-current="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-label="Network" aria-current="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="7" r="2"></circle><circle cx="19" cy="7" r="2"></circle><circle cx="5" cy="18" r="2"></circle><circle cx="19" cy="18" r="2"></circle><path d="m7 8 3 2M17 8l-3 2M7 17l3-3M17 17l-3-3"></path></svg>
             <span>Network</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-current="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-label="Work Search" aria-current="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
             <span>Work Search</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-current="false" tabindex="-1">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-label="You" aria-current="false" tabindex="-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
             <span>You</span>
           </button>
@@ -29782,9 +29906,9 @@
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="room" aria-label="Meetings" aria-pressed="false" aria-checked="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="room" aria-label="Video" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
-            <span class="tool-rail__label">meetings</span>
+            <span class="tool-rail__label">video</span>
           </button>
           <span id="roomRailUnread" class="tool-rail__unread" aria-hidden="true" hidden>0</span>
         </span>
@@ -29819,15 +29943,9 @@
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button id="toolBoard" class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="board" aria-label="Projects" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 5v11"></path><path d="M12 5v6"></path><path d="M18 5v14"></path></svg>
-            <span class="tool-rail__label">projects</span>
-          </button>
-        </span>
-        <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Memory" aria-pressed="false" aria-checked="false">
+          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Meetings" aria-pressed="false" aria-checked="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
-            <span class="tool-rail__label">memory</span>
+            <span class="tool-rail__label">meetings</span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -30030,7 +30148,6 @@
               </form>
               <p id="homeScoutComposerStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
               <button id="homeContextChip" class="home-context-chip" type="button" aria-label="Remove continuation context" hidden></button>
-              <button id="homeProjectChip" class="home-context-chip home-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project" hidden>Add project</button>
               <dialog id="homeProjectChooser" class="home-project-chooser" aria-labelledby="homeProjectChooserTitle">
                 <div class="home-project-chooser__body">
                   <div class="home-project-chooser__head"><h2 id="homeProjectChooserTitle">Choose a project</h2><button id="homeProjectChooserClose" class="home-project-chooser__close pressable" type="button" aria-label="Close project chooser">×</button></div>
@@ -30287,15 +30404,6 @@
           <div class="stage-toolbar" aria-label="Pinned view">
             <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false" hidden>unpin</button>
           </div>
-          <!-- in-room board panel — design glass sheet, real board peek -->
-          <aside id="roomBoardPanel" class="room-board-panel" hidden aria-label="Board peek" tabindex="-1">
-            <header class="room-board-panel__head">
-              <span class="room-board-panel__title">Board</span>
-              <span class="room-board-panel__sub">scout keeps it</span>
-            </header>
-            <div id="roomBoardPanelList" class="room-board-panel__list"></div>
-            <button id="roomBoardPanelOpen" class="room-board-panel__open" type="button">Open the board</button>
-          </aside>
           <div id="screenStage" class="screen-stage" aria-label="Shared screen">
             <video id="screenStageVideo" autoplay muted playsinline></video>
             <div class="screen-stage__placeholder" aria-hidden="true">
@@ -30599,9 +30707,6 @@
               </button>
               <span id="chatWorkIndicatorActions" class="chat-work-indicator__actions" hidden></span>
             </div>
-            <div id="scoutChatProjectRow" class="scout-chat-project-row" hidden>
-              <button id="scoutChatProjectChip" class="home-context-chip home-project-chip scout-chat-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project">Add project</button>
-            </div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -30668,7 +30773,6 @@
               <div id="chatContextMentionPopover" class="scout-mention-popover" hidden>
                 <div id="chatContextMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
               </div>
-			  <button id="chatContextProjectChip" class="home-context-chip home-project-chip pressable" type="button" aria-haspopup="dialog" aria-label="Add project" hidden>Add project</button>
 			  <dialog id="chatContextProjectChooser" class="home-project-chooser" aria-labelledby="chatContextProjectChooserTitle">
 				<div class="home-project-chooser__panel">
 				  <div class="home-project-chooser__head"><h2 id="chatContextProjectChooserTitle">Choose a project</h2><button id="chatContextProjectChooserClose" class="home-project-chooser__close pressable" type="button" aria-label="Close project chooser">×</button></div>
@@ -31094,7 +31198,7 @@
         </dialog>
 
         <!-- Memory tool — day-grouped meeting cards over the durable archive (D15) -->
-        <section id="memoryTool" class="memory-tool" aria-label="Memory">
+        <section id="memoryTool" class="memory-tool" aria-label="Meetings">
           <div class="memory-tool__inner">
             <div class="memory-tool__search">
               <span class="memory-tool__search-icon" aria-hidden="true">
@@ -31346,12 +31450,6 @@
             </svg>
             <span class="camera-label">Camera</span>
           </button>
-          <button id="roomBoardToggle" class="btn btn--ghost" type="button" aria-label="Open board panel" aria-pressed="false" title="Board" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect width="18" height="18" x="3" y="3" rx="2"></rect>
-              <path d="M15 3v18"></path>
-            </svg>
-          </button>
           <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
@@ -31422,7 +31520,6 @@
               <button id="roomMorePeople" class="room-more__action" type="button" role="menuitem">People in this room</button>
               <button id="roomMoreSpecialists" class="room-more__action" type="button" role="menuitem">Agent team</button>
               <button id="roomMoreInvite" class="room-more__action" type="button" role="menuitem">Invite people</button>
-              <button id="roomMoreBoard" class="room-more__action" type="button" role="menuitem">Board</button>
               <button id="roomMoreConsent" class="room-more__action" type="button" role="menuitem">Microphone data</button>
               <button id="roomMoreWorkspace" class="room-more__action" type="button" role="menuitem">Open advanced workspace</button>
               <button id="roomMoreArchive" class="room-more__action" type="button" role="menuitem">Send notes</button>
@@ -32606,8 +32703,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // card is open (single-expand accordion; default = most recent)
       let memoryMeetings = []
       let memoryMeetingsLoadedAt = 0
+      let memoryMeetingsNextCursor = ''
+      let memoryMeetingsHasMore = false
       let expandedMemoryMeetingId = ''
       let memoryExpandTouched = false
+	  let memoryMeetingsListRequestGeneration = 0
+	  let memoryMeetingDetailRequestGeneration = 0
+	  let memoryConversationRequestGeneration = 0
+      const memoryMeetingDetails = new Map()
+      const memoryTranscriptOpenIds = new Set()
+      const memoryTranscriptQueries = new Map()
       const assistantFeed = document.getElementById('assistantFeed')
       const assistantState = document.getElementById('assistantState')
       const assistantForm = document.getElementById('assistantForm')
@@ -32802,6 +32907,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
       let selectedHomeCategoryId = ''
       let selectedHomeSuggestionDestination = null
+      // Project/workstream association is server-owned context. The retired
+      // chooser remains parse-compatible for old exact retries, but new turns
+      // cannot request it, render it, or send a composer-selected token.
+      const explicitProjectAttachmentEnabled = false
       let homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
       let homeProjectGeneration = 0
       let homeProjectTimer = 0
@@ -33003,7 +33112,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let sentMessageProjectGeneration = 0
 	      let sentMessageProjectAttempt = null
 	      let sentMessageProjectState = {
-			threadId: '', messageId: '', scopeKey: '', account: '', loading: false, saving: false,
+			kind: 'message', threadId: '', messageId: '', artifactId: '', scopeKey: '', account: '', loading: false, saving: false,
 			available: false, current: null, choices: [], remove: null, selected: null,
 			error: '', returnFocus: null
 	      }
@@ -33156,6 +33265,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const roomChatSeenIds = new Set()
       let roomChatUnreadCount = 0
       let roomMeetingMode = 'chat'
+      let roomMeetingRecordReturn = null
       let currentMeetingIntelligence = null
       let roomMeetingTranscriptHistory = []
       const notificationMaxEntries = 100
@@ -33175,6 +33285,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let pendingActiveSpeakerSince = 0
       let participantsInRoom = []
       let roomAgentParticipants = []
+      let roomScoutVoiceAvailability = { enabled: false, reason: 'quality_gate_pending' }
+      let meetingSpecialistsSnapshot = null
+      let meetingSpecialistsRoomId = ''
+      let meetingSpecialistsLoadGeneration = 0
       let participantPreview = []
       let roomCapacity = 10
       let occupiedSeats = 0
@@ -33227,7 +33341,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // Home recommendations and their exact thread destinations are private
         // authority projections. Remove them synchronously after publishing the
         // replacement identity, before that account's shell can paint or fetch.
-	        resetPersistedScoutChatState()
+        resetPersistedScoutChatState()
+		memoryMeetingsListRequestGeneration += 1
+		memoryMeetingDetailRequestGeneration += 1
+		memoryConversationRequestGeneration += 1
+        memoryMeetings = []
+        memoryMeetingsLoadedAt = 0
+        memoryMeetingsNextCursor = ''
+        memoryMeetingsHasMore = false
+        expandedMemoryMeetingId = ''
+        memoryExpandTouched = false
+        memoryMeetingDetails.clear()
+        memoryTranscriptOpenIds.clear()
+        memoryTranscriptQueries.clear()
+        renderMemory()
         // Authentication transitions are a hard privacy boundary. Fence any
         // in-flight fetch for the prior account and remove its projection from
         // the DOM before the new account can load.
@@ -33908,8 +34035,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       inviteToggleButton.addEventListener('click', toggleInvitePopover)
       roomMoreToggleButton?.addEventListener('click', () => setRoomMoreOpen(roomMoreMenu?.hidden !== false))
       let roomChatFocusFrame = 0
+      const cancelRoomChatComposerFocus = () => {
+        if (!roomChatFocusFrame) return
+        window.cancelAnimationFrame(roomChatFocusFrame)
+        roomChatFocusFrame = 0
+      }
       const focusRoomChatComposer = () => {
-        if (roomChatFocusFrame) window.cancelAnimationFrame(roomChatFocusFrame)
+        cancelRoomChatComposerFocus()
         roomChatFocusFrame = window.requestAnimationFrame(() => {
           roomChatFocusFrame = 0
           if (isRoomChatOpen() && roomMeetingMode === 'chat' && !roomChatInput.disabled) {
@@ -33949,6 +34081,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         openMeetingSpecialists()
       })
       roomScoutQuickActionButton?.addEventListener('click', () => {
+        if (!roomScoutVoiceAvailability.enabled) return
         if (roomAgentParticipants.some(agent => agent.id === 'scout')) {
           openMeetingSpecialists()
           return
@@ -39703,19 +39836,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!notificationPanel.hidden) {
           setNotificationPanelOpen(false)
         }
-        const prevTool = appShell.dataset.tool || 'office'
-        const next = TOOL_IDS.includes(tool) ? tool : 'office'
+		const prevTool = appShell.dataset.tool || 'office'
+		// Board is retired. Old deep links and server actions land in the Work
+		// library without mounting or mutating the archived Kanban surface.
+		const requestedTool = tool === 'board' ? 'artifacts' : tool
+		const next = TOOL_IDS.includes(requestedTool) ? requestedTool : 'office'
         if (prevTool === 'network' && next !== 'network' && window.closeStrideContributionSurface?.() === false) {
-          return
-        }
-        if (next === 'board') {
-          const selectedThread = selectedScoutChatThread()
-          if (prevTool === 'chat' && chatThreadIsProject(selectedThread)) {
-            boardProjectFilterValue = String(selectedThread.id)
-          }
-          // opens the board surface; editing controls stay gated by board readiness
-          setBoardExpanded(true)
-          closeMobileToolRailForSelection()
           return
         }
         // P2-3: on the phone, drilling from the office home into a tool pushes a
@@ -39743,11 +39869,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           promptScoutForWork(next)
           return
         }
-        if (next === 'board') {
-          setBoardExpanded(true)
-          return
-        }
-        setActiveTool(next)
+		setActiveTool(next)
       }
 
       function scoutStarterText(mode) {
@@ -41292,38 +41414,66 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const readyTitle = String(options.readyTitle || 'Save this deliverable to the company Drive')
         const savedTitle = String(options.savedTitle || 'This deliverable is saved in the company Drive')
         const errorLabel = String(options.errorLabel || 'could not save to Drive')
-        const settleSaved = () => {
-          button.textContent = savedLabel
-          button.disabled = true
+		let savedDriveId = ''
+		let saveAttempt = null
+        const settleSaved = driveId => {
+		  savedDriveId = String(driveId || artifactId).trim()
+          button.textContent = 'Open in Drive'
+          button.disabled = false
           button.dataset.state = 'saved'
-          button.title = savedTitle
+		  button.title = `${savedTitle}. Open the exact Drive file.`
         }
         if (String(entry?.metadata?.savedToFiles || '').trim().toLowerCase() === 'true') {
-          settleSaved()
-          return button
+		  settleSaved(artifactId)
         }
-        button.textContent = readyLabel
-        button.title = readyTitle
+		if (!savedDriveId) {
+		  button.textContent = readyLabel
+		  button.title = readyTitle
+		}
         button.addEventListener('click', async () => {
+		  if (savedDriveId) {
+			await openDriveFileByID(savedDriveId)
+			return
+		  }
 	      const destination = await chooseDriveSaveOptions(artifactDisplayTitle(entry))
 	      if (!destination) return
+		  const operationId = saveAttempt && saveAttempt.fileName === destination.fileName && saveAttempt.folderId === destination.folderId
+			? saveAttempt.operationId
+			: `web-save-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`}`
+		  saveAttempt = { operationId, fileName: destination.fileName, folderId: destination.folderId }
           button.disabled = true
           button.dataset.state = 'saving'
           button.textContent = savingLabel
           try {
-            const response = await fetch('/assistant/files/save', {
+			const artifactResponse = await fetch(`/artifacts?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+			const artifactPayload = await artifactResponse.json().catch(() => ({}))
+			const dispositionRef = artifactPayload?.dispositionRef
+			if (!artifactResponse.ok || !validArtifactDispositionRef(dispositionRef) || String(dispositionRef.artifactId) !== artifactId) {
+			  throw new Error('The deliverable authority changed. Refresh and try again.')
+			}
+            const response = await fetch('/api/artifact-drive-saves/v1', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId, fileName: destination.fileName, folderId: destination.folderId })
+			  body: JSON.stringify({ operationId, artifact: dispositionRef, fileName: destination.fileName, folderId: destination.folderId })
             })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok) {
+			  if (response.status === 409) saveAttempt = null
               throw new Error(payload.error || errorLabel)
             }
+			const receipt = payload?.receipt
+			const drive = receipt?.drive
+			if (payload?.ok !== true || receipt?.operationId !== operationId || receipt?.action !== 'save' || receipt?.outcome !== 'saved' ||
+				!sameArtifactDispositionRef(receipt?.artifact, dispositionRef) || !drive || String(drive.id || '') !== artifactId ||
+				String(drive.sourceArtifactId || '') !== artifactId || String(drive.name || '') !== destination.fileName ||
+				String(drive.folderId || '') !== destination.folderId || !sameArtifactDispositionRef(drive.artifact, dispositionRef)) {
+			  throw new Error('Drive did not confirm the exact save.')
+			}
             if (entry.metadata && typeof entry.metadata === 'object') {
               entry.metadata.savedToFiles = 'true'
             }
-            settleSaved()
+			saveAttempt = null
+			settleSaved(drive.id)
             showToast({ text: savedLabel, kind: 'done' })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
           } catch (error) {
@@ -41335,6 +41485,36 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
         return button
       }
+
+	  function validArtifactDispositionRef(value) {
+		const digest = /^[0-9a-f]{64}$/
+		return Boolean(value && typeof value === 'object' && !Array.isArray(value) && String(value.tenantId || '').trim() &&
+		  String(value.artifactId || '').trim() && Number.isInteger(value.contentRevision) && value.contentRevision > 0 &&
+		  digest.test(String(value.contentDigest || '')) && Number.isInteger(value.aclVersion) && value.aclVersion > 0 &&
+		  digest.test(String(value.audienceDigest || '')))
+	  }
+
+	  function sameArtifactDispositionRef(left, right) {
+		return validArtifactDispositionRef(left) && validArtifactDispositionRef(right) && left.tenantId === right.tenantId &&
+		  left.artifactId === right.artifactId && left.contentRevision === right.contentRevision && left.contentDigest === right.contentDigest &&
+		  left.aclVersion === right.aclVersion && left.audienceDigest === right.audienceDigest
+	  }
+
+	  async function openDriveFileByID(fileId) {
+		fileId = String(fileId || '').trim()
+		if (!fileId) return
+		filesSelectedId = fileId
+		setActiveTool('files')
+		await loadFilesSurface(true)
+		const file = filesEntries.find(candidate => String(candidate?.id || '') === fileId)
+		if (!file) {
+		  showToast({ text: 'The saved Drive file is unavailable', kind: 'error' })
+		  return
+		}
+		filesActiveFolderId = String(file.folderId || '')
+		filesSelectedId = fileId
+		renderFilesSurface()
+	  }
 
       /* ---------- Download PDF (founder ask 2026-07-07) ----------
          POST /artifacts/export-pdf {artifactId}: the server derives the print
@@ -44660,6 +44840,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function setBoardExpanded(expanded) {
+		if (expanded) {
+		  setActiveTool('artifacts')
+		  return
+		}
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
         if (expanded) {
@@ -49434,33 +49618,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderMeetingTranscript()
       }
 
-      // Board and memory state normally ride the room or office websocket;
-      // these authed HTTP reads are the fallback for tabs whose sockets are
-      // down so the tools still work. Reads only — edits keep their room
-      // gates.
-      async function loadBoardSnapshot(options = {}) {
-        // force: the leave-room cleanup wipes the client board while the
-        // office socket stays OPEN (it follows auth, not room membership),
-        // so no board event repairs it until the next mutation. A one-shot
-        // forced fetch re-syncs the post-meeting board review instead of
-        // showing four empty columns.
-        const force = options.force === true
-        if (!authedUser || ws?.readyState === WebSocket.OPEN || (!force && officeSocketLive())) {
-          return
-        }
-        try {
-          const response = await fetch('/assistant/board', { cache: 'no-store' })
-          if (!response.ok) {
-            return
-          }
-          const payload = await response.json()
-          if (payload?.board && ws?.readyState !== WebSocket.OPEN && (force || !officeSocketLive())) {
-            applyBoardSnapshot(payload.board)
-          }
-        } catch {
-          // The board loads again on the next open or on socket admission.
-        }
-      }
+		  // Historical compatibility only. Active clients never call this
+		  // retired endpoint; old deep links route to conversation-backed Work.
+		async function loadBoardSnapshot(options = {}) {
+		  // Compatibility no-op. Historical Board state is never fetched into an
+		  // active client; old deep links route to Work before this seam.
+		  void options
+		}
 
       async function loadMemorySnapshot() {
         if (!authedUser || ws?.readyState === WebSocket.OPEN || officeSocketLive()) {
@@ -49927,7 +50091,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // without this a burst would stampede the endpoint.
       const osEventsRefetchDebounceMs = 500
       let osEventsPackagesTimer = null
-      let osEventsBoardTimer = null
 
       function osEventsRefetchPackages() {
         // rich consumer: the package rail re-reads packagePayload by ref. The
@@ -49938,19 +50101,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         osEventsPackagesTimer = setTimeout(() => {
           osEventsPackagesTimer = null
           loadPackages(true)
-        }, osEventsRefetchDebounceMs)
-      }
-
-      function osEventsRefetchBoard() {
-        // rich consumer: a completed artifact may have advanced a linked card.
-        // loadBoardSnapshot self-guards (no-op while a room ws is OPEN, where
-        // the 'board' event already covers it) so this is cheap off-room.
-        if (osEventsBoardTimer) {
-          clearTimeout(osEventsBoardTimer)
-        }
-        osEventsBoardTimer = setTimeout(() => {
-          osEventsBoardTimer = null
-          loadBoardSnapshot({ force: true })
         }, osEventsRefetchDebounceMs)
       }
 
@@ -50029,11 +50179,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         switch (event.kind) {
-          case 'artifact_completed':
-            // light: the "work finished" arrival hook. Full return-card UI is
-            // Wave 11; here we just surface it to the extension point and let
-            // the board re-read pick up any linked-card advance.
-            osEventsRefetchBoard()
+		  case 'artifact_completed':
+			// Work is conversation/artifact-backed; refresh the exact result and
+			// never wake the retired Board transport.
+			scheduleArtifactProgressRefresh(event.ref)
             break
           case 'artifact_progress':
             // rich: each orchestrator turn stamps rising progress onto the
@@ -52227,6 +52376,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
+          meetingSpecialistsRoomId = ''
+          if (!guestMode) void loadMeetingSpecialists()
           if (!reconnectingSignal) {
             completeRoomJoinTiming()
           }
@@ -52600,7 +52751,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	  function renderHomeProjectContext() {
 		if (!homeProjectChip) return
 		const selected = homeProjectContext.selected
-		homeProjectChip.hidden = !Boolean(authedUser && homeProjectContext.available)
+		homeProjectChip.hidden = !explicitProjectAttachmentEnabled || !Boolean(authedUser && homeProjectContext.available)
 		homeProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : 'Add project'
 		homeProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : 'Add project')
 		if (!homeProjectChoices) return
@@ -52635,6 +52786,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	  }
 
 	  async function loadHomeProjectContext(createTitle = '') {
+		if (!explicitProjectAttachmentEnabled) return
 		if (!authedUser || guestMode || !homeScoutInput) return
 		const generation = ++homeProjectGeneration
 		const text = homeScoutInput.value.trim()
@@ -52664,7 +52816,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	  function renderScoutChatProjectContext() {
 		const selected = scoutChatProjectContext.selected
-		if (scoutChatProjectRow) scoutChatProjectRow.hidden = !Boolean(authedUser && activeScoutThreadId && scoutChatProjectContext.available)
+		if (scoutChatProjectRow) scoutChatProjectRow.hidden = !explicitProjectAttachmentEnabled || !Boolean(authedUser && activeScoutThreadId && scoutChatProjectContext.available)
 		if (!scoutChatProjectChip) return
 		scoutChatProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : scoutChatProjectContext.explicitNone ? 'No project' : 'Add project'
 		scoutChatProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : scoutChatProjectContext.explicitNone ? 'No project. Change project' : 'Add project')
@@ -52717,6 +52869,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	  }
 
 	  async function loadScoutChatProjectContext() {
+		if (!explicitProjectAttachmentEnabled) return
 		if (!authedUser || !activeScoutThreadId || !scoutChatInput) return
 		const generation = ++scoutChatProjectGeneration
 		const text = scoutChatInput.value.trim()
@@ -52769,6 +52922,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			return `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/project`
 		  }
 
+		  function workResultProjectPath(artifactId) {
+			return `/artifacts/workstream?id=${encodeURIComponent(artifactId)}`
+		  }
+
+		  function activeProjectCorrectionPath(state) {
+			return state.kind === 'work' ? workResultProjectPath(state.artifactId) : sentMessageProjectPath(state.threadId, state.messageId)
+		  }
+
 		  function normalizeSentMessageProjectCorrection(raw) {
 			const source = raw && typeof raw === 'object' ? raw : {}
 			const normalizeChoice = (choice, remove = false) => {
@@ -52800,12 +52961,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			return article.querySelector('button.scout-chat-msg__project[data-project-correction="true"]')
 		  }
 
+		  function workResultProjectTrigger(artifactId) {
+			return scoutChatThread?.querySelector(`.scout-chat-work-card[data-work-artifact-id="${selectorEscape(String(artifactId || ''))}"] button[data-work-project-correction="true"]`) || null
+		  }
+
 		  function closeSentMessageProjectCorrection({ restoreFocus = true } = {}) {
 			const prior = sentMessageProjectState
 			sentMessageProjectGeneration += 1
 			sentMessageProjectAttempt = null
 			sentMessageProjectState = {
-			  threadId: '', messageId: '', scopeKey: '', account: '', loading: false, saving: false,
+			  kind: 'message', threadId: '', messageId: '', artifactId: '', scopeKey: '', account: '', loading: false, saving: false,
 			  available: false, current: null, choices: [], remove: null, selected: null,
 			  error: '', returnFocus: null
 			}
@@ -52814,7 +52979,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			window.requestAnimationFrame(() => {
 			  const target = prior.returnFocus?.isConnected
 				? prior.returnFocus
-				: sentMessageProjectTrigger(prior.threadId, prior.messageId)
+				: (prior.kind === 'work' ? workResultProjectTrigger(prior.artifactId) : sentMessageProjectTrigger(prior.threadId, prior.messageId))
 			  target?.focus?.({ preventScroll: true })
 			})
 		  }
@@ -52822,6 +52987,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  function renderSentMessageProjectCorrection() {
 			if (!sentMessageProjectDialog) return
 			const state = sentMessageProjectState
+			const workSubject = state.kind === 'work'
+			const titleNode = document.getElementById('sentMessageProjectTitle')
+			const descriptionNode = document.getElementById('sentMessageProjectDescription')
+			if (titleNode) titleNode.textContent = workSubject ? 'Correct Work project' : 'Change project'
+			if (descriptionNode) descriptionNode.textContent = workSubject
+			  ? 'Correct this Work and future continuity. The source conversation stays unchanged.'
+			  : 'Choose where this sent message belongs. Nothing changes until you confirm.'
 			if (sentMessageProjectForm) sentMessageProjectForm.setAttribute('aria-busy', String(state.loading || state.saving))
 			if (sentMessageProjectClose) sentMessageProjectClose.disabled = state.saving
 			if (sentMessageProjectCancel) sentMessageProjectCancel.disabled = state.saving
@@ -52881,7 +53053,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			sentMessageProjectState.selected = null
 			sentMessageProjectState.loading = false
 			sentMessageProjectState.saving = false
-			sentMessageProjectState.error = next.available ? '' : 'Project changes are not available for this message.'
+			sentMessageProjectState.error = next.available ? '' : `Project changes are not available for this ${sentMessageProjectState.kind === 'work' ? 'Work' : 'message'}.`
 			sentMessageProjectAttempt = null
 			renderSentMessageProjectCorrection()
 			return true
@@ -52895,7 +53067,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			closeSentMessageProjectCorrection({ restoreFocus: false })
 			const generation = ++sentMessageProjectGeneration
 			sentMessageProjectState = {
-			  threadId, messageId, scopeKey: '', account: String(authedUser.email || '').toLowerCase(), loading: true, saving: false,
+			  kind: 'message', threadId, messageId, artifactId: '', scopeKey: '', account: String(authedUser.email || '').toLowerCase(), loading: true, saving: false,
 			  available: false, current: { title: String(message.project?.title || ''), status, contextRevision: Number(message.project?.contextRevision || 0) },
 			  choices: [], remove: null, selected: null, error: '', returnFocus: trigger || document.activeElement
 			}
@@ -52916,10 +53088,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			}
 		  }
 
+		  async function openWorkResultProjectCorrection(artifact, trigger) {
+			const artifactId = String(artifact?.id || '')
+			if (!sentMessageProjectDialog || !artifactId || !authedUser) return
+			closeSentMessageProjectCorrection({ restoreFocus: false })
+			const generation = ++sentMessageProjectGeneration
+			sentMessageProjectState = {
+			  kind: 'work', threadId: String(activeScoutThreadId || ''), messageId: '', artifactId, scopeKey: '',
+			  account: String(authedUser.email || '').toLowerCase(), loading: true, saving: false,
+			  available: false, current: { title: String(artifact?.metadata?.projectWorkTitle || 'No project'), status: String(artifact?.metadata?.projectWorkId ? 'project' : 'none'), contextRevision: 0 },
+			  choices: [], remove: null, selected: null, error: '', returnFocus: trigger || document.activeElement
+			}
+			renderSentMessageProjectCorrection()
+			sentMessageProjectDialog.showModal()
+			try {
+			  const response = await fetch(workResultProjectPath(artifactId), { method: 'GET', cache: 'no-store' })
+			  const payload = await response.json().catch(() => ({}))
+			  if (generation !== sentMessageProjectGeneration || sentMessageProjectState.artifactId !== artifactId || sentMessageProjectState.account !== String(authedUser?.email || '').toLowerCase()) return
+			  if (!response.ok) throw new Error(payload?.error || 'Work project choices could not be loaded.')
+			  if (!applySentMessageProjectCorrection(payload?.workstreamCorrection)) return
+			  window.requestAnimationFrame(() => sentMessageProjectChoices?.querySelector('[role="radio"]')?.focus())
+			} catch (error) {
+			  if (generation !== sentMessageProjectGeneration) return
+			  sentMessageProjectState.loading = false
+			  sentMessageProjectState.error = error?.message || 'Work project choices could not be loaded.'
+			  renderSentMessageProjectCorrection()
+			}
+		  }
+
 		  async function submitSentMessageProjectCorrection() {
 			const state = sentMessageProjectState
 			if (!state.available || !state.selected || state.saving || !authedUser || state.threadId !== activeScoutThreadId) return
-			const attemptKey = JSON.stringify({ threadId: state.threadId, messageId: state.messageId, scopeKey: state.scopeKey, correctionToken: state.selected.token })
+			const attemptKey = JSON.stringify({ kind: state.kind, threadId: state.threadId, messageId: state.messageId, artifactId: state.artifactId, scopeKey: state.scopeKey, correctionToken: state.selected.token })
 			sentMessageProjectAttempt = sentMessageProjectAttempt?.key === attemptKey
 			  ? sentMessageProjectAttempt
 			  : { key: attemptKey, operationId: globalThis.crypto?.randomUUID?.() || `project-correction-${Date.now()}-${Math.random().toString(16).slice(2)}` }
@@ -52928,22 +53128,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			state.error = ''
 			renderSentMessageProjectCorrection()
 			try {
-			  const response = await fetch(sentMessageProjectPath(state.threadId, state.messageId), {
+			  const response = await fetch(activeProjectCorrectionPath(state), {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ operationId: attempt.operationId, correctionToken: state.selected.token })
 			  })
 			  const payload = await response.json().catch(() => ({}))
 			  if (state !== sentMessageProjectState || state.threadId !== activeScoutThreadId || state.account !== String(authedUser?.email || '').toLowerCase()) return
-			  if (response.status === 409 && payload?.projectCorrection) {
-				if (!applySentMessageProjectCorrection(payload.projectCorrection, { enforceScope: true })) return
+			  const refreshedCorrection = state.kind === 'work' ? payload?.workstreamCorrection : payload?.projectCorrection
+			  if (response.status === 409 && refreshedCorrection) {
+				if (!applySentMessageProjectCorrection(refreshedCorrection, { enforceScope: true })) return
 				sentMessageProjectState.error = payload?.error || 'The Project changed elsewhere. Review and confirm again.'
 				renderSentMessageProjectCorrection()
 				return
 			  }
 			  if (!response.ok) throw new Error(payload?.error || 'Project could not be updated.')
 			  sentMessageProjectAttempt = null
-			  if (payload?.thread) {
+			  if (state.kind === 'work') {
+				await loadScoutChatThreads({ onlyIfChanged: false })
+				if (activeScoutThreadId) await hydrateScoutChatThread(activeScoutThreadId)
+			  } else if (payload?.thread) {
 				upsertScoutChatThread(payload.thread, { select: false })
 				renderActiveScoutThread()
 			  } else if (payload?.message) {
@@ -52972,7 +53176,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const continuationThreadId = selectedHomeSuggestionDestination?.route === 'thread'
           ? String(selectedHomeSuggestionDestination.threadId || '')
           : ''
-		const projectContextToken = homeProjectContext.selected?.text === text ? String(homeProjectContext.selected.token || '') : ''
+		const projectContextToken = explicitProjectAttachmentEnabled && homeProjectContext.selected?.text === text ? String(homeProjectContext.selected.token || '') : ''
 		if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text || homeScoutOpeningAttempt.threadId !== continuationThreadId || homeScoutOpeningAttempt.projectContextToken !== projectContextToken) {
 		  homeScoutOpeningAttempt = { text, threadId: continuationThreadId, projectContextToken, key: nextHomeScoutOpeningKey() }
         }
@@ -53366,7 +53570,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // hidden until the next socket event.
 	          window.requestAnimationFrame(syncDesktopActiveWorkIndicator)
 	          renderOfficeRecentThreads()
-		  const conversationVisible = !phoneLayoutQuery.matches || mobileChatView === 'convo'
+		  // Chat becomes a stacked threads/conversation navigator below the
+		  // desktop split at 861px. Do not hydrate an auto-selected conversation
+		  // while that pane is hidden on tablets; the real row activation starts
+		  // the one bounded detail request as it advances to the conversation.
+		  const conversationVisible = desktopChatLayoutQuery.matches || mobileChatView === 'convo'
 		  if (!presentationFixture && activeScoutThreadId && conversationVisible) void hydrateScoutChatThread(activeScoutThreadId)
 	        } catch {
 	          // Persistent chat can refresh again; keep the current in-memory view.
@@ -53614,7 +53822,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutFollowUpTarget = null
 	        scoutChatReplyTarget = null
 	        renderScoutFollowUpTarget()
-		const projectContextToken = scoutChatProjectContext.selected?.text === String(text || '').trim() && scoutChatProjectContext.selected?.threadId === activeScoutThreadId && scoutChatProjectContext.selected?.sourceKey === projectSourceKey
+		const projectContextToken = explicitProjectAttachmentEnabled && scoutChatProjectContext.selected?.text === String(text || '').trim() && scoutChatProjectContext.selected?.threadId === activeScoutThreadId && scoutChatProjectContext.selected?.sourceKey === projectSourceKey
 		  ? String(scoutChatProjectContext.selected.token || '')
 		  : ''
 	        const ts = new Date().toISOString()
@@ -53692,14 +53900,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			// Project and No-project selections apply to exactly one outgoing
 			// turn. Refresh canonical thread context after every accepted send.
 			resetScoutChatProjectContext({ reload: true })
-	            if (payload.boardAction?.surface === 'board') {
-	              setActiveTool('board')
-	              if (payload.boardAction.requestedIntent === 'clear' && !payload.boardAction.mutationExecuted) {
-	                const count = Number(payload.boardAction.activeCardCount || 0)
-	                showToast({
-	                  text: `Opened Board · ${count} ${count === 1 ? 'item' : 'items'} unchanged until recoverable Trash is available`,
-	                  kind: 'note'
-	                })
+			if (payload.boardAction?.surface === 'board') {
+			  setActiveTool('board')
+			  if (payload.boardAction.requestedIntent === 'clear' && !payload.boardAction.mutationExecuted) {
+				const count = Number(payload.boardAction.activeCardCount || 0)
+				showToast({
+				  text: `Board is retired · ${count} historical ${count === 1 ? 'item' : 'items'} preserved`,
+				  kind: 'note'
+				})
 	              }
 	            }
 	            if (Array.isArray(payload.actions)) {
@@ -57509,6 +57717,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           status.appendChild(coverage)
         }
         fragment.appendChild(status)
+        const recordAction = roomMeetingPermanentRecordAction('recap')
+        if (recordAction) fragment.appendChild(recordAction)
 
         if (!snapshot?.recap) {
           const empty = document.createElement('div')
@@ -57560,6 +57770,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderMeetingTranscript() {
         const entries = roomMeetingTranscriptEntries()
+        const recordAction = roomMeetingPermanentRecordAction('transcript')
         if (!entries.length) {
           const empty = document.createElement('div')
           empty.className = 'room-meeting-empty'
@@ -57568,7 +57779,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ? 'Transcript capture is paused.'
             : 'Spoken moments will appear here as the meeting captures them.'
           empty.appendChild(text)
-          roomMeetingTranscript.replaceChildren(empty)
+          roomMeetingTranscript.replaceChildren(...(recordAction ? [recordAction, empty] : [empty]))
           return
         }
         const nodes = entries.map(entry => {
@@ -57590,10 +57801,52 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.append(meta, copy)
           return item
         })
-        roomMeetingTranscript.replaceChildren(...nodes)
+        roomMeetingTranscript.replaceChildren(...(recordAction ? [recordAction, ...nodes] : nodes))
         if (roomMeetingMode === 'transcript') {
           roomMeetingTranscript.scrollTop = roomMeetingTranscript.scrollHeight
         }
+      }
+
+      function roomMeetingPermanentRecordAction(mode) {
+        const meetingId = String(meetingRecord?.id || currentMeetingIntelligence?.meetingId || '').trim()
+        if (guestMode || !meetingId || !['recap', 'transcript'].includes(mode)) return null
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'meeting-record__action room-meeting-record-action'
+        button.dataset.meetingRecordOrigin = mode
+        button.textContent = 'Open Meeting Record'
+        button.setAttribute('aria-label', `Open permanent Meeting Record from live ${mode}`)
+        button.addEventListener('click', () => openPermanentMeetingRecordFromRoom(meetingId, mode))
+        return button
+      }
+
+      async function openPermanentMeetingRecordFromRoom(meetingId, mode) {
+        meetingId = String(meetingId || '').trim()
+        if (!meetingId || !['recap', 'transcript'].includes(mode)) return
+        const panel = mode === 'recap' ? roomMeetingRecap : roomMeetingTranscript
+        roomMeetingRecordReturn = {
+          meetingId,
+          mode,
+          scrollTop: Number(panel?.scrollTop) || 0
+        }
+        setRoomChatOpen(false)
+        const opened = await jumpToMemoryMeeting(meetingId)
+        if (!opened) returnToLiveMeetingRecordOrigin()
+      }
+
+      function returnToLiveMeetingRecordOrigin() {
+        const origin = roomMeetingRecordReturn
+        if (!origin) return
+        roomMeetingRecordReturn = null
+        setActiveTool('room')
+        setRoomMeetingMode(origin.mode)
+        setRoomChatOpen(true)
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          const panel = origin.mode === 'recap' ? roomMeetingRecap : roomMeetingTranscript
+          if (panel) panel.scrollTop = origin.scrollTop
+          const trigger = document.querySelector(`[data-meeting-record-origin="${selectorEscape(origin.mode)}"]`)
+          ;(trigger || (origin.mode === 'recap' ? roomMeetingRecapTab : roomMeetingTranscriptTab))?.focus()
+        }))
       }
 
       function parseRoomMeetingTranscriptEntry(payload) {
@@ -59242,18 +59495,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        const projectTitle = String(message?.project?.title || '').trim()
 		        if (projectTitle) {
 		          const projectStatus = message?.project?.status === 'pending' ? 'Linking' : message?.project?.status === 'unavailable' ? 'Unavailable' : 'Project'
-			  const correctable = desktopChatMessageIsOwn(selectedScoutChatThread(), message) && ['confirmed', 'unavailable'].includes(String(message?.project?.status || ''))
-		          const project = bfEl(correctable ? 'button' : 'span', 'scout-chat-msg__project', `${projectStatus} · ${projectTitle}`)
-			  if (correctable) {
-				project.type = 'button'
-				project.dataset.projectCorrection = 'true'
-				project.setAttribute('aria-label', `Project: ${projectTitle}. Change project for this message`)
-				project.setAttribute('aria-haspopup', 'dialog')
-				project.title = 'Change project'
-				project.addEventListener('click', () => void openSentMessageProjectCorrection(selectedScoutChatThread(), message, project))
-			  } else {
-				project.setAttribute('aria-label', `${projectStatus === 'Linking' ? 'Project link pending' : projectStatus === 'Unavailable' ? 'Project unavailable' : 'Project'}: ${projectTitle}`)
-			  }
+		          const project = bfEl('span', 'scout-chat-msg__project', `${projectStatus} · ${projectTitle}`)
+			  project.setAttribute('aria-label', `${projectStatus === 'Linking' ? 'Project link pending' : projectStatus === 'Unavailable' ? 'Project unavailable' : 'Project'}: ${projectTitle}`)
 		          const stack = node.querySelector('.scout-chat-msg__stack')
 	          const meta = stack?.querySelector('.scout-chat-msg__meta')
 	          stack?.insertBefore(project, meta || null)
@@ -59984,7 +60227,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              const sourceButton = bfEl('button', 'desktop-chat-source', `source ${index + 1} · ${source.author || 'thread'}`)
 	              sourceButton.type = 'button'
 	              sourceButton.title = String(source.quote || 'Open source message')
-	              sourceButton.addEventListener('click', () => desktopChatScrollToMessage(source.messageId))
+	              sourceButton.addEventListener('click', () => openScoutAnswerSource(source))
 	              sourceRow.appendChild(sourceButton)
 	            })
 	            content.appendChild(sourceRow)
@@ -60110,7 +60353,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function renderDesktopReplyProjectContext() {
 		const selected = chatContextProjectContext.selected
 		if (chatContextProjectChip) {
-		  chatContextProjectChip.hidden = !Boolean(chatContextState?.mode === 'thread' && chatContextProjectContext.available)
+		  chatContextProjectChip.hidden = !explicitProjectAttachmentEnabled || !Boolean(chatContextState?.mode === 'thread' && chatContextProjectContext.available)
 		  chatContextProjectChip.textContent = selected ? `${selected.suggested ? 'Suggested' : 'Project'} · ${selected.title}` : chatContextProjectContext.explicitNone ? 'No project' : 'Add project'
 		  chatContextProjectChip.setAttribute('aria-label', selected ? `Project: ${selected.title}. Change project` : chatContextProjectContext.explicitNone ? 'No project. Change project' : 'Add project')
 		}
@@ -60135,6 +60378,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      async function loadDesktopReplyProjectContext() {
+		if (!explicitProjectAttachmentEnabled) return
 		const state = chatContextState
 		if (!authedUser || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
 		const generation = ++chatContextProjectGeneration
@@ -60258,7 +60502,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        chatContextReplySend.disabled = true
 		const projectSourceKey = desktopReplyProjectSourceKey(files, state)
 		const selectedProject = chatContextProjectContext.selected
-		const projectContextToken = selectedProject?.text === text && selectedProject?.sourceKey === projectSourceKey ? String(selectedProject.token || '') : ''
+		const projectContextToken = explicitProjectAttachmentEnabled && selectedProject?.text === text && selectedProject?.sourceKey === projectSourceKey ? String(selectedProject.token || '') : ''
 		if (selectedProject?.token && !projectContextToken) {
 		  chatContextReplySend.disabled = false
 		  showToast({ text: 'Project context is refreshing for these sources. Try Send again in a moment.', kind: 'note' })
@@ -60441,6 +60685,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            scoutChatInput?.focus()
 	          })
 	          actions.appendChild(regenerate)
+	          if (artifact?.id) {
+	            const projectTitle = String(artifact?.metadata?.projectWorkTitle || ref.projectTitle || '').trim()
+	            const correctProject = bfEl('button', 'chat-context-action', projectTitle ? 'Change project' : 'Set project')
+	            correctProject.type = 'button'
+	            correctProject.dataset.workProjectCorrection = 'true'
+	            correctProject.setAttribute('aria-label', `${projectTitle ? 'Change' : 'Set'} project for this Work`)
+	            correctProject.addEventListener('click', () => openWorkResultProjectCorrection(artifact, correctProject))
+	            actions.appendChild(correctProject)
+	          }
 	        }
 	        if (actions.childNodes.length) summary.appendChild(actions)
 	        const worklog = document.createElement('section')
@@ -60609,7 +60862,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            const chip = bfEl('button', 'desktop-chat-source', `source ${index + 1} · ${source.author || 'thread'}`)
 	            chip.type = 'button'
 	            chip.title = String(source.quote || 'Open source message')
-	            chip.addEventListener('click', () => desktopChatScrollToMessage(source.messageId))
+	            chip.addEventListener('click', () => openScoutAnswerSource(source))
 	            sourceRow.appendChild(chip)
 	          })
 	          stack.appendChild(sourceRow)
@@ -60667,9 +60920,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		              label: generatedImage ? 'More image actions' : 'More message actions',
 		              onEdit: generatedImage ? null : () => beginDesktopFeedMessageEdit(activeThread, message, node),
 		              onRegenerate: generatedImage ? () => beginScoutChatImageRegenerate(message) : null,
-			      onProject: !generatedImage && ['confirmed', 'unavailable'].includes(String(message?.project?.status || ''))
-				? trigger => void openSentMessageProjectCorrection(activeThread, message, trigger)
-				: null,
+			      onProject: null,
 		              onDelete: desktopChatMessageIsOwn(activeThread, message)
 	                ? (control, close) => confirmDesktopFeedMessageDelete(message.id, control, close)
 	                : null
@@ -60946,6 +61197,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const pctValue = Number(ref.progressPercent || artifact?.metadata?.progressPercent || 4)
 	        const pct = Math.max(0, Math.min(100, Number.isFinite(pctValue) ? pctValue : 4))
 	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
+	        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
 	        const phase = desktopWorkPhase(artifact, status, ref)
 	        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
 	        const state = status === 'approval_required'
@@ -60963,18 +61215,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        card.className = 'scout-chat-work-card'
 	        card.dataset.state = status
 	        card.dataset.workArtifactId = workCardID
-	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${query}`)
+	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${query}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
 	        const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
 	        mark.setAttribute('aria-hidden', 'true')
 	        const copy = bfEl('span', 'scout-chat-work-card__copy')
 	        const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
 	        eyebrow.setAttribute('aria-live', 'polite')
 	        eyebrow.setAttribute('aria-atomic', 'true')
-	        copy.append(
-	          eyebrow,
-	          bfEl('span', 'scout-chat-work-card__title', query),
-	          bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step} · ${Math.round(pct)}%`)
-	        )
+	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', query))
+	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
+	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step} · ${Math.round(pct)}%`))
 	        const progressBar = bfEl('span', 'scout-chat-work-card__progress')
 	        progressBar.setAttribute('role', 'progressbar')
 	        progressBar.setAttribute('aria-label', `${state} ${Math.round(pct)} percent`)
@@ -60997,6 +61247,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          bfEl('span', '', progress || 'Work is moving forward.'),
 	          bfEl('span', '', 'Private, durable work. Routing and tools stay server-managed.')
 	        )
+	        if (['complete', 'completed', 'published'].includes(status) && artifact?.id) {
+	          const compactActions = bfEl('div', 'chat-context-actions scout-chat-work-card__actions')
+	          const view = bfEl('button', 'chat-context-action', 'Open')
+	          view.type = 'button'
+	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
+	          compactActions.appendChild(view)
+	          const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
+	          if (save) compactActions.appendChild(save)
+	          const regenerate = bfEl('button', 'chat-context-action', 'Regenerate')
+	          regenerate.type = 'button'
+	          regenerate.addEventListener('click', () => {
+	            armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })
+	            scoutChatInput?.focus()
+	          })
+	          compactActions.appendChild(regenerate)
+	          const correctProject = bfEl('button', 'chat-context-action', projectTitle ? 'Change project' : 'Set project')
+	          correctProject.type = 'button'
+	          correctProject.dataset.workProjectCorrection = 'true'
+	          correctProject.setAttribute('aria-label', `${projectTitle ? 'Change' : 'Set'} project for this Work`)
+	          correctProject.addEventListener('click', () => openWorkResultProjectCorrection(artifact, correctProject))
+	          compactActions.appendChild(correctProject)
+	          details.appendChild(compactActions)
+	        }
 	        open.addEventListener('click', () => {
 	          if (desktopChatLayoutQuery.matches) {
 	            openDesktopWorkContext(message, open)
@@ -68335,7 +68608,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          cards from /assistant/meetings, single-expand accordion; entries
          that aren't meeting-shaped keep the log-row idiom under their day */
 
-      async function loadMeetingsForMemory(force = false) {
+      async function loadMeetingsForMemory(force = false, append = false) {
         // A signed-out tab must not poll authed endpoints into 401 noise.
         if (!authedUser) {
           return
@@ -68343,23 +68616,102 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!force && memoryMeetingsLoadedAt && Date.now() - memoryMeetingsLoadedAt < 15000) {
           return
         }
+		const requestGeneration = ++memoryMeetingsListRequestGeneration
+        const requestIdentity = String(authedUser?.email || '').trim().toLowerCase()
         try {
-          const response = await fetch('/assistant/meetings?limit=60', { cache: 'no-store' })
+		  const cursor = append ? String(memoryMeetingsNextCursor || '') : ''
+		  if (append && !cursor) return
+		  const response = await fetch(`/assistant/meetings?view=index&limit=60${cursor ? `&meetingCursor=${encodeURIComponent(cursor)}` : ''}`, { cache: 'no-store' })
           if (!response.ok) {
             return
           }
           const payload = await response.json()
+		  if (requestGeneration !== memoryMeetingsListRequestGeneration || requestIdentity !== String(authedUser?.email || '').trim().toLowerCase()) {
+            return
+          }
           if (Array.isArray(payload?.meetings)) {
-            memoryMeetings = payload.meetings
+			if (append) {
+			  const seen = new Set(memoryMeetings.map(meeting => String(meeting?.id || '')))
+			  memoryMeetings = [...memoryMeetings, ...payload.meetings.filter(meeting => !seen.has(String(meeting?.id || '')))]
+			} else {
+			  memoryMeetings = payload.meetings
+			}
+			memoryMeetingsNextCursor = String(payload?.nextCursor || '')
+			memoryMeetingsHasMore = Boolean(payload?.hasMore && memoryMeetingsNextCursor)
             memoryMeetingsLoadedAt = Date.now()
+            const currentRevisions = new Map(memoryMeetings.map(meeting => [String(meeting?.id || ''), String(meeting?.recordRevision || '')]))
+			const expandedOutsidePage = !append && expandedMemoryMeetingId && !currentRevisions.has(String(expandedMemoryMeetingId))
+            for (const [meetingId, detail] of memoryMeetingDetails.entries()) {
+			  if ((!currentRevisions.has(meetingId) && meetingId !== expandedMemoryMeetingId) || (currentRevisions.has(meetingId) && currentRevisions.get(meetingId) !== String(detail?.recordRevision || ''))) {
+                memoryMeetingDetails.delete(meetingId)
+              }
+            }
             // default = most recent meeting expanded (design 10.2)
             if (!memoryExpandTouched && !expandedMemoryMeetingId && memoryMeetings.length) {
               expandedMemoryMeetingId = String(memoryMeetings[0].id || '')
+              loadMeetingRecordDetail(expandedMemoryMeetingId)
             }
             renderMemory()
+			if (expandedOutsidePage) {
+			  await loadMeetingRecordDetail(expandedMemoryMeetingId, { force: true })
+			  const refreshed = memoryMeetingDetails.get(expandedMemoryMeetingId)
+			  if (requestGeneration !== memoryMeetingsListRequestGeneration || requestIdentity !== String(authedUser?.email || '').trim().toLowerCase()) return
+			  if (refreshed?.state === 'ready' && !memoryMeetings.some(meeting => String(meeting?.id || '') === expandedMemoryMeetingId)) {
+				memoryMeetings.push(refreshed)
+			  }
+			  renderMemory()
+			}
           }
         } catch {
           // the list loads again on the next visit
+        }
+      }
+
+      async function loadMeetingRecordDetail(meetingId, options = {}) {
+        meetingId = String(meetingId || '').trim()
+        if (!meetingId || !authedUser) {
+          return
+        }
+        const current = memoryMeetingDetails.get(meetingId)
+        if (!options.force && !options.cursor && !options.query && current?.state === 'ready') {
+          return
+        }
+		const requestGeneration = ++memoryMeetingDetailRequestGeneration
+        const requestIdentity = String(authedUser?.email || '').trim().toLowerCase()
+        if (!options.cursor && !options.query) {
+          memoryMeetingDetails.set(meetingId, { state: 'loading' })
+          renderMemory()
+        }
+        const params = new URLSearchParams({ transcriptLimit: '100' })
+        if (options.cursor) params.set('cursor', String(options.cursor))
+        if (options.query) params.set('q', String(options.query))
+		if (options.segmentId) params.set('segmentId', String(options.segmentId))
+        try {
+          const response = await fetch(`/assistant/meetings/${encodeURIComponent(meetingId)}?${params}`, { cache: 'no-store' })
+          const payload = await response.json().catch(() => null)
+		  if (requestGeneration !== memoryMeetingDetailRequestGeneration || requestIdentity !== String(authedUser?.email || '').trim().toLowerCase()) {
+            return
+          }
+          if (!response.ok || !payload?.meeting) {
+            memoryMeetingDetails.set(meetingId, { state: 'error', error: payload?.error || 'Meeting Record unavailable' })
+            renderMemory()
+            return
+          }
+          const next = payload.meeting
+          if (options.append && current?.state === 'ready') {
+            next.transcript = {
+              ...next.transcript,
+              segments: [...(current.transcript?.segments || []), ...(next.transcript?.segments || [])]
+            }
+          }
+          memoryMeetingDetails.set(meetingId, { ...next, state: 'ready' })
+          renderMemory()
+        } catch {
+		  if (requestGeneration !== memoryMeetingDetailRequestGeneration || requestIdentity !== String(authedUser?.email || '').trim().toLowerCase()) {
+            return
+          }
+          memoryMeetingDetails.set(meetingId, { state: 'error', error: 'Meeting Record unavailable' })
+          renderMemory()
         }
       }
 
@@ -69496,8 +69848,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           parts.push(new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(new Date(meeting?.startedAt || Date.now())).toLowerCase())
         }
         parts.push(`${people} ${people === 1 ? 'person' : 'people'}`)
-        const entryCount = Number(meeting?.entryCount) || 0
-        parts.push(`${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`)
+        const transcriptCount = Number(meeting?.transcriptCount) || 0
+        parts.push(`${transcriptCount} transcript ${transcriptCount === 1 ? 'segment' : 'segments'}`)
         return parts.join(' · ')
       }
 
@@ -69586,29 +69938,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return row
       }
 
-      /* → card chips: open the Board and light the card up */
-      function jumpToBoardCard(cardId) {
-        cardId = String(cardId || '').trim()
-        if (!cardId) {
-          return
-        }
-        setActiveTool('board')
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-          const node = document.querySelector(`#board .card[data-card-id="${selectorEscape(cardId)}"]`)
-          if (!node) {
-            showToast({ text: 'that card is no longer on the board', kind: 'note' })
-            return
-          }
-          node.scrollIntoView({ block: 'center', inline: 'nearest' })
-          node.classList.add('is-fresh')
-          window.setTimeout(() => node.classList.remove('is-fresh'), 4000)
-        }))
-      }
-
       // jumpToMemoryMeeting (card 081): a decision ledger row's "open meeting →"
       // chip switches to the Memory tool with the source meeting expanded and
-      // flashed. Mirrors jumpToBoardCard; the record can age past the limit=60
-      // fetch (meetingStoreCap), so a miss is an honest toast, not a dead click.
+      // flashed. The record can age past the initial bounded page, so a miss is
+      // an honest toast, not a dead click.
       async function jumpToMemoryMeeting(meetingId) {
         meetingId = String(meetingId || '').trim()
         if (!meetingId) {
@@ -69618,87 +69951,281 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         expandedMemoryMeetingId = meetingId
         setActiveTool('memory')
         await loadMeetingsForMemory(true)
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        await loadMeetingRecordDetail(meetingId)
+        return new Promise(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
           const node = document.querySelector(`.memory-card[data-meeting-id="${selectorEscape(meetingId)}"]`)
           if (!node) {
             showToast({ text: 'that meeting is no longer in memory', kind: 'note' })
+            resolve(false)
             return
           }
           node.scrollIntoView({ block: 'center' })
           node.classList.add('is-fresh')
           window.setTimeout(() => node.classList.remove('is-fresh'), 4000)
-        }))
+          resolve(true)
+        })))
+      }
+
+	  async function jumpToMeetingRecordSource(meetingId, segmentId) {
+		meetingId = String(meetingId || '').trim()
+		segmentId = String(segmentId || '').trim()
+		if (!meetingId || !segmentId) return
+		memoryExpandTouched = true
+		expandedMemoryMeetingId = meetingId
+		memoryTranscriptOpenIds.add(meetingId)
+		setActiveTool('memory')
+		await loadMeetingsForMemory(true)
+		await loadMeetingRecordDetail(meetingId, { segmentId, force: true })
+		window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+		  const row = document.querySelector(`.meeting-record__transcript-row[data-segment-id="${selectorEscape(segmentId)}"]`)
+		  if (!row) {
+			showToast({ text: 'that transcript interval is no longer available', kind: 'note' })
+			return
+		  }
+		  row.scrollIntoView({ block: 'center' })
+		  row.focus({ preventScroll: true })
+		  row.classList.add('is-fresh')
+		  window.setTimeout(() => row.classList.remove('is-fresh'), 4000)
+		}))
+	  }
+
+	  function openScoutAnswerSource(source) {
+		if (source?.kind === 'meeting_transcript' && source.meetingId && source.segmentId) {
+		  jumpToMeetingRecordSource(source.meetingId, source.segmentId)
+		  return
+		}
+		if (source?.messageId) desktopChatScrollToMessage(source.messageId)
+	  }
+
+	  async function startMeetingRecordConversation(meetingId, detail, trigger) {
+		meetingId = String(meetingId || '').trim()
+		const revision = String(detail?.recordRevision || '').trim()
+		if (!authedUser || !meetingId || !revision) return
+		const generation = ++memoryConversationRequestGeneration
+		const identity = String(authedUser?.email || '').trim().toLowerCase()
+		if (trigger) {
+		  trigger.disabled = true
+		  trigger.textContent = 'Opening private conversation…'
+		}
+		try {
+		  const result = await postAuthJSON(`/assistant/meetings/${encodeURIComponent(meetingId)}/conversation`, { recordRevision: revision })
+		  if (generation !== memoryConversationRequestGeneration || identity !== String(authedUser?.email || '').trim().toLowerCase()) return
+		  const current = memoryMeetingDetails.get(meetingId)
+		  if (!result.ok || !result.data?.thread?.id || current?.recordRevision !== revision) {
+			throw new Error(result.data?.error || 'Meeting Record revision changed')
+		  }
+		  const thread = upsertScoutChatThread(result.data.thread)
+		  setActiveTool('chat')
+		  setScoutTab('private')
+		  selectScoutChatThread(thread.id)
+		  setMobileChatView('convo')
+		  scoutChatInput?.focus()
+		} catch (error) {
+		  if (generation === memoryConversationRequestGeneration) showToast({ text: error?.message || 'Could not start a Meeting Record conversation', kind: 'error' })
+		} finally {
+		  if (generation === memoryConversationRequestGeneration && trigger?.isConnected) {
+			trigger.disabled = false
+			trigger.textContent = 'Ask Scout about this meeting'
+		  }
+		}
+	  }
+
+      function meetingRecordCoverageLabel(state) {
+        const labels = {
+          full: 'sources complete',
+          catching_up: 'analysis catching up',
+          partial_late_start: 'opening may be missing',
+          partial_gaps: 'transcript may have gaps',
+          partial_synthesis: 'analysis has gaps',
+          no_transcript: 'transcript unavailable',
+          unknown: 'coverage unknown'
+        }
+        return labels[String(state || '')] || 'coverage unknown'
+      }
+
+      function meetingRecordSection(meetingId, title, claims, emptyText) {
+        const section = document.createElement('section')
+        section.className = 'meeting-record__section'
+        section.appendChild(bfEl('h4', 'meeting-record__heading', title))
+        if (!Array.isArray(claims) || !claims.length) {
+          section.appendChild(bfEl('div', 'meeting-record__empty', emptyText))
+          return section
+        }
+        for (const claim of claims) {
+          const row = document.createElement('div')
+          row.className = 'meeting-record__claim'
+          row.appendChild(bfEl('div', 'meeting-record__claim-text', String(claim?.text || '')))
+          const meta = [claim?.status]
+          if (claim?.owner) meta.push(claim.owner)
+          else if (claim?.kind === 'commitment' || claim?.kind === 'decision') meta.push('owner unresolved')
+          if (claim?.dueState === 'unresolved') meta.push('due unresolved')
+          row.appendChild(bfEl('div', 'meeting-record__claim-meta', meta.filter(Boolean).join(' · ')))
+          const source = Array.isArray(claim?.sources) ? claim.sources[0] : null
+          if (source) {
+			const sourceState = String(source.correctionState || 'current')
+			const sourceButton = bfEl('button', 'meeting-record__source', `${source.speaker ? `${source.speaker} · ` : ''}${memoryClock(source.at)} · source ${sourceState}`)
+			sourceButton.type = 'button'
+			sourceButton.setAttribute('aria-label', `Open exact transcript source, ${sourceState}, revision ${String(source.revision || '').slice(0, 8) || 'unavailable'}`)
+			sourceButton.addEventListener('click', () => jumpToMeetingRecordSource(meetingId, source.segmentId))
+			row.appendChild(sourceButton)
+          }
+		  const linked = [...(Array.isArray(claim?.work) ? claim.work : []), ...(Array.isArray(claim?.projects) ? claim.projects : [])]
+		  if (linked.length) {
+			const links = document.createElement('div')
+			links.className = 'meeting-record__claim-links'
+			for (const reference of linked) {
+			  const kind = String(reference?.kind || '')
+			  const openKind = String(reference?.openKind || '')
+			  const openId = String(reference?.openId || '').trim()
+			  if (!openId || (openKind !== 'project' && openKind !== 'artifact')) continue
+			  const chip = bfEl('button', 'memory-link-chip', `${kind === 'project' ? 'Project' : 'Work'} · ${String(reference?.title || 'linked record')}`)
+			  chip.type = 'button'
+			  chip.setAttribute('aria-label', `Open linked ${kind === 'project' ? 'Project' : 'Work'} ${String(reference?.title || '')}`)
+			  if (openKind === 'project') chip.addEventListener('click', () => { selectScoutChatThread(openId); setActiveTool('chat') })
+			  else chip.addEventListener('click', () => openArtifactStage(openId, String(reference?.title || 'Work result')))
+			  links.appendChild(chip)
+			}
+			row.appendChild(links)
+		  }
+          section.appendChild(row)
+        }
+        return section
+      }
+
+      function meetingRecordTranscriptNode(meetingId, detail) {
+        const section = document.createElement('section')
+        section.className = 'meeting-record__section'
+        const toggle = bfEl('button', 'meeting-record__action', memoryTranscriptOpenIds.has(meetingId) ? 'Hide transcript' : 'Open transcript')
+        toggle.type = 'button'
+        toggle.setAttribute('aria-expanded', memoryTranscriptOpenIds.has(meetingId) ? 'true' : 'false')
+        toggle.addEventListener('click', () => {
+          if (memoryTranscriptOpenIds.has(meetingId)) memoryTranscriptOpenIds.delete(meetingId)
+          else memoryTranscriptOpenIds.add(meetingId)
+          renderMemory()
+        })
+        section.appendChild(toggle)
+        if (!memoryTranscriptOpenIds.has(meetingId)) return section
+
+        const search = document.createElement('input')
+        search.type = 'search'
+        search.className = 'meeting-record__search'
+        search.placeholder = 'Search speaker or exact words'
+        search.setAttribute('aria-label', 'Search transcript')
+        search.value = memoryTranscriptQueries.get(meetingId) || ''
+        search.addEventListener('input', () => memoryTranscriptQueries.set(meetingId, search.value))
+        search.addEventListener('keydown', event => {
+          if (event.key !== 'Enter') return
+          event.preventDefault()
+          loadMeetingRecordDetail(meetingId, { query: search.value, force: true })
+        })
+        section.appendChild(search)
+        const segments = Array.isArray(detail?.transcript?.segments) ? detail.transcript.segments : []
+        if (!segments.length) {
+          section.appendChild(bfEl('div', 'meeting-record__empty', 'No authorized transcript segment matches.'))
+        }
+        for (const segment of segments) {
+		  const row = document.createElement('div')
+		  row.className = 'meeting-record__transcript-row'
+		  row.dataset.segmentId = String(segment?.id || '')
+		  row.tabIndex = -1
+		  row.setAttribute('role', 'group')
+		  row.setAttribute('aria-label', `Exact transcript source. ${String(segment?.speaker || 'speaker unresolved')}. ${memoryClock(segment?.at)}. Source ${String(segment?.correctionState || 'current')}. ${String(segment?.text || '')}`)
+          const meta = document.createElement('div')
+          meta.className = 'meeting-record__transcript-meta'
+          meta.append(bfEl('span', '', String(segment?.speaker || 'speaker unresolved')), bfEl('span', '', memoryClock(segment?.at)))
+          row.append(meta, bfEl('div', 'meeting-record__transcript-text', String(segment?.text || '')))
+          section.appendChild(row)
+        }
+        if (detail?.transcript?.hasMore && detail?.transcript?.nextCursor) {
+          const more = bfEl('button', 'meeting-record__action', 'Load more transcript')
+          more.type = 'button'
+          more.addEventListener('click', () => loadMeetingRecordDetail(meetingId, {
+            cursor: detail.transcript.nextCursor,
+            query: detail.transcript.query || '',
+            append: true,
+            force: true
+          }))
+          section.appendChild(more)
+        }
+        return section
       }
 
       function renderMemoryMeetingBody(meeting) {
+        const meetingId = String(meeting?.id || '')
         const body = document.createElement('div')
         body.className = 'memory-card__body'
-
-        const rule = document.createElement('div')
-        rule.className = 'memory-card__rule'
-        body.appendChild(rule)
+        body.appendChild(bfEl('div', 'memory-card__rule'))
+        const detail = memoryMeetingDetails.get(meetingId)
+		if (roomMeetingRecordReturn?.meetingId === meetingId) {
+		  const back = bfEl('button', 'meeting-record__action', `Back to live ${roomMeetingRecordReturn.mode}`)
+		  back.type = 'button'
+		  back.setAttribute('aria-label', `Back to live meeting ${roomMeetingRecordReturn.mode}`)
+		  back.addEventListener('click', returnToLiveMeetingRecordOrigin)
+		  body.appendChild(back)
+		}
+        if (!detail || detail.state === 'loading') {
+          body.appendChild(bfEl('div', 'meeting-record__empty', 'Loading the current authorized Meeting Record…'))
+          return body
+        }
+        if (detail.state === 'error') {
+          body.appendChild(bfEl('div', 'meeting-record__empty', String(detail.error || 'Meeting Record unavailable')))
+          const retry = bfEl('button', 'meeting-record__action', 'Retry')
+          retry.type = 'button'
+          retry.addEventListener('click', () => loadMeetingRecordDetail(meetingId, { force: true }))
+          body.appendChild(retry)
+          return body
+        }
 
         const kicker = document.createElement('div')
         kicker.className = 'memory-card__kicker'
         kicker.innerHTML = '<svg width="11" height="11" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>'
-        kicker.appendChild(document.createTextNode('what the room decided'))
+        kicker.appendChild(document.createTextNode(`Meeting Record · ${meetingRecordCoverageLabel(detail.coverage?.state)}`))
         body.appendChild(kicker)
+        body.appendChild(bfEl('div', 'memory-card__summary', String(detail.outcomePreview || 'No grounded outcomes yet.')))
+		const askScout = bfEl('button', 'meeting-record__action', 'Ask Scout about this meeting')
+		askScout.type = 'button'
+		askScout.addEventListener('click', () => startMeetingRecordConversation(meetingId, detail, askScout))
+		body.appendChild(askScout)
+        body.append(
+		  meetingRecordSection(meetingId, 'Executive recap', detail.executiveRecap, 'No currently grounded recap is available.'),
+		  meetingRecordSection(meetingId, 'What everyone needs to know', detail.needsToKnow, 'No currently grounded highlights are available.'),
+		  meetingRecordSection(meetingId, 'Decisions', detail.decisions, 'No decision was resolved from current sources.'),
+		  meetingRecordSection(meetingId, 'Commitments & follow-ups', detail.commitments, 'No commitment was resolved from current sources.'),
+		  meetingRecordSection(meetingId, 'Blockers, risks & unresolved', detail.blockers, 'No current blocker or unresolved question was recorded.')
+        )
 
-        const summary = document.createElement('div')
-        summary.className = 'memory-card__summary'
-        summary.textContent = String(meeting?.summary || '').trim()
-          || (meeting?.active
-            ? 'the room is live — scout writes the summary as it talks.'
-            : 'no summary yet — scout writes one as the meeting is processed.')
-        body.appendChild(summary)
-
-        const decisions = Array.isArray(meeting?.decisions) ? meeting.decisions : []
-        if (decisions.length) {
-          const decided = document.createElement('div')
-          decided.className = 'memory-decided'
-          const label = document.createElement('div')
-          label.className = 'memory-decided__label'
-          label.textContent = 'decided'
-          decided.appendChild(label)
-          for (const decision of decisions) {
-            const row = document.createElement('div')
-            row.className = 'memory-decided__row'
-            row.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'
-            row.appendChild(document.createTextNode(String(decision)))
-            decided.appendChild(row)
+        const references = document.createElement('section')
+        references.className = 'meeting-record__section'
+        references.appendChild(bfEl('h4', 'meeting-record__heading', 'People, Work, Projects & artifacts'))
+        references.appendChild(bfEl('div', 'meeting-record__coverage', Array.isArray(detail.people) && detail.people.length ? detail.people.join(' · ') : 'No people resolved'))
+        const referenceRows = [...(detail.work || []), ...(detail.projects || []), ...(detail.artifacts || [])]
+        const exactReferenceRows = referenceRows.filter(reference => {
+          const openKind = String(reference?.openKind || '').trim()
+          const openId = String(reference?.openId || '').trim()
+          return Boolean(openId && (openKind === 'project' || openKind === 'artifact'))
+        })
+        if (!exactReferenceRows.length) references.appendChild(bfEl('div', 'meeting-record__empty', 'No currently authorized Work, Project, or artifact references.'))
+        for (const reference of exactReferenceRows) {
+          const chip = bfEl('button', 'memory-link-chip', `→ ${String(reference?.title || 'reference')}`)
+          chip.type = 'button'
+          const openId = String(reference.openId).trim()
+          if (reference.openKind === 'project') {
+            chip.setAttribute('aria-label', `Open Meeting Record Project ${String(reference?.title || 'reference')}`)
+            chip.addEventListener('click', () => openScoutChatThread(openId))
+          } else {
+            chip.setAttribute('aria-label', `Open Meeting Record ${reference?.kind === 'work' ? 'Work' : 'artifact'} ${String(reference?.title || 'reference')}`)
+            chip.addEventListener('click', () => openArtifactStage(openId, String(reference?.title || 'artifact')))
           }
-          body.appendChild(decided)
+          references.appendChild(chip)
         }
+        body.appendChild(references)
 
-        const logRows = Array.isArray(meeting?.log) ? meeting.log : []
-        if (logRows.length) {
-          const log = document.createElement('div')
-          log.className = 'memory-log'
-          for (const row of logRows) {
-            log.appendChild(memoryLogRowNode(String(row?.kind || ''), row?.at, String(row?.text || '')))
-          }
-          body.appendChild(log)
-        }
-
-        const links = Array.isArray(meeting?.links) ? meeting.links : []
-        if (links.length) {
-          const linksRow = document.createElement('div')
-          linksRow.className = 'memory-links'
-          const label = document.createElement('span')
-          label.className = 'memory-links__label'
-          label.textContent = 'on the board'
-          linksRow.appendChild(label)
-          for (const link of links) {
-            const chip = document.createElement('button')
-            chip.type = 'button'
-            chip.className = 'memory-link-chip'
-            chip.textContent = `→ ${String(link?.title || 'card')}`
-            chip.addEventListener('click', () => jumpToBoardCard(link?.cardId))
-            linksRow.appendChild(chip)
-          }
-          body.appendChild(linksRow)
-        }
-
+        const coverage = document.createElement('section')
+        coverage.className = 'meeting-record__section'
+        coverage.appendChild(bfEl('h4', 'meeting-record__heading', 'Source coverage'))
+        coverage.appendChild(bfEl('div', 'meeting-record__coverage', `${meetingRecordCoverageLabel(detail.coverage?.state)} · ${Number(detail.coverage?.transcriptCount) || 0} transcript segments · ${Number(detail.coverage?.unavailableClaims) || 0} unavailable claims`))
+        for (const gap of detail.coverage?.gaps || []) coverage.appendChild(bfEl('div', 'meeting-record__coverage-gap', `• ${String(gap)}`))
+        body.append(coverage, meetingRecordTranscriptNode(meetingId, detail))
         return body
       }
 
@@ -69729,6 +70256,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // accordion — opening one closes the other; reopening toggles shut
           memoryExpandTouched = true
           expandedMemoryMeetingId = expanded ? '' : String(meeting?.id || '')
+          if (!expanded && expandedMemoryMeetingId) {
+            loadMeetingRecordDetail(expandedMemoryMeetingId)
+          }
           renderMemory()
         })
         item.appendChild(head)
@@ -69752,8 +70282,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return Number.isFinite(startedAt) && startedAt >= weekAgo
         })
         const seconds = week.reduce((total, meeting) => total + (Number(meeting?.durationSeconds) || 0), 0)
-        const decisions = memoryMeetings.reduce((total, meeting) => total + (Array.isArray(meeting?.decisions) ? meeting.decisions.length : 0), 0)
-        const logs = memoryMeetings.reduce((total, meeting) => total + (Number(meeting?.entryCount) || 0), 0)
+        const decisions = memoryMeetings.reduce((total, meeting) => total + (Number(meeting?.decisionCount) || 0), 0)
+        const logs = memoryMeetings.reduce((total, meeting) => total + (Number(meeting?.transcriptCount) || 0), 0)
         if (memoryStatMeetings) {
           memoryStatMeetings.textContent = `this week · ${week.length} ${week.length === 1 ? 'meeting' : 'meetings'}`
         }
@@ -69764,7 +70294,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           memoryStatDecisions.textContent = `${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`
         }
         if (memoryCount) {
-          memoryCount.textContent = `${logs} log ${logs === 1 ? 'entry' : 'entries'}`
+          memoryCount.textContent = `${logs} transcript ${logs === 1 ? 'segment' : 'segments'}`
         }
         memoryStats.hidden = false
       }
@@ -69785,7 +70315,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const meetingIds = new Set(memoryMeetings.map(meeting => String(meeting?.id || '')))
         // search filters meeting titles (design 10.2); loose log rows have
         // no title, so a query hides them
-        const matches = memoryMeetings.filter(meeting => !query || memoryMeetingTitle(meeting).toLowerCase().includes(query))
+        const matches = memoryMeetings.filter(meeting => !query || `${memoryMeetingTitle(meeting)} ${String(meeting?.outcomePreview || '')}`.toLowerCase().includes(query))
         const loose = query
           ? []
           : memoryEntries.filter(entry => !meetingIds.has(String(entry?.metadata?.meetingId || ''))).slice().reverse()
@@ -69846,6 +70376,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             wrap.append(rail, labelRow, items)
             return wrap
           })
+		if (!query && memoryMeetingsHasMore) {
+		  const older = bfEl('button', 'meeting-record__action', 'Load older meetings')
+		  older.type = 'button'
+		  older.setAttribute('aria-label', 'Load older Meeting Records')
+		  older.addEventListener('click', () => loadMeetingsForMemory(true, true))
+		  nodes.push(older)
+		}
 
         memoryList.replaceChildren(...nodes)
         if (memoryFoot) {
@@ -71799,6 +72336,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         iceRestartRecoveryStartedAt = 0
         participantsInRoom = []
         roomAgentParticipants = []
+        roomScoutVoiceAvailability = { enabled: false, reason: 'quality_gate_pending' }
+        meetingSpecialistsLoadGeneration++
+        meetingSpecialistsRoomId = ''
+        meetingSpecialistsSnapshot = null
         // the sitting's occupancy dies with the seat — a stale occupiedSeats
         // (last in-call presence payload) fed every post-leave surface a
         // phantom "live now · n inside" until the next preview fetch landed
@@ -71815,13 +72356,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         setStageMode('gallery')
         renderBoard()
         updateBoardControls()
-        // re-sync the board from the office path — the live office socket
-        // would otherwise make the fallback skip and leave the board (and
-        // the intel stat tile) empty until reload or the next mutation.
-        // Guests skip it: no board surface, and the fetch would 401.
-        if (!guestMode) {
-          loadBoardSnapshot({ force: true })
-        }
         stopRoomClock()
         // the ONLY place the tab's room identity resets (reconnects must
         // re-seat into the same room with the same passcode) — §3.8: it
@@ -73257,6 +73791,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return activeJoinRoomRecord() || { id, name: id === 'office' ? 'the office' : id }
       }
 
+      function roomVoiceAgentControlsAvailable() {
+        if (roomAgentParticipants.length > 0) return true
+        const roomId = activeJoin.roomId || 'office'
+        if (meetingSpecialistsRoomId !== roomId) return false
+        return Boolean(roomScoutVoiceAvailability.enabled || meetingSpecialistsSnapshot?.available)
+      }
+
       function syncRoomMoreActions() {
         if (!roomMoreMenu) {
           return
@@ -73271,8 +73812,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomMoreInviteButton.disabled = !appShell.classList.contains('is-in-room')
         }
         if (roomMoreSpecialistsButton) {
-          roomMoreSpecialistsButton.hidden = Boolean(guestMode)
+          roomMoreSpecialistsButton.hidden = Boolean(guestMode) || !roomVoiceAgentControlsAvailable()
           roomMoreSpecialistsButton.disabled = !appShell.classList.contains('is-in-room')
+        }
+        if (roomMoreChatButton) {
+          roomMoreChatButton.disabled = !appShell.classList.contains('is-in-room') || Boolean(roomChatInput?.disabled)
         }
         if (roomMoreRecapButton) {
           roomMoreRecapButton.hidden = Boolean(guestMode)
@@ -73289,7 +73833,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomMoreArchiveButton.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
         }
         if (roomMoreBoardButton) {
-          roomMoreBoardButton.hidden = Boolean(guestMode)
+          roomMoreBoardButton.hidden = true
           roomMoreBoardButton.disabled = Boolean(roomBoardToggleButton?.disabled)
           roomMoreBoardButton.textContent = roomBoardPanel?.hidden === false ? 'Close board' : 'Board'
         }
@@ -73311,7 +73855,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const buttonCopy = meetingSpecialistsBusy
           ? (scout ? 'Removing Scout…' : 'Adding Scout…')
           : (scout ? 'Scout joined' : 'Add Scout')
-        roomScoutQuickActionButton.hidden = Boolean(guestMode)
+        roomScoutQuickActionButton.hidden = Boolean(guestMode) || !roomScoutVoiceAvailability.enabled
         roomScoutQuickActionButton.disabled = meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')
         roomScoutQuickActionButton.classList.toggle('is-live', Boolean(scout))
         roomScoutQuickActionButton.setAttribute('aria-label', scout ? 'Open Scout participant controls' : 'Add Scout to this meeting')
@@ -73324,6 +73868,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const next = Boolean(open && appShell.classList.contains('is-in-room'))
+        // A deferred composer focus belongs only to the Chat action that
+        // scheduled it. Reopening the action menu means the user has moved on;
+        // cancel the stale frame so it cannot steal focus from a later panel.
+        if (next) cancelRoomChatComposerFocus()
         syncRoomMoreActions()
         roomMoreMenu.hidden = !next
         roomMoreToggleButton.setAttribute('aria-expanded', String(next))
@@ -73333,7 +73881,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      let meetingSpecialistsSnapshot = null
       let meetingSpecialistsRestoreFocus = null
 
       function meetingSpecialistReason(reason) {
@@ -73402,7 +73949,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const rows = []
         const scout = roomAgentParticipants.find(agent => agent.id === 'scout') || null
         const scoutState = scout ? meetingSpecialistStatusLabel(scout.voiceState || scout.status) : 'available'
-        rows.push(`<article class="meeting-specialists__row meeting-specialists__row--scout">
+        if (roomScoutVoiceAvailability.enabled) rows.push(`<article class="meeting-specialists__row meeting-specialists__row--scout">
           <div class="meeting-specialists__row-head"><span class="meeting-specialists__name">${escapeHtml(scout?.name || 'Scout')}</span><span class="meeting-specialists__status">${escapeHtml(scoutState)}</span></div>
           <p class="meeting-specialists__purpose">Invite Scout as a visible, audible participant.</p>
           <p class="meeting-specialists__copy">${scout ? 'Scout is visible to everyone in this sitting. Dismissing him leaves meeting transcription running.' : 'Meeting transcription remains independent; Scout hears nothing until invited.'}</p>
@@ -73461,12 +74008,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       async function loadMeetingSpecialists() {
         setMeetingSpecialistsState('Checking eligibility, consent, and the current meeting…')
         const roomId = activeJoin.roomId || 'office'
+        const generation = ++meetingSpecialistsLoadGeneration
         const [scoutResult, specialistsResult] = await Promise.allSettled([
           meetingSpecialistFetch(`/api/rooms/agents/scout?roomId=${encodeURIComponent(roomId)}`),
           meetingSpecialistFetch(`/api/stride/v1/meeting-specialists?roomId=${encodeURIComponent(roomId)}`)
         ])
+        if (generation !== meetingSpecialistsLoadGeneration || roomId !== (activeJoin.roomId || 'office')) return
+        meetingSpecialistsRoomId = roomId
         if (scoutResult.status === 'fulfilled') {
+          roomScoutVoiceAvailability = scoutResult.value.voice || { enabled: false, reason: 'quality_gate_pending' }
           handleRoomAgentParticipants(scoutResult.value.agents)
+          syncRoomScoutQuickAction()
+        } else {
+          roomScoutVoiceAvailability = { enabled: false, reason: 'quality_gate_pending' }
         }
         meetingSpecialistsSnapshot = specialistsResult.status === 'fulfilled'
           ? specialistsResult.value.specialists || null
@@ -73480,10 +74034,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const message = scoutResult.reason?.message || specialistsResult.reason?.message || 'Agent meeting controls are unavailable.'
           setMeetingSpecialistsState(message, true)
         }
+        syncRoomMoreActions()
       }
 
       function openMeetingSpecialists() {
-        if (!meetingSpecialistsPanel || guestMode || !appShell.classList.contains('is-in-room')) return
+        if (!meetingSpecialistsPanel || guestMode || !appShell.classList.contains('is-in-room') || !roomVoiceAgentControlsAvailable()) return
         const active = document.activeElement
         if (!meetingSpecialistsRestoreFocus) {
           meetingSpecialistsRestoreFocus = roomMoreMenu?.contains(active) || active?.hidden

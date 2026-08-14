@@ -41,8 +41,9 @@ test('transcript stays one reveal away while truthful audio output is primary', 
 
 test('secondary meeting work and privacy actions have one More-menu owner', () => {
   assert.match(room, /id: 'people', label: 'People in this room'/);
-  assert.match(room, /id: 'specialists', label: 'Agent team'/);
-  assert.match(room, /id: 'board', label: 'Board'/);
+  assert.match(room, /if \(meetingAgentControlsAvailable\(\)\)[\s\S]*id: 'specialists', label: 'Agent team'/);
+  assert.match(room, /if \(inNativeRoom\) void loadSpecialists\(\)/);
+  assert.doesNotMatch(room, /id: 'board', label: 'Board'/);
   assert.match(room, /id: 'data-choices', label: 'Microphone data'/);
   assert.match(room, /<RoomConsentSheet[\s\S]*visible=\{consentVisible\}/);
   assert.doesNotMatch(room, /id: 'audio-output'/);

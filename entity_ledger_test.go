@@ -46,16 +46,36 @@ func upsertLedgerTestDigest(t *testing.T, app *kanbanBoardApp, meetingID string,
 	if err != nil {
 		t.Fatalf("marshal digest payload: %v", err)
 	}
-	entry, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, string(raw), map[string]string{
-		"meetingId":                meetingID,
-		digestDayMetadataKey:       payload.Day,
-		digestSpanStartMetadataKey: "2026-07-06T10:00:00Z",
-		digestSpanEndMetadataKey:   "2026-07-06T18:00:00Z",
-	})
-	if err != nil {
-		t.Fatalf("upsert digest for %s: %v", meetingID, err)
+	upsertBriefingTestDigest(t, app, meetingID, string(raw), payload.Day, "2026-07-06T10:00:00Z", "2026-07-06T18:00:00Z")
+	entry, ok := app.memory.currentDigest(meetingMemoryKindMeetingDigest, meetingID)
+	if !ok {
+		t.Fatalf("current digest for %s is missing after upsert", meetingID)
 	}
 
+	return entry
+}
+
+func appendCorrectedLedgerTranscript(t *testing.T, app *kanbanBoardApp, meetingID, id, supersedesID, body string) meetingMemoryEntry {
+	t.Helper()
+	entry, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID,
+		id,
+		"",
+		"Fixture speaker",
+		"human_attributed",
+		body,
+		map[string]string{
+			"meetingId":       meetingID,
+			"source":          "ledger_correction_fixture",
+			"correctionState": "corrected",
+			"supersedesId":    supersedesID,
+		},
+		true,
+		"",
+	)
+	if err != nil || !appended {
+		t.Fatalf("append corrected ledger transcript %s: appended=%v err=%v", id, appended, err)
+	}
 	return entry
 }
 
@@ -205,6 +225,9 @@ func TestEntityLedgerPassIsIdempotentAcrossDigestRebuilds(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	upsertLedgerTestDigest(t, app, "meeting-a", fullLedgerTestPayload())
 	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	if rooms := app.drainAmbientAgentPendingRooms(companyDigestAgentName); len(rooms) != 1 || rooms[0] != officeRoomID {
+		t.Fatalf("company digest nudge rooms=%v, want office immediately after durable ledger events", rooms)
+	}
 	before := app.memory.ledgerState()
 
 	// the cumulative digest is rebuilt with identical facts (a new entry id
@@ -222,6 +245,85 @@ func TestEntityLedgerPassIsIdempotentAcrossDigestRebuilds(t *testing.T) {
 	}
 	if after := app.memory.ledgerState(); !reflect.DeepEqual(before, after) {
 		t.Fatalf("state changed on an idempotent rerun:\nbefore=%+v\nafter=%+v", before, after)
+	}
+}
+
+func TestEntityLedgerClosesCorrectedSourceBeforeOpeningReplacementAndIgnoresModelSilence(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	const meetingID = "meeting-source-correction"
+	oldPayload := meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "OBSOLETE-CANARY ship the launch on Friday", By: "attributed to AJ", Status: "decided",
+		Anchor: "source-old", At: "2026-07-06T10:06:00Z", Importance: 5,
+	}}}
+	upsertLedgerTestDigest(t, app, meetingID, oldPayload)
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	initial := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision)
+	if len(initial) != 1 || !initial[0].current() {
+		t.Fatalf("initial decision=%+v, want one current record", initial)
+	}
+	oldRecordID := initial[0].ID
+	oldAnchor := initial[0].Anchors[0]
+
+	// Omitting a still-current fact from a rebuilt model digest is not evidence
+	// that the underlying decision disappeared. The exact anchor remains
+	// current, so no ledger validity window may close.
+	silent := upsertLedgerTestDigest(t, app, meetingID, meetingDigestPayload{})
+	pass := runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	if got := pass.Metadata[entityLedgerCursorMetadataKey]; got != silent.ID || pass.Metadata["eventCount"] != "0" {
+		t.Fatalf("silent rebuild pass=%+v, want cursor advance and zero events", pass.Metadata)
+	}
+	if record := app.memory.ledgerState()[oldRecordID]; !record.current() {
+		t.Fatalf("model silence closed current source record: %+v", record)
+	}
+
+	replacement := appendCorrectedLedgerTranscript(
+		t, app, meetingID, "source-corrected", oldAnchor,
+		"Hold the launch until security review is complete.",
+	)
+	correctedPayload := meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Hold the launch until security review is complete", By: "attributed to AJ", Status: "decided",
+		Anchor: replacement.ID, At: "2026-07-06T10:07:00Z", Importance: 5,
+	}}}
+	upsertLedgerTestDigest(t, app, meetingID, correctedPayload)
+	pass = runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	if pass.Metadata["eventCount"] != "2" {
+		t.Fatalf("corrected pass eventCount=%q, want close plus fresh add", pass.Metadata["eventCount"])
+	}
+
+	records := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision)
+	if len(records) != 2 {
+		t.Fatalf("decisions=%+v, want preserved old history plus replacement", records)
+	}
+	var oldRecord, currentRecord ledgerRecord
+	for _, record := range records {
+		if record.ID == oldRecordID {
+			oldRecord = record
+		}
+		if record.current() {
+			currentRecord = record
+		}
+	}
+	if oldRecord.Status != ledgerStatusSuperseded || oldRecord.current() {
+		t.Fatalf("old record=%+v, want source-closed superseded history", oldRecord)
+	}
+	if currentRecord.Title != "Hold the launch until security review is complete" || !ledgerSliceContains(currentRecord.Anchors, replacement.ID) {
+		t.Fatalf("current replacement=%+v, want corrected source-bound decision", currentRecord)
+	}
+	view := app.ledgerCurrentStateView(10)
+	if len(view.Decisions) != 1 || strings.Contains(view.Decisions[0].Title, "OBSOLETE-CANARY") {
+		t.Fatalf("current view=%+v, stale wording survived correction", view.Decisions)
+	}
+
+	foundGovernedClose := false
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindLedgerEvent, 0) {
+		var event ledgerEventPayload
+		if json.Unmarshal([]byte(entry.Text), &event) == nil && event.Record.ID == oldRecordID && event.Op == ledgerOpClose {
+			foundGovernedClose = event.Reason == ledgerReasonSourceNoLongerCurrent
+		}
+	}
+	if !foundGovernedClose {
+		t.Fatal("source correction did not emit an explicit governed close event")
 	}
 }
 
@@ -439,7 +541,7 @@ func TestLedgerEventsAreBookkeepingNotRecall(t *testing.T) {
 	if meetingID == "" {
 		t.Fatal("expected a minted meeting id")
 	}
-	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{Decisions: []meetingDigestDecision{{
+	upsertLedgerTestDigest(t, app, meetingID, meetingDigestPayload{Decisions: []meetingDigestDecision{{
 		D: "Quokka rollout budget approved", Anchor: "tx-1", Importance: 5,
 	}}})
 	runLedgerPass(t, app, forbiddenLedgerResponder(t))

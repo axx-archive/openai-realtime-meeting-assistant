@@ -178,7 +178,7 @@ func TestCapabilitySnapshotExposesEveryAmbientLaneAndCircuitTruth(t *testing.T) 
 		t.Fatalf("ambientWorkers type=%T, want map", snapshot["ambientWorkers"])
 	}
 	for _, name := range []string{
-		"brain", "board", "missionIntel", "decisionLedger", "narrative",
+		"brain", "missionIntel", "decisionLedger", "narrative",
 		"meetingDigest", "dayDigest", "entityLedger", "companyDigest",
 		"researchSuggestion", "slopClassifier", "tasteAnalyst", "houseStyle",
 	} {

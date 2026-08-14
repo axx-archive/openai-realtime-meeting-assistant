@@ -174,9 +174,6 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 		}
 	}
 
-	builder.WriteString("\n\n# Board context\n")
-	builder.WriteString(boardContextLine(app.snapshotState()))
-
 	builder.WriteString("\n\n# Brain write-up window\n")
 	for _, entry := range inputs {
 		builder.WriteString("- ")

@@ -22,6 +22,12 @@ test('proposal approval submits the human-edited objective once', () => {
 test('terminal work opens from the authorized read and receipts only mutating Save', () => {
   assert.match(bubble, /Open deliverable/);
   assert.match(bubble, /Save deliverable to Drive/);
+  assert.match(bubble, /Open saved deliverable in Drive/);
+	assert.match(bubble, /Project: \$\{String\(workThread\.ref\.projectTitle\)\.trim\(\)\}/);
+	assert.match(bubble, /Project · \{String\(workThread\.ref\.projectTitle\)\.trim\(\)\}/);
+	assert.match(screen, /navigation\.navigate\(["']Files["'], \{ fileId \}\)/);
+	assert.match(files, /route\.params\?\.fileId/);
+	assert.match(files, /openFile\(file\)/);
   assert.match(bubble, /Edit prompt and regenerate deliverable/);
   assert.doesNotMatch(screen, /action: 'open'/);
   assert.match(screen, /const response = await api\.artifact\(sessionToken, artifactId\)/);

@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "deterministic_local_pd1_conversation_first_home_checkpoint",
+  "observedAt": "2026-08-11T23:11:07-07:00",
+  "status": "bounded_web_iphone_ipad_home_independent_critic_pass",
+  "sourceBoundary": {
+    "workspace": "/Users/ajhart/meetingassist",
+    "branch": "codex/country-golf-stride",
+    "headBeforeCandidateCommit": "343cdd8572f02288dc695284d215d83e63c47d95",
+    "canonicalPlanSha256BeforeCheckpoint": "1bc89fc2e72656dc61092127bb1fe6d2b4fb7ec516b85f485fb12fa7c72c83e4",
+    "dirty": true,
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "released": false
+  },
+  "claims": {
+    "primaryEntry": "one_ordinary_private_scout_composer_and_one_realtime_voice_control_without_tool_deliverable_model_or_authority_picker",
+    "continuity": "server_owned_home_v1_returns_at_most_four_exact_authorized_next_actions_and_destinations",
+    "starters": "continue_explore_create_challenge_seed_only_the_editable_ordinary_composer_and_create_zero_effect_until_explicit_submit",
+    "revocationAndFailure": "every_failed_refresh_immediately_clears_server_derived_titles_previews_starters_and_destinations_while_preserving_only_the_unsent_local_draft",
+    "retry": "quiet_retry_contains_no_private_context_and_repopulates_only_from_a_fresh_authorized_response",
+    "minimalism": "legacy_morning_brief_portfolio_health_intelligence_cards_tap_to_talk_copy_and_private_brain_footer_are_absent",
+    "appearance": [
+      "dark",
+      "light"
+    ],
+    "nativeAccessibility": "iphone_and_ipad_render_large_and_accessibility_extra_extra_extra_large_text_with_keyboard_coexistence_and_prompt_local_autofill_suppression",
+    "providerCalls": 0,
+    "externalEffects": 0,
+    "productionMutations": 0
+  },
+  "platformParity": [
+    {
+      "row": "home_continuity",
+      "classification": "equivalent_capability",
+      "desktop": "quiet_simultaneous_home_context_plus_quick_room_jump",
+      "iphone": "one_handed_progressive_continuity_rows",
+      "ipad": "persistent_sidebar_plus_bounded_centered_continuity"
+    },
+    {
+      "row": "continue_explore_create_challenge",
+      "classification": "equivalent_capability",
+      "desktop": "two_column_editable_starter_grid_on_focus",
+      "iphone": "two_column_normal_type_and_continuity_first_at_accessibility_type",
+      "ipad": "two_column_normal_type_and_four_full_width_rows_at_accessibility_type"
+    },
+    {
+      "row": "project_chip_and_correction",
+      "classification": "explicitly_deferred",
+      "reason": "server_owned_project_link_classifier_and_correction_contract_not_implemented_in_this_checkpoint"
+    }
+  ],
+  "selectedFileSha256": {
+    "guest_allowlist_test.go": "0ef3b89dc3fadc6eaa2bffb99f45022ebc5c2b3ba77e0bf622520c79e2b7efc4",
+    "index.html": "c0b4e8bf4ea395c2ab14f4af35b2cd5330ff40b1a26f1df41a1b974a8d6d4a01",
+    "main.go": "d4845ad6ade83edf05c9581dd4a73f88d22470cdfce14ad7e56df14d2542c839",
+    "mobile/src/__tests__/brandAssets.test.ts": "d6a08c4e86afe9bc37797fd5c482e7ada441da194b45427661a4f799bc5f2e78",
+    "mobile/src/api/client.ts": "438fee63d3a752bef86f617babe6716930f033e077b0b3a8123ed43e938aa824",
+    "mobile/src/api/types.ts": "426747d9e54f6ccbc584644e3b486e632800890f6eccb96467484bd72392a722",
+    "mobile/src/canvas/useLiveLine.ts": "8e1657934092681b2e6995e2cb1beffbd3fc9277149fc337b168458dc87ea484",
+    "mobile/src/screens/CanvasScreen.tsx": "02054b5249eba90b90ac16ad7127218c823ca50bf787b0bc2d905383e568dd4e",
+    "rooms.go": "c22bc71437f6af6e443f725079bac21bc6f8983ba85bdb9123b464e8f2abf2fa",
+    "stride_e10_agentic_lab_test.go": "5d201d47ff8e93b5f945e4fffec9a81ad66a99e6c7e7fa9f628857b426f18847",
+    "frontend_home_contract_test.go": "20783aa6b0f22f154311508392488be288e53ba7ae46aa4b3980ac9d6c92039b",
+    "home.go": "4739e076aed2450891fbeaf8a9d6375bbd9831928dac04fb2ba2502489a02570",
+    "home_test.go": "d836315a088f7f507316c1d39e9e5e8cad1d565e61a1f96a29a6d029eb63c967",
+    "mobile/src/__tests__/homeContract.test.ts": "517dfb1b13184b0d9c9e2ce28969545ec8ecf2b506caf2d956c521020b19fa34"
+  },
+  "buildEvidence": {
+    "configuration": "Release_iphonesimulator_CODE_SIGNING_ALLOWED_NO",
+    "apiBase": "http://127.0.0.1:19092",
+    "nativeRealtimeVoiceEnabled": false,
+    "mainJsBundleSha256": "253ba23471f0d0457f48af1529414ed2157b9dc685706e153817c0c395e925fd",
+    "installedSameBundleOn": [
+      "iPhone_17_Pro_simulator",
+      "iPad_Pro_13_inch_M5_simulator"
+    ]
+  },
+  "renderedEvidence": [
+    {"surface":"desktop_home_dark","path":"docs/evidence/e10/rendered-pd1-home-20260811/desktop-home-dark.png","sha256":"81a9037a8702f59e8a17a5aafd0f29f9acc4993b7c58c292dbb7ee9368b94395","width":1440,"height":900},
+    {"surface":"desktop_home_light","path":"docs/evidence/e10/rendered-pd1-home-20260811/desktop-home-light.png","sha256":"f8d57906672576300882d0ad328a0817a1271fd8eac5f0b137f37227ad9a6d0d","width":1440,"height":900},
+    {"surface":"desktop_home_focused_dark","path":"docs/evidence/e10/rendered-pd1-home-20260811/desktop-home-focused-dark.png","sha256":"0fd436f15bbcfd44e7cc3702def75220cdce3176b3631c8a45313c2f3e182c29","width":1440,"height":900},
+    {"surface":"desktop_home_focused_light","path":"docs/evidence/e10/rendered-pd1-home-20260811/desktop-home-focused-light.png","sha256":"60500a4abd7fec9b07487bef0b9fd5695c3e298953ba76e0c57dcbad7592d5e0","width":1440,"height":900},
+    {"surface":"responsive_home_focused_dark","path":"docs/evidence/e10/rendered-pd1-home-20260811/phone-home-focused-dark.png","sha256":"fbcf17b5e2458085866de770a167377fedeb45cb8dab5c24890f5c066990cd86","width":390,"height":844},
+    {"surface":"responsive_home_focused_light","path":"docs/evidence/e10/rendered-pd1-home-20260811/phone-home-focused-light.png","sha256":"957d2ccedad3adf24708a5f3391df9986324c53e4d489bfe761f5c5f723cb5fe","width":390,"height":844},
+    {"surface":"iphone_home_light_large","path":"docs/evidence/e10/rendered-pd1-home-20260811/iphone-home-light-large.png","sha256":"51f25083c033ea06342cb38ebcbbac8068a45b52cef349434aded1f730d5c03e","width":1206,"height":2622},
+    {"surface":"iphone_home_dark_large","path":"docs/evidence/e10/rendered-pd1-home-20260811/iphone-home-dark-large.png","sha256":"26cc012c2778fad9a8e144a0072d8859061b98e48debda5472ff8833b9e43136","width":1206,"height":2622},
+    {"surface":"iphone_home_dark_large_keyboard","path":"docs/evidence/e10/rendered-pd1-home-20260811/iphone-home-dark-large-keyboard.png","sha256":"c7f20c17b9a752afc7c33a100bb66c145a89c6bf11c0f9b535f14a282e9971c9","width":1206,"height":2622},
+    {"surface":"iphone_home_dark_axxxl_focused","path":"docs/evidence/e10/rendered-pd1-home-20260811/iphone-home-dark-axxxl-focused.png","sha256":"ef8c8688aa504a14290c915c7e861ac7782ea6cc6249d41ed91790a96f621e1d","width":1206,"height":2622},
+    {"surface":"ipad_home_light_large","path":"docs/evidence/e10/rendered-pd1-home-20260811/ipad-home-light-large.png","sha256":"4a46ad4bbbe115eaa2f56b77965ebb72a99139d0e170f7628a2a5313eb09e317","width":2064,"height":2752},
+    {"surface":"ipad_home_dark_large","path":"docs/evidence/e10/rendered-pd1-home-20260811/ipad-home-dark-large.png","sha256":"3babd837226a91725464cf1edcc428b07e2875d9534de7670580e73bc7f7e7f8","width":2064,"height":2752},
+    {"surface":"ipad_home_light_axxxl_keyboard","path":"docs/evidence/e10/rendered-pd1-home-20260811/ipad-home-light-axxxl-keyboard-no-autofill.png","sha256":"bc75b7bbb8742e303e6d3a8c17b81b781484e8f35a8d0559b1880e7e7e645a86","width":2064,"height":2752}
+  ],
+  "verification": {
+    "focusedGoNormal": "PASS_4.379s",
+    "focusedGoRace": "PASS_13.777s",
+    "mobileTests": "PASS_516_of_516",
+    "mobileTypecheck": "PASS",
+    "goVetAll": "PASS",
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/secure_tool_critic_round3",
+      "firstVerdict": "REVISE_stale_private_context_retained_after_failed_refresh",
+      "secondVerdict": "REVISE_ipad_axxxl_keyboard_and_autofill_obstruction",
+      "repairs": [
+        "clear_every_server_derived_home_projection_on_any_refresh_failure",
+        "preserve_only_unsent_local_draft_and_repopulate_on_fresh_authorized_retry",
+        "suppress_prompt_autofill_and_capture_combined_ipad_axxxl_keyboard_state"
+      ],
+      "finalVerdict": "PASS",
+      "nativeHomeContract": "PASS_6_of_6",
+      "sourceAndRenderedHashesRevalidated": true,
+      "scope": "bounded_local_default_off_web_iphone_ipad_home_checkpoint"
+    }
+  },
+  "operationalBoundary": {
+    "loopbackOnly": true,
+    "productionReads": 0,
+    "productionWrites": 0,
+    "providerCalls": 0,
+    "collection": 0,
+    "publication": 0,
+    "cohortActivation": 0
+  },
+  "openGates": [
+    "server_owned_project_link_classifier_and_correction",
+    "functional_voiceover_and_reduced_motion",
+    "actual_ipad_split_view_stage_manager_pointer_and_full_keyboard_access",
+    "axxxl_login_screen_repair",
+    "compact_live_meeting_controls",
+    "complete_work_card_open_drive_edit_regenerate_journeys",
+    "physical_iphone_and_ipad_acceptance",
+    "provider_backed_deliverable_acceptance",
+    "production_and_seven_tester_acceptance",
+    "whole_pd1_and_e10_ledger"
+  ],
+  "exclusions": {
+    "physicalDeviceAccepted": false,
+    "actualSplitViewAccepted": false,
+    "functionalVoiceOverAccepted": false,
+    "providerCalled": false,
+    "productionAccepted": false,
+    "wholePD1Complete": false,
+    "wholeLedgerComplete": false
+  }
+}

@@ -184,11 +184,9 @@ func TestLaunchAgentThreadFollowUpVersionsArtifactInPlace(t *testing.T) {
 	}
 }
 
-// The follow-up success seam runs the SAME terminal contract as the primary
-// seam: on the error→follow-up-success path the linked board card advances to
-// Done, the completed artifact attaches to its venture package, and the
-// completion card is delivered back to the origin channel.
-func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.T) {
+// Follow-up success files the deliverable and closes the conversation loop
+// without mutating an archived Board card.
+func TestFollowUpSuccessPreservesBoardHistoryAttachesPackageAndDeliversOrigin(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -211,8 +209,8 @@ func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.
 		t.Fatalf("create channel: %v", err)
 	}
 
-	// v1 errored: the card sits in Blocked, nothing attached, nothing
-	// delivered — exactly the state the primary error seam leaves behind.
+	// The artifact may retain a historical boardCardId, but that archive is no
+	// longer a work-state authority.
 	artifact, _, err := app.createOSArtifactWithMetadata("research", "Nimbus market scan", "scaffold body", "AJ", map[string]string{
 		"source":        "scout_thread",
 		"threadId":      "agent-thread-research-err",
@@ -229,20 +227,16 @@ func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.
 	if err != nil {
 		t.Fatalf("seed errored artifact: %v", err)
 	}
-	app.advanceLinkedCard(card.ID, kanbanStatusBlocked, "v1 worker error")
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBlocked {
-		t.Fatalf("status=%q before the follow-up, want Blocked", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q before the follow-up, want archived Backlog", status)
 	}
 
 	if _, err := app.launchAgentThreadFollowUp(artifact.ID, "try again with the fix", "Tim", nil); err != nil {
 		t.Fatalf("launchAgentThreadFollowUp: %v", err)
 	}
 
-	// board auto-advance: the board stops lying about the recovered work.
-	// In Progress, not Done — the deliverable informs the card's work and a
-	// human judges when the card itself is finished.
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q after the follow-up success, want In Progress", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q after the follow-up success, want archived Backlog", status)
 	}
 	// package auto-attach: the completed deliverable files into its binder.
 	attached, _ := app.venturePackageByID(pkg.ID)

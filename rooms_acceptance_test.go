@@ -297,7 +297,7 @@ func TestMultiRoomAcceptanceFlow(t *testing.T) {
 	app.mu.Unlock()
 	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Instructions == meetingDigestInstructions() {
-			return `{"meetingId":"x","day":"2026-07-09","topics":[{"t":"NBC partnership terms GUESTMTGMARKER","importance":5}],"decisions":[{"d":"Send the NBC terms sheet GUESTMTGMARKER","by":"Guest Nia","importance":5}]}`, nil
+			return fmt.Sprintf(`{"meetingId":"x","day":"2026-07-09","topics":[{"t":"NBC partnership terms GUESTMTGMARKER","anchor":%q,"importance":5}],"decisions":[{"d":"Send the NBC terms sheet GUESTMTGMARKER","by":"Guest Nia","anchor":%q,"importance":5}]}`, chatEntry.ID, chatEntry.ID), nil
 		}
 		return closeFlushSupersetJSON, nil
 	}

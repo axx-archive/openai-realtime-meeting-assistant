@@ -9,7 +9,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { usePushRegistration } from '../push/usePushRegistration';
 import type { PushTarget } from '../push/deepLink';
-import { BoardScreen } from '../screens/BoardScreen';
 import { CanvasScreen } from '../screens/CanvasScreen';
 import { DeckScreen } from '../screens/DeckScreen';
 import { LoginScreen } from '../screens/LoginScreen';
@@ -235,7 +234,7 @@ export function RootNavigator() {
       if (tool === 'chat') navigationRef.navigate('Deck', { segment: 'threads' });
       else if (['workflow', 'research', 'design', 'grill'].includes(tool)) {
         navigationRef.navigate('Deck', { segment: 'work' });
-      } else if (tool === 'board') navigationRef.navigate('Board');
+      } else if (tool === 'board') navigationRef.navigate('WorkHome');
       else if (tool === 'artifacts' || tool === 'files') navigationRef.navigate('Files');
       else if (tool === 'meetings') navigationRef.navigate('Meetings');
       else if (tool === 'memory') navigationRef.navigate('Memory');
@@ -324,7 +323,9 @@ export function RootNavigator() {
               component={OSWebScreen}
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
-            <Stack.Screen name="Board" component={BoardScreen} />
+            {/* Legacy Board deep links land in Work. The old filing-system UI
+                is no longer mounted, while its persisted history remains. */}
+            <Stack.Screen name="Board" component={WorkHomeScreen} />
             <Stack.Screen name="Intelligence" component={IntelligenceScreen} />
             <Stack.Screen name="Memory" component={MemoryScreen} />
             <Stack.Screen name="Meetings" component={MeetingsScreen} />

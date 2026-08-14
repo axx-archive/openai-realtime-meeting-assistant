@@ -207,7 +207,7 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artifact, found := kanbanApp.osArtifactByID(artifactID)
-	if !found || !artifactIsHTMLDocument(artifact) || !artifactRenderTokenMatchesArtifact(token, artifact) {
+	if !found || !artifactIsHTMLDocument(artifact) || !artifactRenderTokenMatchesArtifact(token, artifact) || !kanbanApp.projectBoundArtifactCurrent(r.Context(), artifact) {
 		http.NotFound(w, r)
 		return
 	}

@@ -256,26 +256,20 @@ func TestKanbanBoardStateBackwardCompatWithoutDraftField(t *testing.T) {
 	}
 }
 
-// Frontend wiring guard, following the repo's index.html grep-test pattern:
-// the board draft styling, actions, and endpoint wiring must stay together.
-func TestIndexBoardDraftWiring(t *testing.T) {
+func TestIndexBoardDraftActionsAreNotReachableFromActiveNavigation(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
 	}
 	html := string(rawHTML)
 
-	for _, want := range []string{
-		"/assistant/board/drafts/",
-		"card-draft__accept",
-		"card-draft__dismiss",
-		".card.is-draft",
-		"drafted by scout · ",
-		"dismissed · scout will remember why",
-		"function submitBoardDraftAction(cardId, action)",
+	for _, retired := range []string{
+		`id="toolBoard"`,
+		`id="roomBoardPanel"`,
+		`id="roomBoardToggle"`,
 	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing board draft anchor %q", want)
+		if strings.Contains(html, retired) {
+			t.Fatalf("index.html still mounts retired Board action %q", retired)
 		}
 	}
 }

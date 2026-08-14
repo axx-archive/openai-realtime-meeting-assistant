@@ -442,7 +442,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
 		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
-		`data-tool="room" aria-label="Meetings" aria-pressed="false"`,
+		`data-tool="room" aria-label="Video" aria-pressed="false"`,
 		`data-tool="chat" aria-label="Conversations" aria-pressed="false"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		"let railHidden = false",
@@ -670,7 +670,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 			t.Fatalf("prototype rail tool %s should be present in the OS rail", visibleTool)
 		}
 	}
-	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
+	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="memory"`} {
 		if !strings.Contains(html, hiddenTool) {
 			t.Fatalf("off-rail tool %s should remain addressable for assistant/tool routing", hiddenTool)
 		}
@@ -797,14 +797,11 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if strings.Contains(html, "openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')") {
 		t.Fatal("agent thread cards should open Artifacts, not legacy Research/Design pages")
 	}
-	if !strings.Contains(html, `<button id="toolBoard" class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="board" aria-label="Projects" aria-pressed="false" aria-checked="false">`) {
-		t.Fatal("board rail slot should be visible and enabled; the expanded board gates editing, not entry")
+	if strings.Contains(html, `id="toolBoard"`) {
+		t.Fatal("retired Board route must not remain mounted in Work navigation")
 	}
-	if !strings.Contains(html, `<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Memory" aria-pressed="false" aria-checked="false">`) {
-		t.Fatal("memory rail slot should be visible so the memory browser is reachable")
-	}
-	if strings.Contains(html, "toolBoardButton.disabled") {
-		t.Fatal("board rail entry must not be re-disabled by board readiness; the expanded surface owns its locked state")
+	if !strings.Contains(html, `<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Meetings" aria-pressed="false" aria-checked="false">`) {
+		t.Fatal("Meetings rail slot should be visible so the permanent Meeting Record library is reachable")
 	}
 	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`) {
 		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
@@ -1851,13 +1848,9 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 	for _, want := range []string{
 		// completion notifications land on the originating thread card
 		"function chatThreadForArtifactId(artifactId)",
-		// board + memory reads over authed HTTP without joining the call
-		// (options.force re-syncs the board after leaving a room — the live
-		// office socket would otherwise skip the fallback forever)
+		// memory reads over authed HTTP without joining the call
 		"async function loadBoardSnapshot(options = {})",
-		"loadBoardSnapshot({ force: true })",
 		"async function loadMemorySnapshot()",
-		"fetch('/assistant/board', { cache: 'no-store' })",
 		"fetch('/assistant/memory', { cache: 'no-store' })",
 		"function applyBoardSnapshot(data)",
 		"function applyMemorySnapshot(data)",

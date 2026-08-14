@@ -19,6 +19,9 @@ test('generic deliverables use only the closed save-only Drive capability', () =
   assert.match(screen, /receipt\.action !== ["']save["']/u);
   assert.match(screen, /sameDispositionRef\(receipt\.artifact, artifact\.dispositionRef\)/u);
   assert.match(screen, /receipt\.drive\.sourceArtifactId !== artifactId/u);
+	assert.match(screen, /navigation\.navigate\(["']Files["'], \{ fileId \}\)/u);
+	assert.match(bubble, /Open saved deliverable in Drive/u);
+	assert.match(bubble, /Open in Drive/u);
   assert.doesNotMatch(screen.match(/const saveWorkArtifact = useCallback[\s\S]*?const beginRegenerateWorkArtifact/u)?.[0] ?? '', /artifactDisposition\(/u);
 });
 

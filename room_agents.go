@@ -17,6 +17,7 @@ var (
 	ErrRoomAgentControlScope   = errors.New("room agent control scope is unavailable")
 	ErrRoomAgentControlAction  = errors.New("room agent control action is invalid")
 	ErrRoomAgentConsentMissing = errors.New("room agent consent is unavailable")
+	ErrRoomScoutVoiceDisabled  = errors.New("room Scout voice has not passed qualification")
 )
 
 // roomAgentParticipant is the server-owned participant projection. Clients do
@@ -165,6 +166,9 @@ func (app *kanbanBoardApp) officeRoomScoutScopeForGeneration(generation uint64) 
 }
 
 func (app *kanbanBoardApp) inviteRoomScout(ctx context.Context, user *userAccount, requestedRoomID string) ([]roomAgentParticipant, error) {
+	if !currentRoomScoutVoiceAvailability().Enabled {
+		return nil, ErrRoomScoutVoiceDisabled
+	}
 	control, err := app.resolveRoomScoutControlScope(ctx, user, requestedRoomID, true)
 	if err != nil {
 		return nil, err
@@ -415,7 +419,7 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusForbidden, "room agent status was not authorized")
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": kanbanApp.roomAgentParticipantsSnapshot(activeRoomID)})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": kanbanApp.roomAgentParticipantsSnapshot(activeRoomID), "voice": currentRoomScoutVoiceAvailability()})
 		return
 	}
 	if !websocketOriginAllowed(r) {
@@ -458,11 +462,14 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, ErrConsentAuthorityUnavailable) {
 			status = http.StatusServiceUnavailable
 			message = "Consent choices are temporarily unavailable, so Scout cannot join yet."
+		} else if errors.Is(err, ErrRoomScoutVoiceDisabled) {
+			status = http.StatusServiceUnavailable
+			message = "In-room Scout voice is unavailable until it passes the physical meeting quality gate. Meeting transcription and @Scout chat remain available."
 		}
 		writeAuthError(w, status, message)
 		return
 	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": agents})
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": agents, "voice": currentRoomScoutVoiceAvailability()})
 }
 
 // rememberRoomAgentTranscript commits provider-authored speech into the same

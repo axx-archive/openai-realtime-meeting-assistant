@@ -14,15 +14,16 @@ import (
 const ambientReplayModeEnv = "AMBIENT_INTELLIGENCE_REPLAY_MODE"
 
 type AmbientReplayRuntimeStatus struct {
-	Mode               string `json:"mode"`
-	Enabled            bool   `json:"enabled"`
-	Database           bool   `json:"database"`
-	PlannerConfigured  bool   `json:"plannerConfigured"`
-	ExecutorConfigured bool   `json:"executorConfigured"`
-	BoardExcluded      bool   `json:"boardExcluded"`
-	MaxSources         int    `json:"maxSources"`
-	Ready              bool   `json:"ready"`
-	Error              string `json:"error,omitempty"`
+	Mode                string `json:"mode"`
+	Enabled             bool   `json:"enabled"`
+	Database            bool   `json:"database"`
+	PlannerConfigured   bool   `json:"plannerConfigured"`
+	ExecutorConfigured  bool   `json:"executorConfigured"`
+	PromotionConfigured bool   `json:"promotionConfigured"`
+	BoardExcluded       bool   `json:"boardExcluded"`
+	MaxSources          int    `json:"maxSources"`
+	Ready               bool   `json:"ready"`
+	Error               string `json:"error,omitempty"`
 }
 
 var ambientReplayRuntime struct {
@@ -69,13 +70,22 @@ func configureAmbientReplayRuntime(app *kanbanBoardApp) AmbientReplayRuntimeStat
 			status.Error = "replay approval and rollback authority adapters have not been installed"
 		} else {
 			store := &PostgresAmbientReplayStore{pool: runtime.postgres.pool}
+			promoter := newProductionAmbientReplayPromoter(app, store)
 			reclaimCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, reclaimErr := store.ReclaimExpired(reclaimCtx, time.Now().UTC())
+			recoveryErr := error(nil)
+			if promoter != nil {
+				recoveryErr = promoter.RecoverAmbientReplayPromotions(reclaimCtx)
+			}
+			reclaimErr := error(nil)
+			if recoveryErr == nil {
+				_, reclaimErr = store.ReclaimExpired(reclaimCtx, time.Now().UTC())
+			}
 			cancel()
-			if reclaimErr != nil {
+			if recoveryErr != nil || reclaimErr != nil {
 				status.Error = "ambient replay recovery is unavailable"
 			} else {
-				engine = &AmbientReplayEngine{Authority: authority, Store: store}
+				engine = &AmbientReplayEngine{Authority: authority, Store: store, Promoter: promoter}
+				status.PromotionConfigured = promoter != nil
 				if runner := newProductionAmbientReplayStageRunner(app); runner != nil {
 					engine.Runner = runner
 					status.ExecutorConfigured = true
@@ -88,6 +98,8 @@ func configureAmbientReplayRuntime(app *kanbanBoardApp) AmbientReplayRuntimeStat
 			} else if mode == "execute" {
 				if engine == nil || engine.Runner == nil {
 					status.Error = "replay executor adapter has not been installed"
+				} else if engine.Promoter == nil {
+					status.Error = "canonical replay promotion adapter has not been installed"
 				} else {
 					status.Ready = true
 				}
@@ -111,10 +123,33 @@ func installAmbientReplayStageRunner(runner AmbientReplayStageRunner) {
 	ambientReplayRuntime.engine.Runner = runner
 	ambientReplayRuntime.status.ExecutorConfigured = runner != nil
 	if ambientReplayRuntime.status.Mode == "execute" {
-		ambientReplayRuntime.status.Ready = runner != nil
-		if runner != nil {
-			ambientReplayRuntime.status.Error = ""
+		ambientReplayRuntime.status.Ready = false
+		if runner == nil {
+			ambientReplayRuntime.status.Error = "replay executor adapter has not been installed"
+		} else if !ambientReplayRuntime.status.PromotionConfigured {
+			ambientReplayRuntime.status.Error = "canonical replay promotion adapter has not been installed"
 		}
+	}
+}
+
+func installAmbientReplayPromoter(promoter AmbientReplayPromoter) {
+	ambientReplayRuntime.Lock()
+	defer ambientReplayRuntime.Unlock()
+	if ambientReplayRuntime.engine == nil {
+		return
+	}
+	ambientReplayRuntime.engine.Promoter = promoter
+	ambientReplayRuntime.status.PromotionConfigured = promoter != nil
+	if ambientReplayRuntime.status.Mode != "execute" {
+		return
+	}
+	ambientReplayRuntime.status.Ready = ambientReplayRuntime.engine.Runner != nil && promoter != nil
+	if ambientReplayRuntime.status.Ready {
+		ambientReplayRuntime.status.Error = ""
+	} else if ambientReplayRuntime.engine.Runner == nil {
+		ambientReplayRuntime.status.Error = "replay executor adapter has not been installed"
+	} else {
+		ambientReplayRuntime.status.Error = "canonical replay promotion adapter has not been installed"
 	}
 }
 
@@ -201,7 +236,8 @@ func ambientReplayExecuteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	engine := currentAmbientReplayEngine()
-	if engine == nil || ambientReplayRuntimeSnapshot().Mode != "execute" {
+	status := ambientReplayRuntimeSnapshot()
+	if engine == nil || status.Mode != "execute" || !status.Ready || !status.PromotionConfigured {
 		writeAuthError(w, http.StatusServiceUnavailable, "ambient replay executor is unavailable")
 		return
 	}

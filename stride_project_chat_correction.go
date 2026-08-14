@@ -83,6 +83,7 @@ type projectChatCorrectionTruth struct {
 	AssociationDigest   string
 	ProjectID           string
 	ProjectRevision     int64
+	ProjectDigest       string
 	ProjectTitle        string
 	SourceEventID       string
 	SourceEventRevision int64
@@ -192,7 +193,7 @@ func (store *PostgresCanonicalStore) projectChatCorrectionTruth(ctx context.Cont
 		return truth, ErrProjectAuthorityNotFound
 	}
 	err := store.pool.QueryRow(ctx, `SELECT association.association_id,association.revision,encode(association.content_digest,'hex'),
-association.project_id,association.project_revision,project.title,source.event_id,source.content_revision,encode(source.content_digest,'hex'),
+association.project_id,association.project_revision,encode(project.content_digest,'hex'),project.title,source.event_id,source.content_revision,encode(source.content_digest,'hex'),
 source.acl_version,encode(association.source_acl_digest,'hex'),source.purge_generation
 FROM stride_project_associations_authorized_current current_association
 JOIN stride_project_association_revisions association ON association.association_id=current_association.association_id AND association.revision=current_association.revision AND association.organization_id=current_association.organization_id
@@ -200,7 +201,7 @@ JOIN stride_project_revisions project ON project.project_id=association.project_
 JOIN stride_conversation_events source ON source.tenant_id=association.organization_id AND source.event_id=association.subject_id
 WHERE current_association.organization_id=$1 AND current_association.association_id=$2 AND current_association.revision=$3 AND current_association.state='confirmed'
   AND source.thread_id=$4 AND source.source_id=$5 AND source.author_principal=$6 AND source.invalidated_at IS NULL`, snapshot.Organization.Header.ID, project.AssociationID, project.AssociationRevision, threadID, messageID, snapshot.Person.Header.ID).
-		Scan(&truth.AssociationID, &truth.AssociationRevision, &truth.AssociationDigest, &truth.ProjectID, &truth.ProjectRevision, &truth.ProjectTitle,
+		Scan(&truth.AssociationID, &truth.AssociationRevision, &truth.AssociationDigest, &truth.ProjectID, &truth.ProjectRevision, &truth.ProjectDigest, &truth.ProjectTitle,
 			&truth.SourceEventID, &truth.SourceEventRevision, &truth.SourceDigest, &truth.SourceACLRevision, &truth.SourceACLDigest, &truth.PurgeGeneration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return truth, ErrProjectAuthorityNotFound

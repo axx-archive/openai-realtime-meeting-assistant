@@ -248,6 +248,41 @@ func TestProjectV2CanonicalFailureHasZeroProviderCalls(t *testing.T) {
 	}
 }
 
+func TestExistingThreadRejectsFreshManualProjectTokenBeforeMutation(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { _ = app.Close() })
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "Server-owned workstream", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = priorApp })
+	cookies := loginAs(t, user.Email, "B0NFIRE!")
+	body, _ := json.Marshal(map[string]any{
+		"text": "Put this in a Project", "operationId": "retired-manual-project-operation", "projectContextToken": "new-client-project-token",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantChatThreadHandler(recorder, request)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), errManualProjectAttachmentRetired.Error()) {
+		t.Fatalf("fresh manual Project token status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	stored, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil || len(stored.Messages) != 0 || len(stored.ProjectLinkOperations) != 0 {
+		t.Fatalf("retired manual Project token mutated thread=%+v err=%v", stored, err)
+	}
+}
+
 func TestConfirmedProjectTurnCanonicalResumeRebindsOnlyCurrentSession(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv(homeProjectContextModeEnv, "enabled")

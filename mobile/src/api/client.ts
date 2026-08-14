@@ -39,6 +39,9 @@ import type {
   HomeResponse,
   HomeProjectContextResponse,
   ProjectCorrectionResponse,
+  WorkstreamCorrectionResponse,
+  MeetingRecordIndexResponse,
+  MeetingRecordDetailResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -677,8 +680,37 @@ export const api = {
 
   meetings(
     sessionToken: string,
-  ): Promise<{ ok: boolean; meetings: unknown[]; serverNow?: string }> {
-    return request("/assistant/meetings?limit=60", { sessionToken });
+    cursor?: string,
+  ): Promise<MeetingRecordIndexResponse> {
+    const params = new URLSearchParams({ view: "index", limit: "60" });
+    if (cursor) params.set("meetingCursor", cursor);
+    return request(`/assistant/meetings?${params.toString()}`, { sessionToken });
+  },
+
+  meeting(
+    sessionToken: string,
+    meetingId: string,
+    options: { cursor?: string; query?: string; segmentId?: string; transcriptLimit?: number } = {},
+  ): Promise<MeetingRecordDetailResponse> {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.query) params.set("q", options.query);
+	if (options.segmentId) params.set("segmentId", options.segmentId);
+    if (options.transcriptLimit) params.set("transcriptLimit", String(options.transcriptLimit));
+    const query = params.toString();
+    return request(`/assistant/meetings/${encodeURIComponent(meetingId)}${query ? `?${query}` : ""}`, { sessionToken });
+  },
+
+  meetingConversation(
+    sessionToken: string,
+    meetingId: string,
+    recordRevision: string,
+  ): Promise<ScoutThreadDetailResponse> {
+    return request(`/assistant/meetings/${encodeURIComponent(meetingId)}/conversation`, {
+      method: "POST",
+      body: { recordRevision },
+      sessionToken,
+    });
   },
 
   files(
@@ -970,6 +1002,27 @@ export const api = {
   ): Promise<ProjectCorrectionResponse> {
     return request<ProjectCorrectionResponse>(
       `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/project`,
+      { method: "PATCH", body, sessionToken },
+    );
+  },
+
+  workstreamCorrection(
+    sessionToken: string,
+    artifactId: string,
+  ): Promise<WorkstreamCorrectionResponse> {
+    return request<WorkstreamCorrectionResponse>(
+      `/artifacts/workstream?id=${encodeURIComponent(artifactId)}`,
+      { sessionToken },
+    );
+  },
+
+  updateWorkstreamCorrection(
+    sessionToken: string,
+    artifactId: string,
+    body: { operationId: string; correctionToken: string },
+  ): Promise<WorkstreamCorrectionResponse> {
+    return request<WorkstreamCorrectionResponse>(
+      `/artifacts/workstream?id=${encodeURIComponent(artifactId)}`,
       { method: "PATCH", body, sessionToken },
     );
   },

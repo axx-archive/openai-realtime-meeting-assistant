@@ -27,7 +27,10 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(canvas, /usePersonalRealtime/);
   assert.match(canvas, /realtime\.enabled/);
   assert.match(canvas, /The cradle has one stable meaning: a full-duplex Realtime Scout call/);
-  assert.match(canvas, /if \(!realtime\.enabled\) return;/);
+  assert.match(canvas, /await runPersonalRealtimeTap\(realtime\);/);
+  const tap = source('src', 'realtime', 'personalRealtimeTap.ts');
+  assert.match(tap, /if \(!realtime\.enabled\) return 'disabled';/);
+  assert.match(tap, /if \(realtime\.status === 'error'\) await realtime\.stop\('cancelled'\);[\s\S]*await realtime\.start\(\);/u);
   assert.doesNotMatch(canvas, /legacyUploadOnStop|fallbackVoice|voiceDictation/);
   const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
   assert.match(realtime, /audioFocusRuntime\.acquire\('personal_realtime'/);
@@ -83,7 +86,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(canvas, /usePersonalRealtimeContext\(\)/);
   assert.match(root, /<PersonalRealtimeProvider onActions=\{handleRealtimeActions\} roomActive=\{activeRoute === 'Room'\}>/);
   assert.match(canvas, /submitHomeScoutOpening/);
-  assert.match(canvas, /realtime\.stop\('cancelled'\)/);
+  assert.match(tap, /realtime\.stop\('cancelled'\)/);
   assert.match(canvas, /useComposerDictation/);
   assert.match(canvas, /accessibilityLabel="Dictate a message"/);
   assert.doesNotMatch(canvas, /composerDictation|submitComposerText/);
@@ -95,7 +98,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.equal(
     eas.build?.production?.env?.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED,
     'true',
-    'the production release profile must compile the core Scout cradle on',
+    'private Realtime is the qualified personal voice surface; only unqualified in-room agent voice stays hard off',
   );
 });
 

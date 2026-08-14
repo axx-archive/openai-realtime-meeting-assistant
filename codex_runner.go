@@ -260,9 +260,8 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 
 func (app *kanbanBoardApp) buildCodexAgentJobPrompt(job AgentJob, now time.Time, authority string) string {
 	thread := job.thread
-	board := job.Context.Board
-	memory := job.Context.Memory
-	contextLine := boardAndMemoryContextLine(board, memory)
+	memory := activeAgentMemory(job.Context.Memory)
+	contextLine := workAndMemoryContextLine(memory)
 	authority = normalizeCodexJobAuthority(authority)
 
 	var builder strings.Builder

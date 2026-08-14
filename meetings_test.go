@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -881,7 +882,7 @@ func TestSetAutoTitleFromMissionInsight(t *testing.T) {
 	}
 }
 
-func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
+func TestMeetingStorePersistsPermanentDirectoryAndToleratesBadFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "meetings.json")
 
@@ -889,7 +890,7 @@ func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMeetingStore missing file: %v", err)
 	}
-	total := meetingStoreCap + 5
+	total := meetingDirectoryScanLimit + 5
 	startedAt := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	for index := 0; index < total; index++ {
 		id := fmt.Sprintf("meeting-%03d", index)
@@ -906,17 +907,44 @@ func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
 		t.Fatalf("reload meetings: %v", err)
 	}
 	records := reloaded.recent(0)
-	if len(records) != meetingStoreCap {
-		t.Fatalf("reloaded=%d, want cap %d", len(records), meetingStoreCap)
+	if len(records) != total {
+		t.Fatalf("reloaded=%d, want all %d permanent records", len(records), total)
 	}
 	if records[0].ID != fmt.Sprintf("meeting-%03d", total-1) {
 		t.Fatalf("newest=%q, want newest-first ordering", records[0].ID)
 	}
-	if oldest := records[len(records)-1]; oldest.ID != "meeting-005" {
-		t.Fatalf("oldest survivor=%q, want meeting-005 (cap drops oldest)", oldest.ID)
+	if oldest := records[len(records)-1]; oldest.ID != "meeting-000" {
+		t.Fatalf("oldest=%q, want meeting-000 preserved past the former cap", oldest.ID)
+	}
+	if oldest, found := reloaded.recordByID("meeting-000"); !found || oldest.ID != "meeting-000" {
+		t.Fatalf("oldest exact detail identity=%+v found=%t, want restart-preserved meeting-000", oldest, found)
+	}
+	page, cursor, hasMore := reloaded.recentPage(meetingDirectoryScanLimit, "")
+	if len(page) != meetingDirectoryScanLimit || !hasMore || cursor != meetingDirectoryCursorForID("meeting-005") || strings.Contains(cursor, "meeting-") {
+		t.Fatalf("first page len=%d cursor=%q hasMore=%t, want %d/opaque/true", len(page), cursor, hasMore, meetingDirectoryScanLimit)
+	}
+	older, nextCursor, olderHasMore := reloaded.recentPage(meetingDirectoryScanLimit, cursor)
+	if len(older) != 5 || olderHasMore || nextCursor != meetingDirectoryCursorForID("meeting-000") || strings.Contains(nextCursor, "meeting-") {
+		t.Fatalf("older page len=%d cursor=%q hasMore=%t, want 5/opaque/false", len(older), nextCursor, olderHasMore)
 	}
 	if records[0].EndedReason != meetingEndedReasonIdle || len(records[0].Participants) != 1 {
 		t.Fatalf("record=%#v, want ended record with participants intact", records[0])
+	}
+	beforeDuplicate := len(reloaded.recent(0))
+	if existing, changed := reloaded.startMeeting(officeRoomID, " meeting-000 ", startedAt.Add(48*time.Hour), []string{"Tim"}); changed || existing.ID != "meeting-000" {
+		t.Fatalf("duplicate ended identity result=%+v changed=%t, want exact rejection", existing, changed)
+	}
+	if afterDuplicate := len(reloaded.recent(0)); afterDuplicate != beforeDuplicate {
+		t.Fatalf("duplicate start changed permanent directory size %d -> %d", beforeDuplicate, afterDuplicate)
+	}
+
+	duplicatePath := filepath.Join(dir, "duplicate.json")
+	duplicateState := `{"meetings":[{"id":"meeting-duplicate","startedAt":"2026-07-01T09:00:00Z"},{"id":" meeting-duplicate ","startedAt":"2026-07-02T09:00:00Z"}]}`
+	if err := os.WriteFile(duplicatePath, []byte(duplicateState), 0o600); err != nil {
+		t.Fatalf("write duplicate meetings: %v", err)
+	}
+	if _, err := loadMeetingStore(duplicatePath); err == nil || !strings.Contains(err.Error(), "duplicate meeting id") {
+		t.Fatalf("duplicate meeting load err=%v, want permanent identity rejection", err)
 	}
 
 	// malformed file: load fails cleanly and the app runs with a nil store.
@@ -955,6 +983,139 @@ func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
 	}
 	nilStore.armIdleEnd(officeRoomID, func(uint64) {})
 	nilStore.cancelIdleEnd(officeRoomID)
+}
+
+func TestMeetingRecordPermanentLibraryPagesPastFormerCapAndOpensOldest(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	started := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	total := meetingDirectoryScanLimit + 5
+	records := make([]meetingRecord, 0, total)
+	for index := 0; index < total; index++ {
+		id := fmt.Sprintf("permanent-meeting-%03d", index)
+		at := started.Add(time.Duration(index) * time.Hour)
+		records = append(records, meetingRecord{ID: id, StartedAt: at.Format(time.RFC3339Nano), EndedAt: at.Add(30 * time.Minute).Format(time.RFC3339Nano), EndedReason: meetingEndedReasonIdle, Participants: []string{"Tim"}})
+		scope := map[string]string{"meetingId": id, "visibility": "organization"}
+		if index == 100 {
+			scope = map[string]string{"meetingId": id, "visibility": "private", "ownerEmail": "aj@shareability.com"}
+		}
+		if _, _, err := kanbanApp.memory.appendAttributedTranscriptWithMetadata("permanent-segment-"+id, "item-"+id, "Tim", "high", "Permanent source for "+id, scope); err != nil {
+			t.Fatalf("append source %s: %v", id, err)
+		}
+	}
+	kanbanApp.meetings.mu.Lock()
+	kanbanApp.meetings.records = records
+	kanbanApp.meetings.rebuildDirectoryCursorIndexesLocked()
+	if err := kanbanApp.meetings.persistLocked(); err != nil {
+		kanbanApp.meetings.mu.Unlock()
+		t.Fatalf("persist permanent directory: %v", err)
+	}
+	kanbanApp.meetings.mu.Unlock()
+
+	cookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	request := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantMeetingsHandler(recorder, req)
+		return recorder
+	}
+	cursor := ""
+	seen := map[string]struct{}{}
+	for page := 0; page < 3; page++ {
+		path := "/assistant/meetings?view=index&limit=100"
+		if cursor != "" {
+			path += "&meetingCursor=" + cursor
+		}
+		recorder := request(path)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("page %d status=%d body=%s", page, recorder.Code, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), "permanent-meeting-100") {
+			t.Fatalf("page %d leaked private meeting identity in rows or cursor: %s", page, recorder.Body.String())
+		}
+		payload := struct {
+			Meetings   []meetingRecordIndexItem `json:"meetings"`
+			NextCursor string                   `json:"nextCursor"`
+			HasMore    bool                     `json:"hasMore"`
+		}{}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode page %d: %v", page, err)
+		}
+		for _, meeting := range payload.Meetings {
+			if _, duplicate := seen[meeting.ID]; duplicate {
+				t.Fatalf("meeting %s repeated across permanent pages", meeting.ID)
+			}
+			seen[meeting.ID] = struct{}{}
+		}
+		cursor = payload.NextCursor
+		if page < 2 && !payload.HasMore {
+			t.Fatalf("page %d ended early after %d permanent records", page, len(seen))
+		}
+		if page == 2 && payload.HasMore {
+			t.Fatal("final permanent page still reports more")
+		}
+	}
+	if len(seen) != total-1 {
+		t.Fatalf("paged records=%d, want all %d authorized permanent records", len(seen), total-1)
+	}
+	oldest := request("/assistant/meetings/permanent-meeting-000")
+	if oldest.Code != http.StatusOK || !strings.Contains(oldest.Body.String(), "permanent-meeting-000") {
+		t.Fatalf("oldest detail status=%d body=%s", oldest.Code, oldest.Body.String())
+	}
+}
+
+func TestMeetingRecordClaimProjectRequiresDurableLinkNotMatchingTag(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	tim := accountStore().findUser("tim@shareability.com")
+	if tim == nil {
+		t.Fatal("seeded Tim account missing")
+	}
+	project, err := app.createScoutChatThread(tim.Email, tim.Name, "Ambiguous Project", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create same-title Project: %v", err)
+	}
+	result, changed, err := app.applyRetiredMeetingBoardToolCallArgs("create_ticket", map[string]any{
+		"title": "Tag-only follow-up",
+		"tags":  []any{"Ambiguous Project"},
+	})
+	if err != nil || !changed {
+		t.Fatalf("create tag-only Work changed=%t err=%v", changed, err)
+	}
+	card, ok := result["card"].(kanbanCard)
+	if !ok {
+		t.Fatalf("tag-only Work result=%#v", result)
+	}
+	var tagProjection boardCardViewerProjection
+	for _, row := range app.boardProjectionForViewer(context.Background(), tim).Cards {
+		if row.CardID == card.ID {
+			tagProjection = row
+			break
+		}
+	}
+	if tagProjection.ProjectResolution != "tag" || tagProjection.ProjectID != project.ID {
+		t.Fatalf("board projection=%+v, want the adversarial inferred tag edge", tagProjection)
+	}
+	detail := &meetingMemoryDetail{
+		CardIDs:      []string{card.ID},
+		ClaimCardIDs: map[string][]string{"segment-tag-only": {card.ID}},
+	}
+	references := app.meetingRecordReferencesForViewer(context.Background(), tim, detail)
+	if len(references.Work) != 0 {
+		t.Fatalf("work references=%+v, retired card without a successor artifact must stay unresolved", references.Work)
+	}
+	if len(references.Projects) != 0 {
+		t.Fatalf("global Projects=%+v, inferred tag edge must not become Meeting truth", references.Projects)
+	}
+	claim := references.Claims["segment-tag-only"]
+	if len(claim.Work) != 0 || len(claim.Projects) != 0 {
+		t.Fatalf("claim references=%+v, want no retired-card Work or inferred Project", claim)
+	}
 }
 
 func TestBootReconciliationClosesStaleOpenRecord(t *testing.T) {
@@ -1025,6 +1186,15 @@ func TestAssistantMeetingsHandlerAuthAndShape(t *testing.T) {
 	kanbanApp.meetings.startMeeting(officeRoomID, "meeting-20260630-first", earlier, []string{"AJ"})
 	kanbanApp.meetings.endMeeting("meeting-20260630-first", earlier.Add(45*time.Minute), meetingEndedReasonArchive, "meeting-archive-1")
 	kanbanApp.meetings.startMeeting(officeRoomID, "meeting-20260701-second", earlier.Add(24*time.Hour), []string{"Tim"})
+	// The directory is identity, not read authority. Seed one organization-
+	// visible source for each legacy-style record so the signed member's
+	// principal-filtered recall store proves both rows are readable.
+	if _, _, err := kanbanApp.memory.appendBrainWriteUp("meeting-list-source-first", "First meeting source.", map[string]string{"meetingId": "meeting-20260630-first"}); err != nil {
+		t.Fatalf("append first meeting source: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendBrainWriteUp("meeting-list-source-second", "Second meeting source.", map[string]string{"meetingId": "meeting-20260701-second"}); err != nil {
+		t.Fatalf("append second meeting source: %v", err)
+	}
 
 	fetchMeetings := func(query string) (items []map[string]any, serverNow string) {
 		t.Helper()
@@ -1093,7 +1263,7 @@ func TestAssistantMeetingsPayloadCarriesMemoryDetail(t *testing.T) {
 	meetingID := "meeting-detail-0000001"
 	kanbanApp.meetings.startMeeting(officeRoomID, meetingID, started, []string{"AJ", "Tim"})
 
-	cardResult, _, err := kanbanApp.applyToolCallArgs("create_ticket", map[string]any{"title": "Add bandwidth estimation probe"})
+	cardResult, _, err := kanbanApp.applyRetiredMeetingBoardToolCallArgs("create_ticket", map[string]any{"title": "Add bandwidth estimation probe"})
 	if err != nil {
 		t.Fatalf("create card: %v", err)
 	}
@@ -1166,6 +1336,488 @@ func TestAssistantMeetingsPayloadCarriesMemoryDetail(t *testing.T) {
 	}
 }
 
+func TestAssistantMeetingRecordIndexAndDetailAreGroundedAuthorizedAndBounded(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	started := time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC)
+	meetingID := "meeting-rich-record"
+	kanbanApp.meetings.startMeeting(officeRoomID, meetingID, started, []string{"Tim", "AJ", "Tom"})
+	kanbanApp.meetings.endMeeting(meetingID, started.Add(30*time.Minute), meetingEndedReasonIdle, "")
+	first, _, err := kanbanApp.memory.appendAttributedTranscriptWithMetadata("meeting-rich-segment-1", "item-1", "Tim", "high",
+		"We decided to ship the governed pilot on Friday.", map[string]string{"meetingId": meetingID, "visibility": "organization"})
+	if err != nil {
+		t.Fatalf("append first transcript: %v", err)
+	}
+	second, _, err := kanbanApp.memory.appendAttributedTranscriptWithMetadata("meeting-rich-segment-2", "item-2", "AJ", "high",
+		"I will prepare the pilot checklist.", map[string]string{"meetingId": meetingID, "visibility": "organization"})
+	if err != nil {
+		t.Fatalf("append second transcript: %v", err)
+	}
+	payload := meetingDigestPayload{
+		MeetingID: meetingID, Title: "Governed pilot launch", Day: "2026-08-13", Attendees: []string{"Tim", "AJ", "Tom"},
+		Topics: []meetingDigestTopic{{T: "The governed pilot is ready for launch.", Anchor: first.ID, Importance: 5}},
+		Decisions: []meetingDigestDecision{
+			{D: "Ship the governed pilot on Friday.", By: "Tim", Status: "decided", Anchor: first.ID, Importance: 5},
+			{D: "This stale analysis source must never render.", Status: "decided", Anchor: "missing-segment", Importance: 5},
+		},
+		ActionItems: []meetingDigestAction{
+			{A: "Publish the rollout note.", Owner: "Tim", Status: "open", Anchor: first.ID, Importance: 4},
+			{A: "Prepare the pilot checklist.", Owner: "AJ", Status: "open", Anchor: second.ID, Importance: 4},
+		},
+		OpenQuestions: []meetingDigestQuestion{{Q: "Who verifies the rollout receipt?", Anchor: second.ID, Importance: 3}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal digest: %v", err)
+	}
+	if _, err := kanbanApp.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, string(body), map[string]string{
+		"meetingId": meetingID, "visibility": "organization", digestCoverageMetadataKey: coverageLabelFull,
+		digestSpanEndMetadataKey:                      started.Add(30 * time.Minute).Format(time.RFC3339),
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(payload, meetingRecordSegments(kanbanApp.memory.snapshotForMeeting(meetingID, 0), meetingID)),
+	}); err != nil {
+		t.Fatalf("upsert meeting digest: %v", err)
+	}
+	tim := accountStore().findUser("tim@shareability.com")
+	if tim == nil {
+		t.Fatal("seeded Tim account missing")
+	}
+	projectThread, err := kanbanApp.createScoutChatThread(tim.Email, tim.Name, "Governed Pilot", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create linked Project channel: %v", err)
+	}
+	workCard := kanbanApp.snapshotState().Cards[0]
+	secondCardResult, _, err := kanbanApp.applyRetiredMeetingBoardToolCallArgs("create_ticket", map[string]any{"title": "Prepare the pilot checklist"})
+	if err != nil {
+		t.Fatalf("create second linked Work: %v", err)
+	}
+	secondWorkCard, ok := secondCardResult["card"].(kanbanCard)
+	if !ok {
+		t.Fatalf("second card result=%#v", secondCardResult)
+	}
+	secondProjectThread, err := kanbanApp.createScoutChatThread(tim.Email, tim.Name, "Pilot Checklist", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create second linked Project channel: %v", err)
+	}
+	artifact, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Governed pilot checklist", "# Checklist\n\nDelivered.", tim.Name, map[string]string{
+		"source": "scout_thread", "status": "complete", "threadStatus": "complete", "boardCardId": workCard.ID,
+		"originKind": agentThreadOriginChannel, "originId": projectThread.ID, "requestedBy": tim.Email, "createdBy": tim.Email,
+	})
+	if err != nil {
+		t.Fatalf("create linked artifact: %v", err)
+	}
+	secondArtifact, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Pilot checklist delivery", "# Checklist\n\nDelivered.", tim.Name, map[string]string{
+		"source": "scout_thread", "status": "complete", "threadStatus": "complete", "boardCardId": secondWorkCard.ID,
+		"originKind": agentThreadOriginChannel, "originId": secondProjectThread.ID, "requestedBy": tim.Email, "createdBy": tim.Email,
+	})
+	if err != nil {
+		t.Fatalf("create second linked artifact: %v", err)
+	}
+	claimLinks, err := json.Marshal([]meetingBoardClaimCardLink{{SegmentID: first.ID, CardID: workCard.ID}, {SegmentID: second.ID, CardID: secondWorkCard.ID}})
+	if err != nil {
+		t.Fatalf("marshal claim links: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendBoardUpdate("meeting-rich-board-link", "Linked governed Work.", map[string]string{
+		"meetingId": meetingID, "cardIds": workCard.ID + "," + secondWorkCard.ID, "claimCardLinks": string(claimLinks),
+	}); err != nil {
+		t.Fatalf("append linked meeting Work: %v", err)
+	}
+
+	// A directory row plus a private source is not a grant to another member.
+	hiddenID := "meeting-private-record"
+	kanbanApp.meetings.startMeeting("private-room", hiddenID, started.Add(time.Hour), []string{"AJ"})
+	if _, _, err := kanbanApp.memory.appendBrainWriteUp("private-meeting-source", "AJ private meeting body.", map[string]string{
+		"meetingId": hiddenID, "roomId": "private-room", "visibility": "private", "ownerEmail": "aj@shareability.com",
+	}); err != nil {
+		t.Fatalf("append private meeting source: %v", err)
+	}
+
+	request := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantMeetingsHandler(recorder, req)
+		return recorder
+	}
+
+	indexRecorder := request("/assistant/meetings?view=index&limit=60")
+	if indexRecorder.Code != http.StatusOK {
+		t.Fatalf("index status=%d body=%s", indexRecorder.Code, indexRecorder.Body.String())
+	}
+	var indexPayload struct {
+		Contract string                   `json:"contract"`
+		Meetings []meetingRecordIndexItem `json:"meetings"`
+	}
+	if err := json.Unmarshal(indexRecorder.Body.Bytes(), &indexPayload); err != nil {
+		t.Fatalf("decode index: %v", err)
+	}
+	if indexPayload.Contract != meetingRecordContractVersion || len(indexPayload.Meetings) != 1 {
+		t.Fatalf("index=%+v, want one authorized %s row", indexPayload, meetingRecordContractVersion)
+	}
+	row := indexPayload.Meetings[0]
+	if row.ID != meetingID || row.Title != "Governed pilot launch" || row.OutcomePreview != "Ship the governed pilot on Friday." || row.TranscriptCount != 2 || row.DecisionCount != 1 {
+		t.Fatalf("row=%+v, want honest title/outcome/counts", row)
+	}
+	if len(row.Participants) != 2 || slices.Contains(row.Participants, "Tom") {
+		t.Fatalf("participants=%v, directory/digest-only attendee must not disclose without an authorized transcript segment", row.Participants)
+	}
+	if strings.Contains(indexRecorder.Body.String(), "prepare the pilot checklist") || strings.Contains(indexRecorder.Body.String(), hiddenID) {
+		t.Fatalf("bounded index leaked detail/private meeting: %s", indexRecorder.Body.String())
+	}
+	// The index path must remain body-free inside the server, not merely omit
+	// bodies from JSON. Transcript bodies are represented by their server-owned
+	// digest metadata; only the bounded digest body needed for the honest row
+	// label is copied. Exact detail hydration is separately scoped to one id.
+	principal := recallPrincipalForUser(tim)
+	visits := 0
+	kanbanApp.memory.mu.Lock()
+	kanbanApp.memory.meetingEntryVisitHook = func() { visits++ }
+	kanbanApp.memory.mu.Unlock()
+	t.Cleanup(func() {
+		kanbanApp.memory.mu.Lock()
+		kanbanApp.memory.meetingEntryVisitHook = nil
+		kanbanApp.memory.mu.Unlock()
+	})
+	indexProjections, indexStore := kanbanApp.meetingRecordProjectionsForPrincipal(context.Background(), principal, meetingRecordIndexLimit, "", false)
+	baselineVisits := visits
+	if len(indexProjections) != 1 || indexProjections[0].index.RecordRevision != row.RecordRevision {
+		t.Fatalf("body-free index projections=%+v, want same exact row revision", indexProjections)
+	}
+	if baselineVisits == 0 {
+		t.Fatal("body-free index did not inspect its selected meeting entries")
+	}
+	// Mature brains contain years of unrelated Chat, artifact, and reflection
+	// rows. Add a large unrelated ledger tail without touching the maintained
+	// meeting directory, then prove the exact same index request visits exactly
+	// the same number of durable rows. Response cardinality alone would not catch
+	// the old O(total-ledger) scan and allocation regression.
+	kanbanApp.memory.mu.Lock()
+	for index := 0; index < 5000; index++ {
+		kanbanApp.memory.entries = append(kanbanApp.memory.entries, meetingMemoryEntry{
+			ID:        fmt.Sprintf("unrelated-ledger-%04d", index),
+			Kind:      meetingMemoryKindReflection,
+			Text:      "Unrelated historical body that a Meeting index must never inspect or clone.",
+			CreatedAt: started.Add(-time.Duration(index+1) * time.Minute),
+			Metadata:  map[string]string{"visibility": "organization"},
+		})
+	}
+	kanbanApp.memory.mu.Unlock()
+	visits = 0
+	stressProjections, _ := kanbanApp.meetingRecordProjectionsForPrincipal(context.Background(), principal, meetingRecordIndexLimit, "", false)
+	if len(stressProjections) != 1 || visits != baselineVisits {
+		t.Fatalf("unrelated ledger growth changed Meeting index work: projections=%d visits=%d want visits=%d", len(stressProjections), visits, baselineVisits)
+	}
+	for _, entry := range indexStore.snapshot(0) {
+		if entry.Kind == meetingMemoryKindTranscript && entry.Text != "" {
+			t.Fatalf("index cloned transcript body for %s", entry.ID)
+		}
+		if (entry.Kind == meetingMemoryKindTranscript || isMeetingDigestKind(entry.Kind)) && strings.TrimSpace(entry.BodyDigest) == "" {
+			t.Fatalf("index entry %s lacks server-owned body digest", entry.ID)
+		}
+	}
+	detailProjections, detailStore := kanbanApp.meetingRecordProjectionsForPrincipal(context.Background(), principal, 1, meetingID, true)
+	if len(detailProjections) != 1 {
+		t.Fatalf("exact detail projections=%d, want one", len(detailProjections))
+	}
+	for _, entry := range detailStore.snapshot(0) {
+		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
+			t.Fatalf("exact detail hydrated unrelated meeting body %s/%s", entry.Metadata["meetingId"], entry.ID)
+		}
+	}
+
+	detailRecorder := request("/assistant/meetings/" + meetingID + "?transcriptLimit=1")
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detailPayload struct {
+		Meeting meetingRecordDetail `json:"meeting"`
+	}
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	detail := detailPayload.Meeting
+	if len(detail.Decisions) != 1 || detail.Decisions[0].Sources[0].SegmentID != first.ID || detail.Decisions[0].Sources[0].Revision == "" {
+		t.Fatalf("decisions=%+v, want only the currently grounded decision", detail.Decisions)
+	}
+	if len(detail.Commitments) != 2 || detail.Commitments[0].Owner != "Tim" || detail.Commitments[1].Owner != "AJ" {
+		t.Fatalf("commitments=%+v, want two exact anchored commitments", detail.Commitments)
+	}
+	if firstCommitment, secondCommitment := detail.Commitments[0], detail.Commitments[1]; firstCommitment.DueState != "unresolved" || firstCommitment.WorkState != "resolved" || firstCommitment.ProjectState != "resolved" ||
+		len(firstCommitment.Work) != 1 || firstCommitment.Work[0].ID != workCard.ID || firstCommitment.Work[0].OpenKind != "artifact" || firstCommitment.Work[0].OpenID != artifact.ID ||
+		len(firstCommitment.Projects) != 1 || firstCommitment.Projects[0].ID != projectThread.ID || firstCommitment.Projects[0].OpenKind != "project" || firstCommitment.Projects[0].OpenID != projectThread.ID ||
+		secondCommitment.DueState != "unresolved" || secondCommitment.WorkState != "resolved" || secondCommitment.ProjectState != "resolved" ||
+		len(secondCommitment.Work) != 1 || secondCommitment.Work[0].ID != secondWorkCard.ID || secondCommitment.Work[0].OpenKind != "artifact" || secondCommitment.Work[0].OpenID != secondArtifact.ID ||
+		len(secondCommitment.Projects) != 1 || secondCommitment.Projects[0].ID != secondProjectThread.ID || secondCommitment.Projects[0].OpenKind != "project" || secondCommitment.Projects[0].OpenID != secondProjectThread.ID {
+		t.Fatalf("commitment links=%+v, want exact 2x2 Work/Project associations with no crossing", detail.Commitments)
+	}
+	if len(detail.Work) != 2 || len(detail.Projects) != 2 || len(detail.Artifacts) != 2 ||
+		!slices.ContainsFunc(detail.Work, func(reference meetingRecordReference) bool {
+			return reference.ID == workCard.ID && reference.OpenKind == "artifact" && reference.OpenID == artifact.ID
+		}) ||
+		!slices.ContainsFunc(detail.Work, func(reference meetingRecordReference) bool {
+			return reference.ID == secondWorkCard.ID && reference.OpenKind == "artifact" && reference.OpenID == secondArtifact.ID
+		}) ||
+		!slices.ContainsFunc(detail.Projects, func(reference meetingRecordReference) bool { return reference.ID == projectThread.ID }) ||
+		!slices.ContainsFunc(detail.Projects, func(reference meetingRecordReference) bool { return reference.ID == secondProjectThread.ID }) ||
+		!slices.ContainsFunc(detail.Artifacts, func(reference meetingRecordReference) bool { return reference.ID == artifact.ID }) ||
+		!slices.ContainsFunc(detail.Artifacts, func(reference meetingRecordReference) bool { return reference.ID == secondArtifact.ID }) {
+		t.Fatalf("references work=%+v projects=%+v artifacts=%+v, want exact viewer-authorized Work/Project/artifact identities", detail.Work, detail.Projects, detail.Artifacts)
+	}
+	if detail.Coverage.UnavailableClaims != 1 || len(detail.Coverage.Gaps) == 0 {
+		t.Fatalf("coverage=%+v, want one withheld stale claim and an honest gap", detail.Coverage)
+	}
+	if len(detail.Transcript.Segments) != 1 || !detail.Transcript.HasMore || detail.Transcript.NextCursor != first.ID || detail.Transcript.Segments[0].Text != "We decided to ship the governed pilot on Friday." {
+		t.Fatalf("transcript=%+v, want bounded speaker-attributed first page", detail.Transcript)
+	}
+	nextRecorder := request("/assistant/meetings/" + meetingID + "?transcriptLimit=1&cursor=" + first.ID)
+	var nextPayload struct {
+		Meeting meetingRecordDetail `json:"meeting"`
+	}
+	if err := json.Unmarshal(nextRecorder.Body.Bytes(), &nextPayload); err != nil || len(nextPayload.Meeting.Transcript.Segments) != 1 || nextPayload.Meeting.Transcript.Segments[0].ID != second.ID || nextPayload.Meeting.Transcript.HasMore {
+		t.Fatalf("next page body=%s err=%v", nextRecorder.Body.String(), err)
+	}
+	searchRecorder := request("/assistant/meetings/" + meetingID + "?q=checklist")
+	var searchPayload struct {
+		Meeting meetingRecordDetail `json:"meeting"`
+	}
+	if err := json.Unmarshal(searchRecorder.Body.Bytes(), &searchPayload); err != nil || len(searchPayload.Meeting.Transcript.Segments) != 1 || searchPayload.Meeting.Transcript.Segments[0].ID != second.ID {
+		t.Fatalf("search body=%s err=%v", searchRecorder.Body.String(), err)
+	}
+	exactSegmentRecorder := request("/assistant/meetings/" + meetingID + "?segmentId=" + second.ID + "&transcriptLimit=1")
+	var exactSegmentPayload struct {
+		Meeting meetingRecordDetail `json:"meeting"`
+	}
+	if err := json.Unmarshal(exactSegmentRecorder.Body.Bytes(), &exactSegmentPayload); err != nil || len(exactSegmentPayload.Meeting.Transcript.Segments) != 1 || exactSegmentPayload.Meeting.Transcript.Segments[0].ID != second.ID {
+		t.Fatalf("exact segment body=%s err=%v", exactSegmentRecorder.Body.String(), err)
+	}
+
+	postMeetingBody := func(path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantMeetingsHandler(recorder, req)
+		return recorder
+	}
+	if recorder := postMeetingBody("/assistant/meetings", `{}`); recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("collection POST status=%d body=%s, want method not allowed", recorder.Code, recorder.Body.String())
+	}
+
+	postConversation := func(revision string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := fmt.Sprintf(`{"recordRevision":%q}`, revision)
+		return postMeetingBody("/assistant/meetings/"+meetingID+"/conversation", body)
+	}
+	if recorder := postMeetingBody("/assistant/meetings/"+meetingID+"/conversation", fmt.Sprintf(`{"recordRevision":%q,"extra":true}`, row.RecordRevision)); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown conversation field status=%d body=%s, want bad request", recorder.Code, recorder.Body.String())
+	}
+	if recorder := postMeetingBody("/assistant/meetings/"+meetingID+"/conversation", fmt.Sprintf(`{"recordRevision":%q}{}`, row.RecordRevision)); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("trailing conversation body status=%d body=%s, want bad request", recorder.Code, recorder.Body.String())
+	}
+	conversationRecorder := postConversation(row.RecordRevision)
+	if conversationRecorder.Code != http.StatusCreated || strings.Contains(conversationRecorder.Body.String(), "meetingRecord") {
+		t.Fatalf("conversation status=%d body=%s, want created private thread with server binding stripped", conversationRecorder.Code, conversationRecorder.Body.String())
+	}
+	var conversationPayload struct {
+		Thread scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(conversationRecorder.Body.Bytes(), &conversationPayload); err != nil || conversationPayload.Thread.ID == "" || scoutChatThreadVisibility(conversationPayload.Thread) != scoutChatVisibilityPrivate {
+		t.Fatalf("decode conversation body=%s err=%v", conversationRecorder.Body.String(), err)
+	}
+	rawConversation, _, err := kanbanApp.scoutChatThreadByID("tim@shareability.com", conversationPayload.Thread.ID)
+	if err != nil || rawConversation.MeetingRecord == nil || rawConversation.MeetingRecord.MeetingID != meetingID || rawConversation.MeetingRecord.RecordRevision != row.RecordRevision {
+		t.Fatalf("raw conversation=%+v err=%v, want exact durable Meeting Record binding", rawConversation.MeetingRecord, err)
+	}
+	if replay := postConversation(row.RecordRevision); replay.Code != http.StatusOK {
+		t.Fatalf("conversation replay status=%d body=%s", replay.Code, replay.Body.String())
+	}
+	if stale := postConversation(strings.Repeat("0", 64)); stale.Code != http.StatusConflict {
+		t.Fatalf("stale conversation status=%d body=%s, want conflict", stale.Code, stale.Body.String())
+	}
+
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "meeting-record-test"
+	kanbanApp.mu.Unlock()
+	var answerInput string
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		switch request.Workflow {
+		case "scout_route":
+			if strings.Contains(request.Input, "Create a governed follow-up") {
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+					Outcome: string(conversationIntentStartPrivateWork), Route: "workstream", Mode: "research",
+					Objective: "Create a governed follow-up from the pilot meeting",
+				}), nil
+			}
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
+		case "scout_chat":
+			answerInput = request.Input
+			return "Transcript: We decided to ship the governed pilot on Friday. [segment:" + first.ID + "]", nil
+		default:
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+			return "", nil
+		}
+	})
+	previousProbe := recallModelContextProbe
+	recallModelContextProbe = func(entries []meetingMemoryEntry) {
+		if len(entries) != 0 {
+			t.Fatalf("revision-bound meeting answer widened into general recall: %+v", entries)
+		}
+	}
+	t.Cleanup(func() { recallModelContextProbe = previousProbe })
+	messageReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+conversationPayload.Thread.ID+"/messages", strings.NewReader(`{"text":"What did we decide?","operationId":"meeting-record-question-0001"}`))
+	messageReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		messageReq.AddCookie(cookie)
+	}
+	messageRecorder := httptest.NewRecorder()
+	assistantChatThreadHandler(messageRecorder, messageReq)
+	if messageRecorder.Code != http.StatusOK {
+		t.Fatalf("meeting question status=%d body=%s", messageRecorder.Code, messageRecorder.Body.String())
+	}
+	var messagePayload struct {
+		Answer scoutChatMessageRecord `json:"answer"`
+	}
+	if err := json.Unmarshal(messageRecorder.Body.Bytes(), &messagePayload); err != nil || len(messagePayload.Answer.Sources) != 1 {
+		t.Fatalf("meeting answer body=%s err=%v", messageRecorder.Body.String(), err)
+	}
+	answerSource := messagePayload.Answer.Sources[0]
+	if answerSource.Kind != "meeting_transcript" || answerSource.MeetingID != meetingID || answerSource.SegmentID != first.ID || answerSource.Revision == "" {
+		t.Fatalf("meeting source=%+v, want exact transcript interval", answerSource)
+	}
+	if !strings.Contains(answerInput, "Exact Meeting Record transcript context") || !strings.Contains(answerInput, first.ID) || !strings.Contains(answerInput, second.ID) || strings.Contains(answerInput, "AJ private meeting body") {
+		t.Fatalf("meeting answer input crossed source boundary: %s", answerInput)
+	}
+	if providerCalls != 2 {
+		t.Fatalf("provider calls=%d, want router plus exact transcript answer", providerCalls)
+	}
+	workReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+conversationPayload.Thread.ID+"/messages", strings.NewReader(`{"text":"Create a governed follow-up from this meeting.","operationId":"meeting-record-work-0001"}`))
+	workReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		workReq.AddCookie(cookie)
+	}
+	workRecorder := httptest.NewRecorder()
+	assistantChatThreadHandler(workRecorder, workReq)
+	var workPayload struct {
+		IntentOutcome    string                 `json:"intentOutcome"`
+		ApprovalRequired bool                   `json:"approvalRequired"`
+		Proposal         scoutRouterProposal    `json:"proposal"`
+		Answer           scoutChatMessageRecord `json:"answer"`
+	}
+	if workRecorder.Code != http.StatusOK || json.Unmarshal(workRecorder.Body.Bytes(), &workPayload) != nil ||
+		workPayload.IntentOutcome != string(conversationIntentApprovalRequired) || !workPayload.ApprovalRequired {
+		t.Fatalf("Meeting follow-up status=%d body=%s, want held governed proposal", workRecorder.Code, workRecorder.Body.String())
+	}
+	expectedMeetingRef := meetingRecordContextRef(meetingID, row.RecordRevision)
+	if refs := decodeAssistantContextRefs(workPayload.Proposal.ContextRefs); len(refs) != 1 || refs[0] != expectedMeetingRef || strings.Contains(workRecorder.Body.String(), `"agentThread"`) {
+		t.Fatalf("Meeting follow-up proposal=%+v, want exact record ref and no launched work", workPayload.Proposal)
+	}
+	if entry, readable := kanbanApp.assistantContextEntryForRef(context.Background(), principal, expectedMeetingRef); !readable || !strings.Contains(entry.Text, first.ID) || !strings.Contains(entry.Text, second.ID) {
+		t.Fatalf("Meeting follow-up context readable=%v entry=%+v, want exact transcript-bound worker context", readable, entry)
+	}
+	if providerCalls != 3 {
+		t.Fatalf("Meeting follow-up provider calls=%d, want router only and no work/provider launch", providerCalls)
+	}
+	if workPayload.Answer.ID == "" {
+		t.Fatalf("Meeting follow-up response omitted its persisted proposal message: %s", workRecorder.Body.String())
+	}
+	beforeCards := len(kanbanApp.snapshotState().Cards)
+	beforeArtifacts := 0
+	for _, entry := range kanbanApp.memory.snapshot(0) {
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			beforeArtifacts++
+		}
+	}
+	if _, deleted, deleteErr := kanbanApp.memory.deleteEntryByID(first.ID); deleteErr != nil || !deleted {
+		t.Fatalf("withdraw transcript source deleted=%v err=%v", deleted, deleteErr)
+	}
+	if _, readable := kanbanApp.assistantContextEntryForRef(context.Background(), principal, expectedMeetingRef); readable {
+		t.Fatal("withdrawn Meeting Record remained readable at the worker-admission seam")
+	}
+	if _, acceptErr := kanbanApp.resolveScoutChatProposal(context.Background(), tim, conversationPayload.Thread.ID, scoutChatProposalAction{
+		Action: "accepted", MessageID: workPayload.Answer.ID, Objective: workPayload.Proposal.Objective,
+	}); acceptErr == nil || !strings.Contains(acceptErr.Error(), "source") {
+		t.Fatalf("withdrawn Meeting proposal accept err=%v, want current-source rejection", acceptErr)
+	}
+	afterArtifacts := 0
+	for _, entry := range kanbanApp.memory.snapshot(0) {
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			afterArtifacts++
+		}
+	}
+	if providerCalls != 3 || len(kanbanApp.snapshotState().Cards) != beforeCards || afterArtifacts != beforeArtifacts {
+		t.Fatalf("withdrawn Meeting proposal caused effects: provider=%d cards=%d/%d artifacts=%d/%d", providerCalls, len(kanbanApp.snapshotState().Cards), beforeCards, afterArtifacts, beforeArtifacts)
+	}
+	threadReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads/"+conversationPayload.Thread.ID, nil)
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		threadReq.AddCookie(cookie)
+	}
+	threadRecorder := httptest.NewRecorder()
+	assistantChatThreadHandler(threadRecorder, threadReq)
+	var staleThreadPayload struct {
+		Thread scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(threadRecorder.Body.Bytes(), &staleThreadPayload); err != nil || len(staleThreadPayload.Thread.Messages) < 4 {
+		t.Fatalf("stale thread body=%s err=%v", threadRecorder.Body.String(), err)
+	}
+	staleAnswer := scoutChatMessageRecord{}
+	staleProposal := scoutChatMessageRecord{}
+	for _, candidate := range staleThreadPayload.Thread.Messages {
+		if candidate.ID == messagePayload.Answer.ID {
+			staleAnswer = candidate
+		}
+		if candidate.Kind == scoutChatMessageKindProposal {
+			staleProposal = candidate
+		}
+	}
+	if staleAnswer.IntentOutcome != string(conversationIntentUnavailable) || len(staleAnswer.Sources) != 0 || strings.Contains(staleAnswer.Text, "ship the governed pilot") {
+		t.Fatalf("stale Meeting Record answer survived source withdrawal: %+v", staleAnswer)
+	}
+	if staleProposal.ID == "" || staleProposal.IntentOutcome != string(conversationIntentUnavailable) || staleProposal.Proposal != nil || staleProposal.Choices != nil || staleProposal.Manifest != nil || staleProposal.Thread != nil || staleProposal.Work != nil || strings.Contains(staleProposal.Text, "follow-up") {
+		t.Fatalf("stale Meeting Record proposal survived source withdrawal: %+v", staleProposal)
+	}
+	retryReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+conversationPayload.Thread.ID+"/messages", strings.NewReader(`{"text":"What did we decide?","operationId":"meeting-record-question-0001"}`))
+	retryReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		retryReq.AddCookie(cookie)
+	}
+	retryRecorder := httptest.NewRecorder()
+	assistantChatThreadHandler(retryRecorder, retryReq)
+	if retryRecorder.Code != http.StatusOK || providerCalls != 3 || !strings.Contains(retryRecorder.Body.String(), "source revision is no longer authorized") {
+		t.Fatalf("stale replay status=%d providerCalls=%d body=%s", retryRecorder.Code, providerCalls, retryRecorder.Body.String())
+	}
+	corrected, _, correctionErr := kanbanApp.memory.appendAttributedTranscriptWithMetadata("meeting-rich-segment-2-corrected", "item-2-corrected", "AJ", "high",
+		"I will prepare the launch checklist after legal review.", map[string]string{
+			"meetingId": meetingID, "visibility": "organization", "correctionState": "corrected", "supersedesId": second.ID,
+		})
+	if correctionErr != nil {
+		t.Fatalf("append corrected transcript: %v", correctionErr)
+	}
+	correctedRecorder := request("/assistant/meetings/" + meetingID)
+	var correctedPayload struct {
+		Meeting meetingRecordDetail `json:"meeting"`
+	}
+	if err := json.Unmarshal(correctedRecorder.Body.Bytes(), &correctedPayload); err != nil {
+		t.Fatalf("decode corrected Meeting Record body=%s err=%v", correctedRecorder.Body.String(), err)
+	}
+	if len(correctedPayload.Meeting.Transcript.Segments) != 1 || correctedPayload.Meeting.Transcript.Segments[0].ID != corrected.ID || correctedPayload.Meeting.Transcript.Segments[0].CorrectionState != "corrected" ||
+		len(correctedPayload.Meeting.Decisions) != 0 || len(correctedPayload.Meeting.Commitments) != 0 || strings.Contains(correctedPayload.Meeting.OutcomePreview, "pilot checklist") {
+		t.Fatalf("corrected Meeting Record=%+v, want replacement transcript and stale analysis withheld", correctedPayload.Meeting)
+	}
+	if hidden := request("/assistant/meetings/" + hiddenID); hidden.Code != http.StatusNotFound || strings.Contains(hidden.Body.String(), "private") {
+		t.Fatalf("hidden status=%d body=%s, want generic 404", hidden.Code, hidden.Body.String())
+	}
+}
+
 // The intel stat tiles and pulse chart are fed by real ingestion counts.
 func TestMissionPulseCarriesHistogramAndRealCounters(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
@@ -1232,8 +1884,10 @@ func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
 			return `{"summary":"No actionable board changes.","operations":[]}`, nil
 		case strings.Contains(request.Instructions, "mission intelligence"):
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
+		case strings.Contains(request.Instructions, "narrative maintainer"):
+			return `{"narratives":[]}`, nil
 		case strings.Contains(request.Instructions, "meeting digest compiler"):
-			return cannedMeetingDigestJSON(), nil
+			return cannedArchiveMeetingDigestJSON("tx-idle-1"), nil
 		case strings.Contains(request.Instructions, "entity-ledger adjudicator"):
 			t.Error("idle flush must not spend an adjudication call on all-new facts")
 			return "", nil

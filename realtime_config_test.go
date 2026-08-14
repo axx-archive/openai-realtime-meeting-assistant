@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -13,6 +14,21 @@ import (
 	"testing"
 	"time"
 )
+
+func waitForRealtimeArtifactCount(t *testing.T, app *kanbanBoardApp, want int) []meetingMemoryEntry {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		artifacts := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)
+		if len(artifacts) == want {
+			return artifacts
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("artifact count=%d, want %d", len(artifacts), want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
@@ -141,9 +157,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"call route_conversation_turn exactly once",
 		"conversational_reply, clarify_once, start_private_work, approval_required, or unavailable",
 		"never choose a tool, deliverable template, model, provider",
-		"Direct board, artifact, channel, file, memory",
-		"Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information",
-		"Do not volunteer board status for unclear follow-ups like \"what?\"",
+		"The Kanban Board is retired",
+		"Current Work and Project context is server-resolved",
+		"If that context is unavailable or ambiguous, say so instead of guessing",
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
@@ -313,7 +329,7 @@ func TestBrowserRTCConfigurationDefaultsToPublicStun(t *testing.T) {
 	}
 }
 
-func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
+func TestRealtimeToolsRetireKanbanMutations(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	rawTools, err := json.Marshal(app.kanbanTools())
@@ -321,13 +337,19 @@ func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"add_key_date"`, `"name":"remove_key_dates"`, `"replace_key_dates"`, `"due_date"`, `"key_dates"`} {
-		if !strings.Contains(toolsJSON, want) {
-			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
+	for _, name := range []string{"create_ticket", "move_ticket", "add_tags", "add_key_date", "remove_key_dates", "update_ticket", "delete_ticket", "undo_delete_ticket"} {
+		if strings.Contains(toolsJSON, `"name":"`+name+`"`) {
+			t.Fatalf("retired Board tool %q remains advertised: %s", name, toolsJSON)
 		}
 	}
-	if instructions := app.sessionInstructions(); !strings.Contains(instructions, "add_key_date") || !strings.Contains(instructions, "remove_key_dates") || !strings.Contains(instructions, "key dates") {
-		t.Fatalf("session instructions missing key-date guidance: %s", instructions)
+	if strings.Contains(toolsJSON, `"board"`) {
+		t.Fatalf("retired Board destination remains advertised: %s", toolsJSON)
+	}
+	if strings.Contains(toolsJSON, `"card_id"`) || strings.Contains(toolsJSON, `"card"`) {
+		t.Fatalf("retired Board linkage remains advertised: %s", toolsJSON)
+	}
+	if instructions := app.sessionInstructions(); strings.Contains(instructions, "Kanban board") || strings.Contains(instructions, "# Board") || strings.Contains(instructions, "board operation") {
+		t.Fatalf("Realtime instructions still teach retired Board behavior: %s", instructions)
 	}
 }
 
@@ -339,13 +361,13 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"launch_agent_thread"`, `"name":"update_artifact"`, `"name":"publish_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "conversational thread", "agent-workforce thread", "latest published", `"memory"`, "local mic"} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"create_artifact"`, `"name":"launch_agent_thread"`, `"name":"update_artifact"`, `"name":"publish_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "conversational thread", "agent-workforce thread", "latest published", `"memory"`, "local mic"} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Stride voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "conversational thread", "agent workforce", "vision", "Latest published artifacts", "Voice control mode"} {
+	for _, want := range []string{"Stride voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "conversational thread", "agent workforce", "vision", "Latest published artifacts", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
@@ -491,49 +513,16 @@ func TestRoomRecordingAnnouncementNamesActor(t *testing.T) {
 	}
 }
 
-func TestRealtimeUndoDeleteRestoresLastDeletedCard(t *testing.T) {
+func TestRealtimeBoardMutationsAreRejectedAfterRetirement(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-
-	created, changed, err := app.applyToolCallArgs("create_ticket", map[string]any{
-		"title":  "Restore me",
-		"notes":  "Card to delete and restore.",
-		"owner":  "AJ",
-		"tags":   []any{"qa"},
-		"status": "Backlog",
-	})
-	if err != nil {
-		t.Fatalf("create_ticket: %v", err)
-	}
-	if !changed {
-		t.Fatal("create_ticket changed=false, want true")
-	}
-	card, ok := created["card"].(kanbanCard)
-	if !ok || card.ID == "" {
-		t.Fatalf("created card missing: %#v", created)
-	}
-	if _, changed, err = app.applyToolCallArgs("delete_ticket", map[string]any{"card_id": card.ID}); err != nil || !changed {
-		t.Fatalf("delete_ticket changed=%v err=%v, want changed nil err", changed, err)
-	}
-
-	result, changed, err := app.applyToolCallArgs("undo_delete_ticket", map[string]any{})
-	if err != nil {
-		t.Fatalf("undo_delete_ticket: %v", err)
-	}
-	if !changed {
-		t.Fatal("undo_delete_ticket changed=false, want true")
-	}
-	if restored, _ := result["restored"].(bool); !restored {
-		t.Fatalf("restored=%v, want true", result["restored"])
-	}
-	foundRestored := false
-	for _, candidate := range app.snapshotState().Cards {
-		if candidate.ID == card.ID && candidate.Title == card.Title {
-			foundRestored = true
-			break
+	before := len(app.snapshotState().Cards)
+	for _, name := range []string{"create_ticket", "delete_ticket", "undo_delete_ticket"} {
+		if result, changed, err := app.applyToolCallArgs(name, map[string]any{"title": "Must not land", "card_id": "legacy-card"}); !errors.Is(err, ErrBoardRetired) || changed || result != nil {
+			t.Fatalf("%s result=%v changed=%v err=%v", name, result, changed, err)
 		}
 	}
-	if !foundRestored {
-		t.Fatalf("restored card %q not found in board", card.ID)
+	if after := len(app.snapshotState().Cards); after != before {
+		t.Fatalf("retired calls changed Board size %d -> %d", before, after)
 	}
 }
 
@@ -910,13 +899,13 @@ func TestRealtimeFunctionCallArgumentsDoneUsesNestedItem(t *testing.T) {
 
 func TestHandleToolCallWaitsForCompleteArgumentsBeforeDedupe(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	callID := "call-dog-perfect"
+	callID := "call-durable-artifact"
 
 	app.handleToolCall(kanbanRealtimeOutputItem{
 		Type:      "function_call",
-		Name:      "create_ticket",
+		Name:      "create_artifact",
 		CallID:    callID,
-		Arguments: `{"title":"Dog Perfect"`,
+		Arguments: `{"mode":"artifacts","query":"Dog Perfect status"`,
 	}, true)
 
 	app.mu.Lock()
@@ -927,27 +916,21 @@ func TestHandleToolCallWaitsForCompleteArgumentsBeforeDedupe(t *testing.T) {
 	}
 
 	app.handleToolCall(kanbanRealtimeOutputItem{
-		Type:   "function_call",
-		Name:   "create_ticket",
-		CallID: callID,
-		Arguments: `{
-			"title":"Dog Perfect",
-			"notes":"Waiting on Erick for launch approval.",
-			"owner":"Erick",
-			"tags":["client"],
-			"status":"Blocked"
-		}`,
+		Type:      "function_call",
+		Name:      "create_artifact",
+		CallID:    callID,
+		Arguments: `{"mode":"artifacts","query":"Dog Perfect status","content":"Waiting on Erick for launch approval."}`,
 	}, false)
 
 	found := false
-	for _, card := range app.snapshotState().Cards {
-		if card.Title == "Dog Perfect" && card.Status == kanbanStatusBlocked {
+	for _, artifact := range waitForRealtimeArtifactCount(t, app, 1) {
+		if artifact.Metadata["title"] == "Dog Perfect status" || strings.Contains(artifact.Text, "Waiting on Erick") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("complete retry did not create the Dog Perfect card")
+		t.Fatal("complete retry did not create the durable artifact")
 	}
 }
 

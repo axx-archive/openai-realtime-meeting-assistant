@@ -10,8 +10,11 @@ const room = source('src', 'screens', 'RoomScreen.tsx');
 const sheet = source('src', 'components', 'RoomSpecialistsSheet.tsx');
 const api = source('src', 'api', 'client.ts');
 
-test('native room exposes authenticated meeting-agent controls through the real API', () => {
-  assert.match(room, /label: 'Agent team'/);
+test('native room exposes meeting-agent controls only after exact voice qualification', () => {
+  assert.match(room, /if \(meetingAgentControlsAvailable\(\)\)[\s\S]*label: 'Agent team'/);
+  assert.match(room, /resolvedScopeKey: specialistsScopeKey/);
+  assert.match(room, /specialistVoiceAvailable: Boolean\(specialists\?\.available\)/);
+  assert.match(room, /liveAgentCount: nativeRoom\.state\.agentParticipants\.length/);
   assert.match(room, /api\.meetingSpecialists\(sessionToken, route\.params\.roomId\)/);
   assert.match(room, /api\.requestMeetingSpecialist/);
   assert.match(room, /api\.resolveMeetingSpecialist/);

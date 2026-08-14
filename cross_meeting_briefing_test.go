@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -23,15 +24,99 @@ func cannedBriefingDigestJSON() string {
 		`"themes":["rollout"]}`
 }
 
-func upsertBriefingTestDigest(t *testing.T, app *kanbanBoardApp, key string, text string, day string, spanStart string, spanEnd string) {
+func upsertBriefingTestDigest(t *testing.T, app *kanbanBoardApp, key string, text string, day string, spanStart string, spanEnd string, extraMetadata ...map[string]string) {
 	t.Helper()
+	payload, ok := parseMeetingDigest(text)
+	if !ok {
+		t.Fatalf("parse briefing fixture digest %s", key)
+	}
+	payload.MeetingID = key
+	if strings.TrimSpace(payload.Day) == "" {
+		payload.Day = day
+	}
+	anchorAt, err := time.Parse(time.RFC3339, spanStart)
+	if err != nil {
+		anchorAt = time.Now().UTC()
+	}
+	nextAnchor := func(section string, index int, anchor string, body string) string {
+		anchor = strings.TrimSpace(anchor)
+		app.memory.mu.Lock()
+		collision := false
+		for _, entry := range app.memory.entries {
+			if entry.ID != anchor || anchor == "" {
+				continue
+			}
+			if strings.TrimSpace(entry.Metadata["meetingId"]) == key && entry.Kind == meetingMemoryKindTranscript {
+				app.memory.mu.Unlock()
+				return anchor
+			}
+			collision = true
+			break
+		}
+		app.memory.mu.Unlock()
+		if anchor == "" || collision {
+			anchor = "briefing-fixture-" + temporalDigest(strings.Join([]string{key, section, fmt.Sprint(index), body}, "\x00"))[:20]
+		}
+		entry, appended, appendErr := app.memory.appendAttributedTranscriptEntry(
+			officeRoomID,
+			anchor,
+			"",
+			"Fixture speaker",
+			"human_attributed",
+			body,
+			map[string]string{"meetingId": key, "source": "briefing_fixture"},
+			true,
+			"",
+		)
+		if appendErr != nil {
+			t.Fatalf("append briefing fixture source %s: %v", anchor, appendErr)
+		}
+		if !appended {
+			t.Fatalf("append briefing fixture source %s was unexpectedly deduplicated", anchor)
+		}
+		app.memory.mu.Lock()
+		for entryIndex := range app.memory.entries {
+			if app.memory.entries[entryIndex].ID == entry.ID {
+				app.memory.entries[entryIndex].CreatedAt = anchorAt.Add(time.Duration(index) * time.Second)
+				break
+			}
+		}
+		app.memory.rebuildMeetingEntryIndexesLocked()
+		app.memory.mu.Unlock()
+		return anchor
+	}
+	for index := range payload.Topics {
+		payload.Topics[index].Anchor = nextAnchor("topic", index, payload.Topics[index].Anchor, payload.Topics[index].T)
+	}
+	for index := range payload.Decisions {
+		payload.Decisions[index].Anchor = nextAnchor("decision", index, payload.Decisions[index].Anchor, payload.Decisions[index].D)
+	}
+	for index := range payload.ActionItems {
+		payload.ActionItems[index].Anchor = nextAnchor("action", index, payload.ActionItems[index].Anchor, payload.ActionItems[index].A)
+	}
+	for index := range payload.OpenQuestions {
+		payload.OpenQuestions[index].Anchor = nextAnchor("question", index, payload.OpenQuestions[index].Anchor, payload.OpenQuestions[index].Q)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal briefing fixture digest %s: %v", key, err)
+	}
 	metadata := map[string]string{
 		"meetingId":                key,
 		digestDayMetadataKey:       day,
 		digestSpanStartMetadataKey: spanStart,
 		digestSpanEndMetadataKey:   spanEnd,
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(
+			payload,
+			meetingRecordSegments(app.memory.snapshotForMeeting(key, 0), key),
+		),
 	}
-	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, key, text, metadata); err != nil {
+	for _, extra := range extraMetadata {
+		for metadataKey, metadataValue := range extra {
+			metadata[metadataKey] = metadataValue
+		}
+	}
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, key, string(encoded), metadata); err != nil {
 		t.Fatalf("upsertDigest %s: %v", key, err)
 	}
 }
@@ -119,7 +204,6 @@ func TestCrossMeetingBriefingGroupsByDayAndMeeting(t *testing.T) {
 		"[!4] Draft pricing sheet (owner Tyler; status open; meeting-a)",
 		"## 2026-06-02",
 		"We will ship the rollout on Friday, owned by Tyler.",
-		"Themes: packaging",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("briefing missing %q:\n%s", want, text)
@@ -308,9 +392,10 @@ func TestAnswerMemoryQuestionRangedFallbackMapReducesWhenDigestsMissing(t *testi
 	}
 }
 
-// TestRangedFallbackKeepsKeywordLastResort: keyless AND digest-less, the old
-// keyword answer remains the true last resort (never a fabricated briefing).
-func TestRangedFallbackKeepsKeywordLastResort(t *testing.T) {
+// TestRangedFallbackUsesCurrentTranscriptWithoutAProvider: keyless and
+// digest-less recall still answers from bounded current transcript excerpts.
+// It must label the analysis gap instead of fabricating decisions/actions.
+func TestRangedFallbackUsesCurrentTranscriptWithoutAProvider(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	app := newIsolatedKanbanBoardApp(t)
 	appendTestTranscript(t, app, "tx-1", "Boot Barn kickoff planning notes.")
@@ -320,11 +405,56 @@ func TestRangedFallbackKeepsKeywordLastResort(t *testing.T) {
 		t.Fatalf("answerMemoryQuestion: %v", err)
 	}
 	answer := asString(result["answer"])
-	if strings.Contains(answer, "# What you missed") {
-		t.Fatalf("empty stores must not fabricate a briefing:\n%s", answer)
+	for _, want := range []string{"# What you missed", "Boot Barn kickoff planning notes", "Analysis is catching up"} {
+		if !strings.Contains(answer, want) {
+			t.Fatalf("current-transcript fallback missing %q:\n%s", want, answer)
+		}
 	}
-	if answer == "" {
-		t.Fatal("last-resort answer must not be empty")
+	if strings.Contains(answer, "Decisions:") || strings.Contains(answer, "Action items:") {
+		t.Fatalf("raw transcript fallback fabricated structured conclusions:\n%s", answer)
+	}
+}
+
+func TestCrossMeetingBriefingCorrectionCannotResurrectStaleDigestOrDayRollup(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	old, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID, "briefing-stale-source", "", "AJ", "source_owned",
+		"The obsolete launch date is September 31.", nil, true, "",
+	)
+	if err != nil || !appended {
+		t.Fatalf("append old transcript: appended=%v err=%v", appended, err)
+	}
+	meetingID := strings.TrimSpace(old.Metadata["meetingId"])
+	now := time.Now().In(meetingTimeLocation())
+	digest := `{"meetingId":"` + meetingID + `","title":"Launch review","day":"` + now.Format(dayBucketLayout) + `",` +
+		`"decisions":[{"d":"The obsolete launch date is September 31.","anchor":"` + old.ID + `","importance":5}]}`
+	upsertBriefingTestDigest(t, app, meetingID, digest, now.Format(dayBucketLayout), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	if _, err := app.memory.upsertDigest(meetingMemoryKindDayDigest, now.Format(dayBucketLayout), `{"decisions":[{"d":"The obsolete launch date is September 31."}]}`, map[string]string{
+		digestDayMetadataKey: now.Format(dayBucketLayout), digestSpanStartMetadataKey: now.Add(-time.Hour).UTC().Format(time.RFC3339), digestSpanEndMetadataKey: now.UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("upsert stale day rollup: %v", err)
+	}
+	if _, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID, "briefing-corrected-source", "", "AJ", "source_owned",
+		"The corrected launch date is September 30.",
+		map[string]string{"correctionState": "corrected", "supersedesId": old.ID}, true, meetingID,
+	); err != nil || !appended {
+		t.Fatalf("append corrected transcript: appended=%v err=%v", appended, err)
+	}
+
+	result, _, err := app.crossMeetingBriefingTool(map[string]any{"range": "today"})
+	if err != nil {
+		t.Fatalf("crossMeetingBriefingTool: %v", err)
+	}
+	answer := asString(result["briefing"])
+	if strings.Contains(answer, "September 31") {
+		t.Fatalf("corrected source was resurrected through a stored digest/day rollup:\n%s", answer)
+	}
+	for _, want := range []string{"September 30", "Analysis is catching up"} {
+		if !strings.Contains(answer, want) {
+			t.Fatalf("current corrected fallback missing %q:\n%s", want, answer)
+		}
 	}
 }
 
@@ -337,15 +467,16 @@ func TestCrossMeetingBriefingCoverageSuffixAndSummary(t *testing.T) {
 
 	digest := `{"meetingId":"meeting-a","title":"Pilot","day":"2026-06-01",` +
 		`"decisions":[{"d":"Ship it","status":"decided","at":"2026-06-01T18:00:00Z","importance":5}]}`
-	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-a", digest, map[string]string{
-		"meetingId":                "meeting-a",
-		digestDayMetadataKey:       "2026-06-01",
-		digestSpanStartMetadataKey: "2026-06-01T17:05:00Z",
-		digestSpanEndMetadataKey:   "2026-06-01T17:50:00Z",
-		digestCoverageMetadataKey:  coverageLabelPartialLateStart,
-	}); err != nil {
-		t.Fatalf("upsertDigest: %v", err)
+	upsertBriefingTestDigest(t, app, "meeting-a", digest, "2026-06-01", "2026-06-01T17:05:00Z", "2026-06-01T17:50:00Z")
+	app.memory.mu.Lock()
+	for index := range app.memory.entries {
+		entry := &app.memory.entries[index]
+		if entry.Kind == meetingMemoryKindMeetingDigest && digestEntryKey(*entry) == "meeting-a" && digestEntryCurrent(*entry) {
+			entry.Metadata[digestCoverageMetadataKey] = coverageLabelPartialLateStart
+		}
 	}
+	app.memory.rebuildMeetingEntryIndexesLocked()
+	app.memory.mu.Unlock()
 
 	rangeStart := time.Date(2026, 6, 1, 0, 0, 0, 0, location)
 	briefing := app.composeCrossMeetingBriefing(rangeStart.UTC(), rangeStart.AddDate(0, 0, 1).UTC())
@@ -494,15 +625,9 @@ func TestBriefingReflectsSynthesisDeadLetter(t *testing.T) {
 	seed := func(app *kanbanBoardApp) {
 		digest := `{"meetingId":"meeting-a","title":"Pilot","day":"2026-06-01",` +
 			`"decisions":[{"d":"Ship it","status":"decided","at":"2026-06-01T18:00:00Z","importance":5}]}`
-		if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-a", digest, map[string]string{
-			"meetingId":                "meeting-a",
-			digestDayMetadataKey:       "2026-06-01",
-			digestSpanStartMetadataKey: "2026-06-01T17:05:00Z",
-			digestSpanEndMetadataKey:   "2026-06-01T17:50:00Z",
-			digestCoverageMetadataKey:  coverageLabelFull,
-		}); err != nil {
-			t.Fatalf("upsertDigest: %v", err)
-		}
+		upsertBriefingTestDigest(t, app, "meeting-a", digest, "2026-06-01", "2026-06-01T17:05:00Z", "2026-06-01T17:50:00Z", map[string]string{
+			digestCoverageMetadataKey: coverageLabelFull,
+		})
 	}
 
 	t.Run("synthesis lane flips the briefing", func(t *testing.T) {

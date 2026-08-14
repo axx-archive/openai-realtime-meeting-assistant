@@ -22,9 +22,9 @@ package main
 //	       digests ride, with active decisions injected verbatim.
 //
 // Selection scans store entries by CreatedAt — NOT the meetings directory —
-// so ranges older than the 200-record meetingStoreCap and the legacy
-// null-meetingId entries (grouped per local day via digestKeyForBrain's
-// synthetic key) are still reachable; the directory only contributes titles.
+// so legacy null-meetingId entries (grouped per local day via
+// digestKeyForBrain's synthetic key) remain reachable; the permanent meeting
+// directory contributes identities and titles without becoming recall truth.
 //
 // Mapped payloads are NEVER persisted: an ad-hoc meeting_digest appended
 // without the producer's throughBrainId cursor would be read back as the

@@ -254,6 +254,44 @@ func parseRFC3339OrZero(value string) (parsed time.Time) {
 
 func (app *kanbanBoardApp) assistantContextEntryForRef(ctx context.Context, principal RecallPrincipal, ref string) (meetingMemoryEntry, bool) {
 	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, meetingRangeContextRefPrefix+"|") {
+		return app.meetingRangeContextEntry(ctx, principal, ref)
+	}
+	if parts := strings.Split(ref, "|"); len(parts) == 3 && parts[0] == meetingRecordContextRefVersion {
+		if principal.User == nil {
+			return meetingMemoryEntry{}, false
+		}
+		projection, found := app.meetingRecordProjectionForPrincipal(ctx, principal, parts[1])
+		if !found || projection.index.RecordRevision != parts[2] || len(projection.segments) == 0 {
+			return meetingMemoryEntry{}, false
+		}
+		lines := []string{
+			"Exact Meeting Record transcript truth.",
+			"meeting_id=" + projection.index.ID,
+			"record_revision=" + projection.index.RecordRevision,
+			"coverage=" + projection.index.CoverageState,
+		}
+		for _, gap := range meetingRecordCoverageForProjection(projection).Gaps {
+			lines = append(lines, "coverage_gap="+gap)
+		}
+		for _, segment := range projection.segments {
+			line := fmt.Sprintf("[segment:%s] %s · %s: %s", segment.ID, segment.At, firstNonEmptyString(segment.Speaker, "Unknown speaker"), trimForStorage(segment.Text, 1200))
+			candidate := strings.Join(append(lines, line), "\n")
+			if len(candidate) > maxPromptBodyBytes {
+				lines = append(lines, "[remaining authorized transcript omitted from this bounded worker context]")
+				break
+			}
+			lines = append(lines, line)
+		}
+		return meetingMemoryEntry{
+			ID: "meeting-record-context-" + temporalDigest(ref)[:20], Kind: meetingMemoryKindMeetingDigest,
+			Text: strings.Join(lines, "\n"), CreatedAt: parseRFC3339OrZero(projection.index.StartedAt),
+			Metadata: map[string]string{
+				"title": projection.index.Title, "meetingId": projection.index.ID, "recordRevision": projection.index.RecordRevision,
+				"visibility": "private", "ownerEmail": normalizeAccountEmail(principal.User.Email), "meetingRecordContext": "true",
+			},
+		}, true
+	}
 	if strings.HasPrefix(ref, "file|") {
 		fileID := strings.TrimSpace(strings.TrimPrefix(ref, "file|"))
 		viewer := principal.User
@@ -433,7 +471,7 @@ func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester stri
 	if !ok {
 		return nil
 	}
-	base := app.memorySnapshotForPrincipal(ctx, principal, limit)
+	base := activeAgentMemory(app.memorySnapshotForPrincipal(ctx, principal, limit))
 	refCtx := withAssistantContextRefs(ctx, decodeAssistantContextRefs(refsValue))
 	pinned := app.assistantFileContextEntries(refCtx, principal, "")
 	if strings.TrimSpace(metadata["originKind"]) == agentThreadOriginChannel || strings.TrimSpace(metadata["originKind"]) == agentThreadOriginRoom {
@@ -445,7 +483,7 @@ func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester stri
 		}
 		pinned = append([]meetingMemoryEntry(nil), shared...)
 	}
-	return appendUniqueFileContextEntries(pinned, base)
+	return activeAgentMemory(appendUniqueFileContextEntries(pinned, base))
 }
 
 // currentMeetingDigestContext adds the latest authorized cumulative recap to
@@ -577,9 +615,23 @@ func (app *kanbanBoardApp) withCurrentAgentThreadSource(thread scoutAgentThread,
 	if err != nil || current.ArchivedAt != "" || scoutChatThreadVisibility(current) != wantVisibility {
 		return fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
 	}
+	if current.MeetingRecord != nil && !app.meetingRecordConversationBindingCurrent(requester, current) {
+		return fmt.Errorf("%w: the originating Meeting Record changed", ErrAgentThreadSourceChanged)
+	}
 	_, binding, err := scoutChatSourceWindow(current, sourceMessageID)
 	if err != nil || binding.MessageDigest != strings.TrimSpace(metadata["sourceMessageDigest"]) || binding.WindowDigest != strings.TrimSpace(metadata["sourceWindowDigest"]) {
 		return fmt.Errorf("%w: the approved source conversation changed", ErrAgentThreadSourceChanged)
+	}
+	if raw := strings.TrimSpace(metadata[projectWorkBindingMetadataKey]); raw != "" {
+		projectBinding, ok := decodeProjectWorkBinding(metadata)
+		messageIndex := scoutChatMessageIndex(current, projectBinding.MessageID)
+		if !ok || !projectWorkBindingMatchesThread(projectBinding, current) || messageIndex < 0 ||
+			!projectWorkBindingCanonicalCurrent(context.Background(), currentHomeProjectStore(), projectBinding, current.Messages[messageIndex].Project) {
+			return fmt.Errorf("%w: the linked Project or its source turn changed", ErrAgentThreadSourceChanged)
+		}
+	}
+	if strings.TrimSpace(metadata[workstreamAffinityMetadataKey]) != "" && !app.workstreamAffinityCurrent(context.Background(), thread.Artifact) {
+		return fmt.Errorf("%w: the inferred workstream changed", ErrAgentThreadSourceChanged)
 	}
 	return effect()
 }
@@ -672,6 +724,9 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 		return AgentJobContext{}, fmt.Errorf("%w: assistant is unavailable", ErrAgentThreadSourceChanged)
 	}
 	metadata := thread.Artifact.Metadata
+	if !app.projectBoundArtifactCurrent(ctx, thread.Artifact) {
+		return AgentJobContext{}, fmt.Errorf("%w: the linked Project or its source turn changed; review the conversation and retry", ErrAgentThreadSourceChanged)
+	}
 	if strings.TrimSpace(metadata["goalParentId"]) != "" {
 		if err := app.verifyGoalChildRoute(thread.Artifact); err != nil {
 			return AgentJobContext{}, err
@@ -681,7 +736,7 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 	principal, ok := app.agentThreadRecallPrincipal(requester, metadata)
 	var base []meetingMemoryEntry
 	if ok {
-		base = app.memorySnapshotForPrincipal(ctx, principal, 20)
+		base = activeAgentMemory(app.memorySnapshotForPrincipal(ctx, principal, 20))
 		base = appendUniqueFileContextEntries(app.currentMeetingDigestContext(ctx, principal, metadata), base)
 		sourceEntries, sourceErr := app.agentThreadSourceConversationEntries(principal, metadata)
 		if sourceErr != nil {
@@ -689,7 +744,7 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 		}
 		base = appendUniqueFileContextEntries(sourceEntries, base)
 	}
-	context := AgentJobContext{Board: app.snapshotState(), Memory: base}
+	context := AgentJobContext{Memory: base}
 	refs := decodeAssistantContextRefs(metadata["contextRefs"])
 	sharedOrigin := strings.TrimSpace(metadata["originKind"]) == agentThreadOriginChannel || strings.TrimSpace(metadata["originKind"]) == agentThreadOriginRoom
 	if !ok && (len(refs) > 0 || sharedOrigin) {
@@ -712,7 +767,7 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 		}
 		pinned = append(pinned, entry)
 	}
-	context.Memory = appendUniqueFileContextEntries(pinned, base)
+	context.Memory = activeAgentMemory(appendUniqueFileContextEntries(pinned, base))
 	return context, nil
 }
 

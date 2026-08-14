@@ -180,7 +180,7 @@ test('deep destinations preserve their owning top-level context', () => {
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');
-  assert.equal(nativeShellDestinationForRoute('Meetings'), 'video');
+  assert.equal(nativeShellDestinationForRoute('Meetings'), 'work');
   assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'network');
   assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'work-search');
   assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'you');
@@ -253,8 +253,15 @@ test('navigation integration keeps push/deep-link handling and latest-thread rou
 
 test('shell destination lists handle keyboard dismissal and offline/off copy without fake data', () => {
   const screens = source('src', 'screens', 'NativeShellScreens.tsx');
+	const deck = source('src', 'screens', 'DeckScreen.tsx');
+	const room = source('src', 'screens', 'RoomScreen.tsx');
+	const root = source('src', 'navigation', 'RootNavigator.tsx');
   assert.match(screens, /keyboardDismissMode="on-drag"/);
   assert.match(screens, /keyboardShouldPersistTaps="handled"/);
   assert.match(screens, /No public child surface or fixture data is mounted/);
   assert.doesNotMatch(screens, /Northstar|Bonfire|Alex|fictional_/);
+	assert.doesNotMatch(screens, /route: 'Board', label: 'Board'/);
+	assert.doesNotMatch(deck, /route: 'Board', label: 'Board'/);
+	assert.doesNotMatch(room, /id: 'board', label: 'Board'/);
+	assert.match(root, /tool === 'board'\) navigationRef\.navigate\('WorkHome'\)/u);
 });

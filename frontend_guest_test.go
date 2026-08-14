@@ -253,10 +253,10 @@ func TestIndexGuestLeaveIsTerminal(t *testing.T) {
 		t.Error("handleSessionReplaced must give guests the terminal card")
 	}
 
-	// leaveRoom's member refetches stay off for guests
+	// leaveRoom never reopens the retired Board transport for any principal.
 	leaveBody := functionBody(html, "function leaveRoom()")
-	if !strings.Contains(leaveBody, "if (!guestMode) {\n          loadBoardSnapshot({ force: true })") {
-		t.Error("leaveRoom must skip the board refetch for guests (no board surface; the fetch would 401)")
+	if strings.Contains(leaveBody, "loadBoardSnapshot") {
+		t.Error("leaveRoom must not refetch retired Board state")
 	}
 	if !strings.Contains(leaveBody, "if (!guestMode) {\n          loadParticipantPreview()") {
 		t.Error("leaveRoom must skip the participant preview refetch for guests")

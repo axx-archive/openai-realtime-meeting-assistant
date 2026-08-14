@@ -435,9 +435,9 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(
 	principal, principalOK := app.agentThreadRecallPrincipal(requesterEmail, workerThread.Artifact.Metadata)
 	var memory []meetingMemoryEntry
 	if principalOK {
-		memory = app.memorySnapshotForPrincipal(context.Background(), principal, 12)
+		memory = activeAgentMemory(app.memorySnapshotForPrincipal(context.Background(), principal, 12))
 	}
-	input := buildAgentThreadFollowUpInput(workerThread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), memory, time.Now())
+	input := buildAgentThreadFollowUpInput(workerThread, artifact, nextVersion, replyText, teamReplies, kanbanBoardState{}, memory, time.Now())
 
 	// Signal capture (signals.go): asking for a re-run means v(N) missed — a
 	// negative signal whose payload carries WHAT was asked for. Log-and-continue.
@@ -736,7 +736,8 @@ func (app *kanbanBoardApp) agentThreadFollowUpInstructionsForThread(thread scout
 // prior body, the team replies that landed since the last run, and the
 // explicit follow-up request. Memory context is smaller (12) than the initial
 // run's — the artifact body is the primary context now.
-func buildAgentThreadFollowUpInput(thread scoutAgentThread, artifact meetingMemoryEntry, version int, replyText string, teamReplies []scoutChatMessageRecord, board kanbanBoardState, memory []meetingMemoryEntry, now time.Time) string {
+func buildAgentThreadFollowUpInput(thread scoutAgentThread, artifact meetingMemoryEntry, version int, replyText string, teamReplies []scoutChatMessageRecord, _ kanbanBoardState, memory []meetingMemoryEntry, now time.Time) string {
+	memory = activeAgentMemory(memory)
 	latest, _ := splitAgentThreadVersions(artifact.Text)
 	var builder strings.Builder
 	builder.WriteString("Now: ")
@@ -764,8 +765,8 @@ func buildAgentThreadFollowUpInput(thread scoutAgentThread, artifact meetingMemo
 	}
 	builder.WriteString("\nFollow-up request: ")
 	builder.WriteString(strings.TrimSpace(replyText))
-	builder.WriteString("\n\nBoard and memory context: ")
-	builder.WriteString(boardAndMemoryContextLine(board, memory))
+	builder.WriteString("\n\nCurrent authorized context: ")
+	builder.WriteString(workAndMemoryContextLine(memory))
 	builder.WriteString("\n\nRecent durable memory:\n")
 	for _, entry := range memory {
 		builder.WriteString("- ")

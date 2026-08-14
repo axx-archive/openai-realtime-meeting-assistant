@@ -47,8 +47,9 @@ func homeProjectFeatureEnabled(feature STRIDEFeature) bool {
 }
 
 var (
-	errHomeProjectUnavailable = errors.New("Project context is unavailable")
-	errHomeProjectStale       = errors.New("Project context changed; choose the Project again")
+	errHomeProjectUnavailable         = errors.New("Project context is unavailable")
+	errHomeProjectStale               = errors.New("Project context changed; choose the Project again")
+	errManualProjectAttachmentRetired = errors.New("manual Project attachment is retired; send without a Project")
 )
 
 type homeProjectDestination struct {

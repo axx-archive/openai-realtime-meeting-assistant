@@ -928,10 +928,6 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 
 			var turnText strings.Builder
 			var toolResults []json.RawMessage
-			// RW1 (kanban-card-108): true if any tool this turn mutated the board,
-			// so the fan-out fires once per assistant turn (below) instead of per
-			// tool — an agent-thread board edit reaches live clients without a reload.
-			boardChanged := false
 			for _, rawBlock := range response.Content {
 				block := decodeAnthropicBlock(rawBlock)
 				switch block.Type {
@@ -949,12 +945,6 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 					// The orchestrator's tools ARE the in-process Go functions the
 					// Realtime bridge calls — no new transport.
 					args := decodeToolArgs(block.Input)
-					if block.Name == "create_ticket" {
-						// D4 (mirrors board_worker.go): autonomous worker-created
-						// cards land as pending Scout drafts a human accepts or
-						// dismisses — never as instant board cards.
-						args["draft"] = true
-					}
 					if block.Name == "note_for_the_record" {
 						if err := authorizeOrchestratorTool(job, block.Name); err != nil {
 							toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
@@ -974,28 +964,10 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
 						continue
 					}
-					result, changed, toolErr := r.applyToolCallArgsForJob(job, block.Name, args)
-					if changed {
-						boardChanged = true
-					}
+					result, _, toolErr := r.applyToolCallArgsForJob(job, block.Name, args)
 					content, isError := anthropicToolResultContent(result, toolErr)
 					toolResults = append(toolResults, anthropicToolResultBlock(block.ID, content, isError))
 				}
-			}
-			// RW1 (kanban-card-108): fan the board out ONCE per assistant turn when
-			// any orchestrator tool mutated it, so agent-thread board edits land on
-			// live office/room clients without a manual reload. Batched per turn (not
-			// per tool) to avoid snapshot spam; broadcasting from this worker
-			// goroutine mirrors board_worker.go ~175. The board/undo snapshots are
-			// idempotent, so a non-board changed tool's extra snapshot is harmless.
-			// refreshRealtimeBoardContext completes broadcastManualBoardMutation's
-			// trio (gate finding C): without it this is the only board-mutating seam
-			// that leaves the office Realtime voice session's board context stale.
-			// It is nil-safe on r.app and a no-op when no Realtime session is live.
-			if boardChanged {
-				broadcastSignedInKanbanEvent("board", r.app.snapshotState())
-				broadcastSignedInKanbanEvent("undo_available", r.app.canUndoDelete())
-				r.app.refreshRealtimeBoardContext("agent thread board edit")
 			}
 			if summary := strings.TrimSpace(turnText.String()); summary != "" {
 				finalText = summary
@@ -1113,6 +1085,7 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 }
 
 func (r *anthropicFableRunner) userPrompt(job AgentJob) string {
+	job.Context.Memory = activeAgentMemory(job.Context.Memory)
 	var builder strings.Builder
 	builder.WriteString("Goal: ")
 	builder.WriteString(job.Objective)
@@ -1120,8 +1093,8 @@ func (r *anthropicFableRunner) userPrompt(job AgentJob) string {
 	builder.WriteString(assistantToolLabel(job.Mode))
 	builder.WriteString("\nRequested by: ")
 	builder.WriteString(firstNonEmptyString(job.RequestedBy, "the room"))
-	builder.WriteString("\n\nBoard and memory context: ")
-	builder.WriteString(boardAndMemoryContextLine(job.Context.Board, job.Context.Memory))
+	builder.WriteString("\n\nCurrent authorized context: ")
+	builder.WriteString(workAndMemoryContextLine(job.Context.Memory))
 	builder.WriteString("\n\nRecent durable memory:\n")
 	for _, entry := range job.Context.Memory {
 		builder.WriteString("- ")

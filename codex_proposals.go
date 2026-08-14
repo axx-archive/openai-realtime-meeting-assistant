@@ -125,12 +125,8 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 		// classifies heavy from the start.
 		"approvalLane": approvalLaneFor(mode, "", codexJobAuthorityForThread(scoutAgentThread{Mode: mode, Query: query}), true),
 	}
-	// Board linkage captured at propose time: an explicit card_id wins,
-	// otherwise the title fuzzy-matches an existing card. No match just means
-	// no auto-advance later — never an error.
-	if card, ok := app.matchBoardCard(title, asString(args["card_id"])); ok {
-		metadata["cardId"] = card.ID
-	}
+	// Board is retired. Ignore legacy card_id input from older clients rather
+	// than allowing a new proposal to mutate or extend archived card linkage.
 	// Package linkage captured at propose time: package_id resolves by id or
 	// name; an unknown package just means no binder auto-attach later.
 	if packageRef := strings.TrimSpace(asString(args["package_id"])); packageRef != "" {
@@ -415,42 +411,22 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 		"threadArtifactId": thread.Artifact.ID,
 		"launchState":      codexProposalLaunchStarted,
 	}
-	// Board linkage: the propose-time cardId wins; when it is absent, retry the
-	// fuzzy match now (the board worker may have created the card in a later
-	// pass than the proposal).
-	cardID := strings.TrimSpace(entry.Metadata["cardId"])
-	if cardID == "" {
-		if card, ok := app.matchBoardCard(entry.Metadata["title"], ""); ok {
-			cardID = card.ID
-			threadStamp["cardId"] = cardID
-		}
-	}
 	stamped, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, threadStamp)
 	if stampErr != nil {
 		log.Errorf("Failed to stamp thread linkage on codex proposal %s: %v", id, stampErr)
 	} else {
 		updated = stamped
 	}
-	// Bidirectional stamps + auto-advance. Mirrors the linkage-stamp-after-commit
-	// pattern above: a failure only loses the link, it never re-opens the settled
-	// proposal. The propose-time packageId rides onto the artifact so the terminal
-	// hook can auto-attach the finished deliverable to its venture package.
-	artifactStamp := map[string]string{}
-	if cardID != "" {
-		artifactStamp["boardCardId"] = cardID
-		artifactStamp["proposalId"] = id
-	}
+	// The propose-time packageId rides onto the artifact so the terminal hook can
+	// auto-attach the finished deliverable to its venture package.
+	artifactStamp := map[string]string{"proposalId": id}
 	if packageID := strings.TrimSpace(entry.Metadata["packageId"]); packageID != "" {
 		artifactStamp["packageId"] = packageID
-		artifactStamp["proposalId"] = id
 	}
 	if len(artifactStamp) > 0 {
 		if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "", artifactStamp); err != nil {
-			log.Errorf("Failed to stamp board linkage on artifact %s: %v", thread.Artifact.ID, err)
+			log.Errorf("Failed to stamp proposal package linkage on artifact %s: %v", thread.Artifact.ID, err)
 		}
-	}
-	if cardID != "" {
-		app.advanceLinkedCard(cardID, kanbanStatusInProgress, "confirmed: "+entry.Metadata["title"])
 	}
 
 	// Card 067 delivery: a ticker launch routed to a public channel posts a

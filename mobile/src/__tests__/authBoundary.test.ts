@@ -245,7 +245,7 @@ test('OfficeEvents is the fail-closed control plane for every personal Realtime 
   assert.match(office, /markOfficeControlDisconnected\(sessionToken\)/);
   assert.match(office, /Date\.now\(\) - lastFrameAt > OFFICE_SILENCE_TIMEOUT_MS/);
   assert.match(office, /socketScopeRef\.current !== effectScope \|\| socketRef\.current !== socket/);
-  assert.match(office, /closePersonalRealtimeForControlLoss\(\)/);
+  assert.match(office, /if \(!reconnectEligible\) closePersonalRealtimeForControlLoss\(\)/);
   assert.match(office, /audioFocusRuntime\.mode !== 'personal_realtime'/);
   assert.match(office, /markOfficeControlLive\(sessionToken\)/);
   assert.match(realtime, /await waitForOfficeControlChannel\(/);
@@ -263,7 +263,9 @@ test('OfficeEvents is the fail-closed control plane for every personal Realtime 
     realtime.indexOf('const handleProviderEvent = useCallback'),
   );
   assert.match(toolAdmission, /leaseRef\.current !== lease/);
-  assert.match(toolAdmission, /!officeControlChannelIsLive\(sessionToken\)/);
+  assert.match(toolAdmission, /await waitForOfficeControlChannel\(/);
+  assert.match(toolAdmission, /Scout could not re-establish its authenticated control channel/);
+  assert.doesNotMatch(toolAdmission, /!officeControlChannelIsLive\(sessionToken\)/);
   assert.match(toolAdmission, /toolAbortController\.signal\.aborted/);
   assert.match(toolAdmission, /api\.realtimeTool\([\s\S]*toolAbortController\.signal/);
   assert.match(realtime, /toolAbortController\?\.abort\(\)/);

@@ -23,6 +23,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { RTCView, ScreenCapturePickerView } from 'react-native-webrtc';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, BonfireApiError } from '../api/client';
 import type { Room, RoomAgentParticipant } from '../api/types';
@@ -40,6 +41,7 @@ import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
 import { meetingIntelligenceStatusLabel } from '../realtime/meetingIntelligence';
+import { roomVoiceAgentControlsAvailable } from '../meetings/roomVoiceAgentAvailability';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import {
   cameraFramingRenderRevision,
@@ -637,9 +639,12 @@ export function RoomScreen({ route, navigation }: Props) {
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
   const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
   const [agentControlSnapshot, setAgentControlSnapshot] = useState<RoomAgentParticipant[]>([]);
+	const [scoutVoiceEnabled, setScoutVoiceEnabled] = useState(false);
   const [specialistsLoading, setSpecialistsLoading] = useState(false);
   const [specialistsPending, setSpecialistsPending] = useState(false);
   const [specialistsError, setSpecialistsError] = useState<string | null>(null);
+  const [specialistsScopeKey, setSpecialistsScopeKey] = useState('');
+  const specialistsRequestGenerationRef = useRef(0);
   const allowCallNavigationRef = useRef(false);
   const screenCapturePickerRef = useRef<ScreenCapturePickerHandle | null>(null);
   const wideFramingExplainedRef = useRef(false);
@@ -676,14 +681,23 @@ export function RoomScreen({ route, navigation }: Props) {
 
   const loadSpecialists = useCallback(async () => {
     if (!sessionToken) return;
+    const scopeKey = `${sessionToken}\u0000${route.params.roomId}`;
+    const generation = ++specialistsRequestGenerationRef.current;
     setSpecialistsLoading(true);
     setSpecialistsError(null);
     const [specialistResult, agentResult] = await Promise.allSettled([
       api.meetingSpecialists(sessionToken, route.params.roomId),
       api.roomAgents(sessionToken, route.params.roomId),
     ]);
+    if (generation !== specialistsRequestGenerationRef.current) return;
+    setSpecialistsScopeKey(scopeKey);
     if (specialistResult.status === 'fulfilled') setSpecialists(specialistResult.value.specialists);
-    if (agentResult.status === 'fulfilled') setAgentControlSnapshot(agentResult.value.agents);
+    if (agentResult.status === 'fulfilled') {
+	  setAgentControlSnapshot(agentResult.value.agents);
+	  setScoutVoiceEnabled(Boolean(agentResult.value.voice?.enabled));
+	} else {
+	  setScoutVoiceEnabled(false);
+	}
     if (specialistResult.status === 'rejected') {
       const err = specialistResult.reason;
       setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not load your employee agents.');
@@ -694,7 +708,21 @@ export function RoomScreen({ route, navigation }: Props) {
     setSpecialistsLoading(false);
   }, [route.params.roomId, sessionToken]);
 
+  function meetingAgentControlsAvailable() {
+    const currentScopeKey = `${sessionToken ?? ''}\u0000${route.params.roomId}`;
+    return roomVoiceAgentControlsAvailable({
+      inNativeRoom,
+      currentScopeKey,
+      resolvedScopeKey: specialistsScopeKey,
+      scoutVoiceEnabled,
+      specialistVoiceAvailable: Boolean(specialists?.available),
+      controlAgentCount: agentControlSnapshot.length,
+      liveAgentCount: nativeRoom.state.agentParticipants.length,
+    });
+  }
+
   function openSpecialists() {
+    if (!meetingAgentControlsAvailable()) return;
     setSpecialistsVisible(true);
     void loadSpecialists();
   }
@@ -772,6 +800,18 @@ export function RoomScreen({ route, navigation }: Props) {
   const alreadyJoinedElsewhere = Boolean(user?.name && participants.some((participant) => (
     normalizedParticipantName(participant) === normalizedParticipantName(user.name)
   )));
+
+  useEffect(() => {
+    specialistsRequestGenerationRef.current += 1;
+    setSpecialistsScopeKey('');
+    setSpecialists(null);
+    setAgentControlSnapshot([]);
+    setScoutVoiceEnabled(false);
+    setSpecialistsVisible(false);
+  }, [route.params.roomId, sessionToken]);
+  useEffect(() => {
+    if (inNativeRoom) void loadSpecialists();
+  }, [inNativeRoom, loadSpecialists]);
 
   useEffect(() => {
     if (!inNativeRoom) {
@@ -944,6 +984,27 @@ export function RoomScreen({ route, navigation }: Props) {
     setConversationVisible(true);
     nativeRoom.setRoomChatOpen(mode === 'chat');
   }, [nativeRoom.setRoomChatOpen]);
+  const meetingRecordReturnModeRef = useRef<Exclude<RoomConversationMode, 'chat'> | null>(null);
+  const openPermanentMeetingRecord = useCallback((mode: Exclude<RoomConversationMode, 'chat'>) => {
+    const meetingId = String(nativeRoom.intelligence?.meetingId ?? '').trim();
+    if (!meetingId) return;
+    meetingRecordReturnModeRef.current = mode;
+    setConversationVisible(false);
+    nativeRoom.setRoomChatOpen(false);
+    navigation.navigate('Meetings', {
+      meetingId,
+      returnToRoomId: route.params.roomId,
+      returnMode: mode,
+    });
+  }, [nativeRoom.intelligence?.meetingId, nativeRoom.setRoomChatOpen, navigation, route.params.roomId]);
+  useFocusEffect(useCallback(() => {
+    const mode = meetingRecordReturnModeRef.current;
+    if (!mode) return;
+    meetingRecordReturnModeRef.current = null;
+    setConversationMode(mode);
+    setConversationVisible(true);
+    nativeRoom.setRoomChatOpen(false);
+  }, [nativeRoom.setRoomChatOpen]));
   const changeConversationMode = useCallback((mode: RoomConversationMode) => {
     setConversationMode(mode);
     nativeRoom.setRoomChatOpen(mode === 'chat');
@@ -1225,8 +1286,11 @@ export function RoomScreen({ route, navigation }: Props) {
       { id: 'recap', label: 'Meeting recap', onSelect: () => openConversation('recap') },
       { id: 'transcript', label: 'Live transcript', onSelect: () => openConversation('transcript') },
       { id: 'people', label: 'People in this room', onSelect: () => setParticipantsVisible(true) },
-      { id: 'specialists', label: 'Agent team', onSelect: openSpecialists },
-      { id: 'board', label: 'Board', onSelect: () => navigation.navigate('Board') },
+    );
+    if (meetingAgentControlsAvailable()) {
+      actions.push({ id: 'specialists', label: 'Agent team', onSelect: openSpecialists });
+    }
+    actions.push(
       { id: 'data-choices', label: 'Microphone data', onSelect: () => setConsentVisible(true) },
       { id: 'invite', label: 'Invite someone', onSelect: inviteToRoom },
       {
@@ -1482,6 +1546,8 @@ export function RoomScreen({ route, navigation }: Props) {
             onDeleteMessage={nativeRoom.deleteRoomChat}
             onModeChange={changeConversationMode}
             onOpenArtifact={openRoomWorkArtifact}
+            meetingRecordAvailable={Boolean(nativeRoom.intelligence?.meetingId)}
+            onOpenMeetingRecord={openPermanentMeetingRecord}
             onSendMessage={nativeRoom.sendRoomChat}
             roomName={room?.name ?? route.params.title}
             transcriptEntries={[...spokenTranscriptEntries]}
@@ -1516,6 +1582,7 @@ export function RoomScreen({ route, navigation }: Props) {
             onResolve={resolveSpecialist}
             onSetScout={setRoomScout}
             pending={specialistsPending}
+			scoutVoiceEnabled={scoutVoiceEnabled}
             status={specialists}
             visible={specialistsVisible}
           />

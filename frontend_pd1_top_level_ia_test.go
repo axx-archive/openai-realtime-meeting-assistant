@@ -47,8 +47,8 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	}
 	for _, marker := range []string{
 		`aria-label="Primary"`,
-		`data-pd1-destination="Home" aria-current="page" tabindex="0"`,
-		`data-pd1-destination="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
+		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
+		`data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
 		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Work', 'Network', 'Work Search', 'You'])`,
 		`aria-label="Application navigation"`,
 		`id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces"`,
@@ -383,8 +383,8 @@ const server = http.createServer((req, res) => {
   await page.waitForFunction(() => location.pathname === '/work' && document.querySelector('#toolRail').hidden === false);
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
   assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
-  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Work library','Projects','Memory','Files','Agent team']);
-  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(5).fill({role:'menuitemradio',tabIndex:-1}));
+	  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Work library','Meetings','Files','Agent team']);
+	  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(4).fill({role:'menuitemradio',tabIndex:-1}));
   assert.equal(await page.locator('#workToolMenu [data-tool="artifacts"]').getAttribute('aria-checked'), 'true');
   const utilities = await page.locator('.tool-rail__utilities').evaluate(el => ({
     labels:Array.from(el.querySelectorAll('.tool-rail__label')).filter(label => label.offsetParent !== null).map(label => label.textContent.trim()),
@@ -598,7 +598,13 @@ const server = http.createServer((req, res) => {
   assert.ok((await page.locator('#chatContextBody').evaluate(node => node.scrollTop))>0);
   assert.equal(await page.locator('#chatContextReplyInput').getAttribute('placeholder'),'Message the thread…');
   assert.equal(await page.locator('#chatContextReplyInput').isVisible(),true);
-  assert.equal(await page.locator('#scoutChatForm').isVisible(),false);
+  assert.equal(await page.locator('#scoutChatForm').isVisible(),true);
+  await page.locator('#scoutChatInput').fill('Main-channel draft stays independent');
+  await page.locator('#chatContextReplyInput').fill('Reply-thread draft stays independent');
+  assert.deepEqual(await page.evaluate(() => ({
+    main:document.getElementById('scoutChatInput').value,
+    reply:document.getElementById('chatContextReplyInput').value,
+  })),{main:'Main-channel draft stays independent',reply:'Reply-thread draft stays independent'});
   assert.equal(await page.locator('#scoutChatBrainNote').count(),0);
   if(renderDir){
     for (const candidate of [
@@ -615,12 +621,12 @@ const server = http.createServer((req, res) => {
           chatFits:document.getElementById('chatTool').scrollWidth<=document.getElementById('chatTool').clientWidth,
           threadsVisible:getComputedStyle(document.querySelector('#chatTool .chat-threads')).display!=='none',
           conversationVisible:getComputedStyle(document.querySelector('#chatTool .chat-conversation')).display!=='none',
-          mainComposerVisible:getComputedStyle(document.getElementById('scoutChatForm')).display!=='none',
+          mainComposerVisible:document.getElementById('scoutChatForm').getClientRects().length>0,
           replyVisible:reply.width>=320 && reply.bottom<=innerHeight && reply.left>=0 && reply.right<=innerWidth,
           railVisible:rail.width>=360 && rail.right<=innerWidth,
         };
       });
-      assert.deepEqual(layout,{documentFits:true,chatFits:true,threadsVisible:candidate.threadsVisible,conversationVisible:candidate.conversationVisible,mainComposerVisible:false,replyVisible:true,railVisible:true});
+      assert.deepEqual(layout,{documentFits:true,chatFits:true,threadsVisible:candidate.threadsVisible,conversationVisible:candidate.conversationVisible,mainComposerVisible:candidate.conversationVisible,replyVisible:true,railVisible:true});
       for (const theme of ['dark','light']) {
         await page.evaluate(nextTheme => renderTheme(nextTheme),theme);
         await page.mouse.move(2,2);
@@ -634,6 +640,7 @@ const server = http.createServer((req, res) => {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#chatContextRail').evaluate(node => node.hidden),true);
   assert.equal(await page.evaluate(() => document.activeElement?.dataset?.testThreadTrigger),'true');
+  assert.equal(await page.locator('#scoutChatInput').inputValue(),'Main-channel draft stays independent');
   const activeRowPreview = await page.evaluate(() => {
     artifactEntries=[{id:'artifact-follow-up',status:'running',metadata:{threadStatus:'running',status:'running',threadId:'run-follow-up',originKind:'channel',originId:'channel-follow-up'}}];
     const thread={id:'channel-follow-up',title:'Bonfire Chat',visibility:'public',preview:'Research delivered · 12 cited source links · 10 domains',updatedAt:'2026-08-10T00:01:00Z',messages:[{id:'follow-up-work',kind:'thread',text:'Research delivered · 12 cited source links · 10 domains',thread:{id:'run-follow-up',artifactId:'artifact-follow-up',status:'running',startedAt:'2026-08-10T00:00:00Z'}}]};

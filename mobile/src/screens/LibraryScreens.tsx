@@ -3,7 +3,6 @@ import { api } from '../api/client';
 import { CollectionScreen } from './CollectionScreen';
 
 const memoryKeys = ['entries', 'memory', 'items'];
-const meetingKeys = ['meetings'];
 const intelligenceKeys = ['themes', 'signals', 'opportunities', 'priorities', 'items'];
 
 export function MemoryScreen() {
@@ -19,18 +18,7 @@ export function MemoryScreen() {
   );
 }
 
-export function MeetingsScreen() {
-  return (
-    <CollectionScreen
-      title="Meetings"
-      subtitle="Summaries, decisions, and linked work"
-      empty="No meetings have landed yet."
-      keys={meetingKeys}
-      load={api.meetings}
-      events={['meeting', 'meeting_archived']}
-    />
-  );
-}
+export { MeetingsScreen } from './MeetingsScreen';
 
 export { FilesScreen } from './FilesScreen';
 

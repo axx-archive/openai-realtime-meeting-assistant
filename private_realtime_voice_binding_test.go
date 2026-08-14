@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPrivateRealtimeVoiceSessionBindingIsRestartSafeAndOwnerIsolated(t *testing.T) {
@@ -175,5 +176,68 @@ func TestAssistantRealtimeToolRequiresAndEchoesExactVoiceBinding(t *testing.T) {
 	}
 	if !payload.OK || payload.VoiceSessionID != voiceSessionID || payload.ThreadID != thread.ID || payload.Result.VoiceSessionID != voiceSessionID || payload.Result.ThreadID != thread.ID || payload.Result.Message != "Exact HTTP binding." {
 		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestAssistantRealtimeToolRoutesTodaysMeetingsThroughAuthorizedBriefing(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	voiceSessionID := "voice-http-todays-meetings"
+	thread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation("aj@shareability.com", "AJ", voiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().In(meetingTimeLocation())
+	spanStart := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+	spanEnd := spanStart.Add(45 * time.Minute)
+	digest := `{"meetingId":"voice-http-meeting-today","title":"Launch review","day":"` + spanStart.Format("2006-01-02") + `",` +
+		`"decisions":[{"d":"Keep the Friday launch with a rollback owner assigned","status":"decided","importance":5}]}`
+	upsertBriefingTestDigest(t, kanbanApp, "voice-http-meeting-today", digest, spanStart.Format("2006-01-02"), spanStart.UTC().Format(time.RFC3339), spanEnd.UTC().Format(time.RFC3339))
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		t.Fatalf("authorized meeting briefing reached generic provider workflow %q", request.Workflow)
+		return "", nil
+	})
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	post := func() *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-meeting-call","name":"route_conversation_turn","arguments":{"utterance":"Catch me up on today's meetings. What was important?"}}`, voiceSessionID, thread.ID)
+		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantRealtimeToolHandler(recorder, req)
+		return recorder
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		response := post()
+		if response.Code != http.StatusOK {
+			t.Fatalf("attempt %d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+		var payload struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				Outcome string `json:"outcome"`
+				Message string `json:"message"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !payload.OK || payload.Result.Outcome != string(conversationIntentConversationalReply) ||
+			!strings.Contains(payload.Result.Message, "Keep the Friday launch") ||
+			!strings.Contains(payload.Result.Message, "Launch review") {
+			t.Fatalf("attempt %d payload=%+v", attempt, payload)
+		}
+	}
+	if providerCalls != 0 {
+		t.Fatalf("generic provider calls=%d, want 0", providerCalls)
 	}
 }

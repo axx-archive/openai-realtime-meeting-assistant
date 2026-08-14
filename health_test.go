@@ -90,8 +90,8 @@ func TestReadinessHandlerReportsStorageAndAgentState(t *testing.T) {
 	if payload.Checks.StrideE10W5["ready"] != true || payload.Checks.StrideE10W6["ready"] == nil {
 		t.Fatalf("W5/W6 readiness checks missing: W5=%v W6=%v", payload.Checks.StrideE10W5, payload.Checks.StrideE10W6)
 	}
-	if payload.Checks.Agents.Brain["enabled"] != true || payload.Checks.Agents.Board["enabled"] != true {
-		t.Fatalf("agent checks=%+v, want enabled defaults", payload.Checks.Agents)
+	if payload.Checks.Agents.Brain["enabled"] != true || len(payload.Checks.Agents.Board) != 0 {
+		t.Fatalf("agent checks=%+v, want meeting brain enabled and retired Board worker absent", payload.Checks.Agents)
 	}
 	if len(payload.Degraded) == 0 || payload.Degraded[0] != "openai_api_key_missing" {
 		t.Fatalf("degraded=%v, want missing OpenAI key noted without failing readiness", payload.Degraded)

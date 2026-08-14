@@ -48,6 +48,10 @@ const STRIDE_MASS_DARK = '#77777D';
 
 const publicDir = resolve(repositoryRoot, 'public');
 const mobileDir = resolve(repositoryRoot, 'mobile/assets');
+const nativeIOSAppIconDir = resolve(
+  repositoryRoot,
+  'mobile/ios/Stride/Images.xcassets/AppIcon.appiconset',
+);
 const sitePublicDir = resolve(repositoryRoot, 'stride-site/public');
 const brandDir = resolve(repositoryRoot, 'brand');
 const publicFontsDir = resolve(publicDir, 'fonts');
@@ -270,6 +274,24 @@ await render(tiles.light, resolve(mobileDir, 'adaptive-icon.png'), 512, { opaque
 await render(tiles.light, resolve(mobileDir, 'favicon.png'), 48, { opaque: true });
 await render(tiles.dark, resolve(mobileDir, 'ios-icon-dark.png'), 1024, { opaque: true });
 await render(tiles.tinted, resolve(mobileDir, 'ios-icon-tinted.png'), 1024, { opaque: true });
+
+// EAS builds the checked-in native iOS project, so Xcode compiles this catalog
+// directly rather than regenerating it from app.config.ts. Keep the release
+// catalog byte-identical to the canonical Expo assets on every brand rebuild;
+// otherwise a correct source bundle can still ship an older installed icon.
+await mkdir(nativeIOSAppIconDir, { recursive: true });
+await copyFile(
+  resolve(mobileDir, 'icon.png'),
+  resolve(nativeIOSAppIconDir, 'App-Icon-1024x1024@1x.png'),
+);
+await copyFile(
+  resolve(mobileDir, 'ios-icon-dark.png'),
+  resolve(nativeIOSAppIconDir, 'App-Icon-dark-1024x1024@1x.png'),
+);
+await copyFile(
+  resolve(mobileDir, 'ios-icon-tinted.png'),
+  resolve(nativeIOSAppIconDir, 'App-Icon-tinted-1024x1024@1x.png'),
+);
 
 // The native loading artwork is the real five-mass cradle at rest—not the icon.
 await render(cradleSvg(STRIDE_MASS), resolve(mobileDir, 'splash-icon.png'), 1024);

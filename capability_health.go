@@ -566,7 +566,6 @@ func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady bool) map[strin
 		workers[key] = ambientWorkerCapabilitySnapshot(agent, now, provider, ready)
 	}
 	add("brain", meetingBrainAgent(), providerOpenAI, openAIReady)
-	add("board", meetingBoardAgent(), providerOpenAI, openAIReady)
 	add("missionIntel", missionIntelligenceAgent(), providerOpenAI, openAIReady)
 	add("decisionLedger", decisionLedgerAgent(), providerOpenAI, openAIReady)
 	add("narrative", narrativeMaintainerAgent(), providerOpenAI, openAIReady)
@@ -719,7 +718,6 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	}
 	brain["workers"] = map[string]any{
 		"brain":        brainCfg,
-		"board":        readinessAgentSnapshot(meetingBoardAgent()),
 		"missionIntel": readinessAgentSnapshot(missionIntelligenceAgent()),
 	}
 	markProviderFailure(brain, providerReady)

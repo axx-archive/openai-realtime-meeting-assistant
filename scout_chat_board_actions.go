@@ -1,19 +1,14 @@
 package main
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 const (
 	scoutChatBoardIntentOpen  = "open"
 	scoutChatBoardIntentClear = "clear"
 )
 
-// scoutChatBoardAction is a navigation contract, not mutation authority. The
-// typed-chat client may use it to open the Board, while RequestedIntent keeps
-// the user's original intent visible. In particular, a clear request remains
-// read-only until the product has a durable, recoverable Trash operation.
+// scoutChatBoardAction is a compatibility response for old typed requests. It
+// never reads or opens archived cards; old Board navigation lands in Work.
 type scoutChatBoardAction struct {
 	Surface          string `json:"surface"`
 	Action           string `json:"action"`
@@ -64,26 +59,17 @@ func (app *kanbanBoardApp) scoutChatBoardActionForIntent(intent string) (*scoutC
 	if app == nil || (intent != scoutChatBoardIntentOpen && intent != scoutChatBoardIntentClear) {
 		return nil, ""
 	}
-	activeCardCount := len(app.snapshotState().Cards)
 	action := &scoutChatBoardAction{
-		Surface:          "board",
+		Surface:          "artifacts",
 		Action:           "open",
 		RequestedIntent:  intent,
-		ActiveCardCount:  activeCardCount,
+		ActiveCardCount:  0,
 		ReadOnly:         true,
 		MutationExecuted: false,
-	}
-	itemLabel := "items"
-	if activeCardCount == 1 {
-		itemLabel = "item"
+		Reason:           "board_retired",
 	}
 	if intent == scoutChatBoardIntentClear {
-		action.Reason = "durable_trash_required"
-		return action, "I found " + boardCountLabel(activeCardCount, itemLabel) + " on the Board. I haven’t changed anything—clearing the Board needs a durable Trash flow first so every item stays recoverable. I’ll open it for you."
+		return action, "The Board is retired and its history is preserved read-only. Nothing was changed; I’ll open Work instead."
 	}
-	return action, "Opening the Board—there are " + boardCountLabel(activeCardCount, itemLabel) + " on it right now."
-}
-
-func boardCountLabel(count int, itemLabel string) string {
-	return strconv.Itoa(count) + " " + itemLabel
+	return action, "The Board is retired. I’ll open Work, where current work is grounded in conversations, meetings, files, and artifacts."
 }

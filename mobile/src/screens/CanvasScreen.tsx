@@ -27,7 +27,9 @@ import { Waveform } from '../components/Waveform';
 import { useHomeCanvas } from '../canvas/useLiveLine';
 import { createConversationOperationId } from '../conversations/newConversation';
 import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
+import { runPersonalRealtimeTap } from '../realtime/personalRealtimeTap';
 import { useComposerDictation } from '../voice/useComposerDictation';
+import { explicitProjectAttachmentEnabled, safeProjectContextFromResponse } from '../messaging/projectContextPreflight';
 import type { HomeStarterDestination, HomeStarterSuggestion } from '../api/types';
 import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
@@ -146,7 +148,8 @@ export function CanvasScreen() {
         || sessionTokenRef.current !== sessionToken
         || draftRef.current.trim() !== text
         || JSON.stringify(currentDestination) !== destinationKey) return;
-      const context = response.projectContext;
+      const context = safeProjectContextFromResponse(response);
+      if (!context) throw new Error('Project context is unavailable.');
       if (projectScopeKeyRef.current && context.scopeKey && projectScopeKeyRef.current !== context.scopeKey) {
         setSelectedProject(null);
       }
@@ -201,7 +204,7 @@ export function CanvasScreen() {
   }, []);
 
   useEffect(() => {
-    if (!sessionToken || draftDestination?.route === 'thread') {
+    if (!explicitProjectAttachmentEnabled || !sessionToken || draftDestination?.route === 'thread') {
       setProjectAvailable(false);
       setProjectChoices([]);
       setSelectedProject(null);
@@ -215,14 +218,8 @@ export function CanvasScreen() {
     // The cradle has one stable meaning: a full-duplex Realtime Scout call.
     // Home also accepts an ordinary typed turn below; neither path asks the
     // person to choose a tool, template, model, or deliverable first.
-    if (!realtime.enabled) return;
     Keyboard.dismiss();
-    if (realtime.active) {
-      await realtime.stop('completed');
-    } else {
-      if (realtime.status === 'error') await realtime.stop('cancelled');
-      await realtime.start();
-    }
+    await runPersonalRealtimeTap(realtime);
   }, [realtime]);
 
   const sendOpening = useCallback(async () => {
@@ -268,7 +265,7 @@ export function CanvasScreen() {
       }
       return;
     }
-    const projectContextToken = projectSessionToken === sessionToken && selectedProject?.text === text ? selectedProject.token : '';
+    const projectContextToken = explicitProjectAttachmentEnabled && projectSessionToken === sessionToken && selectedProject?.text === text ? selectedProject.token : '';
     const attempt = homeScoutOpeningAttempt(openingAttemptRef.current, draft, undefined, projectContextToken);
     if (!attempt) return;
     openingAttemptRef.current = attempt;
@@ -305,10 +302,22 @@ export function CanvasScreen() {
     setSending(false);
   }, [draft, draftDestination, navigation, projectSessionToken, selectedProject, sending, sessionToken]);
 
-  // The disabled mic already communicates capability. Reserve copy below the
-  // composer for a real runtime problem; a permanent policy sentence is
-  // superfluous on the most important screen in the product.
-  const voiceNotice = realtime.error;
+  // A Realtime start can spend a few seconds waiting for the authenticated
+  // office control channel before iOS capture and the provider offer begin.
+  // Never make that honest startup look like a dead button: publish the live
+  // state immediately, while still reserving persistent copy for real runtime
+  // errors and active voice truth.
+  const voiceNotice = realtime.error || (() => {
+    switch (realtime.status) {
+      case 'connecting': return 'Connecting to Scout…';
+      case 'listening':
+      case 'hearing': return 'Scout is listening';
+      case 'thinking': return 'Scout is thinking';
+      case 'acting': return 'Scout is working';
+      case 'talking': return 'Scout is speaking';
+      default: return null;
+    }
+  })();
   const liveMeeting = home.continuity.find((item) => item.kind === 'live-meeting');
   const continuityItems = home.continuity.filter((item) => item.kind !== 'live-meeting');
 
@@ -442,13 +451,11 @@ export function CanvasScreen() {
                   <SymbolView name="xmark" size={17} tintColor={colors.text2} />
                 </Pressable>
               ) : null}
-              {!dictationActive ? (
+              {!dictationActive && realtime.enabled ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={!realtime.enabled ? 'Voice unavailable' : realtime.status === 'connecting' ? 'Connecting to Scout' : listening ? 'End private voice chat' : 'Start a new private voice chat with Scout'}
+                  accessibilityLabel={realtime.status === 'connecting' ? 'Connecting to Scout' : listening ? 'End private voice chat' : 'Start a new private voice chat with Scout'}
                   accessibilityHint={listening ? 'Ends this voice conversation.' : 'Starts a full-duplex voice conversation and saves both sides in one private chat.'}
-                  accessibilityState={{ disabled: !realtime.enabled }}
-                  disabled={!realtime.enabled}
                   onPress={() => { void handleTap(); }}
                   style={({ pressed }) => [styles.composerVoice, listening && styles.composerVoiceLive, pressed && styles.composerActionPressed]}
                 >
@@ -498,20 +505,6 @@ export function CanvasScreen() {
                   <Text maxFontSizeMultiplier={1.6} style={styles.draftDestinationActionText}>Change</Text>
                 </Pressable>
               </View>
-            ) : null}
-            {draftDestination?.route !== 'thread' && projectAvailable && projectSessionToken === sessionToken ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : 'Add project'}
-                accessibilityHint="Chooses an authorized project for this message. Nothing is linked until Send."
-                onPress={() => setProjectChooserOpen(true)}
-                style={({ pressed }) => [styles.projectChip, pressed && styles.starterPressed]}
-              >
-                <SymbolView name="folder" size={14} tintColor={colors.text3} />
-                <Text maxFontSizeMultiplier={1.8} style={styles.projectChipText}>
-                  {selectedProject ? `${selectedProject.suggested ? 'Suggested' : 'Project'} · ${selectedProject.title}` : 'Add project'}
-                </Text>
-              </Pressable>
             ) : null}
             {sendError ? <Text accessibilityRole="alert" maxFontSizeMultiplier={1.8} style={styles.sendError}>{sendError}</Text> : null}
           </View>
@@ -609,7 +602,7 @@ export function CanvasScreen() {
 
         <View style={[canvasCradleComposition.skyBelow, keyboardVisible && styles.keyboardSky]} />
       </ScrollView>
-		  <Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
+		  <Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
 		<SafeAreaView style={styles.projectSheet}>
 		  <View style={styles.projectSheetHeader}>
 			<Text accessibilityRole="header" maxFontSizeMultiplier={1.8} style={styles.projectSheetTitle}>Choose a project</Text>

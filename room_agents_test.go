@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,6 +29,10 @@ func TestRoomAdmissionStartsTranscriptionWithoutSilentlyInvitingScout(t *testing
 
 func TestExplicitScoutInviteProjectsParticipantAndAttributesProviderSpeech(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv(roomScoutVoiceModeEnv, "qualified")
+	receipt := strings.Repeat("a", 64)
+	t.Setenv(roomScoutVoiceQualificationEnv, receipt)
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(func(candidate string) bool { return candidate == receipt }))
 	app := newKanbanBoardApp()
 	authority := newAmbientConsentAuthorityForTest(t)
 	sittingID := grantAmbientConsentForTest(t, app, authority, officeRoomID, "aj@shareability.com")
@@ -67,5 +72,40 @@ func TestExplicitScoutInviteProjectsParticipantAndAttributesProviderSpeech(t *te
 	}
 	if got := app.dismissRoomScout(officeRoomID, sittingID, "test_complete"); len(got) != 0 || len(app.roomAgentParticipantsSnapshot(officeRoomID)) != 0 {
 		t.Fatalf("dismiss left agent participant got=%+v snapshot=%+v", got, app.roomAgentParticipantsSnapshot(officeRoomID))
+	}
+}
+
+func TestRoomScoutVoiceIsDefaultOffUntilExactQualification(t *testing.T) {
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(nil))
+	t.Setenv(roomScoutVoiceModeEnv, "")
+	t.Setenv(roomScoutVoiceQualificationEnv, "")
+	if gate := currentRoomScoutVoiceAvailability(); gate.Enabled || gate.Reason != "quality_gate_pending" {
+		t.Fatalf("default room Scout voice gate=%+v", gate)
+	}
+	if _, err := (&kanbanBoardApp{}).inviteRoomScout(context.Background(), &userAccount{}, officeRoomID); !errors.Is(err, ErrRoomScoutVoiceDisabled) {
+		t.Fatalf("unqualified invite error=%v", err)
+	}
+	t.Setenv(roomScoutVoiceModeEnv, "qualified")
+	t.Setenv(roomScoutVoiceQualificationEnv, strings.Repeat("b", 63))
+	if currentRoomScoutVoiceAvailability().Enabled {
+		t.Fatal("malformed qualification receipt enabled room voice")
+	}
+	receipt := strings.Repeat("b", 64)
+	t.Setenv(roomScoutVoiceQualificationEnv, receipt)
+	if gate := currentRoomScoutVoiceAvailability(); gate.Enabled || gate.Reason != "trusted_qualification_unavailable" {
+		t.Fatalf("local configuration enabled room Scout without a trusted verifier: %+v", gate)
+	}
+	restoreTrusted := installRoomScoutVoiceQualificationVerifier(func(candidate string) bool { return candidate == receipt })
+	t.Cleanup(restoreTrusted)
+	if gate := currentRoomScoutVoiceAvailability(); !gate.Enabled || gate.Reason != "qualified" {
+		t.Fatalf("qualified room Scout voice gate=%+v", gate)
+	}
+	restoreTrusted()
+	if gate := currentRoomScoutVoiceAvailability(); gate.Enabled || gate.Reason != "trusted_qualification_unavailable" {
+		t.Fatalf("revoked trusted verifier left room Scout voice enabled: %+v", gate)
+	}
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(func(string) bool { return false }))
+	if gate := currentRoomScoutVoiceAvailability(); gate.Enabled || gate.Reason != "qualification_not_current" {
+		t.Fatalf("stale trusted receipt enabled room Scout voice: %+v", gate)
 	}
 }

@@ -35,9 +35,9 @@ func collectProgress(out <-chan AgentProgress) []AgentProgress {
 	return progresses
 }
 
-// The orchestrator runs a real tool loop: a tool_use response is dispatched to
-// applyToolCallArgs, the tool_result is fed back, and the loop terminates on
-// end_turn with the finished artifact.
+// The orchestrator runs a real non-Board tool loop: a tool_use response is
+// dispatched, the tool_result is fed back, and the loop terminates on end_turn
+// with the finished artifact.
 func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -52,7 +52,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 				StopReason: "tool_use",
 				Content: []json.RawMessage{
 					mockAnthropicTextBlock("Starting on the Aurora package."),
-					mockAnthropicToolUseBlock("toolu_1", "create_ticket", map[string]any{"title": "Orchestrated card"}),
+					mockAnthropicToolUseBlock("toolu_1", "create_artifact", map[string]any{"mode": "artifacts", "query": "Aurora plan", "content": "Initial plan"}),
 				},
 			}, nil
 		}
@@ -67,7 +67,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	runner.apiKey = func() string { return "test-key" }
 	runner.maxTurns = 6
 
-	cardsBefore := len(app.cards)
+	artifactsBefore := len(app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0))
 	job := app.newAgentJob(scoutAgentThread{ID: "agent-thread-workflow-1", Mode: "workflow", Query: "package the Aurora IP", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "aj@shareability.com"}}})
 	out, err := runner.RunJob(context.Background(), job)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 		t.Fatalf("responder called %d times, want 2", len(requests))
 	}
 	// The first request carries the curated tools including the control tool.
-	if !toolNamesContain(requests[0].Tools, "create_ticket") || !toolNamesContain(requests[0].Tools, controlToolReportGoalState) {
+	if !toolNamesContain(requests[0].Tools, "create_artifact") || toolNamesContain(requests[0].Tools, "create_ticket") || !toolNamesContain(requests[0].Tools, controlToolReportGoalState) {
 		t.Fatalf("first request tools missing curated set: %v", toolNames(requests[0].Tools))
 	}
 	if !strings.Contains(strings.ToLower(requests[0].System), "orchestrator") {
@@ -97,14 +97,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 		t.Fatal("second request missing a tool_result block")
 	}
 
-	// applyToolCallArgs actually mutated the board, and the orchestrator's
-	// create_ticket landed as a D4 draft (not an instant board card).
-	if len(app.cards) != cardsBefore+1 {
-		t.Fatalf("board has %d cards, want %d (create_ticket dispatched)", len(app.cards), cardsBefore+1)
-	}
-	if newest := app.cards[len(app.cards)-1]; !newest.Draft {
-		t.Fatalf("orchestrator-created card Draft=false, want true (D4 gate bypassed)")
-	}
+	waitForRealtimeArtifactCount(t, app, artifactsBefore+1)
 
 	if len(progresses) < 2 {
 		t.Fatalf("emitted %d progress updates, want >=2 (turn + terminal)", len(progresses))
@@ -1577,11 +1570,10 @@ func TestAnthropicFableRunnerTurnProgressNotes(t *testing.T) {
 }
 
 // TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn pins RW1
-// (kanban-card-108): an agent-thread orchestrator turn that mutates the board
-// fans a board + undo_available snapshot out to live office/room sockets once
-// per turn, while a read-only tool turn broadcasts nothing. Pre-fix the runner's
-// tool loop never broadcast, so agent-thread board edits needed a manual reload.
-func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
+// Retiring the Board removes its mutation tools and its fan-out side effects
+// from orchestrated Work. Non-Board artifact and read-only turns must both stay
+// silent on the legacy board/undo websocket events.
+func TestAnthropicFableRunnerNeverBroadcastsRetiredBoard(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
 	sendOfficeHello(t, conn)
@@ -1601,29 +1593,58 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 		return runner
 	}
 
-	// A board-mutating tool turn (create_ticket) must broadcast board + undo.
+	assertNoBoardBeforeMarker := func(marker string) {
+		t.Helper()
+		if _, _, err := kanbanApp.memory.appendAmbientEntry(meetingMemoryKindBrain, marker, marker, nil); err != nil {
+			t.Fatalf("append marker: %v", err)
+		}
+		broadcastSignedInKanbanEvent("memory", nil)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if err := conn.SetReadDeadline(deadline); err != nil {
+				t.Fatalf("set read deadline: %v", err)
+			}
+			var message websocketMessage
+			if err := conn.ReadJSON(&message); err != nil {
+				t.Fatalf("read websocket through marker: %v", err)
+			}
+			if message.Event != "kanban" {
+				continue
+			}
+			var inner struct {
+				Event string `json:"event"`
+			}
+			if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+				t.Fatalf("decode kanban envelope: %v", err)
+			}
+			if inner.Event == "board" || inner.Event == "undo_available" {
+				t.Fatalf("orchestrator leaked retired %q broadcast", inner.Event)
+			}
+			if inner.Event == "memory" {
+				return
+			}
+		}
+	}
+
+	// A real artifact mutation is still allowed, but cannot broadcast Board.
 	mutating := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		if len(request.Messages) == 1 {
 			return anthropicMessagesResponse{
 				StopReason: "tool_use",
 				Content: []json.RawMessage{
-					mockAnthropicToolUseBlock("toolu_mut", "create_ticket", map[string]any{"title": "RW1AgentThreadProbe"}),
+					mockAnthropicToolUseBlock("toolu_mut", "create_artifact", map[string]any{"mode": "artifacts", "query": "RW1 agent probe", "content": "Verified result"}),
 				},
 			}, nil
 		}
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Done")}}, nil
 	}
-	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "aj@shareability.com"}}}))
+	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "create an artifact", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "aj@shareability.com"}}}))
 	if err != nil {
 		t.Fatalf("RunJob mutating: %v", err)
 	}
 	collectProgress(out)
 
-	board := waitForKanbanEvent(t, conn, "board", 5*time.Second)
-	if !strings.Contains(string(board), "RW1AgentThreadProbe") {
-		t.Fatalf("office board snapshot missing the orchestrated card: %s", board)
-	}
-	waitForKanbanEvent(t, conn, "undo_available", 5*time.Second)
+	assertNoBoardBeforeMarker("rw1-artifact-marker")
 
 	// A read-only tool turn (control_app) must broadcast nothing. A memory marker
 	// over the signed-in fan-out bounds the negative check: ordered delivery on
@@ -1645,35 +1666,7 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 	}
 	collectProgress(out)
 
-	if _, _, err := kanbanApp.memory.appendAmbientEntry(meetingMemoryKindBrain, "rw1-readonly-marker", "ordered read-only marker", nil); err != nil {
-		t.Fatalf("append read-only marker: %v", err)
-	}
-	broadcastSignedInKanbanEvent("memory", nil)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if err := conn.SetReadDeadline(deadline); err != nil {
-			t.Fatalf("set read deadline: %v", err)
-		}
-		var message websocketMessage
-		if err := conn.ReadJSON(&message); err != nil {
-			t.Fatalf("read websocket draining after read-only turn: %v", err)
-		}
-		if message.Event != "kanban" {
-			continue
-		}
-		var inner struct {
-			Event string `json:"event"`
-		}
-		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
-			t.Fatalf("decode kanban envelope: %v", err)
-		}
-		if inner.Event == "board" || inner.Event == "undo_available" {
-			t.Fatalf("read-only orchestrator turn leaked a %q broadcast", inner.Event)
-		}
-		if inner.Event == "memory" {
-			break
-		}
-	}
+	assertNoBoardBeforeMarker("rw1-readonly-marker")
 }
 
 // --- W0 item 3 + W1 item 14: cache-token parsing, base-URL seam, wire ledger ---

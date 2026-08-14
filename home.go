@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -9,6 +10,12 @@ import (
 )
 
 const homeSnapshotVersion = "home-v2"
+
+const (
+	homeConversationCompactionVersion = "home-conversation-v1"
+	homeConversationCompactionKey     = "homeContextCompaction"
+	homeConversationFreshnessWindow   = 30 * 24 * time.Hour
+)
 
 type homeDestination struct {
 	Route     string `json:"route"`
@@ -78,6 +85,279 @@ type homeRoomCandidate struct {
 type homeRecurringTheme struct {
 	Topic   string
 	Threads []scoutChatThreadRecord
+}
+
+// homeConversationCompaction is the durable, body-minimized recommendation
+// input for one conversation. It is regenerated at the same persistence
+// boundary as every thread mutation. Home may rank these records, but it must
+// never reopen raw message history to synthesize a card-click suggestion.
+type homeConversationCompaction struct {
+	Version            string                `json:"version"`
+	ThreadID           string                `json:"threadId"`
+	SourceRevision     string                `json:"sourceRevision"`
+	SourceHighWater    string                `json:"sourceHighWater"`
+	AudienceDigest     string                `json:"audienceDigest"`
+	GeneratedAt        string                `json:"generatedAt"`
+	FreshUntil         string                `json:"freshUntil"`
+	Topics             []string              `json:"topics,omitempty"`
+	Recent             *homeCompactionRecent `json:"recent,omitempty"`
+	Work               *homeCompactionWork   `json:"work,omitempty"`
+	Action             *homeCompactionAction `json:"action,omitempty"`
+	Status             string                `json:"status"`
+	InvalidationReason string                `json:"invalidationReason,omitempty"`
+	ReceiptDigest      string                `json:"receiptDigest"`
+}
+
+type homeCompactionRecent struct {
+	MessageID string `json:"messageId"`
+	Detail    string `json:"detail"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type homeCompactionWork struct {
+	MessageID string             `json:"messageId"`
+	CreatedAt string             `json:"createdAt"`
+	Ref       scoutChatThreadRef `json:"ref"`
+}
+
+type homeCompactionAction struct {
+	MessageID string `json:"messageId"`
+	CreatedAt string `json:"createdAt"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+}
+
+func homeConversationAudienceDigest(owner, visibility string, members []string) string {
+	canonicalMembers := append([]string(nil), members...)
+	for index := range canonicalMembers {
+		canonicalMembers[index] = normalizeAccountEmail(canonicalMembers[index])
+	}
+	sort.Strings(canonicalMembers)
+	return exactSHA256([]byte(strings.Join([]string{
+		"home-conversation-audience/v1",
+		normalizeAccountEmail(owner),
+		normalizeScoutChatVisibility(visibility),
+		strings.Join(canonicalMembers, ","),
+	}, "\x00")))
+}
+
+func homeConversationAudienceDigestFromMetadata(metadata map[string]string) string {
+	members := []string{}
+	if raw := strings.TrimSpace(metadata["memberEmails"]); raw != "" {
+		members = strings.Split(raw, ",")
+	}
+	return homeConversationAudienceDigest(metadata["ownerEmail"], metadata["visibility"], members)
+}
+
+func homeConversationSourceHighWater(thread scoutChatThreadRecord) string {
+	type sourceMessage struct {
+		ID        string `json:"id"`
+		Role      string `json:"role"`
+		CreatedAt string `json:"createdAt"`
+		Text      string `json:"text"`
+		WorkID    string `json:"workId,omitempty"`
+		WorkQuery string `json:"workQuery,omitempty"`
+		WorkState string `json:"workState,omitempty"`
+	}
+	source := struct {
+		Version    string          `json:"version"`
+		ThreadID   string          `json:"threadId"`
+		Title      string          `json:"title"`
+		UpdatedAt  string          `json:"updatedAt"`
+		ArchivedAt string          `json:"archivedAt,omitempty"`
+		Intake     string          `json:"intake,omitempty"`
+		Messages   []sourceMessage `json:"messages"`
+	}{
+		Version: "home-conversation-source/v1", ThreadID: strings.TrimSpace(thread.ID),
+		Title: strings.TrimSpace(thread.Title), UpdatedAt: strings.TrimSpace(thread.UpdatedAt),
+		ArchivedAt: strings.TrimSpace(thread.ArchivedAt), Intake: strings.TrimSpace(thread.Intake),
+	}
+	start := len(thread.Messages) - 3
+	if start < 0 {
+		start = 0
+	}
+	for _, message := range thread.Messages[start:] {
+		row := sourceMessage{ID: strings.TrimSpace(message.ID), Role: strings.TrimSpace(message.Role), CreatedAt: strings.TrimSpace(message.CreatedAt), Text: strings.TrimSpace(message.Text)}
+		if message.Thread != nil {
+			row.WorkID = strings.TrimSpace(message.Thread.ID)
+			row.WorkQuery = strings.TrimSpace(message.Thread.Query)
+			row.WorkState = strings.TrimSpace(message.Thread.Status)
+		}
+		source.Messages = append(source.Messages, row)
+	}
+	raw, _ := json.Marshal(source)
+	return exactSHA256(raw)
+}
+
+func homeConversationCompactionReceiptDigest(compaction homeConversationCompaction) string {
+	compaction.ReceiptDigest = ""
+	raw, _ := json.Marshal(compaction)
+	return exactSHA256(append([]byte("home-conversation-compaction-receipt/v1\x00"), raw...))
+}
+
+func homeConversationCompactionForThread(thread scoutChatThreadRecord) homeConversationCompaction {
+	revision := firstNonEmptyString(strings.TrimSpace(thread.UpdatedAt), strings.TrimSpace(thread.CreatedAt))
+	generated := homeTimestamp(revision)
+	status, reason := "current", ""
+	switch {
+	case strings.TrimSpace(thread.ArchivedAt) != "":
+		status, reason = "invalidated", "thread_archived"
+	case strings.TrimSpace(thread.Intake) != "":
+		status, reason = "invalidated", "intake_not_conversation"
+	case generated.IsZero():
+		status, reason = "invalidated", "source_high_water_unavailable"
+	}
+	context := strings.TrimSpace(thread.Title)
+	start := len(thread.Messages) - 3
+	if start < 0 {
+		start = 0
+	}
+	for _, message := range thread.Messages[start:] {
+		context += " " + message.Text
+		if message.Thread != nil {
+			context += " " + message.Thread.Query
+		}
+	}
+	topics := homeThemeWords(context)
+	if len(topics) > 12 {
+		topics = topics[:12]
+	}
+	compaction := homeConversationCompaction{
+		Version: homeConversationCompactionVersion, ThreadID: strings.TrimSpace(thread.ID),
+		SourceRevision: revision, SourceHighWater: homeConversationSourceHighWater(thread),
+		AudienceDigest: homeConversationAudienceDigest(thread.OwnerEmail, scoutChatThreadVisibility(thread), scoutChatThreadMemberEmails(thread)),
+		Status:         status, InvalidationReason: reason, Topics: topics,
+	}
+	workStatuses := map[string]bool{"queued": true, "running": true, "in_progress": true, "working": true, "approval_required": true, "needs_input": true, "parked": true, "needs_attention": true, "error": true, "failed": true}
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		if compaction.Recent == nil && strings.TrimSpace(message.ID) != "" {
+			// The compaction preserves the exact continuation point but not the
+			// message body. Preview is already the bounded server-authored rail
+			// projection; title is the safe fallback for legacy rows.
+			detail := homeOneLine(firstNonEmptyString(thread.Preview, thread.Title), 120)
+			if detail != "" {
+				compaction.Recent = &homeCompactionRecent{MessageID: message.ID, Detail: detail, CreatedAt: message.CreatedAt}
+			}
+		}
+		if compaction.Work == nil && message.Thread != nil && workStatuses[strings.ToLower(strings.TrimSpace(message.Thread.Status))] {
+			compaction.Work = &homeCompactionWork{MessageID: message.ID, CreatedAt: message.CreatedAt, Ref: *message.Thread}
+		}
+		if compaction.Action == nil {
+			pendingProposal := message.Proposal != nil && oneOf(strings.ToLower(strings.TrimSpace(message.Proposal.Status)), "", "pending", "held")
+			pendingChoice := message.Choices != nil && strings.TrimSpace(message.Choices.SelectedID) == "" && oneOf(strings.ToLower(strings.TrimSpace(message.Choices.Status)), "", "pending")
+			switch {
+			case pendingProposal:
+				compaction.Action = &homeCompactionAction{MessageID: message.ID, CreatedAt: message.CreatedAt, Kind: "proposal", Title: homeOneLine(firstNonEmptyString(message.Proposal.Summary, message.Proposal.Objective, "Scout needs your decision"), 96)}
+			case pendingChoice:
+				compaction.Action = &homeCompactionAction{MessageID: message.ID, CreatedAt: message.CreatedAt, Kind: "choices", Title: homeOneLine(firstNonEmptyString(message.Choices.Question, "Scout needs your decision"), 96)}
+			}
+		}
+		if compaction.Recent != nil && compaction.Work != nil && compaction.Action != nil {
+			break
+		}
+	}
+	if !generated.IsZero() {
+		compaction.GeneratedAt = generated.UTC().Format(time.RFC3339Nano)
+		compaction.FreshUntil = generated.Add(homeConversationFreshnessWindow).UTC().Format(time.RFC3339Nano)
+	}
+	if status != "current" {
+		compaction.Topics = nil
+		compaction.Recent = nil
+		compaction.Work = nil
+		compaction.Action = nil
+	}
+	compaction.ReceiptDigest = homeConversationCompactionReceiptDigest(compaction)
+	return compaction
+}
+
+func validHomeConversationCompaction(entry meetingMemoryEntry, viewerEmail string, now time.Time) (homeConversationCompaction, bool) {
+	var compaction homeConversationCompaction
+	if entry.Kind != meetingMemoryKindScoutChat || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, viewerEmail) {
+		return compaction, false
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(entry.Metadata[homeConversationCompactionKey])), &compaction) != nil {
+		return compaction, false
+	}
+	if compaction.Version != homeConversationCompactionVersion || compaction.ThreadID != entry.ID || compaction.Status != "current" || compaction.InvalidationReason != "" {
+		return compaction, false
+	}
+	if compaction.SourceRevision != firstNonEmptyString(strings.TrimSpace(entry.Metadata["updatedAt"]), strings.TrimSpace(entry.Metadata["createdAt"])) || compaction.AudienceDigest != homeConversationAudienceDigestFromMetadata(entry.Metadata) || compaction.ReceiptDigest != homeConversationCompactionReceiptDigest(compaction) {
+		return compaction, false
+	}
+	generated, freshUntil := homeTimestamp(compaction.GeneratedAt), homeTimestamp(compaction.FreshUntil)
+	if generated.IsZero() || freshUntil.IsZero() || generated.After(now.Add(5*time.Minute)) || !freshUntil.After(now) || len(compaction.SourceHighWater) != 64 {
+		return compaction, false
+	}
+	return compaction, true
+}
+
+func homeThreadsFromCompactions(entries []meetingMemoryEntry, viewerEmail string, now time.Time, limit int) []scoutChatThreadRecord {
+	threads := make([]scoutChatThreadRecord, 0, len(entries))
+	for _, entry := range entries {
+		compaction, ok := validHomeConversationCompaction(entry, viewerEmail, now)
+		if !ok {
+			continue
+		}
+		thread := scoutChatThreadRecord{
+			ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Preview: strings.TrimSpace(entry.Metadata["preview"]),
+			OwnerEmail: normalizeAccountEmail(entry.Metadata["ownerEmail"]), Visibility: normalizeScoutChatVisibility(entry.Metadata["visibility"]),
+			CreatedAt: strings.TrimSpace(entry.Metadata["createdAt"]), UpdatedAt: compaction.SourceRevision,
+		}
+		if rawMembers := strings.TrimSpace(entry.Metadata["memberEmails"]); rawMembers != "" {
+			thread.MemberEmails = strings.Split(rawMembers, ",")
+		}
+		messages := map[string]*scoutChatMessageRecord{}
+		ensureMessage := func(id, createdAt string) *scoutChatMessageRecord {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				return nil
+			}
+			if messages[id] == nil {
+				messages[id] = &scoutChatMessageRecord{ID: id, Kind: "home_compaction", Role: "scout", CreatedAt: strings.TrimSpace(createdAt)}
+			}
+			return messages[id]
+		}
+		if compaction.Recent != nil {
+			if message := ensureMessage(compaction.Recent.MessageID, compaction.Recent.CreatedAt); message != nil {
+				message.Text = compaction.Recent.Detail
+			}
+		}
+		if compaction.Work != nil {
+			if message := ensureMessage(compaction.Work.MessageID, compaction.Work.CreatedAt); message != nil {
+				work := compaction.Work.Ref
+				message.Thread = &work
+			}
+		}
+		if compaction.Action != nil {
+			if message := ensureMessage(compaction.Action.MessageID, compaction.Action.CreatedAt); message != nil {
+				switch compaction.Action.Kind {
+				case "proposal":
+					message.Proposal = &scoutRouterProposal{Summary: compaction.Action.Title, Status: "pending"}
+				case "choices":
+					message.Choices = &scoutChatChoices{Question: compaction.Action.Title, Status: "pending"}
+				}
+			}
+		}
+		for _, message := range messages {
+			thread.Messages = append(thread.Messages, *message)
+		}
+		sort.Slice(thread.Messages, func(i, j int) bool {
+			left, right := homeTimestamp(thread.Messages[i].CreatedAt), homeTimestamp(thread.Messages[j].CreatedAt)
+			if !left.Equal(right) {
+				return left.Before(right)
+			}
+			return thread.Messages[i].ID < thread.Messages[j].ID
+		})
+		threads = append(threads, thread)
+	}
+	sort.SliceStable(threads, func(i, j int) bool {
+		return scoutChatThreadTime(threads[i]).After(scoutChatThreadTime(threads[j]))
+	})
+	if limit > 0 && len(threads) > limit {
+		threads = threads[:limit]
+	}
+	return threads
 }
 
 func homeTimestamp(value string) time.Time {
@@ -511,6 +791,73 @@ func homeRecurringThemeForViewer(threads []scoutChatThreadRecord) *homeRecurring
 	return result
 }
 
+// homeRecurringThemeFromCompactions performs the live recommendation
+// aggregation exclusively over durable body-free metadata. Authorization,
+// audience binding, freshness, high-water and receipt integrity are checked
+// before any topic can contribute.
+func homeRecurringThemeFromCompactions(entries []meetingMemoryEntry, viewerEmail string, now time.Time) *homeRecurringTheme {
+	type themeCandidate struct {
+		threads map[string]scoutChatThreadRecord
+		latest  time.Time
+	}
+	candidates := map[string]*themeCandidate{}
+	for _, entry := range entries {
+		compaction, ok := validHomeConversationCompaction(entry, viewerEmail, now)
+		if !ok {
+			continue
+		}
+		for _, topic := range compaction.Topics {
+			topic = strings.TrimSpace(strings.ToLower(topic))
+			if len(homeThemeWords(topic)) != 1 || homeThemeWords(topic)[0] != topic {
+				continue
+			}
+			candidate := candidates[topic]
+			if candidate == nil {
+				candidate = &themeCandidate{threads: map[string]scoutChatThreadRecord{}}
+				candidates[topic] = candidate
+			}
+			candidate.threads[entry.ID] = scoutChatThreadRecord{
+				ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]),
+				CreatedAt: strings.TrimSpace(entry.Metadata["createdAt"]), UpdatedAt: compaction.SourceRevision,
+			}
+			if timestamp := homeTimestamp(compaction.GeneratedAt); timestamp.After(candidate.latest) {
+				candidate.latest = timestamp
+			}
+		}
+	}
+	words := make([]string, 0, len(candidates))
+	for word, candidate := range candidates {
+		if len(candidate.threads) >= 2 {
+			words = append(words, word)
+		}
+	}
+	if len(words) == 0 {
+		return nil
+	}
+	sort.Slice(words, func(i, j int) bool {
+		left, right := candidates[words[i]], candidates[words[j]]
+		if len(left.threads) != len(right.threads) {
+			return len(left.threads) > len(right.threads)
+		}
+		if !left.latest.Equal(right.latest) {
+			return left.latest.After(right.latest)
+		}
+		return words[i] < words[j]
+	})
+	selected := candidates[words[0]]
+	result := &homeRecurringTheme{Topic: words[0]}
+	for _, thread := range selected.threads {
+		result.Threads = append(result.Threads, thread)
+	}
+	sort.Slice(result.Threads, func(i, j int) bool {
+		return scoutChatThreadTime(result.Threads[i]).After(scoutChatThreadTime(result.Threads[j]))
+	})
+	if len(result.Threads) > 3 {
+		result.Threads = result.Threads[:3]
+	}
+	return result
+}
+
 func homeThemeCoverage(theme *homeRecurringTheme) []homeSuggestionSource {
 	if theme == nil {
 		return nil
@@ -646,7 +993,7 @@ func homeStarters(recent, attention, active *homeItem, theme *homeRecurringTheme
 	}
 }
 
-func buildHomeSnapshot(threads []scoutChatThreadRecord, notifications []map[string]any, rooms []homeRoomCandidate, now time.Time) homeSnapshot {
+func buildHomeSnapshotWithTheme(threads []scoutChatThreadRecord, notifications []map[string]any, rooms []homeRoomCandidate, theme *homeRecurringTheme, now time.Time) homeSnapshot {
 	attention := homeAttentionItem(threads, notifications)
 	active := homeActiveWorkItem(threads)
 	excluded := map[string]bool{}
@@ -668,19 +1015,28 @@ func buildHomeSnapshot(threads []scoutChatThreadRecord, notifications []map[stri
 	}
 	return homeSnapshot{
 		Version: homeSnapshotVersion, GeneratedAt: now.UTC().Format(time.RFC3339Nano), Items: items,
-		Starters: homeStarters(recent, attention, active, homeRecurringThemeForViewer(threads)), AllClear: len(items) == 0,
+		Starters: homeStarters(recent, attention, active, theme), AllClear: len(items) == 0,
 	}
 }
 
+func buildHomeSnapshot(threads []scoutChatThreadRecord, notifications []map[string]any, rooms []homeRoomCandidate, now time.Time) homeSnapshot {
+	return buildHomeSnapshotWithTheme(threads, notifications, rooms, homeRecurringThemeForViewer(threads), now)
+}
+
 func (app *kanbanBoardApp) homeSnapshotForViewer(viewerEmail string) homeSnapshot {
-	threads := app.scoutChatThreadsSnapshot(viewerEmail, false, 100)
-	for index := range threads {
-		threads[index] = app.projectScoutChatThreadForViewer(viewerEmail, threads[index])
+	now := time.Now()
+	if app == nil || app.memory == nil {
+		return buildHomeSnapshotWithTheme(nil, nil, nil, nil, now)
 	}
+	app.scheduleScoutChatIndexMetadataBackfill()
+	// This metadata snapshot contains the durable compaction and no chat bodies.
+	compactions := app.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
+	theme := homeRecurringThemeFromCompactions(compactions, viewerEmail, now)
+	threads := homeThreadsFromCompactions(compactions, viewerEmail, now, 100)
 	rooms := []homeRoomCandidate{}
 	store := appRoomStoreIfOpen()
 	if store == nil {
-		return buildHomeSnapshot(threads, app.notificationsForUser(viewerEmail, notificationListLimit), rooms, time.Now())
+		return buildHomeSnapshotWithTheme(threads, app.notificationsForUser(viewerEmail, notificationListLimit), rooms, theme, now)
 	}
 	for _, room := range store.list() {
 		if room.Archived {
@@ -692,7 +1048,7 @@ func (app *kanbanBoardApp) homeSnapshotForViewer(viewerEmail string) homeSnapsho
 			Live: live, ParticipantCount: count,
 		})
 	}
-	return buildHomeSnapshot(threads, app.notificationsForUser(viewerEmail, notificationListLimit), rooms, time.Now())
+	return buildHomeSnapshotWithTheme(threads, app.notificationsForUser(viewerEmail, notificationListLimit), rooms, theme, now)
 }
 
 func assistantHomeHandler(w http.ResponseWriter, r *http.Request) {

@@ -259,12 +259,36 @@ func TestListenOnlySittingBuildsRecordButNeverActsProactively(t *testing.T) {
 // one topic and one decision, optionally listen-only-stamped.
 func seedCurrentMeetingDigest(t *testing.T, app *kanbanBoardApp, meetingID string, day string, spanStart time.Time, spanEnd time.Time, marker string, listenOnly bool) {
 	t.Helper()
-	payload := fmt.Sprintf(`{"meetingId":%q,"day":%q,"topics":[{"t":"Topic %s","importance":4}],"decisions":[{"d":"Decision %s","by":"AJ","importance":5}]}`, meetingID, day, marker, marker)
+	anchorID := "rollup-source-" + temporalDigest(strings.Join([]string{meetingID, marker}, "\x00"))[:20]
+	if _, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID,
+		anchorID,
+		"",
+		"AJ",
+		"human_attributed",
+		"Topic and decision "+marker,
+		map[string]string{"meetingId": meetingID, "source": "listen_only_rollup_fixture"},
+		true,
+		"",
+	); err != nil {
+		t.Fatalf("seed transcript %s: %v", meetingID, err)
+	} else if !appended {
+		t.Fatalf("seed transcript %s appended=false", meetingID)
+	}
+	payload := fmt.Sprintf(`{"meetingId":%q,"day":%q,"topics":[{"t":"Topic %s","anchor":%q,"importance":4}],"decisions":[{"d":"Decision %s","by":"AJ","anchor":%q,"importance":5}]}`, meetingID, day, marker, anchorID, marker, anchorID)
+	parsed, ok := parseMeetingDigest(payload)
+	if !ok {
+		t.Fatalf("parse seeded digest %s", meetingID)
+	}
 	metadata := map[string]string{
 		"meetingId":                meetingID,
 		digestDayMetadataKey:       day,
 		digestSpanStartMetadataKey: spanStart.UTC().Format(time.RFC3339),
 		digestSpanEndMetadataKey:   spanEnd.UTC().Format(time.RFC3339),
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(
+			parsed,
+			meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID),
+		),
 	}
 	if listenOnly {
 		metadata[listenOnlyMetadataKey] = "true"

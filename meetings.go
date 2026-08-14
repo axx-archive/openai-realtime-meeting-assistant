@@ -26,6 +26,9 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,12 +42,13 @@ import (
 )
 
 const (
-	// meetingStoreCap keeps data/meetings.json bounded: only the newest 200
-	// records survive a write.
-	meetingStoreCap = 200
 	// meetingListLimit is the default newest-first page size for
 	// GET /assistant/meetings.
 	meetingListLimit = 20
+	// meetingDirectoryScanLimit bounds one permanent-library page without
+	// deleting older identities. Authorization can make a page sparse, but the
+	// returned cursor always advances through this bounded directory window.
+	meetingDirectoryScanLimit = 200
 )
 
 const (
@@ -95,9 +99,11 @@ type meetingStoreState struct {
 }
 
 type meetingStore struct {
-	mu      sync.Mutex
-	path    string
-	records []meetingRecord // oldest-first, capped
+	mu                     sync.Mutex
+	path                   string
+	records                []meetingRecord // oldest-first; permanent identities are never evicted
+	directoryCursorIndexes map[string]int
+	recordIndexes          map[string]int
 	// idleTimers holds each room's pending idle-end timer (multi-room W2:
 	// every sitting seam is keyed by normalized room id; office aliases the
 	// pre-room behavior exactly).
@@ -147,7 +153,9 @@ func loadMeetingStore(path string) (*meetingStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &meetingStore{path: path, records: records}, nil
+	store := &meetingStore{path: path, records: records}
+	store.rebuildDirectoryCursorIndexesLocked()
+	return store, nil
 }
 
 func loadMeetingStoreState(path string) ([]meetingRecord, error) {
@@ -167,15 +175,18 @@ func loadMeetingStoreState(path string) ([]meetingRecord, error) {
 		return nil, fmt.Errorf("decode meetings: %w", err)
 	}
 	records := make([]meetingRecord, 0, len(state.Meetings))
+	seenIDs := make(map[string]struct{}, len(state.Meetings))
 	for _, record := range state.Meetings {
-		if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.StartedAt) == "" {
+		record.ID = strings.TrimSpace(record.ID)
+		if record.ID == "" || strings.TrimSpace(record.StartedAt) == "" {
 			continue
 		}
+		if _, duplicate := seenIDs[record.ID]; duplicate {
+			return nil, fmt.Errorf("decode meetings: duplicate meeting id %q", record.ID)
+		}
+		seenIDs[record.ID] = struct{}{}
 		record.Participants, _ = unionMeetingParticipants(nil, record.Participants)
 		records = append(records, record)
-	}
-	if len(records) > meetingStoreCap {
-		records = records[len(records)-meetingStoreCap:]
 	}
 	return records, nil
 }
@@ -197,10 +208,27 @@ func (store *meetingStore) resolvePersistFailureLocked(err error, rollback func(
 	if errors.Is(err, ErrDurableReplaceAmbiguous) {
 		if persisted, loadErr := loadMeetingStoreState(store.path); loadErr == nil {
 			store.records = persisted
+			store.rebuildDirectoryCursorIndexesLocked()
 			return
 		}
 	}
 	rollback()
+	store.rebuildDirectoryCursorIndexesLocked()
+}
+
+func meetingDirectoryCursorForID(id string) string {
+	mac := hmac.New(sha256.New, archiveTokenSecret())
+	_, _ = mac.Write([]byte("meeting-directory-page/v1\x00" + strings.TrimSpace(id)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (store *meetingStore) rebuildDirectoryCursorIndexesLocked() {
+	store.directoryCursorIndexes = make(map[string]int, len(store.records))
+	store.recordIndexes = make(map[string]int, len(store.records))
+	for index, record := range store.records {
+		store.directoryCursorIndexes[meetingDirectoryCursorForID(record.ID)] = index
+		store.recordIndexes[record.ID] = index
+	}
 }
 
 // unionMeetingParticipants unions canonical participant names into
@@ -298,28 +326,40 @@ func (store *meetingStore) openRoomIDs() []string {
 // a record belonging to the SAME room (openRecordIndexLocked filters by
 // room), so one room starting a sitting never restarts another's.
 func (store *meetingStore) startMeeting(roomID string, id string, startedAt time.Time, participants []string) (meetingRecord, bool) {
-	if store == nil || strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if store == nil || id == "" {
 		return meetingRecord{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.recordIndexes == nil {
+		store.rebuildDirectoryCursorIndexesLocked()
+	}
+	if existingIndex, exists := store.recordIndexes[id]; exists {
+		if existingIndex < 0 || existingIndex >= len(store.records) {
+			return meetingRecord{}, false
+		}
+		existing := &store.records[existingIndex]
+		if existing.RoomID != storedMeetingRoomID(roomID) || existing.EndedAt != "" {
+			return cloneMeetingRecord(*existing), false
+		}
+		union, changed := unionMeetingParticipants(existing.Participants, participants)
+		if changed {
+			prior := cloneMeetingRecord(*existing)
+			existing.Participants = union
+			if err := store.persistLocked(); err != nil {
+				store.resolvePersistFailureLocked(err, func() { store.records[existingIndex] = prior })
+				return cloneMeetingRecord(store.records[existingIndex]), false
+			}
+		}
+		return cloneMeetingRecord(store.records[existingIndex]), changed
+	}
 
 	priorRecords := make([]meetingRecord, len(store.records))
 	for index := range store.records {
 		priorRecords[index] = cloneMeetingRecord(store.records[index])
 	}
 	if index := store.openRecordIndexLocked(roomID); index >= 0 {
-		if store.records[index].ID == id {
-			union, changed := unionMeetingParticipants(store.records[index].Participants, participants)
-			if changed {
-				store.records[index].Participants = union
-				if err := store.persistLocked(); err != nil {
-					store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
-					return cloneMeetingRecord(store.records[index]), false
-				}
-			}
-			return cloneMeetingRecord(store.records[index]), changed
-		}
 		store.records[index].EndedAt = startedAt.UTC().Format(time.RFC3339Nano)
 		store.records[index].EndedReason = meetingEndedReasonRestart
 	}
@@ -332,8 +372,11 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 		Participants: union,
 	}
 	store.records = append(store.records, record)
-	if len(store.records) > meetingStoreCap {
-		store.records = store.records[len(store.records)-meetingStoreCap:]
+	if store.directoryCursorIndexes == nil || store.recordIndexes == nil {
+		store.rebuildDirectoryCursorIndexesLocked()
+	} else {
+		store.directoryCursorIndexes[meetingDirectoryCursorForID(record.ID)] = len(store.records) - 1
+		store.recordIndexes[record.ID] = len(store.records) - 1
 	}
 	if err := store.persistLocked(); err != nil {
 		store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
@@ -350,11 +393,13 @@ func (store *meetingStore) recordByID(id string) (meetingRecord, bool) {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.recordIndexes == nil {
+		store.rebuildDirectoryCursorIndexesLocked()
+	}
 
-	for index := len(store.records) - 1; index >= 0; index-- {
-		if store.records[index].ID == id {
-			return cloneMeetingRecord(store.records[index]), true
-		}
+	index, found := store.recordIndexes[id]
+	if found && index >= 0 && index < len(store.records) && store.records[index].ID == id {
+		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
 }
@@ -569,6 +614,40 @@ func (store *meetingStore) recent(limit int) []meetingRecord {
 		}
 	}
 	return records
+}
+
+// recentPage returns a bounded newest-first directory window after cursor.
+// The cursor is an opaque managed commitment to the last directory identity
+// observed by the prior page. Permanent identities make it stable across
+// restart and later appends without exposing an unauthorized meeting id.
+func (store *meetingStore) recentPage(limit int, cursor string) ([]meetingRecord, string, bool) {
+	records := []meetingRecord{}
+	if store == nil || limit < 1 {
+		return records, "", false
+	}
+	cursor = strings.TrimSpace(cursor)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.directoryCursorIndexes == nil || store.recordIndexes == nil {
+		store.rebuildDirectoryCursorIndexesLocked()
+	}
+	start := len(store.records) - 1
+	if cursor != "" {
+		index, found := store.directoryCursorIndexes[cursor]
+		if !found || index < 1 {
+			return records, "", false
+		}
+		start = index - 1
+	}
+	for index := start; index >= 0 && len(records) < limit; index-- {
+		records = append(records, cloneMeetingRecord(store.records[index]))
+	}
+	if len(records) == 0 {
+		return records, "", false
+	}
+	nextCursor := meetingDirectoryCursorForID(records[len(records)-1].ID)
+	hasMore := start-len(records) >= 0
+	return records, nextCursor, hasMore
 }
 
 // countStartedSince reports how many records started today and within the
@@ -982,6 +1061,7 @@ type meetingMemoryDetail struct {
 	Decisions      []string
 	Log            []map[string]string
 	CardIDs        []string
+	ClaimCardIDs   map[string][]string
 	EntryCount     int
 }
 
@@ -1057,7 +1137,7 @@ func meetingMemoryDetailsFromStore(store *meetingMemoryStore, wanted map[string]
 		}
 		detail := details[meetingID]
 		if detail == nil {
-			detail = &meetingMemoryDetail{}
+			detail = &meetingMemoryDetail{ClaimCardIDs: map[string][]string{}}
 			details[meetingID] = detail
 		}
 		switch entry.Kind {
@@ -1101,6 +1181,7 @@ func meetingMemoryDetailsFromStore(store *meetingMemoryStore, wanted map[string]
 			for _, cardID := range strings.Split(entry.Metadata["cardIds"], ",") {
 				detail.addCardID(cardID)
 			}
+			detail.addClaimCardLinks(entry.Metadata["claimCardLinks"])
 		case meetingMemoryKindOSArtifact:
 			detail.addCardID(entry.Metadata["boardCardId"])
 		case meetingMemoryKindArchive:
@@ -1121,6 +1202,32 @@ func meetingMemoryDetailsFromStore(store *meetingMemoryStore, wanted map[string]
 		}
 	}
 	return details
+}
+
+func (detail *meetingMemoryDetail) addClaimCardLinks(encoded string) {
+	if detail == nil || strings.TrimSpace(encoded) == "" {
+		return
+	}
+	links := []meetingBoardClaimCardLink{}
+	if json.Unmarshal([]byte(encoded), &links) != nil {
+		return
+	}
+	if detail.ClaimCardIDs == nil {
+		detail.ClaimCardIDs = map[string][]string{}
+	}
+	for _, link := range links {
+		segmentID, cardID := strings.TrimSpace(link.SegmentID), strings.TrimSpace(link.CardID)
+		if segmentID == "" || cardID == "" {
+			continue
+		}
+		found := false
+		for _, existing := range detail.ClaimCardIDs[segmentID] {
+			found = found || existing == cardID
+		}
+		if !found {
+			detail.ClaimCardIDs[segmentID] = append(detail.ClaimCardIDs[segmentID], cardID)
+		}
+	}
 }
 
 func (detail *meetingMemoryDetail) addCardID(cardID string) {
@@ -1170,11 +1277,12 @@ func meetingDetailFields(detail *meetingMemoryDetail, cardTitles map[string]stri
 
 /* ---------- HTTP ---------- */
 
-// assistantMeetingsHandler serves GET /assistant/meetings to any signed-in
-// user (same origin + session guards as the board handler): newest-first
-// meeting records plus one top-level serverNow skew anchor.
+// assistantMeetingsHandler serves the permanent Meeting Record collection and
+// exact detail route to a signed-in principal. The directory is never a grant:
+// rows are joined only after the requester's principal-filtered recall store
+// proves that the sitting still has readable source material.
 func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -1206,24 +1314,108 @@ func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	records := kanbanApp.meetings.recent(limit)
-	wanted := make(map[string]struct{}, len(records))
-	for _, record := range records {
-		wanted[record.ID] = struct{}{}
+	principal := recallPrincipalForUser(user)
+	projectionLimit := limit
+	detailID := ""
+	conversationRequest := false
+	if strings.HasPrefix(r.URL.Path, "/assistant/meetings/") {
+		suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assistant/meetings/"), "/")
+		parts := strings.Split(suffix, "/")
+		detailID = strings.TrimSpace(parts[0])
+		conversationRequest = len(parts) == 2 && parts[1] == "conversation"
+		if detailID == "" || len(parts) > 2 || (len(parts) == 2 && !conversationRequest) {
+			writeAuthError(w, http.StatusNotFound, "meeting record is unavailable")
+			return
+		}
+		projectionLimit = 1
 	}
-	details := kanbanApp.meetingMemoryDetailsForPrincipal(r.Context(), recallPrincipalForUser(user), wanted)
+	if r.Method == http.MethodPost && !conversationRequest {
+		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	indexOnly := detailID == "" && strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "index")
+	projections, _, nextMeetingCursor, hasMoreMeetings := kanbanApp.meetingRecordPageProjectionsForPrincipal(r.Context(), principal, projectionLimit, detailID, r.URL.Query().Get("meetingCursor"), !indexOnly)
 	cardTitles := map[string]string{}
 	for _, card := range kanbanApp.snapshotState().Cards {
 		cardTitles[card.ID] = card.Title
 	}
-	meetings := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		item := meetingRecordPayload(record, now)
+	if detailID != "" {
+		for _, projection := range projections {
+			if projection.index.ID != detailID {
+				continue
+			}
+			if conversationRequest {
+				if r.Method != http.MethodPost {
+					writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+					return
+				}
+				payload := struct {
+					RecordRevision string `json:"recordRevision"`
+				}{}
+				decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+				decoder.DisallowUnknownFields()
+				if r.Body == nil || decoder.Decode(&payload) != nil || ensureJSONEOF(decoder) != nil {
+					writeAuthError(w, http.StatusBadRequest, "could not read Meeting Record conversation request")
+					return
+				}
+				if strings.TrimSpace(payload.RecordRevision) == "" || payload.RecordRevision != projection.index.RecordRevision {
+					writeAuthError(w, http.StatusConflict, "Meeting Record revision changed")
+					return
+				}
+				thread, created, createErr := kanbanApp.ensureMeetingRecordConversation(user, projection)
+				if createErr != nil {
+					writeAuthError(w, http.StatusConflict, createErr.Error())
+					return
+				}
+				if created {
+					deliverScoutChatThreadMetadata(thread)
+				}
+				writeAuthJSON(w, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], map[string]any{
+					"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+				})
+				return
+			}
+			if r.Method != http.MethodGet {
+				writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			writeAuthJSON(w, http.StatusOK, map[string]any{
+				"ok":        true,
+				"meeting":   projection.detail(kanbanApp.meetingRecordReferencesForViewer(r.Context(), user, projection.legacyDetail), r.URL.Query().Get("cursor"), r.URL.Query().Get("q"), r.URL.Query().Get("segmentId"), parseMeetingRecordTranscriptLimit(r.URL.Query().Get("transcriptLimit"))),
+				"serverNow": now.Format(time.RFC3339Nano),
+			})
+			return
+		}
+		// Missing and unauthorized are deliberately indistinguishable.
+		writeAuthError(w, http.StatusNotFound, "meeting record is unavailable")
+		return
+	}
+	if indexOnly {
+		items := make([]meetingRecordIndexItem, 0, len(projections))
+		for _, projection := range projections {
+			items = append(items, projection.index)
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":         true,
+			"contract":   meetingRecordContractVersion,
+			"meetings":   items,
+			"nextCursor": nextMeetingCursor,
+			"hasMore":    hasMoreMeetings,
+			"serverNow":  now.Format(time.RFC3339Nano),
+		})
+		return
+	}
+
+	// Compatibility shape for already-released clients. It is now subject to
+	// the same current-source authorization as the closed index/detail routes.
+	meetings := make([]map[string]any, 0, len(projections))
+	for _, projection := range projections {
+		item := meetingRecordPayload(projection.record, now)
 		// one top-level anchor instead of a per-item serverNow.
 		delete(item, "serverNow")
 		// Memory-tool enrichment (D15): summary, decided checklist, log
 		// rows, and board-card links per meeting.
-		for key, value := range meetingDetailFields(details[record.ID], cardTitles) {
+		for key, value := range meetingDetailFields(projection.legacyDetail, cardTitles) {
 			item[key] = value
 		}
 		meetings = append(meetings, item)

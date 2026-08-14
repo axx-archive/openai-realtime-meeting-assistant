@@ -45,8 +45,10 @@ describe('room agent participants', () => {
     assert.doesNotMatch(room, /agent:\$\{agent\.id\}:\$\{agent\.invitationId\}/);
     assert.doesNotMatch(room, /<StrideCradle/);
     assert.match(room, /item\.voiceState === 'talking'/);
+    assert.match(sheet, /scoutVoiceEnabled \? <View/u);
     assert.match(sheet, /Invite Scout/);
     assert.match(sheet, /Dismiss Scout/);
     assert.match(sheet, /Meeting transcription remains independent/);
+    assert.match(room, /setScoutVoiceEnabled\(Boolean\(agentResult\.value\.voice\?\.enabled\)\)/u);
   });
 });

@@ -12,7 +12,7 @@ import (
 
 func createLinkageTestCard(t *testing.T, app *kanbanBoardApp, title string) kanbanCard {
 	t.Helper()
-	result, changed, err := app.applyToolCallArgs("create_ticket", map[string]any{
+	result, changed, err := app.applyRetiredMeetingBoardToolCallArgs("create_ticket", map[string]any{
 		"title": title,
 	})
 	if err != nil || !changed {
@@ -72,7 +72,7 @@ func TestMatchBoardCard(t *testing.T) {
 
 	// Done cards never fuzzy-match (finished work is not a link target)...
 	doneCard := createLinkageTestCard(t, app, "Coyote channel audit")
-	if _, changed, err := app.applyToolCallArgs("move_ticket", map[string]any{"card_id": doneCard.ID, "status": string(kanbanStatusDone)}); err != nil || !changed {
+	if _, changed, err := app.applyRetiredMeetingBoardToolCallArgs("move_ticket", map[string]any{"card_id": doneCard.ID, "status": string(kanbanStatusDone)}); err != nil || !changed {
 		t.Fatalf("move to done: changed=%v err=%v", changed, err)
 	}
 	if _, ok := app.matchBoardCard("Coyote channel audit", ""); ok {
@@ -84,20 +84,19 @@ func TestMatchBoardCard(t *testing.T) {
 	}
 }
 
-// advanceLinkedCard rides applyToolCallArgs: real moves change the board,
-// repeats are idempotent, and unknown card ids are swallowed no-ops.
-func TestAdvanceLinkedCardIdempotentAndSafe(t *testing.T) {
+// Historical board links are immutable after retirement.
+func TestAdvanceLinkedCardPreservesRetiredBoardHistory(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	card := createLinkageTestCard(t, app, "Nimbus launch checklist")
 
 	app.advanceLinkedCard(card.ID, kanbanStatusInProgress, "confirmed: Nimbus launch checklist")
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q, want In Progress", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog unchanged", status)
 	}
 	// retry: already there, no error, no change.
 	app.advanceLinkedCard(card.ID, kanbanStatusInProgress, "retry")
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q after retry, want In Progress", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q after retry, want archived Backlog unchanged", status)
 	}
 	// unknown card id: logged and swallowed.
 	app.advanceLinkedCard("card-missing", kanbanStatusDone, "gone")
@@ -105,11 +104,7 @@ func TestAdvanceLinkedCardIdempotentAndSafe(t *testing.T) {
 	app.advanceLinkedCard("", kanbanStatusDone, "empty")
 }
 
-// runAgentThread terminal seam: complete → In Progress via the completion-time
-// fuzzy fallback (direct launches carry no boardCardId), and the matched id is
-// stamped back onto the artifact so retries are stable. In Progress, not Done:
-// the artifact is a deliverable ABOUT the card's work; a human judges Done.
-func TestRunAgentThreadCompleteAdvancesLinkedCardToInProgress(t *testing.T) {
+func TestRunAgentThreadCompleteDoesNotDiscoverOrMutateRetiredBoard(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.mu.Lock()
 	app.apiKey = "test-key"
@@ -131,21 +126,19 @@ func TestRunAgentThreadCompleteAdvancesLinkedCardToInProgress(t *testing.T) {
 	}
 	app.runAgentThread(thread)
 
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q, want In Progress after completion", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog after completion", status)
 	}
 	artifact, found := app.osArtifactByID(thread.Artifact.ID)
 	if !found {
 		t.Fatalf("artifact %q not found", thread.Artifact.ID)
 	}
-	if artifact.Metadata["boardCardId"] != card.ID {
-		t.Fatalf("boardCardId=%q, want %q stamped at completion", artifact.Metadata["boardCardId"], card.ID)
+	if artifact.Metadata["boardCardId"] != "" {
+		t.Fatalf("boardCardId=%q, want no new Board linkage", artifact.Metadata["boardCardId"])
 	}
 }
 
-// runAgentThread error seam: a failed worker moves the linked card to Blocked
-// — waiting on a human is a wait state, not silence in Backlog.
-func TestRunAgentThreadErrorAdvancesLinkedCardToBlocked(t *testing.T) {
+func TestRunAgentThreadErrorDoesNotMutateRetiredBoard(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.mu.Lock()
 	app.apiKey = "test-key"
@@ -167,15 +160,12 @@ func TestRunAgentThreadErrorAdvancesLinkedCardToBlocked(t *testing.T) {
 	}
 	app.runAgentThread(thread)
 
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBlocked {
-		t.Fatalf("status=%q, want Blocked after worker error", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog after worker error", status)
 	}
 }
 
-// The queued-codex terminal seam: a complete callback moves the linked card
-// to In Progress (a human judges Done); a retried identical callback is
-// changed=false and must not re-move a card a human has since repositioned.
-func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
+func TestCodexCallbackPreservesRetiredBoardAndRetriesAreNoops(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
 	kanbanApp = app
@@ -216,15 +206,11 @@ func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 	if recorder := post(); recorder.Code != http.StatusOK {
 		t.Fatalf("callback status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q, want In Progress after complete callback", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog after complete callback", status)
 	}
 
-	// A human pulls the card back; the retried identical callback is
-	// changed=false and must not shove it to Done again.
-	if _, changed, err := app.applyToolCallArgs("move_ticket", map[string]any{"card_id": card.ID, "status": string(kanbanStatusBacklog)}); err != nil || !changed {
-		t.Fatalf("manual move back: changed=%v err=%v", changed, err)
-	}
+	// A retried identical callback still cannot alter archived history.
 	if recorder := post(); recorder.Code != http.StatusOK {
 		t.Fatalf("retried callback status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -233,9 +219,8 @@ func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 	}
 }
 
-// A failed codex callback blocks the linked card; a deleted card is a logged
-// no-op that never fails the callback.
-func TestCodexCallbackFailureBlocksAndMissingCardIsNoop(t *testing.T) {
+// A failed callback and stale legacy link never mutate Board history.
+func TestCodexCallbackFailureAndMissingCardPreserveRetiredBoard(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
 	kanbanApp = app
@@ -277,8 +262,8 @@ func TestCodexCallbackFailureBlocksAndMissingCardIsNoop(t *testing.T) {
 	if recorder := postResult(failing.ID, codexJobStatusFailed); recorder.Code != http.StatusOK {
 		t.Fatalf("failed callback status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBlocked {
-		t.Fatalf("status=%q, want Blocked after failed callback", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog after failed callback", status)
 	}
 
 	// stale link: the card is deleted before the artifact lands.
@@ -297,10 +282,8 @@ func TestCodexCallbackFailureBlocksAndMissingCardIsNoop(t *testing.T) {
 	}
 }
 
-// The propose→confirm linkage flow: cardId captured at propose time (explicit
-// and fuzzy), ambiguous titles stay unlinked, and confirm stamps both
-// directions + advances the card to In Progress.
-func TestProposalLinkageCapturedAtProposeAndAdvancedOnConfirm(t *testing.T) {
+// New proposals ignore legacy Board identifiers and remain conversation-backed.
+func TestProposalIgnoresRetiredBoardLinkage(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	var launched scoutAgentThread
 	previousRunner := startAgentThreadAsync
@@ -309,7 +292,7 @@ func TestProposalLinkageCapturedAtProposeAndAdvancedOnConfirm(t *testing.T) {
 
 	card := createLinkageTestCard(t, app, "Rodeo creator landscape brief")
 
-	// explicit card_id wins.
+	// Legacy card_id from an older client is ignored.
 	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
 		"title":   "Something entirely different",
 		"mode":    "research",
@@ -320,11 +303,11 @@ func TestProposalLinkageCapturedAtProposeAndAdvancedOnConfirm(t *testing.T) {
 		t.Fatalf("propose with card_id: %v", err)
 	}
 	explicit := result["proposal"].(map[string]any)
-	if explicit["cardId"] != card.ID {
-		t.Fatalf("explicit proposal cardId=%v, want %q in the payload", explicit["cardId"], card.ID)
+	if _, ok := explicit["cardId"]; ok {
+		t.Fatalf("explicit proposal unexpectedly retained retired cardId=%v", explicit["cardId"])
 	}
 
-	// fuzzy title binds without an explicit id.
+	// Matching titles also do not create a new Board association.
 	result, _, err = app.applyToolCallArgs("propose_codex_task", map[string]any{
 		"title": "Rodeo creator landscape brief",
 		"mode":  "research",
@@ -334,8 +317,8 @@ func TestProposalLinkageCapturedAtProposeAndAdvancedOnConfirm(t *testing.T) {
 		t.Fatalf("propose fuzzy: %v", err)
 	}
 	fuzzy := result["proposal"].(map[string]any)
-	if fuzzy["cardId"] != card.ID {
-		t.Fatalf("fuzzy proposal cardId=%v, want %q", fuzzy["cardId"], card.ID)
+	if _, ok := fuzzy["cardId"]; ok {
+		t.Fatalf("fuzzy proposal unexpectedly linked retired cardId=%v", fuzzy["cardId"])
 	}
 
 	// ambiguous titles do NOT link.
@@ -352,27 +335,24 @@ func TestProposalLinkageCapturedAtProposeAndAdvancedOnConfirm(t *testing.T) {
 		t.Fatalf("ambiguous proposal cardId=%v, want unlinked", cardID)
 	}
 
-	// confirm the fuzzy-linked proposal: card moves to In Progress and the
-	// artifact carries the bidirectional stamps.
+	// Confirm launches Work while archived Board history remains unchanged.
 	proposalID := asString(fuzzy["id"])
 	if _, _, err := app.resolveCodexProposal(proposalID, "confirm", "Tom", "tom@shareability.com"); err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q after confirm, want In Progress", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q after confirm, want archived Backlog", status)
 	}
 	artifact, found := app.osArtifactByID(launched.Artifact.ID)
 	if !found {
 		t.Fatalf("launched artifact %q not found", launched.Artifact.ID)
 	}
-	if artifact.Metadata["boardCardId"] != card.ID || artifact.Metadata["proposalId"] != proposalID {
-		t.Fatalf("artifact linkage=%v/%v, want boardCardId=%q proposalId=%q", artifact.Metadata["boardCardId"], artifact.Metadata["proposalId"], card.ID, proposalID)
+	if artifact.Metadata["boardCardId"] != "" || artifact.Metadata["proposalId"] != proposalID {
+		t.Fatalf("artifact linkage=%v/%v, want no boardCardId and proposalId=%q", artifact.Metadata["boardCardId"], artifact.Metadata["proposalId"], proposalID)
 	}
 }
 
-// The board worker may create the card in a LATER pass than the proposal:
-// confirm retries the fuzzy match so late cards still link and advance.
-func TestProposalConfirmRetriesCardMatchWhenCardArrivesLate(t *testing.T) {
+func TestProposalConfirmDoesNotLinkLateRetiredBoardCard(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
@@ -399,11 +379,11 @@ func TestProposalConfirmRetriesCardMatchWhenCardArrivesLate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if payload["cardId"] != card.ID {
-		t.Fatalf("confirmed payload cardId=%v, want the late card %q", payload["cardId"], card.ID)
+	if _, ok := payload["cardId"]; ok {
+		t.Fatalf("confirmed payload unexpectedly linked late retired card %q", card.ID)
 	}
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
-		t.Fatalf("status=%q, want In Progress from the confirm-time retry match", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want archived Backlog", status)
 	}
 }
 
@@ -498,23 +478,18 @@ func TestFailedThreadDoesNotAttachArtifactToPackage(t *testing.T) {
 	}
 }
 
-// propose_codex_task's schema exposes the optional card_id linkage arg, and
-// the board-worker prompt teaches the binding rule.
-func TestProposeCodexTaskSchemaAndPromptCarryLinkage(t *testing.T) {
+func TestProposeCodexTaskSchemaRetiresBoardLinkage(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	rawTools, err := json.Marshal(app.kanbanTools())
 	if err != nil {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	if !strings.Contains(toolsJSON, `"card_id":{"description":"id of the existing board card this task delivers; omit if none."`) {
-		t.Fatal("propose_codex_task schema must expose the optional card_id arg")
+	if strings.Contains(toolsJSON, `"card_id"`) {
+		t.Fatal("live tool schema exposed retired card_id linkage")
 	}
 	// card_id stays optional: required is unchanged.
 	if !strings.Contains(toolsJSON, `"required":["title","mode","query"]`) {
 		t.Fatal("propose_codex_task required args must stay title/mode/query")
-	}
-	if !strings.Contains(meetingBoardInstructions(), "pass its card_id if known, otherwise reuse the card's exact title") {
-		t.Fatal("board-worker prompt must teach the card_id binding rule")
 	}
 }

@@ -294,6 +294,9 @@ func TestMeetingIntelligenceSnapshotProjectsCurrentAnchoredRecap(t *testing.T) {
 		digestSpanEndMetadataKey:        transcript.CreatedAt.UTC().Format(time.RFC3339),
 		digestCoverageMetadataKey:       coverageLabelFull,
 		meetingDigestCaptureMetadataKey: transcript.Metadata["captureSequence"],
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(
+			payload, meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID),
+		),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -416,6 +419,98 @@ func TestMeetingIntelligenceSnapshotRejectsCaptureGapAndDuplicate(t *testing.T) 
 	}
 }
 
+func TestMeetingIntelligenceSnapshotUsesGlobalCaptureTruthWithoutScanningUnrelatedBodies(t *testing.T) {
+	app, meetingID, _ := meetingIntelligenceFixture(t)
+	otherRoomID := "room-priority-one-other"
+	otherMeetingID := "meeting-priority-one-other"
+	app.memory.mu.Lock()
+	app.memory.meetingIDs[otherRoomID] = otherMeetingID
+	app.memory.mu.Unlock()
+	if _, appended, err := app.memory.appendAttributedTranscriptEntry(
+		otherRoomID, "other-room-transcript", "other-room-item", "Tyler", "source_owned",
+		"This interleaved room segment must not look like a gap in the office sitting.", nil, true, otherMeetingID,
+	); err != nil || !appended {
+		t.Fatalf("append interleaved room transcript: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID, "office-transcript-2", "office-item-2", "AJ", "source_owned",
+		"The office transcript remains complete across another room's capture sequence.", nil, true, meetingID,
+	); err != nil || !appended {
+		t.Fatalf("append second office transcript: appended=%v err=%v", appended, err)
+	}
+
+	visits := 0
+	app.memory.mu.Lock()
+	app.memory.meetingEntryVisitHook = func() { visits++ }
+	app.memory.mu.Unlock()
+	t.Cleanup(func() {
+		app.memory.mu.Lock()
+		app.memory.meetingEntryVisitHook = nil
+		app.memory.mu.Unlock()
+	})
+	first := app.meetingIntelligenceSnapshot(officeRoomID, time.Now().UTC())
+	baselineVisits := visits
+	if first == nil || first.Transcript.SegmentCount != 2 || !first.Transcript.SequenceComplete {
+		t.Fatalf("interleaved exact meeting snapshot=%+v", first)
+	}
+	if baselineVisits != 2 {
+		t.Fatalf("active meeting visits=%d, want its two exact rows", baselineVisits)
+	}
+
+	app.memory.mu.Lock()
+	for index := 0; index < 5000; index++ {
+		app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
+			ID: "unrelated-intelligence-" + strconv.Itoa(index), Kind: meetingMemoryKindReflection,
+			Text:      "A mature brain body that the live meeting cursor must never inspect or clone.",
+			CreatedAt: time.Now().UTC().Add(-time.Duration(index+1) * time.Minute),
+		})
+	}
+	app.memory.mu.Unlock()
+	second := app.meetingIntelligenceSnapshot(officeRoomID, time.Now().UTC())
+	if second == nil || second.Revision != first.Revision {
+		t.Fatalf("unrelated ledger tail changed exact snapshot: first=%+v second=%+v", first, second)
+	}
+	if additional := visits - baselineVisits; additional != baselineVisits {
+		t.Fatalf("unrelated ledger tail changed meeting visits: baseline=%d additional=%d", baselineVisits, additional)
+	}
+}
+
+func TestMeetingIntelligenceSnapshotProjectsOnlyCurrentCorrectedTranscript(t *testing.T) {
+	app, meetingID, prior := meetingIntelligenceFixture(t)
+	payload := meetingDigestPayload{
+		MeetingID: meetingID, Title: "Stale prior recap",
+		Topics: []meetingDigestTopic{{T: "The prior wording must disappear after correction.", Anchor: prior.ID, At: prior.CreatedAt.UTC().Format(time.RFC3339), Importance: 5}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, string(body), map[string]string{
+		"meetingId": meetingID, "roomId": officeRoomID,
+		meetingDigestCaptureMetadataKey: prior.Metadata["captureSequence"],
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(
+			payload, meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID),
+		),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	replacement, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID, "corrected-transcript", "corrected-item", "AJ", "source_owned",
+		"Ship the corrected first-class meeting recap with exact source anchors.",
+		map[string]string{"correctionState": "corrected", "supersedesId": prior.ID}, true, meetingID,
+	)
+	if err != nil || !appended {
+		t.Fatalf("append corrected transcript: appended=%v err=%v", appended, err)
+	}
+	snapshot := app.meetingIntelligenceSnapshot(officeRoomID, time.Now().UTC())
+	if snapshot == nil || snapshot.Transcript.SegmentCount != 1 || snapshot.Transcript.LastSegmentID != replacement.ID || snapshot.Transcript.CaptureHighWater == 0 || !snapshot.Transcript.SequenceComplete {
+		t.Fatalf("current corrected transcript snapshot=%+v", snapshot)
+	}
+	if snapshot.Notes.State != "catching_up" || snapshot.Recap == nil || snapshot.Recap.SourceCount != 0 || snapshot.Recap.Title != "" || len(snapshot.Recap.Topics) != 0 {
+		t.Fatalf("corrected source left stale live recap prose: notes=%+v recap=%+v", snapshot.Notes, snapshot.Recap)
+	}
+}
+
 func TestMeetingIntelligenceDigestBehindTranscriptStaysCatchingUp(t *testing.T) {
 	app, meetingID, first := meetingIntelligenceFixture(t)
 	payload := meetingDigestPayload{MeetingID: meetingID, Title: "Partial recap", Day: "2026-08-11"}
@@ -458,7 +553,10 @@ func TestMeetingIntelligenceRevisionChangesWithDigestContentAtSameHighWater(t *t
 	app, meetingID, transcript := meetingIntelligenceFixture(t)
 	writeDigest := func(title string) {
 		t.Helper()
-		body, err := json.Marshal(meetingDigestPayload{MeetingID: meetingID, Title: title, Day: "2026-08-11"})
+		payload := meetingDigestPayload{MeetingID: meetingID, Title: title, Day: "2026-08-11", Topics: []meetingDigestTopic{{
+			T: title, Anchor: transcript.ID, At: transcript.CreatedAt.UTC().Format(time.RFC3339), Importance: 5,
+		}}}
+		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -466,6 +564,9 @@ func TestMeetingIntelligenceRevisionChangesWithDigestContentAtSameHighWater(t *t
 			"meetingId":                     meetingID,
 			"roomId":                        officeRoomID,
 			meetingDigestCaptureMetadataKey: transcript.Metadata["captureSequence"],
+			meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(
+				payload, meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID),
+			),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -637,5 +738,53 @@ func TestMeetingDigestCurrentMeetingBootstrapAdmitsOnlyActiveSitting(t *testing.
 	)
 	if len(inputs) != 1 || inputs[0].ID != currentBrain.ID {
 		t.Fatalf("inputs=%+v", inputs)
+	}
+}
+
+func TestMeetingBrainCurrentMeetingBootstrapRecoversOnlyCleanActiveSuffixAfterRestart(t *testing.T) {
+	t.Setenv(meetingBrainCurrentMeetingBootstrapEnv, "true")
+	path := filepath.Join(t.TempDir(), "meeting-memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, appended, err := store.appendEntry(meetingMemoryKindTranscript, "transcript-old", "Old meeting transcript.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-old", "visibility": "organization"})
+	if err != nil || !appended {
+		t.Fatalf("append old transcript: appended=%v err=%v", appended, err)
+	}
+	currentOne, appended, err := store.appendEntry(meetingMemoryKindTranscript, "transcript-current-1", "Current meeting first segment.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-current", "visibility": "organization"})
+	if err != nil || !appended {
+		t.Fatalf("append current transcript 1: appended=%v err=%v", appended, err)
+	}
+	currentTwo, appended, err := store.appendEntry(meetingMemoryKindTranscript, "transcript-current-2", "Current meeting second segment.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-current", "visibility": "organization"})
+	if err != nil || !appended {
+		t.Fatalf("append current transcript 2: appended=%v err=%v", appended, err)
+	}
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &kanbanBoardApp{
+		memory: reloaded,
+		meetings: &meetingStore{records: []meetingRecord{{
+			ID: "meeting-current", StartedAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano), Participants: []string{"AJ"},
+		}}},
+	}
+	baseline, blocked, err := app.bootstrapAmbientContinuity(meetingBrainAgent(), officeRoomID)
+	if err != nil || blocked != "" || baseline != old.ID {
+		t.Fatalf("baseline=%q blocked=%q err=%v, want exact predecessor %q", baseline, blocked, err, old.ID)
+	}
+	inputs := reloaded.unconsumedEntriesAfterForRoom(meetingMemoryKindTranscript, meetingMemoryKindBrain, meetingBrainCursorMetadataKey, 10, baseline, officeRoomID)
+	if len(inputs) != 2 || inputs[0].ID != currentOne.ID || inputs[1].ID != currentTwo.ID {
+		t.Fatalf("active suffix=%+v", inputs)
+	}
+
+	// Any later transcript from a different/blank sitting makes the claimed
+	// active suffix ambiguous; the activation fence must not bridge it.
+	if _, appended, err := reloaded.appendEntry(meetingMemoryKindTranscript, "transcript-interleaved", "Mismatched later source.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-other", "visibility": "organization"}); err != nil || !appended {
+		t.Fatalf("append interleaved transcript: appended=%v err=%v", appended, err)
+	}
+	if baseline, admitted := app.meetingAnalysisCurrentMeetingBootstrapBaseline(meetingBrainAgent(), officeRoomID); admitted || baseline != "" {
+		t.Fatalf("interleaved active suffix admitted with baseline=%q", baseline)
 	}
 }

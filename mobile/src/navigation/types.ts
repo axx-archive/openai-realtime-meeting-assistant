@@ -21,10 +21,10 @@ export type RootStackParamList = {
   Thread: { threadId: string; title: string; messageId?: string };
   Intelligence: undefined;
   Memory: undefined;
-  Meetings: undefined;
-  Files: undefined;
+  Meetings: { meetingId?: string; segmentId?: string; returnToRoomId?: string; returnMode?: 'recap' | 'transcript' } | undefined;
+  Files: { fileId?: string } | undefined;
   AgentTeam: undefined;
-  Board: undefined;
+  Board: { cardId?: string } | undefined;
   Alerts: undefined;
   Settings: undefined;
   Profile: undefined;

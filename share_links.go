@@ -707,7 +707,7 @@ func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
 	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
-	if !found || header.TenantID != claims.TenantID || header.ObjectID != claims.ArtifactID || int(header.ContentRevision) != claims.Revision ||
+	if !found || !kanbanApp.projectBoundArtifactCurrent(r.Context(), artifact) || header.TenantID != claims.TenantID || header.ObjectID != claims.ArtifactID || int(header.ContentRevision) != claims.Revision ||
 		header.ACLVersion != claims.ACLGeneration || !artifactShareEligible(artifact) || artifactCapabilityDigest(artifact) != claims.ContentDigest {
 		writeShareLinkNotFound(w)
 		return
@@ -719,7 +719,7 @@ func serveShareLinkRecord(w http.ResponseWriter, record shareLinkRecord) {
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
 	// Re-check the status gate on EVERY open: pulling an artifact's approval
 	// revokes its live links without touching the records.
-	if !found || !artifactShareEligible(artifact) || artifactVersion(artifact) != record.Revision || artifactCapabilityDigest(artifact) != record.ContentDigest {
+	if !found || !kanbanApp.projectBoundArtifactCurrent(context.Background(), artifact) || !artifactShareEligible(artifact) || artifactVersion(artifact) != record.Revision || artifactCapabilityDigest(artifact) != record.ContentDigest {
 		writeShareLinkNotFound(w)
 		return
 	}

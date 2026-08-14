@@ -330,7 +330,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 
-	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "launch plan", "public")
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "rodeo creator market", "public")
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -441,6 +441,17 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 
 	// Accepting the persisted research card enters the existing resolver's one
 	// workstream launch door exactly once and preserves its public-channel origin.
+	currentChannel, _, currentErr := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+	if currentErr != nil {
+		t.Fatal(currentErr)
+	}
+	sourceIndex := scoutChatMessageIndex(currentChannel, lineage[0].sourceMessageID)
+	if sourceIndex < 0 {
+		t.Fatal("public research source message disappeared before acceptance")
+	}
+	if affinity, found := kanbanApp.resolveWorkstreamAffinity(user, currentChannel, currentChannel.Messages[sourceIndex], "Research the rodeo creator market", time.Now().UTC()); !found || affinity.ProjectThreadID != channel.ID {
+		t.Fatalf("same-channel public affinity before acceptance=%+v found=%v", affinity, found)
+	}
 	response, err = kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: researchCardID})
 	if err != nil {
 		t.Fatalf("accept public research proposal: %v", err)
@@ -451,6 +462,11 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	}
 	if meta := agentThread.Artifact.Metadata; meta["originKind"] != agentThreadOriginChannel || meta["originId"] != channel.ID || meta["requestedBy"] != "tim@shareability.com" || meta["sourceMessageId"] != lineage[0].sourceMessageID || !isHexDigest(meta["sourceMessageDigest"]) || !isHexDigest(meta["sourceWindowDigest"]) {
 		t.Fatalf("accepted public proposal origin=%v", meta)
+	}
+	if meta := agentThread.Artifact.Metadata; meta["projectWorkId"] != channel.ID || meta["projectWorkTitle"] != "rodeo creator market" {
+		t.Fatalf("accepted public proposal omitted same-channel server-owned affinity: %v", meta)
+	} else if affinity, present := decodeWorkstreamAffinity(meta); !present || affinity.SourceThreadID != channel.ID || affinity.ProjectThreadID != channel.ID {
+		t.Fatalf("accepted public proposal affinity=%+v present=%v", affinity, present)
 	}
 	if modelCalls != 1 {
 		t.Fatalf("modelCalls=%d, want only the earlier conversational @scout answer", modelCalls)
@@ -1322,7 +1338,7 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 	if !strings.Contains(capturedAnswerInput, strategyPrompt) {
 		t.Fatalf("model input omitted strategy prompt: %s", capturedAnswerInput)
 	}
-	if !strings.Contains(capturedAnswerInput, "Omitted because the user did not ask about board") {
+	if strings.Contains(capturedAnswerInput, "Kanban") || strings.Contains(capturedAnswerInput, `"status":"Backlog"`) {
 		t.Fatalf("strategy input leaked onto Board path: %s", capturedAnswerInput)
 	}
 
@@ -1348,7 +1364,7 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 	if !ok || directAnswer.Text != "channel answer." {
 		t.Fatalf("direct answer=%#v, want threaded conversational model response", response["answer"])
 	}
-	if !strings.Contains(capturedAnswerInput, directPrompt) || !strings.Contains(capturedAnswerInput, "Omitted because the user did not ask about board") {
+	if !strings.Contains(capturedAnswerInput, directPrompt) || !strings.Contains(capturedAnswerInput, "Archived filing surfaces are not answer sources") {
 		t.Fatalf("direct-reply strategy input reopened Board path: %s", capturedAnswerInput)
 	}
 }
@@ -1401,7 +1417,7 @@ func TestScoutChatPublicConversationNeverFallsBackToMemoryHitsAfterModelFailure(
 	}
 }
 
-func TestScoutChatPublicChannelExactCardTitleCanUseBoardShortcut(t *testing.T) {
+func TestScoutChatPublicChannelExactCardTitleCannotUseRetiredBoardShortcut(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "openai-core-test")
 	previousApp := kanbanApp
@@ -1409,11 +1425,16 @@ func TestScoutChatPublicChannelExactCardTitleCanUseBoardShortcut(t *testing.T) {
 	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
+	var capturedInput string
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.Workflow == "scout_chat" {
-			t.Fatal("an exact card-title query should use the deterministic Board answer")
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
 		}
-		return "unexpected model answer", nil
+		if request.Workflow == "scout_chat" {
+			capturedInput = request.Input
+			return "I could not find a source-current Work record for that exact name.", nil
+		}
+		return "", nil
 	})
 	const title = "Fix long-press reply composer on iPhone"
 	if _, changed, err := kanbanApp.createTicket(map[string]any{
@@ -1434,8 +1455,11 @@ func TestScoutChatPublicChannelExactCardTitleCanUseBoardShortcut(t *testing.T) {
 		t.Fatalf("append exact-title query: %v", err)
 	}
 	answer, ok := response["answer"].(scoutChatMessageRecord)
-	if !ok || !strings.Contains(answer.Text, title+" is currently Backlog") {
-		t.Fatalf("answer=%#v, want deterministic exact-card answer", response["answer"])
+	if !ok || !strings.Contains(answer.Text, "source-current Work") {
+		t.Fatalf("answer=%#v, want source-current abstention", response["answer"])
+	}
+	if strings.Contains(capturedInput, `"status":"Backlog"`) || strings.Contains(capturedInput, `"owner":"AJ"`) {
+		t.Fatalf("retired card leaked into model input: %s", capturedInput)
 	}
 }
 

@@ -196,13 +196,17 @@ func meetingDigestMaxMeetingsPerTick() int {
 	return positiveIntEnv("MEETING_DIGEST_MAX_MEETINGS_PER_TICK", defaultMeetingDigestMaxMeetingsPerTick)
 }
 
-// meetingDigestCurrentMeetingBootstrapBaseline returns the exact predecessor
-// brain for the room's active sitting. Starting after that cursor admits only
-// current-meeting brains; returning an empty predecessor is safe only when the
-// first matching room brain already belongs to the active sitting. Existing
-// digest/checkpoint continuity always wins before this seam is consulted.
-func (app *kanbanBoardApp) meetingDigestCurrentMeetingBootstrapBaseline(agent ambientAgentConfig, roomID string) (string, bool) {
-	if app == nil || app.memory == nil || app.meetings == nil || agent.name != meetingDigestAgentName || !boolEnv(meetingDigestCurrentMeetingBootstrapEnv) {
+// meetingAnalysisCurrentMeetingBootstrapBaseline returns the exact predecessor
+// input for the room's active sitting. It is the narrow activation seam for
+// both transcript→brain and brain→meeting-digest after either worker was
+// disabled. The active meeting must form a clean suffix of that room's input
+// stream; interleaved, missing, or corrupt meeting identity fails closed.
+// Existing durable checkpoint/artifact continuity always wins before this
+// seam is consulted.
+func (app *kanbanBoardApp) meetingAnalysisCurrentMeetingBootstrapBaseline(agent ambientAgentConfig, roomID string) (string, bool) {
+	enabled := (agent.name == meetingBrainAgentName && boolEnv(meetingBrainCurrentMeetingBootstrapEnv)) ||
+		(agent.name == meetingDigestAgentName && boolEnv(meetingDigestCurrentMeetingBootstrapEnv))
+	if app == nil || app.memory == nil || app.meetings == nil || !enabled {
 		return "", false
 	}
 	roomID = agent.scopeRoomID(roomID)
@@ -210,12 +214,22 @@ func (app *kanbanBoardApp) meetingDigestCurrentMeetingBootstrapBaseline(agent am
 	if !active || strings.TrimSpace(record.ID) == "" {
 		return "", false
 	}
-	if _, alreadyCurrent := app.memory.latestDigestPerMeeting()[record.ID]; alreadyCurrent {
-		return "", false
-	}
 	windowRoomID := agent.windowRoomID(roomID)
 	app.memory.mu.Lock()
 	defer app.memory.mu.Unlock()
+	// If this sitting already has an artifact with a durable input cursor, the
+	// ordinary continuity resolver—not this activation exception—owns resume.
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind != agent.artifactKind || memoryEntryHiddenFromRecall(entry) ||
+			(windowRoomID != "" && normalizeRoomID(entry.Metadata["roomId"]) != normalizeRoomID(windowRoomID)) ||
+			strings.TrimSpace(entry.Metadata["meetingId"]) != record.ID {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata[agent.cursorMetadataKey]) != "" {
+			return "", false
+		}
+	}
 	predecessor := ""
 	foundCurrent := false
 	for _, entry := range app.memory.entries {
@@ -226,11 +240,18 @@ func (app *kanbanBoardApp) meetingDigestCurrentMeetingBootstrapBaseline(agent am
 			foundCurrent = true
 			continue
 		}
-		if !foundCurrent {
-			predecessor = entry.ID
+		if foundCurrent {
+			return "", false
 		}
+		predecessor = entry.ID
 	}
 	return predecessor, foundCurrent
+}
+
+// Retain the prior helper name for narrow call sites/tests while routing it
+// through the shared transcript-and-digest activation contract.
+func (app *kanbanBoardApp) meetingDigestCurrentMeetingBootstrapBaseline(agent ambientAgentConfig, roomID string) (string, bool) {
+	return app.meetingAnalysisCurrentMeetingBootstrapBaseline(agent, roomID)
 }
 
 /* ---------- T2 anchored-JSON schema ---------- */
@@ -734,16 +755,27 @@ func (app *kanbanBoardApp) digestTranscriptIDSet(meetingKey string) map[string]s
 	if app == nil || app.memory == nil || isLegacyMeetingKey(meetingKey) {
 		return nil
 	}
-	ids := map[string]struct{}{}
-	for _, entry := range app.memory.snapshotForMeeting(meetingKey, 0) {
+	entries := app.memory.snapshotForMeeting(meetingKey, 0)
+	hasTranscript := false
+	for _, entry := range entries {
 		if entry.Kind == meetingMemoryKindTranscript {
-			ids[entry.ID] = struct{}{}
+			hasTranscript = true
+			break
 		}
 	}
-	if len(ids) == 0 {
+	if !hasTranscript {
 		return nil
 	}
-
+	ids := map[string]struct{}{}
+	// Digest claims and Meeting Record claims share one exact current-source
+	// projection. A superseded, withdrawn or deleted transcript revision remains
+	// durable history, but it cannot continue authorizing a new digest anchor.
+	// An all-withdrawn meeting deliberately returns a non-nil empty set so the
+	// verification pass blanks every asserted anchor instead of treating the
+	// meeting like a legacy/no-transcript fixture.
+	for _, segment := range meetingRecordSegments(entries, meetingKey) {
+		ids[segment.ID] = struct{}{}
+	}
 	return ids
 }
 
@@ -1028,12 +1060,9 @@ func (app *kanbanBoardApp) meetingRecordTitle(meetingID string) string {
 	if app == nil || app.meetings == nil || strings.TrimSpace(meetingID) == "" {
 		return ""
 	}
-	for _, record := range app.meetings.recent(0) {
-		if record.ID == meetingID {
-			return strings.TrimSpace(record.Title)
-		}
+	if record, found := app.meetings.recordByID(meetingID); found {
+		return strings.TrimSpace(record.Title)
 	}
-
 	return ""
 }
 
@@ -1199,6 +1228,11 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			// A listen-only sitting may have been underway before capture began.
 			metadata[externalMayPredateCaptureMetadataKey] = "true"
 		}
+		// Bind every model-written fact to the exact transcript revision it
+		// analyzed. Meeting Record readers fail closed when a correction,
+		// withdrawal, or same-id body edit changes that source revision, so stale
+		// summary prose can never outlive its evidence.
+		metadata[meetingRecordDigestSourceRevisionsMetadataKey] = meetingRecordDigestSourceRevisionMetadata(payload, meetingRecordSegments(app.memory.snapshotForMeeting(group.key, 0), group.key))
 		entry, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, group.key, string(canonical), metadata)
 		if err != nil {
 			return newest, err
@@ -1209,6 +1243,13 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		app.broadcastMeetingIntelligence(metadata["roomId"], group.key)
 		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash))
 		newest = entry
+	}
+	if newest.ID != "" {
+		// The interval floor is recovery insurance, not freshness cadence. A
+		// current meeting digest immediately wakes the deterministic day fold and
+		// typed company-ledger reducer; their own cursor/run locks coalesce bursts.
+		app.nudgeAmbientAgent(dayDigestAgentName)
+		app.nudgeAmbientAgent(entityLedgerAgentName)
 	}
 
 	return newest, nil

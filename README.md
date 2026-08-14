@@ -192,6 +192,7 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 | `MEETING_BRAIN_DISABLED` | Disables the background brain worker |
 | `MEETING_DIGEST_DISABLED` | Disables meeting digest generation |
 | `MEETING_DIGEST_CURRENT_MEETING_BOOTSTRAP` | Activation-only, default-off fence that admits the active sitting's existing brain records without broad historical backfill |
+| `MEETING_BRAIN_CURRENT_MEETING_BOOTSTRAP` | Activation-only, default-off fence that admits the active sitting's existing finalized transcript records without broad historical backfill |
 | `USAGE_LEDGER_DISABLED` | Disables usage and evaluation recording |
 | `BONFIRE_PUBLIC_URL` | Canonical production URL for secure links |
 

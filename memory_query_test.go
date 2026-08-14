@@ -293,8 +293,11 @@ func TestAssistantQueryDoesNotMistakeCompanyVisionForBoardCard(t *testing.T) {
 	}
 }
 
-func TestAssistantQueryAnswersCurrentBoardCardStatus(t *testing.T) {
+func TestAssistantQueryCurrentStatusUsesBrainAndNeverBoardCard(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "current-work-test"
+	app.mu.Unlock()
 	if _, changed, err := app.createTicket(map[string]any{
 		"title":  "Dog Perfect",
 		"notes":  "Waiting on Erick for launch approval.",
@@ -307,6 +310,14 @@ func TestAssistantQueryAnswersCurrentBoardCardStatus(t *testing.T) {
 		t.Fatal("createTicket changed=false, want true")
 	}
 
+	previousResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if strings.Contains(request.Input, "Waiting on Erick") || strings.Contains(request.Input, `"status"`) {
+			t.Fatalf("retired Board card leaked into model input: %s", request.Input)
+		}
+		return "I could not find a source-current Work record for Dog Perfect.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = previousResponder })
 	result, changed, err := app.answerAssistantQuery("what is the current status of DogPerfect?")
 	if err != nil {
 		t.Fatalf("answerAssistantQuery: %v", err)
@@ -316,13 +327,11 @@ func TestAssistantQueryAnswersCurrentBoardCardStatus(t *testing.T) {
 	}
 
 	answer := asString(result["answer"])
-	for _, want := range []string{"Dog Perfect", "Blocked", "Erick"} {
-		if !strings.Contains(answer, want) {
-			t.Fatalf("answer=%q, missing %q", answer, want)
-		}
+	if !strings.Contains(answer, "source-current Work") {
+		t.Fatalf("answer=%q, want source-current abstention", answer)
 	}
-	if source := asString(result["source"]); source != "board" {
-		t.Fatalf("source=%q, want board", source)
+	if source := asString(result["source"]); source != "assistant" {
+		t.Fatalf("source=%q, want assistant synthesis", source)
 	}
 }
 
@@ -1145,6 +1154,7 @@ func TestContextEntriesForQueryThisWeekLoadsDigestsFirst(t *testing.T) {
 			Metadata:  map[string]string{"speaker": "Tom", "meetingId": "meeting-week-a"},
 		})
 	}
+	store.rebuildMeetingEntryIndexesLocked()
 
 	entries := store.contextEntriesForQuery("what did I miss this week?", 8, now)
 	if len(entries) != 8 {
@@ -1239,6 +1249,7 @@ func TestContextEntriesForQueryNoRangeKeepsBrainLayerAndAddsDigests(t *testing.T
 			Metadata:  map[string]string{"meetingId": "meeting-0"},
 		})
 	}
+	store.rebuildMeetingEntryIndexesLocked()
 
 	entries := store.contextEntriesForQuery("summarize our pricing project", 20, time.Now())
 	if len(entries) == 0 {
@@ -1254,6 +1265,104 @@ func TestContextEntriesForQueryNoRangeKeepsBrainLayerAndAddsDigests(t *testing.T
 	}
 	if memoryEntriesContain(entries, "digest-meeting-0") {
 		t.Fatal("no-range lane should cap recent meeting digests at the newest few")
+	}
+}
+
+func TestDigestContextLaneSuppressesCompanyProjectionUntilLedgerCursorCatchesUp(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	base := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	company := testDigestContextEntry(
+		"digest-company-stale",
+		meetingMemoryKindCompanyDigest,
+		companyDigestKey,
+		`{"narrative":"OBSOLETE-CURSOR-CANARY"}`,
+		base,
+		map[string]string{companyDigestCursorMetadataKey: "ledger-event-1"},
+	)
+	store.entries = []meetingMemoryEntry{
+		{ID: "ledger-event-1", Kind: meetingMemoryKindLedgerEvent, Text: `{}`, CreatedAt: base.Add(-time.Minute)},
+		company,
+		{ID: "ledger-event-2", Kind: meetingMemoryKindLedgerEvent, Text: `{}`, CreatedAt: base.Add(time.Minute)},
+	}
+	store.rebuildMeetingEntryIndexesLocked()
+	if lane := store.digestContextLane(false, time.Time{}, time.Time{}, 8); memoryEntriesContain(lane, company.ID) {
+		t.Fatalf("stale company digest entered recall before its ledger cursor caught up: %+v", lane)
+	}
+
+	company.Metadata[companyDigestCursorMetadataKey] = "ledger-event-2"
+	company.ID = "digest-company-current"
+	company.CreatedAt = base.Add(2 * time.Minute)
+	store.entries[1] = company
+	store.rebuildMeetingEntryIndexesLocked()
+	lane := store.digestContextLane(false, time.Time{}, time.Time{}, 8)
+	if !memoryEntriesContain(lane, company.ID) {
+		t.Fatalf("caught-up company digest missing from recall lane: %+v", lane)
+	}
+}
+
+func TestGenericRecallProjectsTranscriptBrainDecisionAndDigestsThroughCurrentSources(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	old, appended, err := app.memory.appendAttributedTranscriptEntry(
+		officeRoomID,
+		"generic-recall-old",
+		"",
+		"AJ",
+		"source_owned",
+		"OBSOLETE-GENERIC-CANARY ship on the impossible date.",
+		nil,
+		true,
+		"",
+	)
+	if err != nil || !appended {
+		t.Fatalf("append old transcript: appended=%v err=%v", appended, err)
+	}
+	meetingID := strings.TrimSpace(old.Metadata["meetingId"])
+	brain, appended, err := app.memory.appendBrainWriteUp("generic-recall-brain", "OBSOLETE-GENERIC-CANARY brain prose", map[string]string{
+		"meetingId": meetingID, "fromTranscriptId": old.ID, "throughTranscriptId": old.ID, "transcriptCount": "1",
+	})
+	if err != nil || !appended {
+		t.Fatalf("append old brain: appended=%v err=%v", appended, err)
+	}
+	decision, appended, err := app.memory.appendDecision("generic-recall-decision", "OBSOLETE-GENERIC-CANARY decision prose", map[string]string{
+		"meetingId": meetingID, "sourceBrainId": brain.ID, "status": decisionStatusActive,
+	})
+	if err != nil || !appended {
+		t.Fatalf("append old decision: appended=%v err=%v", appended, err)
+	}
+	digestBody := `{"meetingId":"` + meetingID + `","decisions":[{"d":"OBSOLETE-GENERIC-CANARY digest prose","anchor":"` + old.ID + `","importance":5}]}`
+	day := time.Now().In(meetingTimeLocation()).Format(dayBucketLayout)
+	upsertBriefingTestDigest(t, app, meetingID, digestBody, day, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
+	meetingDigest, ok := app.memory.currentDigest(meetingMemoryKindMeetingDigest, meetingID)
+	if !ok {
+		t.Fatal("meeting digest fixture missing")
+	}
+	dayDigest, err := app.memory.upsertDigest(meetingMemoryKindDayDigest, day, `{"decisions":[{"d":"OBSOLETE-GENERIC-CANARY day prose"}]}`, map[string]string{digestDayMetadataKey: day})
+	if err != nil {
+		t.Fatalf("upsert day digest: %v", err)
+	}
+
+	replacement := appendCorrectedLedgerTranscript(
+		t, app, meetingID, "generic-recall-corrected", old.ID,
+		"The corrected launch date is September 30.",
+	)
+	projected := app.currentSourceRecallEntries([]meetingMemoryEntry{old, replacement, brain, decision, meetingDigest, dayDigest})
+	if len(projected) != 1 || projected[0].ID != replacement.ID {
+		t.Fatalf("current-source recall projection=%+v, want only corrected transcript", projected)
+	}
+
+	matches, contextEntries := app.memoryMatchesAndContext("OBSOLETE-GENERIC-CANARY")
+	for _, match := range matches {
+		if strings.Contains(match.Entry.Text, "OBSOLETE-GENERIC-CANARY") {
+			t.Fatalf("generic match resurrected corrected meeting source: %+v", match.Entry)
+		}
+	}
+	for _, entry := range contextEntries {
+		if strings.Contains(entry.Text, "OBSOLETE-GENERIC-CANARY") {
+			t.Fatalf("generic model context resurrected corrected meeting source: %+v", entry)
+		}
 	}
 }
 
@@ -1300,12 +1409,17 @@ func TestMemoryMatchesAndContextLedgerFirstForStatusQuery(t *testing.T) {
 	if entries[0].Kind != memoryContextKindLedgerState {
 		t.Fatalf("entries[0].Kind = %s, want %s leading the context", entries[0].Kind, memoryContextKindLedgerState)
 	}
-	for _, want := range []string{"Choose vendor Zebra", "status=", "anchors=tx-1"} {
+	decisions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision)
+	if len(decisions) != 1 || len(decisions[0].Anchors) == 0 {
+		t.Fatalf("ledger decision lacks exact source anchor: %+v", decisions)
+	}
+	anchor := decisions[0].Anchors[0]
+	for _, want := range []string{"Choose vendor Zebra", "status=", "anchors=" + anchor} {
 		if !strings.Contains(entries[0].Text, want) {
 			t.Fatalf("ledger state entry missing %q:\n%s", want, entries[0].Text)
 		}
 	}
-	if !memoryEntriesContain(entries, "tx-1") {
+	if !memoryEntriesContain(entries, anchor) {
 		t.Fatal("anchor drill-down transcript window missing from context")
 	}
 
@@ -1598,6 +1712,7 @@ func TestDigestContextLaneWideRangeKeepsNewest(t *testing.T) {
 		))
 	}
 	store.entries = entries
+	store.rebuildMeetingEntryIndexesLocked()
 
 	rangeStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	rangeEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) // 30-day span > one week

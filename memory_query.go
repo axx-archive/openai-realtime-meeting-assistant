@@ -174,6 +174,10 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 }
 
 func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachments(ctx context.Context, principal RecallPrincipal, requester string, query string, history []scoutChatTurn, attachments []openAIInputContent) (assistantQueryResult, error) {
+	// Board is archived compatibility data, never an active answer source. Work
+	// status must be composed from current authorized conversations, Meeting
+	// Records, artifacts, files, and server-owned Project/workstream bindings.
+	ctx = withAssistantBoardShortcutDisabled(ctx)
 	query = canonicalizeBoardText(query)
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
@@ -207,17 +211,21 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		}
 	}
 
-	matches, contextEntries := recallApp.memoryMatchesAndContext(recallQuery)
+	matches, contextEntries := []meetingMemoryMatch(nil), []meetingMemoryEntry(nil)
+	if !assistantExactSourceContext(ctx) {
+		matches, contextEntries = recallApp.memoryMatchesAndContext(recallQuery)
+	}
 	// Files is a first-class Scout source, not just a visual tab. Relevance
 	// search remains useful for broad company recall, but an exact file ref
 	// selected by chat (or an explicit Files/catalog question) is pinned ahead
 	// of the fuzzy lane after the same principal-scoped authorization pass.
-	contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, recallQuery), contextEntries)
+	if !assistantExactSourceContext(ctx) {
+		contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, recallQuery), contextEntries)
+	}
 	if recallModelContextProbe != nil {
 		recallModelContextProbe(contextEntries)
 	}
-	board := app.snapshotState()
-	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(ctx, requester, query, board.Cards, contextEntries, history, attachments)
+	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(ctx, requester, query, nil, contextEntries, history, attachments)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 		if assistantModelSuccessRequired(ctx) {
@@ -254,6 +262,27 @@ type assistantModelSuccessRequiredContextKey struct{}
 
 type assistantBoardShortcutDisabledContextKey struct{}
 type assistantRecallQueryContextKey struct{}
+type assistantExactSourceContextKey struct{}
+
+// withAssistantExactSourceContext prevents a revision-bound surface from
+// silently widening into Board, Files, general recall, relationship memory, or
+// other company sources. The caller must place its already-authorized exact
+// source window in the model query itself.
+func withAssistantExactSourceContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = withAssistantBoardShortcutDisabled(ctx)
+	return context.WithValue(ctx, assistantExactSourceContextKey{}, true)
+}
+
+func assistantExactSourceContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	exact, _ := ctx.Value(assistantExactSourceContextKey{}).(bool)
+	return exact
+}
 
 // withAssistantRecallQuery keeps structured channel-turn metadata in the
 // answer model input while giving retrieval and deterministic intent routing
@@ -409,16 +438,27 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	ctx, cancel := context.WithTimeout(ctx, assistantQueryRequestTimeout)
 	defer cancel()
 
-	includeBoard := !assistantBoardShortcutDisabled(ctx) && shouldIncludeBoardContextForAssistant(assistantRecallQuery(ctx, query), history)
-	pinned := app.pinnedProfileNotes(requester)
-	if positions := app.agentMindPositionPrompt(agentMindScoutID, query); positions != "" {
+	exactSources := assistantExactSourceContext(ctx)
+	includeBoard := !exactSources && !assistantBoardShortcutDisabled(ctx) && shouldIncludeBoardContextForAssistant(assistantRecallQuery(ctx, query), history)
+	pinned := []assistantPinnedNote(nil)
+	if !exactSources {
+		pinned = app.pinnedProfileNotes(requester)
+	}
+	if positions := app.agentMindPositionPrompt(agentMindScoutID, query); !exactSources && positions != "" {
 		pinned = append(pinned, assistantPinnedNote{
 			heading:  "Scout AgentMind positions",
 			body:     positions,
 			preamble: agentMindPinnedPreamble,
 		})
 	}
-	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, pinned...)
+	decisions, narratives := []meetingMemoryEntry(nil), []meetingMemoryEntry(nil)
+	if !exactSources {
+		decisions = app.activeDecisionEntries(decisionContextLimit)
+		narratives = app.activeNarrativeEntries(narrativeStorylineContextLimit)
+	} else {
+		cards = nil
+	}
+	input := buildAssistantQueryInput(query, cards, entries, decisions, narratives, history, time.Now(), includeBoard, pinned...)
 	instructions := assistantQueryInstructionsForContext(ctx, strings.TrimSpace(apiKey) != "")
 	recordCapabilityPoll(capabilityTypedScoutAnswer, time.Now().UTC())
 	request := openAITextRequest{
@@ -1151,7 +1191,8 @@ func osArtifactTitle(mode string, query string, answer string) string {
 	return artifactTitleFromBody(answer, fallback)
 }
 
-func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+func buildArtifactModeAnswer(query string, contextAnswer string, _ kanbanBoardState, memory []meetingMemoryEntry) string {
+	memory = activeAgentMemory(memory)
 	inferredType := inferArtifactType(query)
 	lines := []string{
 		"Artifact draft",
@@ -1161,17 +1202,18 @@ func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoa
 		"",
 		"Structure",
 		"1. Decision or thesis: " + artifactThesis(query, contextAnswer),
-		"2. Evidence: pull the strongest board card, transcript quote, or archive note that supports it.",
+		"2. Evidence: pull the strongest current Work record, transcript quote, or governed artifact that supports it.",
 		"3. Risks: name the assumption that would make this wrong.",
 		"4. Next move: assign one owner and one date before sending.",
 		"",
-		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+		"Current authorized context: " + workAndMemoryContextLine(memory),
 	}
-	lines = appendGoalWorkflow(lines, "artifacts", query, contextAnswer, "durable operating artifact", boardAndMemoryContextLine(board, memory))
+	lines = appendGoalWorkflow(lines, "artifacts", query, contextAnswer, "durable operating artifact", workAndMemoryContextLine(memory))
 	return strings.Join(lines, "\n")
 }
 
-func buildResearchModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+func buildResearchModeAnswer(query string, contextAnswer string, _ kanbanBoardState, memory []meetingMemoryEntry) string {
+	memory = activeAgentMemory(memory)
 	lines := []string{
 		"Research brief",
 		"",
@@ -1184,13 +1226,13 @@ func buildResearchModeAnswer(query string, contextAnswer string, board kanbanBoa
 		"3. Contrarian proof: look for the best reason this idea fails or becomes a commodity.",
 		"",
 		"Deliverable: a one-page brief with claim, evidence, counterargument, and recommendation.",
-		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+		"Current authorized context: " + workAndMemoryContextLine(memory),
 	}
-	lines = appendGoalWorkflow(lines, "research", query, contextAnswer, "source-backed research brief", boardAndMemoryContextLine(board, memory))
+	lines = appendGoalWorkflow(lines, "research", query, contextAnswer, "source-backed research brief", workAndMemoryContextLine(memory))
 	return strings.Join(lines, "\n")
 }
 
-func buildDesignModeAnswer(query string, contextAnswer string, board kanbanBoardState) string {
+func buildDesignModeAnswer(query string, contextAnswer string, _ kanbanBoardState) string {
 	lines := []string{
 		"Design kickoff",
 		"",
@@ -1204,9 +1246,9 @@ func buildDesignModeAnswer(query string, contextAnswer string, board kanbanBoard
 		"4. Quality bar: fast scan, clear hierarchy, unambiguous controls, no decorative bulk.",
 		"",
 		"First pass: sketch states for empty, active, evidence-rich, and decision-ready.",
-		"Board context: " + boardContextLine(board),
+		"Current authorized context: conversation evidence and current Work records only.",
 	}
-	lines = appendGoalWorkflow(lines, "design", query, contextAnswer, "design kickoff and implementation handoff", boardContextLine(board))
+	lines = appendGoalWorkflow(lines, "design", query, contextAnswer, "design kickoff and implementation handoff", "current authorized conversation evidence and Work records")
 	return strings.Join(lines, "\n")
 }
 
@@ -1233,19 +1275,20 @@ func buildGrillModeAnswer(query string, contextAnswer string) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildWorkflowModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+func buildWorkflowModeAnswer(query string, contextAnswer string, _ kanbanBoardState, memory []meetingMemoryEntry) string {
+	memory = activeAgentMemory(memory)
 	lines := []string{
 		"Codex goal workflow",
 		"",
 		"Objective: " + compactAssistantLine(query),
 		"Current signal: " + compactAssistantLine(contextAnswer),
-		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+		"Current authorized context: " + workAndMemoryContextLine(memory),
 		"",
 		"Worker boundary",
 		"Realtime 2 can start this workflow, control Bonfire apps, answer from memory, and save the scaffold.",
 		"Codex workers should execute long-running research, design, code, browser, SSH, tests, diffs, and review steps outside the live voice loop.",
 	}
-	lines = appendGoalWorkflow(lines, "workflow", query, contextAnswer, "goal-tracked multi-agent workflow artifact", boardAndMemoryContextLine(board, memory))
+	lines = appendGoalWorkflow(lines, "workflow", query, contextAnswer, "goal-tracked multi-agent workflow artifact", workAndMemoryContextLine(memory))
 	return strings.Join(lines, "\n")
 }
 
@@ -1265,7 +1308,7 @@ func goalWorkflowSection(mode string, query string, contextAnswer string, delive
 		"1. Identify and set goal: " + goal,
 		"2. Decompose the work: turn the request into scoped research, design, evidence, implementation, review, and verification steps.",
 		"3. Assign the right agent: " + goalWorkflowAgentLine(mode),
-		"4. Coordinate dependencies: use Bonfire board state, prior meetings, saved artifacts, and any required external Codex worker inputs as the shared context.",
+		"4. Coordinate dependencies: use current Work records, prior meetings, saved artifacts, and any required external Codex worker inputs as the shared context.",
 		"5. Execute in order: save this scaffold now, run the assigned worker when connected, attach evidence, then update the artifact.",
 		"6. Review against the original goal: compare the output to the request before treating it as done.",
 		"7. Gate before shipping: require source-backed evidence, passing checks, and explicit approval before deploy, publish, or push.",
@@ -1332,6 +1375,14 @@ func compactAssistantLine(text string) string {
 
 func boardAndMemoryContextLine(board kanbanBoardState, memory []meetingMemoryEntry) string {
 	return fmt.Sprintf("%s · %d recent memory item%s", boardContextLine(board), len(memory), pluralSuffix(len(memory)))
+}
+
+// workAndMemoryContextLine is the active agent context contract after Board
+// retirement. Historical cards remain available only through the explicit
+// legacy inventory/migration path; ordinary work receives current authorized
+// sources and server-owned Work/Project bindings, never a Kanban snapshot.
+func workAndMemoryContextLine(memory []meetingMemoryEntry) string {
+	return fmt.Sprintf("%d current authorized source item%s", len(memory), pluralSuffix(len(memory)))
 }
 
 func boardContextLine(board kanbanBoardState) string {
@@ -1419,12 +1470,10 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 		scoutRuntimeSelfKnowledge(),
 		"Speak in first person about your own actions and commitments. Step into the conversation naturally; never narrate ‘Scout’ in third person, announce your personality, or sound like a status bot.",
 		"Keep your stable identity distinct from learned collaboration preferences. You may adapt to supplied human-reviewed relationship and company memory, but never invent a preference, treat repetition as permission, or let familiarity expand access.",
-		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
-		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates when the user explicitly asks about board, card, task, status, owner, or due-date information.",
-		"Do not volunteer board status for ambiguous follow-ups or strategy questions just because board context is present.",
-		"Use memory only for past discussion, decisions, transcript recall, or archived meeting questions.",
+		"Answer using only the supplied current authorized sources and conversation history.",
+		"Current Work and Project understanding comes from source-current public channels, private Scout conversations, Meeting Records, files, artifacts, and server-owned workstream bindings. Never infer it from an archived Kanban card.",
+		"Use meeting and company memory for past discussion, decisions, transcript recall, archived meeting questions, and source-grounded current synthesis.",
 		"A per-meeting digest describes a CAPTURED window, not necessarily the whole meeting — when its header carries coverage=partial_late_start/partial_gaps/unknown or listenOnly=true, state that plainly instead of implying full visibility; a partial_gaps stretch may be quiet time rather than a capture failure, so describe it as possibly-missing, not as proof capture broke. Day- and company-level digests carry no coverage header — do not infer one.",
-		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
 		"For short ambiguous follow-ups like \"what?\" or \"huh?\", ask one clarification question only.",
@@ -1460,10 +1509,8 @@ func scoutRuntimeSelfKnowledge() string {
 
 func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, storylines []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool, pinned ...assistantPinnedNote) string {
 	location := meetingTimeLocation()
-	boardJSON, err := json.MarshalIndent(cards, "", "  ")
-	if err != nil {
-		boardJSON = []byte("[]")
-	}
+	_ = cards
+	_ = includeBoard
 
 	var builder strings.Builder
 	builder.WriteString("# Current time\n")
@@ -1479,13 +1526,8 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 	}
 	builder.WriteString("\n\n# User question\n")
 	builder.WriteString(query)
-	if includeBoard {
-		builder.WriteString("\n\n# Current Kanban board\n")
-		builder.Write(boardJSON)
-	} else {
-		builder.WriteString("\n\n# Current Kanban board\n")
-		builder.WriteString("Omitted because the user did not ask about board, card, task, status, owner, or due-date information.\n")
-	}
+	builder.WriteString("\n\n# Current Work authority\n")
+	builder.WriteString("Use only the authorized sources below and abstain when current Work or Project affinity is ambiguous. Archived filing surfaces are not answer sources.\n")
 	// Decisions ride along unconditionally: token search can miss a decision
 	// statement, but "what did we decide?" must still ground on the ledger.
 	if len(decisions) > 0 {
@@ -1711,13 +1753,145 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 	})
 }
 
+// currentSourceRecallEntries is the shared source-current projection for every
+// generic memory consumer (typed Scout, private voice, named agents and tool
+// memory windows). Durable history remains in the store; only exact current
+// evidence is allowed into a model or keyword fallback.
+func (app *kanbanBoardApp) currentSourceRecallEntries(entries []meetingMemoryEntry) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || len(entries) == 0 {
+		return nil
+	}
+	type meetingSources struct {
+		segments map[string]meetingRecordTranscriptSegment
+		raw      []meetingMemoryEntry
+	}
+	meetingCache := map[string]meetingSources{}
+	sourcesForMeeting := func(meetingID string) meetingSources {
+		meetingID = strings.TrimSpace(meetingID)
+		if cached, ok := meetingCache[meetingID]; ok {
+			return cached
+		}
+		raw := app.memory.snapshotForMeeting(meetingID, 0)
+		segments := map[string]meetingRecordTranscriptSegment{}
+		for _, segment := range meetingRecordSegments(raw, meetingID) {
+			segments[segment.ID] = segment
+		}
+		cached := meetingSources{segments: segments, raw: raw}
+		meetingCache[meetingID] = cached
+		return cached
+	}
+
+	brainCache := map[string]bool{}
+	var brainCurrent func(meetingMemoryEntry) bool
+	brainCurrent = func(brain meetingMemoryEntry) bool {
+		if current, ok := brainCache[brain.ID]; ok {
+			return current
+		}
+		meetingID := strings.TrimSpace(brain.Metadata["meetingId"])
+		fromID := strings.TrimSpace(brain.Metadata["fromTranscriptId"])
+		throughID := strings.TrimSpace(brain.Metadata["throughTranscriptId"])
+		wantCount, _ := strconv.Atoi(strings.TrimSpace(brain.Metadata["transcriptCount"]))
+		if meetingID == "" || fromID == "" || throughID == "" || wantCount <= 0 {
+			brainCache[brain.ID] = false
+			return false
+		}
+		sources := sourcesForMeeting(meetingID)
+		inside := false
+		count := 0
+		for _, source := range sources.raw {
+			if source.Kind != meetingMemoryKindTranscript || strings.TrimSpace(source.Metadata["meetingId"]) != meetingID {
+				continue
+			}
+			if source.ID == fromID {
+				inside = true
+			}
+			if !inside {
+				continue
+			}
+			count++
+			segment, current := sources.segments[source.ID]
+			if !current || segment.Revision != meetingRecordTranscriptRevision(source) {
+				brainCache[brain.ID] = false
+				return false
+			}
+			if source.ID == throughID {
+				current = count == wantCount
+				brainCache[brain.ID] = current
+				return current
+			}
+		}
+		brainCache[brain.ID] = false
+		return false
+	}
+
+	projected := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		switch entry.Kind {
+		case meetingMemoryKindTranscript:
+			meetingID := strings.TrimSpace(entry.Metadata["meetingId"])
+			if meetingID == "" {
+				continue
+			}
+			segment, current := sourcesForMeeting(meetingID).segments[entry.ID]
+			if !current || segment.Revision != meetingRecordTranscriptRevision(entry) {
+				continue
+			}
+		case meetingMemoryKindBrain:
+			if !brainCurrent(entry) {
+				continue
+			}
+		case meetingMemoryKindDecision:
+			if sourceBrainID := strings.TrimSpace(entry.Metadata["sourceBrainId"]); sourceBrainID != "" {
+				brain, found := app.memory.entryByKindAndID(meetingMemoryKindBrain, sourceBrainID)
+				if !found || !brainCurrent(brain) {
+					continue
+				}
+			}
+		case meetingMemoryKindMeetingDigest:
+			current, ok := app.currentSourceMeetingBriefingDigest(entry)
+			if !ok {
+				continue
+			}
+			entry = current
+		case meetingMemoryKindDayDigest:
+			// Day rollups do not carry per-fact source edges. Dedicated briefing
+			// paths re-fold exact meeting facts; generic recall must not trust the
+			// stored recursive summary as independent authority.
+			continue
+		case meetingMemoryKindCompanyDigest:
+			cursor := strings.TrimSpace(entry.Metadata[companyDigestCursorMetadataKey])
+			if cursor != "" && cursor != app.memory.latestEntryIDOfKind(meetingMemoryKindLedgerEvent) {
+				continue
+			}
+		}
+		projected = append(projected, entry)
+	}
+	return projected
+}
+
 func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemoryMatch, []meetingMemoryEntry) {
 	if app == nil || app.memory == nil {
 		return nil, nil
 	}
 
 	now := time.Now()
-	matches := app.memory.search(query, 8)
+	rawMatches := app.memory.search(query, 8)
+	matchEntries := make([]meetingMemoryEntry, 0, len(rawMatches))
+	for _, match := range rawMatches {
+		matchEntries = append(matchEntries, match.Entry)
+	}
+	projectedMatches := app.currentSourceRecallEntries(matchEntries)
+	projectedByID := make(map[string]meetingMemoryEntry, len(projectedMatches))
+	for _, entry := range projectedMatches {
+		projectedByID[entry.ID] = entry
+	}
+	matches := make([]meetingMemoryMatch, 0, len(projectedMatches))
+	for _, match := range rawMatches {
+		if entry, current := projectedByID[match.Entry.ID]; current {
+			match.Entry = entry
+			matches = append(matches, match)
+		}
+	}
 	// A5 recall routing: a current-state question ("status of X", "what's
 	// decided on Y") answers LEDGER-first — the canonical fold leads the
 	// context (status/owner/validity computed in Go, never by the model)
@@ -1727,7 +1901,7 @@ func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemor
 	if budget < 0 {
 		budget = 0
 	}
-	contextEntries := app.memory.contextEntriesForQuery(query, budget, now)
+	contextEntries := app.currentSourceRecallEntries(app.memory.contextEntriesForQuery(query, budget, now))
 	if len(lane) == 0 {
 		return matches, contextEntries
 	}
@@ -2990,7 +3164,15 @@ func (store *meetingMemoryStore) digestContextLane(hasTimeRange bool, rangeStart
 		}
 	} else {
 		if company, ok := store.latestCompanyDigest(); ok {
-			lane = append(lane, company)
+			// A company digest is a materialized projection of ledger events. If a
+			// newer event exists, its state and narrative are stale by definition;
+			// omit it until the nudge-driven compactor advances the exact cursor.
+			// Legacy fixtures/artifacts without a cursor retain their historical
+			// behavior, while every current producer stamps this boundary.
+			cursor := strings.TrimSpace(company.Metadata[companyDigestCursorMetadataKey])
+			if cursor == "" || cursor == store.latestEntryIDOfKind(meetingMemoryKindLedgerEvent) {
+				lane = append(lane, company)
+			}
 		}
 		recent := make([]meetingMemoryEntry, 0, 8)
 		for _, digest := range store.latestDigestPerMeeting() {

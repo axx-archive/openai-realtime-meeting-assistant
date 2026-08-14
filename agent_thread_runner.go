@@ -135,6 +135,10 @@ type agentThreadGoalSpec struct {
 	AgentActiveLearning string
 	AgentDigest         string
 	DelegatedBy         string
+	ProjectWorkBinding  string
+	ProjectWorkID       string
+	ProjectWorkTitle    string
+	WorkstreamAffinity  string
 	// Goal-engine linkage (Wave 2): a subtask launched by the /goal engine
 	// stamps its parent goal + subtask id so the child's terminal seam folds
 	// the result back into the parent plan, and the assigned runner so
@@ -180,38 +184,42 @@ type launchFunnelLineage struct {
 func (spec agentThreadGoalSpec) metadata() map[string]string {
 	metadata := map[string]string{}
 	for key, value := range map[string]string{
-		"objective":           spec.Objective,
-		"toolTemplate":        spec.ToolTemplate,
-		"contextRefs":         spec.ContextRefs,
-		"sourceMessageId":     spec.SourceMessageID,
-		"sourceMessageDigest": spec.SourceMessageDigest,
-		"sourceWindowDigest":  spec.SourceWindowDigest,
-		"operationId":         spec.OperationID,
-		"operationBodyDigest": spec.OperationBodyDigest,
-		"originSurface":       spec.OriginSurface,
-		"requestedBy":         spec.RequestedBy,
-		"authority":           spec.Authority,
-		"visibility":          spec.Visibility,
-		"packageId":           spec.PackageID,
-		"agentId":             spec.AgentID,
-		"agentName":           spec.AgentName,
-		"agentRole":           spec.AgentRole,
-		"agentOutcome":        spec.AgentOutcome,
-		"agentPersona":        spec.AgentPersona,
-		"agentVoice":          spec.AgentVoice,
-		"agentStyle":          spec.AgentStyle,
-		"agentTraits":         spec.AgentTraits,
-		"agentCapabilities":   spec.AgentCapabilities,
-		"agentMemoryPolicy":   spec.AgentMemoryPolicy,
-		"agentCoreMemories":   spec.AgentCoreMemories,
-		"agentActiveLearning": spec.AgentActiveLearning,
-		"agentDigest":         spec.AgentDigest,
-		"delegatedBy":         spec.DelegatedBy,
-		"goalParentId":        spec.ParentGoalID,
-		"goalSubtaskId":       spec.SubtaskID,
-		"assignedRunner":      spec.AssignedRunner,
-		"outputContract":      spec.OutputContract,
-		"goalRouteDigest":     spec.ParentGoalRouteDigest,
+		"objective":                   spec.Objective,
+		"toolTemplate":                spec.ToolTemplate,
+		"contextRefs":                 spec.ContextRefs,
+		"sourceMessageId":             spec.SourceMessageID,
+		"sourceMessageDigest":         spec.SourceMessageDigest,
+		"sourceWindowDigest":          spec.SourceWindowDigest,
+		"operationId":                 spec.OperationID,
+		"operationBodyDigest":         spec.OperationBodyDigest,
+		"originSurface":               spec.OriginSurface,
+		"requestedBy":                 spec.RequestedBy,
+		"authority":                   spec.Authority,
+		"visibility":                  spec.Visibility,
+		"packageId":                   spec.PackageID,
+		"agentId":                     spec.AgentID,
+		"agentName":                   spec.AgentName,
+		"agentRole":                   spec.AgentRole,
+		"agentOutcome":                spec.AgentOutcome,
+		"agentPersona":                spec.AgentPersona,
+		"agentVoice":                  spec.AgentVoice,
+		"agentStyle":                  spec.AgentStyle,
+		"agentTraits":                 spec.AgentTraits,
+		"agentCapabilities":           spec.AgentCapabilities,
+		"agentMemoryPolicy":           spec.AgentMemoryPolicy,
+		"agentCoreMemories":           spec.AgentCoreMemories,
+		"agentActiveLearning":         spec.AgentActiveLearning,
+		"agentDigest":                 spec.AgentDigest,
+		"delegatedBy":                 spec.DelegatedBy,
+		projectWorkBindingMetadataKey: spec.ProjectWorkBinding,
+		workstreamAffinityMetadataKey: spec.WorkstreamAffinity,
+		"projectWorkId":               spec.ProjectWorkID,
+		"projectWorkTitle":            spec.ProjectWorkTitle,
+		"goalParentId":                spec.ParentGoalID,
+		"goalSubtaskId":               spec.SubtaskID,
+		"assignedRunner":              spec.AssignedRunner,
+		"outputContract":              spec.OutputContract,
+		"goalRouteDigest":             spec.ParentGoalRouteDigest,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
@@ -313,7 +321,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 	requester := firstNonEmptyString(strings.TrimSpace(origin["requestedBy"]), createdBy)
 	content := "# Private work\n\nSecure work is queued."
 	if envelope == nil {
-		content = buildAgentThreadScaffold(mode, query, app.snapshotState(), app.agentThreadMemory(context.Background(), requester, origin, spec.ContextRefs, 12))
+		content = buildAgentThreadScaffold(mode, query, kanbanBoardState{}, app.agentThreadMemory(context.Background(), requester, origin, spec.ContextRefs, 12))
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	openAIToolReservationLocked := false
@@ -2015,8 +2023,9 @@ func (app *kanbanBoardApp) currentOpenAIAPIKey() string {
 	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 }
 
-func buildAgentThreadScaffold(mode string, query string, board kanbanBoardState, memory []meetingMemoryEntry) string {
-	contextLine := boardAndMemoryContextLine(board, memory)
+func buildAgentThreadScaffold(mode string, query string, _ kanbanBoardState, memory []meetingMemoryEntry) string {
+	memory = activeAgentMemory(memory)
+	contextLine := workAndMemoryContextLine(memory)
 	lines := []string{
 		"Scout work thread",
 		"",
@@ -2189,7 +2198,8 @@ func agentThreadInstructions(mode string) string {
 	}, "\n")
 }
 
-func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memory []meetingMemoryEntry, now time.Time) string {
+func buildAgentThreadInput(thread scoutAgentThread, _ kanbanBoardState, memory []meetingMemoryEntry, now time.Time) string {
+	memory = activeAgentMemory(memory)
 	var builder strings.Builder
 	builder.WriteString("Now: ")
 	builder.WriteString(now.Format(time.RFC3339))
@@ -2199,8 +2209,8 @@ func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memo
 	builder.WriteString(thread.Mode)
 	builder.WriteString("\nUser request: ")
 	builder.WriteString(thread.Query)
-	builder.WriteString("\n\nBoard and memory context: ")
-	builder.WriteString(boardAndMemoryContextLine(board, memory))
+	builder.WriteString("\n\nCurrent authorized context: ")
+	builder.WriteString(workAndMemoryContextLine(memory))
 	builder.WriteString("\n\nRecent durable memory:\n")
 	for _, entry := range memory {
 		builder.WriteString("- ")

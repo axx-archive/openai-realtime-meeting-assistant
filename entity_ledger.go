@@ -116,6 +116,8 @@ const (
 	ledgerOpClose     = "close"
 )
 
+const ledgerReasonSourceNoLongerCurrent = "source no longer current"
+
 // Canonical record statuses. Facts arrive with free-text model statuses;
 // normalizeLedgerStatus maps them onto this small vocabulary so restatements
 // never churn UPDATE events.
@@ -302,6 +304,10 @@ type ledgerFact struct {
 	At         string
 	MeetingID  string
 	Importance int
+	// Reason is reserved for deterministic governance transitions. Source
+	// closures must remain distinguishable from model-written completion so
+	// downstream compaction can discard prior prose without interpreting it.
+	Reason string
 	// Aliases (item 1.3a) rides in from the source digest's model-written alias
 	// phrasings; carried onto the record so a later renamed restatement matches.
 	Aliases []string
@@ -375,6 +381,106 @@ func ledgerFactsFromDigest(entry meetingMemoryEntry) []ledgerFact {
 	}
 
 	return facts
+}
+
+// staleLedgerSourceFacts converts exact source loss into explicit temporal
+// closures before a rebuilt digest's fresh facts are consolidated. Silence
+// from the model is not enough to close a record: a record stays current while
+// any one of its transcript/decision anchors is still current. A correction,
+// withdrawal, deletion, quarantine, or authorization loss that leaves no
+// current anchor closes the old validity window; a replacement fact in the
+// same pass then opens a new source-bound window.
+func (app *kanbanBoardApp) staleLedgerSourceFacts(touchedMeetingIDs map[string]bool, now time.Time) []ledgerFact {
+	if app == nil || app.memory == nil || len(touchedMeetingIDs) == 0 {
+		return nil
+	}
+	state := app.memory.ledgerState()
+	candidates := make([]ledgerRecord, 0)
+	meetingIDs := map[string]struct{}{}
+	for _, record := range state {
+		if !record.current() {
+			continue
+		}
+		affected := false
+		for _, meetingID := range append(append([]string{}, record.MeetingIDs...), record.MeetingIDsOverflow...) {
+			meetingID = strings.TrimSpace(meetingID)
+			if meetingID != "" {
+				meetingIDs[meetingID] = struct{}{}
+			}
+			if touchedMeetingIDs[meetingID] {
+				affected = true
+			}
+		}
+		if affected {
+			candidates = append(candidates, record)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	currentAnchors := map[string]struct{}{}
+	knownAnchors := map[string]struct{}{}
+	for meetingID := range meetingIDs {
+		entries := app.memory.snapshotForMeeting(meetingID, 0)
+		for _, entry := range entries {
+			if entry.Kind == meetingMemoryKindTranscript {
+				knownAnchors[entry.ID] = struct{}{}
+			}
+		}
+		for _, segment := range meetingRecordSegments(entries, meetingID) {
+			currentAnchors[segment.ID] = struct{}{}
+		}
+	}
+	for _, decision := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		knownAnchors[decision.ID] = struct{}{}
+		status := strings.TrimSpace(decision.Metadata["status"])
+		if !memoryEntryHiddenFromRecall(decision) && status != decisionStatusProposedSupersession && status != "superseded" {
+			currentAnchors[decision.ID] = struct{}{}
+		}
+	}
+
+	closures := make([]ledgerFact, 0)
+	for _, record := range candidates {
+		anchors := append(append([]string{}, record.Anchors...), record.AnchorsOverflow...)
+		if len(anchors) == 0 {
+			continue
+		}
+		current := false
+		staleAnchor := ""
+		for _, anchor := range anchors {
+			anchor = strings.TrimSpace(anchor)
+			if anchor == "" {
+				continue
+			}
+			if _, ok := currentAnchors[anchor]; ok {
+				current = true
+				break
+			}
+			if staleAnchor == "" {
+				staleAnchor = anchor
+			}
+			if _, ok := knownAnchors[anchor]; ok {
+				staleAnchor = anchor
+			}
+		}
+		if current {
+			continue
+		}
+		meetingID := ""
+		for _, candidate := range record.MeetingIDs {
+			if touchedMeetingIDs[candidate] {
+				meetingID = candidate
+				break
+			}
+		}
+		closures = append(closures, ledgerFact{
+			Entity: record.Entity, Title: record.Title, Status: ledgerStatusSuperseded, Owner: record.Owner,
+			Anchor: staleAnchor, At: now.UTC().Format(time.RFC3339), MeetingID: meetingID, Importance: record.Importance,
+			Reason: ledgerReasonSourceNoLongerCurrent,
+		})
+	}
+	return closures
 }
 
 // aliasesForFact gates digest-level storyline aliases onto ONE fact (item 1.3a /
@@ -1076,10 +1182,27 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		if !ok {
 			continue
 		}
+		// The entity ledger compounds meeting facts into company truth, so it
+		// must use the same exact-current source projection as Meeting Record
+		// and conversational briefings. A corrected, withdrawn, superseded or
+		// same-id revised transcript may remain durable history, but its old
+		// digest prose cannot mint or update a current company record.
+		digest, ok = contextApp.currentSourceMeetingBriefingDigest(digest)
+		if !ok {
+			continue
+		}
 		// §6.4 (RATIFIED 2026-07-09): a listen-only sitting's digest feeds the
 		// canonical registry like any other — its facts must be Scout-recallable
 		// company-wide. Origin stays visible on the digest's listenOnly stamp.
 		facts = append(facts, ledgerFactsFromDigest(digest)...)
+	}
+	// Close source-invalid records before applying rebuilt current facts. This
+	// ordering is deliberate: a corrected restatement closes the old validity
+	// window first, then opens a fresh record bound to the replacement anchor.
+	// Model silence alone cannot close anything because staleLedgerSourceFacts
+	// retains a record while any one of its exact anchors remains current.
+	if closures := contextApp.staleLedgerSourceFacts(seenKeys, now); len(closures) > 0 {
+		facts = append(closures, facts...)
 	}
 
 	decisions, throughDecisionID := contextApp.unconsumedDecisionEntriesForLedger(entityLedgerDecisionSweepCap)
@@ -1128,6 +1251,12 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 	passEntry, _, err := app.memory.appendAmbientEntry(meetingMemoryKindLedgerPass, durableTimestampID("ledger-pass", now), passText, metadata)
 	if err != nil {
 		return meetingMemoryEntry{}, err
+	}
+	if appended > 0 {
+		// Company state is a thin fold over canonical ledger events. Wake it as
+		// soon as the atomic event batch and pass cursor are durable rather than
+		// waiting for its 30-minute safety-floor tick.
+		app.nudgeAmbientAgent(companyDigestAgentName)
 	}
 
 	return passEntry, nil
@@ -1236,9 +1365,13 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 			continue
 		}
 		record, class := matchLedgerFact(fact, workingList())
+		reason := strings.TrimSpace(fact.Reason)
 		switch class {
 		case ledgerMatchStrong:
-			consolidateAgainst(fact, record, "deterministic match")
+			if reason == "" {
+				reason = "deterministic match"
+			}
+			consolidateAgainst(fact, record, reason)
 		case ledgerMatchAmbiguous:
 			if len(ambiguities) < entityLedgerAdjudicationPairCap {
 				ambiguities = append(ambiguities, ledgerAmbiguity{fact: fact, candidateID: record.ID})
@@ -1246,7 +1379,7 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 				addFact(fact, "adjudication overflow")
 			}
 		default:
-			addFact(fact, "")
+			addFact(fact, reason)
 		}
 	}
 

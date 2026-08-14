@@ -60,9 +60,10 @@ test('native stack registers every authenticated STRIDE product route', () => {
 
 test('deck preserves existing destinations and adds product entry points', () => {
   const deck = source('src', 'screens', 'DeckScreen.tsx');
-  for (const existing of ['Board', 'Files', 'AgentTeam', 'Alerts', 'Meetings', 'Memory', 'Intelligence', 'Settings']) {
+  for (const existing of ['Files', 'AgentTeam', 'Alerts', 'Meetings', 'Memory', 'Intelligence', 'Settings']) {
     assert.match(deck, new RegExp(`route: '${existing}'`));
   }
+	assert.doesNotMatch(deck, /route: 'Board', label: 'Board'/);
   for (const added of ['Profile', 'WorkRecord', 'NetworkPreview']) {
     assert.match(deck, new RegExp(`route: '${added}'`));
   }

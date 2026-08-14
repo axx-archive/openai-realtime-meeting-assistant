@@ -1,23 +1,19 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// Board draft flow (D4): Scout's board worker proposes cards as pending
-// drafts; a human accepts ("Add to board") or dismisses them from the Board
-// surface. Reads/writes are session-authed HTTP like the codex-proposal
-// actions — drafts are actionable from any signed-in tab, without joining
-// the call.
+// Historical Board draft records remain loadable for migration and audit.
+// The HTTP action route below is retired; these internal helpers exist only so
+// old persisted state can still be interpreted without destructive rewriting.
 
-// assistantBoardDraftActionHandler serves
-// POST /assistant/board/drafts/{cardId}/{accept|dismiss}
-// with the same origin + session guards as the proposal handler. Any
-// signed-in user may accept or dismiss a Scout draft.
+// assistantBoardDraftActionHandler keeps the legacy route fail-closed. Draft
+// records remain readable in historical storage, but they can no longer be
+// accepted into or dismissed from an active Board.
 func assistantBoardDraftActionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -36,44 +32,7 @@ func assistantBoardDraftActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "the board is unavailable")
 		return
 	}
-
-	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assistant/board/drafts/"), "/")
-	parts := strings.Split(suffix, "/")
-	if suffix == "" || len(parts) != 2 || parts[0] == "" || (parts[1] != "accept" && parts[1] != "dismiss") {
-		http.NotFound(w, r)
-		return
-	}
-	cardID := parts[0]
-	action := parts[1]
-
-	// Body is optional ({}); dismissals may carry a short reason for memory.
-	payload := struct {
-		Reason string `json:"reason"`
-	}{}
-	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload)
-	}
-
-	result, changed, err := kanbanApp.resolveBoardDraft(cardID, action, user.Name, payload.Reason)
-	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "unknown card_id") {
-			status = http.StatusNotFound
-		}
-		writeAuthError(w, status, err.Error())
-		return
-	}
-	if changed {
-		broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
-		broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
-		kanbanApp.refreshRealtimeBoardContext("board draft " + action)
-	}
-
-	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"action": action,
-		"card":   result["card"],
-	})
+	writeAuthError(w, http.StatusGone, ErrBoardRetired.Error())
 }
 
 // resolveBoardDraft applies an accept/dismiss to a Scout draft card and

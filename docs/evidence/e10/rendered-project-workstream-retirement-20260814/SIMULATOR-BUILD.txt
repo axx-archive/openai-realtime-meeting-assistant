@@ -1,0 +1,34 @@
+STRIDE local iOS Release-simulator build checkpoint
+Captured: 2026-08-14 America/Los_Angeles
+
+Scope
+- Local Release configuration for the iOS Simulator only.
+- No signing, archive, IPA, TestFlight upload, physical-device install, or production activation.
+- The build proves that the current dirty-tree native source compiles and that the compiled asset catalog contains the current light, dark, and tinted App Icons.
+
+Toolchain
+- Xcode 26.6 (17F113)
+- Scheme: Stride
+- Configuration: Release
+- Destination: iPhone 17 Pro simulator, iOS 26.5
+- Bundle identifier: xyz.thebonfire.app
+- Marketing version: 1.0.0
+- Local build number: 52
+
+Command
+xcodebuild -workspace mobile/ios/Stride.xcworkspace -scheme Stride -configuration Release -sdk iphonesimulator -destination id=EE7DD6DF-0F68-475B-B439-AF49BB80CCE3 -derivedDataPath /tmp/stride-e10-simulator-build.LaRjee CODE_SIGNING_ALLOWED=NO build
+
+Result
+- ** BUILD SUCCEEDED **
+- App: /tmp/stride-e10-simulator-build.LaRjee/Build/Products/Release-iphonesimulator/Stride.app
+- Executable SHA-256: b01d186f425e9bf0e87ad2fa677828b08bb0ba3dad2d55a1ebb5ea256326cc2c
+- Compiled Assets.car SHA-256: 420a3a8043a1963543a0bd87228cb01c91b6c515e3e32b1f9a32fc5a69d8caeb
+- Build log SHA-256: 7c082341340ce494781300ade2b5d3b53037cd4f5237b567613f48d79f6c4a03
+
+App Icon source/catalog parity
+- Light source and native catalog: 729c00fafe50a48b6101db057de5795790361fec1c71dbf8053db2822ef16e4a
+- Dark source and native catalog: fd41b9de76117d869ab137def0f4fec7348c77ef0943610734e00d713e1d3993
+- Tinted source and native catalog: 19c3701993249e710366081b04942ede8a79de112f909f0f60a9fe998a9e88f9
+
+Interpretation
+This closes the local compiled-icon regression check. It does not prove what is installed on the founder's phone; that requires an exact signed build from the reviewed candidate and physical-device acceptance.

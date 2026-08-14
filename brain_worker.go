@@ -11,10 +11,15 @@ import (
 )
 
 const (
-	meetingBrainAgentName             = "meeting brain"
-	meetingBrainCursorMetadataKey     = "processedThroughTranscriptId"
-	meetingBrainCaptureMetadataKey    = "processedThroughCaptureSequence"
-	defaultMeetingBrainInterval       = 5 * time.Minute
+	meetingBrainAgentName          = "meeting brain"
+	meetingBrainCursorMetadataKey  = "processedThroughTranscriptId"
+	meetingBrainCaptureMetadataKey = "processedThroughCaptureSequence"
+	defaultMeetingBrainInterval    = 5 * time.Minute
+	// A short exchange must become current Meeting Record intelligence within
+	// the Priority-1 30-60 second normal window even when it never reaches the
+	// four-transcript immediate batch. The five-minute interval remains only a
+	// recovery sweep if a wake is lost.
+	defaultMeetingBrainNudgeMaxAge    = 60 * time.Second
 	defaultMeetingBrainMinTranscripts = 4
 	// defaultMeetingBrainMaxTranscripts (A7) is lowered from 80 so a single dense
 	// window can no longer outgrow the output budget and truncate the mandated
@@ -22,6 +27,10 @@ const (
 	// passes closer to real time, windows are smaller in practice anyway.
 	defaultMeetingBrainMaxTranscripts = 48
 	meetingBrainRequestTimeout        = 90 * time.Second
+	// Activation-only and default-off: admit the exact active sitting's
+	// already-finalized transcript suffix when restoring a previously disabled
+	// brain worker, without replaying older meetings.
+	meetingBrainCurrentMeetingBootstrapEnv = "MEETING_BRAIN_CURRENT_MEETING_BOOTSTRAP"
 	// meetingBrain output-budget scaling (A7): the base covers a small window;
 	// each additional transcript widens the budget so the reference section (the
 	// LAST section the model writes) survives, capped so a large backfill window
@@ -54,6 +63,7 @@ func meetingBrainAgent() ambientAgentConfig {
 		backfillEnv:     "MEETING_BRAIN_BACKFILL",
 		minBatchEnv:     "MEETING_BRAIN_MIN_TRANSCRIPTS",
 		defaultMinBatch: defaultMeetingBrainMinTranscripts,
+		nudgeMaxAge:     defaultMeetingBrainNudgeMaxAge,
 		maxBatchEnv:     "MEETING_BRAIN_MAX_TRANSCRIPTS",
 		defaultMaxBatch: defaultMeetingBrainMaxTranscripts,
 		inputKind:       meetingMemoryKindTranscript,
@@ -222,6 +232,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	app.nudgeAmbientAgentForRoom(decisionLedgerAgentName, roomID)
 	app.nudgeAmbientAgentForRoom(missionIntelAgentName, roomID)
 	app.nudgeAmbientAgentForRoom(narrativeMaintainerAgentName, roomID)
+	app.nudgeAmbientAgentForRoom(meetingDigestAgentName, roomID)
 
 	return entry, nil
 }

@@ -465,6 +465,9 @@ func authorizedArtifactForActions(ctx context.Context, user *userAccount, id str
 	if !found {
 		return meetingMemoryEntry{}, false
 	}
+	if !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
+		return meetingMemoryEntry{}, false
+	}
 	if artifactBodyReadProbe != nil {
 		artifactBodyReadProbe(header.ObjectID)
 	}
@@ -506,7 +509,13 @@ func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 		return false
 	}
 	for _, header := range artifactOwnersForBlob(ref) {
-		if artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
+		// The owner header identifies the exact historical revision that created
+		// this immutable blob. Requiring it to match the artifact's current
+		// revision would make every valid history entry unreadable after an edit.
+		// Authorize that historical header, then apply the Project-source
+		// freshness fence to the current artifact record that still owns it.
+		artifact, found := kanbanApp.osArtifactByID(header.ObjectID)
+		if found && artifactHeaderAuthorized(ctx, user, ACLReadContent, header) && kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
 			return true
 		}
 	}
@@ -608,6 +617,9 @@ func authorizedArtifactsSnapshot(ctx context.Context, user *userAccount, action 
 			artifactAuthorizationAfterCheckProbe()
 		}
 		if artifact, found := kanbanApp.memory.artifactSnapshotIfHeaderMatches(header.ObjectID, header); found {
+			if !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
+				continue
+			}
 			if artifactBodyReadProbe != nil {
 				artifactBodyReadProbe(header.ObjectID)
 			}

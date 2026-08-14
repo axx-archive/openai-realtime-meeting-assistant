@@ -73,6 +73,7 @@ test('Continue sends into the exact destination thread while arbitrary text open
 test('native Home separates bounded dictation from circular realtime voice and exact destinations', () => {
   assert.match(screen, /useComposerDictation\(\{/u);
   assert.match(screen, /accessibilityLabel="Dictate a message"/u);
+  assert.match(screen, /!dictationActive && realtime\.enabled \? \(/u);
   assert.match(screen, /Start a new private voice chat with Scout/u);
   assert.match(screen, /SymbolView name="waveform"/u);
   assert.doesNotMatch(screen, /<StrideCradle/u);
@@ -104,19 +105,19 @@ test('native Home expands truthful context and suggestions for accessibility tex
   assert.doesNotMatch(screen, /numberOfLines=\{2\} style=\{styles\.continuityDetail\}/u);
 });
 
-test('native Home exposes Project context as a zero-effect chooser consumed only by explicit Send', () => {
-  assert.match(screen, /Chooses an authorized project for this message\. Nothing is linked until Send\./u);
-  assert.match(screen, /accessibilityLabel=\{selectedProject \? `Project: \$\{selectedProject\.title\}\. Change project` : 'Add project'\}/u);
-  assert.match(screen, /projectContextToken = projectSessionToken === sessionToken && selectedProject\?\.text === text/u);
-  assert.match(screen, /visible=\{projectChooserOpen && projectSessionToken === sessionToken\}/u);
-  assert.match(screen, /generation !== projectRequestGenerationRef\.current[\s\S]*sessionTokenRef\.current !== sessionToken/u);
-  assert.match(types, /HomeProjectContextResponse/u);
+test('native Home leaves Project association to server-owned inference', () => {
+  assert.match(screen, /projectContextToken = explicitProjectAttachmentEnabled && projectSessionToken/u);
+  assert.match(screen, /visible=\{explicitProjectAttachmentEnabled && projectChooserOpen/u);
+  assert.match(screen, /if \(!explicitProjectAttachmentEnabled \|\| !sessionToken/u);
+  assert.doesNotMatch(screen, /Add project/u);
   assert.doesNotMatch(screen, /projectId\s*:/u);
 });
 
 test('native Home has no permanent voice-policy or legacy live-line copy', () => {
   assert.doesNotMatch(screen, /Voice is unavailable\. You can still message Scout\./u);
-  assert.match(screen, /const voiceNotice = realtime\.error/u);
+  assert.match(screen, /const voiceNotice = realtime\.error \|\| \(\(\) => \{/u);
+  assert.match(screen, /case 'connecting': return 'Connecting to Scout…'/u);
+  assert.match(screen, /case 'listening':[\s\S]*case 'hearing': return 'Scout is listening'/u);
   assert.match(screen, /styles\.homeCopyBlock/u);
   assert.doesNotMatch(screen, /styles\.liveLine|styles\.liveText|styles\.liveAuthor/u);
 });

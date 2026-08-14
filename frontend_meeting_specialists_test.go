@@ -15,6 +15,12 @@ func TestFrontendMeetingSpecialistsUsesRealControlRouteAndHonestDisclosure(t *te
 	for _, want := range []string{
 		`id="roomMoreSpecialists"`,
 		`id="roomScoutQuickAction"`,
+		`roomScoutVoiceAvailability = { enabled: false, reason: 'quality_gate_pending' }`,
+		`function roomVoiceAgentControlsAvailable()`,
+		`roomMoreSpecialistsButton.hidden = Boolean(guestMode) || !roomVoiceAgentControlsAvailable()`,
+		`void loadMeetingSpecialists()`,
+		`roomScoutQuickActionButton.hidden = Boolean(guestMode) || !roomScoutVoiceAvailability.enabled`,
+		`if (roomScoutVoiceAvailability.enabled) rows.push(`,
 		`id="meetingSpecialistsPanel"`,
 		`/api/rooms/agents/scout`,
 		`/api/stride/v1/meeting-specialists`,

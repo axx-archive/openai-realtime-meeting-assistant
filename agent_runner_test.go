@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,6 +53,11 @@ func appendTestTranscript(t *testing.T, app *kanbanBoardApp, id string, text str
 	} else if !appended {
 		t.Fatalf("transcript %s appended=false, want true", id)
 	}
+}
+
+func cannedArchiveMeetingDigestJSON(anchor string) string {
+	anchor = strings.TrimSpace(anchor)
+	return strings.ReplaceAll(strings.ReplaceAll(cannedMeetingDigestJSON(), `"tx-1"`, strconv.Quote(anchor)), `"tx-2"`, strconv.Quote(anchor))
 }
 
 func expireAmbientAgentBackoffForTest(app *kanbanBoardApp, key string) {
@@ -662,53 +668,11 @@ func TestAmbientHeldWindowSurvivesNamedRoomLazyBoot(t *testing.T) {
 	}
 }
 
-func TestCloseFlushRejectedBoardOutputOpensBoundedCircuit(t *testing.T) {
-	app := newIsolatedKanbanBoardApp(t)
-	app.mu.Lock()
-	app.apiKey = "test-key"
-	app.mu.Unlock()
+func TestCloseFlushChainRetiresMeetingBoardWorker(t *testing.T) {
 	for _, candidate := range closeFlushChain() {
-		if candidate.name != meetingBoardAgentName {
-			t.Setenv(candidate.disabledEnv, "true")
+		if candidate.name == meetingBoardAgentName {
+			t.Fatalf("retired Board worker remains in close flush chain: %+v", candidate)
 		}
-	}
-	t.Setenv(meetingBoardAgent().disabledEnv, "false")
-	if _, appended, err := app.memory.appendBrainWriteUp("close-board-held", "## Overview\nBoard work must survive malformed output.", map[string]string{"visibility": "organization"}); err != nil || !appended {
-		t.Fatalf("append brain: appended=%v err=%v", appended, err)
-	}
-
-	calls := 0
-	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.Seat != seatBoard {
-			t.Fatalf("unexpected close-flush seat %q", request.Seat)
-		}
-		calls++
-		return "not json", nil
-	}
-	agent := meetingBoardAgent()
-	key := ambientAgentKey(agent.name, officeRoomID)
-	for attempt := 0; attempt < ambientProviderMaxWindowAttempts; attempt++ {
-		app.flushAmbientAgentsForCloseWithResponder("archive-test", officeRoomID, false, responder)
-		expireAmbientAgentBackoffForTest(app, key)
-	}
-	app.flushAmbientAgentsForCloseWithResponder("archive-test", officeRoomID, false, responder)
-	if calls != ambientProviderMaxWindowAttempts {
-		t.Fatalf("close-flush wire calls=%d, want %d", calls, ambientProviderMaxWindowAttempts)
-	}
-	app.mu.Lock()
-	failure := app.agentFailures[key]
-	app.mu.Unlock()
-	if failure == nil || !failure.providerOpen {
-		t.Fatalf("close-flush board circuit=%+v, want open", failure)
-	}
-	if baseline := app.ambientAgentBaselineID(key); baseline == "close-board-held" {
-		t.Fatalf("close flush advanced held cursor to %q", baseline)
-	}
-	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
-		t.Fatalf("close flush dead-lettered malformed output: %+v", deadLetters)
-	}
-	if updates := app.memory.entriesOfKind(meetingMemoryKindBoardUpdate, 0); len(updates) != 0 {
-		t.Fatalf("close flush persisted malformed board update: %+v", updates)
 	}
 }
 
@@ -1441,7 +1405,7 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 		}
 		if strings.Contains(request.Instructions, "meeting digest compiler") {
 			calls = append(calls, "digest")
-			return cannedMeetingDigestJSON(), nil
+			return cannedArchiveMeetingDigestJSON("event-1"), nil
 		}
 		if strings.Contains(request.Instructions, "company digest narrator") {
 			calls = append(calls, "company")
@@ -1463,8 +1427,8 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	}
 	// the close chain in dependency order; the day fold and the entity-ledger
 	// consolidation are deterministic (no model call).
-	if strings.Join(calls, ",") != "brain,ledger,board,mission,narrative,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, narrative, meeting-digest, then company", calls)
+	if strings.Join(calls, ",") != "brain,ledger,mission,narrative,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, mission, narrative, meeting-digest, then company", calls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
 		t.Fatalf("downloadUrl=%q, want embedded room key", result.DownloadURL)
@@ -1486,8 +1450,8 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	for _, entry := range archive.Memory {
 		kinds[entry.Kind] = true
 	}
-	if !kinds[meetingMemoryKindBrain] || !kinds[meetingMemoryKindBoardUpdate] {
-		t.Fatalf("archive memory kinds=%v, want flushed brain and board_update artifacts in the snapshot", kinds)
+	if !kinds[meetingMemoryKindBrain] || kinds[meetingMemoryKindBoardUpdate] {
+		t.Fatalf("archive memory kinds=%v, want brain and no new retired board_update", kinds)
 	}
 }
 
@@ -1629,7 +1593,7 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 		}
 		if strings.Contains(request.Instructions, "meeting digest compiler") {
 			calls = append(calls, "digest")
-			return cannedMeetingDigestJSON(), nil
+			return cannedArchiveMeetingDigestJSON("fresh"), nil
 		}
 		if strings.Contains(request.Instructions, "entity-ledger adjudicator") {
 			t.Error("flush must not spend an adjudication call on all-new facts")
@@ -1659,8 +1623,8 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	// company narrative rides the ledger events the consolidation just landed.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if strings.Join(calls, ",") != "brain,ledger,board,mission,narrative,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, narrative, meeting-digest, then company for post-boot input", calls)
+	if strings.Join(calls, ",") != "brain,ledger,mission,narrative,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, mission, narrative, meeting-digest, then company for post-boot input", calls)
 	}
 	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
 		t.Fatal("archive flush did not fold a day digest")

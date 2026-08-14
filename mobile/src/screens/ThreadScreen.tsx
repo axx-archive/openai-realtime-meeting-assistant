@@ -44,6 +44,8 @@ import type {
   GiphySearchResult,
 	HomeProjectChoice,
   ProjectCorrectionProjection,
+	WorkstreamCorrectionProjection,
+	ScoutAnswerSource,
   ScoutFileAttachment,
   ScoutMessage,
   ThreadDigestResponse,
@@ -58,6 +60,11 @@ import { CatchUpSheet } from "../messaging/CatchUpSheet";
 import { MessageActionSheet } from "../messaging/MessageActionSheet";
 import { ProjectCorrectionSheet } from "../messaging/ProjectCorrectionSheet";
 import { rebindOpaqueProjectChoice } from "../messaging/projectChoice";
+import {
+	explicitProjectAttachmentEnabled,
+  safeProjectContextFromResponse,
+  shouldRequestMainThreadProjectContext,
+} from "../messaging/projectContextPreflight";
 import { LongMessageSheet } from "../messaging/LongMessageSheet";
 import { ThreadDetailSheet } from "../messaging/ThreadDetailSheet";
 import { MentionComposerInput } from "../messaging/MentionComposerInput";
@@ -144,6 +151,13 @@ type ProjectCorrectionTarget = {
   returnFocusHandle?: number;
 };
 
+type WorkstreamCorrectionTarget = {
+  artifactId: string;
+  messageId: string;
+  sessionToken: string;
+  returnFocusHandle?: number;
+};
+
 function workThreadIsActive(message: ScoutMessage): boolean {
   if (String(message.kind ?? "").toLowerCase() !== "thread" || !message.thread)
     return false;
@@ -210,7 +224,7 @@ type ThreadMessageRowProps = {
   regeneratingWork: boolean;
   workSaved: boolean;
   workDriveSaveAvailability: "checking" | "available" | "unavailable";
-  onOpenSource: (messageId: string) => void;
+  onOpenSource: (source: ScoutAnswerSource) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (
     message: ScoutMessage,
@@ -230,14 +244,15 @@ type ThreadMessageRowProps = {
   ) => void;
   onChangeProposalObjective: (message: ScoutMessage, objective: string) => void;
   onSaveWorkArtifact: (message: ScoutMessage) => void;
+  onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact: (message: ScoutMessage) => void;
   onSaveImage: (message: ScoutMessage) => void;
   onRegenerateImage: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onOpenThread: (message: ScoutMessage) => void;
-  onChangeProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
 };
 
 const ThreadMessageRow = React.memo(
@@ -264,14 +279,15 @@ const ThreadMessageRow = React.memo(
     onResolveProposal,
     onChangeProposalObjective,
     onSaveWorkArtifact,
+    onOpenSavedWorkArtifact,
     onRegenerateWorkArtifact,
     onSaveImage,
     onRegenerateImage,
     onOpenCatchUp,
     onOpenLongMessage,
     onOpenWorkArtifact,
+    onChangeWorkProject,
     onOpenThread,
-    onChangeProject,
   }: ThreadMessageRowProps) {
     return (
       <>
@@ -319,10 +335,9 @@ const ThreadMessageRow = React.memo(
           viewerEmail={viewerEmail}
           timestampReveal={timestampReveal}
           onOpenSource={onOpenSource}
-          onOpenReplySource={onOpenSource}
+		  onOpenReplySource={(messageId) => onOpenSource({ messageId, quote: '' })}
           threadReplies={item.threadReplies}
           onOpenThread={onOpenThread}
-          onChangeProject={onChangeProject}
           onOpenAttachment={onOpenAttachment}
           onLongPress={onLongPress}
           onToggleReaction={onToggleReaction}
@@ -331,12 +346,14 @@ const ThreadMessageRow = React.memo(
           proposalObjective={proposalObjective}
           onChangeProposalObjective={onChangeProposalObjective}
           onSaveWorkArtifact={onSaveWorkArtifact}
+          onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}
           onRegenerateWorkArtifact={onRegenerateWorkArtifact}
           onSaveImage={onSaveImage}
           onRegenerateImage={onRegenerateImage}
           resolvingProposal={resolvingProposal}
           onOpenLongMessage={onOpenLongMessage}
           onOpenWorkArtifact={onOpenWorkArtifact}
+          onChangeWorkProject={onChangeWorkProject}
           retryingReply={retryingReply}
           savingImage={savingImage}
           regeneratingImage={regeneratingImage}
@@ -372,14 +389,15 @@ const ThreadMessageRow = React.memo(
     previous.onResolveProposal === next.onResolveProposal &&
     previous.onChangeProposalObjective === next.onChangeProposalObjective &&
     previous.onSaveWorkArtifact === next.onSaveWorkArtifact &&
+    previous.onOpenSavedWorkArtifact === next.onOpenSavedWorkArtifact &&
     previous.onRegenerateWorkArtifact === next.onRegenerateWorkArtifact &&
     previous.onSaveImage === next.onSaveImage &&
     previous.onRegenerateImage === next.onRegenerateImage &&
     previous.onOpenCatchUp === next.onOpenCatchUp &&
     previous.onOpenLongMessage === next.onOpenLongMessage &&
     previous.onOpenWorkArtifact === next.onOpenWorkArtifact &&
-    previous.onOpenThread === next.onOpenThread &&
-    previous.onChangeProject === next.onChangeProject,
+    previous.onChangeWorkProject === next.onChangeWorkProject &&
+    previous.onOpenThread === next.onOpenThread,
 );
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
@@ -454,6 +472,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [projectCorrectionLoading, setProjectCorrectionLoading] = useState(false);
   const [projectCorrectionUpdating, setProjectCorrectionUpdating] = useState(false);
   const [projectCorrectionError, setProjectCorrectionError] = useState("");
+  const [workstreamCorrectionTarget, setWorkstreamCorrectionTarget] = useState<WorkstreamCorrectionTarget | null>(null);
+  const [workstreamCorrection, setWorkstreamCorrection] = useState<WorkstreamCorrectionProjection | null>(null);
+  const [workstreamCorrectionLoading, setWorkstreamCorrectionLoading] = useState(false);
+  const [workstreamCorrectionUpdating, setWorkstreamCorrectionUpdating] = useState(false);
+  const [workstreamCorrectionError, setWorkstreamCorrectionError] = useState("");
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(
     null,
   );
@@ -616,6 +639,12 @@ export function ThreadScreen({ route, navigation }: Props) {
     key: string;
     operationId: string;
   } | null>(null);
+  const workstreamCorrectionTargetRef = useRef<WorkstreamCorrectionTarget | null>(null);
+  const workstreamCorrectionGenerationRef = useRef(0);
+  const workstreamCorrectionAttemptRef = useRef<{
+    key: string;
+    operationId: string;
+  } | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -721,6 +750,14 @@ export function ThreadScreen({ route, navigation }: Props) {
     );
     if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
   }, []);
+
+	const openAnswerSource = useCallback((source: ScoutAnswerSource) => {
+		if (source.kind === 'meeting_transcript' && source.meetingId && source.segmentId) {
+			navigation.navigate('Meetings', { meetingId: source.meetingId, segmentId: source.segmentId });
+			return;
+		}
+		if (source.messageId) scrollToMessage(source.messageId);
+	}, [navigation, scrollToMessage]);
 
   const openThreadContext = useCallback((message: ScoutMessage) => {
     const root = replyTopologyRef.current.rootFor(message);
@@ -1098,6 +1135,17 @@ export function ThreadScreen({ route, navigation }: Props) {
 			setProjectChooserOpen(false);
 			return;
 		}
+		// Keep the ordinary Chat/Scout path native-module quiet. Project context is
+		// an optional accessory, so opening a channel must not automatically start
+		// its request/render cycle. The first explicit chooser press opens this
+		// gate; an already-selected Project keeps it open only long enough to
+		// refresh exact draft/source authority.
+		if (!shouldRequestMainThreadProjectContext({
+			sessionToken,
+			editingMessage: Boolean(editingMessage),
+			chooserOpen: projectChooserOpen,
+			hasSelectedProject: Boolean(selectedProject),
+		})) return;
 		const timer = setTimeout(() => {
 			void api.projectContext(sessionToken, {
 				text: draft.trim(),
@@ -1105,7 +1153,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 				attachmentHandles: projectAttachmentHandles,
 			}).then((response) => {
 				if (generation !== projectContextGenerationRef.current) return;
-				const next = response.projectContext;
+				const next = safeProjectContextFromResponse(response);
+				if (!next) throw new Error("Project context is unavailable.");
 				setProjectContext((current) => {
 					if (current.scopeKey && next.scopeKey && current.scopeKey !== next.scopeKey) {
 						setSelectedProject(null);
@@ -1126,7 +1175,7 @@ export function ThreadScreen({ route, navigation }: Props) {
 			});
 		}, 220);
 		return () => clearTimeout(timer);
-	}, [draft, editingMessage, projectAttachmentHandles, projectExplicitNone, projectSourceKey, route.params.threadId, sessionToken]);
+	}, [draft, editingMessage, projectAttachmentHandles, projectChooserOpen, projectExplicitNone, projectSourceKey, route.params.threadId, sessionToken]);
 
 	useEffect(() => {
 		setSelectedProject(null);
@@ -1140,6 +1189,14 @@ export function ThreadScreen({ route, navigation }: Props) {
 		setProjectCorrectionLoading(false);
 		setProjectCorrectionUpdating(false);
 		setProjectCorrectionError("");
+		workstreamCorrectionGenerationRef.current += 1;
+		workstreamCorrectionTargetRef.current = null;
+		workstreamCorrectionAttemptRef.current = null;
+		setWorkstreamCorrectionTarget(null);
+		setWorkstreamCorrection(null);
+		setWorkstreamCorrectionLoading(false);
+		setWorkstreamCorrectionUpdating(false);
+		setWorkstreamCorrectionError("");
 	}, [route.params.threadId, sessionToken]);
 
   const applyScoutActions = useCallback(
@@ -1154,7 +1211,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           navigation.navigate("Deck", { segment: "threads" });
         else if (["workflow", "research", "design", "grill"].includes(tool))
           navigation.navigate("Deck", { segment: "work" });
-        else if (tool === "board") navigation.navigate("Board");
+        else if (tool === "board") navigation.navigate("WorkHome");
         else if (tool === "artifacts" || tool === "files")
           navigation.navigate("Files");
         else if (tool === "memory") navigation.navigate("Memory");
@@ -1326,7 +1383,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   async function send(textOverride?: string) {
     const text = (textOverride ?? draft).trim();
     const messageFiles = textOverride === undefined ? pendingFiles : [];
-	const projectContextToken = !editingMessage && selectedProject?.text === text && selectedProject.threadId === route.params.threadId && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : "";
+	const projectContextToken = explicitProjectAttachmentEnabled && !editingMessage && selectedProject?.text === text && selectedProject.threadId === route.params.threadId && selectedProject.sourceKey === projectSourceKey ? selectedProject.token : "";
     if (
       !sessionToken ||
       (!text && messageFiles.length === 0) ||
@@ -1334,7 +1391,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       uploading
     )
       return;
-	if (!editingMessage && selectedProject?.token && !projectContextToken) {
+	if (explicitProjectAttachmentEnabled && !editingMessage && selectedProject?.token && !projectContextToken) {
 		setError("Project context is refreshing for these sources. Try Send again in a moment.");
 		return;
 	}
@@ -2286,6 +2343,87 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [applyTranscriptSnapshot, closeProjectCorrection, projectCorrection, projectCorrectionUpdating, route.params.threadId, sessionToken]);
 
+  const closeWorkstreamCorrection = useCallback(() => {
+    workstreamCorrectionGenerationRef.current += 1;
+    workstreamCorrectionTargetRef.current = null;
+    workstreamCorrectionAttemptRef.current = null;
+    setWorkstreamCorrectionTarget(null);
+    setWorkstreamCorrection(null);
+    setWorkstreamCorrectionLoading(false);
+    setWorkstreamCorrectionUpdating(false);
+    setWorkstreamCorrectionError("");
+  }, []);
+
+  const loadWorkstreamCorrection = useCallback(async (targetOverride?: WorkstreamCorrectionTarget) => {
+    const target = targetOverride ?? workstreamCorrectionTargetRef.current;
+    if (!target || !sessionToken || target.sessionToken !== sessionToken) return;
+    const generation = ++workstreamCorrectionGenerationRef.current;
+    setWorkstreamCorrectionLoading(true);
+    setWorkstreamCorrectionError("");
+    try {
+      const response = await api.workstreamCorrection(sessionToken, target.artifactId);
+      if (generation !== workstreamCorrectionGenerationRef.current || workstreamCorrectionTargetRef.current !== target) return;
+      if (!response.workstreamCorrection) throw new Error("The server did not return current Work choices.");
+      setWorkstreamCorrection(response.workstreamCorrection);
+    } catch (caught) {
+      if (generation !== workstreamCorrectionGenerationRef.current || workstreamCorrectionTargetRef.current !== target) return;
+      setWorkstreamCorrection(null);
+      setWorkstreamCorrectionError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : "Work choices could not be loaded.");
+    } finally {
+      if (generation === workstreamCorrectionGenerationRef.current && workstreamCorrectionTargetRef.current === target) setWorkstreamCorrectionLoading(false);
+    }
+  }, [sessionToken]);
+
+  const openWorkstreamCorrection = useCallback((message: ScoutMessage, returnFocusHandle?: number) => {
+    const artifactId = String(message.thread?.artifactId ?? message.work?.artifactId ?? "").trim();
+    if (!sessionToken || !artifactId) return;
+    const target: WorkstreamCorrectionTarget = { artifactId, messageId: String(message.id), sessionToken, returnFocusHandle };
+    workstreamCorrectionAttemptRef.current = null;
+    workstreamCorrectionTargetRef.current = target;
+    setWorkstreamCorrectionTarget(target);
+    setWorkstreamCorrection(null);
+    setWorkstreamCorrectionError("");
+    void loadWorkstreamCorrection(target);
+    void Haptics.selectionAsync();
+  }, [loadWorkstreamCorrection, sessionToken]);
+
+  const submitWorkstreamCorrection = useCallback(async (selection: { kind: "project" | "remove"; token: string; title: string }) => {
+    const target = workstreamCorrectionTargetRef.current;
+    const projection = workstreamCorrection;
+    if (!target || !projection || !sessionToken || target.sessionToken !== sessionToken || workstreamCorrectionUpdating) return;
+    const attemptKey = `${target.artifactId}:${projection.scopeKey}:${selection.token}`;
+    const attempt = workstreamCorrectionAttemptRef.current?.key === attemptKey
+      ? workstreamCorrectionAttemptRef.current
+      : { key: attemptKey, operationId: createConversationOperationId() };
+    workstreamCorrectionAttemptRef.current = attempt;
+    setWorkstreamCorrectionUpdating(true);
+    setWorkstreamCorrectionError("");
+    try {
+      const response = await api.updateWorkstreamCorrection(sessionToken, target.artifactId, {
+        operationId: attempt.operationId,
+        correctionToken: selection.token,
+      });
+      if (workstreamCorrectionTargetRef.current !== target) return;
+      const projectTitle = String(response.artifact?.metadata?.projectWorkTitle ?? (selection.kind === "project" ? selection.title : "")).trim();
+      const projectId = String(response.artifact?.metadata?.projectWorkId ?? "").trim();
+      setMessages((current) => current.map((message) => String(message.id) !== target.messageId || !message.thread
+        ? message
+        : { ...message, thread: { ...message.thread, projectId, projectTitle } }));
+      closeWorkstreamCorrection();
+      void load();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      if (workstreamCorrectionTargetRef.current !== target) return;
+      workstreamCorrectionAttemptRef.current = null;
+      setWorkstreamCorrectionError(caught instanceof BonfireApiError && caught.status === 409
+        ? "The Work changed. Review the current choice and try again."
+        : caught instanceof BonfireApiError ? caught.message : "The Work was not updated. Try again.");
+      if (caught instanceof BonfireApiError && caught.status === 409) void loadWorkstreamCorrection(target);
+    } finally {
+      if (workstreamCorrectionTargetRef.current === target) setWorkstreamCorrectionUpdating(false);
+    }
+  }, [closeWorkstreamCorrection, load, loadWorkstreamCorrection, sessionToken, workstreamCorrection, workstreamCorrectionUpdating]);
+
   const openMessageActions = useCallback(
     (
       message: ScoutMessage,
@@ -2430,6 +2568,18 @@ export function ThreadScreen({ route, navigation }: Props) {
       setWorkSaveTarget(message);
     },
     [workDriveSaveAvailability],
+  );
+
+  const openSavedWorkArtifact = useCallback(
+    (message: ScoutMessage) => {
+      const fileId = String(message.thread?.artifactId ?? "").trim();
+      if (!fileId) {
+        setError("That saved Drive file is unavailable.");
+        return;
+      }
+      navigation.navigate("Files", { fileId });
+    },
+    [navigation],
   );
 
   const beginSaveChatAttachment = useCallback(() => {
@@ -2625,7 +2775,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         regeneratingWork={regeneratingWorkID === String(item.message.id)}
         workSaved={savedWorkIDs.has(String(item.message.id))}
         workDriveSaveAvailability={workDriveSaveAvailability}
-        onOpenSource={scrollToMessage}
+		onOpenSource={openAnswerSource}
         onOpenAttachment={openAttachment}
         onLongPress={openMessageActions}
         onToggleReaction={toggleReaction}
@@ -2633,14 +2783,15 @@ export function ThreadScreen({ route, navigation }: Props) {
         onResolveProposal={resolveProposal}
         onChangeProposalObjective={changeProposalObjective}
         onSaveWorkArtifact={beginSaveWorkArtifact}
+        onOpenSavedWorkArtifact={openSavedWorkArtifact}
         onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
         onSaveImage={saveGeneratedImage}
         onRegenerateImage={regenerateGeneratedImage}
         onOpenCatchUp={openCatchUp}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onChangeWorkProject={openWorkstreamCorrection}
         onOpenThread={openThreadContext}
-        onChangeProject={openProjectCorrection}
       />
     ),
     [
@@ -2648,13 +2799,15 @@ export function ThreadScreen({ route, navigation }: Props) {
       beginRegenerateWorkArtifact,
       beginSaveWorkArtifact,
       changeProposalObjective,
-      openAttachment,
+	  openAnswerSource,
+	  openAttachment,
       openCatchUp,
       openMessageActions,
       openLongMessage,
       openWorkArtifact,
+      openWorkstreamCorrection,
+      openSavedWorkArtifact,
       openThreadContext,
-      openProjectCorrection,
       regenerateGeneratedImage,
       regeneratingImageID,
       regeneratingWorkID,
@@ -2720,12 +2873,6 @@ export function ThreadScreen({ route, navigation }: Props) {
       onDelete={() => {
         if (actionMessage) confirmDelete(actionMessage.message);
       }}
-      onChangeProject={
-        actionMessage?.own && actionMessage.message.project && actionMessage.message.project.status !== "removed"
-          ? () => openProjectCorrection(actionMessage.message)
-          : undefined
-      }
-      projectChangePending={actionMessage?.message.project?.status === "pending"}
     />
   );
   const renderProjectCorrectionSheet = (contained = false) => (
@@ -2740,6 +2887,21 @@ export function ThreadScreen({ route, navigation }: Props) {
       onClose={closeProjectCorrection}
       onReload={() => { void loadProjectCorrection(); }}
       onSubmit={(selection) => { void submitProjectCorrection(selection); }}
+    />
+  );
+  const renderWorkstreamCorrectionSheet = (contained = false) => (
+    <ProjectCorrectionSheet
+      visible={Boolean(workstreamCorrectionTarget)}
+      contained={contained}
+      subject="work"
+      projection={workstreamCorrection}
+      loading={workstreamCorrectionLoading}
+      updating={workstreamCorrectionUpdating}
+      error={workstreamCorrectionError}
+      returnFocusHandle={workstreamCorrectionTarget?.returnFocusHandle}
+      onClose={closeWorkstreamCorrection}
+      onReload={() => { void loadWorkstreamCorrection(); }}
+      onSubmit={(selection) => { void submitWorkstreamCorrection(selection); }}
     />
   );
   const renderLongMessageSheet = (contained = false) => (
@@ -2974,7 +3136,9 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onChangeWorkProject={openWorkstreamCorrection}
         onSaveWorkArtifact={beginSaveWorkArtifact}
+        onOpenSavedWorkArtifact={openSavedWorkArtifact}
         onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
         savingWorkID={savingWorkID}
         regeneratingWorkID={regeneratingWorkID}
@@ -2985,6 +3149,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             {renderLongMessageSheet(true)}
             {renderMessageActionSheet(true)}
             {renderProjectCorrectionSheet(true)}
+            {renderWorkstreamCorrectionSheet(true)}
           </>
         }
       />
@@ -3073,6 +3238,7 @@ export function ThreadScreen({ route, navigation }: Props) {
 
       {threadContextRoot ? null : renderMessageActionSheet()}
       {threadContextRoot ? null : renderProjectCorrectionSheet()}
+      {threadContextRoot ? null : renderWorkstreamCorrectionSheet()}
 
       <KeyboardAvoidingView
         style={styles.fill}
@@ -3394,19 +3560,6 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-		{!editingMessage && projectContext.available ? (
-		  <Pressable
-			accessibilityRole="button"
-			accessibilityLabel={selectedProject ? `Project: ${selectedProject.title}. Change project` : projectExplicitNone ? "No project. Change project" : "Add project"}
-			accessibilityHint="Opens the authorized Project chooser. Nothing changes until you send."
-			onPress={() => setProjectChooserOpen(true)}
-			style={({ pressed }) => [styles.projectChip, pressed && styles.headerActionPressed]}
-		  >
-			<SymbolView name="link" size={14} tintColor={colors.text2} />
-			<Text numberOfLines={1} maxFontSizeMultiplier={1.8} style={styles.projectChipText}>{selectedProject ? `${selectedProject.suggested ? "Suggested" : "Project"} · ${selectedProject.title}` : projectExplicitNone ? "No project" : "Add project"}</Text>
-		  </Pressable>
-		) : null}
-
 		{!editingMessage ? (
           <Glass radius={radius.xl} style={styles.composer}>
             {pendingFiles.length > 0 || stagingFiles.length > 0 || uploading ? (
@@ -3614,7 +3767,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             </View>
           </Glass>
         ) : null}
-		<Modal animationType="slide" presentationStyle="pageSheet" visible={projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
+		<Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectContext.available} onRequestClose={() => setProjectChooserOpen(false)}>
 		  <SafeAreaView style={styles.projectSheet}>
 			<View style={styles.projectSheetHeader}>
 			  <Text accessibilityRole="header" style={styles.projectSheetTitle}>Choose a project</Text>

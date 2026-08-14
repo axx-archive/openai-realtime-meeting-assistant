@@ -26,12 +26,13 @@ const (
 )
 
 var (
-	ErrAmbientReplayInvalid       = errors.New("ambient intelligence replay request is invalid")
-	ErrAmbientReplayUnauthorized  = errors.New("ambient intelligence replay is not authorized")
-	ErrAmbientReplayUnavailable   = errors.New("ambient intelligence replay dependency is unavailable")
-	ErrAmbientReplayDrift         = errors.New("ambient intelligence replay authority or source drifted")
-	ErrAmbientReplayCeiling       = errors.New("ambient intelligence replay ceiling exceeded")
-	ErrAmbientReplayAlreadyActive = errors.New("ambient intelligence replay already active for sitting")
+	ErrAmbientReplayInvalid          = errors.New("ambient intelligence replay request is invalid")
+	ErrAmbientReplayUnauthorized     = errors.New("ambient intelligence replay is not authorized")
+	ErrAmbientReplayUnavailable      = errors.New("ambient intelligence replay dependency is unavailable")
+	ErrAmbientReplayDrift            = errors.New("ambient intelligence replay authority or source drifted")
+	ErrAmbientReplayCeiling          = errors.New("ambient intelligence replay ceiling exceeded")
+	ErrAmbientReplayAlreadyActive    = errors.New("ambient intelligence replay already active for sitting")
+	ErrAmbientReplayPromotionPending = errors.New("ambient intelligence replay promotion is durably pending")
 )
 
 type AmbientReplayStageSpec struct {
@@ -151,6 +152,40 @@ type AmbientReplayStageRunner interface {
 	RunAmbientReplayStage(context.Context, AmbientReplayManifest, AmbientReplayStageSpec, []AmbientReplayArtifact) (AmbientReplayStageResult, error)
 }
 
+// AmbientReplayPromoter is the explicit boundary between validated shadow
+// execution and current product truth. A production implementation must be
+// receipt-first and idempotent across restart/response loss; the replay engine
+// never treats completed model stages alone as a repaired Meeting Record.
+type AmbientReplayPromoter interface {
+	PromoteAmbientReplay(context.Context, AmbientReplayManifest, string, []AmbientReplayArtifact) error
+}
+
+// AmbientReplayRecoveryPromoter completes receipt-backed promotions before a
+// generic expired-lease sweep can classify their already-committed truth as a
+// failed model attempt.
+type AmbientReplayRecoveryPromoter interface {
+	RecoverAmbientReplayPromotions(context.Context) error
+}
+
+type AmbientReplayPromotionReceipt struct {
+	ManifestDigest                 string
+	ExecutionID                    string
+	TenantID                       string
+	RoomID                         string
+	SittingID                      string
+	SourceManifestDigest           string
+	MeetingDigestStageOutputDigest string
+	CanonicalMeetingDigestBodyHash string
+	ApprovalReference              string
+	RollbackFloor                  string
+	ReleaseCommit                  string
+	RecordedAt                     time.Time
+}
+
+type AmbientReplayPromotionReceiptStore interface {
+	CommitAmbientReplayPromotionReceipt(context.Context, AmbientReplayPromotionReceipt) (bool, error)
+}
+
 type AmbientReplayStageReceipt struct {
 	ManifestDigest string             `json:"manifestDigest"`
 	ExecutionID    string             `json:"executionId"`
@@ -188,6 +223,7 @@ type AmbientReplayEngine struct {
 	Authority AmbientReplayAuthority
 	Store     AmbientReplayStore
 	Runner    AmbientReplayStageRunner
+	Promoter  AmbientReplayPromoter
 	Now       func() time.Time
 	NewID     func() string
 	mu        sync.Mutex
@@ -414,6 +450,11 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 	}
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
+	if recovery, ok := engine.Promoter.(AmbientReplayRecoveryPromoter); ok {
+		if err := recovery.RecoverAmbientReplayPromotions(ctx); err != nil {
+			return AmbientReplayExecution{}, err
+		}
+	}
 	if _, err := engine.Store.ReclaimExpired(ctx, engine.now()); err != nil {
 		return AmbientReplayExecution{}, err
 	}
@@ -464,6 +505,7 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 	}
 	execution := AmbientReplayExecution{ExecutionID: executionID, Manifest: manifest, Status: "running"}
 	input := make([]AmbientReplayArtifact, 0, len(manifest.Sources))
+	promotionArtifacts := make([]AmbientReplayArtifact, 0, len(manifest.Stages))
 	for _, source := range manifest.Sources {
 		input = append(input, AmbientReplayArtifact{ID: source.ObjectID, Kind: "transcript", Digest: source.ContentDigest, SourceManifestDigest: manifest.SourceManifestDigest, ManifestDigest: manifest.Digest})
 	}
@@ -527,7 +569,19 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 			return execution, err
 		}
 		execution.Receipts = append(execution.Receipts, completed)
+		promotionArtifacts = append(promotionArtifacts, result.Artifacts...)
 		input = append([]AmbientReplayArtifact(nil), result.Artifacts...)
+	}
+	if engine.Promoter != nil {
+		if err := engine.Authority.Revalidate(ctx, manifest); err != nil {
+			return execution, engine.fail(ctx, &execution, "promotion", fmt.Errorf("%w: %v", ErrAmbientReplayDrift, err))
+		}
+		if err := engine.Promoter.PromoteAmbientReplay(ctx, manifest, executionID, append([]AmbientReplayArtifact(nil), promotionArtifacts...)); err != nil {
+			if errors.Is(err, ErrAmbientReplayPromotionPending) {
+				return execution, err
+			}
+			return execution, engine.fail(ctx, &execution, "promotion", err)
+		}
 	}
 	if err := engine.Store.CompleteExecution(ctx, manifest.Digest, executionID, "completed", engine.now()); err != nil {
 		return execution, err

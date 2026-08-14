@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestConversationIntentContractAcceptsExactlyFiveExclusiveShapes(t *testing.T) {
@@ -115,6 +116,9 @@ func TestConversationIntentPrivateToolRequestStartsWithoutProposal(t *testing.T)
 	previousGoalStarter := startGoalThreadAsync
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
 	t.Cleanup(func() { startGoalThreadAsync = previousGoalStarter })
+	previousAgentStarter := startAgentThreadAsync
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousAgentStarter })
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Workflow != "scout_route" {
 			t.Fatalf("unexpected workflow %q", request.Workflow)
@@ -614,6 +618,479 @@ func TestPrivateRealtimeVoiceUsesSharedConversationContractAndReplays(t *testing
 	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", saved)
 	if projected.Messages[0].SourceOperationID != "" || projected.Messages[0].SourceOperationDigest != "" {
 		t.Fatalf("server-only replay binding leaked to viewer: %#v", projected.Messages[0])
+	}
+}
+
+func TestPrivateRealtimeVoiceRoutesTodaysMeetingsToAuthorizedBriefingWithoutClarifying(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Voice meeting recall", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().In(meetingTimeLocation())
+	spanStart := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+	spanEnd := spanStart.Add(45 * time.Minute)
+	digest := `{"meetingId":"meeting-today","title":"Launch review","day":"` + spanStart.Format("2006-01-02") + `",` +
+		`"topics":[{"t":"Launch readiness","importance":4}],` +
+		`"decisions":[{"d":"Keep the Friday launch with a rollback owner assigned","status":"decided","importance":5}],` +
+		`"openQuestions":[{"q":"Who verifies the rollback receipt?","importance":3}]}`
+	upsertBriefingTestDigest(t, app, "meeting-today", digest, spanStart.Format("2006-01-02"), spanStart.UTC().Format(time.RFC3339), spanEnd.UTC().Format(time.RFC3339))
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		t.Fatalf("meeting briefing reached generic provider workflow %q", request.Workflow)
+		return "", nil
+	})
+
+	utterance := "What, um, can you catch me up on the meetings that happened today, anything interesting come up?"
+	first, changed, err := app.applyPrivateRealtimeVoiceModelTool(context.Background(), "aj@shareability.com", "call_voice_meetings_today", "route_conversation_turn", map[string]any{"utterance": utterance})
+	if err != nil || changed {
+		t.Fatalf("first=%v changed=%v err=%v", first, changed, err)
+	}
+	message := asString(first["message"])
+	if first["outcome"] != string(conversationIntentConversationalReply) || !strings.Contains(message, "Keep the Friday launch") || !strings.Contains(message, "Launch review") {
+		t.Fatalf("briefing result=%v", first)
+	}
+	if providerCalls != 0 {
+		t.Fatalf("generic provider calls=%d, want 0", providerCalls)
+	}
+
+	replay, changed, err := app.applyPrivateRealtimeVoiceModelTool(context.Background(), "aj@shareability.com", "call_voice_meetings_today", "route_conversation_turn", map[string]any{"utterance": utterance})
+	if err != nil || changed || replay["message"] != first["message"] || providerCalls != 0 {
+		t.Fatalf("replay=%v changed=%v providerCalls=%d err=%v", replay, changed, providerCalls, err)
+	}
+	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil || len(saved.Messages) != 2 {
+		t.Fatalf("saved messages=%#v err=%v", saved.Messages, err)
+	}
+}
+
+func TestConversationMeetingBriefingIntentRequiresMeetingAndExactTimeRange(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+	for _, utterance := range []string{
+		"Catch me up on Aurora today",
+		"Catch me up on the meetings",
+		"Schedule a meeting today",
+		"What happened yesterday in the project thread?",
+	} {
+		if got, ok := conversationMeetingBriefingRange(utterance, now); ok {
+			t.Fatalf("utterance %q matched as %q", utterance, got)
+		}
+	}
+	if got, ok := conversationMeetingBriefingRange("Summarize yesterday's calls", now); !ok || got == "" {
+		t.Fatalf("explicit meeting range was not recognized: got=%q ok=%v", got, ok)
+	}
+}
+
+func seedMeetingAgentContextRecord(t *testing.T, app *kanbanBoardApp, meetingID, title, decision string, started time.Time) {
+	t.Helper()
+	app.meetings.startMeeting(officeRoomID, meetingID, started, []string{"AJ", "Tim"})
+	app.meetings.endMeeting(meetingID, started.Add(8*time.Minute), meetingEndedReasonIdle, "")
+	segment, _, err := app.memory.appendAttributedTranscriptWithMetadata(
+		meetingID+"-segment", meetingID+"-item", "AJ", "high", decision,
+		map[string]string{"meetingId": meetingID, "visibility": "organization", "roomId": officeRoomID},
+	)
+	if err != nil {
+		t.Fatalf("append %s transcript: %v", meetingID, err)
+	}
+	payload := meetingDigestPayload{
+		MeetingID: meetingID, Title: title, Day: dayBucket(started),
+		Decisions: []meetingDigestDecision{{D: decision, By: "AJ", Status: "decided", Anchor: segment.ID, Importance: 5}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal %s digest: %v", meetingID, err)
+	}
+	segments := meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID)
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, string(body), map[string]string{
+		"meetingId": meetingID, "visibility": "organization", digestCoverageMetadataKey: coverageLabelFull,
+		digestSpanStartMetadataKey:                    started.UTC().Format(time.RFC3339),
+		digestSpanEndMetadataKey:                      started.Add(8 * time.Minute).UTC().Format(time.RFC3339),
+		meetingRecordDigestSourceRevisionsMetadataKey: meetingRecordDigestSourceRevisionMetadata(payload, segments),
+	}); err != nil {
+		t.Fatalf("upsert %s digest: %v", meetingID, err)
+	}
+}
+
+func TestMeetingRangeContextBindsExactAuthorizedRecordsAndFailsClosedOnRevisionChange(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	started := now.Add(-40 * time.Minute)
+	if started.Before(dayStart) {
+		started = dayStart.Add(time.Minute)
+	}
+	seedMeetingAgentContextRecord(t, app, "meeting-agent-range-1", "Launch review", "Keep the Friday launch and assign a rollback owner.", started)
+	seedMeetingAgentContextRecord(t, app, "meeting-agent-range-2", "Partner review", "Advance the partner pilot with a two-week checkpoint.", started.Add(12*time.Minute))
+
+	aj := accountStore().findUser("aj@shareability.com")
+	if aj == nil {
+		t.Fatal("seeded AJ account missing")
+	}
+	principal := recallPrincipalForUser(aj)
+	ref, recognized, err := app.meetingRangeContextRefForPrincipal(context.Background(), principal, "Analyze today's meetings and prepare a report", now)
+	if err != nil || !recognized || ref == "" {
+		t.Fatalf("ref=%q recognized=%v err=%v", ref, recognized, err)
+	}
+	claims, ok := resolveMeetingRangeContextRef(ref)
+	if !ok || len(claims.Records) != 2 || claims.Records[0].MeetingID != "meeting-agent-range-1" || claims.Records[1].MeetingID != "meeting-agent-range-2" {
+		t.Fatalf("claims=%+v ok=%v, want two chronological exact records", claims, ok)
+	}
+	entry, readable := app.assistantContextEntryForRef(context.Background(), principal, ref)
+	if !readable || !strings.Contains(entry.Text, "Keep the Friday launch") || !strings.Contains(entry.Text, "Advance the partner pilot") || len(entry.Text) > meetingRangeContextTextCap {
+		t.Fatalf("entry readable=%v bytes=%d text=%s", readable, len(entry.Text), entry.Text)
+	}
+	tim := accountStore().findUser("tim@shareability.com")
+	if tim == nil {
+		t.Fatal("seeded Tim account missing")
+	}
+	if _, readable := app.assistantContextEntryForRef(context.Background(), recallPrincipalForUser(tim), ref); readable {
+		t.Fatal("another principal reused the owner-bound meeting range manifest")
+	}
+	dot := strings.LastIndex(ref, ".")
+	if dot < 0 || dot+1 >= len(ref) {
+		t.Fatalf("meeting range ref omitted signature: %q", ref)
+	}
+	replacement := byte('A')
+	if ref[dot+1] == replacement {
+		replacement = 'B'
+	}
+	tampered := ref[:dot+1] + string(replacement) + ref[dot+2:]
+	if _, readable := app.assistantContextEntryForRef(context.Background(), principal, tampered); readable {
+		t.Fatal("tampered meeting range manifest remained readable")
+	}
+
+	seedMeetingAgentContextRecord(t, app, "meeting-agent-range-2", "Partner review", "Do not advance the partner pilot yet.", started.Add(12*time.Minute))
+	if _, readable := app.assistantContextEntryForRef(context.Background(), principal, ref); readable {
+		t.Fatal("changed Meeting Record revision remained readable through the old manifest")
+	}
+}
+
+func TestMeetingRangeContextReportsStaleAnalysisGapAndFallsBackToCurrentTranscript(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().In(meetingTimeLocation())
+	started := now.Add(-20 * time.Minute)
+	if dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()); started.Before(dayStart) {
+		started = dayStart.Add(time.Minute)
+	}
+	seedMeetingAgentContextRecord(t, app, "meeting-analysis-gap", "Launch review", "Keep the launch on Friday.", started)
+	user := accountStore().findUser("aj@shareability.com")
+	principal := recallPrincipalForUser(user)
+	ref, recognized, err := app.meetingRangeContextRefForPrincipal(context.Background(), principal, "Analyze today's meetings", now)
+	if err != nil || !recognized || ref == "" {
+		t.Fatalf("ref=%q recognized=%v err=%v", ref, recognized, err)
+	}
+	claims, ok := resolveMeetingRangeContextRef(ref)
+	if !ok || len(claims.Records) != 1 {
+		t.Fatalf("claims=%+v ok=%v", claims, ok)
+	}
+	entries := app.memory.snapshotForMeeting("meeting-analysis-gap", 0)
+	segments := meetingRecordSegments(entries, "meeting-analysis-gap")
+	if len(segments) != 1 {
+		t.Fatalf("segments=%+v", segments)
+	}
+	if _, appended, appendErr := app.memory.appendAttributedTranscriptWithMetadata(
+		"meeting-analysis-gap-segment-v2", "meeting-analysis-gap-item-v2", "AJ", "high", "Move the launch to Monday.",
+		map[string]string{"meetingId": "meeting-analysis-gap", "visibility": "organization", "roomId": officeRoomID, "supersedesId": segments[0].ID},
+	); appendErr != nil || !appended {
+		t.Fatalf("append correction: appended=%v err=%v", appended, appendErr)
+	}
+	projection, readable := app.meetingRecordProjectionForPrincipal(context.Background(), principal, "meeting-analysis-gap")
+	if !readable || projection == nil {
+		t.Fatal("corrected meeting projection unavailable")
+	}
+	claims.Records[0].RecordRevision = projection.index.RecordRevision
+	ref, err = mintMeetingRangeContextRef(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, readable := app.assistantContextEntryForRef(context.Background(), principal, ref)
+	if !readable || !strings.Contains(entry.Text, "analysis_gap=1") || !strings.Contains(entry.Text, "Move the launch to Monday") || strings.Contains(entry.Text, "decision: Keep the launch on Friday") {
+		t.Fatalf("stale-analysis projection readable=%v text=%s", readable, entry.Text)
+	}
+}
+
+func TestPrivateAgentWorkCarriesMeetingRangeIntoCurrentSourceProviderContext(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-meeting-agent-context-test"
+	previousGoalStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousGoalStarter })
+	previousAgentStarter := startAgentThreadAsync
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousAgentStarter })
+	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	started := now.Add(-35 * time.Minute)
+	if started.Before(dayStart) {
+		started = dayStart.Add(time.Minute)
+	}
+	seedMeetingAgentContextRecord(t, app, "meeting-agent-work-1", "Customer launch", "Ship the customer launch on Friday.", started)
+	seedMeetingAgentContextRecord(t, app, "meeting-agent-work-2", "Operations review", "Assign Tim to verify the rollback receipt.", started.Add(12*time.Minute))
+
+	routerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("meeting-backed work reached unexpected workflow %q", request.Workflow)
+		}
+		routerCalls++
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "workstream", Mode: "research",
+			Objective: "Analyze today's meetings and prepare a report",
+		}), nil
+	})
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Meeting agent work", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	response, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Analyze today's meetings and prepare a report", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launched, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || launched.ID == "" {
+		t.Fatalf("response=%+v, want launched source-bound agent work", response)
+	}
+	refs := decodeAssistantContextRefs(launched.Artifact.Metadata["contextRefs"])
+	if len(refs) != 1 || !strings.HasPrefix(refs[0], meetingRangeContextRefPrefix+"|") {
+		t.Fatalf("contextRefs=%v, want one server-signed meeting range manifest", refs)
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), launched)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range providerContext.Memory {
+		if entry.Metadata["meetingRangeContext"] == "true" {
+			found = strings.Contains(entry.Text, "Ship the customer launch") && strings.Contains(entry.Text, "verify the rollback receipt")
+		}
+	}
+	if !found || routerCalls != 1 {
+		t.Fatalf("provider context omitted meeting range or routerCalls=%d: %+v", routerCalls, providerContext.Memory)
+	}
+}
+
+func TestTypedScoutInlineMeetingAnalysisUsesBoundedCurrentRecordContext(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-inline-meeting-context-test"
+	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	started := now.Add(-20 * time.Minute)
+	if started.Before(dayStart) {
+		started = dayStart.Add(time.Minute)
+	}
+	seedMeetingAgentContextRecord(t, app, "meeting-inline-analysis", "Launch risk review", "Keep a named rollback owner before Friday's launch.", started)
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		if request.Workflow != "scout_chat" || !strings.Contains(request.Input, "Exact authorized Meeting Record range") || !strings.Contains(request.Input, "named rollback owner") {
+			t.Fatalf("inline meeting analysis input=%q workflow=%q", request.Input, request.Workflow)
+		}
+		return "The key cross-meeting risk is that Friday's launch still needs a named rollback owner.", nil
+	})
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Inline meeting analysis", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := app.appendScoutChatThreadMessage(context.Background(), accountStore().findUser("aj@shareability.com"), thread.ID, "Analyze today's meetings for the biggest risk", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, _ := response["answer"].(scoutChatMessageRecord)
+	if providerCalls != 1 || !strings.Contains(answer.Text, "rollback owner") {
+		t.Fatalf("providerCalls=%d answer=%+v", providerCalls, answer)
+	}
+}
+
+func TestTypedPrivateScoutUsesSameAuthorizedMeetingBriefingAsVoice(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Typed meeting recall", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user missing")
+	}
+	now := time.Now().In(meetingTimeLocation())
+	digest := `{"meetingId":"typed-meeting-today","title":"Partner review","day":"` + now.Format("2006-01-02") + `",` +
+		`"decisions":[{"d":"Advance the partner pilot with a two-week checkpoint","status":"decided","importance":5}]}`
+	upsertBriefingTestDigest(t, app, "typed-meeting-today", digest, now.Format("2006-01-02"), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		t.Fatalf("typed meeting briefing reached generic provider workflow %q", request.Workflow)
+		return "", nil
+	})
+	response, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Catch me up on today's meetings", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, _ := response["answer"].(scoutChatMessageRecord)
+	if !strings.Contains(answer.Text, "Advance the partner pilot") || providerCalls != 0 {
+		t.Fatalf("answer=%#v providerCalls=%d", answer, providerCalls)
+	}
+}
+
+func TestMeetingBriefingParityAcrossTypedVoiceAndNamedAgent(t *testing.T) {
+	fixture := newSTRIDEProjectAuthorityFixture(t)
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := fixture.app
+	now := time.Now().In(meetingTimeLocation())
+	spanStart := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+	spanEnd := spanStart.Add(45 * time.Minute)
+	digest := `{"meetingId":"meeting-parity-today","title":"Launch parity review","day":"` + spanStart.Format("2006-01-02") + `",` +
+		`"decisions":[{"d":"Keep Friday's launch and assign one rollback owner","status":"decided","importance":5}],` +
+		`"openQuestions":[{"q":"Who verifies the rollback receipt?","importance":3}]}`
+	upsertBriefingTestDigest(t, app, "meeting-parity-today", digest, spanStart.Format("2006-01-02"), spanStart.UTC().Format(time.RFC3339), spanEnd.UTC().Format(time.RFC3339))
+
+	providerCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerCalls++
+		t.Fatalf("exact meeting briefing reached generic provider workflow %q", request.Workflow)
+		return "", nil
+	})
+
+	typedThread, err := app.createScoutChatThread(fixture.user.Email, fixture.user.Name, "Typed meeting parity", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceSessionID := "voice-meeting-parity"
+	voiceThread, _, err := app.ensurePrivateRealtimeVoiceConversation(fixture.user.Email, fixture.user.Name, voiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directThreadID := strideProductAgentDirectThreadPrefix + "colton_meeting_parity"
+	_ = hireResearchAgentForBridgeTest(t, fixture, "colton-research", directThreadID)
+	directThread, _, err := app.ensureScoutChatThread(directThreadID, fixture.user.Email, fixture.user.Name, "Colton · agent", scoutChatVisibilityPrivate, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	utterance := "Catch me up on today's meetings. What was important?"
+	typedResponse, err := app.appendScoutChatThreadMessage(context.Background(), fixture.user, typedThread.ID, utterance, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceResult, changed, err := app.applyPrivateRealtimeVoiceSessionModelTool(context.Background(), fixture.user.Email, voiceSessionID, voiceThread.ID, "meeting-parity-voice-call", "route_conversation_turn", map[string]any{"utterance": utterance})
+	if err != nil || changed {
+		t.Fatalf("voice result=%v changed=%v err=%v", voiceResult, changed, err)
+	}
+	directResponse, err := app.appendScoutChatThreadMessage(context.Background(), fixture.user, directThread.ID, utterance, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	typedAnswer, typedOK := typedResponse["answer"].(scoutChatMessageRecord)
+	directAnswer, directOK := directResponse["answer"].(scoutChatMessageRecord)
+	voiceAnswer := strings.TrimSpace(asString(voiceResult["message"]))
+	if !typedOK || !directOK || typedAnswer.Text == "" || typedAnswer.Text != voiceAnswer || directAnswer.Text != typedAnswer.Text {
+		t.Fatalf("briefing parity failed typed=%+v voice=%q direct=%+v", typedAnswer, voiceAnswer, directAnswer)
+	}
+	for _, required := range []string{"Launch parity review", "Keep Friday's launch", "Who verifies the rollback receipt?"} {
+		if !strings.Contains(typedAnswer.Text, required) {
+			t.Fatalf("shared briefing omitted %q: %s", required, typedAnswer.Text)
+		}
+	}
+	if typedAnswer.AuthorName != scoutParticipantName || directAnswer.AuthorName != "Colton" {
+		t.Fatalf("worker attribution typed=%q direct=%q", typedAnswer.AuthorName, directAnswer.AuthorName)
+	}
+	typedBriefing, typedBriefingOK := typedResponse["meetingBriefing"].(map[string]any)
+	directBriefing, directBriefingOK := directResponse["meetingBriefing"].(map[string]any)
+	if !typedBriefingOK || !directBriefingOK || typedBriefing["source"] != directBriefing["source"] || typedBriefing["coverage"] != directBriefing["coverage"] {
+		t.Fatalf("structured briefing parity typed=%v direct=%v", typedBriefing, directBriefing)
+	}
+	if providerCalls != 0 || voiceResult["outcome"] != string(conversationIntentConversationalReply) {
+		t.Fatalf("providerCalls=%d voice=%v", providerCalls, voiceResult)
+	}
+}
+
+func TestPrivateRealtimeVoiceFallsBackToAuthorizedTranscriptWhenDigestLags(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-meeting-map-test"
+	if _, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Voice transcript fallback", scoutChatVisibilityPrivate); err != nil {
+		t.Fatal(err)
+	}
+	appendTestTranscript(t, app, "voice-fallback-tx-1", "The team decided to keep Friday's customer launch and assigned AJ as rollback owner.")
+	appendTestTranscript(t, app, "voice-fallback-tx-2", "The open question is whether the partner checklist is complete.")
+
+	mapCalls := 0
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Instructions != meetingDigestInstructions() {
+			t.Fatalf("raw fallback reached unrelated workflow %q", request.Workflow)
+		}
+		mapCalls++
+		if !strings.Contains(request.Input, "Friday's customer launch") {
+			t.Fatalf("authorized transcript was absent from bounded map input: %s", request.Input)
+		}
+		return `{"meetingId":"ignored-model-id","title":"Customer launch review","day":"1999-01-01",` +
+			`"decisions":[{"d":"Keep Friday's customer launch","by":"attributed to AJ","status":"decided","importance":5}],` +
+			`"openQuestions":[{"q":"Is the partner checklist complete?","importance":3}]}`, nil
+	})
+
+	result, changed, err := app.applyPrivateRealtimeVoiceModelTool(context.Background(), "aj@shareability.com", "call_voice_transcript_fallback", "route_conversation_turn", map[string]any{
+		"utterance": "Catch me up on today's meetings. What was important?",
+	})
+	if err != nil || changed {
+		t.Fatalf("result=%v changed=%v err=%v", result, changed, err)
+	}
+	if message := asString(result["message"]); !strings.Contains(message, "Keep Friday's customer launch") || !strings.Contains(message, "Composed on demand") {
+		t.Fatalf("raw transcript briefing=%v", result)
+	}
+	if mapCalls != 1 {
+		t.Fatalf("map calls=%d, want exactly 1", mapCalls)
+	}
+
+	replay, changed, err := app.applyPrivateRealtimeVoiceModelTool(context.Background(), "aj@shareability.com", "call_voice_transcript_fallback", "route_conversation_turn", map[string]any{
+		"utterance": "Catch me up on today's meetings. What was important?",
+	})
+	if err != nil || changed || replay["message"] != result["message"] || mapCalls != 1 {
+		t.Fatalf("replay=%v changed=%v mapCalls=%d err=%v", replay, changed, mapCalls, err)
+	}
+}
+
+func TestPrincipalMeetingBriefingVisitsOnlyRequestedWindowDespiteLargeUnrelatedLedger(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().In(meetingTimeLocation())
+	app.memory.mu.Lock()
+	for index := 0; index < 1000; index++ {
+		app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
+			ID: fmt.Sprintf("unrelated-recall-%04d", index), Kind: meetingMemoryKindNote,
+			Text: "unrelated long-lived memory", CreatedAt: now.Add(-time.Duration(index+1) * time.Hour),
+			Metadata: map[string]string{"visibility": "organization"},
+		})
+	}
+	app.memory.rebuildMeetingEntryIndexesLocked()
+	app.memory.mu.Unlock()
+	digest := `{"meetingId":"bounded-briefing","title":"Daily operations","day":"` + now.Format(dayBucketLayout) + `",` +
+		`"decisions":[{"d":"Keep the rollout checkpoint on Friday","status":"decided","importance":5}]}`
+	upsertBriefingTestDigest(t, app, "bounded-briefing", digest, now.Format(dayBucketLayout), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+
+	visits := 0
+	app.memory.authorizationEntryVisitHook = func() { visits++ }
+	principal, ok := authenticatedRecallPrincipal("aj@shareability.com")
+	if !ok {
+		t.Fatal("missing authenticated principal")
+	}
+	result, changed, err := app.crossMeetingBriefingToolForPrincipal(map[string]any{"range": "today"}, principal)
+	if err != nil || changed || !strings.Contains(asString(result["briefing"]), "Keep the rollout checkpoint") {
+		t.Fatalf("result=%v changed=%v err=%v", result, changed, err)
+	}
+	if visits != 2 {
+		t.Fatalf("principal briefing inspected %d durable rows, want only the exact digest and its current source despite 1000 unrelated rows", visits)
 	}
 }
 

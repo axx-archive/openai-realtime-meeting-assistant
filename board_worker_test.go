@@ -231,6 +231,67 @@ func TestMeetingBoardWorkerToleratesAliasStatusAndMissingCardID(t *testing.T) {
 	}
 }
 
+func TestMeetingBoardWorkerPersistsOnlyExactCommitmentSourceLinks(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+	app := newKanbanBoardApp()
+	analysis := meetingBoardAnalysis{Operations: []meetingBoardOperation{
+		{Tool: "create_ticket", SourceAnchor: "segment-exact", Arguments: map[string]any{"title": "Exact linked follow-up", "notes": "Complete the exact follow-up.", "owner": "AJ", "tags": []any{"workflow"}, "status": "Backlog"}},
+		{Tool: "create_ticket", SourceAnchor: "segment-guessed", Arguments: map[string]any{"title": "Guessed follow-up", "notes": "This must not be created.", "owner": "AJ", "tags": []any{"workflow"}, "status": "Backlog"}},
+	}}
+	result := app.applyMeetingBoardAnalysisForRoomWithSources(analysis, officeRoomID, map[string]struct{}{"segment-exact": {}})
+	if result.ChangedCount != 1 || result.ErrorCount != 1 || !strings.Contains(result.Applications[1].Error, "exact transcript source") {
+		t.Fatalf("result=%+v, want one exact mutation and one rejected guessed anchor", result)
+	}
+	links := meetingBoardClaimCardLinks(result)
+	if len(links) != 1 || links[0].SegmentID != "segment-exact" || links[0].CardID == "" {
+		t.Fatalf("links=%+v, want one body-free exact segment-to-card edge", links)
+	}
+	for _, card := range app.snapshotState().Cards {
+		if card.Title == "Guessed follow-up" {
+			t.Fatal("guessed source mutation reached the Board")
+		}
+	}
+}
+
+func TestMeetingBoardClaimAnchorsUseOnlyCurrentMeetingSegments(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	app := newKanbanBoardApp()
+	meetingID := "meeting-current-anchors"
+	current, _, err := app.memory.appendAttributedTranscriptWithMetadata("segment-current", "item-current", "AJ", "high", "Current commitment", map[string]string{"meetingId": meetingID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, _, err := app.memory.appendAttributedTranscriptWithMetadata("segment-prior", "item-prior", "AJ", "high", "Old commitment", map[string]string{"meetingId": meetingID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, _, err := app.memory.appendAttributedTranscriptWithMetadata("segment-replacement", "item-replacement", "AJ", "high", "Corrected commitment", map[string]string{"meetingId": meetingID, "supersedesId": prior.ID, "correctionState": "corrected"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withdrawn, _, err := app.memory.appendAttributedTranscriptWithMetadata("segment-withdrawn", "item-withdrawn", "AJ", "high", "Withdrawn commitment", map[string]string{"meetingId": meetingID, "correctionState": "withdrawn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, _, err := app.memory.appendAttributedTranscriptWithMetadata("segment-foreign", "item-foreign", "AJ", "high", "Other meeting", map[string]string{"meetingId": "meeting-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := app.currentMeetingRecordTranscriptIDs(meetingID)
+	if _, ok := ids[current.ID]; !ok {
+		t.Fatal("current source missing")
+	}
+	if _, ok := ids[replacement.ID]; !ok {
+		t.Fatal("corrected replacement source missing")
+	}
+	for _, rejected := range []string{prior.ID, withdrawn.ID, foreign.ID} {
+		if _, ok := ids[rejected]; ok {
+			t.Fatalf("noncurrent/foreign source %s admitted", rejected)
+		}
+	}
+}
+
 func TestMeetingBoardInstructionsEnumerateColumnsAndDraftFlag(t *testing.T) {
 	instructions := meetingBoardInstructions()
 	for _, want := range []string{"Backlog, In Progress, Blocked, Done", "NOT a status", "card_id"} {

@@ -24,20 +24,22 @@ type meetingBoardAnalysis struct {
 }
 
 type meetingBoardOperation struct {
-	Tool      string         `json:"tool,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	ToolName  string         `json:"tool_name,omitempty"`
-	Reason    string         `json:"reason,omitempty"`
-	Arguments map[string]any `json:"arguments,omitempty"`
-	Args      map[string]any `json:"args,omitempty"`
+	Tool         string         `json:"tool,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	ToolName     string         `json:"tool_name,omitempty"`
+	Reason       string         `json:"reason,omitempty"`
+	SourceAnchor string         `json:"source_anchor,omitempty"`
+	Arguments    map[string]any `json:"arguments,omitempty"`
+	Args         map[string]any `json:"args,omitempty"`
 }
 
 type meetingBoardOperationApplication struct {
-	Tool    string         `json:"tool"`
-	Reason  string         `json:"reason,omitempty"`
-	Changed bool           `json:"changed"`
-	Error   string         `json:"error,omitempty"`
-	Result  map[string]any `json:"result,omitempty"`
+	Tool         string         `json:"tool"`
+	Reason       string         `json:"reason,omitempty"`
+	SourceAnchor string         `json:"sourceAnchor,omitempty"`
+	Changed      bool           `json:"changed"`
+	Error        string         `json:"error,omitempty"`
+	Result       map[string]any `json:"result,omitempty"`
 }
 
 type meetingBoardRunResult struct {
@@ -69,7 +71,8 @@ func meetingBoardAgent() ambientAgentConfig {
 }
 
 func (app *kanbanBoardApp) startMeetingBoardWorker(apiKey string) {
-	app.startAmbientAgent(meetingBoardAgent(), apiKey)
+	// Historical board updates remain readable and replayable, but new meeting
+	// intelligence folds into Meeting Records and Work rather than Kanban.
 }
 
 func (app *kanbanBoardApp) runMeetingBoardOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
@@ -145,7 +148,9 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		recordEvalEvent(seatBoard, evalKindParseFailure, map[string]any{"seat": seatBoard, "model": model})
 		return meetingMemoryEntry{}, &ambientOutputRejection{agent: meetingBoardAgentName, reason: "invalid_structured_output"}
 	}
-	runResult := app.applyMeetingBoardAnalysisForRoom(analysis, roomID)
+	meetingID := strings.TrimSpace(windowLast.Metadata["meetingId"])
+	allowedTranscriptIDs := app.currentMeetingRecordTranscriptIDs(meetingID)
+	runResult := app.applyMeetingBoardAnalysisForRoomWithSources(analysis, roomID, allowedTranscriptIDs)
 
 	firstSummary := summaries[0]
 	lastSummary := summaries[len(summaries)-1]
@@ -206,6 +211,11 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	if cardIDs := meetingBoardChangedCardIDs(runResult); len(cardIDs) > 0 {
 		metadata["cardIds"] = strings.Join(cardIDs, ",")
 	}
+	if claimLinks := meetingBoardClaimCardLinks(runResult); len(claimLinks) > 0 {
+		if encoded, encodeErr := json.Marshal(claimLinks); encodeErr == nil {
+			metadata["claimCardLinks"] = string(encoded)
+		}
+	}
 
 	// A2 write-back resilience: a pass that changed nothing but errored on every
 	// op dropped real commitments the old code still cursored past (the "created
@@ -243,6 +253,17 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	return entry, nil
 }
 
+func (app *kanbanBoardApp) currentMeetingRecordTranscriptIDs(meetingID string) map[string]struct{} {
+	ids := map[string]struct{}{}
+	if app == nil || app.memory == nil || strings.TrimSpace(meetingID) == "" {
+		return ids
+	}
+	for _, segment := range meetingRecordSegments(app.memory.snapshotForMeeting(meetingID, 0), meetingID) {
+		ids[segment.ID] = struct{}{}
+	}
+	return ids
+}
+
 func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalysis) meetingBoardRunResult {
 	return app.applyMeetingBoardAnalysisForRoom(analysis, officeRoomID)
 }
@@ -254,6 +275,10 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 // error rail — belt and suspenders under the window filter, so a mis-filtered
 // window still cannot touch the board or mint a proposal.
 func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoom(analysis meetingBoardAnalysis, roomID string) meetingBoardRunResult {
+	return app.applyMeetingBoardAnalysisForRoomWithSources(analysis, roomID, nil)
+}
+
+func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoomWithSources(analysis meetingBoardAnalysis, roomID string, allowedTranscriptIDs map[string]struct{}) meetingBoardRunResult {
 	roomID = normalizeRoomID(roomID)
 	listenOnlySource := app.sittingListenOnly(roomID)
 	result := meetingBoardRunResult{
@@ -269,8 +294,17 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoom(analysis meetingBoar
 	for _, operation := range operations {
 		toolName := normalizeMeetingBoardToolName(operation)
 		application := meetingBoardOperationApplication{
-			Tool:   toolName,
-			Reason: canonicalizeBoardText(operation.Reason),
+			Tool:         toolName,
+			Reason:       canonicalizeBoardText(operation.Reason),
+			SourceAnchor: strings.TrimSpace(operation.SourceAnchor),
+		}
+		if application.SourceAnchor != "" && allowedTranscriptIDs != nil {
+			if _, allowed := allowedTranscriptIDs[application.SourceAnchor]; !allowed {
+				application.Error = "source_anchor is not an exact transcript source in this meeting"
+				result.ErrorCount++
+				result.Applications = append(result.Applications, application)
+				continue
+			}
 		}
 		if toolName == "" {
 			application.Error = "operation tool is required"
@@ -324,7 +358,11 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoom(analysis meetingBoar
 			retainNamedBusinessOwner(args)
 		}
 
-		toolResult, changed, err := app.applyToolCallArgs(toolName, args)
+		// Production no longer starts this worker. The legacy executor remains
+		// available only for historical update verification and migration tests;
+		// live model and client dispatch use applyToolCallArgs and reject Board
+		// writes.
+		toolResult, changed, err := app.applyRetiredMeetingBoardToolCallArgs(toolName, args)
 		application.Changed = changed
 		application.Result = toolResult
 		if err != nil {
@@ -338,6 +376,53 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoom(analysis meetingBoar
 	}
 
 	return result
+}
+
+func (app *kanbanBoardApp) applyRetiredMeetingBoardToolCallArgs(toolName string, args map[string]any) (map[string]any, bool, error) {
+	switch toolName {
+	case "create_ticket":
+		return app.createTicket(args)
+	case "move_ticket":
+		return app.moveTicket(args)
+	case "add_tags":
+		return app.addTags(args)
+	case "add_key_date":
+		return app.addKeyDate(args)
+	case "remove_key_dates":
+		return app.removeKeyDates(args)
+	case "update_ticket":
+		return app.updateTicket(args)
+	case "delete_ticket":
+		return app.deleteTicket(args)
+	case "undo_delete_ticket":
+		return app.restoreLastDeletedTicket()
+	default:
+		return app.applyToolCallArgs(toolName, args)
+	}
+}
+
+type meetingBoardClaimCardLink struct {
+	SegmentID string `json:"segmentId"`
+	CardID    string `json:"cardId"`
+}
+
+func meetingBoardClaimCardLinks(result meetingBoardRunResult) []meetingBoardClaimCardLink {
+	seen := map[string]struct{}{}
+	links := []meetingBoardClaimCardLink{}
+	for _, application := range result.Applications {
+		segmentID := strings.TrimSpace(application.SourceAnchor)
+		cardID := strings.TrimSpace(meetingBoardApplicationTarget(application))
+		if !application.Changed || application.Error != "" || segmentID == "" || cardID == "" {
+			continue
+		}
+		key := segmentID + "\x00" + cardID
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		links = append(links, meetingBoardClaimCardLink{SegmentID: segmentID, CardID: cardID})
+	}
+	return links
 }
 
 // shouldRetryBoardWindow reports whether a total-failure board pass (nothing
@@ -467,6 +552,7 @@ func meetingBoardInstructions() string {
 		"Tag every card you create with exactly one category tag — build, fix, workflow, or business — plus topical tags.",
 		"The board has exactly four status columns and status must be one of them, spelled exactly: Backlog, In Progress, Blocked, Done. \"Draft\" is NOT a status — draft is a boolean flag applied automatically to every card you create, so never send Draft, To Do, or Todo as a status; new work belongs in Backlog.",
 		"When updating, moving, or tagging an existing card, pass its card_id exactly as it appears in the board snapshot.",
+		"For every operation grounded in one commitment, decision, or follow-up, set source_anchor to the single transcript id copied verbatim from that fact's Transcript reference. Leave source_anchor empty when no exact transcript id supports the operation; never guess one.",
 		"Required arguments per tool — an operation missing them is dropped: create_ticket needs title, notes, owner, tags, and status; update_ticket, move_ticket, add_tags, and add_key_date each need the target card_id (or, if you lack the id, the card's exact title so it can be resolved) — move_ticket also needs status, add_tags also needs tags, add_key_date also needs label and date; propose_codex_task needs title, mode, and query; do_nothing needs reason.",
 		"The board exists for work that gets BUILT, FIXED, or run as a WORKFLOW (research, decks, design).",
 		"Business cards are never cut silently: they require a named owner and notes stating the concrete next step, and they always stay drafts for human accept/dismiss — that review is the debate.",

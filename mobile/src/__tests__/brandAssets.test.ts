@@ -247,6 +247,38 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   // being generated even though iOS no longer reads them.
   assert.ok(read('assets/ios-icon-dark.png').length > 0);
   assert.ok(read('assets/ios-icon-tinted.png').length > 0);
+  // This repository checks in ios/, so the signed native build compiles the
+  // Xcode AppIcon catalog rather than relying on Expo prebuild to regenerate
+  // it. A prior build could therefore regress even while the Expo sources were
+  // correct. Pin all three compiled renditions to the canonical brand bytes.
+  const nativeCatalog = JSON.parse(
+    text('ios/Stride/Images.xcassets/AppIcon.appiconset/Contents.json'),
+  );
+  assert.deepEqual(
+    nativeCatalog.images.map((image: { filename?: string }) => image.filename),
+    [
+      'App-Icon-1024x1024@1x.png',
+      'App-Icon-dark-1024x1024@1x.png',
+      'App-Icon-tinted-1024x1024@1x.png',
+    ],
+  );
+  assert.equal(
+    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png')),
+    sha256(read('assets/icon.png')),
+    'the compiled light app icon must match the canonical light source',
+  );
+  assert.equal(
+    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-dark-1024x1024@1x.png')),
+    sha256(read('assets/ios-icon-dark.png')),
+    'the compiled dark app icon must match the canonical dark source',
+  );
+  assert.equal(
+    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-tinted-1024x1024@1x.png')),
+    sha256(read('assets/ios-icon-tinted.png')),
+    'the compiled tinted app icon must match the canonical tinted source',
+  );
+  const nativeProject = text('ios/Stride.xcodeproj/project.pbxproj');
+  assert.match(nativeProject, /ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/);
   assert.match(config, /imageWidth: 313/);
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
 });

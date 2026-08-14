@@ -209,6 +209,130 @@ func TestHomeChiefOfStaffRecommendationsSynthesizeOnlyViewerAuthorizedThreads(t 
 	}
 }
 
+func TestHomeConversationCompactionIsBodyMinimizedFreshAndFailClosed(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	thread := scoutChatThreadRecord{
+		ID: "customer-risk", Title: "Customer renewal", OwnerEmail: artifactLibraryAdminEmail,
+		Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		Messages: []scoutChatMessageRecord{{ID: "message-1", Role: "user", Text: "The onboarding risk needs an owner before Friday.", CreatedAt: now.Format(time.RFC3339Nano)}},
+	}
+	metadata := scoutChatThreadMetadata(thread)
+	raw := metadata[homeConversationCompactionKey]
+	if raw == "" || strings.Contains(raw, "needs an owner") || strings.Contains(raw, "before Friday") {
+		t.Fatalf("compaction is missing or copied source prose: %s", raw)
+	}
+	entry := meetingMemoryEntry{ID: thread.ID, Kind: meetingMemoryKindScoutChat, Metadata: metadata}
+	compaction, ok := validHomeConversationCompaction(entry, artifactLibraryAdminEmail, now)
+	if !ok || compaction.SourceHighWater == "" || compaction.AudienceDigest == "" || compaction.ReceiptDigest == "" || len(compaction.Topics) == 0 {
+		t.Fatalf("valid compaction=%+v ok=%v", compaction, ok)
+	}
+
+	changed := thread
+	changed.UpdatedAt = now.Add(time.Second).Format(time.RFC3339Nano)
+	changed.Messages[0].Text = "The onboarding risk has been resolved."
+	changedCompaction := homeConversationCompactionForThread(changed)
+	if changedCompaction.SourceHighWater == compaction.SourceHighWater || changedCompaction.ReceiptDigest == compaction.ReceiptDigest {
+		t.Fatalf("source advance did not move exact high-water: before=%+v after=%+v", compaction, changedCompaction)
+	}
+
+	archived := changed
+	archived.ArchivedAt = now.Add(2 * time.Second).Format(time.RFC3339Nano)
+	archived.UpdatedAt = archived.ArchivedAt
+	archivedCompaction := homeConversationCompactionForThread(archived)
+	if archivedCompaction.Status != "invalidated" || archivedCompaction.InvalidationReason != "thread_archived" || archivedCompaction.ReceiptDigest == "" || len(archivedCompaction.Topics) != 0 {
+		t.Fatalf("archive did not persist a body-free invalidation receipt: %+v", archivedCompaction)
+	}
+	archivedRaw, _ := json.Marshal(archivedCompaction)
+	archivedMetadata := scoutChatThreadMetadata(archived)
+	archivedMetadata[homeConversationCompactionKey] = string(archivedRaw)
+	if _, ok := validHomeConversationCompaction(meetingMemoryEntry{ID: archived.ID, Kind: meetingMemoryKindScoutChat, Metadata: archivedMetadata}, artifactLibraryAdminEmail, now.Add(2*time.Second)); ok {
+		t.Fatal("invalidated compaction entered Home ranking")
+	}
+}
+
+func TestHomeRecurringThemeReadsDurableCompactionWithoutDecodingRawHistory(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().UTC()
+	threads := []scoutChatThreadRecord{
+		{ID: "current-readable", Title: "Onboarding plan", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "current-message", Role: "user", Text: "Revisit the onboarding timeline.", CreatedAt: now.Format(time.RFC3339Nano)}}},
+		{ID: "body-unavailable", Title: "Customer rollout", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "unavailable-message", Role: "user", Text: "The onboarding risk needs attention.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}},
+	}
+	for _, thread := range threads {
+		encoded, err := encodeScoutChatThread(thread)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := app.memory.appendScoutChatThread(thread.ID, encoded, scoutChatThreadMetadata(thread)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Simulate a body-store outage after the durable recommendation compaction
+	// was committed. The Home request may still use its body-free metadata, but
+	// must not decode or copy this raw history.
+	app.memory.mu.Lock()
+	for index := range app.memory.entries {
+		if app.memory.entries[index].Kind == meetingMemoryKindScoutChat && app.memory.entries[index].ID == "body-unavailable" {
+			app.memory.entries[index].Text = `{not-json`
+		}
+	}
+	app.memory.mu.Unlock()
+
+	snapshot := app.homeSnapshotForViewer(artifactLibraryAdminEmail)
+	found := false
+	for _, suggestion := range snapshot.Starters[1].Suggestions {
+		if suggestion.ID != "explore-recurring-theme" {
+			continue
+		}
+		found = true
+		if !strings.Contains(suggestion.Text, "onboarding") || len(suggestion.SourceCoverage) != 2 {
+			t.Fatalf("metadata synthesis=%+v", suggestion)
+		}
+	}
+	if !found {
+		t.Fatalf("Home reopened raw history instead of using durable compaction: %+v", snapshot.Starters)
+	}
+	encoded, _ := json.Marshal(snapshot)
+	if strings.Contains(string(encoded), "risk needs attention") {
+		t.Fatalf("Home leaked raw source prose: %s", encoded)
+	}
+}
+
+func TestHomeConversationCompactionRejectsStaleAndUnauthorizedSources(t *testing.T) {
+	now := time.Now().UTC()
+	entryFor := func(id, owner, updated string) meetingMemoryEntry {
+		thread := scoutChatThreadRecord{ID: id, Title: "Onboarding", OwnerEmail: owner, Visibility: scoutChatVisibilityPrivate, CreatedAt: updated, UpdatedAt: updated, Messages: []scoutChatMessageRecord{{ID: id + "-message", Text: "Onboarding risk"}}}
+		return meetingMemoryEntry{ID: id, Kind: meetingMemoryKindScoutChat, Metadata: scoutChatThreadMetadata(thread)}
+	}
+	entries := []meetingMemoryEntry{
+		entryFor("current", artifactLibraryAdminEmail, now.Format(time.RFC3339Nano)),
+		entryFor("stale", artifactLibraryAdminEmail, now.Add(-31*24*time.Hour).Format(time.RFC3339Nano)),
+		entryFor("other-private", "tim@shareability.com", now.Format(time.RFC3339Nano)),
+	}
+	if theme := homeRecurringThemeFromCompactions(entries, artifactLibraryAdminEmail, now); theme != nil {
+		t.Fatalf("stale or unauthorized source created recurrence: %+v", theme)
+	}
+}
+
+func TestScoutChatMetadataBackfillAddsHomeCompactionEvenWhenIndexMetadataExists(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	thread := scoutChatThreadRecord{ID: "legacy-home-compaction", Title: "Onboarding", OwnerEmail: artifactLibraryAdminEmail, CreatedAt: now, UpdatedAt: now, Messages: []scoutChatMessageRecord{{ID: "legacy-message", Text: "Onboarding risk"}}}
+	encoded, _ := encodeScoutChatThread(thread)
+	metadata := scoutChatThreadMetadata(thread)
+	delete(metadata, homeConversationCompactionKey)
+	if _, _, err := app.memory.appendScoutChatThread(thread.ID, encoded, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.memory.backfillScoutChatIndexMetadata(); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, thread.ID)
+	if !ok || strings.TrimSpace(entry.Metadata[homeConversationCompactionKey]) == "" {
+		t.Fatalf("legacy index row was not durably upgraded: %+v", entry.Metadata)
+	}
+}
+
 func TestAssistantHomeHandlerIsAuthenticatedReadOnly(t *testing.T) {
 	setupAuthTestEnv(t)
 	roomsPath := filepath.Join(t.TempDir(), "rooms.json")

@@ -99,7 +99,14 @@ function markOfficeControlDisconnected(sessionToken: string, reconnectEligible =
     officeControlRuntime.generation += 1;
     notifyOfficeControlListeners();
   }
-  closePersonalRealtimeForControlLoss();
+  // A transient office-socket reconnect is not an authority change. The
+  // private Realtime offer and every tool request remain independently bound
+  // to the exact authenticated session on the server, so tearing down the
+  // audio peer here cancels an in-flight answer and makes Scout appear unable
+  // to answer. Session replacement/logout still closes synchronously through
+  // commitOfficeControlSession; relationship-memory drift has its own explicit
+  // close below. Only a non-reconnectable control loss is terminal here.
+  if (!reconnectEligible) closePersonalRealtimeForControlLoss();
 }
 
 export function officeControlChannelIsLive(sessionToken: string | null): boolean {
