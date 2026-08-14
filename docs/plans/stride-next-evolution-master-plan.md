@@ -1224,6 +1224,29 @@ logout/login and are deliberately not rewritten in place. Public health and
 readiness identify the exact release, and the retained exact-release verifier
 reported `verified-local-unsigned`; external attestation remains open.
 
+**2026-08-14 10:16 PT active-sitting continuity reconciliation:** exact server
+release `cfa3dbd3e1c2f9d161a3e7606eb05f5248229c3c` now supersedes that
+checkpoint at ledger generation 80 from bundle
+`ab581a77bb11d3a971b5ebd0c0cde3e944d22080913af31af3eaefc4e0765adc`.
+The application image is
+`sha256:181e7afc2f3039080dd1a88304a59dccd9dbf061374d8e37be3ca07f1eb6ea72`
+and the renderer is
+`sha256:0626b94f9aefbdcefef2cc502e18e104281f6a79960c3d4c81b816bf42ab6791`;
+the retained verifier, ledger, images, Caddy and public probes agree under
+`verified-local-unsigned`, with `8336ea63...` intact as the exact rollback.
+The guarded Meeting Digest scheduler now attempts the already-reviewed narrow
+active-sitting repair before continuity admission. Production logged the exact
+repair at `2026-08-14T17:16:34Z`: the office checkpoint moved from predecessor
+`brain-20260813-222101-937662577` into held current window
+`brain-20260814-160453-469053690`, cleared its blocked reason, produced a fresh
+current-sitting digest/recap at `2026-08-14T17:16:55Z`, and did not replay the
+51 quarantined historical dead letters. One unrelated inactive legacy room
+remains honestly blocked by `durable_cursor_ambiguous`; it does not make the
+office sitting stale. The exact source passed the scheduler regression in
+normal and race modes, the focused ambient/Meeting Digest suite, `go vet`,
+`git diff --check`, and the full repository suite (`618.016s` for the main
+package) before activation.
+
 The permanent Meeting Record is no longer only a dirty local candidate. Its
 current source is in that exact serving release, while the replacement rendered
 evidence is separately bound to the same source through
@@ -1239,17 +1262,16 @@ text sizes. The current exact source additionally passes the focused Meeting
 Record normal gate, focused race gate, native 9/9 behavior suite, TypeScript
 typecheck, source/artifact/image hash verification and `git diff --check`.
 
-This release does **not** close the live meeting-intelligence gate. Readiness
-still reports `durable_cursor_ambiguous` for the legacy Meeting Digest scopes;
-the current-day/day/entity projections can therefore remain stale until the
-first real active sitting supplies the exact clean suffix. Broad historical
-`*_BACKFILL` flags and inferred cursor repair remain forbidden. Historical
+The first live active-sitting continuity gate is now closed for the office, but
+the whole current-day meeting-intelligence lane is not. Broad historical
+`*_BACKFILL` flags and inferred cursor repair remain forbidden; historical
 regeneration still requires the separate approved, manifest-bound,
 oldest-first ambient replay authority described below. The immediate external
-gate is therefore unchanged: observe a real active sitting, prove exact suffix
-repair and then run the same authorized current-day question through typed
-Scout, private Realtime and one named agent. Physical iPhone availability does
-not block later critical implementation or simulator/release evidence.
+gate is now the parity half of the same acceptance: run one authorized
+current-day question over the repaired office corpus through typed Scout,
+private Realtime and one named agent, and prove matching current-source facts,
+privacy and bounded work. Physical iPhone availability does not block that
+server/simulator work or later critical builds.
 
 | Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
 |---|---|---|---|
@@ -1517,9 +1539,8 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next — Priority 1:** observe the first active sitting on release
-  `b891f8a8...`, prove its clean current suffix repairs the exact ambiguous
-  Meeting Digest scope, and run current-day parity through private Realtime,
+- **Next — Priority 1:** retain the proved office active-sitting repair on
+  release `cfa3dbd3...` and run current-day parity through private Realtime,
   typed Scout and a named agent. Apple processing and founder device acceptance
   for Build 63 run alongside that live gate and do not block later critical
   builds. Only after current-day parity, restart, privacy, bounded-work and live
