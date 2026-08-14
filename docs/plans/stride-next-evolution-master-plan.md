@@ -1215,6 +1215,42 @@ acceptance loop as Build 63 and later candidates arrive. Other safe PD1 work
 may proceed without representing live meeting/provider quality or historical
 replay as accepted.
 
+**2026-08-14 09:40 PT current release reconciliation:** exact server release
+`8336ea6300bfc5bd4d7254b8fe41a5892fb24d57` now serves at VPS ledger
+generation 79 and supersedes the older order-3 release identities below. It
+adds the durable single-active-membership session binding used by the Bonfire
+organization shell; sessions minted before this release require one normal
+logout/login and are deliberately not rewritten in place. Public health and
+readiness identify the exact release, and the retained exact-release verifier
+reported `verified-local-unsigned`; external attestation remains open.
+
+The permanent Meeting Record is no longer only a dirty local candidate. Its
+current source is in that exact serving release, while the replacement rendered
+evidence is separately bound to the same source through
+`docs/evidence/e10/rendered-meeting-record-current-20260814/`. The evidence is
+synthetic and loopback-only: it uses no production meeting or user data and
+does not claim TestFlight processing or physical-device acceptance. Its
+candidate manifest SHA-256 is `d9042d45...`, image checksum ledger SHA-256 is
+`34e19bde...`, and deterministic fixture SHA-256 is `29c3cf97...`. Current
+desktop, 390px web, iPhone, iPad and Accessibility XXXL captures prove live,
+corrected, partial-analysis and transcript-unavailable states; exact source
+navigation; fail-closed empty content; and readable card identity at large
+text sizes. The current exact source additionally passes the focused Meeting
+Record normal gate, focused race gate, native 9/9 behavior suite, TypeScript
+typecheck, source/artifact/image hash verification and `git diff --check`.
+
+This release does **not** close the live meeting-intelligence gate. Readiness
+still reports `durable_cursor_ambiguous` for the legacy Meeting Digest scopes;
+the current-day/day/entity projections can therefore remain stale until the
+first real active sitting supplies the exact clean suffix. Broad historical
+`*_BACKFILL` flags and inferred cursor repair remain forbidden. Historical
+regeneration still requires the separate approved, manifest-bound,
+oldest-first ambient replay authority described below. The immediate external
+gate is therefore unchanged: observe a real active sitting, prove exact suffix
+repair and then run the same authorized current-day question through typed
+Scout, private Realtime and one named agent. Physical iPhone availability does
+not block later critical implementation or simulator/release evidence.
+
 | Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
 |---|---|---|---|
 | 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 39-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
