@@ -728,6 +728,12 @@ func TestMeetingDigestCurrentMeetingBootstrapAdmitsOnlyActiveSitting(t *testing.
 	if !admitted || baseline != oldBrain.ID {
 		t.Fatalf("baseline=%q admitted=%v", baseline, admitted)
 	}
+	t.Setenv(meetingDigestCurrentMeetingBootstrapEnv, "false")
+	t.Setenv("BONFIRE_RELEASE_IDENTITY_REQUIRED", "true")
+	productionBaseline, productionAdmitted := app.meetingDigestCurrentMeetingBootstrapBaseline(meetingDigestAgent(), officeRoomID)
+	if !productionAdmitted || productionBaseline != oldBrain.ID {
+		t.Fatalf("receipted production baseline=%q admitted=%v, want exact active-sitting suffix", productionBaseline, productionAdmitted)
+	}
 	inputs := store.unconsumedEntriesAfterForRoom(
 		meetingMemoryKindBrain,
 		meetingMemoryKindMeetingDigest,

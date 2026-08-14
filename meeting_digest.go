@@ -146,11 +146,18 @@ const (
 )
 
 func meetingDigestAgent() ambientAgentConfig {
+	disabledEnv := "MEETING_DIGEST_DISABLED"
+	if boolEnv("BONFIRE_RELEASE_IDENTITY_REQUIRED") {
+		// Current Meeting intelligence is part of the receipted production
+		// contract. A stale long-lived env file must not silently unregister it;
+		// disabling the worker requires another reviewed release instead.
+		disabledEnv = ""
+	}
 	return ambientAgentConfig{
 		name:              meetingDigestAgentName,
 		defaultInterval:   defaultMeetingDigestInterval,
 		intervalEnv:       "MEETING_DIGEST_INTERVAL",
-		disabledEnv:       "MEETING_DIGEST_DISABLED",
+		disabledEnv:       disabledEnv,
 		backfillEnv:       "MEETING_DIGEST_BACKFILL",
 		minBatchEnv:       "MEETING_DIGEST_MIN_INPUTS",
 		defaultMinBatch:   1,
@@ -204,8 +211,9 @@ func meetingDigestMaxMeetingsPerTick() int {
 // Existing durable checkpoint/artifact continuity always wins before this
 // seam is consulted.
 func (app *kanbanBoardApp) meetingAnalysisCurrentMeetingBootstrapBaseline(agent ambientAgentConfig, roomID string) (string, bool) {
-	enabled := (agent.name == meetingBrainAgentName && boolEnv(meetingBrainCurrentMeetingBootstrapEnv)) ||
-		(agent.name == meetingDigestAgentName && boolEnv(meetingDigestCurrentMeetingBootstrapEnv))
+	receiptedProduction := boolEnv("BONFIRE_RELEASE_IDENTITY_REQUIRED")
+	enabled := (agent.name == meetingBrainAgentName && (boolEnv(meetingBrainCurrentMeetingBootstrapEnv) || receiptedProduction)) ||
+		(agent.name == meetingDigestAgentName && (boolEnv(meetingDigestCurrentMeetingBootstrapEnv) || receiptedProduction))
 	if app == nil || app.memory == nil || app.meetings == nil || !enabled {
 		return "", false
 	}

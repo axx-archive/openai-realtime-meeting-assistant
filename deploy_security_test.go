@@ -60,21 +60,3 @@ func TestProductionComposeRequiresReceiptedW4LiveEnvironment(t *testing.T) {
 		t.Fatal("second-hop deployment policy is not the receipted W4 live mode")
 	}
 }
-
-func TestProductionComposeKeepsCurrentMeetingIntelligenceEnabled(t *testing.T) {
-	raw, err := os.ReadFile("deploy/digitalocean/docker-compose.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	compose := string(raw)
-	for _, required := range []string{
-		`MEETING_DIGEST_DISABLED: "false"`,
-		`MEETING_DIGEST_BACKFILL: "false"`,
-		`MEETING_DIGEST_CURRENT_MEETING_BOOTSTRAP: "true"`,
-		`MEETING_BRAIN_CURRENT_MEETING_BOOTSTRAP: "true"`,
-	} {
-		if !strings.Contains(compose, required) {
-			t.Fatalf("production Compose is missing current-meeting intelligence binding %q", required)
-		}
-	}
-}

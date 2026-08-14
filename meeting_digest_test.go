@@ -40,6 +40,14 @@ func cannedMeetingDigestJSON() string {
 
 /* ---------- meeting digest worker ---------- */
 
+func TestReceiptedProductionCannotSilentlyDisableMeetingDigest(t *testing.T) {
+	t.Setenv("MEETING_DIGEST_DISABLED", "true")
+	t.Setenv("BONFIRE_RELEASE_IDENTITY_REQUIRED", "true")
+	if disabledEnv := meetingDigestAgent().disabledEnv; disabledEnv != "" {
+		t.Fatalf("receipted production digest disabled env = %q, want no legacy disable binding", disabledEnv)
+	}
+}
+
 func TestMeetingDigestWorkerProducesAnchoredImportanceJSON(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	app := newIsolatedKanbanBoardApp(t)
