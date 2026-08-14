@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -79,9 +80,10 @@ func strideE10CreateAuthenticatedSession(email string) (string, error) {
 	if !strideIdentifier(personID) || person.Validate() != nil || person.Status != "active" || person.AccountSubjectDigest != digest {
 		return "", ErrStrideE10TenantAuthorityStale
 	}
-	// Login creates only the global-person session. Existing sessions are
-	// migrated by the crash-journaled W4 activation; future organization
-	// binding continues through the durable organization-switch operation.
+	// Mint the global-person row first. When the person has exactly one current
+	// active membership, immediately drive that same token through the durable
+	// organization-switch operation below. Zero memberships remain person-only;
+	// multiple memberships deliberately require an explicit human choice.
 	authorizePerson := func(wantPersonID, organizationID, membershipID string, membershipRevision int64) error {
 		if wantPersonID != personID || organizationID != "" || membershipID != "" || membershipRevision != 0 {
 			return ErrStrideE10TenantAuthorityStale
@@ -94,7 +96,100 @@ func strideE10CreateAuthenticatedSession(email string) (string, error) {
 		}
 		return nil
 	}
-	return userSessionStore().createMemberSession(email, personID, "", "", 0, 0, authorizePerson)
+	token, err := userSessionStore().createMemberSession(email, personID, "", "", 0, 0, authorizePerson)
+	if err != nil {
+		return "", err
+	}
+	membership, single, err := strideE10SingleActiveOrganizationMembership(organizations, personID)
+	if err != nil {
+		userSessionStore().destroy(token)
+		return "", err
+	}
+	if !single {
+		return token, nil
+	}
+	if err := strideE10BindAuthenticatedSessionOrganization(token, personID, membership); err != nil {
+		// The raw bearer has not been returned to the caller. Revoke it rather
+		// than exposing a partially applied cross-store login operation. The
+		// immutable switch operation remains available for receipt-first repair.
+		userSessionStore().destroy(token)
+		return "", err
+	}
+	return token, nil
+}
+
+// strideE10SingleActiveOrganizationMembership returns a login default only
+// when current authority has exactly one unambiguous active membership. An
+// active membership whose organization is missing, invalid, or inactive is a
+// stale-authority failure rather than permission to fall back to person-only.
+func strideE10SingleActiveOrganizationMembership(organizations *OrganizationAuthorityService, personID string) (OrganizationMembership, bool, error) {
+	if organizations == nil || !strideIdentifier(personID) {
+		return OrganizationMembership{}, false, ErrStrideE10TenantAuthorityStale
+	}
+	organizations.mu.RLock()
+	defer organizations.mu.RUnlock()
+	candidates := make([]OrganizationMembership, 0, 2)
+	for _, membership := range organizations.memberships {
+		if membership.PersonID != personID || membership.Status != "active" || membership.EndedAt != nil {
+			continue
+		}
+		organization, ok := organizations.organizations[membership.OrganizationID]
+		if membership.Validate() != nil || !ok || organization.Validate() != nil || organization.Status != "active" {
+			return OrganizationMembership{}, false, ErrStrideE10TenantAuthorityStale
+		}
+		candidates = append(candidates, cloneOrganizationMembership(membership))
+		if len(candidates) > 1 {
+			return OrganizationMembership{}, false, nil
+		}
+	}
+	if len(candidates) != 1 {
+		return OrganizationMembership{}, false, nil
+	}
+	return candidates[0], true, nil
+}
+
+// strideE10BindAuthenticatedSessionOrganization reuses the ordinary durable
+// organization-switch operation. It does not write a special login-only
+// authority row or bypass the operation journal, active-session receipt,
+// membership recheck, runtime snapshot, or session-store postimage.
+func strideE10BindAuthenticatedSessionOrganization(token, personID string, membership OrganizationMembership) error {
+	runtime := strideE10LiveProductRuntime
+	if runtime == nil || strings.TrimSpace(token) == "" || !strideIdentifier(personID) || membership.Validate() != nil || membership.PersonID != personID || membership.Status != "active" || membership.EndedAt != nil {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	principal := StrideE10ProductPrincipal{PersonID: personID}
+	runtime.mintProjectionActions(principal, "organizations")
+	runtime.mu.RLock()
+	var binding StrideE10LiveActionBinding
+	for _, candidate := range runtime.actions {
+		if candidate.Type == "organization-switch" && candidate.Surface == "organizations" && candidate.PersonID == personID && candidate.Target.ID == membership.Header.ID && candidate.Target.Revision == membership.Header.Revision && candidate.Target.Digest == membership.Header.ContentDigest && runtime.now().Before(candidate.ExpiresAt) {
+			binding = cloneStrideE10LiveActionBinding(candidate)
+			break
+		}
+	}
+	runtime.mu.RUnlock()
+	if binding.ID == "" {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	body, err := json.Marshal(map[string]any{"action": "organization-switch", "surface": "organizations", "expectedRevision": binding.ExpectedRevision, "values": map[string]any{}})
+	if err != nil {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	sessionHash := hashResetToken(token)
+	command := StrideE10ProductCommand{
+		Operation: "session.switch_organization", Method: http.MethodPost,
+		Path: "/api/stride/v1/mobile/actions/" + binding.ID, ResourceID: binding.ID,
+		ExpectedRevision: binding.ExpectedRevision, IdempotencyKey: "login-auto-bind-" + sessionHash[:24], Body: body,
+	}
+	ctx := context.WithValue(context.Background(), strideE10LiveSessionTokenKey{}, token)
+	if _, _, err := runtime.Execute(ctx, principal, command); err != nil {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	record, ok := userSessionStore().lookupRecord(token)
+	if !ok || record.PersonID != personID || record.ActiveOrganizationID != membership.OrganizationID || record.OrganizationMembershipID != membership.Header.ID || record.OrganizationMembershipRev != membership.Header.Revision || record.ActiveOrganizationSessionRev != 1 || record.AuthorityGeneration < 2 {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	return nil
 }
 
 func (r *strideE10MainTenantAuthorityResolver) WithCurrentTenantAuthority(ctx context.Context, surface StrideE10TenantSurface, sessionHash string, use func(StrideE10TenantAuthoritySnapshot) error) error {

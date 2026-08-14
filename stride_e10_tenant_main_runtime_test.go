@@ -335,3 +335,118 @@ func TestStrideE10AuthSuccessMintsCanonicalZeroOrgAndBlocksLegacyBypass(t *testi
 		t.Fatalf("revoked person authenticated: %v", err)
 	}
 }
+
+func TestStrideE10AuthAutoBindsOnlyOneCurrentOrganization(t *testing.T) {
+	setupAuthTestEnv(t)
+	now := time.Now().UTC()
+	_, converter, _ := strideE10TenantHookRequestAndConverter(t, StrideE10TenantConversionCutover, true)
+	restoreConverter := InstallStrideE10TenantRuntimeConverter(converter)
+	defer restoreConverter()
+	runtime := NewStrideE10ProductLiveRuntime(func() time.Time { return now })
+	email := "single-organization@example.com"
+	digest := sha256Hex([]byte(email))
+	person := organizationTestPerson("person-auth-single-organization", 'a', now.Add(-2*time.Hour))
+	person.AccountSubjectDigest = digest
+	if err := runtime.organization.RegisterPerson(person); err != nil {
+		t.Fatal(err)
+	}
+	organization := Organization{
+		Header: organizationTestHeader(STRIDEGlobalPersonTenant, "organization-auth-single", 1, STRIDEContractOrganization, 'b', now.Add(-time.Hour)),
+		Name:   "Bonfire", Slug: "bonfire-auth-single", Status: "active", Discoverability: "private",
+		CreatorPersonID: person.Header.ID, PolicyRevision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
+	membership := organizationTestMembership("membership-auth-single", person.Header.ID, organization.Header.ID, "owner", 1, now.Add(-time.Hour), "")
+	runtime.organization.mu.Lock()
+	runtime.organization.organizations[organization.Header.ID] = organization
+	runtime.organization.memberships[membership.Header.ID] = membership
+	runtime.organization.mu.Unlock()
+	previousRuntime := strideE10LiveProductRuntime
+	strideE10LiveProductRuntime = runtime
+	defer func() { strideE10LiveProductRuntime = previousRuntime }()
+
+	token, err := strideE10CreateAuthenticatedSession(email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, ok := userSessionStore().lookupRecord(token)
+	if !ok || record.PersonID != person.Header.ID || record.ActiveOrganizationID != organization.Header.ID || record.OrganizationMembershipID != membership.Header.ID || record.OrganizationMembershipRev != membership.Header.Revision || record.ActiveOrganizationSessionRev != 1 || record.AuthorityGeneration != 2 {
+		t.Fatalf("single-organization login record=%+v ok=%t", record, ok)
+	}
+	sessionHash := hashResetToken(token)
+	runtime.organization.mu.RLock()
+	active := runtime.organization.sessions[sessionHash]
+	runtime.organization.mu.RUnlock()
+	if active.Validate() != nil || active.PersonID != person.Header.ID || active.OrganizationID != organization.Header.ID || active.MembershipID != membership.Header.ID || active.MembershipRevision != membership.Header.Revision || active.SessionRevision != 1 {
+		t.Fatalf("single-organization active session=%+v", active)
+	}
+	principal := StrideE10ProductPrincipal{PersonID: record.PersonID, ActiveOrganizationID: record.ActiveOrganizationID, OrganizationMembershipID: record.OrganizationMembershipID, OrganizationMembershipRev: record.OrganizationMembershipRev, ActiveOrganizationSessionRev: record.ActiveOrganizationSessionRev, SessionHash: sessionHash, ActiveOrganizationSessionID: active.Header.ID}
+	projection, err := runtime.project(principal, "organizations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _ := projection["items"].([]map[string]any)
+	foundCurrent := false
+	for _, item := range items {
+		if item["kind"] == "organization-summary" && item["title"] == "Bonfire" && item["status"] == "current" {
+			foundCurrent = true
+		}
+	}
+	if !foundCurrent {
+		t.Fatalf("single-organization login projection=%+v", projection)
+	}
+
+	secondOrganization := Organization{
+		Header: organizationTestHeader(STRIDEGlobalPersonTenant, "organization-auth-second", 1, STRIDEContractOrganization, 'c', now.Add(-time.Hour)),
+		Name:   "Second", Slug: "second-auth-organization", Status: "active", Discoverability: "private",
+		CreatorPersonID: person.Header.ID, PolicyRevision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
+	secondMembership := organizationTestMembership("membership-auth-second", person.Header.ID, secondOrganization.Header.ID, "owner", 1, now.Add(-time.Hour), "")
+	runtime.organization.mu.Lock()
+	runtime.organization.organizations[secondOrganization.Header.ID] = secondOrganization
+	runtime.organization.memberships[secondMembership.Header.ID] = secondMembership
+	runtime.organization.mu.Unlock()
+	choiceToken, err := strideE10CreateAuthenticatedSession(email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	choiceRecord, ok := userSessionStore().lookupRecord(choiceToken)
+	if !ok || choiceRecord.PersonID != person.Header.ID || choiceRecord.ActiveOrganizationID != "" || choiceRecord.OrganizationMembershipID != "" || choiceRecord.OrganizationMembershipRev != 0 || choiceRecord.ActiveOrganizationSessionRev != 0 || choiceRecord.AuthorityGeneration != 1 {
+		t.Fatalf("multi-organization login must require explicit choice record=%+v ok=%t", choiceRecord, ok)
+	}
+}
+
+func TestStrideE10AuthRejectsBrokenSingleOrganizationAuthority(t *testing.T) {
+	setupAuthTestEnv(t)
+	now := time.Now().UTC()
+	_, converter, _ := strideE10TenantHookRequestAndConverter(t, StrideE10TenantConversionCutover, true)
+	restoreConverter := InstallStrideE10TenantRuntimeConverter(converter)
+	defer restoreConverter()
+	runtime := NewStrideE10ProductLiveRuntime(func() time.Time { return now })
+	email := "broken-organization@example.com"
+	digest := sha256Hex([]byte(email))
+	person := organizationTestPerson("person-auth-broken-organization", 'd', now.Add(-2*time.Hour))
+	person.AccountSubjectDigest = digest
+	if err := runtime.organization.RegisterPerson(person); err != nil {
+		t.Fatal(err)
+	}
+	membership := organizationTestMembership("membership-auth-broken", person.Header.ID, "organization-auth-missing", "owner", 1, now.Add(-time.Hour), "")
+	runtime.organization.mu.Lock()
+	runtime.organization.memberships[membership.Header.ID] = membership
+	runtime.organization.mu.Unlock()
+	previousRuntime := strideE10LiveProductRuntime
+	strideE10LiveProductRuntime = runtime
+	defer func() { strideE10LiveProductRuntime = previousRuntime }()
+	store := userSessionStore()
+	store.mu.Lock()
+	before := len(store.sessions)
+	store.mu.Unlock()
+	if token, err := strideE10CreateAuthenticatedSession(email); token != "" || !errors.Is(err, ErrStrideE10TenantAuthorityStale) {
+		t.Fatalf("broken single-organization login token=%q err=%v", token, err)
+	}
+	store.mu.Lock()
+	after := len(store.sessions)
+	store.mu.Unlock()
+	if after != before {
+		t.Fatalf("failed login leaked a bearer session before=%d after=%d", before, after)
+	}
+}

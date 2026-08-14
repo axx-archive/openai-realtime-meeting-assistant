@@ -203,8 +203,16 @@ func TestStrideE10W4ProductionInstallUsesOnlyClosedCanaryFeatures(t *testing.T) 
 		t.Fatal(err)
 	}
 	record, ok := userSessionStore().lookupRecord(token)
-	if !ok || record.PersonID == "" || record.ActiveOrganizationID != "" || record.OrganizationMembershipID != "" || record.OrganizationMembershipRev != 0 || record.ActiveOrganizationSessionRev != 0 || record.AuthorityGeneration != 1 {
+	if !ok || record.PersonID == "" || record.ActiveOrganizationID == "" || record.OrganizationMembershipID == "" || record.OrganizationMembershipRev < 1 || record.ActiveOrganizationSessionRev != 1 || record.AuthorityGeneration != 2 {
 		t.Fatalf("W4 canary login record=%+v ok=%t", record, ok)
+	}
+	loginSnapshot, _, err := loadStrideE10W4Snapshot(snapshot, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := loginSnapshot.Organization.Sessions[hashResetToken(token)]
+	if active.Validate() != nil || active.PersonID != record.PersonID || active.OrganizationID != record.ActiveOrganizationID || active.MembershipID != record.OrganizationMembershipID || active.MembershipRevision != record.OrganizationMembershipRev || active.SessionRevision != record.ActiveOrganizationSessionRev {
+		t.Fatalf("W4 auto-bound login was not durable active=%+v record=%+v", active, record)
 	}
 	person := record.PersonID
 	if _, _, err := strideE10LiveProductRuntime.Execute(context.Background(), StrideE10ProductPrincipal{PersonID: person}, StrideE10ProductCommand{Operation: "identity.self_profile", Method: "GET", Path: "/api/stride/v1/mobile/surfaces/profile", ResourceID: "profile"}); err != nil {
