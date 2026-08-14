@@ -871,7 +871,7 @@ function byteSize(value, label) {
 function exactByteSize(value, expected, label) {
   if (expected === null) {
     if (value !== undefined && value !== null) throw new Error(`${label} must remain unset`)
-  } else if (byteSize(value, label) !== expected) {
+  } else if (!(Array.isArray(expected) ? expected : [expected]).includes(byteSize(value, label))) {
     throw new Error(`${label} differs from the approved topology`)
   }
 }
@@ -1162,7 +1162,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   const servicePolicy = {
     meetingassist: {
       profiles: [], networks: ['default', 'render_internal'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
-      capAdd: [], capDrop: [], securityOpt: [], ports: ['40000-40100:40000-40100/udp'], memory: 3 * 1024 ** 3, shm: null, pids: null,
+      capAdd: [], capDrop: [], securityOpt: [], ports: ['40000-40100:40000-40100/udp'], memory: [1024 ** 3, 3 * 1024 ** 3], shm: null, pids: null,
       mounts: [
         { type: 'volume', source: 'meeting_data', target: '/app/data', readOnly: false },
         { type: 'volume', source: 'usage_ledger', target: '/app/data/usage', readOnly: false },
