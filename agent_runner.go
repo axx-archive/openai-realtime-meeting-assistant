@@ -1035,6 +1035,13 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 	runLock.Lock()
 	defer runLock.Unlock()
 
+	// Recovery must run before either admission check below. A continuity-open
+	// scope has no readable window and no attempt budget by design, so leaving
+	// this repair inside runAmbientAgentOnceLimitedUnlocked made the guarded
+	// scheduler return at peek/budget forever even after a new active sitting
+	// supplied the exact clean suffix required for a safe baseline.
+	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
+
 	headID, count, _, ok := app.peekUnconsumedWindow(agent, roomID)
 	if !ok || count < minBatch {
 		app.mu.Lock()

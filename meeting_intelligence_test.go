@@ -797,6 +797,61 @@ func TestMeetingDigestRepairsOnlyAmbiguousContinuityAtActiveMeetingBoundary(t *t
 	}
 }
 
+func TestMeetingDigestGuardedRunnerRepairsAmbiguousContinuityBeforeAdmission(t *testing.T) {
+	t.Setenv("BONFIRE_RELEASE_IDENTITY_REQUIRED", "true")
+	t.Setenv(meetingDigestCurrentMeetingBootstrapEnv, "false")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBrain, appended, err := store.appendBrainWriteUp("guarded-repair-brain-old", "## Overview\nOld meeting.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-old"})
+	if err != nil || !appended {
+		t.Fatalf("append old brain: appended=%v err=%v", appended, err)
+	}
+	currentBrain, appended, err := store.appendBrainWriteUp("guarded-repair-brain-current", "## Overview\nCurrent meeting.", map[string]string{"roomId": officeRoomID, "meetingId": "meeting-current"})
+	if err != nil || !appended {
+		t.Fatalf("append current brain: appended=%v err=%v", appended, err)
+	}
+	agent := meetingDigestAgent()
+	app := &kanbanBoardApp{
+		memory:           store,
+		meetings:         &meetingStore{records: []meetingRecord{{ID: "meeting-current", StartedAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano), Participants: []string{"AJ"}}}},
+		agentFailures:    map[string]*ambientAgentFailure{agent.name: {continuityOpen: true, providerOpen: true}},
+		agentBaselineIDs: map[string]string{agent.name: ""},
+	}
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind, ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey, BlockedReason: ambientContinuityAmbiguous},
+	}}
+	if err := persistAmbientHeldWindowState(app.ambientHeldWindowPath(), state); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	entry, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return cannedMeetingDigestJSON(), nil
+	}, 1, officeRoomID)
+	if err != nil {
+		t.Fatalf("guarded runner: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls=%d, want exactly one current-sitting digest", calls)
+	}
+	if entry.Kind != meetingMemoryKindMeetingDigest || entry.Metadata[meetingDigestCursorMetadataKey] != currentBrain.ID {
+		t.Fatalf("digest=%+v, want current brain cursor %q", entry, currentBrain.ID)
+	}
+	checkpoint, ok, err := app.ambientScopeCheckpoint(agent.name)
+	if err != nil || !ok || checkpoint.BaselineID != oldBrain.ID || checkpoint.BlockedReason != "" || checkpoint.WindowID != "" {
+		t.Fatalf("repaired checkpoint=%+v ok=%v err=%v", checkpoint, ok, err)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if failure != nil {
+		t.Fatalf("continuity failure survived guarded recovery: %+v", failure)
+	}
+}
+
 func TestMeetingBrainCurrentMeetingBootstrapRecoversOnlyCleanActiveSuffixAfterRestart(t *testing.T) {
 	t.Setenv(meetingBrainCurrentMeetingBootstrapEnv, "true")
 	path := filepath.Join(t.TempDir(), "meeting-memory.jsonl")
