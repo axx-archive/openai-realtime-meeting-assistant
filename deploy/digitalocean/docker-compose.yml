@@ -68,7 +68,7 @@ services:
     # 400 MiB afterward. A 1 GiB cgroup limit OOM-kills the entire room process
     # and disconnects every participant, so retain headroom for that bounded
     # transient working set.
-    mem_limit: 1024m
+    mem_limit: 3072m
     # Rides both networks: the egress-less render_internal leg exists ONLY so
     # the render sidecar can POST its callback here.
     networks:
