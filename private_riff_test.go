@@ -118,6 +118,28 @@ func TestPrivateRiffCannotEnterLegacyArtifactFollowUpPath(t *testing.T) {
 	}
 }
 
+func TestPrivateRiffRouterCannotPreemptCheckpointAnswer(t *testing.T) {
+	for _, decision := range []conversationIntentDecision{
+		unavailableConversationDecision("source_missing", "I don't have the checkpoint content.", proposalSourceChatRouter),
+		{Outcome: conversationIntentClarifyOnce, Question: "Which tradeoff?", Source: proposalSourceChatRouter},
+	} {
+		constrained := constrainPrivateRiffDecision(decision)
+		if constrained.Outcome != conversationIntentConversationalReply || constrained.Source != proposalSourceDeterministicGuard {
+			t.Fatalf("constrained decision=%+v, want checkpoint answer stage", constrained)
+		}
+	}
+
+	work := conversationIntentDecision{
+		Outcome: conversationIntentStartPrivateWork,
+		Work:    &conversationWorkDecision{Kind: conversationWorkWorkstream},
+		Source:  proposalSourceChatRouter,
+	}
+	constrained := constrainPrivateRiffDecision(work)
+	if constrained.Outcome != conversationIntentUnavailable || constrained.Unavailable == nil || constrained.Unavailable.Code != "private_riff_work_unavailable" {
+		t.Fatalf("work decision=%+v, want Riff authority fence", constrained)
+	}
+}
+
 func TestPrivateRiffSourceDriftFailsClosed(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}

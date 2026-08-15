@@ -3159,8 +3159,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// taking product actions would require carrying the public checkpoint through
 	// every downstream WorkRun and terminal effect. Refuse that widening until
 	// the complete launch spine has the same reauthorization contract.
-	if thread.Riff != nil && (routedIntent.Outcome == conversationIntentStartPrivateWork || routedIntent.Outcome == conversationIntentApprovalRequired) {
-		routedIntent = unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
+	if thread.Riff != nil {
+		routedIntent = constrainPrivateRiffDecision(routedIntent)
 		routedVerdict = nil
 	}
 	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {

@@ -321,6 +321,20 @@ func (app *kanbanBoardApp) privateRiffModelQuery(viewerEmail string, thread scou
 		"\n\nCurrent private request (the only new instruction):\n" + strings.TrimSpace(request), len(window), nil
 }
 
+// constrainPrivateRiffDecision keeps the shared router in its proper role for
+// a Private Riff: it may identify and refuse an attempted authority expansion,
+// but it may not answer (or decline to answer) a checkpoint-content question.
+// The exact-source answer stage below is the only stage that receives the
+// frozen channel bodies, so every non-work turn must reach it.
+func constrainPrivateRiffDecision(decision conversationIntentDecision) conversationIntentDecision {
+	switch decision.Outcome {
+	case conversationIntentStartPrivateWork, conversationIntentApprovalRequired:
+		return unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
+	default:
+		return conversationalReplyDecision(proposalSourceDeterministicGuard)
+	}
+}
+
 func privateRiffParagraphs(message scoutChatMessageRecord) ([]privateRiffParagraph, string, error) {
 	if message.Kind != "message" || (!strings.EqualFold(message.Role, "scout") && !strings.EqualFold(message.Role, "assistant")) ||
 		strings.TrimSpace(message.Text) == "" || message.Thread != nil || message.Work != nil || message.Proposal != nil ||
