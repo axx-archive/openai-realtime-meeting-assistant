@@ -139,10 +139,17 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 		}
 		importer.Registry = registry
 	}
-	if err := recoverBoardLifecycleTransactions(importer.Paths.Board, importer.Paths.DeletedJournal); err != nil {
+	canonicalLifecycleJournalMu.Lock()
+	if err := recoverBoardLifecycleTransactionsLocked(importer.Paths.Board, importer.Paths.DeletedJournal); err != nil {
+		canonicalLifecycleJournalMu.Unlock()
 		return CanonicalImportPlan{}, fmt.Errorf("recover board lifecycle before canonical plan: %w", err)
 	}
-	objects, err := importer.readLegacyObjects()
+	if err := recoverLegacyLifecycleTransactionsLocked(importer.Paths.DeletedJournal, importer.Paths); err != nil {
+		canonicalLifecycleJournalMu.Unlock()
+		return CanonicalImportPlan{}, fmt.Errorf("recover legacy lifecycle before canonical plan: %w", err)
+	}
+	objects, err := importer.readLegacyObjectsLocked()
+	canonicalLifecycleJournalMu.Unlock()
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
@@ -301,6 +308,12 @@ func (plan CanonicalImportPlan) Apply(ctx context.Context, store CanonicalEventS
 }
 
 func (importer *CanonicalImporter) readLegacyObjects() ([]CanonicalImportedObject, error) {
+	canonicalLifecycleJournalMu.Lock()
+	defer canonicalLifecycleJournalMu.Unlock()
+	return importer.readLegacyObjectsLocked()
+}
+
+func (importer *CanonicalImporter) readLegacyObjectsLocked() ([]CanonicalImportedObject, error) {
 	var objects []CanonicalImportedObject
 	readers := []func() ([]CanonicalImportedObject, error){
 		func() ([]CanonicalImportedObject, error) { return importMemoryObjects(importer.Paths.MeetingMemory) },
@@ -316,10 +329,10 @@ func (importer *CanonicalImporter) readLegacyObjects() ([]CanonicalImportedObjec
 		func() ([]CanonicalImportedObject, error) { return importArchiveObjects(importer.Paths.ArchivesDir) },
 		func() ([]CanonicalImportedObject, error) { return importBlobObjects(importer.Paths.BlobsDir) },
 		func() ([]CanonicalImportedObject, error) {
-			return importLifecycleJournal(importer.Paths.DeletedJournal, "tombstone")
+			return importLifecycleJournalLocked(importer.Paths.DeletedJournal, "tombstone")
 		},
 		func() ([]CanonicalImportedObject, error) {
-			return importLifecycleJournal(importer.Paths.EvictedJournal, "eviction")
+			return importLifecycleJournalLocked(importer.Paths.EvictedJournal, "eviction")
 		},
 	}
 	for _, read := range readers {
@@ -466,48 +479,11 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 					continue
 				}
 				seenIDs[entry.ID] = struct{}{}
-				contentDigest := sha256.Sum256([]byte(entry.Text))
-				metadataDigest, err := digestAny(entry.Metadata)
+				entryObjects, err := canonicalMemoryImportedObjects(entry)
 				if err != nil {
 					return nil, err
 				}
-				safe := map[string]any{"id": entry.ID, "kind": entry.Kind, "room": NormalizeCanonicalRoomID(entry.Metadata["roomId"]), "meeting": entry.Metadata["meetingId"], "content_sha256": hex.EncodeToString(contentDigest[:]), "metadata_sha256": metadataDigest}
-				object, err := importedObject("memory", entry.ID, safe, entry.CreatedAt)
-				if err != nil {
-					return nil, err
-				}
-				object.RoomID, object.MeetingID = NormalizeCanonicalRoomID(entry.Metadata["roomId"]), strings.TrimSpace(entry.Metadata["meetingId"])
-				object.ContentRevision = int64(artifactVersion(entry))
-				object.ContentDigest = hex.EncodeToString(contentDigest[:])
-				object.ContentRef = "legacy:memory:" + entry.ID
-				object.Status = firstNonEmptyString(entry.Metadata["status"], "active")
-				owner := firstNonEmptyString(entry.Metadata["ownerEmail"], entry.Metadata["createdByEmail"], entry.Metadata["createdBy"])
-				object.OwnerPrincipal = canonicalImportOwnerPrincipal(owner)
-				visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
-				if visibility == "private" || strings.EqualFold(entry.Metadata["private"], "true") || entry.Kind == meetingMemoryKindScoutChat && (visibility != scoutChatVisibilityPublic || strings.TrimSpace(entry.Metadata["memberEmails"]) != "") {
-					object.Visibility = "private"
-				} else {
-					object.Visibility = "team"
-				}
-				objects = append(objects, object)
-				if entry.Kind == meetingMemoryKindOSArtifact {
-					for _, revision := range artifactVersionHistory(entry) {
-						revisionID := artifactVersionID(entry.ID, revision.V)
-						revisionSafe := map[string]any{"artifact_id": entry.ID, "version": revision.V, "body_ref": revision.BodyBlobRef, "at": revision.At}
-						revisionObject, err := importedObject("artifact_revision", revisionID, revisionSafe, parseImportTime(revision.At))
-						if err != nil {
-							return nil, err
-						}
-						revisionObject.ContentRevision = int64(revision.V)
-						revisionObject.OwnerPrincipal = object.OwnerPrincipal
-						revisionObject.Visibility = object.Visibility
-						if validBlobRef(revision.BodyBlobRef) {
-							revisionObject.ContentDigest = revision.BodyBlobRef
-							revisionObject.ContentRef = "blob:" + revision.BodyBlobRef
-						}
-						objects = append(objects, revisionObject)
-					}
-				}
+				objects = append(objects, entryObjects...)
 			}
 		}
 		if readErr != nil {
@@ -515,6 +491,52 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 				break
 			}
 			return nil, readErr
+		}
+	}
+	return objects, nil
+}
+
+func canonicalMemoryImportedObjects(entry meetingMemoryEntry) ([]CanonicalImportedObject, error) {
+	contentDigest := sha256.Sum256([]byte(entry.Text))
+	metadataDigest, err := digestAny(entry.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	safe := map[string]any{"id": entry.ID, "kind": entry.Kind, "room": NormalizeCanonicalRoomID(entry.Metadata["roomId"]), "meeting": entry.Metadata["meetingId"], "content_sha256": hex.EncodeToString(contentDigest[:]), "metadata_sha256": metadataDigest}
+	object, err := importedObject("memory", entry.ID, safe, entry.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	object.RoomID, object.MeetingID = NormalizeCanonicalRoomID(entry.Metadata["roomId"]), strings.TrimSpace(entry.Metadata["meetingId"])
+	object.ContentRevision = int64(artifactVersion(entry))
+	object.ContentDigest = hex.EncodeToString(contentDigest[:])
+	object.ContentRef = "legacy:memory:" + entry.ID
+	object.Status = firstNonEmptyString(entry.Metadata["status"], "active")
+	owner := firstNonEmptyString(entry.Metadata["ownerEmail"], entry.Metadata["createdByEmail"], entry.Metadata["createdBy"])
+	object.OwnerPrincipal = canonicalImportOwnerPrincipal(owner)
+	visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
+	if visibility == "private" || strings.EqualFold(entry.Metadata["private"], "true") || entry.Kind == meetingMemoryKindScoutChat && (visibility != scoutChatVisibilityPublic || strings.TrimSpace(entry.Metadata["memberEmails"]) != "") {
+		object.Visibility = "private"
+	} else {
+		object.Visibility = "team"
+	}
+	objects := []CanonicalImportedObject{object}
+	if entry.Kind == meetingMemoryKindOSArtifact {
+		for _, revision := range artifactVersionHistory(entry) {
+			revisionID := artifactVersionID(entry.ID, revision.V)
+			revisionSafe := map[string]any{"artifact_id": entry.ID, "version": revision.V, "body_ref": revision.BodyBlobRef, "at": revision.At}
+			revisionObject, err := importedObject("artifact_revision", revisionID, revisionSafe, parseImportTime(revision.At))
+			if err != nil {
+				return nil, err
+			}
+			revisionObject.ContentRevision = int64(revision.V)
+			revisionObject.OwnerPrincipal = object.OwnerPrincipal
+			revisionObject.Visibility = object.Visibility
+			if validBlobRef(revision.BodyBlobRef) {
+				revisionObject.ContentDigest = revision.BodyBlobRef
+				revisionObject.ContentRef = "blob:" + revision.BodyBlobRef
+			}
+			objects = append(objects, revisionObject)
 		}
 	}
 	return objects, nil
@@ -622,33 +644,41 @@ func importNotificationObjects(path string) ([]CanonicalImportedObject, error) {
 	}
 	var objects []CanonicalImportedObject
 	for _, record := range state.Notifications {
-		readDigest, err := digestAny(append([]string{}, record.ReadBy...))
+		object, err := canonicalNotificationImportedObject(record)
 		if err != nil {
 			return nil, err
-		}
-		clearedDigest, err := digestAny(append([]string{}, record.ClearedBy...))
-		if err != nil {
-			return nil, err
-		}
-		safe := map[string]any{"id": record.ID, "kind": record.Kind, "body_digest": digestText(record.Text), "recipient_digest": digestText(record.UserEmail), "artifact": record.ArtifactID, "thread": record.ThreadID, "resolved": record.ResolvedAt, "read_digest": readDigest, "cleared_digest": clearedDigest}
-		object, err := importedObject("notification", record.ID, safe, parseImportTime(record.CreatedAt))
-		if err != nil {
-			return nil, err
-		}
-		if record.ResolvedAt != "" {
-			object.Status = "closed"
-		}
-		object.ContentRevision = 1
-		object.ContentDigest = digestText(record.Text)
-		object.ContentRef = "legacy:notification:" + record.ID
-		if owner := canonicalImportOwnerPrincipal(record.UserEmail); owner != "" {
-			object.OwnerPrincipal, object.Visibility = owner, "private"
-		} else {
-			object.Visibility = "team"
 		}
 		objects = append(objects, object)
 	}
 	return objects, nil
+}
+
+func canonicalNotificationImportedObject(record notificationRecord) (CanonicalImportedObject, error) {
+	readDigest, err := digestAny(append([]string{}, record.ReadBy...))
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	clearedDigest, err := digestAny(append([]string{}, record.ClearedBy...))
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	safe := map[string]any{"id": record.ID, "kind": record.Kind, "body_digest": digestText(record.Text), "recipient_digest": digestText(record.UserEmail), "artifact": record.ArtifactID, "thread": record.ThreadID, "resolved": record.ResolvedAt, "read_digest": readDigest, "cleared_digest": clearedDigest}
+	object, err := importedObject("notification", record.ID, safe, parseImportTime(record.CreatedAt))
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	if record.ResolvedAt != "" {
+		object.Status = "closed"
+	}
+	object.ContentRevision = 1
+	object.ContentDigest = digestText(record.Text)
+	object.ContentRef = "legacy:notification:" + record.ID
+	if owner := canonicalImportOwnerPrincipal(record.UserEmail); owner != "" {
+		object.OwnerPrincipal, object.Visibility = owner, "private"
+	} else {
+		object.Visibility = "team"
+	}
+	return object, nil
 }
 
 func importShareLinkObjects(path string) ([]CanonicalImportedObject, error) {
@@ -679,24 +709,40 @@ func importFileFolderObjects(path string) ([]CanonicalImportedObject, error) {
 	}
 	var objects []CanonicalImportedObject
 	for _, folder := range state.Folders {
-		object, err := importedObject("file_folder", folder.ID, map[string]any{"id": folder.ID, "name_digest": digestText(folder.Name)}, parseImportTime(folder.CreatedAt))
+		object, err := canonicalFileFolderImportedObject(folder)
 		if err != nil {
 			return nil, err
 		}
-		object.OwnerPrincipal = canonicalImportOwnerPrincipal(folder.CreatedBy)
-		object.Visibility = "team"
 		objects = append(objects, object)
 	}
 	for fileID, folderID := range state.Assignments {
-		id := fileID + ":" + folderID
-		object, err := importedObject("file_assignment", id, map[string]any{"file": fileID, "folder": folderID}, time.Time{})
+		object, err := canonicalFileAssignmentImportedObject(fileID, folderID)
 		if err != nil {
 			return nil, err
 		}
-		object.Visibility = "team"
 		objects = append(objects, object)
 	}
 	return objects, nil
+}
+
+func canonicalFileFolderImportedObject(folder fileFolderRecord) (CanonicalImportedObject, error) {
+	object, err := importedObject("file_folder", folder.ID, map[string]any{"id": folder.ID, "name_digest": digestText(folder.Name)}, parseImportTime(folder.CreatedAt))
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	object.OwnerPrincipal = canonicalImportOwnerPrincipal(folder.CreatedBy)
+	object.Visibility = "team"
+	return object, nil
+}
+
+func canonicalFileAssignmentImportedObject(fileID, folderID string) (CanonicalImportedObject, error) {
+	id := fileID + ":" + folderID
+	object, err := importedObject("file_assignment", id, map[string]any{"file": fileID, "folder": folderID}, time.Time{})
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	object.Visibility = "team"
+	return object, nil
 }
 
 func importQueueObjects(dirs []string) ([]CanonicalImportedObject, error) {
@@ -838,7 +884,16 @@ func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, err
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	records, err := boardLifecycleCommittedRecords(path)
+	canonicalLifecycleJournalMu.Lock()
+	defer canonicalLifecycleJournalMu.Unlock()
+	return importLifecycleJournalLocked(path, family)
+}
+
+func importLifecycleJournalLocked(path, family string) ([]CanonicalImportedObject, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	records, err := boardLifecycleCommittedRecordsLocked(path)
 	if err != nil {
 		return nil, err
 	}

@@ -34,7 +34,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.doesNotMatch(canvas, /legacyUploadOnStop|fallbackVoice|voiceDictation/);
   const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
   assert.match(realtime, /audioFocusRuntime\.acquire\('personal_realtime'/);
-  assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP, voiceSessionId\)/);
+  assert.match(realtime, /api\.realtimeOffer\([\s\S]*sessionToken,[\s\S]*localSDP,[\s\S]*voiceSessionId,[\s\S]*createConversationOperationId\(\),[\s\S]*\)/);
   assert.match(realtime, /api\.realtimeTool\([\s\S]*sessionToken,[\s\S]*voiceSessionIdRef\.current,[\s\S]*voiceThreadIdRef\.current,[\s\S]*call\.name/);
   assert.match(realtime, /answer\.voiceSessionId !== voiceSessionId/);
   assert.match(realtime, /voiceThreadIdRef\.current = answer\.threadId/);
@@ -97,8 +97,8 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   };
   assert.equal(
     eas.build?.production?.env?.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED,
-    'true',
-    'private Realtime is the qualified personal voice surface; only unqualified in-room agent voice stays hard off',
+    'false',
+    'production private Realtime stays dark until provider, device, and sustained reliability qualification passes',
   );
 });
 

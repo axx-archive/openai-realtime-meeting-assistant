@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,8 +57,9 @@ type fileFolderRecord struct {
 
 // fileFolderStoreState is the on-disk shape of data/file-folders.json.
 type fileFolderStoreState struct {
-	Folders     []fileFolderRecord `json:"folders"`
-	Assignments map[string]string  `json:"assignments"`
+	Folders             []fileFolderRecord `json:"folders"`
+	Assignments         map[string]string  `json:"assignments"`
+	AssignmentUpdatedAt map[string]string  `json:"assignmentUpdatedAt,omitempty"`
 }
 
 // fileFolderStore guards the folder list + row assignments behind one mutex,
@@ -67,20 +69,47 @@ type fileFolderStore struct {
 	path        string
 	folders     []fileFolderRecord
 	assignments map[string]string
-	loadErr     error
+	// assignmentUpdatedAt is recovery-only ABA evidence. Canonical projection
+	// deliberately ignores it; legacy files without it remain readable.
+	assignmentUpdatedAt map[string]string
+	loadErr             error
 }
 
 func newFileFolderStore(path string) *fileFolderStore {
-	store := &fileFolderStore{path: path, assignments: map[string]string{}}
+	store := &fileFolderStore{path: path, assignments: map[string]string{}, assignmentUpdatedAt: map[string]string{}}
+	if err := recoverLegacyLifecycleTransactionsForPaths(CanonicalImportPaths{
+		MeetingMemory: meetingMemoryPath(), Notifications: notificationsPath(), FileFolders: path,
+	}); err != nil {
+		store.loadErr = fmt.Errorf("recover legacy lifecycle transactions: %w", err)
+		return store
+	}
 	if raw, err := os.ReadFile(path); err == nil {
 		var state fileFolderStoreState
 		if err := json.Unmarshal(raw, &state); err != nil {
 			store.loadErr = fmt.Errorf("file-folder store is malformed")
 		} else {
+			recovered, changed, recoveryErr := recoverJournaledFileFolderDeletions(path, state)
+			if recoveryErr != nil {
+				store.loadErr = recoveryErr
+				return store
+			}
+			state = recovered
+			if changed {
+				raw, encodeErr := json.MarshalIndent(state, "", "  ")
+				if encodeErr != nil {
+					store.loadErr = fmt.Errorf("encode file-folder lifecycle recovery: %w", encodeErr)
+					return store
+				}
+				if persistErr := writeFileAtomicallyForCanonicalMode(path, raw, 0o600); persistErr != nil {
+					store.loadErr = fmt.Errorf("persist file-folder lifecycle recovery: %w", persistErr)
+					return store
+				}
+			}
 			store.folders = state.Folders
 			if state.Assignments != nil {
 				store.assignments = state.Assignments
 			}
+			store.assignmentUpdatedAt = cloneFileFolderAssignments(state.AssignmentUpdatedAt)
 			if !store.folderTreeValidLocked() {
 				store.loadErr = fmt.Errorf("file-folder store is malformed")
 			}
@@ -104,6 +133,7 @@ func (s *fileFolderStore) reloadVisibleStateLocked() error {
 	}
 	s.folders = append([]fileFolderRecord(nil), state.Folders...)
 	s.assignments = cloneFileFolderAssignments(state.Assignments)
+	s.assignmentUpdatedAt = cloneFileFolderAssignments(state.AssignmentUpdatedAt)
 	if !s.folderTreeValidLocked() {
 		s.loadErr = fmt.Errorf("file-folder store is malformed")
 		return s.loadErr
@@ -114,8 +144,9 @@ func (s *fileFolderStore) reloadVisibleStateLocked() error {
 
 func (s *fileFolderStore) persistLocked() error {
 	raw, err := json.MarshalIndent(fileFolderStoreState{
-		Folders:     s.folders,
-		Assignments: s.assignments,
+		Folders:             s.folders,
+		Assignments:         s.assignments,
+		AssignmentUpdatedAt: s.assignmentUpdatedAt,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode file-folder store: %w", err)
@@ -267,29 +298,154 @@ func (s *fileFolderStore) remove(id string) error {
 	}
 	priorFolders := append([]fileFolderRecord(nil), s.folders...)
 	priorAssignments := cloneFileFolderAssignments(s.assignments)
-	folderID := s.folders[index].ID
-	parentID := s.folders[index].ParentID
-	s.folders = append(s.folders[:index], s.folders[index+1:]...)
-	for child := range s.folders {
-		if s.folders[child].ParentID == folderID {
-			s.folders[child].ParentID = parentID
-		}
-	}
-	for fileID, assigned := range s.assignments {
-		if assigned == folderID {
-			delete(s.assignments, fileID)
-		}
-	}
-	if err := s.persistLocked(); err != nil {
-		if errors.Is(err, ErrDurableReplaceAmbiguous) {
-			_ = s.reloadVisibleStateLocked()
-			return err
-		}
-		s.folders = priorFolders
-		s.assignments = priorAssignments
+	priorAssignmentUpdatedAt := cloneFileFolderAssignments(s.assignmentUpdatedAt)
+	removedFolder := s.folders[index]
+	folderID := removedFolder.ID
+	parentID := removedFolder.ParentID
+	objects := make([]CanonicalImportedObject, 0, 1+len(s.assignments))
+	folderObject, err := canonicalFileFolderImportedObject(removedFolder)
+	if err != nil {
 		return err
 	}
+	objects = append(objects, folderObject)
+	fileIDs := make([]string, 0)
+	for fileID, assigned := range s.assignments {
+		if assigned == folderID {
+			fileIDs = append(fileIDs, fileID)
+		}
+	}
+	sort.Strings(fileIDs)
+	stamp := time.Now().UTC()
+	stampedLegacyAssignments := false
+	if s.assignmentUpdatedAt == nil {
+		s.assignmentUpdatedAt = map[string]string{}
+	}
+	for _, fileID := range fileIDs {
+		if strings.TrimSpace(s.assignmentUpdatedAt[fileID]) == "" {
+			s.assignmentUpdatedAt[fileID] = stamp.Format(time.RFC3339Nano)
+			stampedLegacyAssignments = true
+		}
+	}
+	if stampedLegacyAssignments {
+		if err := s.persistLocked(); err != nil {
+			s.assignmentUpdatedAt = priorAssignmentUpdatedAt
+			return fmt.Errorf("persist file-folder assignment generation: %w", err)
+		}
+		priorAssignmentUpdatedAt = cloneFileFolderAssignments(s.assignmentUpdatedAt)
+	}
+	for _, fileID := range fileIDs {
+		assignment, err := canonicalFileAssignmentImportedObject(fileID, folderID)
+		if err != nil {
+			return err
+		}
+		objects = append(objects, assignment)
+	}
+	deletionAt := time.Now().UTC()
+	if !deletionAt.After(stamp) {
+		deletionAt = stamp.Add(time.Nanosecond)
+	}
+	records := canonicalLifecycleDeletionRecords(objects, deletionAt, "file_folder_deleted")
+	if err := withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), records, func() error {
+		s.folders = append(s.folders[:index], s.folders[index+1:]...)
+		for child := range s.folders {
+			if s.folders[child].ParentID == folderID {
+				s.folders[child].ParentID = parentID
+			}
+		}
+		for fileID, assigned := range s.assignments {
+			if assigned == folderID {
+				delete(s.assignments, fileID)
+				delete(s.assignmentUpdatedAt, fileID)
+			}
+		}
+		if err := s.persistLocked(); err != nil {
+			if errors.Is(err, ErrDurableReplaceAmbiguous) {
+				_ = s.reloadVisibleStateLocked()
+				return err
+			}
+			s.folders = priorFolders
+			s.assignments = priorAssignments
+			s.assignmentUpdatedAt = priorAssignmentUpdatedAt
+			return err
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("journal file-folder deletion %s: %w", folderID, err)
+	}
 	return nil
+}
+
+func recoverJournaledFileFolderDeletions(path string, state fileFolderStoreState) (fileFolderStoreState, bool, error) {
+	latest, err := latestCommittedCanonicalLifecycleRecords(canonicalDeletedLifecycleJournalPath(), "file_folder", "file_assignment")
+	if err != nil {
+		return fileFolderStoreState{}, false, fmt.Errorf("read file-folder lifecycle recovery: %w", err)
+	}
+	if len(latest) == 0 {
+		return state, false, nil
+	}
+	changed := false
+	removedParents := map[string]string{}
+	keptFolders := make([]fileFolderRecord, 0, len(state.Folders))
+	for _, folder := range state.Folders {
+		journal, exists := latest["file_folder\x00"+folder.ID]
+		if !exists {
+			keptFolders = append(keptFolders, folder)
+			continue
+		}
+		object, objectErr := canonicalFileFolderImportedObject(folder)
+		if objectErr != nil {
+			return fileFolderStoreState{}, false, objectErr
+		}
+		if !object.OccurredAt.IsZero() && object.OccurredAt.After(journal.At) {
+			keptFolders = append(keptFolders, folder)
+			continue
+		}
+		if object.StateDigest == journal.StateDigest {
+			removedParents[folder.ID] = folder.ParentID
+			changed = true
+			continue
+		}
+		return fileFolderStoreState{}, false, fmt.Errorf("file-folder lifecycle recovery state mismatch for %s", folder.ID)
+	}
+	for index := range keptFolders {
+		for {
+			parent, removed := removedParents[keptFolders[index].ParentID]
+			if !removed {
+				break
+			}
+			keptFolders[index].ParentID = parent
+		}
+	}
+	assignments := cloneFileFolderAssignments(state.Assignments)
+	assignmentUpdatedAt := cloneFileFolderAssignments(state.AssignmentUpdatedAt)
+	for fileID, folderID := range state.Assignments {
+		object, objectErr := canonicalFileAssignmentImportedObject(fileID, folderID)
+		if objectErr != nil {
+			return fileFolderStoreState{}, false, objectErr
+		}
+		journal, exists := latest["file_assignment\x00"+object.ObjectID]
+		_, folderWasDeleted := latest["file_folder\x00"+folderID]
+		if folderWasDeleted && !exists {
+			return fileFolderStoreState{}, false, fmt.Errorf("file-folder lifecycle recovery lacks assignment evidence for %s", object.ObjectID)
+		}
+		if !exists {
+			continue
+		}
+		updatedAt, timeErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(assignmentUpdatedAt[fileID]))
+		if timeErr != nil {
+			return fileFolderStoreState{}, false, fmt.Errorf("file-assignment lifecycle recovery lacks generation for %s", object.ObjectID)
+		}
+		if updatedAt.After(journal.At) {
+			continue
+		}
+		if journal.StateDigest != object.StateDigest {
+			return fileFolderStoreState{}, false, fmt.Errorf("file-assignment lifecycle recovery state mismatch for %s", object.ObjectID)
+		}
+		delete(assignments, fileID)
+		delete(assignmentUpdatedAt, fileID)
+		changed = true
+	}
+	return fileFolderStoreState{Folders: keptFolders, Assignments: assignments, AssignmentUpdatedAt: assignmentUpdatedAt}, changed, nil
 }
 
 func (s *fileFolderStore) folderDepthLocked(id string) int {
@@ -354,12 +510,17 @@ func (s *fileFolderStore) assign(fileID string, folderID string) error {
 			return nil
 		}
 		delete(s.assignments, fileID)
+		priorUpdatedAt, hadUpdatedAt := s.assignmentUpdatedAt[fileID]
+		delete(s.assignmentUpdatedAt, fileID)
 		if err := s.persistLocked(); err != nil {
 			if errors.Is(err, ErrDurableReplaceAmbiguous) {
 				_ = s.reloadVisibleStateLocked()
 				return err
 			}
 			s.assignments[fileID] = prior
+			if hadUpdatedAt {
+				s.assignmentUpdatedAt[fileID] = priorUpdatedAt
+			}
 			return err
 		}
 		return nil
@@ -371,7 +532,12 @@ func (s *fileFolderStore) assign(fileID string, folderID string) error {
 		s.assignments = map[string]string{}
 	}
 	prior, hadPrior := s.assignments[fileID]
+	priorUpdatedAt, hadUpdatedAt := s.assignmentUpdatedAt[fileID]
 	s.assignments[fileID] = folderID
+	if s.assignmentUpdatedAt == nil {
+		s.assignmentUpdatedAt = map[string]string{}
+	}
+	s.assignmentUpdatedAt[fileID] = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := s.persistLocked(); err != nil {
 		if errors.Is(err, ErrDurableReplaceAmbiguous) {
 			_ = s.reloadVisibleStateLocked()
@@ -381,6 +547,11 @@ func (s *fileFolderStore) assign(fileID string, folderID string) error {
 			s.assignments[fileID] = prior
 		} else {
 			delete(s.assignments, fileID)
+		}
+		if hadUpdatedAt {
+			s.assignmentUpdatedAt[fileID] = priorUpdatedAt
+		} else {
+			delete(s.assignmentUpdatedAt, fileID)
 		}
 		return err
 	}

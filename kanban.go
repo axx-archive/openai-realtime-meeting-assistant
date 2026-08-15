@@ -272,6 +272,11 @@ type kanbanBoardApp struct {
 	handledCalls               map[string]struct{}
 	memory                     *meetingMemoryStore
 	scoutChatIndexBackfillOnce sync.Once
+	// privateRealtimeOfferReplays is deliberately process-only. It retains the
+	// raw lease token and answer SDP just long enough to replay a lost HTTP
+	// response without a second provider call; durable memory stores digests.
+	privateRealtimeOfferReplayMu sync.Mutex
+	privateRealtimeOfferReplays  map[string]privateRealtimeOfferReplay
 	// pendingAttachmentUploads are short-lived server-minted source objects for
 	// composer uploads. A raw content hash is never authority: the uploader must
 	// own a live grant until the blob is durably referenced by an authorized

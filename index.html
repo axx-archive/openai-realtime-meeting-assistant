@@ -33190,6 +33190,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceID = ''
       let privateRealtimeVoiceThreadID = ''
       let privateRealtimeVoiceTransportRevision = 0
+      let privateRealtimeVoiceLeaseToken = ''
+      let privateRealtimeVoiceLeaseGeneration = 0
+      let privateRealtimeVoiceLeaseExpiresAt = ''
+      let privateRealtimeVoiceLeaseRenewTimer = 0
+      let privateRealtimeVoiceOfferOperationID = ''
+      let privateRealtimeVoiceQualified = false
       let privateRealtimeVoiceMilestoneOperations = new Map()
       let privateRealtimeVoiceReconnectTimer = 0
       let privateRealtimeVoiceReconnectBinding = null
@@ -33335,6 +33341,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
         authedUser = nextUser || null
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         syncPD1NavigationAccess()
+        if (authedUser) {
+          loadClientConfig().then(syncPrivateRealtimeVoiceQualification).catch(() => {
+            syncPrivateRealtimeVoiceQualification(null)
+          })
+        } else {
+          syncPrivateRealtimeVoiceQualification(null)
+        }
         if (!identityChanged) {
           return
         }
@@ -34815,8 +34828,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             console.warn('Could not restore video after visibility change', error)
           })
         } else {
+          if (privateRealtimeVoiceInFlight()) closePrivateRealtimeVoiceSession()
           pauseLocalMirrorPreviewForVisibility()
         }
+      })
+      window.addEventListener('pagehide', () => {
+        if (privateRealtimeVoiceInFlight()) closePrivateRealtimeVoiceSession()
       })
       window.addEventListener('pageshow', () => {
         syncLocalMirrorPreview()
@@ -42454,7 +42471,25 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function privateRealtimeVoiceSurfaceAvailable() {
-        return !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')
+        return privateRealtimeVoiceQualified
+          && !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')
+      }
+
+      function syncPrivateRealtimeVoiceQualification(config) {
+        privateRealtimeVoiceQualified = config?.privateRealtimeVoiceQualified === true
+        document.querySelectorAll('[data-start-realtime-voice]').forEach(button => {
+          button.disabled = !privateRealtimeVoiceQualified
+          button.setAttribute('aria-label', privateRealtimeVoiceQualified
+            ? 'Start a new private voice chat with Scout'
+            : 'Private Scout voice is awaiting qualification')
+          button.title = privateRealtimeVoiceQualified
+            ? 'Start voice chat'
+            : 'Voice qualification pending'
+        })
+        if (!privateRealtimeVoiceQualified && privateRealtimeVoiceInFlight()) {
+          closePrivateRealtimeVoiceSession()
+        }
+        syncOSAssistantAvailability()
       }
 
       async function startRealtimeVoiceConversation(event) {
@@ -42462,6 +42497,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!appShell.classList.contains('is-in-room')) {
           if (privateRealtimeVoiceSurfaceAvailable()) {
             startRealtimeVoiceFromWaveform(event)
+          } else if (!privateRealtimeVoiceQualified) {
+            showToast({ text: 'private Scout voice is awaiting qualification', kind: 'note' })
           } else {
             showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
           }
@@ -42499,7 +42536,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         if (!privateRealtimeVoiceSurfaceAvailable()) {
-          showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
+          showToast({ text: privateRealtimeVoiceQualified
+            ? 'the room uses the shared Scout agent'
+            : 'private Scout voice is awaiting qualification', kind: 'note' })
           return
         }
         if (!authedUser) {
@@ -42532,6 +42571,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceID = String(reconnect?.voiceSessionId || '') || newPrivateRealtimeVoiceID()
         privateRealtimeVoiceThreadID = String(reconnect?.threadId || '')
         privateRealtimeVoiceTransportRevision = Number(reconnect?.transportRevision || 0)
+        privateRealtimeVoiceOfferOperationID = newPrivateRealtimeVoiceOperationID('offer')
         privateRealtimeVoiceMilestoneOperations = new Map()
         setVoiceIslandState('connecting', 'connecting…')
 
@@ -42690,6 +42730,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           privateRealtimeVoiceTransportRevision
         )
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
+        startPrivateRealtimeVoiceLeaseRenewal(sessionToken, peer)
         await peer.setRemoteDescription({ type: 'answer', sdp: answerSDP })
         } catch (error) {
           closePrivateRealtimeVoiceAttempt(attempt)
@@ -42805,12 +42846,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
       }
 
+      function newPrivateRealtimeVoiceOperationID(prefix) {
+        const id = globalThis.crypto?.randomUUID?.()
+          || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
+        return `${prefix}-${id}`
+      }
+
       async function exchangePrivateRealtimeOffer(offerSDP, voiceSessionId, expectedThreadId = '', priorTransportRevision = 0) {
         const sdp = normalizeRealtimeSDPForBrowser(offerSDP)
         if (!sdp.trim() || !String(voiceSessionId || '').trim()) {
           throw new Error('Realtime 2 voice did not create an offer')
         }
-        const result = await postAuthJSON('/assistant/realtime-offer', { sdp, voiceSessionId })
+        const operationId = privateRealtimeVoiceOfferOperationID
+          || newPrivateRealtimeVoiceOperationID('offer')
+        privateRealtimeVoiceOfferOperationID = operationId
+        const result = await postAuthJSON('/assistant/realtime-offer', { sdp, voiceSessionId, operationId })
         if (!result.ok) {
           throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
         }
@@ -42819,7 +42869,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const threadId = String(result.data?.threadId || '').trim()
         const transportRevision = Number(result.data?.transportRevision || 0)
-        if (!threadId || !Number.isSafeInteger(transportRevision) || transportRevision <= 0) {
+        const leaseToken = String(result.data?.leaseToken || '').trim()
+        const leaseGeneration = Number(result.data?.leaseGeneration || 0)
+        const leaseExpiresAt = String(result.data?.leaseExpiresAt || '').trim()
+        if (!threadId || !Number.isSafeInteger(transportRevision) || transportRevision <= 0
+          || !leaseToken || !Number.isSafeInteger(leaseGeneration) || leaseGeneration <= 0
+          || !Number.isFinite(Date.parse(leaseExpiresAt))) {
           throw new Error('Realtime 2 voice did not bind its private transcript')
         }
         if ((expectedThreadId && threadId !== expectedThreadId)
@@ -42828,11 +42883,47 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         privateRealtimeVoiceThreadID = threadId
         privateRealtimeVoiceTransportRevision = transportRevision
+        privateRealtimeVoiceLeaseToken = leaseToken
+        privateRealtimeVoiceLeaseGeneration = leaseGeneration
+        privateRealtimeVoiceLeaseExpiresAt = leaseExpiresAt
         const answerSDP = normalizeRealtimeSDPForBrowser(result.data?.sdp)
         if (!answerSDP) {
           throw new Error('Realtime 2 voice did not return an answer')
         }
         return answerSDP
+      }
+
+      function privateRealtimeVoiceLeaseBinding(operationId) {
+        return {
+          voiceSessionId: privateRealtimeVoiceID,
+          threadId: privateRealtimeVoiceThreadID,
+          leaseToken: privateRealtimeVoiceLeaseToken,
+          leaseGeneration: privateRealtimeVoiceLeaseGeneration,
+          transportRevision: privateRealtimeVoiceTransportRevision,
+          operationId
+        }
+      }
+
+      function startPrivateRealtimeVoiceLeaseRenewal(sessionToken, peer) {
+        if (privateRealtimeVoiceLeaseRenewTimer) window.clearInterval(privateRealtimeVoiceLeaseRenewTimer)
+        privateRealtimeVoiceLeaseRenewTimer = window.setInterval(async () => {
+          if (sessionToken !== privateRealtimeVoiceSessionToken
+            || privateRealtimeVoicePeer !== peer
+            || !privateRealtimeVoiceLeaseToken) return
+          const binding = privateRealtimeVoiceLeaseBinding(newPrivateRealtimeVoiceOperationID('renew'))
+          try {
+            const result = await postAuthJSON('/assistant/realtime/lease/renew', binding)
+            if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+            if (!result.ok || !Number.isFinite(Date.parse(String(result.data?.leaseExpiresAt || '')))) {
+              terminatePrivateRealtimeVoiceSession(sessionToken, peer, result.data?.error || 'voice lease ended')
+              return
+            }
+            privateRealtimeVoiceLeaseExpiresAt = String(result.data.leaseExpiresAt)
+          } catch {
+            // A transient request failure gets another bounded renewal chance;
+            // the short server lease remains the final stale-client fence.
+          }
+        }, 10_000)
       }
 
       function normalizeRealtimeSDPForBrowser(sdp) {
@@ -43374,18 +43465,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
             appendPrivateGrillQuestion(spoken)
           }
         }
-        if (type === 'response.output_item.done' && event.item?.type === 'function_call') {
-          handlePrivateRealtimeToolCall(event.item)
-        } else if (type === 'response.function_call_arguments.done') {
-          handlePrivateRealtimeToolCall(privateRealtimeFunctionCallFromEvent(event))
-        } else if (type === 'response.done') {
+        if (type === 'response.done') {
           postPrivateRealtimeMilestone('response_done')
           const interrupted = ['cancelled', 'incomplete', 'failed'].includes(String(event.response?.status || '').trim().toLowerCase())
-          for (const item of event.response?.output || []) {
-            if (item?.type === 'function_call' && !interrupted) {
-              handlePrivateRealtimeToolCall(item)
-            }
-          }
+          // A function call is complete only when its owning response is done.
+          // Starting the tool from output_item/arguments events lets the HTTP
+          // result race the still-active provider response; the subsequent
+          // response.create is then rejected as "Conversation already has
+          // active". Wait for the exact terminal response before continuing.
+          const toolCalls = interrupted ? [] : (event.response?.output || [])
+            .filter(item => item?.type === 'function_call')
+          if (toolCalls.length) void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
           // W0 usage beacon: the private voice peer is browser-owned, so this
           // page is the only place its usage exists — post each response.done
           // usage object to the server ledger (seat voice_private).
@@ -43436,7 +43526,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         try {
           const name = String(milestone || '').trim()
           const payload = { milestone: name }
-          if (privateRealtimeVoiceID && privateRealtimeVoiceThreadID && privateRealtimeVoiceTransportRevision > 0) {
+          if (privateRealtimeVoiceID && privateRealtimeVoiceThreadID
+            && privateRealtimeVoiceLeaseToken && privateRealtimeVoiceLeaseGeneration > 0
+            && privateRealtimeVoiceTransportRevision > 0) {
             const key = `${privateRealtimeVoiceTransportRevision}:${name}`
             let operationId = privateRealtimeVoiceMilestoneOperations.get(key)
             if (!operationId) {
@@ -43446,6 +43538,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             Object.assign(payload, {
               voiceSessionId: privateRealtimeVoiceID,
               threadId: privateRealtimeVoiceThreadID,
+              leaseToken: privateRealtimeVoiceLeaseToken,
+              leaseGeneration: privateRealtimeVoiceLeaseGeneration,
               transportRevision: privateRealtimeVoiceTransportRevision,
               operationId
             })
@@ -43744,11 +43838,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
         window.requestAnimationFrame(step)
       }
 
-      async function handlePrivateRealtimeToolCall(item) {
+      async function continuePrivateRealtimeToolCalls(items, sessionToken, peer) {
+        for (const item of items) {
+          if (!await handlePrivateRealtimeToolCall(item, sessionToken, peer)) return
+        }
+        if (sessionToken !== privateRealtimeVoiceSessionToken
+          || privateRealtimeVoicePeer !== peer
+          || !privateRealtimeVoiceActive()) return
+        sendPrivateRealtimeEvent({
+          type: 'response.create',
+          response: {
+            output_modalities: ['audio'],
+            tool_choice: 'none'
+          }
+        })
+      }
+
+      async function handlePrivateRealtimeToolCall(item, sessionToken, peer) {
+        const dataChannel = privateRealtimeVoiceDataChannel
+        const sessionIsCurrent = () => sessionToken === privateRealtimeVoiceSessionToken
+          && privateRealtimeVoicePeer === peer
+          && privateRealtimeVoiceDataChannel === dataChannel
+          && privateRealtimeVoiceActive()
+        if (!sessionIsCurrent()) return false
         const callId = String(item?.call_id || item?.callId || '').trim()
         const name = String(item?.name || '').trim()
         if (!callId || !name || privateRealtimeVoiceHandledCalls.has(callId)) {
-          return
+          return false
         }
         privateRealtimeVoiceHandledCalls.add(callId)
         // announce beat: posting-as-user pauses on a consent-signalling
@@ -43767,8 +43883,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const rawArgs = typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments || {})
           args = rawArgs.trim() ? JSON.parse(rawArgs) : {}
         } catch (error) {
-          sendPrivateRealtimeToolOutput(callId, { ok: false, error: 'could not read tool arguments' })
-          return
+          return sendPrivateRealtimeToolOutput(callId, { ok: false, error: 'could not read tool arguments' })
         }
 
         let output = { ok: false, error: 'tool request failed' }
@@ -43778,8 +43893,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
             threadId: privateRealtimeVoiceThreadID,
             callId,
             name,
-            arguments: args
+            arguments: args,
+            leaseToken: privateRealtimeVoiceLeaseToken,
+            leaseGeneration: privateRealtimeVoiceLeaseGeneration,
+            transportRevision: privateRealtimeVoiceTransportRevision
           })
+          // The HTTP action may outlive this peer. Never let its result, UI
+          // actions, or continuation escape onto a replacement conversation.
+          if (!sessionIsCurrent()) return false
           output = response.data?.result || { ok: Boolean(response.ok) }
           if (!response.ok && !output.error) {
             output.error = response.data?.error || 'tool request failed'
@@ -43828,14 +43949,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
           }
         } catch (error) {
+          if (!sessionIsCurrent()) return false
           output = { ok: false, error: error.message || 'tool request failed' }
           setVoiceIslandState('error', output.error)
         }
-        sendPrivateRealtimeToolOutput(callId, output)
+        return sendPrivateRealtimeToolOutput(callId, output)
       }
 
       function sendPrivateRealtimeToolOutput(callId, output) {
-        sendPrivateRealtimeEvent({
+        return sendPrivateRealtimeEvent({
           type: 'conversation.item.create',
           item: {
             type: 'function_call_output',
@@ -43843,18 +43965,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
             output: JSON.stringify(output || { ok: true })
           }
         })
-        sendPrivateRealtimeEvent({
-          type: 'response.create',
-          response: {
-            output_modalities: ['audio'],
-            tool_choice: 'none'
-          }
-        })
       }
 
       function closePrivateRealtimeVoiceSession(options = {}) {
+        const serverLease = {
+          voiceSessionId: privateRealtimeVoiceID,
+          threadId: privateRealtimeVoiceThreadID,
+          leaseToken: privateRealtimeVoiceLeaseToken,
+          leaseGeneration: privateRealtimeVoiceLeaseGeneration,
+          transportRevision: privateRealtimeVoiceTransportRevision,
+          operationId: `stop-${privateRealtimeVoiceLeaseGeneration}-${privateRealtimeVoiceTransportRevision}`
+        }
         privateRealtimeVoiceSessionToken += 1
         privateRealtimeVoiceStarting = false
+        if (privateRealtimeVoiceLeaseRenewTimer) window.clearInterval(privateRealtimeVoiceLeaseRenewTimer)
+        privateRealtimeVoiceLeaseRenewTimer = 0
         if (privateRealtimeVoiceDataChannel) {
           privateRealtimeVoiceDataChannel.onopen = null
           privateRealtimeVoiceDataChannel.onmessage = null
@@ -43871,6 +43996,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceID = ''
         privateRealtimeVoiceThreadID = ''
         privateRealtimeVoiceTransportRevision = 0
+        privateRealtimeVoiceLeaseToken = ''
+        privateRealtimeVoiceLeaseGeneration = 0
+        privateRealtimeVoiceLeaseExpiresAt = ''
+        privateRealtimeVoiceOfferOperationID = ''
         privateRealtimeVoiceMilestoneOperations = new Map()
         if (!options?.preserveReconnect) cancelPrivateRealtimeVoiceReconnect()
         // A closing session ends any in-flight grill ritual (the browser owns it).
@@ -43904,6 +44033,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // rather than inheriting a stale analyser on a stopped track.
         releaseStrideSignalTaps()
         releaseRealtimeVoiceAudioFocus('session_closed')
+        if (serverLease.voiceSessionId && serverLease.threadId && serverLease.leaseToken
+          && serverLease.leaseGeneration > 0 && serverLease.transportRevision > 0) {
+          // Local media and focus are already closed; the exact durable stop is
+          // best-effort and idempotent, with lease expiry as the crash fallback.
+          postAuthJSON('/assistant/realtime/lease/stop', serverLease).catch(() => {})
+        }
       }
 
       async function acquireRealtimeVoiceAudioFocus(mode) {
@@ -46239,6 +46374,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           clientConfigLoadedAt = requestedAt
           clientConfigTtlSeconds = Number(config?.turnCredentialTTLSeconds) || 0
           lastGoodClientConfig = config
+          syncPrivateRealtimeVoiceQualification(config)
           return { config, usable: true }
         }
         return { config: lastGoodClientConfig || {}, usable: false }

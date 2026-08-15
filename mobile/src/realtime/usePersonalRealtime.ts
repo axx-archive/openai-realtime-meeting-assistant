@@ -53,6 +53,7 @@ export type PersonalRealtimeTurn = {
 const STATS_INTERVAL_MS = 100;
 const NATIVE_MEDIA_OPERATION_TIMEOUT_MS = 2_500;
 const PERSONAL_REALTIME_RECONNECT_DELAYS_MS = [500, 1_500] as const;
+const PERSONAL_REALTIME_LEASE_RENEW_MS = 10_000;
 
 type PersonalRealtimeReconnectBinding = {
   voiceSessionId: string;
@@ -130,6 +131,10 @@ export function usePersonalRealtime(options: {
   const voiceSessionIdRef = useRef('');
   const voiceThreadIdRef = useRef('');
   const voiceTransportRevisionRef = useRef(0);
+  const voiceLeaseTokenRef = useRef('');
+  const voiceLeaseGenerationRef = useRef(0);
+  const voiceLeaseExpiresAtRef = useRef('');
+  const voiceLeaseRenewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const milestoneOperationIdsRef = useRef(new Map<string, string>());
   const pendingMilestonesRef = useRef(new Set<string>());
   const activeTransportRevisionRef = useRef<{ generation: number; revision: number } | null>(null);
@@ -221,6 +226,8 @@ export function usePersonalRealtime(options: {
     }
     if (statsTimerRef.current) clearInterval(statsTimerRef.current);
     statsTimerRef.current = null;
+    if (voiceLeaseRenewTimerRef.current) clearInterval(voiceLeaseRenewTimerRef.current);
+    voiceLeaseRenewTimerRef.current = null;
     const toolAbortController = toolAbortControllerRef.current;
     toolAbortControllerRef.current = null;
     toolAbortController?.abort();
@@ -232,11 +239,21 @@ export function usePersonalRealtime(options: {
     streamRef.current = null;
     remoteStreamRef.current = null;
     handledCallsRef.current = new Set();
+    const serverLease = {
+      voiceSessionId: voiceSessionIdRef.current,
+      threadId: voiceThreadIdRef.current,
+      leaseToken: voiceLeaseTokenRef.current,
+      leaseGeneration: voiceLeaseGenerationRef.current,
+      transportRevision: voiceTransportRevisionRef.current,
+    };
     if (!preserveLogicalBinding) {
       voiceSessionIdRef.current = '';
       voiceThreadIdRef.current = '';
       voiceTransportRevisionRef.current = 0;
     }
+    voiceLeaseTokenRef.current = '';
+    voiceLeaseGenerationRef.current = 0;
+    voiceLeaseExpiresAtRef.current = '';
     milestoneOperationIdsRef.current = new Map();
     pendingMilestonesRef.current = new Set();
     activeTransportRevisionRef.current = null;
@@ -249,11 +266,24 @@ export function usePersonalRealtime(options: {
         ? Promise.resolve(false)
         : BonfireMediaSession.deactivateVideoMeeting(expectedMediaSessionGeneration),
     });
+    if (
+      sessionToken
+      && serverLease.voiceSessionId
+      && serverLease.threadId
+      && serverLease.leaseToken
+      && serverLease.leaseGeneration > 0
+      && serverLease.transportRevision > 0
+    ) {
+      void api.realtimeLeaseStop(sessionToken, {
+        ...serverLease,
+        operationId: createConversationOperationId(),
+      }).catch(() => undefined);
+    }
     if (publishIdle && mountedRef.current) {
       setTrace(emptyTrace());
       if (statusRef.current !== 'error') setLiveStatus('idle');
     }
-  }, [setLiveStatus]);
+  }, [sessionToken, setLiveStatus]);
 
   const terminateTransportWithError = useCallback((
     connectionGeneration: number,
@@ -351,7 +381,9 @@ export function usePersonalRealtime(options: {
     const voiceSessionId = voiceSessionIdRef.current;
     const threadId = voiceThreadIdRef.current;
     const transportRevision = voiceTransportRevisionRef.current;
-    if (!voiceSessionId || !threadId || transportRevision <= 0) {
+    const leaseToken = voiceLeaseTokenRef.current;
+    const leaseGeneration = voiceLeaseGenerationRef.current;
+    if (!voiceSessionId || !threadId || !leaseToken || leaseGeneration <= 0 || transportRevision <= 0) {
       // Provider callbacks can beat the HTTP offer response. Retain their
       // names until the exact durable binding is known instead of downgrading
       // them to an unbound legacy receipt.
@@ -367,12 +399,14 @@ export function usePersonalRealtime(options: {
       voiceSessionId,
       threadId,
       transportRevision,
+      leaseToken,
+      leaseGeneration,
       operationId,
       milestone,
     }).catch(() => undefined);
   }, [sessionToken]);
 
-  const sendToolOutput = useCallback((callId: string, output: Record<string, unknown>) => {
+  const sendToolOutput = useCallback((callId: string, output: Record<string, unknown>): boolean => (
     sendEvent({
       type: 'conversation.item.create',
       item: {
@@ -380,17 +414,13 @@ export function usePersonalRealtime(options: {
         call_id: callId,
         output: JSON.stringify(output),
       },
-    });
-    sendEvent({
-      type: 'response.create',
-      response: { output_modalities: ['audio'], tool_choice: 'none' },
-    });
-  }, [sendEvent]);
+    })
+  ), [sendEvent]);
 
   const handleToolCall = useCallback(async (
     call: RealtimeFunctionCall,
     connectionGeneration: number,
-  ) => {
+  ): Promise<boolean> => {
     const lease = leaseRef.current;
     const toolAbortController = toolAbortControllerRef.current;
     if (
@@ -399,7 +429,7 @@ export function usePersonalRealtime(options: {
       || !toolAbortController
       || toolAbortController.signal.aborted
       || handledCallsRef.current.has(call.callId)
-    ) return;
+    ) return false;
     handledCallsRef.current.add(call.callId);
     setLiveStatus(call.name === 'do_nothing' ? 'thinking' : 'acting');
     let argumentsValue: Record<string, unknown> = {};
@@ -408,8 +438,7 @@ export function usePersonalRealtime(options: {
       if (!isRecord(parsed)) throw new Error('arguments must be an object');
       argumentsValue = parsed;
     } catch {
-      sendToolOutput(call.callId, { ok: false, error: 'could not read tool arguments' });
-      return;
+      return sendToolOutput(call.callId, { ok: false, error: 'could not read tool arguments' });
     }
     try {
       const controlReady = await waitForOfficeControlChannel(
@@ -422,15 +451,14 @@ export function usePersonalRealtime(options: {
         ),
       );
       if (!controlReady) {
-        sendToolOutput(call.callId, { ok: false, error: 'Scout could not re-establish its authenticated control channel.' });
-        return;
+        return sendToolOutput(call.callId, { ok: false, error: 'Scout could not re-establish its authenticated control channel.' });
       }
       if (
         generationRef.current !== connectionGeneration
         || leaseRef.current !== lease
         || !lease.isCurrent()
         || toolAbortController.signal.aborted
-      ) return;
+      ) return false;
       const response = await api.realtimeTool(
         sessionToken,
         voiceSessionIdRef.current,
@@ -438,6 +466,11 @@ export function usePersonalRealtime(options: {
         call.callId,
         call.name,
         argumentsValue,
+        {
+          leaseToken: voiceLeaseTokenRef.current,
+          leaseGeneration: voiceLeaseGenerationRef.current,
+          transportRevision: voiceTransportRevisionRef.current,
+        },
         toolAbortController.signal,
       );
       if (
@@ -445,19 +478,33 @@ export function usePersonalRealtime(options: {
         || leaseRef.current !== lease
         || !lease.isCurrent()
         || toolAbortController.signal.aborted
-      ) return;
+      ) return false;
       if (response.actions?.length) onActionsRef.current?.(response.actions);
-      sendToolOutput(call.callId, response.result ?? { ok: response.ok !== false });
+      return sendToolOutput(call.callId, response.result ?? { ok: response.ok !== false });
     } catch (toolError) {
       if (
         generationRef.current !== connectionGeneration
         || leaseRef.current !== lease
         || !lease.isCurrent()
         || toolAbortController.signal.aborted
-      ) return;
-      sendToolOutput(call.callId, { ok: false, error: userFacingRealtimeError(toolError) });
+      ) return false;
+      return sendToolOutput(call.callId, { ok: false, error: userFacingRealtimeError(toolError) });
     }
   }, [sendToolOutput, sessionToken, setLiveStatus]);
+
+  const continueToolCalls = useCallback(async (
+    calls: RealtimeFunctionCall[],
+    connectionGeneration: number,
+  ) => {
+    for (const call of calls) {
+      if (!await handleToolCall(call, connectionGeneration)) return;
+    }
+    if (generationRef.current !== connectionGeneration || dataChannelRef.current?.readyState !== 'open') return;
+    sendEvent({
+      type: 'response.create',
+      response: { output_modalities: ['audio'], tool_choice: 'none' },
+    });
+  }, [handleToolCall, sendEvent]);
 
   const handleProviderEvent = useCallback((raw: unknown, connectionGeneration: number) => {
     let event: Record<string, unknown>;
@@ -478,9 +525,8 @@ export function usePersonalRealtime(options: {
         ? { question: transcript.text, answer: '' }
         : { question: current?.question ?? '', answer: transcript.text });
     }
-    for (const call of realtimeFunctionCalls(event)) {
-      void handleToolCall(call, connectionGeneration);
-    }
+    const toolCalls = realtimeFunctionCalls(event);
+    if (toolCalls.length) void continueToolCalls(toolCalls, connectionGeneration);
     if (type === 'response.done' && sessionToken && isRecord(event.response)) {
       publishMilestone('response_done', connectionGeneration);
       const usage = event.response.usage;
@@ -502,7 +548,7 @@ export function usePersonalRealtime(options: {
       publishMilestone('first_audio', connectionGeneration);
     }
     setLiveStatus(realtimeStatusForEvent(type, statusRef.current));
-  }, [handleToolCall, publishMilestone, sessionToken, setLiveStatus, terminateTransportWithError]);
+  }, [continueToolCalls, publishMilestone, sessionToken, setLiveStatus, terminateTransportWithError]);
 
   const startStats = useCallback((peer: RTCPeerConnection, connectionGeneration: number) => {
     if (generationRef.current !== connectionGeneration || peerRef.current !== peer) return;
@@ -516,6 +562,39 @@ export function usePersonalRealtime(options: {
       }).catch(() => undefined);
     }, STATS_INTERVAL_MS);
   }, []);
+
+  const startLeaseRenewal = useCallback((connectionGeneration: number) => {
+    if (voiceLeaseRenewTimerRef.current) clearInterval(voiceLeaseRenewTimerRef.current);
+    voiceLeaseRenewTimerRef.current = setInterval(() => {
+      const binding = {
+        voiceSessionId: voiceSessionIdRef.current,
+        threadId: voiceThreadIdRef.current,
+        leaseToken: voiceLeaseTokenRef.current,
+        leaseGeneration: voiceLeaseGenerationRef.current,
+        transportRevision: voiceTransportRevisionRef.current,
+      };
+      if (
+        !sessionToken
+        || generationRef.current !== connectionGeneration
+        || !binding.voiceSessionId
+        || !binding.threadId
+        || !binding.leaseToken
+        || binding.leaseGeneration <= 0
+        || binding.transportRevision <= 0
+      ) return;
+      void api.realtimeLeaseRenew(sessionToken, {
+        ...binding,
+        operationId: createConversationOperationId(),
+      }).then((result) => {
+        if (generationRef.current === connectionGeneration) {
+          voiceLeaseExpiresAtRef.current = String(result.leaseExpiresAt || '');
+        }
+      }).catch((renewError) => {
+        if (generationRef.current !== connectionGeneration) return;
+        terminateTransportWithError(connectionGeneration, userFacingRealtimeError(renewError));
+      });
+    }, PERSONAL_REALTIME_LEASE_RENEW_MS);
+  }, [sessionToken, terminateTransportWithError]);
 
   const start = useCallback(async (reconnectBinding?: PersonalRealtimeReconnectBinding) => {
     if (!NATIVE_REALTIME_VOICE_ENABLED || !sessionToken) return;
@@ -747,7 +826,12 @@ export function usePersonalRealtime(options: {
         || peerRef.current !== peer
         || !officeControlChannelIsLive(sessionToken)
       ) return;
-      const answer = await api.realtimeOffer(sessionToken, localSDP, voiceSessionId);
+      const answer = await api.realtimeOffer(
+        sessionToken,
+        localSDP,
+        voiceSessionId,
+        createConversationOperationId(),
+      );
       if (
         generationRef.current !== connectionGeneration
         || peerRef.current !== peer
@@ -759,12 +843,19 @@ export function usePersonalRealtime(options: {
         || !String(answer.threadId || '').trim()
         || !Number.isSafeInteger(answer.transportRevision)
         || answer.transportRevision <= previousTransportRevision
+        || !String(answer.leaseToken || '').trim()
+        || !Number.isSafeInteger(answer.leaseGeneration)
+        || answer.leaseGeneration <= 0
+        || !Number.isFinite(new Date(answer.leaseExpiresAt).getTime())
         || (reconnecting && answer.threadId !== expectedThreadId)
       ) {
         throw new Error('Scout voice did not bind its private transcript.');
       }
       voiceThreadIdRef.current = answer.threadId;
       voiceTransportRevisionRef.current = answer.transportRevision;
+      voiceLeaseTokenRef.current = answer.leaseToken;
+      voiceLeaseGenerationRef.current = answer.leaseGeneration;
+      voiceLeaseExpiresAtRef.current = answer.leaseExpiresAt;
       activeTransportRevisionRef.current = {
         generation: connectionGeneration,
         revision: answer.transportRevision,
@@ -788,6 +879,7 @@ export function usePersonalRealtime(options: {
         || peerRef.current !== peer
         || !lease.isCurrent()
       ) return;
+      startLeaseRenewal(connectionGeneration);
       startStats(peer, connectionGeneration);
     } catch (startError) {
       if (startupFailureTerminalRequest === null && generationRef.current !== connectionGeneration) return;
@@ -825,7 +917,7 @@ export function usePersonalRealtime(options: {
       setError(message);
       setLiveStatus('error');
     }
-  }, [cancelReconnect, cleanupTransport, handleProviderEvent, publishMilestone, queueReconnect, sessionToken, setLiveStatus, startStats, terminateTransportWithError]);
+  }, [cancelReconnect, cleanupTransport, handleProviderEvent, publishMilestone, queueReconnect, sessionToken, setLiveStatus, startLeaseRenewal, startStats, terminateTransportWithError]);
 
   reconnectRunnerRef.current = (binding) => {
     void start(binding);
@@ -835,7 +927,8 @@ export function usePersonalRealtime(options: {
     reason: AudioFocusTerminalReason = 'completed',
   ) => {
     terminalRequestRef.current += 1;
-    cancelReconnect();
+    // Keep the exact server binding until cleanup snapshots it for Stop.
+    cancelReconnect(false);
     const lease = leaseRef.current;
     leaseRef.current = null;
     try {
@@ -866,12 +959,21 @@ export function usePersonalRealtime(options: {
 
   useEffect(() => () => {
     mountedRef.current = false;
-    cancelReconnect();
+    cancelReconnect(false);
     const lease = leaseRef.current;
     leaseRef.current = null;
     if (lease) void lease.release('cancelled').catch(() => undefined);
     else void cleanupTransport().catch(() => undefined);
   }, [cancelReconnect, cleanupTransport]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' && !['idle', 'error'].includes(statusRef.current)) {
+        void stop('cancelled');
+      }
+    });
+    return () => subscription.remove();
+  }, [stop]);
 
   return {
     enabled: NATIVE_REALTIME_VOICE_ENABLED,

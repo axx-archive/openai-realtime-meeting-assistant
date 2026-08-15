@@ -447,7 +447,7 @@ func TestIndexHasPrivateGrillMarkers(t *testing.T) {
 	// Wiring, not just presence: the swap must be applied from the private tool
 	// handler's body (a substring-anywhere check would pass with the functions
 	// disconnected). Per the Wave-6 lesson, scope the assertion to the function.
-	handlerBody := functionBody(html, "async function handlePrivateRealtimeToolCall(item)")
+	handlerBody := functionBody(html, "async function handlePrivateRealtimeToolCall(item, sessionToken, peer)")
 	if handlerBody == "" {
 		t.Fatal("index.html missing handlePrivateRealtimeToolCall")
 	}

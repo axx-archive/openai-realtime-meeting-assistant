@@ -20,6 +20,7 @@ type scoutChatVoiceTransportAttempt struct {
 	StartedAt  string                             `json:"startedAt"`
 	AcceptedAt string                             `json:"acceptedAt,omitempty"`
 	FailedAt   string                             `json:"failedAt,omitempty"`
+	StoppedAt  string                             `json:"stoppedAt,omitempty"`
 	Milestones []scoutChatVoiceTransportMilestone `json:"milestones,omitempty"`
 }
 
@@ -120,6 +121,35 @@ func (app *kanbanBoardApp) appendPrivateRealtimeVoiceTransportMilestone(requeste
 	if err != nil {
 		return privateRealtimeVoiceLatencySnapshot{}, false, err
 	}
+	return app.appendPrivateRealtimeVoiceTransportMilestoneLocked(thread, revision, operationID, milestone, at)
+}
+
+// appendPrivateRealtimeVoiceLeaseTransportMilestone validates the exact live
+// lease and appends its receipt under one thread lock. A concurrent stop must
+// therefore happen wholly before (and reject) or wholly after this receipt.
+func (app *kanbanBoardApp) appendPrivateRealtimeVoiceLeaseTransportMilestone(requesterEmail, sessionHash, voiceSessionID, threadID, leaseToken string, leaseGeneration, revision int, operationID, milestone string, at time.Time) (privateRealtimeVoiceLatencySnapshot, bool, error) {
+	operationID, err := normalizeScoutIdempotencyKey(operationID)
+	if err != nil {
+		return privateRealtimeVoiceLatencySnapshot{}, false, fmt.Errorf("private Realtime voice milestone operation id is invalid")
+	}
+	milestone = strings.ToLower(strings.TrimSpace(milestone))
+	if !validPrivateRealtimeVoiceTransportMilestone(milestone) {
+		return privateRealtimeVoiceLatencySnapshot{}, false, fmt.Errorf("unknown realtime milestone")
+	}
+	lock := app.scoutChatThreadLock(strings.TrimSpace(threadID))
+	lock.Lock()
+	defer lock.Unlock()
+	thread, err := app.privateRealtimeVoiceConversation(requesterEmail, voiceSessionID, threadID)
+	if err != nil {
+		return privateRealtimeVoiceLatencySnapshot{}, false, err
+	}
+	if err := validatePrivateRealtimeLeaseAdmission(thread.VoiceSession.Lease, sessionHash, voiceSessionID, leaseToken, leaseGeneration, revision, at); err != nil {
+		return privateRealtimeVoiceLatencySnapshot{}, false, err
+	}
+	return app.appendPrivateRealtimeVoiceTransportMilestoneLocked(thread, revision, operationID, milestone, at)
+}
+
+func (app *kanbanBoardApp) appendPrivateRealtimeVoiceTransportMilestoneLocked(thread scoutChatThreadRecord, revision int, operationID, milestone string, at time.Time) (privateRealtimeVoiceLatencySnapshot, bool, error) {
 	if thread.VoiceSession.TransportRevision != revision {
 		return privateRealtimeVoiceLatencySnapshot{}, false, fmt.Errorf("private Realtime voice transport revision was superseded")
 	}

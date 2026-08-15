@@ -42,7 +42,7 @@ type boardLifecycleOperation struct {
 }
 
 func boardLifecycleJournalPath() string {
-	return filepath.Join(filepath.Dir(meetingMemoryPath()), "deleted-objects.jsonl")
+	return canonicalDeletedLifecycleJournalPath()
 }
 
 func marshalKanbanBoardState(state kanbanBoardState) ([]byte, error) {
@@ -92,16 +92,28 @@ func validBoardLifecycleRecord(record CanonicalLifecycleJournalRecord) error {
 	default:
 		return fmt.Errorf("unknown lifecycle phase %q", record.Phase)
 	}
-	if record.Family != "board_card" || strings.TrimSpace(record.ObjectID) == "" {
-		return errors.New("phased lifecycle records currently require a board_card target")
+	if strings.TrimSpace(record.ObjectID) == "" {
+		return errors.New("phased lifecycle records require an object target")
 	}
-	if !isHexDigest(record.StateDigest) ||
-		!isHexDigest(record.BoardBeforeSHA256) ||
-		!isHexDigest(record.BoardAfterSHA256) {
-		return errors.New("phased lifecycle record requires exact state, before, and after SHA-256 digests")
+	if !isHexDigest(record.StateDigest) {
+		return errors.New("phased lifecycle record requires an exact state digest")
 	}
-	if record.BoardBeforeSHA256 == record.BoardAfterSHA256 {
-		return errors.New("board lifecycle before and after digests must differ")
+	if record.Family == "board_card" {
+		if !isHexDigest(record.BoardBeforeSHA256) || !isHexDigest(record.BoardAfterSHA256) {
+			return errors.New("board lifecycle record requires exact before and after SHA-256 digests")
+		}
+		if record.BoardBeforeSHA256 == record.BoardAfterSHA256 {
+			return errors.New("board lifecycle before and after digests must differ")
+		}
+	} else {
+		switch record.Family {
+		case "memory", "artifact_revision", "notification", "file_folder", "file_assignment":
+		default:
+			return fmt.Errorf("unsupported phased lifecycle family %q", record.Family)
+		}
+		if record.BoardBeforeSHA256 != "" || record.BoardAfterSHA256 != "" {
+			return errors.New("non-board lifecycle record cannot carry board digests")
+		}
 	}
 	return nil
 }
@@ -207,7 +219,7 @@ func recoverBoardLifecycleTransactionsLocked(boardPath, journalPath string) erro
 	}
 	pendingIDs := make([]string, 0)
 	for operationID, operation := range operations {
-		if operation.prepared != nil && operation.terminal == nil {
+		if operation.prepared != nil && operation.terminal == nil && operation.prepared.Family == "board_card" {
 			pendingIDs = append(pendingIDs, operationID)
 		}
 	}
@@ -419,6 +431,10 @@ func (app *kanbanBoardApp) deleteBoardCardTwoPhaseLocked(cardID, reason string, 
 func boardLifecycleCommittedRecords(path string) ([]CanonicalLifecycleJournalRecord, error) {
 	canonicalLifecycleJournalMu.Lock()
 	defer canonicalLifecycleJournalMu.Unlock()
+	return boardLifecycleCommittedRecordsLocked(path)
+}
+
+func boardLifecycleCommittedRecordsLocked(path string) ([]CanonicalLifecycleJournalRecord, error) {
 	records, err := readCanonicalLifecycleJournal(path)
 	if err != nil {
 		return nil, err

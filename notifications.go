@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,11 +112,20 @@ type notificationRecord struct {
 	// still reaches everyone else. The roster is bounded by the 500-record cap.
 	ClearedBy          []string `json:"clearedBy,omitempty"`
 	ClearedByPersonIDs []string `json:"clearedByPersonIds,omitempty"`
+	// CanonicalStateDigest retains the importer's exact projection of the raw
+	// row loaded from disk. Loader normalization is process-only until the next
+	// store rewrite, so retention journaling must use this pre-normalization
+	// digest rather than accidentally describing the normalized RAM copy.
+	CanonicalStateDigest string `json:"-"`
 }
 
 type notificationStoreState struct {
 	Notifications []notificationRecord `json:"notifications"`
 	UpdatedAt     string               `json:"updatedAt,omitempty"`
+}
+
+var notificationLifecycleReplace = func(path string, state notificationStoreState) error {
+	return writeJSONFileAtomically(path, "notifications lifecycle recovery", state)
 }
 
 func notificationsPath() string {
@@ -126,6 +136,11 @@ func notificationsPath() string {
 }
 
 func loadNotificationStoreState(path string) ([]notificationRecord, error) {
+	if err := recoverLegacyLifecycleTransactionsForPaths(CanonicalImportPaths{
+		MeetingMemory: meetingMemoryPath(), Notifications: path, FileFolders: fileFoldersFilePath(),
+	}); err != nil {
+		return nil, fmt.Errorf("recover legacy lifecycle transactions: %w", err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -146,16 +161,110 @@ func loadNotificationStoreState(path string) ([]notificationRecord, error) {
 		if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.Text) == "" {
 			continue
 		}
+		object, objectErr := canonicalNotificationImportedObject(record)
+		if objectErr != nil {
+			return nil, objectErr
+		}
+		record.CanonicalStateDigest = object.StateDigest
 		record.Kind = normalizeNotificationKind(record.Kind)
 		record.TenantID = strings.TrimSpace(record.TenantID)
 		record.UserEmail = normalizeAccountEmail(record.UserEmail)
 		record.ExcludedUserEmails = normalizeNotificationExcludedUsers(record.ExcludedUserEmails)
 		records = append(records, record)
 	}
+	recovered, changed, err := recoverJournaledNotificationDeletions(path, records)
+	if err != nil {
+		return nil, err
+	}
+	records = recovered
 	if len(records) > notificationStoreCap {
+		removed := append([]notificationRecord(nil), records[:len(records)-notificationStoreCap]...)
 		records = records[len(records)-notificationStoreCap:]
+		deletions, deletionErr := notificationDeletionRecords(removed, "notification_retention_truncated", time.Now().UTC())
+		if deletionErr != nil {
+			return nil, deletionErr
+		}
+		state := notificationStoreState{Notifications: records, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		if err := withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), deletions, func() error {
+			return notificationLifecycleReplace(path, state)
+		}); err != nil {
+			return nil, err
+		}
+		refreshNotificationCanonicalStateDigests(records)
+		return records, nil
+	}
+	if changed {
+		if err := notificationLifecycleReplace(path, notificationStoreState{Notifications: records, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+			return nil, err
+		}
+		refreshNotificationCanonicalStateDigests(records)
 	}
 	return records, nil
+}
+
+func notificationDeletionRecords(records []notificationRecord, reason string, at time.Time) ([]CanonicalLifecycleJournalRecord, error) {
+	objects := make([]CanonicalImportedObject, 0, len(records))
+	for _, record := range records {
+		object, err := canonicalNotificationLifecycleObject(record)
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects, object)
+	}
+	return canonicalLifecycleDeletionRecords(objects, at, reason), nil
+}
+
+func canonicalNotificationLifecycleObject(record notificationRecord) (CanonicalImportedObject, error) {
+	object, err := canonicalNotificationImportedObject(record)
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	if isHexDigest(record.CanonicalStateDigest) {
+		object.StateDigest = record.CanonicalStateDigest
+	}
+	return object, nil
+}
+
+func refreshNotificationCanonicalStateDigests(records []notificationRecord) {
+	for index := range records {
+		object, err := canonicalNotificationImportedObject(records[index])
+		if err == nil {
+			records[index].CanonicalStateDigest = object.StateDigest
+		}
+	}
+}
+
+func recoverJournaledNotificationDeletions(path string, records []notificationRecord) ([]notificationRecord, bool, error) {
+	latest, err := latestCommittedCanonicalLifecycleRecords(canonicalDeletedLifecycleJournalPath(), "notification")
+	if err != nil {
+		return nil, false, fmt.Errorf("read notification lifecycle recovery: %w", err)
+	}
+	if len(latest) == 0 {
+		return records, false, nil
+	}
+	kept := make([]notificationRecord, 0, len(records))
+	changed := false
+	for _, record := range records {
+		journal, exists := latest["notification\x00"+record.ID]
+		if !exists {
+			kept = append(kept, record)
+			continue
+		}
+		object, objectErr := canonicalNotificationLifecycleObject(record)
+		if objectErr != nil {
+			return nil, false, objectErr
+		}
+		if !object.OccurredAt.IsZero() && object.OccurredAt.After(journal.At) {
+			kept = append(kept, record)
+			continue
+		}
+		if object.StateDigest == journal.StateDigest {
+			changed = true
+			continue
+		}
+		return nil, false, fmt.Errorf("notification lifecycle recovery state mismatch for %s", record.ID)
+	}
+	return kept, changed, nil
 }
 
 func normalizeNotificationKind(kind string) string {
@@ -237,14 +346,35 @@ func (app *kanbanBoardApp) createNotificationRecord(userEmail string, excludedUs
 
 	app.mu.Lock()
 	record.ID = app.nextNotificationIDLocked()
-	app.notifications = append(app.notifications, record)
-	if len(app.notifications) > notificationStoreCap {
-		app.notifications = app.notifications[len(app.notifications)-notificationStoreCap:]
+	prior := append([]notificationRecord(nil), app.notifications...)
+	next := append(append([]notificationRecord(nil), app.notifications...), record)
+	var removed []notificationRecord
+	if len(next) > notificationStoreCap {
+		removed = append([]notificationRecord(nil), next[:len(next)-notificationStoreCap]...)
+		next = next[len(next)-notificationStoreCap:]
 	}
-	persistErr := app.persistNotificationsLocked()
+	commit := func() error {
+		app.notifications = next
+		persistErr := app.persistNotificationsLocked()
+		if persistErr != nil && !errors.Is(persistErr, ErrDurableReplaceAmbiguous) {
+			app.notifications = prior
+		}
+		return persistErr
+	}
+	var persistErr error
+	if len(removed) > 0 {
+		deletions, deletionErr := notificationDeletionRecords(removed, "notification_retention_truncated", time.Now().UTC())
+		if deletionErr != nil {
+			persistErr = deletionErr
+		} else {
+			persistErr = withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), deletions, commit)
+		}
+	} else {
+		persistErr = commit()
+	}
 	app.mu.Unlock()
 	if persistErr != nil {
-		log.Errorf("Failed to persist notifications: %v", persistErr)
+		return notificationRecord{}, persistErr
 	}
 
 	if deferred {
@@ -484,7 +614,11 @@ func (app *kanbanBoardApp) persistNotificationsLocked() error {
 		Notifications: append([]notificationRecord(nil), app.notifications...),
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	return writeJSONFileAtomically(notificationsPath(), "notifications", state)
+	if err := writeJSONFileAtomically(notificationsPath(), "notifications", state); err != nil {
+		return err
+	}
+	refreshNotificationCanonicalStateDigests(app.notifications)
+	return nil
 }
 
 func canonicalCatchUpNotification(record notificationRecord) bool {

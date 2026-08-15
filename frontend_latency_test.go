@@ -2169,7 +2169,7 @@ func TestRoomEntryStopsPrivateRealtimeBeforeRoomVoiceState(t *testing.T) {
 		"const inRoom = appShell.classList.contains('is-in-room') && roomMediaActive()",
 		"waitingParticipants.textContent = `${seatCount} invited",
 		"const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')",
-		"return !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')",
+		"return privateRealtimeVoiceQualified\n          && !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')",
 		"return Boolean(authedUser) && privateRealtimeVoiceSurfaceAvailable()",
 		"who: names.length ? `${Math.max(occupiedSeats, names.length)} ${inRoom ? 'in the room' : 'invited'}` : 'the team'",
 	} {
@@ -2229,7 +2229,7 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"voiceSessionId: privateRealtimeVoiceID",
 		"transportRevision: privateRealtimeVoiceTransportRevision",
 		"operationId",
-		"function handlePrivateRealtimeToolCall(item)",
+		"function handlePrivateRealtimeToolCall(item, sessionToken, peer)",
 		"type: 'function_call_output'",
 		"type: 'response.create'",
 		"function closePrivateRealtimeVoiceSession(options = {})",
@@ -2333,6 +2333,95 @@ func TestPrivateRealtimeTerminalErrorsFenceAndCloseTransportBeforeErrorUI(t *tes
 	} {
 		if !strings.Contains(closeBody, want) {
 			t.Fatalf("private Realtime close path missing %q", want)
+		}
+	}
+}
+
+func TestPrivateRealtimeToolContinuationWaitsForResponseDone(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	eventBody := functionBody(string(rawHTML), "function handlePrivateRealtimeVoiceEvent(raw, sessionToken, peer)")
+	if eventBody == "" {
+		t.Fatal("private Realtime event handler is missing")
+	}
+	if strings.Contains(eventBody, "type === 'response.output_item.done' && event.item?.type === 'function_call'") ||
+		strings.Contains(eventBody, "type === 'response.function_call_arguments.done'") {
+		t.Fatal("private Realtime must not run tools before the owning response is done")
+	}
+	responseDone := strings.Index(eventBody, "if (type === 'response.done')")
+	toolCall := strings.Index(eventBody, "continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)")
+	if responseDone < 0 || toolCall < responseDone {
+		t.Fatal("private Realtime tool continuation is not fenced behind response.done")
+	}
+	handler := functionBody(string(rawHTML), "async function handlePrivateRealtimeToolCall(item, sessionToken, peer)")
+	if !strings.Contains(handler, "if (!sessionIsCurrent()) return") ||
+		strings.Count(handler, "if (!sessionIsCurrent()) return") < 3 ||
+		!strings.Contains(handler, "const dataChannel = privateRealtimeVoiceDataChannel") {
+		t.Fatal("private Realtime tool continuation is not fenced to its exact peer after async work")
+	}
+	continuation := functionBody(string(rawHTML), "async function continuePrivateRealtimeToolCalls(items, sessionToken, peer)")
+	if !strings.Contains(continuation, "for (const item of items)") ||
+		!strings.Contains(continuation, "await handlePrivateRealtimeToolCall(item, sessionToken, peer)") ||
+		strings.Count(continuation, "type: 'response.create'") != 1 ||
+		strings.Contains(handler, "type: 'response.create'") {
+		t.Fatal("private Realtime must serialize every tool output and emit one continuation per completed response")
+	}
+}
+
+func TestPrivateRealtimeBrowserOwnsExactServerLeaseLifecycle(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+	offer := functionBody(html, "async function exchangePrivateRealtimeOffer(offerSDP, voiceSessionId, expectedThreadId = '', priorTransportRevision = 0)")
+	for _, want := range []string{
+		"operationId",
+		"leaseToken",
+		"leaseGeneration",
+		"leaseExpiresAt",
+		"privateRealtimeVoiceLeaseToken = leaseToken",
+		"privateRealtimeVoiceLeaseGeneration = leaseGeneration",
+	} {
+		if !strings.Contains(offer, want) {
+			t.Fatalf("private Realtime offer is missing lease binding %q", want)
+		}
+	}
+	renew := functionBody(html, "function startPrivateRealtimeVoiceLeaseRenewal(sessionToken, peer)")
+	if !strings.Contains(renew, "'/assistant/realtime/lease/renew'") ||
+		!strings.Contains(renew, "10_000") ||
+		!strings.Contains(renew, "privateRealtimeVoicePeer !== peer") {
+		t.Fatal("private Realtime lease renewal is not bounded to the exact live peer")
+	}
+	closeBody := functionBodyAfterSignature(html, "function closePrivateRealtimeVoiceSession(options = {})")
+	closeIndex := strings.Index(closeBody, "privateRealtimeVoicePeer.close()")
+	stopIndex := strings.Index(closeBody, "'/assistant/realtime/lease/stop'")
+	if closeIndex < 0 || stopIndex < closeIndex {
+		t.Fatal("private Realtime must close local media before posting its exact server stop")
+	}
+	tool := functionBody(html, "async function handlePrivateRealtimeToolCall(item, sessionToken, peer)")
+	milestone := functionBody(html, "function postPrivateRealtimeMilestone(milestone)")
+	for label, body := range map[string]string{"tool": tool, "milestone": milestone} {
+		for _, want := range []string{"leaseToken", "leaseGeneration", "transportRevision"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("private Realtime %s is missing exact lease field %q", label, want)
+			}
+		}
+	}
+	if !strings.Contains(html, "if (privateRealtimeVoiceInFlight()) closePrivateRealtimeVoiceSession()") ||
+		!strings.Contains(html, "window.addEventListener('pagehide'") {
+		t.Fatal("private Realtime does not close on browser background/page exit")
+	}
+	for _, want := range []string{
+		"let privateRealtimeVoiceQualified = false",
+		"config?.privateRealtimeVoiceQualified === true",
+		"Private Scout voice is awaiting qualification",
+		"private Scout voice is awaiting qualification",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("private Realtime qualification gate is missing %q", want)
 		}
 	}
 }

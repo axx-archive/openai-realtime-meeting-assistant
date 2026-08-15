@@ -221,6 +221,8 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/api/artifact-dispositions/v1":                  {handler: artifactDispositionHandler, memberGated: true},
 		artifactDriveSavePath:                            {handler: artifactDriveSaveHandler, memberGated: true},
 		"/assistant/realtime-offer":                      {handler: assistantRealtimeOfferHandler, memberGated: true},
+		"/assistant/realtime/lease/renew":                {handler: assistantRealtimeLeaseRenewHandler, memberGated: true},
+		"/assistant/realtime/lease/stop":                 {handler: assistantRealtimeLeaseStopHandler, memberGated: true},
 		"/assistant/realtime-tool":                       {handler: assistantRealtimeToolHandler, memberGated: true},
 		"/assistant/realtime/usage":                      {handler: assistantRealtimeUsageHandler, memberGated: true},
 		"/assistant/realtime/milestone":                  {handler: assistantRealtimeMilestoneHandler, memberGated: true},

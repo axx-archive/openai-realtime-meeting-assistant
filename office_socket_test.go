@@ -523,8 +523,9 @@ func TestPrivateVoiceDirectBoardMutationIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "aj@shareability.com", voiceSessionID, voiceThread.ID, []*http.Cookie{{Name: sessionCookieName, Value: token}})
 	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool",
-		strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-forged-board-write","name":"create_ticket","arguments":{"title":"RW1BoardLiveRefreshProbe"}}`, voiceSessionID, voiceThread.ID)))
+		strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-forged-board-write","name":"create_ticket","arguments":{"title":"RW1BoardLiveRefreshProbe"}%s}`, voiceSessionID, voiceThread.ID, privateRealtimeLeaseTestJSON(lease))))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	recorder := httptest.NewRecorder()

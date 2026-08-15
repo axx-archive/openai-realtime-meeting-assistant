@@ -13,7 +13,7 @@ test('normalizes SDP to the server and native WebRTC CRLF contract', () => {
   assert.equal(normalizeRealtimeSDP('   '), '');
 });
 
-test('deduplicatable function call shapes match every server-supported Realtime event', () => {
+test('function calls wait for response.done before continuing the Realtime turn', () => {
   const direct = realtimeFunctionCalls({
     type: 'response.function_call_arguments.done',
     call_id: 'call-1',
@@ -24,12 +24,19 @@ test('deduplicatable function call shapes match every server-supported Realtime 
     type: 'response.done',
     response: { output: [{ type: 'function_call', call_id: 'call-1', name: 'answer_memory_question', arguments: '{}' }] },
   });
-  assert.deepEqual(direct[0], {
-    callId: 'call-1',
-    name: 'answer_memory_question',
-    argumentsText: '{"question":"what changed?"}',
-  });
+  assert.deepEqual(direct, []);
+  assert.deepEqual(realtimeFunctionCalls({
+    type: 'response.output_item.done',
+    item: { type: 'function_call', call_id: 'call-1', name: 'answer_memory_question', arguments: '{}' },
+  }), []);
   assert.equal(completed[0]?.callId, 'call-1');
+  assert.deepEqual(realtimeFunctionCalls({
+    type: 'response.done',
+    response: { status: 'completed', output: [
+      { type: 'function_call', call_id: 'call-a', name: 'answer_memory_question', arguments: '{}' },
+      { type: 'function_call', call_id: 'call-b', name: 'do_nothing', arguments: '{}' },
+    ] },
+  }).map((call) => call.callId), ['call-a', 'call-b']);
   assert.deepEqual(realtimeFunctionCalls({
     type: 'response.done',
     response: { status: 'cancelled', output: [{ type: 'function_call', call_id: 'call-2', name: 'delete_ticket' }] },

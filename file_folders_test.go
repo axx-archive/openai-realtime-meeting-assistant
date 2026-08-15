@@ -23,7 +23,9 @@ import (
 )
 
 func TestFileFolderStoreCRUDAndPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "file-folders.json")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "meeting-memory.jsonl"))
+	path := filepath.Join(dir, "file-folders.json")
 	store := newFileFolderStore(path)
 
 	// Name law: whitespace collapses, 1-60 runes after the collapse.
@@ -121,6 +123,7 @@ func TestFileFolderStoreCap(t *testing.T) {
 
 func TestFileFolderStoreRollsBackWhenPersistenceFails(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(root, "meeting-memory.jsonl"))
 	validPath := filepath.Join(root, "file-folders.json")
 	store := newFileFolderStore(validPath)
 	folder, err := store.create("Diligence", "AJ")

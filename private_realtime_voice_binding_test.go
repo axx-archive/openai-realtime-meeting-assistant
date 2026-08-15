@@ -139,6 +139,7 @@ func TestAssistantRealtimeToolRequiresAndEchoesExactVoiceBinding(t *testing.T) {
 		return "Exact HTTP binding.", nil
 	})
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "aj@shareability.com", voiceSessionID, thread.ID, cookies)
 	post := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -153,11 +154,11 @@ func TestAssistantRealtimeToolRequiresAndEchoesExactVoiceBinding(t *testing.T) {
 	if missing.Code != http.StatusBadRequest {
 		t.Fatalf("missing binding status=%d body=%s", missing.Code, missing.Body.String())
 	}
-	mismatch := post(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-call","name":"route_conversation_turn","arguments":{"utterance":"Hello"}}`, voiceSessionID, "scout-voice-mismatch"))
-	if mismatch.Code != http.StatusOK || !strings.Contains(mismatch.Body.String(), "do not match") {
+	mismatch := post(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-call","name":"route_conversation_turn","arguments":{"utterance":"Hello"}%s}`, voiceSessionID, "scout-voice-mismatch", privateRealtimeLeaseTestJSON(lease)))
+	if mismatch.Code != http.StatusConflict {
 		t.Fatalf("mismatch status=%d body=%s", mismatch.Code, mismatch.Body.String())
 	}
-	response := post(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-call","name":"route_conversation_turn","arguments":{"utterance":"Hello"}}`, voiceSessionID, thread.ID))
+	response := post(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-call","name":"route_conversation_turn","arguments":{"utterance":"Hello"}%s}`, voiceSessionID, thread.ID, privateRealtimeLeaseTestJSON(lease)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -205,8 +206,9 @@ func TestAssistantRealtimeToolRoutesTodaysMeetingsThroughAuthorizedBriefing(t *t
 		return "", nil
 	})
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "aj@shareability.com", voiceSessionID, thread.ID, cookies)
 	post := func() *httptest.ResponseRecorder {
-		body := fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-meeting-call","name":"route_conversation_turn","arguments":{"utterance":"Catch me up on today's meetings. What was important?"}}`, voiceSessionID, thread.ID)
+		body := fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"voice-http-meeting-call","name":"route_conversation_turn","arguments":{"utterance":"Catch me up on today's meetings. What was important?"}%s}`, voiceSessionID, thread.ID, privateRealtimeLeaseTestJSON(lease))
 		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		for _, cookie := range cookies {

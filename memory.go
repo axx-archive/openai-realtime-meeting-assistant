@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -497,54 +498,22 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create memory directory: %w", err)
 	}
+	if err := recoverLegacyLifecycleTransactionsForPaths(CanonicalImportPaths{
+		MeetingMemory: path, Notifications: notificationsPath(), FileFolders: fileFoldersFilePath(),
+	}); err != nil {
+		return nil, fmt.Errorf("recover legacy lifecycle transactions: %w", err)
+	}
 
-	file, err := os.Open(path)
+	entries, err := loadMeetingMemoryEntries(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return store, nil
-		}
-		return nil, fmt.Errorf("open memory file: %w", err)
+		return nil, err
 	}
-	defer file.Close()
-
-	// bufio.Reader, not bufio.Scanner: a shipped packaging deck (print chassis +
-	// base64-inlined imagery) is a multi-megabyte artifact filed as ONE JSONL
-	// line, and Scanner both caps a token (bufio.ErrTooLong) and hard-fails the
-	// WHOLE load on the first over-cap line — so one deck disabled all meeting
-	// memory on the next restart. ReadString grows without a fixed ceiling, and
-	// a per-line json error only skips that line (matching the existing
-	// malformed-entry resilience below).
-	reader := bufio.NewReaderSize(file, 1024*1024)
-	for {
-		line, readErr := reader.ReadString('\n')
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			var entry meetingMemoryEntry
-			if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
-				log.Warnf("Skipping malformed memory entry: %v", err)
-			} else if strings.TrimSpace(entry.ID) != "" && strings.TrimSpace(entry.Text) != "" {
-				// Historical JSONL is left byte-for-byte untouched. The body is
-				// already resident during load, so deriving the missing digest in
-				// memory is race-free and avoids an unsafe startup rewrite.
-				stampMeetingRecordBodyDigest(&entry)
-				store.entries = append(store.entries, entry)
-				store.seen[entry.ID] = struct{}{}
-				if !memoryEntryHiddenFromRecall(entry) {
-					store.bootLatestIDs[entry.Kind] = entry.ID
-					if store.bootLatestRoomIDs[entry.Kind] == nil {
-						store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
-					}
-					store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
-				}
-			}
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				break
-			}
-			return nil, fmt.Errorf("read memory file: %w", readErr)
-		}
+	store.entries = entries
+	store.rebuildLoadedMemoryStateLocked()
+	if err := store.recoverJournaledMemoryDeletionsLocked(); err != nil {
+		return nil, err
 	}
-	store.backfillArtifactAuthorizationProjections()
+	store.backfillArtifactAuthorizationProjectionsLocked()
 	store.rebuildMeetingEntryIndexesLocked()
 
 	// resume the in-flight meetings after a restart, PER ROOM (multi-room W2):
@@ -590,6 +559,70 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 
 	return store, nil
+}
+
+func loadMeetingMemoryEntries(path string) ([]meetingMemoryEntry, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open memory file: %w", err)
+	}
+	defer file.Close()
+
+	// bufio.Reader, not bufio.Scanner: a shipped packaging deck can be one
+	// multi-megabyte JSONL row. Per-line decode failures remain skippable.
+	reader := bufio.NewReaderSize(file, 1024*1024)
+	var entries []meetingMemoryEntry
+	for {
+		line, readErr := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			var entry meetingMemoryEntry
+			if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
+				log.Warnf("Skipping malformed memory entry: %v", err)
+			} else if strings.TrimSpace(entry.ID) != "" && strings.TrimSpace(entry.Text) != "" {
+				stampMeetingRecordBodyDigest(&entry)
+				entries = append(entries, entry)
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("read memory file: %w", readErr)
+		}
+	}
+	return entries, nil
+}
+
+func (store *meetingMemoryStore) rebuildLoadedMemoryStateLocked() {
+	store.seen = map[string]struct{}{}
+	store.bootLatestIDs = map[string]string{}
+	store.bootLatestRoomIDs = map[string]map[string]string{}
+	for _, entry := range store.entries {
+		store.seen[entry.ID] = struct{}{}
+		if memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		store.bootLatestIDs[entry.Kind] = entry.ID
+		if store.bootLatestRoomIDs[entry.Kind] == nil {
+			store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
+		}
+		store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
+	}
+}
+
+func (store *meetingMemoryStore) reloadVisibleMemoryGenerationLocked() error {
+	entries, err := loadMeetingMemoryEntries(store.path)
+	if err != nil {
+		return err
+	}
+	store.entries = entries
+	store.rebuildLoadedMemoryStateLocked()
+	store.backfillArtifactAuthorizationProjectionsLocked()
+	store.rebuildMeetingEntryIndexesLocked()
+	return nil
 }
 
 func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
@@ -2917,15 +2950,30 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 	}
 
 	removed := cloneMemoryEntry(store.entries[index])
-	store.entries = append(store.entries[:index], store.entries[index+1:]...)
-	store.rebuildMeetingEntryIndexesLocked()
-	if err := store.rewriteLocked(false); err != nil {
-		// restore the in-memory slice so a failed rewrite is not silently lossy.
-		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
-		store.rebuildMeetingEntryIndexesLocked()
+	objects, err := canonicalMemoryImportedObjects(removed)
+	if err != nil {
 		return meetingMemoryEntry{}, false, err
 	}
-	delete(store.seen, id)
+	records := canonicalLifecycleDeletionRecords(objects, time.Now().UTC(), "memory_deleted")
+	if err := withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), records, func() error {
+		store.entries = append(store.entries[:index], store.entries[index+1:]...)
+		store.rebuildMeetingEntryIndexesLocked()
+		if err := store.rewriteLocked(false); err != nil {
+			if errors.Is(err, ErrDurableReplaceAmbiguous) {
+				if reloadErr := store.reloadVisibleMemoryGenerationLocked(); reloadErr != nil {
+					return fmt.Errorf("%w; reload visible memory generation: %v", err, reloadErr)
+				}
+				return err
+			}
+			store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+			store.rebuildMeetingEntryIndexesLocked()
+			return err
+		}
+		delete(store.seen, id)
+		return nil
+	}); err != nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("journal memory deletion %s: %w", id, err)
+	}
 
 	return removed, true, nil
 }
@@ -2965,16 +3013,97 @@ func (store *meetingMemoryStore) deleteOSArtifactWithProjection(id string) (meet
 		OriginSurface: firstNonEmptyString(strings.TrimSpace(removed.Metadata["originSurface"]), strings.TrimSpace(removed.Metadata["originKind"]), "artifacts"),
 		Actor:         "system",
 	})
-	store.entries = append(store.entries[:index], store.entries[index+1:]...)
-	store.rebuildMeetingEntryIndexesLocked()
-	if err := store.rewriteLocked(false); err != nil {
-		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
-		store.rebuildMeetingEntryIndexesLocked()
+	objects, err := canonicalMemoryImportedObjects(removed)
+	if err != nil {
 		revokeArtifactDeletionProjection(projection)
 		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, err
 	}
-	delete(store.seen, id)
+	records := canonicalLifecycleDeletionRecords(objects, time.Now().UTC(), "artifact_deleted")
+	if err := withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), records, func() error {
+		store.entries = append(store.entries[:index], store.entries[index+1:]...)
+		store.rebuildMeetingEntryIndexesLocked()
+		if err := store.rewriteLocked(false); err != nil {
+			if errors.Is(err, ErrDurableReplaceAmbiguous) {
+				if reloadErr := store.reloadVisibleMemoryGenerationLocked(); reloadErr != nil {
+					return fmt.Errorf("%w; reload visible memory generation: %v", err, reloadErr)
+				}
+				return err
+			}
+			store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+			store.rebuildMeetingEntryIndexesLocked()
+			return err
+		}
+		delete(store.seen, id)
+		return nil
+	}); err != nil {
+		revokeArtifactDeletionProjection(projection)
+		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, fmt.Errorf("journal artifact deletion %s: %w", id, err)
+	}
 	return removed, projection, true, nil
+}
+
+func (store *meetingMemoryStore) recoverJournaledMemoryDeletionsLocked() error {
+	latest, err := latestCommittedCanonicalLifecycleRecords(canonicalDeletedLifecycleJournalPath(), "memory", "artifact_revision")
+	if err != nil {
+		return fmt.Errorf("read memory lifecycle recovery: %w", err)
+	}
+	if len(latest) == 0 || len(store.entries) == 0 {
+		return nil
+	}
+	kept := make([]meetingMemoryEntry, 0, len(store.entries))
+	changed := false
+	for _, entry := range store.entries {
+		journal, exists := latest["memory\x00"+entry.ID]
+		if !exists {
+			kept = append(kept, entry)
+			continue
+		}
+		objects, objectErr := canonicalMemoryImportedObjects(entry)
+		if objectErr != nil || len(objects) == 0 {
+			if objectErr != nil {
+				return objectErr
+			}
+			return fmt.Errorf("memory lifecycle recovery cannot identify %s", entry.ID)
+		}
+		if !objects[0].OccurredAt.IsZero() && objects[0].OccurredAt.After(journal.At) {
+			kept = append(kept, entry)
+			continue
+		}
+		if objects[0].StateDigest == journal.StateDigest {
+			for _, object := range objects[1:] {
+				revision, ok := latest[object.Family+"\x00"+object.ObjectID]
+				if !ok || revision.StateDigest != object.StateDigest {
+					return fmt.Errorf("memory lifecycle recovery lacks exact %s evidence for %s", object.Family, object.ObjectID)
+				}
+			}
+			delete(store.seen, entry.ID)
+			changed = true
+			continue
+		}
+		return fmt.Errorf("memory lifecycle recovery state mismatch for %s", entry.ID)
+	}
+	if !changed {
+		return nil
+	}
+	prior := store.entries
+	store.entries = kept
+	if err := store.rewriteLocked(false); err != nil {
+		store.entries = prior
+		return fmt.Errorf("complete journaled memory deletion: %w", err)
+	}
+	store.bootLatestIDs = map[string]string{}
+	store.bootLatestRoomIDs = map[string]map[string]string{}
+	for _, entry := range store.entries {
+		if memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		store.bootLatestIDs[entry.Kind] = entry.ID
+		if store.bootLatestRoomIDs[entry.Kind] == nil {
+			store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
+		}
+		store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
+	}
+	return nil
 }
 
 // isUIStateMemoryKind reports the entry kinds that are workspace/UI state

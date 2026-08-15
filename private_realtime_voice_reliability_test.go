@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestPrivateRealtimeVoiceTransportReconnectAndMilestonesSurviveRestart(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	app := newIsolatedKanbanBoardApp(t)
 	const voiceSessionID = "voice-reconnect-contract"
 	thread, _, err := app.ensurePrivateRealtimeVoiceConversation("aj@shareability.com", "AJ", voiceSessionID)
@@ -78,8 +80,9 @@ func TestPrivateRealtimeVoiceTransportReconnectAndMilestonesSurviveRestart(t *te
 	}
 }
 
-func TestAssistantRealtimeOfferReconnectKeepsThreadAndAdvancesTransport(t *testing.T) {
+func TestAssistantRealtimeOfferExactReplayKeepsThreadAndProviderCall(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -106,8 +109,11 @@ func TestAssistantRealtimeOfferReconnectKeepsThreadAndAdvancesTransport(t *testi
 		ThreadID          string `json:"threadId"`
 		VoiceSessionID    string `json:"voiceSessionId"`
 		TransportRevision int    `json:"transportRevision"`
+		LeaseGeneration   int    `json:"leaseGeneration"`
+		LeaseToken        string `json:"leaseToken"`
+		Replayed          bool   `json:"replayed"`
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-http-reconnect"}`))
+		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-http-reconnect","operationId":"http-offer-replay"}`))
 		req.Header.Set("Content-Type", "application/json")
 		for _, cookie := range cookies {
 			req.AddCookie(cookie)
@@ -121,6 +127,9 @@ func TestAssistantRealtimeOfferReconnectKeepsThreadAndAdvancesTransport(t *testi
 			ThreadID          string `json:"threadId"`
 			VoiceSessionID    string `json:"voiceSessionId"`
 			TransportRevision int    `json:"transportRevision"`
+			LeaseGeneration   int    `json:"leaseGeneration"`
+			LeaseToken        string `json:"leaseToken"`
+			Replayed          bool   `json:"replayed"`
 		}
 		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 			t.Fatal(err)
@@ -132,12 +141,89 @@ func TestAssistantRealtimeOfferReconnectKeepsThreadAndAdvancesTransport(t *testi
 	if first.ThreadID == "" || first.ThreadID != second.ThreadID || first.VoiceSessionID != "voice-http-reconnect" || second.VoiceSessionID != first.VoiceSessionID {
 		t.Fatalf("first=%+v second=%+v", first, second)
 	}
-	if first.TransportRevision != 1 || second.TransportRevision != 2 || providerCalls != 2 {
+	if first.TransportRevision != 1 || second.TransportRevision != 1 || first.LeaseGeneration != 1 || second.LeaseGeneration != 1 || first.LeaseToken == "" || second.LeaseToken != first.LeaseToken || first.Replayed || !second.Replayed || providerCalls != 1 {
 		t.Fatalf("first=%+v second=%+v providerCalls=%d", first, second, providerCalls)
 	}
+	changedReq := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=1\r\n","voiceSessionId":"voice-http-reconnect","operationId":"http-offer-replay"}`))
+	changedReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		changedReq.AddCookie(cookie)
+	}
+	changed := httptest.NewRecorder()
+	assistantRealtimeOfferHandler(changed, changedReq)
+	if changed.Code != http.StatusConflict || providerCalls != 1 {
+		t.Fatalf("changed digest status=%d body=%s providerCalls=%d", changed.Code, changed.Body.String(), providerCalls)
+	}
 	reloaded, err := newKanbanBoardApp().privateRealtimeVoiceConversation("aj@shareability.com", first.VoiceSessionID, first.ThreadID)
-	if err != nil || reloaded.VoiceSession == nil || len(reloaded.VoiceSession.TransportAttempts) != 2 {
+	if err != nil || reloaded.VoiceSession == nil || len(reloaded.VoiceSession.TransportAttempts) != 1 {
 		t.Fatalf("reloaded binding=%+v err=%v", reloaded.VoiceSession, err)
+	}
+}
+
+func TestAssistantRealtimeOfferConcurrentExactReplayNeverDuplicatesProviderAdmission(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
+	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	previousURL := realtimeCallsURL
+	previousClient := realtimeHTTPClient
+	providerStarted := make(chan struct{}, 1)
+	releaseProvider := make(chan struct{})
+	var providerCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if providerCalls.Add(1) > 1 {
+			http.Error(w, "duplicate provider admission", http.StatusInternalServerError)
+			return
+		}
+		providerStarted <- struct{}{}
+		<-releaseProvider
+		w.Header().Set("Content-Type", "application/sdp")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("v=0\n"))
+	}))
+	t.Cleanup(func() {
+		provider.Close()
+		realtimeCallsURL = previousURL
+		realtimeHTTPClient = previousClient
+	})
+	realtimeCallsURL = provider.URL
+	realtimeHTTPClient = provider.Client()
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	request := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-concurrent-replay","operationId":"concurrent-offer-replay"}`))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		return req
+	}
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		assistantRealtimeOfferHandler(recorder, request())
+		firstDone <- recorder
+	}()
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first provider admission did not start")
+	}
+	concurrent := httptest.NewRecorder()
+	assistantRealtimeOfferHandler(concurrent, request())
+	if concurrent.Code != http.StatusServiceUnavailable || providerCalls.Load() != 1 {
+		t.Fatalf("concurrent replay status=%d body=%s providerCalls=%d", concurrent.Code, concurrent.Body.String(), providerCalls.Load())
+	}
+	close(releaseProvider)
+	first := <-firstDone
+	if first.Code != http.StatusOK {
+		t.Fatalf("first offer status=%d body=%s", first.Code, first.Body.String())
+	}
+	replay := httptest.NewRecorder()
+	assistantRealtimeOfferHandler(replay, request())
+	if replay.Code != http.StatusOK || providerCalls.Load() != 1 {
+		t.Fatalf("settled replay status=%d body=%s providerCalls=%d", replay.Code, replay.Body.String(), providerCalls.Load())
 	}
 }
 
@@ -151,18 +237,14 @@ func TestAssistantRealtimeMilestoneExactBindingAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, err := kanbanApp.beginPrivateRealtimeVoiceTransport("aj@shareability.com", voiceSessionID, thread.ID, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := kanbanApp.finishPrivateRealtimeVoiceTransport("aj@shareability.com", voiceSessionID, thread.ID, revision, true, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
 	ajCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "aj@shareability.com", voiceSessionID, thread.ID, ajCookies)
+	revision := lease.TransportRevision
 	post := func(cookies []*http.Cookie, operationID, milestone string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]any{
 			"voiceSessionId": voiceSessionID, "threadId": thread.ID,
 			"transportRevision": revision, "operationId": operationID, "milestone": milestone,
+			"leaseToken": lease.LeaseToken, "leaseGeneration": lease.Generation,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/assistant/realtime/milestone", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")

@@ -190,6 +190,10 @@ func (store *meetingMemoryStore) backfillArtifactAuthorizationProjections() {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.backfillArtifactAuthorizationProjectionsLocked()
+}
+
+func (store *meetingMemoryStore) backfillArtifactAuthorizationProjectionsLocked() {
 	for index := range store.entries {
 		entry := &store.entries[index]
 		if entry.Kind != meetingMemoryKindOSArtifact {

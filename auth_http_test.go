@@ -578,13 +578,14 @@ func TestClientConfigEndpointRequiresSession(t *testing.T) {
 		t.Fatalf("expected /client-config with session to return 200, got %d body %s", recorder.Code, recorder.Body.String())
 	}
 	var payload struct {
-		RTCConfiguration map[string]any `json:"rtcConfiguration"`
-		ProtocolVersion  string         `json:"protocolVersion"`
-		Auth             string         `json:"auth"`
-		WebsocketPath    string         `json:"websocketPath"`
-		SignalingRole    string         `json:"signalingRole"`
-		SupportedLayers  []string       `json:"supportedLayers"`
-		NativeHints      map[string]any `json:"nativeHints"`
+		RTCConfiguration              map[string]any `json:"rtcConfiguration"`
+		ProtocolVersion               string         `json:"protocolVersion"`
+		Auth                          string         `json:"auth"`
+		WebsocketPath                 string         `json:"websocketPath"`
+		SignalingRole                 string         `json:"signalingRole"`
+		SupportedLayers               []string       `json:"supportedLayers"`
+		NativeHints                   map[string]any `json:"nativeHints"`
+		PrivateRealtimeVoiceQualified bool           `json:"privateRealtimeVoiceQualified"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal /client-config: %v", err)
@@ -603,6 +604,9 @@ func TestClientConfigEndpointRequiresSession(t *testing.T) {
 	}
 	if payload.NativeHints["mediaReadyEvent"] != "media_ready" {
 		t.Fatalf("nativeHints=%v, want media_ready hint", payload.NativeHints)
+	}
+	if payload.PrivateRealtimeVoiceQualified {
+		t.Fatal("private Realtime voice must default to visibly unqualified")
 	}
 }
 

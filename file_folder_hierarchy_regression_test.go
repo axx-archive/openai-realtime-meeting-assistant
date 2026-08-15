@@ -9,7 +9,9 @@ import (
 )
 
 func TestFileFolderHierarchyScopesNamesReparentsAndCapsDepth(t *testing.T) {
-	store := newFileFolderStore(filepath.Join(t.TempDir(), "hierarchy.json"))
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "meeting-memory.jsonl"))
+	store := newFileFolderStore(filepath.Join(dir, "hierarchy.json"))
 	root, err := store.createInParent("Research", "", "aj@shareability.com")
 	if err != nil {
 		t.Fatal(err)

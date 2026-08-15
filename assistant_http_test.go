@@ -29,6 +29,7 @@ func TestAssistantQueryRequiresAuth(t *testing.T) {
 
 func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("OPENAI_API_KEY", "")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -58,8 +59,44 @@ func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
 	}
 }
 
+func TestAssistantRealtimeOfferQualificationGatePreventsProviderAdmission(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "false")
+	t.Setenv("OPENAI_API_KEY", "must-not-be-used")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	providerCalls := 0
+	previousURL := realtimeCallsURL
+	previousClient := realtimeHTTPClient
+	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		providerCalls++
+	}))
+	t.Cleanup(func() {
+		provider.Close()
+		realtimeCallsURL = previousURL
+		realtimeHTTPClient = previousClient
+	})
+	realtimeCallsURL = provider.URL
+	realtimeHTTPClient = provider.Client()
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0","voiceSessionId":"voice-unqualified"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantRealtimeOfferHandler(recorder, req)
+	if recorder.Code != http.StatusServiceUnavailable || providerCalls != 0 {
+		t.Fatalf("status=%d body=%s providerCalls=%d", recorder.Code, recorder.Body.String(), providerCalls)
+	}
+	if !strings.Contains(recorder.Body.String(), "awaiting qualification") {
+		t.Fatalf("qualification error is not actionable: %s", recorder.Body.String())
+	}
+}
+
 func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -186,6 +223,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 
 func TestAssistantRealtimeOfferReportsQuotaBlocker(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -242,9 +280,10 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "aj@shareability.com", voiceSessionID, thread.ID, cookies)
 	for _, name := range []string{"set_voice_control", "set_recording"} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-direct-rejected","name":%q,"arguments":{"enabled":true}}`, voiceSessionID, thread.ID, name)))
+			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"call-direct-rejected","name":%q,"arguments":{"enabled":true}%s}`, voiceSessionID, thread.ID, name, privateRealtimeLeaseTestJSON(lease))))
 			req.Header.Set("Content-Type", "application/json")
 			for _, cookie := range cookies {
 				req.AddCookie(cookie)

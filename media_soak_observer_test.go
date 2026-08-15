@@ -534,7 +534,14 @@ func TestProductionArtifactDeletePathsPreserveExactRecipients(t *testing.T) {
 		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "meeting-memory.jsonl"))
+			dir := t.TempDir()
+			memoryPath := filepath.Join(dir, "meeting-memory.jsonl")
+			// Production lifecycle evidence is intentionally centralized beside
+			// MEETING_MEMORY_PATH. Keep each deletion-path fixture's journal in
+			// the same isolated generation as its synthetic memory store so a
+			// prior run cannot look like an ABA reuse of this fixed test ID.
+			t.Setenv("MEETING_MEMORY_PATH", memoryPath)
+			store, err := newMeetingMemoryStore(memoryPath)
 			if err != nil {
 				t.Fatal(err)
 			}

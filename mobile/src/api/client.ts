@@ -464,6 +464,7 @@ export const api = {
     rtcConfiguration: { iceServers?: Array<Record<string, unknown>> };
     websocketPath?: string;
     supportedLayers?: string[];
+    privateRealtimeVoiceQualified?: boolean;
   }> {
     return request("/client-config", { sessionToken });
   },
@@ -472,16 +473,58 @@ export const api = {
     sessionToken: string,
     sdp: string,
     voiceSessionId: string,
+    operationId: string,
   ): Promise<{
     ok: boolean;
     sdp: string;
     voiceSessionId: string;
     threadId: string;
     transportRevision: number;
+    operationId: string;
+    leaseToken: string;
+    leaseGeneration: number;
+    leaseExpiresAt: string;
+    replayed: boolean;
   }> {
     return request("/assistant/realtime-offer", {
       method: "POST",
-      body: { sdp, voiceSessionId },
+      body: { sdp, voiceSessionId, operationId },
+      sessionToken,
+    });
+  },
+
+  realtimeLeaseRenew(
+    sessionToken: string,
+    binding: {
+      voiceSessionId: string;
+      threadId: string;
+      leaseToken: string;
+      leaseGeneration: number;
+      transportRevision: number;
+      operationId: string;
+    },
+  ): Promise<{ ok: boolean; replayed: boolean; leaseExpiresAt: string }> {
+    return request("/assistant/realtime/lease/renew", {
+      method: "POST",
+      body: binding,
+      sessionToken,
+    });
+  },
+
+  realtimeLeaseStop(
+    sessionToken: string,
+    binding: {
+      voiceSessionId: string;
+      threadId: string;
+      leaseToken: string;
+      leaseGeneration: number;
+      transportRevision: number;
+      operationId: string;
+    },
+  ): Promise<{ ok: boolean; replayed: boolean; state: "stopped" }> {
+    return request("/assistant/realtime/lease/stop", {
+      method: "POST",
+      body: binding,
       sessionToken,
     });
   },
@@ -493,6 +536,11 @@ export const api = {
     callId: string,
     name: string,
     argumentsValue: Record<string, unknown>,
+    leaseBinding: {
+      leaseToken: string;
+      leaseGeneration: number;
+      transportRevision: number;
+    },
     signal?: AbortSignal,
   ): Promise<{
     ok?: boolean;
@@ -502,7 +550,7 @@ export const api = {
   }> {
     return request("/assistant/realtime-tool", {
       method: "POST",
-      body: { voiceSessionId, threadId, callId, name, arguments: argumentsValue },
+      body: { voiceSessionId, threadId, callId, name, arguments: argumentsValue, ...leaseBinding },
       sessionToken,
       signal,
     });
@@ -533,6 +581,8 @@ export const api = {
         threadId: string;
         transportRevision: number;
         operationId: string;
+        leaseToken: string;
+        leaseGeneration: number;
         milestone:
           | "peer_connected"
           | "data_channel_open"

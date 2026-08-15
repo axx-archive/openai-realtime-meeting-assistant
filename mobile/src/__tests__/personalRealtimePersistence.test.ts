@@ -68,8 +68,15 @@ test('persistence does not weaken server authority or room audio focus', () => {
 
   assert.match(realtime, /audioFocusRuntime\.acquire\('personal_realtime'/);
   assert.match(room, /audioFocusRuntime\.acquire\('meeting_media'/);
-  assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP, voiceSessionId\)/);
+  assert.match(realtime, /api\.realtimeOffer\([\s\S]*sessionToken,[\s\S]*localSDP,[\s\S]*voiceSessionId,[\s\S]*createConversationOperationId\(\),[\s\S]*\)/);
   assert.match(realtime, /voiceThreadIdRef\.current/);
+  assert.match(realtime, /api\.realtimeLeaseRenew\(sessionToken/);
+  assert.match(realtime, /api\.realtimeLeaseStop\(sessionToken/);
+  assert.match(realtime, /leaseToken: voiceLeaseTokenRef\.current/);
+  assert.match(realtime, /leaseGeneration: voiceLeaseGenerationRef\.current/);
+  assert.match(realtime, /AppState\.addEventListener\('change',[\s\S]*void stop\('cancelled'\)/);
+  assert.match(realtime, /for \(const call of calls\) \{[\s\S]*await handleToolCall\(call, connectionGeneration\)/);
+  assert.equal((realtime.match(/type: 'response\.create'/g) || []).length, 1);
   assert.doesNotMatch(root, /toolTemplate|provider\s*:|model\s*:|authority\s*:/);
 });
 
@@ -94,13 +101,13 @@ test('automatic reconnect preserves the logical binding and is strictly bounded'
   assert.match(realtime, /PERSONAL_REALTIME_RECONNECT_DELAYS_MS = \[500, 1_500\]/);
   assert.match(realtime, /voiceSessionId: voiceSessionIdRef\.current/);
   assert.match(realtime, /threadId: voiceThreadIdRef\.current/);
-  assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP, voiceSessionId\)/);
+  assert.match(realtime, /api\.realtimeOffer\([\s\S]*sessionToken,[\s\S]*localSDP,[\s\S]*voiceSessionId,[\s\S]*createConversationOperationId\(\),[\s\S]*\)/);
   assert.match(realtime, /answer\.transportRevision <= previousTransportRevision/);
   assert.match(realtime, /reconnecting && answer\.threadId !== expectedThreadId/);
   assert.match(realtime, /preserveLogicalBinding/);
   assert.match(realtime, /reason === 'forced_close'[\s\S]*control\.reconnectEligible/);
   assert.match(realtime, /reason === 'forced_close'[\s\S]*AppState\.currentState === 'active'/);
-  assert.match(realtime, /cancelReconnect\(\);[\s\S]*const lease = leaseRef\.current/);
+  assert.match(realtime, /cancelReconnect\(false\);[\s\S]*const lease = leaseRef\.current/);
   assert.match(office, /officeControlChannelSnapshot/);
   assert.match(office, /markOfficeControlDisconnected\(sessionToken, false\)/);
   assert.match(office, /officeControlListeners\.add\(check\)/);

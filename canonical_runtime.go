@@ -88,6 +88,14 @@ var canonicalRuntimeState struct {
 
 var canonicalLifecycleJournalMu sync.Mutex
 
+var canonicalLifecycleAppend = func(path string, data []byte) error {
+	return appendFileDurably(path, data, 0o600)
+}
+
+func canonicalDeletedLifecycleJournalPath() string {
+	return filepath.Join(filepath.Dir(meetingMemoryPath()), "deleted-objects.jsonl")
+}
+
 func readCanonicalLifecycleJournal(path string) ([]CanonicalLifecycleJournalRecord, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -111,39 +119,277 @@ func readCanonicalLifecycleJournal(path string) ([]CanonicalLifecycleJournalReco
 }
 
 func ensureCanonicalLifecycleJournal(path string, record CanonicalLifecycleJournalRecord) error {
+	return ensureCanonicalLifecycleJournalBatch(path, []CanonicalLifecycleJournalRecord{record})
+}
+
+func ensureCanonicalLifecycleJournalBatch(path string, requested []CanonicalLifecycleJournalRecord) error {
 	canonicalLifecycleJournalMu.Lock()
 	defer canonicalLifecycleJournalMu.Unlock()
+	return ensureCanonicalLifecycleJournalBatchLocked(path, requested)
+}
+
+func withCanonicalLifecycleJournalBatch(path string, requested []CanonicalLifecycleJournalRecord, commitSource func() error) error {
+	canonicalLifecycleJournalMu.Lock()
+	defer canonicalLifecycleJournalMu.Unlock()
+	committed, err := boardLifecycleCommittedRecordsLocked(path)
+	if err != nil {
+		return err
+	}
+	pending := make([]CanonicalLifecycleJournalRecord, 0, len(requested))
+	for _, record := range requested {
+		var latest *CanonicalLifecycleJournalRecord
+		historicalDigestMatch := false
+		for _, existing := range committed {
+			if existing.Family != record.Family || existing.ObjectID != record.ObjectID {
+				continue
+			}
+			historicalDigestMatch = historicalDigestMatch || existing.StateDigest == record.StateDigest
+			if latest == nil || existing.At.After(latest.At) {
+				copy := existing
+				latest = &copy
+			}
+		}
+		if historicalDigestMatch {
+			return fmt.Errorf("reused historical lifecycle digest for %s/%s", record.Family, record.ObjectID)
+		}
+		if latest != nil && !record.At.After(latest.At) {
+			return fmt.Errorf("stale lifecycle journal generation for %s/%s", record.Family, record.ObjectID)
+		}
+		record.OperationID = uuid.NewString()
+		record.Phase = canonicalLifecyclePhasePrepared
+		pending = append(pending, record)
+	}
+	if err := appendCanonicalLifecycleRecordsLocked(path, pending); err != nil {
+		return err
+	}
+	commitErr := commitSource()
+	terminalPhase := canonicalLifecyclePhaseCommitted
+	if commitErr != nil && !errors.Is(commitErr, ErrDurableReplaceAmbiguous) {
+		terminalPhase = canonicalLifecyclePhaseAborted
+	}
+	if commitErr == nil || terminalPhase == canonicalLifecyclePhaseAborted {
+		terminal := make([]CanonicalLifecycleJournalRecord, 0, len(pending))
+		for _, record := range pending {
+			record.Phase = terminalPhase
+			record.At = boardLifecycleTerminalTime(record.At)
+			terminal = append(terminal, record)
+		}
+		if err := appendCanonicalLifecycleRecordsLocked(path, terminal); err != nil {
+			if commitErr != nil {
+				return fmt.Errorf("source mutation failed (%v) and lifecycle %s append failed: %w", commitErr, terminalPhase, err)
+			}
+			return err
+		}
+	}
+	return commitErr
+}
+
+func appendCanonicalLifecycleRecordsLocked(path string, records []CanonicalLifecycleJournalRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	var pending bytes.Buffer
+	for _, record := range records {
+		if err := validBoardLifecycleRecord(record); err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		pending.Write(encoded)
+		pending.WriteByte('\n')
+	}
+	return canonicalLifecycleAppend(path, pending.Bytes())
+}
+
+func ensureCanonicalLifecycleJournalBatchLocked(path string, requested []CanonicalLifecycleJournalRecord) error {
 	records, err := readCanonicalLifecycleJournal(path)
 	if err != nil {
 		return err
 	}
-	var latest *CanonicalLifecycleJournalRecord
-	historicalDigestMatch := false
-	for index := range records {
-		existing := records[index]
-		if existing.Family != record.Family || existing.ObjectID != record.ObjectID {
-			continue
-		}
-		historicalDigestMatch = historicalDigestMatch || existing.StateDigest == record.StateDigest
-		if latest == nil || existing.At.After(latest.At) {
-			copy := existing
-			latest = &copy
-		}
-	}
-	if latest != nil && latest.StateDigest == record.StateDigest {
-		return nil
-	}
-	if historicalDigestMatch {
-		return fmt.Errorf("reused historical lifecycle digest for %s/%s", record.Family, record.ObjectID)
-	}
-	if latest != nil && !record.At.After(latest.At) {
-		return fmt.Errorf("stale lifecycle journal generation for %s/%s", record.Family, record.ObjectID)
-	}
-	encoded, err := json.Marshal(record)
+	combined, _, err := classifyLifecycleJournal(records)
 	if err != nil {
 		return err
 	}
-	return appendFileDurably(path, append(encoded, '\n'), 0o600)
+	var pending bytes.Buffer
+	for _, record := range requested {
+		if strings.TrimSpace(record.Family) == "" || strings.TrimSpace(record.ObjectID) == "" || !isHexDigest(record.StateDigest) || record.At.IsZero() || strings.TrimSpace(record.Reason) == "" {
+			return errors.New("lifecycle journal record requires family, object, state digest, timestamp, and reason")
+		}
+		var latest *CanonicalLifecycleJournalRecord
+		historicalDigestMatch := false
+		for index := range combined {
+			existing := combined[index]
+			if existing.Family != record.Family || existing.ObjectID != record.ObjectID {
+				continue
+			}
+			historicalDigestMatch = historicalDigestMatch || existing.StateDigest == record.StateDigest
+			if latest == nil || existing.At.After(latest.At) {
+				copy := existing
+				latest = &copy
+			}
+		}
+		if latest != nil && latest.StateDigest == record.StateDigest {
+			continue
+		}
+		if historicalDigestMatch {
+			return fmt.Errorf("reused historical lifecycle digest for %s/%s", record.Family, record.ObjectID)
+		}
+		if latest != nil && !record.At.After(latest.At) {
+			return fmt.Errorf("stale lifecycle journal generation for %s/%s", record.Family, record.ObjectID)
+		}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		pending.Write(encoded)
+		pending.WriteByte('\n')
+		combined = append(combined, record)
+	}
+	if pending.Len() == 0 {
+		return nil
+	}
+	return canonicalLifecycleAppend(path, pending.Bytes())
+}
+
+func canonicalLifecycleDeletionRecords(objects []CanonicalImportedObject, at time.Time, reason string) []CanonicalLifecycleJournalRecord {
+	records := make([]CanonicalLifecycleJournalRecord, 0, len(objects))
+	for _, object := range objects {
+		records = append(records, CanonicalLifecycleJournalRecord{Family: object.Family, ObjectID: object.ObjectID, StateDigest: object.StateDigest, At: at.UTC(), Reason: reason})
+	}
+	return records
+}
+
+func latestCommittedCanonicalLifecycleRecords(path string, families ...string) (map[string]CanonicalLifecycleJournalRecord, error) {
+	records, err := boardLifecycleCommittedRecords(path)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{}
+	for _, family := range families {
+		allowed[family] = true
+	}
+	latest := map[string]CanonicalLifecycleJournalRecord{}
+	for _, record := range records {
+		if !allowed[record.Family] {
+			continue
+		}
+		key := record.Family + "\x00" + record.ObjectID
+		if prior, ok := latest[key]; !ok || record.At.After(prior.At) {
+			latest[key] = record
+		}
+	}
+	return latest, nil
+}
+
+func recoverLegacyLifecycleTransactions() error {
+	return recoverLegacyLifecycleTransactionsForPaths(CanonicalImportPaths{
+		MeetingMemory: meetingMemoryPath(), Notifications: notificationsPath(), FileFolders: fileFoldersFilePath(),
+	})
+}
+
+func recoverLegacyLifecycleTransactionsForPaths(paths CanonicalImportPaths) error {
+	canonicalLifecycleJournalMu.Lock()
+	defer canonicalLifecycleJournalMu.Unlock()
+	return recoverLegacyLifecycleTransactionsLocked(canonicalDeletedLifecycleJournalPath(), paths)
+}
+
+func recoverLegacyLifecycleTransactionsLocked(path string, paths CanonicalImportPaths) error {
+	records, err := readCanonicalLifecycleJournal(path)
+	if err != nil {
+		return err
+	}
+	_, operations, err := classifyLifecycleJournal(records)
+	if err != nil {
+		return err
+	}
+	operationIDs := make([]string, 0)
+	for operationID, operation := range operations {
+		if operation.prepared != nil && operation.terminal == nil && operation.prepared.Family != "board_card" {
+			operationIDs = append(operationIDs, operationID)
+		}
+	}
+	sort.Slice(operationIDs, func(i, j int) bool {
+		return operations[operationIDs[i]].prepared.At.Before(operations[operationIDs[j]].prepared.At)
+	})
+	for _, operationID := range operationIDs {
+		prepared := *operations[operationID].prepared
+		present, exact, newer, visibilityErr := legacyLifecycleTargetVisibility(prepared, paths)
+		if visibilityErr != nil {
+			return fmt.Errorf("recover lifecycle %s: %w", operationID, visibilityErr)
+		}
+		terminal := prepared
+		terminal.At = boardLifecycleTerminalTime(prepared.At)
+		switch {
+		case !present:
+			terminal.Phase = canonicalLifecyclePhaseCommitted
+		case exact || newer:
+			terminal.Phase = canonicalLifecyclePhaseAborted
+		default:
+			return fmt.Errorf("recover lifecycle %s: visible target state is indeterminate", operationID)
+		}
+		if err := appendCanonicalLifecycleRecordsLocked(path, []CanonicalLifecycleJournalRecord{terminal}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func legacyLifecycleTargetVisibility(record CanonicalLifecycleJournalRecord, paths CanonicalImportPaths) (present, exact, newer bool, err error) {
+	switch record.Family {
+	case "memory", "artifact_revision":
+		objects, importErr := importMemoryObjects(paths.MeetingMemory)
+		if importErr != nil {
+			return false, false, false, importErr
+		}
+		for _, object := range objects {
+			if object.Family == record.Family && object.ObjectID == record.ObjectID {
+				return true, object.StateDigest == record.StateDigest, !object.OccurredAt.IsZero() && object.OccurredAt.After(record.At), nil
+			}
+		}
+	case "notification":
+		objects, importErr := importNotificationObjects(paths.Notifications)
+		if importErr != nil {
+			return false, false, false, importErr
+		}
+		for _, object := range objects {
+			if object.ObjectID == record.ObjectID {
+				return true, object.StateDigest == record.StateDigest, !object.OccurredAt.IsZero() && object.OccurredAt.After(record.At), nil
+			}
+		}
+	case "file_folder", "file_assignment":
+		var state fileFolderStoreState
+		found, readErr := readJSONIfExists(paths.FileFolders, &state)
+		if readErr != nil || !found {
+			return false, false, false, readErr
+		}
+		if record.Family == "file_folder" {
+			for _, folder := range state.Folders {
+				if folder.ID == record.ObjectID {
+					object, objectErr := canonicalFileFolderImportedObject(folder)
+					return true, object.StateDigest == record.StateDigest, !object.OccurredAt.IsZero() && object.OccurredAt.After(record.At), objectErr
+				}
+			}
+		} else {
+			for fileID, folderID := range state.Assignments {
+				object, objectErr := canonicalFileAssignmentImportedObject(fileID, folderID)
+				if objectErr != nil {
+					return false, false, false, objectErr
+				}
+				if object.ObjectID == record.ObjectID {
+					updatedAt, timeErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(state.AssignmentUpdatedAt[fileID]))
+					if timeErr != nil {
+						return true, false, false, fmt.Errorf("file assignment %s lacks recovery generation", record.ObjectID)
+					}
+					return true, object.StateDigest == record.StateDigest, updatedAt.After(record.At), nil
+				}
+			}
+		}
+	default:
+		return false, false, false, fmt.Errorf("unsupported lifecycle family %q", record.Family)
+	}
+	return false, false, false, nil
 }
 
 func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) {
@@ -210,6 +456,18 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 			return nil, fmt.Errorf("canonical guest-link expiry recovery: %w", err)
 		}
 		runtime.markFailure(fmt.Errorf("canonical guest-link expiry recovery degraded: %w", err))
+	}
+	if err := recoverLegacyLifecycleTransactions(); err != nil {
+		if mode == CanonicalModeRequired {
+			return nil, fmt.Errorf("canonical legacy lifecycle recovery: %w", err)
+		}
+		runtime.markFailure(fmt.Errorf("canonical legacy lifecycle recovery degraded: %w", err))
+	}
+	if err := recoverJournaledLegacyLifecycleSources(); err != nil {
+		if mode == CanonicalModeRequired {
+			return nil, fmt.Errorf("canonical legacy source recovery: %w", err)
+		}
+		runtime.markFailure(fmt.Errorf("canonical legacy source recovery degraded: %w", err))
 	}
 	// A missing/corrupt/mismatched checkpoint is not trusted. Boot continues
 	// into the full importer/PG parity reconciliation below and rewrites it.
@@ -314,6 +572,19 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	configureProductionBrainProjectionRuntime(runtime)
 	canonicalStartupProgress(mode, "serving_gate", started, "complete")
 	return runtime, nil
+}
+
+func recoverJournaledLegacyLifecycleSources() error {
+	if _, err := newMeetingMemoryStore(meetingMemoryPath()); err != nil {
+		return fmt.Errorf("memory: %w", err)
+	}
+	if _, err := loadNotificationStoreState(notificationsPath()); err != nil {
+		return fmt.Errorf("notifications: %w", err)
+	}
+	if folders := newFileFolderStore(fileFoldersFilePath()); folders.loadErr != nil {
+		return fmt.Errorf("file folders: %w", folders.loadErr)
+	}
+	return nil
 }
 
 func canonicalStartupProgress(mode CanonicalMode, phase string, started time.Time, state string) {

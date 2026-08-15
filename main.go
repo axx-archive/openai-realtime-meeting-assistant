@@ -1134,6 +1134,8 @@ func main() {
 	// generic process registry and remains 404 until the feature flag is enabled.
 	http.HandleFunc("/api/insights-opportunities/v1/", insightsOpportunitiesExecutorHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
+	http.HandleFunc("/assistant/realtime/lease/renew", assistantRealtimeLeaseRenewHandler)
+	http.HandleFunc("/assistant/realtime/lease/stop", assistantRealtimeLeaseStopHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
 	// W0 private-voice usage beacon (founder decision 3): the browser owns the
 	// private voice peer, so the page posts each response.done usage object
@@ -2360,6 +2362,10 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
 		return
 	}
+	if !privateRealtimeVoiceQualified() {
+		writeAuthError(w, http.StatusServiceUnavailable, "private Scout voice is awaiting qualification")
+		return
+	}
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		writeAuthError(w, http.StatusServiceUnavailable, "OpenAI Realtime is not configured")
@@ -2377,6 +2383,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		SDP            string `json:"sdp"`
 		VoiceSessionID string `json:"voiceSessionId"`
+		OperationID    string `json:"operationId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime offer")
@@ -2398,16 +2405,32 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusConflict, err.Error())
 		return
 	}
-	transportRevision, err := kanbanApp.beginPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, time.Now().UTC())
+	offerDigest := privateRealtimeLeaseDigest("offer-sdp", offerSDP)
+	operationID := strings.TrimSpace(payload.OperationID)
+	if operationID == "" {
+		// Compatibility for existing clients: the body-derived key makes a lost
+		// response replayable while a genuinely new SDP remains a new attempt.
+		operationID = "offer-" + sha256Hex([]byte(voiceSessionID + "\x00" + offerDigest))[:32]
+	}
+	sessionHash := strideE10SessionHashFromRequest(r)
+	claim, err := kanbanApp.claimPrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, voiceThread.ID, operationID, offerDigest, time.Now().UTC())
 	if err != nil {
-		writeAuthError(w, http.StatusConflict, err.Error())
+		writeAuthError(w, privateRealtimeVoiceLeaseHTTPStatus(err), err.Error())
+		return
+	}
+	if claim.Replay {
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "sdp": claim.AnswerSDP, "voiceSessionId": voiceSessionID, "threadId": voiceThread.ID,
+			"operationId": claim.OperationID, "leaseToken": claim.LeaseToken, "leaseGeneration": claim.Generation,
+			"leaseExpiresAt": claim.ExpiresAt.Format(time.RFC3339Nano), "transportRevision": claim.TransportRevision, "replayed": true,
+		})
 		return
 	}
 
 	recordCapabilityPoll(capabilityPrivateVoice, time.Now().UTC())
 	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP, user.Email)
 	if err != nil {
-		if persistErr := kanbanApp.finishPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, transportRevision, false, time.Now().UTC()); persistErr != nil {
+		if persistErr := kanbanApp.finishPrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, voiceThread.ID, claim, false, "", time.Now().UTC()); persistErr != nil {
 			log.Errorf("Failed to persist private Realtime transport failure for %s: %v", user.Email, persistErr)
 		}
 		recordCapabilityFailure(capabilityPrivateVoice, time.Now().UTC(), err)
@@ -2419,7 +2442,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if err := kanbanApp.finishPrivateRealtimeVoiceTransport(user.Email, voiceSessionID, voiceThread.ID, transportRevision, true, time.Now().UTC()); err != nil {
+	if err := kanbanApp.finishPrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, voiceThread.ID, claim, true, answerSDP, time.Now().UTC()); err != nil {
 		log.Errorf("Failed to persist private Realtime transport acceptance for %s: %v", user.Email, err)
 		writeAuthError(w, http.StatusServiceUnavailable, "Scout voice could not persist its private session")
 		return
@@ -2431,7 +2454,12 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		"sdp":               answerSDP,
 		"voiceSessionId":    voiceSessionID,
 		"threadId":          voiceThread.ID,
-		"transportRevision": transportRevision,
+		"operationId":       claim.OperationID,
+		"leaseToken":        claim.LeaseToken,
+		"leaseGeneration":   claim.Generation,
+		"leaseExpiresAt":    claim.ExpiresAt.Format(time.RFC3339Nano),
+		"transportRevision": claim.TransportRevision,
+		"replayed":          false,
 	})
 }
 
@@ -2464,7 +2492,7 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 
 	rawPayload, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 	payload, decodeErr := decodeOpenAIToolArguments(rawPayload)
-	if readErr != nil || decodeErr != nil || len(payload) != 5 {
+	if readErr != nil || decodeErr != nil || len(payload) != 8 {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
 		return
 	}
@@ -2473,12 +2501,20 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	callID, callIDOK := payload["callId"].(string)
 	name, nameOK := payload["name"].(string)
 	arguments, argumentsOK := payload["arguments"].(map[string]any)
-	if !voiceSessionIDOK || !threadIDOK || !callIDOK || !nameOK || !argumentsOK {
+	leaseToken, leaseTokenOK := payload["leaseToken"].(string)
+	leaseGeneration, leaseGenerationOK := exactPositiveJSONInteger(payload["leaseGeneration"])
+	transportRevision, transportRevisionOK := exactPositiveJSONInteger(payload["transportRevision"])
+	if !voiceSessionIDOK || !threadIDOK || !callIDOK || !nameOK || !argumentsOK || !leaseTokenOK || !leaseGenerationOK || !transportRevisionOK {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
 		return
 	}
+	sessionHash := strideE10SessionHashFromRequest(r)
+	if err := kanbanApp.authorizePrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, threadID, leaseToken, leaseGeneration, transportRevision, time.Now().UTC()); err != nil {
+		writeAuthError(w, privateRealtimeVoiceLeaseHTTPStatus(err), err.Error())
+		return
+	}
 
-	voiceContext := strideE10TenantContextWithSessionHash(r.Context(), strideE10SessionHashFromRequest(r))
+	voiceContext := strideE10TenantContextWithSessionHash(r.Context(), sessionHash)
 	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceSessionModelTool(voiceContext, user.Email, voiceSessionID, threadID, callID, name, arguments)
 	ok := err == nil
 	if err != nil {
@@ -2504,6 +2540,15 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		"actions":        result["actions"],
 		"artifact":       result["artifact"],
 	})
+}
+
+func exactPositiveJSONInteger(value any) (int, bool) {
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(number.String())
+	return parsed, err == nil && parsed > 0
 }
 
 const (
@@ -3471,6 +3516,10 @@ func browserRTCConfigurationFromEnv() map[string]any {
 func nativeRoomClientConfig() map[string]any {
 	return map[string]any{
 		"rtcConfiguration": browserRTCConfigurationFromEnv(),
+		// Private Home voice stays visibly unavailable until the release has
+		// completed provider, browser, native-device, and sustained reliability
+		// qualification. The transport can ship dark without client heuristics.
+		"privateRealtimeVoiceQualified": privateRealtimeVoiceQualified(),
 		// The browser proof ledger is inert unless both the server-side observer
 		// and the explicit probe URL opt in. It records only bounded signaling
 		// timestamps/correlation ids and RTP counters; no SDP, names, chat, audio,
@@ -3498,6 +3547,10 @@ func nativeRoomClientConfig() map[string]any {
 			"mediaCodecs":         []string{webrtc.MimeTypeOpus, webrtc.MimeTypeH264, webrtc.MimeTypeVP8},
 		},
 	}
+}
+
+func privateRealtimeVoiceQualified() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("PRIVATE_REALTIME_VOICE_QUALIFIED")), "true")
 }
 
 func nativeRosterParticipants() []map[string]string {

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "stride-build63-testflight-readonly",
+  "capturedAt": "2026-08-15T03:54:10Z",
+  "status": "distribution_and_physical_install_observed_named_flow_acceptance_pending",
+  "source": {
+    "provider": "App Store Connect",
+    "app": "BonfireOS",
+    "appId": "6794029943",
+    "readOnly": true
+  },
+  "build": {
+    "version": "1.0.0",
+    "number": 63,
+    "binaryState": "Validated",
+    "testingState": "Testing",
+    "expiresInDays": 90,
+    "groups": [
+      {
+        "name": "Team (Expo)",
+        "type": "internal",
+        "testerCount": 1
+      },
+      {
+        "name": "Bonfire",
+        "type": "external",
+        "testerCount": 7
+      }
+    ],
+    "buildRowMetrics": {
+      "invites": 7,
+      "installs": 1,
+      "sessions": 5,
+      "crashes": null,
+      "feedback": null
+    }
+  },
+  "physicalInstallation": [
+    {
+      "testerRole": "founder",
+      "installedBuild": 63,
+      "observedDeviceClass": "iPad Pro 11-inch (M5) class plus one additional device"
+    },
+    {
+      "testerRole": "tyler",
+      "installedBuild": 63,
+      "observedDeviceClass": "iPhone 13 Pro class plus one additional device"
+    }
+  ],
+  "crashFeedback": {
+    "window": "2026-08-13 through 2026-08-14",
+    "build62Reports": 7,
+    "build63Reports": 0,
+    "commentBodiesRetained": false,
+    "finding": "all currently listed recent chat or thread crash feedback is attributed to Build 62"
+  },
+  "screenshotFeedback": {
+    "rows": 0,
+    "contentOpened": false,
+    "finding": "App Store Connect reports No Screenshot Feedback"
+  },
+  "notProven": [
+    "absence of unreported Build 63 crashes",
+    "chat or cold-load flow acceptance",
+    "private Realtime quality or latency acceptance",
+    "AppIcon visual acceptance",
+    "retired Project or Board surface acceptance",
+    "Tyler and AJ two-person room incident soak",
+    "whole physical-device acceptance"
+  ],
+  "mutationsPerformed": []
+}

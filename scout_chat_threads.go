@@ -540,6 +540,10 @@ type scoutChatVoiceSessionBinding struct {
 	// removes the entire VoiceSession binding.
 	TransportRevision int                              `json:"transportRevision,omitempty"`
 	TransportAttempts []scoutChatVoiceTransportAttempt `json:"transportAttempts,omitempty"`
+	// Lease is the durable, secret-free admission record for the one active
+	// private Realtime transport owned by this account. Raw lease tokens and SDP
+	// never enter meeting memory; the process-only replay cache holds those.
+	Lease *scoutChatVoiceLease `json:"lease,omitempty"`
 }
 
 // scoutChatLegacyConversationOperation is the durable retry alias for native

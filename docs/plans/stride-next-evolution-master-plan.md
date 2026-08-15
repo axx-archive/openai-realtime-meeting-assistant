@@ -39,7 +39,7 @@ the same release verifier before serving.
 The carrier remains `qualified=false` and `externallyAttested=false` because
 independent signing/off-host attestation is still a separate gate.
 
-The current exact application release is commit
+At the retained 2026-08-12 historical checkpoint, the exact application release was commit
 `741e02845add0c300646bb1a9ac7c56bac2e4e33`, serving at ledger generation 67
 from bundle `0967116aeeab0d0f0d13aba0c7eb089efcc7e3b76c2963615649d9e6c4b9bb02`.
 The application image is `sha256:903b4656...`, the renderer is
@@ -50,7 +50,7 @@ installed with reviewed checksums `39754a773f2dc3df...` and
 `53aa05d793ff7cbe...`; runtime migration cap 19 and future-version tolerance
 keep the retained additive-schema rollback compatible.
 
-The authoritative 2026-08-14 Priority-1 successor is now exact server release
+The historical 2026-08-14 Priority-1 release checkpoint was exact server release
 `b891f8a8c78ab9c8d6ad83fb482910ed01bf49d0`, serving at ledger generation 78
 from bundle `15509d1efea0a41c76e8970cf5f532657d72f789e3bb9ea20c9af79f0720fedc`.
 The application image is `sha256:b5d02f510c45ac34969be5d48f415f9028e65972388adf5f603ccbffd2612c97`
@@ -61,13 +61,29 @@ This successor contains the Priority-1 meeting-intelligence, workstream,
 Realtime-control, mobile-crash and AppIcon repairs. Its exact release receipt is
 `docs/evidence/e10/stride-e10-priority1-production-release-20260814.json`.
 
+The current live successor observed at `2026-08-14T23:39:13Z` is exact release
+`35a12d8c55d9b4313e6b609286ad3dce65948730`, ledger generation 83, bundle
+`75a5e379e1c194301e9f617d1f36f9d72cab4e04f4ef250da6f4c8192da22b45`,
+application image
+`sha256:5ecc00e7a22c9c0fd86c53f6fa82e9edb35e91f8fa93542500a9691faad9158b`
+and renderer image
+`sha256:b480173c2b04d08035aca3031702edee415688dc478c33ce527aa25ab0a5e4b2`.
+The exact retained rollback is `f2db10429221ec0a0c4d67da3d9ffd8716b8fc27`.
+Ledger, retained images, Caddy, public release identity and the retained verifier
+agree under `verified-local-unsigned`; the release remains
+`qualified=false` and `externallyAttested=false`. This identity supersedes the
+older same-day release identities retained below as historical checkpoints.
+
 iOS Build 63 is the corresponding mobile carrier for implementation commit
 `bad0ae4c451a2e78637c5cc9efdf66009cbd73e5`. EAS build
 `573b4227-7226-41fb-95a0-299e5b118aea` is `FINISHED` with fingerprint
 `f3401d6b32a083d3ee301dca3e5f5ad5f101818a`; submission
-`ab157c6e-291d-46cf-b610-1153d5bb8849` was handed to Apple. Apple processing,
-exact tester-group availability and physical-device acceptance remain pending
-and must not be inferred from the successful upload. Per founder direction,
+`ab157c6e-291d-46cf-b610-1153d5bb8849` was handed to Apple. Current App Store
+Connect readback now proves Build 63 `VALID`, unexpired and
+`IN_BETA_TESTING` internally and externally, assigned to Team (Expo) and the
+seven-person Bonfire group; Tyler is present in Bonfire. Physical-device
+acceptance remains pending and must not be inferred from processing or group
+assignment. Build 62 is expired. Per founder direction,
 physical iPhone availability is a post-build acceptance lane rather than a
 prerequisite for producing or submitting critical builds.
 
@@ -78,12 +94,10 @@ release commit and fingerprint `af65baea438e7fe8bde00fe06a187e5650574691`; the
 app plus broadcast extension both report version 1.0.0, build 58. Exact EAS
 submission `ab45e425-3895-4a67-92ac-5a4cda641365` successfully uploaded it for App Store
 Connect app `6794029943`. Apple processing state, exact intended-group
-relationships and internal/external Bonfire availability remain open and must
-not be inferred from the successful EAS/ASC handoff. Build 54 remains the newest
-independently proved Apple `VALID` and internal `IN_BETA_TESTING` carrier; Build
-53 remains the newest independently proved external `IN_BETA_TESTING` carrier.
-No physical iPhone/iPad acceptance is proven, and the seven-person Bonfire
-group still has no tester record named Tyler.
+relationships and internal/external Bonfire availability were open at that
+historical checkpoint and could not be inferred from the successful EAS/ASC
+handoff. Those Build 54/53 and missing-Tyler observations are superseded by the
+Build 63 readback above. No physical iPhone/iPad acceptance is proven.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -327,15 +341,54 @@ sustained readiness window or permission to replay production dead letters.
 The scoped hashes and exact external boundary are frozen in
 `docs/evidence/e10/stride-e10-priority1-final-local-gate-20260814.json`.
 
-That local boundary is now superseded for release state by the exact production
-receipt `stride-e10-priority1-production-release-20260814.json`: server commit
-`b891f8a8...` is live, Build 63 is in Apple processing, Meeting Digest is
-enabled with its supervisor registered and running, and day/entity folds are
+That local boundary was superseded at its historical release checkpoint by the
+exact production receipt `stride-e10-priority1-production-release-20260814.json`:
+server commit `b891f8a8...` was live, Build 63 had entered Apple processing,
+Meeting Digest was enabled with its supervisor registered and running, and day/entity folds were
 current. The two pre-existing ambiguous meeting-digest scopes and 51 historical
 dead letters were deliberately not replayed. The released repair may establish
 a safe baseline only at the exact next active-sitting boundary; current-day
 voice/text/agent parity and sustained readiness remain the next acceptance
 gate.
+
+### 2026-08-14 Priority 1 Realtime 2.1 reliability gate
+
+The founder's current web and iPhone observations make Realtime 2.1 a named
+Priority-1 incident, not a later voice-polish task. Personal voice currently can
+present a stale `Conversation already has active` lease, accept a waveform or
+white-circle tap without establishing a usable turn, lag or lose the user's
+speech, and fail to answer an authorized request such as “catch me up on
+today's meetings.” In-room agent voice also lags, loses the conversation and
+cannot be trusted to track the current sitting. A session that exists in server
+state but cannot hear, answer or stop is failed, not active.
+
+The release gate covers the complete path rather than the model name alone:
+
+1. active-conversation ownership is a short, renewable, session-bound lease;
+   stale client, socket, app-background and process-loss states self-heal, and
+   Stop is exact and idempotent;
+2. every start control immediately progresses through truthful connecting,
+   listening, thinking, speaking or actionable-error state—never a silent
+   no-op—and web/native use the same state contract;
+3. microphone capture, audio publication, VAD, interruption, turn correlation,
+   reconnect and cancellation preserve exactly one current conversation without
+   dropping accepted speech or replaying an old answer;
+4. private voice calls the same current-source meeting-recall service as typed
+   Scout and named agents, including exact Meeting Records, rolling analysis,
+   transcript fallback, freshness and authorization; it never asks the user to
+   choose a transcript STRIDE already owns;
+5. executable web and physical-device cases prove start → speak → grounded
+   answer → interrupt → stop → resume, stale-lease recovery, app backgrounding,
+   network loss, “catch me up on today's meetings,” and zero duplicate or
+   unauthorized turns, with provider/audio/latency measurements attached to the
+   exact released build.
+
+Private Home voice remains disabled or visibly unavailable until this gate
+passes; a stale `active` response may never block a new authorized recovery.
+Shared-room Realtime remains behind the stricter real-room corpus below. If it
+cannot meet that bar, remove the live in-room voice participant rather than
+shipping a poor imitation of conversation; keep passive capture, continuous
+analysis and explicit source-grounded `@Scout` questions in meeting chat.
 
 ### One bounded, evidence-preserving intelligence stack
 
@@ -1081,11 +1134,11 @@ The closed acceptance catalog covers every advertised venture-work family:
 | Presentation, pitch deck and narrative slides | editable slide source, native PPTX, PDF, rendered page previews, notes and visual-jury receipt | **In Progress** — deterministic HTML/PDF and local OpenAI jury contracts exist; native PPTX and successful live OpenAI/device/Drive proof are not complete |
 | Image, brand direction, concept render and design board | high-quality PNG/JPEG, prompt/provenance, inline preview, regenerate and Drive | **Verified Complete** only for prior bounded image/readback evidence; current-generation and physical-device matrix pending |
 | Spreadsheet, business model, cap table, unit economics and scenario analysis | formula-driven XLSX, assumptions/evidence sheets, typed preview and Drive | **Verified Complete** only for deterministic venture-workbook scope; broader scenario/import/edit/device cases pending |
-| Data table, chart and visualization | source-bound table plus reusable chart/image and workbook/document embedding | **Not Started** as a complete advertised family |
+| Data table, chart and visualization | source-bound table plus reusable chart/image and workbook/document embedding | **In Progress** — a dirty local, providerless typed-table compiler deterministically produces bounded passive SVG plus an accessible HTML table and body-free independently verifiable identity manifest for bar, line and scatter. A separate internal artifact-reference-atomic materializer can bind that exact output into one already-authorized current private Work artifact with source/Project freshness, exact replay and terminal-card repair; immutable blobs written before a later denied/failed artifact CAS may remain unreferenced. Raw-JSON/time-axis admission, source selection/extraction, router/UI/preview, workbook/document embedding, Drive, provider/live/device evidence and the complete advertised family remain open. |
 | Meeting recap, briefing, decision log and action plan | source-linked document/work objects with exact meeting window | **In Progress** — foundations exist; conversational-vs-work and export/device matrix pending |
 | Artifact revision, redline, summarize, translate and regenerate | new revision linked to prior artifact; old revision retained; exact diff/status | **In Progress** — regenerate/follow-up foundations exist; document/deck/sheet/image parity pending |
 | Project plan and operating plan | one evolving governed Work record with explicit decisions, commitments, owners, blockers, next actions, artifacts and outcome receipt—not a prose-only claim or Kanban board | **In Progress** — the conversation-first Work carrier and exact workstream affinity/correction foundations exist; provider-backed plan artifacts, full lifecycle parity and web/native rendered acceptance remain pending. Board tools are retired and cannot satisfy this family. |
-| Mixed investor or diligence package | manifest-bound research + memo + deck + workbook + imagery + source register; atomic package preview/export | **In Progress** — Packaging Studio foundations exist; successful OpenAI-only live package and platform parity pending |
+| Mixed investor or diligence package | manifest-bound research + memo + deck + workbook + imagery + source register; atomic package preview/export | **In Progress** — Packaging Studio foundations exist, and a dirty local body-free compiler now deterministically binds caller-asserted artifact revision/digest identities for all six required roles under an explicit prior-authorization precondition. It proves internal identity consistency only, not authorization, content existence, role fitness, persistence, preview/export atomicity, successful OpenAI-only live packaging or platform parity; those remain pending. |
 | Scheduled or recurring private work | visible schedule, next run, pause/cancel, per-run WorkRun/artifact receipts | **In Progress** — study/design evidence exists; product acceptance pending |
 | Code, repository, browser, deployment or external execution handoff | explicit scoped handoff, approval/authority gate and execution receipt; never impersonated by Scout | **In Progress** — Codex lane remains separately fenced and GPT-5.6 migration pending |
 
@@ -1136,13 +1189,13 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | PD1 Project identity / association / Project Record foundation | **Verified Complete — bounded local/default-off class** | receipt `stride-e10-pd1-project-foundation-local-20260812.json` binds migration 0018, stable organization-scoped Project identity, exact current session/source authority, correctable append-only ProjectAssociation, atomic old/new correction, synchronous source-drift unlisting plus four-family purge outbox, restart-safe permission-filtered body-free Project Record reconstruction and operation-scoped durable replay. Focused and race suites, real disposable-PostgreSQL upgrade/authority/correction/revoke/replay tests, DR, vet, 20× stress, full `go test ./...` (`536.950s`) and a fresh independent critic PASS. All Project switches remain false; no Home chip/chooser, HTTP exposure, production migration, provider call, commit, push or deploy is claimed. |
 | PD1 Project foundation / persistent personal Realtime / immediate Home taxonomy | **Verified Complete — bounded exact-release class** | local receipt `stride-e10-pd1-project-realtime-persistent-local-20260812.json` binds the exact web/native/server candidate: the Home waveform starts a durable owner-only `gpt-realtime-2.1` thread; logical human and Scout turns append to that exact thread; the voice control persists across ordinary navigation, opens the bound thread and shows truthful listening/thinking/talking/acting/error state; transient loss retries the same logical session/thread twice with strictly increasing transport revisions while stale callbacks fail closed; explicit stop, auth/session drift, room entry, backgrounding and audio-focus takeover terminate it. Web and native render the four stable category shells immediately while authorized suggestions load, keep them non-actionable until hydration and avoid composer shift. Full Go (`542.384s`), focused race, 526/526 native, typecheck, Release simulator build, vet, rendered responsive web evidence, diff-check and fresh critic pass. Release receipt `stride-e10-pd1-project-realtime-persistent-release-20260812.json` then binds exact commit `cf7240f3...` on main, VPS ledger generation 62, bundle `08f519eb...`, app image `393272fc...`, renderer image `7264176a...`, retained `7fb35f88...` rollback, public health/readiness and `verified-local-unsigned`; migration 18 is installed with reviewed checksum `39754a77...` under rollback-compatible policy. iOS Build 55 (`52ae0dd4...`, fingerprint `f6a9a4ca...`) and EAS/ASC submission `477acca1...` are `FINISHED`. This does not claim Apple `VALID` processing, intended tester-group availability, a live provider conversation, native active-control pixel proof, physical-device quality/latency, Home chief-of-staff personalization or Project-chip integration. |
 | PD1 Home chief-of-staff recommendations and immediate shells | **Verified Complete — bounded exact-release class** | The safe four-card taxonomy now paints before web authentication restoration and before the native Home request, reserves exact hydrated geometry, remains non-actionable while recommendations load and fails closed without retaining private context. The server ranks current `Needs you`, active work and exact continuation before safe fallbacks—including sparse one-thread states—detects one recurring topic across two or more already-viewer-authorized public/private conversations without mislabeling private context as team sentiment, and emits editable full-sentence suggestions with plain-language `Why this?` plus body-free source ID/revision coverage. Category selection remains local and zero-effect; Send remains the first persistence boundary. Local receipt `stride-e10-pd1-home-chief-of-staff-local-20260812.json` binds current responsive desktop/phone light/dark renders, focused normal/race tests, full Go (`540.630s`), full native 526/526, typecheck, vet, diff-check and fresh critic PASS. Release receipt `stride-e10-pd1-home-chief-of-staff-release-20260812.json` binds exact commit `fc4e3a57...` on main, VPS ledger generation 63, bundle `3d83223d...`, app image `e73f8146...`, renderer image `300316af...`, retained `cf7240f3...` rollback, public health/readiness and `verified-local-unsigned`; iOS Build 56 (`919cb22e...`, fingerprint `51bae3ea...`) finished and EAS submission `3a361594...` successfully uploaded it to App Store Connect. The session-safe performance successor receipt `stride-e10-pd1-home-immediate-session-safe-release-20260812.json` binds exact commit `ee5c2b38...` on main: static server-rendered shells paint before JavaScript, duplicate startup/event fetches coalesce per exact audience, account changes synchronously remove the prior user's private projection, and delayed prior-user responses fail closed. Full Go (`542.987s`), focused race, 526/526 native, typecheck, vet, rendered delayed-response proof and fresh critic PASS; VPS ledger generation 64 serves bundle `f111742b...`, app image `18374743...`, renderer image `acdf07f7...`, retains `fc4e3a57...` for rollback and verifies `verified-local-unsigned`. iOS Build 57 (`2ba79940...`, fingerprint `324a4815...`) is finished from the exact commit; its App Store Connect submission `bbb0c957...` remained in progress without error at receipt time. This bounded row does **not** claim Apple processing or tester-group availability, meeting-transcript/Project-state compaction, a signed suggestion token, Project chip/chooser/Send association, Project Record completion, provider synthesis or physical-device acceptance. |
-| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Superseded — historical released foundation** | The exact-release receipts and canonical ProjectAssociation history from this row remain valid historical evidence, but its `Add project` / `Suggested` / `No project` composer UX is no longer the controlling product contract. The Priority-1 workstream decision above retires manual Project attachment across Home, channel, private-chat and reply composers. New ordinary turns must carry no client-selected Project token; server-owned, source-grounded workstream affinity may associate resulting work only after current authorization and must abstain when ambiguous. Existing signed tokens and associations remain readable for replay, correction and nondestructive migration. The retirement implementation is live in server release `b891f8a8...`; iOS Build 63 contains the corresponding client removal and is awaiting Apple processing/device acceptance. |
+| PD1 Home Project suggestion/chooser/Create and exact-Send association | **Superseded — historical released foundation** | The exact-release receipts and canonical ProjectAssociation history from this row remain valid historical evidence, but its `Add project` / `Suggested` / `No project` composer UX is no longer the controlling product contract. The Priority-1 workstream decision above retires manual Project attachment across Home, channel, private-chat and reply composers. New ordinary turns must carry no client-selected Project token; server-owned, source-grounded workstream affinity may associate resulting work only after current authorization and must abstain when ambiguous. Existing signed tokens and associations remain readable for replay, correction and nondestructive migration. The retirement implementation is live in the current exact successor lineage; iOS Build 63 contains the corresponding client removal and is now Apple `VALID` and `IN_BETA_TESTING` in both intended groups. Physical-device acceptance remains open. |
 | PD1 Video/Chat prominence, member shell and channel stability | **Verified Complete — bounded exact-release class** | Desktop and native promote Video and Chat beside Home. The authenticated server projects `core` versus `full` shell access: missing/stale authority fails closed to Home/Video/Chat, AJ remains the explicit founder owner, and only an exact current organization owner/admin membership exposes Work/Network/Work Search/You. Clients hide—not merely disable—the unfinished destinations, redirect a stale direct top-level path to Home, keep keyboard/VoiceOver semantics, and retain icon-only compact navigation. Home no longer refetches recommendations after an unchanged room snapshot, its web launch geometry is stable, and generated Country Golf/channel imagery reserves exact 3:2 feed geometry before load with scroll anchoring disabled, removing the observed jitter. The Agentic Lab may cover every destination only inside its isolated synthetic authority fixtures; it is not a user-role bypass. Exact local source/rendered evidence and the release evidence are the same receipts named in the preceding row. Build 58 Apple processing, exact tester-group availability, physical-device proof and whole-PD1 acceptance remain open. |
 | PD1 Chat cold-load/crash and navigation stability | **Verified Complete — bounded exact-release class** | The web and native Chat rails now load from a body-free, viewer-authorized thread index and hydrate only the selected conversation. Cold entry reserves stable public/private rows; iPhone/iPad state is session-bound on the first frame; refreshes are single-flight and account/generation fenced; background failure preserves a usable list; exact-thread detail stays bounded; web socket/index/detail merges are monotonic; and desktop/iPad rendering constructs only the newest 200 messages. Legacy metadata is upgraded once under the store lock without replacing message bodies, while rename/archive responses remain metadata-only. Exact commit `d319c768...` is on main and serves from VPS ledger generation 71, bundle `d8210f3f...`, app image `412b5ca8...`, renderer image `3cc8cebf...`, with `7bf81f06...` retained for rollback and `verified-local-unsigned`. Focused rendered/source tests, focused race, vet, native typecheck, 531/531 native tests and a fresh independent critic PASS bind the bounded hotfix. iOS Build 60 (`b26bfeac...`, fingerprint `8d0a81d0...`) finished from the same exact commit and EAS submission `4b870fa5...` finished successfully. Apple processing, intended tester-group availability, physical-device observation and whole-PD1 acceptance remain open. |
 | PD1 author-only sent-message Project correction and linked-source invalidation | **Verified Complete — bounded exact-release class** | An author-owned confirmed Project chip on a sent message opens an accessible web/native review surface. Reading the choices, selecting another authorized Project, selecting No project, cancelling or closing remain zero-effect; only explicit Update/Remove mutates. The client submits only an opaque revision-bound correction token and stable operation ID. The server reauthorizes the exact author, organization session, message, source and Project; atomically appends old/new association lineage or removal; advances a message-local context revision; synchronously unlists old truth and queues four-family projection work. Late socket frames cannot regress the visible result. Edit/delete of a linked source first projects unavailable, durably invalidates canonical authority, recomputes the list preview and recovers from an immutable receipt. Cross-store response loss and restart fail closed: correction and abandonment share one PostgreSQL advisory lock and mutually exclusive immutable receipts, so neither a late correction nor a receipt-absent recovery can resurrect contradictory Project truth. Migration 0021, focused normal/race/disposable-PostgreSQL and DR gates, full Go (`563.332s`), 537/537 native tests/typecheck, responsive dark/light desktop/phone renders, vet, diff-check and a fresh independent critic PASS are bound by `stride-e10-pd1-sent-message-project-correction-local-20260812.json`. Release receipt `stride-e10-pd1-sent-message-project-correction-release-20260812.json` binds the exact operational readback. Implementation commit `ea56fc21...` and docs-only exact-release successor `a5a4ece5...` are on main. The successor serves from VPS ledger generation 73, bundle `c9e65734...`, app image `e63e7893...` and renderer image `9dfa4791...`, retains `ea56fc21...` as rollback and verifies `verified-local-unsigned`. Migration 21 is installed at reviewed checksum `3a2e1e30...` after a private backup of the migration-20 environment. iOS Build 61 (`35f97e8f...`, fingerprint `25e1f180...`) finished from the exact implementation commit and EAS submission `23e7d9a3...` finished, proving upload acceptance only. This row does not claim Project-linked attachment/reply completion, controller/admin retagging, native simulator pixels, Apple processing/intended tester-group availability, physical-device acceptance, full Project Record, provider-backed work or whole-PD1 completion. |
-| PD1 Project-linked attachment and reply source groups | **Verified Complete — bounded exact-release class** | Existing-thread web and native composers now preview and explicitly send an exact source manifest over normalized text, destination authority, ordered server-issued attachment handles and same-thread reply ancestry. The server durably journals one pending human turn, then atomically confirms one body-free root event, zero-to-six immutable rich-part revisions, the evidence-only reply dependency, every Project association edge and one immutable group receipt before provider admission. Attachment-only turns, response-loss/restart replay, session rotation, Project A→B/A→none correction, root/part/parent mutation, attachment/origin revocation, Project archive/audience loss and four-family purge are all fail-closed and all-or-nothing. Current Project/thread/group/blob/parent authority is rechecked immediately before provider work; unsupported or over-budget but still-authorized files remain valid evidence; Project-bound replies intentionally withhold parent media until every such media source is represented canonically. Opaque `choiceKey` rebinding clears rather than silently switching when authority changes. Migration 0022, full Go (`587.752s`), focused normal/race/disposable-PostgreSQL/DR gates, vet, 539/539 native tests/typecheck, responsive rendered browser journeys and a fresh independent critic PASS bind `stride-e10-pd1-project-source-groups-local-20260813.json`. Exact implementation commit `43103a68...` is on main and serves from VPS ledger generation 74, bundle `301b036f...`, app image `662ebe06...` and renderer image `b2b56bb4...`; migration 22 is installed at checksum `c2e696d1...` after a private transaction-consistent migration-21 backup, `a5a4ece5...` is retained for rollback and the serving bundle verifies `verified-local-unsigned`. iOS Build 62 (`d7ad87ae...`, fingerprint `fb4c0646...`, IPA `df59eeb7...`) finished from the same exact commit; submission `7bd762eb...` uploaded it, Apple processing is `VALID`, beta review is `APPROVED`, and the exact build is `IN_BETA_TESTING` in both existing `Team (Expo)` and `Bonfire` groups. Canonical parent-media inclusion, native simulator pixels, physical-device acceptance, Tyler enrollment, full Project Record, provider-backed work and whole-PD1 remain open. |
-| PD1 Project reply-parent media source evidence | **Verified Complete — bounded exact-release class** | Project-linked replies now mint a backward-compatible signed v3 source manifest that binds the exact replied-to event plus every ordered parent file or generated-image revision. Preview is read-only; explicit Send admits each parent-media source as an immutable evidence-only RichMessagePart and exact authority receipt before confirming the child Project group. Parent media never receives a ProjectAssociation and is never retagged. Released v2 retries remain byte-compatible and intentionally continue withholding parent media. V3 provider admission occurs only after canonical confirmation and exact before/after source reauthorization; missing, changed, revoked or unreadable parent evidence atomically hides and terminalizes the whole child group with four-family purge, while ordinary unlinked replies retain their existing authorized-media behavior. A→B correction mints fresh support-media receipts even after the original receipt expires, response-loss replay remains exact, and parent/file/image mutations traverse reverse dependencies before legacy mutation. Migration 0023, full Go (`593.010s`), focused disposable-PostgreSQL/race/DR gates, vet, 539/539 native tests/typecheck, rendered web Project journeys, diff-check and a fresh independent critic PASS bind `stride-e10-pd1-project-reply-media-local-20260813.json`. Exact implementation commit `77787371...` is on main and serves from VPS ledger generation 75, bundle `c10f4ce2...`, app image `3fc3cf70...` and renderer image `a77bde25...`; migration 23 is installed at checksum `78c0875b...` after a private transaction-consistent migration-22 backup, `43103a68...` is retained for rollback and the serving bundle verifies `verified-local-unsigned`. No mobile bytes changed, so Apple-valid Build 62 remains the current compatible client and no new TestFlight build was required. Physical-device acceptance, full Project Record, provider-backed artifacts and whole-PD1 remain open. |
-| PD1 permanent Meeting Record | **In Progress — current functional gate passes; candidate-wide render/release proof pending** | One evolving, permanent and paginated Meeting Record now projects exact current-source transcript segments, claims, corrections, gaps, artifacts and governed Ask Scout/follow-up state across web and native. Video remains room discovery; Meetings is a distinct historical library with exact source focus, record/room return, fail-closed reauthorization, Dynamic Type and accessible corrected/unavailable state. The body-free directory is bounded and indexed, survives more than 200 records/restart, rejects duplicate IDs and uses opaque non-leaking cursors. A retired Board card is no longer presented as current Work: only a current viewer-authorized successor artifact can resolve the Work link, and executable web/native regressions prove that the link opens that exact artifact while a legacy-only card remains unresolved; Project links require the same exact durable origin rather than title/tag inference. Current focused normal/race Go, 9/9 native Meeting, full native and TypeScript gates pass. The images under `docs/evidence/e10/rendered-meeting-record-20260813/` are explicitly historical and do not bind the current dirty bytes, so the prior `Verified Complete` label was too strong. A current candidate-wide desktop/phone/iPhone/iPad/AXXXL recapture, reviewed source/archive identity, full root/vet gate, physical-device acceptance and the degraded live meeting STT, room voice, Scout, digest-worker, canonical-shadow and backup/restore gates remain open. No production data was read or mutated for this local repair. |
+| PD1 Project-linked attachment and reply source groups | **Verified Complete — historical bounded exact-release class** | Existing-thread web and native composers now preview and explicitly send an exact source manifest over normalized text, destination authority, ordered server-issued attachment handles and same-thread reply ancestry. The server durably journals one pending human turn, then atomically confirms one body-free root event, zero-to-six immutable rich-part revisions, the evidence-only reply dependency, every Project association edge and one immutable group receipt before provider admission. Attachment-only turns, response-loss/restart replay, session rotation, Project A→B/A→none correction, root/part/parent mutation, attachment/origin revocation, Project archive/audience loss and four-family purge are all fail-closed and all-or-nothing. Current Project/thread/group/blob/parent authority is rechecked immediately before provider work; unsupported or over-budget but still-authorized files remain valid evidence; Project-bound replies intentionally withhold parent media until every such media source is represented canonically. Opaque `choiceKey` rebinding clears rather than silently switching when authority changes. Migration 0022, full Go (`587.752s`), focused normal/race/disposable-PostgreSQL/DR gates, vet, 539/539 native tests/typecheck, responsive rendered browser journeys and a fresh independent critic PASS bind `stride-e10-pd1-project-source-groups-local-20260813.json`. Exact implementation commit `43103a68...` was recorded on main and served from VPS ledger generation 74, bundle `301b036f...`, app image `662ebe06...` and renderer image `b2b56bb4...`; migration 22 was installed at checksum `c2e696d1...` after a private transaction-consistent migration-21 backup, `a5a4ece5...` was retained for rollback and the serving bundle verified `verified-local-unsigned`. iOS Build 62 (`d7ad87ae...`, fingerprint `fb4c0646...`, IPA `df59eeb7...`) finished from the same exact commit; submission `7bd762eb...` uploaded it, Apple processing was `VALID`, beta review was `APPROVED`, and the exact build was `IN_BETA_TESTING` in both existing `Team (Expo)` and `Bonfire` groups. Canonical parent-media inclusion, native simulator pixels, physical-device acceptance, Tyler enrollment, full Project Record, provider-backed work and whole-PD1 were open at that checkpoint; current Build 63 and Tyler state are controlled by the top checkpoint. |
+| PD1 Project reply-parent media source evidence | **Verified Complete — historical bounded exact-release class** | Project-linked replies now mint a backward-compatible signed v3 source manifest that binds the exact replied-to event plus every ordered parent file or generated-image revision. Preview is read-only; explicit Send admits each parent-media source as an immutable evidence-only RichMessagePart and exact authority receipt before confirming the child Project group. Parent media never receives a ProjectAssociation and is never retagged. Released v2 retries remain byte-compatible and intentionally continue withholding parent media. V3 provider admission occurs only after canonical confirmation and exact before/after source reauthorization; missing, changed, revoked or unreadable parent evidence atomically hides and terminalizes the whole child group with four-family purge, while ordinary unlinked replies retain their existing authorized-media behavior. A→B correction mints fresh support-media receipts even after the original receipt expires, response-loss replay remains exact, and parent/file/image mutations traverse reverse dependencies before legacy mutation. Migration 0023, full Go (`593.010s`), focused disposable-PostgreSQL/race/DR gates, vet, 539/539 native tests/typecheck, rendered web Project journeys, diff-check and a fresh independent critic PASS bind `stride-e10-pd1-project-reply-media-local-20260813.json`. Exact implementation commit `77787371...` was recorded on main and served from VPS ledger generation 75, bundle `c10f4ce2...`, app image `3fc3cf70...` and renderer image `a77bde25...`; migration 23 was installed at checksum `78c0875b...` after a private transaction-consistent migration-22 backup, `43103a68...` was retained for rollback and the serving bundle verified `verified-local-unsigned`. No mobile bytes changed, so Apple-valid Build 62 was the then-compatible client and no new TestFlight build was required. Physical-device acceptance, full Project Record, provider-backed artifacts and whole-PD1 remained open at that checkpoint; current release and mobile state are controlled by the top checkpoint. |
+| PD1 permanent Meeting Record | **Verified Complete — bounded current-release/rendered class** | The exact serving source projects one evolving, permanent and paginated Meeting Record with current-source transcript segments, claims, corrections, gaps, artifacts and governed Ask Scout/follow-up state across web and native. Video remains room discovery; Meetings is a distinct historical library with exact source focus, record/room return, fail-closed reauthorization, Dynamic Type and accessible corrected/unavailable state. The body-free directory is bounded and indexed, survives more than 200 records/restart, rejects duplicate IDs and uses opaque non-leaking cursors. Only a current viewer-authorized durable Project/successor-artifact link resolves; legacy title/tag inference remains forbidden. Focused normal/race Go, native Meeting/typecheck and replacement desktop/390px/iPhone/iPad/AXXXL evidence under `docs/evidence/e10/rendered-meeting-record-current-20260814/` bind the current source/app hashes. Physical-device acceptance and degraded live STT, room voice, Scout, digest-worker, canonical-shadow and backup/restore readiness remain open and are not inherited from this bounded class. |
 | PD1 Project-bound Research work projection | **Verified Complete — bounded local candidate class** | One confirmed Project-linked private conversation turn now launches one server-owned Research workstream and one evolving work card carrying the exact current Project. The same immutable artifact advances through a human edit and evidence-grade regeneration; rich Open, artifact reads/edits, follow-up, terminal publication, share/blob and Drive surfaces all re-check the canonical Project/source association. Save uses the exact body-free disposition and named Drive receipt, settles to **Open in Drive**, and selects the exact saved file. Source or Project invalidation makes provider publication, edit, regeneration, read and Drive projection fail closed while preserving the last accepted artifact. Focused normal/race authority tests, rendered desktop/390px Open/Save/Regenerate journeys, an executable production native work-card action test, 549/549 native tests, typecheck, vet and the full Go gate bind `docs/evidence/e10/rendered-project-bound-research-20260813/README.md`; its scoped `CANDIDATE-MANIFEST.txt` SHA-256 is `be5f2635...` and image `SHA256SUMS` is `6ccf7d18...`. This candidate is dirty/uncommitted, unreleased and not live; it does not claim a paid/current-generation provider run, native simulator pixels, physical devices, remaining deliverable families, production release or whole-PD1 completion. |
 | PI0-A instrumentation contract/carrier/runtime | **In Progress** | contract, route-free carrier and synthetic default-off runtime receipts pass; frozen pre-migration baseline and production installation/emitter proof remain; collection stays off |
 | PN1 safe public projections | **Not Started** | requires PD0 decision package, PI0-A baseline and new successor authority/storage/purge receipts; all switches false |
@@ -1156,7 +1209,7 @@ activation remains `In Progress` or `Blocked/External Gate`.
 | Conversation-first intent and deliverable routing | **In Progress** | the bounded local/default-off five-way router passes exact focused/race tests and independent critic in receipt `10948ff1...`: text, dictation/private voice, Scout and direct eligible-agent turns share the server-owned outcomes; normal clients cannot select tools/output contracts/authority; approvals bind exact immutable objective/effect; restart/replay and named-agent capability stay fenced. Receipt `9c83c4b1...` adds all-Go, 488/488 native, typecheck, provider-matrix and exact goal-child restart PASS; receipt `20ebacf8...` adds the four concrete product adapters; `e9f5a2d7...` proves the exact presentation request becomes one evolving work card; `dfdf214d...` accepts the bounded native iPhone/iPad presentation projection; `0623ccee...` extends the providerless contract through Research, Design and Financial model; and `b07b46a7...` completes the bounded twelve-family one-request/one-card interaction grammar with exact restart and stable pre/post-artifact identity. Managed key custody, release/live provider activation and the full provider-backed deliverable/device evidence remain open, so this row is not globally complete |
 | Complete venture deliverable catalog | **In Progress** | research/image/workbook have bounded prior evidence, and receipt `b07b46a7...` accepts only the interaction grammar for all twelve recurring families: Presentation, Research, Design, Financial model, Document, Meeting recap, Revision, Scheduled work, Build, Mixed package, Data visualization and Project plan. Actual provider-backed cited research/document/image/XLSX/PPTX/PDF/chart/mixed artifacts, attachment/reply/revision/translation/regeneration/scheduling/execution behavior, previews and Drive remain incomplete at their exact web/iPhone/iPad/live evidence classes |
 | Mobile Home/Work/new conversation correction | **In Progress** | receipt `ff80a903...` accepts a bounded loopback simulator slice for iPhone/iPad orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source focus/isolation, virtualized channel lists and a single shared active-work clock; receipt `0231271a...` accepts the bounded local native Home continuation/starters, fail-closed authorization refresh, light/dark and iPad AXXXL-plus-keyboard interaction after independent critic. Functional VoiceOver, reduced motion, remaining Dynamic Type spectrum, actual Split View/Stage Manager, pointer, Full Keyboard Access, measured runtime performance, reviewed commit/release and physical devices remain |
-| Tyler/TestFlight and all-user consent | **In Progress** | founder authorization is recorded; exact ASC tester relation and durable current-policy consent records remain readback gates |
+| Tyler/TestFlight and all-user consent | **In Progress** | founder authorization is recorded; current App Store Connect readback proves Tyler in Bonfire and Build 63 in both intended groups, while physical-device acceptance and durable current-policy consent records remain separate gates |
 
 > **2026-08-12 controlling PD1 resume checkpoint:** The completed bounded
 > Home/meeting/native-navigation release, local/default-off Project authority
@@ -1247,6 +1300,250 @@ normal and race modes, the focused ambient/Meeting Digest suite, `go vet`,
 `git diff --check`, and the full repository suite (`618.016s` for the main
 package) before activation.
 
+**2026-08-14 16:57 PT live-readiness and Realtime reliability
+reconciliation:** the exact release identity above remains intact, but the
+whole STRIDE readiness gate is red. At `2026-08-14T23:39:13Z`, `/readyz`
+reported canonical high-water 44,186 against reconciled/checkpoint 8,532 with
+`outboxKnown=false`; the direct database audit at `2026-08-14T23:27:00Z`
+classified all 135 repair candidates as target-only `tombstone_required` rows:
+103 memory, 20 file assignments, seven board cards, three file folders, one
+artifact revision and one notification. Canonical storage itself is intact:
+27,808 events, 22,948 current objects and zero latest-event projection,
+last-event pointer or duplicate-version mismatch. The defect is missing legacy
+lifecycle capture/retention, and it is still active for memory deletion and
+notification truncation. The apparently empty outbox is not known-empty:
+direct SQL found 17,160 undelivered `legacy.object.imported` rows, 10,648
+delivered and zero error-coded rows; reconciliation fails before the drain.
+Migrations 1–23 remain exact. Migration 24 is absent and blocks immutable
+ambient replay promotion receipts, but it did not cause these candidates and
+cannot repair them.
+
+No production repair or migration was performed. The only safe resume for the
+canonical lane is a separate ceremony: quiesce covered writers; prove two
+stable fingerprints; take and restore one matched named-volume/PostgreSQL
+backup in an isolated clone; generate a fresh exact manifest; append lifecycle
+generations without rewriting retained history; require zero candidates,
+parity, idempotence, restart stability, equal high-waters and complete outbox
+drain; prove matched restore; then take a distinct pre-24 database backup and
+apply migration 24 with replay still off. The old exact-seven board repair tool
+is not authority for this six-family set.
+
+The dirty local Priority-1 Realtime candidate now closes the deterministic
+lease/ordering class only. The server owns one 30-second account lease bound to
+the authenticated client and exact voice session/thread/generation, admits the
+provider only after claim, replays an exact offer without a second provider
+call, renews and stops idempotently, lets the same client recover immediately,
+rejects a late old Stop, and fences stale tools and milestones. Raw token/answer
+replays are process-only, swept on access/claim, removed on supersession and
+capped at 256. Web and native wait for `response.done`, serialize all function
+calls, emit one continuation, fence async results to the exact peer/generation,
+renew every ten seconds, close local media before Stop, and terminate on
+background/page exit. The server, web and future production native build stay
+dark unless `PRIVATE_REALTIME_VOICE_QUALIFIED=true`; the production EAS profile
+is explicitly false. The default-off two-person disconnect evaluator is
+offline supplied-evidence only, gates exact release/media/container identity,
+current-or-peak memory and frozen recovery/loss thresholds, and cannot claim a
+real run or formal W2A qualification.
+
+Focused normal and race gates, all Realtime/private-voice/voice-session server
+tests, `go vet ./...`, native typecheck and 559/559 tests, the incident harness
+7/7, `git diff --check`, a blocked-provider concurrent exact-replay test, a
+concurrent recovery/late-Stop test and independent critic round two pass on the
+pre-lifecycle dirty checkpoint; its full main-package gate also passed in
+`610.578s`. This is not a reviewed commit, release, deployment,
+provider/browser/device qualification or Tyler/AJ soak. Resume with the local
+new-lifecycle-capture wave, then review/commit authority if appropriate;
+activation remains
+blocked by the canonical repair/migration ceremony, live provider/browser and
+physical-device acceptance, and real two-person incident evidence.
+
+**2026-08-14 17:54 PT local lifecycle-prevention checkpoint:** the next safe
+canonical wave now passes locally without touching the 135 live candidates.
+Memory and artifact deletion, notification retention, and file-folder plus
+direct-assignment deletion use one central, phased
+`PREPARED -> COMMITTED|ABORTED` journal contract. The lifecycle lock spans the
+exact source rewrite; required-mode boot resolves pending transactions and
+exact committed-source cleanup before canonical import; current-source
+builders are shared with the importer so deletion evidence cannot drift from
+projection semantics. Recovery checks a newer recreation before digest
+equality, and file assignments carry server-only generation stamps so an
+identical recreated assignment cannot be mistaken for the deleted generation.
+Supported notification and folder path overrides still write only the central
+meeting-memory lifecycle journal, and board recovery ignores non-board pending
+operations.
+
+Fault injection proves journal failure retains every source, ordinary source
+failure records `ABORTED`, crash after prepare plus visible old source aborts,
+crash after the atomic source replacement commits on restart, repeated restart
+is idempotent, notification boot-cap truncation is transactional, and
+ambiguous memory/artifact replacement reloads the visible JSONL generation so
+a later write cannot resurrect the deleted row. The focused lifecycle,
+board, guest-link, importer, memory, notification and folder suites pass in
+normal and race modes; `go vet ./...`, `git diff --check`, and the combined
+full main-package gate pass (`610.403s`). A refreshed independent critic
+reports PASS with no actionable P0-P2 finding. This is still dirty local
+prevention only: it is not committed, pushed, released or deployed and does
+not repair or backfill the existing 135 rows, drain the 17,160-row outbox,
+install migration 24, or authorize the separate production ceremony.
+
+**2026-08-14 18:18 PT providerless Data Visualization foundation:** the next
+disjoint Priority-3 slice is implemented locally in two new isolated files.
+It accepts an explicitly typed, ordered category/number table plus a
+server-minted bar, line or scatter specification; requires an exact expected
+source digest; and returns byte-deterministic passive SVG, an accessible HTML
+source table, and a body-free manifest. RFC 8785 canonical JSON and
+domain-separated SHA-256 identities bind the source, specification, SVG,
+table and combined artifact. The manifest has an explicit detached self-digest
+preimage and verifier that independently recomputes the combined artifact
+identity and derived counts, rejecting even a rehashed inconsistent receipt.
+Inputs fail closed on ambiguous axes or series, ragged or mismatched cells,
+duplicate columns/categories, unsupported chart or column types, non-finite or
+unsafe numeric values, invalid UTF-8, controls/bidi overrides, markup/resource
+strings and fixed row/column/series/text/dimension/output bounds. Exact zero
+bars emit no false geometry; constant/all-zero domains remain finite; series
+use fixed non-color distinctions; and successful SVG contains no executable or
+external-resource construct.
+
+Focused normal, race, concurrency, degenerate-domain, injection and fuzz-seed
+tests pass; `go vet ./...` and `git diff --check` pass; and the independent
+critic reports PASS with no actionable P0-P2 finding after closing detached
+manifest, rehashed artifact/count and zero-geometry defects. This is an
+uncommitted providerless compiler foundation only. It does not admit raw JSON
+or time axes, make SVG safe for ordinary same-origin inline serving, create or
+persist a governed Work artifact, integrate a router/UI/preview/workbook/
+document/Drive path, call a provider, or prove web/native/live/device
+acceptance. The advertised Data Visualization family remains `In Progress`.
+
+**2026-08-14 20:08 PT providerless governed-output foundations:** two more
+dependency-safe Priority-3 slices now pass locally without adding any route,
+client-selected tool, provider, Drive write or production effect. Under an
+explicit caller-side prior-authorization precondition, the mixed-package
+identity compiler accepts typed component identity assertions, requires at
+least one research, memo, deck, workbook, imagery and
+source-register role, bounds and canonicalizes the inventory, and emits an
+RFC 8785/domain-separated body-free manifest whose verifier recomputes every
+derived count and digest. It deliberately proves only unkeyed internal
+consistency: callers must still authorize and resolve every artifact revision,
+and the manifest cannot prove authorship, custody, content existence or role
+fitness.
+
+The Data Visualization materializer accepts an exact operation, actor,
+`ArtifactDispositionRef` and complete typed compile request for one current
+private actor-owned `scout_thread` Work artifact. It prepares deterministic
+source JSON, passive SVG, accessible HTML table, body-free manifest and
+body-free materialization receipt as content-addressed blobs, then uses the
+current conversation/Project source fence plus semantic and full-artifact
+preimages to commit exactly one revision of the same artifact. Exact replay is
+restart-safe and repairs a subsequently present stale card or a previously
+failed terminal work-card projection; it does not create a still-absent card.
+It cannot overwrite a late human edit, cancellation, source change, Project
+change or authority revision. An ambiguous rename-published artifact reloads
+the visible generation and an exact retry repairs the card. Current Markdown
+readers do not consistently honor escaped table delimiters, so the
+materializer rejects pipe and backslash values before compilation or blob
+publication rather than corrupting the readable table. Operation identity is
+actor-and-tenant scoped rather than artifact-local: before blob publication,
+every durable body-free receipt is scanned under an exact
+actor-digest/tenant/operation admission lock. Exact same-target replay remains
+idempotent; reuse against a different Work target conflicts across sequence,
+restart and concurrent races. Refcounted keyed locks include holders and
+waiters, admit unrelated operations independently and are deleted at zero, so
+the uniqueness fence neither leaks historical keys nor globally serializes
+tenants.
+
+The mixed-package compiler passes focused normal, race, concurrency and fuzz
+gates plus two independent read-only reviews. The final materializer passes
+focused normal (`11.601s`) and race (`103.952s`) gates, valid Project-bound no-deadlock,
+late-metadata, persistence-fault, ambiguous-commit, replay-repair and hostile-
+cell cases plus cross-target operation uniqueness, unrelated-key progress and
+zero retained admission keys. Its final refreshed independent critic reports
+PASS with no actionable P0-P2 finding against source SHA-256
+`0042c592700f18cb72e4f30810c3d6de96efb3e65314c880906e17b32a1f013c`
+and test SHA-256
+`b7042e1956a270ba5e0cb0ff1bf47f056f62d63b6ae7693520a7b8f30b52ba06`.
+The first post-integration full-package run failed after `621.834s` because
+`TestProductionArtifactDeletePathsPreserveExactRecipients/generic` created a
+temporary memory store while the newly centralized lifecycle journal still
+resolved beside the repository development memory path. A prior run's fixed
+synthetic object ID was therefore correctly rejected as a historical digest
+reuse. The test now binds `MEETING_MEMORY_PATH` and its lifecycle journal to
+the same temporary generation; no production deletion behavior changed. That
+exact deletion-path test then passed 10 consecutive normal runs and three race
+runs, and the final complete main-package gate passed in `652.051s`.
+After the final cross-target operation fence, the first broad rerun failed only
+`TestChatColdIndexRendersImmediatelyAndHydratesSelectedThreadAtIPadWidth`
+after its 30-second Playwright wait and ended at `642.859s`; no materializer or
+lifecycle test failed. The same browser test immediately passed once, then 10
+consecutive times in `31.508s`, with no retained browser process or byte change.
+The definitive same-byte full-package rerun preserved that test's exact event
+stream: it passed in `3.03s`, and the entire main package passed in `614.299s`.
+The one stall remains recorded as non-reproduced test-environment flake rather
+than erased. `go vet ./...`, final `gofmt`, and `git diff --check` also pass on
+the final bytes.
+These are uncommitted internal foundations only. No router/tool admission, raw
+file or attachment extraction, automatic source choice, client preview,
+workbook/document embedding, package persistence/export, inline-SVG policy,
+Drive save, provider call, release, deployment or product acceptance is
+claimed.
+
+**2026-08-14 final local candidate freeze:** the complete remaining STRIDE
+implementation candidate is now frozen, without staging, against baseline
+`35a12d8c55d9b4313e6b609286ad3dce65948730`. The body-free manifest at
+`docs/evidence/e10/stride-remaining-local-candidate-20260814/CANDIDATE-MANIFEST.txt`
+binds exactly 43 implementation paths by tracked state, mode, byte count and
+SHA-256 and has SHA-256
+`79ba7e26be0baff2432825c849e5830f0a9b66289bcdeee6a2007811dca15b61`.
+Its scope note has SHA-256
+`ea88d1d18770d874eb540e28227c37cf3c51a18a1f817edc2750d0680ce910eb`.
+An independent path-set and per-file recomputation passes. This plan is
+excluded as the live ledger, the receipt directory is excluded to avoid
+self-reference, ignored artifacts are excluded, and the unrelated
+`stride-site/` tree remains excluded and untouched. The receipt grants no
+review, Git, migration, repair, provider, Apple, release, deployment or
+production authority. The next implementation transition is therefore human
+review/integration of these exact bytes; the separate canonical repair,
+migration 24, paid-provider, physical-device and real Tyler/AJ incident-soak
+gates remain unchanged.
+
+**2026-08-14 20:42 PT read-only drift checkpoint:** the frozen local candidate
+still verifies exactly against the 43-path manifest above and nothing is
+staged. Production still serves exact release `35a12d8c...` at ledger
+generation 83 with bundle `75a5e379...`, app image `5ecc00e7...`, renderer
+`b480173c...`, rollback `f2db1042...` and `verified-local-unsigned`; it remains
+`qualified=false` and `externallyAttested=false`. Migrations 1-23 remain exact
+and migration 24 remains absent. Canonical PostgreSQL now contains 27,889
+events and 23,007 objects with zero event/projection pointer mismatch, but the
+legacy mutation high-water advanced to 44,354 while the checkpoint remains
+8,532. Reconciliation now reports 136 repair candidates. Target memory has
+14,979 objects while the active legacy JSONL has 14,875 records, proving 104
+target-only memory generations instead of the prior 103; this is one more
+uncaptured legacy memory deletion, not canonical projection corruption. The
+undelivered `legacy.object.imported` outbox grew to 17,241, with 10,648
+delivered and zero error-coded rows. No repair, drain, migration or data write
+was performed.
+
+Current App Store Connect readback still shows Build 63 as Testing, Validated,
+unexpired and attached to both Team (Expo) and the seven-tester Bonfire group.
+It now additionally proves physical installation of Build 63 on AJ's and
+Tyler's tester rows; Tyler's row identifies an iPhone 13 Pro-class device and
+AJ's identifies an iPad Pro 11-inch (M5)-class device among their devices.
+This closes installation/distribution only. It does not prove the named chat,
+private Realtime, icon, retired-surface or two-person room flows passed. The
+tester table also exposes nonzero historical/session crash counts alongside
+those installed statuses. Exact Crash Feedback and build-row readback resolves
+their current attribution: all seven Aug. 13-14 chat/thread crash reports are
+Build 62, while Build 63 reports seven invites, one measured install, five
+sessions and no crash or feedback count. This proves no currently reported
+Build-63 TestFlight crash; it does not prove unreported absence or any named
+device flow, so physical acceptance remains open rather than being silently
+promoted. The separate Screenshot Feedback surface has zero rows and reports
+`No Screenshot Feedback`; no private screenshot content was opened. There is
+therefore no unexamined TestFlight screenshot evidence that can close a named
+flow. The body-free read-only receipt is
+`docs/evidence/e10/stride-remaining-local-candidate-20260814/APPLE-READONLY-20260814.json`
+with SHA-256
+`a6d61cbb917e67e3b98e9fe6d576e09a173b4f277026776e0f1846b25f965ec3`.
+
 The permanent Meeting Record is no longer only a dirty local candidate. Its
 current source is in that exact serving release, while the replacement rendered
 evidence is separately bound to the same source through
@@ -1278,7 +1575,7 @@ server/simulator work or later critical builds.
 | 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 39-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |
 | 1 — complete | **PD0 representative browser prototype and system freeze**, single Product Design owner. The comparative study, ChatGPT Workstream extension, Work presentation lifecycle and fail-closed Work→Network bridge passed independent critics. | exact studies/manifests; 13-journey validator; four synchronized J4 postimages; desktop/430 iPhone/1180 iPad reference captures; screenshot SHA/dimension verifier; Network value withholding; independent critic PASS | complete only for the bounded browser-reference class; no native/product/device/provider/Drive/publication/activation claim |
 | 2 — complete for the local/default-off class | **OpenAI-only conversational work runtime**, one provider/runtime owner. Inventory, function-tool design `c5363c31...`, isolated carrier `7064ee32...`, five-way router `10948ff1...`, complete local provider/model/restart gate `9c83c4b1...` and concrete adapter receipt `20ebacf8...` are independently accepted on exact dirty bytes. `report_goal_state`, `answer_memory_question`, `create_artifact` and `update_artifact` bind to governed product services under the frozen journal; every other tool is unavailable. | exact approved model/effort map; natural text/voice/Scout/direct-agent intent corpus; five server outcomes; exact tool authority/restart/final-use journal; tool-specific pre/post/reconcile/final-use and projection tests; no visible/client tool preselection; no-Anthropic negatives; full Go `515.862s`; 488/488 native tests and typecheck; provider receipts and independent critics | deterministic/providerless paths stay intact; four-tool integration remains default-off; managed custody and live activation remain gated; zero provider calls and zero production mutations in verification; no activation until exact project/cost authority and reviewed release receipts |
-| 3 — in progress; **Priority 1 meeting-intelligence recovery is the immediate resume lane**; Project-linked Home/text/correction/source groups/parent media exact releases complete; Meeting Record and Project-bound Research local candidates complete | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; `1c1a07e9...` plus live receipt `4466e8e4...` bind the third release `7fb35f88...`; the Project/Realtime receipts bind exact release `cf7240f3...`; the Home recommendation/performance receipts bind release `ee5c2b38...`; the Project-linked Home plus Video/Chat/core-shell receipts bind release `741e0284...`; the existing-thread Project/navigation checkpoint binds predecessor `7bf81f06...`, migration 20 and Build 59; the body-free/lazy Chat cold-load checkpoint binds release `d319c768...` and Build 60; the sent-message correction receipts bind release `a5a4ece5...`, migration 21 and Build 61; the attachment/reply source-group receipts bind predecessor `43103a68...`, migration 22 and Build 62 in both intended TestFlight groups; and the reply-parent media receipts bind current release `77787371...` and migration 23 while retaining compatible Build 62. The rich Meeting Record and the exact Project-bound Research work journey are now locally complete for their bounded candidate classes: permanent record/source/link governance plus one evolving Project work card/artifact through edit, regenerate, rich Open, named Drive receipt/Open and fail-closed source invalidation. Both remain dirty, unreleased and not live. Resume first with the Priority-1 capture/cursor repair, rolling analysis, bounded hierarchical compaction and one authorized recall plane shared by Realtime voice, typed Scout and agents; only after its live/current-day gates pass proceed to broader chief-of-staff ranking, remaining deliverable families and functional/device accessibility. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; critic | retain live release `77787371...`, rollback `43103a68...` and exact compatible Build 62; migration 23 is installed, additive and rollback-compatible; local candidates remain local-only until reviewed commit/release; any regression rolls back through the exact retained bundle; fixture data stays synthetic/local |
+| 3 — historical serialized checkpoint; **current stop point is controlled below** | **PD1 design/system freeze and serialized migration**, Product Design owner plus platform adapter reviewers. The bounded local/default-off Agentic Lab journey and truthful completed-work/Open/private-contribution slice pass rendered desktop/iPhone/iPad, full source/mobile/simulator and critic gates. The exact presentation process-dump rejection passes one evolving desktop/430-responsive work card, persistent activity/inspector and shared recurring-family/phase grammar in `e9f5a2d7...`; `dfdf214d...` accepts the same in-progress request/card/activity journey on simulated native iPhone and iPad; `0623ccee...` extends it through native Research, Design and Financial model; `b07b46a7...` completes the bounded twelve-family interaction grammar, providerless restart and eight additional native captures with one immutable pre/post-artifact card identity; `ff80a903...` accepts the bounded simulated native orientation, Accessibility XXXL adaptive layout, software-keyboard coexistence, accessibility-source and list-performance architecture checkpoint; `e4fb1548...` accepts the founder-directed global desktop rail, quiet header, governed name-only organization chooser, labeled utilities, responsive keyboard behavior and light/dark render parity; `351a32e0...` accepts the bounded desktop ordinary-message and thread-inspector interaction; `0231271a...` accepts the bounded local web/iPhone/iPad conversation-first Home; `1c1a07e9...` plus live receipt `4466e8e4...` bind the third release `7fb35f88...`; the Project/Realtime receipts bind exact release `cf7240f3...`; the Home recommendation/performance receipts bind release `ee5c2b38...`; the Project-linked Home plus Video/Chat/core-shell receipts bind release `741e0284...`; the existing-thread Project/navigation checkpoint binds predecessor `7bf81f06...`, migration 20 and Build 59; the body-free/lazy Chat cold-load checkpoint binds release `d319c768...` and Build 60; the sent-message correction receipts bind release `a5a4ece5...`, migration 21 and Build 61; the attachment/reply source-group receipts bind predecessor `43103a68...`, migration 22 and Build 62 in both intended TestFlight groups; and the reply-parent media receipts bound then-current release `77787371...` and migration 23 while retaining compatible Build 62. At that checkpoint, the rich Meeting Record and exact Project-bound Research work journey were locally complete for their bounded candidate classes. Their later release/evidence status and the current Priority-1 stop point are controlled by the 2026-08-14 checkpoints above, not this historical row. | exact every-surface parity matrix; rendered desktop/iPhone/iPad journeys; New Conversation selects people/channel/audience only; accessible Home/meeting/work-card stages/interventions; every deliverable preview/Open/named Drive save/edit-regenerate path; Work↔Network continuity; synthetic agent-company meeting/transcript/contribution/Work Record flows; performance; source/race/full tests; critic | historical rollback record: release `77787371...`, rollback `43103a68...`, compatible Build 62 and migration 23 were the checkpoint state; current release, rollback, Build and local-candidate authority are controlled above; fixture data stays synthetic/local |
 | 3a — next after exact release/readback | **Founder-directed STRIDE organization and cross-org profile proof**, identity/organization authority owner. Resolve the canonical AJ and Tyler people, confirm no organization/name collision, create one private `STRIDE` organization, attach both exact members and prove that governed contributions from multiple organizations project into each person's core profile without cross-tenant body or membership leakage. General onboarding/invite/join UX remains later. | exact pre/post person/org/membership IDs and generations; backup/rollback; consent and audit receipt; active signed ContributionAttestations plus released-field manifests; correction/revocation/leave/delete rebuild and zero-disclosure corpus; desktop/iPhone/iPad profile render and independent critic | production data mutation is limited to the exact named organization/memberships after current readback; no duplicate people, inferred public/shared org, onboarding policy, search/contact activation or private-source copying |
 | 4 — next | **PI0-A baseline and installation design**, instrumentation owner; no collection. | signed baseline, event/schema/source digests, off/no-byte parity, privacy/export/purge/restore tests, critic | collection and emitters remain off; remove candidate installation without touching source data |
 | 5 — next | **PN1 safe projections default off**, PN authority owner after PD0+PI0-A. | migrations/PG, current-authority/CAS/ACL, purge/rebuild/restore, fixture render and critic; every PN switch false | drop candidate projections through governed rollback; private W4 remains authority |
@@ -1290,8 +1587,9 @@ server/simulator work or later critical builds.
 
 The order-3 row retains the serialized implementation history, but its older
 `77787371...`/Build 62/local-only wording is superseded by the 2026-08-14
-Priority-1 receipt: server release `b891f8a8...` is live and Build 63 is in
-Apple processing. The current order-3 stop point is the first active-sitting
+top checkpoint: exact server release `35a12d8c...` is live and Build 63 is
+Apple `VALID` and `IN_BETA_TESTING` in both intended groups, with Tyler present
+in Bonfire. The current order-3 stop point is the first active-sitting
 continuity/current-day recall proof, followed by founder device acceptance as
 builds arrive; physical iPhone availability does not pause implementation or
 submission.
@@ -1422,9 +1720,9 @@ founder connects the phone at the end.
   indexed pagination, exact current sources and successor-artifact/Project
   claim links, governed Ask Scout/follow-up, web/native source and return
   behavior and accessibility. Its prior rendered evidence is historical rather
-  than current-candidate proof, so this row remains In Progress until the exact
-  current archive is recaptured and independently accepted. It is uncommitted,
-  unreleased and not live. The public app still serves exact release
+  than current-candidate proof. That limitation is superseded by the replacement
+  current-source evidence named in the bounded Meeting Record row above. At
+  this historical checkpoint, the public app served exact release
   `777873712c24da48f63364d9e42fc52a02a62954` from VPS ledger generation 75;
   read-only health is healthy, while readiness remains degraded for meeting
   STT, room voice/Scout freshness, the disabled meeting-digest worker with 51
@@ -1539,10 +1837,11 @@ founder connects the phone at the end.
   provider call, managed-key installation, production data mutation,
   publication, collection, cohort or provider-spend action is authorized by
   that release request.
-- **Next — Priority 1:** retain the proved office active-sitting repair on
-  release `cfa3dbd3...` and run current-day parity through private Realtime,
-  typed Scout and a named agent. Apple processing and founder device acceptance
-  for Build 63 run alongside that live gate and do not block later critical
+- **Next — Priority 1:** retain the proved office active-sitting repair through
+  the current exact release lineage and run current-day parity through private
+  Realtime, typed Scout and a named agent. Build 63 is Apple `VALID` in both
+  intended groups; founder physical-device acceptance runs alongside that live
+  gate and does not block later critical
   builds. Only after current-day parity, restart, privacy, bounded-work and live
   readiness pass, extend that same compaction into the
   deterministic ranking path that makes each category's suggestions feel like
@@ -2458,7 +2757,7 @@ expressions or their interaction/accessibility evidence.
 | PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract, route-free carrier, and default-off synthetic runtime/privacy lifecycle passed bounded critics; production installation/emitters and frozen baseline remain | safe local implementation authorized; real collection not authorized | `synthetic_deterministic_safe_local_runtime_verified_no_collection` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
 | PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | bounded desktop web and native renderer shell plus Scout delivery/status/reconciliation are locally verified; remaining journeys, accessibility/performance, real-device and live-repair gates stay open; rollback to prior shell by release | shell work authorized locally; PN-dependent pilot journeys still require PN1 contracts | `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending` |
-| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | the reviewed release, desktop private research/image/workbook surfaces, Drive readback, and Build 52 distribution are verified; documents/slides/mixed, physical devices, native Save activation, and remaining network gates stay separate | body-minimized receipt binds exact serving release, artifacts, previews/status, privacy/Drive postimages, IPA/ASC build, and explicit failed/open cells; rollback is the retained exact release | AJ authorizes production runs and judges acceptance; Apple devices, Anthropic credit, Tyler enrollment, and native Save activation remain external inputs | `bounded_postrelease_desktop_research_image_workbook_and_drive_verified_documents_slides_devices_and_network_gates_open` |
+| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | the reviewed release, desktop private research/image/workbook surfaces, Drive readback, and Build 52 distribution are verified; documents/slides/mixed, physical devices, native Save activation, and remaining network gates stay separate | body-minimized receipt binds exact serving release, artifacts, previews/status, privacy/Drive postimages, IPA/ASC build, and explicit failed/open cells; rollback is the retained exact release | AJ authorizes production runs and judges acceptance; Apple physical-device acceptance, Anthropic credit, and native Save activation remain external inputs; Tyler's tester enrollment is already proven by the top checkpoint | `bounded_postrelease_desktop_research_image_workbook_and_drive_verified_documents_slides_devices_and_network_gates_open` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
 | PD1 remainder | Migrate every remaining legacy/planned surface across web/iPhone/iPad | same exclusive platform owners after pilot subset | full parity matrix, interactive/device/accessibility/performance acceptance | local implementation authorized; Apple/device/release external | `blocked_on_PD0`; may run after pilot subset without delaying PN2 unless it is a named pilot dependency |
 | PN2 | Signed-in human pilot | PN cohort config plus accepted pilot surfaces | >=5 people, 2 workspaces, typed objects, chronology, pause/block/dispute/purge, PI0-B receipts | participants, moderators, product/legal/privacy, deploy/activation | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` |
@@ -2468,30 +2767,30 @@ expressions or their interaction/accessibility evidence.
 
 ### Operations and authority queues
 
-**Safe local queue:** PN0 reconciliation/critic is complete. PD0 audit,
-primary-source research, three-platform parity, semantic-system, reference
-contracts, and the exact deterministic browser harness have independent critic
-PASS. The bounded desktop web/native shell and Scout delivery/status/
-reconciliation checkpoint is also locally verified; complete only the remaining
-governed PD1 journeys and reproducible accessibility/performance evidence, while
-keeping PN-dependent journeys behind PN1 and real-device/live-repair evidence in
-their separate queues. PI0-A's contract, route-free carrier, and default-off
-synthetic runtime/privacy lifecycle are locally verified with collection absent;
-next freeze the pre-migration baseline and design any production installation/
-emitter seam without enabling collection. The reviewed release now includes a
-real providerless private XLSX workbook, the research-source terminal-delimiter
-repair, unmistakable private/no-publish workbook controls, and a separate
-default-off native save-only capability with corrected authorization. Desktop
-AJA research, image, workbook, rich-preview, and Drive postimages are bounded
-post-release evidence; physical-device and native Save activation are not.
-Maintain W5-W8 default-off operator tests. Do not select cohort participants or
-create external signatures as local fixtures for production acceptance.
+**Current safe local queue:** exhausted at the frozen 43-path candidate above.
+The Realtime lease/ordering and dark gate, six-family legacy-lifecycle
+prevention, deterministic Data Visualization compiler/materializer,
+mixed-package identity foundation, default-off two-person evidence evaluator,
+current-source Meeting Record evidence, full normal/race/native/typecheck/vet
+gates and independent critics are complete for their explicitly bounded local
+classes. The exact bytes are body-free-manifested and unstaged. The next local
+transition is human review/integration authority for that exact candidate, not
+another overlapping implementation slice. Raw JSON/time axes, product source
+selection, client chart preview/router admission, mixed-package role fitness
+and persistence/export, native Save activation, broader PD1 journeys and
+PI0/W5-W8 activation each require a named product/authority or external-evidence
+decision first. Read-only drift monitoring and truthful ledger correction may
+continue, but cannot be relabeled as implementation completion. Do not select
+cohort participants, create external signatures, fabricate device results, or
+cross the provider/data/release boundary as a local fixture.
 
 **Externally blocked queue:** real independently operated W5 custody service,
 managed state/custody/destruction keys, external monotonic high-water,
 custody/privacy owners and consent; W6 five
-participants, two reviewers, legal/privacy/product approvals and corpus; Tyler's
-exact Apple Account enrollment; real iPhone and real iPad;
+participants, two reviewers, legal/privacy/product approvals and corpus;
+Tyler's Bonfire relation and Build-63 physical installation are now proven,
+and current Apple crash feedback contains no Build-63 report; the named real
+iPhone/iPad flow acceptance remains open;
 accessibility/privacy; restrictive TURN/WebRTC; encrypted offsite four-root
 restore; PostgreSQL/app/TURN/traffic HA; independent attestation; PI0 pilot
 consent/interviews; PN moderators/retention/rate/appeal owners; the real AJA
@@ -2502,7 +2801,7 @@ final soak.
 Responses, embedding, image, or external service requires exact project,
 billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 
-**Git/release/deploy queue:** production is exact
+**Historical Git/release/deploy queue checkpoint:** production was exact
 `261aced8c7491b4b7a2ab5416a00838e3c43ae18`, ledger generation 58, bundle
 `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
 with retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`.
@@ -2513,7 +2812,7 @@ unexpired, and `IN_BETA_TESTING` for both Team (Expo) and Bonfire. This does
 not authorize native Save activation, a product cohort, more provider spend,
 public content, canonical repair, or any W5-W8 activation.
 
-**Post-deploy acceptance queue:** PD1-AJA is materially advanced but incomplete.
+**Historical post-deploy acceptance checkpoint:** PD1-AJA was materially advanced but incomplete.
 The exact current release re-read the private decision-grade research artifact
 (16 cited links, 9 domains, 13 searches) with rich source rendering and zero
 malformed backtick URLs, the private 1536x1024 image, and their Drive files.
@@ -2527,9 +2826,9 @@ Anthropic One-Pager and Packaging Studio
 stopped on exact HTTP 400 `low_credit`; documents, slides, and mixed artifacts
 remain failed/open. Native Build 53 is Apple `VALID` and available in both
 intended TestFlight groups, while all physical iPhone/iPad acceptance remains
-open. Tyler's iPhone 13 Pro on iOS 26.5.2 is compatible, but the seven-person
-Bonfire group has no tester record named Tyler; obtain the exact Apple Account
-email before inviting. Native generic Drive Save remains correctly default-off and needs a
+open. The older missing-Tyler observation is superseded: current App Store
+Connect readback shows Tyler in Bonfire. His physical iPhone acceptance remains
+open. Native generic Drive Save remains correctly default-off and needs a
 separate activation receipt. No browser, simulator, or source test may replace
 the remaining device cells.
 
@@ -5898,7 +6197,7 @@ session, Contribution Review, Work Record, and private network-draft states. It
 does not promote publication/search/contact/MyMind, provider, real-corpus,
 physical-device, HA, custody, pilot, soak, or later cohort-activation states.
 
-**Current owner and stop:** AJ authorized and completed the W4-W8 deterministic
+**Historical W4 owner and stop checkpoint:** AJ authorized and completed the W4-W8 deterministic
 implementation carrier, migration 17, commit, push, and exact VPS activation.
 The 2026-08-09 live carrier receipt proves signed-in release `32736f1...`,
 authenticated activation lineage, seven current Bonfire members, and 98 bound
@@ -5910,9 +6209,11 @@ only with their separately named product/privacy/custody authority. No further p
 qualification retry, canonical production repair/promotion, production data or
 configuration mutation, Git shipping/deployment, active specialist route,
 repository rename, or cohort activation is authorized by this plan alone.
-Build 53 is the newest exact native carrier and is verified Apple `VALID` in
-internal `Team (Expo)` and external `Bonfire`; Tyler enrollment plus physical
-iPhone and iPad acceptance remain open. Build 52, Build 49, Build 48, and older
+Build 53 was the newest exact native carrier at this checkpoint and was
+verified Apple `VALID` in internal `Team (Expo)` and external `Bonfire`.
+Current Build 63 and Tyler status are controlled by the 2026-08-14 top
+checkpoint; physical iPhone and iPad acceptance remain open. Build 52, Build
+49, Build 48, and older
 Build 39/47 notes are historical. Do
 not claim provider-quality, restore, physical-device, HA, MyMind,
 or multi-organization acceptance without its separate evidence.

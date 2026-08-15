@@ -35,16 +35,11 @@ export function realtimeStatusForEvent(
 export function realtimeFunctionCalls(event: Record<string, unknown>): RealtimeFunctionCall[] {
   const type = String(event.type ?? '');
   const candidates: Array<Record<string, unknown>> = [];
-  if (type === 'response.output_item.done' && isRecord(event.item)) {
-    candidates.push(event.item);
-  } else if (type === 'response.function_call_arguments.done') {
-    candidates.push({
-      type: 'function_call',
-      call_id: event.call_id ?? event.callId,
-      name: event.name,
-      arguments: event.arguments,
-    });
-  } else if (type === 'response.done' && isRecord(event.response)) {
+  // The function call may look complete in earlier item/argument events, but
+  // its owning response can still be active. Running it there allows the tool
+  // result's response.create to race that response. The Realtime contract
+  // makes response.done the turn boundary, so only admit calls from it.
+  if (type === 'response.done' && isRecord(event.response)) {
     const status = String(event.response.status ?? '').trim().toLowerCase();
     if (['cancelled', 'incomplete', 'failed'].includes(status)) return [];
     const output = Array.isArray(event.response.output) ? event.response.output : [];
