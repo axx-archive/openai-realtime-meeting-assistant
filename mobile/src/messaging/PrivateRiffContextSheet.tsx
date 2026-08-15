@@ -16,6 +16,7 @@ import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import {
   privateRiffCheckpointSummary,
   privateRiffHasUpdates,
+  privateRiffPacificDateTime,
   privateRiffSourceTitle,
 } from './privateRiff';
 
@@ -27,12 +28,6 @@ type Props = {
   onClose: () => void;
   onRefresh: () => void;
 };
-
-function readableDate(value: string | undefined): string {
-  if (!value) return 'Not available';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Not available' : date.toLocaleString();
-}
 
 export function PrivateRiffContextSheet({ visible, riff, refreshing, error, onClose, onRefresh }: Props) {
   if (!riff) return null;
@@ -63,7 +58,7 @@ export function PrivateRiffContextSheet({ visible, riff, refreshing, error, onCl
         </View>
         <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
           <View accessibilityRole="summary" style={styles.summary}>
-            <SymbolView name="lock.fill" size={15} tintColor={colors.emberText} />
+            <SymbolView name="guitars.fill" size={17} tintColor={colors.emberText} />
             <View style={styles.summaryCopy}>
               <Text style={styles.summaryTitle}>{privateRiffCheckpointSummary(riff)}</Text>
               <Text style={styles.summaryBody}>This private conversation uses an immutable, server-authorized snapshot. New public messages never enter silently.</Text>
@@ -72,11 +67,11 @@ export function PrivateRiffContextSheet({ visible, riff, refreshing, error, onCl
 
           <View style={styles.facts}>
             <Fact label="Source" value={privateRiffSourceTitle(riff)} />
-            <Fact label="Through" value={`${riff.throughAuthorName || 'Channel message'} · ${readableDate(riff.throughCreatedAt)}`} />
+            <Fact label="Through" value={`${riff.throughAuthorName || 'Channel message'} · ${privateRiffPacificDateTime(riff.throughCreatedAt)}`} />
             <Fact label="Coverage" value={`${riff.messageCount} ${riff.messageCount === 1 ? 'message' : 'messages'} · revision ${riff.contextRevision}`} />
             <Fact label="Agent" value={riff.agentName || 'Scout'} />
-            <Fact label="Captured" value={readableDate(riff.capturedAt)} />
-            <Fact label="Brain" value={readableDate(riff.brainCapturedAt)} />
+            <Fact label="Captured" value={privateRiffPacificDateTime(riff.capturedAt)} />
+            <Fact label="Brain" value={privateRiffPacificDateTime(riff.brainCapturedAt)} />
           </View>
 
           {!riff.sourceAvailable ? (

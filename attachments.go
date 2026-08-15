@@ -1530,6 +1530,51 @@ func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, th
 	return true
 }
 
+func (app *kanbanBoardApp) privateRiffInvalidPublicationRoots(thread scoutChatThreadRecord) map[string]bool {
+	invalid := map[string]bool{}
+	var authorized map[string]privateRiffMemorySource
+	for _, message := range thread.Messages {
+		publication := message.Publication
+		if publication == nil || publication.Version != privateRiffConversationPublicationVersion || publication.RootMessageID == "" {
+			continue
+		}
+		validManifest := true
+		if len(publication.ContextSources) > 0 {
+			manifestDigest, err := digestAny(publication.ContextSources)
+			validManifest = err == nil && publication.ContextManifestDigest != "" && manifestDigest == publication.ContextManifestDigest
+		} else if publication.ContextManifestDigest != "" {
+			validManifest = false
+		}
+		if len(publication.ContextSources) > 0 && authorized == nil && app != nil {
+			authorized = app.privateRiffAuthorizedContextSources(context.Background(), thread.ID)
+		}
+		if !validManifest || (len(publication.ContextSources) > 0 && (app == nil || !privateRiffContextSourcesMatchAuthorized(authorized, publication.ContextSources))) {
+			invalid[publication.RootMessageID] = true
+		}
+	}
+	return invalid
+}
+
+func redactPrivateRiffPublicationMessage(message scoutChatMessageRecord) scoutChatMessageRecord {
+	message.Text = "This shared Private Riff is unavailable because context used by the conversation is no longer authorized for this channel."
+	message.Sources = nil
+	message.IntentOutcome = string(conversationIntentUnavailable)
+	message.Activity = nil
+	message.Thread = nil
+	message.Work = nil
+	message.Proposal = nil
+	message.Choices = nil
+	message.Manifest = nil
+	message.Image = nil
+	message.ImageGeneration = nil
+	message.Reply = nil
+	message.Files = nil
+	if message.ReplyTo != nil {
+		message.ReplyTo = &scoutChatReplyRef{MessageID: message.ReplyTo.MessageID}
+	}
+	return message
+}
+
 // projectScoutChatThreadForViewer is the sole read projection for persisted
 // chat attachments. A persisted chat message is not itself authority to expose
 // an attachment: every file must still resolve to its exact committed source
@@ -1573,6 +1618,13 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	if len(thread.Messages) == 0 {
 		return projected
 	}
+	// A v2 Riff publication is one authored conversation, even though it is
+	// stored as a channel root plus replies. If any turn relied on broader
+	// context that is no longer authorized for this destination, redact the
+	// entire batch. Keeping only the root or neighboring replies could leak the
+	// withdrawn context through references and would misrepresent the shared
+	// conversation as complete.
+	invalidRiffPublicationRoots := app.privateRiffInvalidPublicationRoots(thread)
 	projected.Messages = make([]scoutChatMessageRecord, 0, len(thread.Messages))
 	for _, message := range thread.Messages {
 		if pendingDeletes[message.ID] || (message.CausedByMessageID != "" && pendingDeletes[message.CausedByMessageID]) {
@@ -1595,18 +1647,24 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 				message.Files = nil
 			}
 		}
+		if message.Publication != nil && invalidRiffPublicationRoots[message.Publication.RootMessageID] {
+			message = redactPrivateRiffPublicationMessage(message)
+		}
 		projected.Messages = append(projected.Messages, message)
 	}
 	for messageIndex := range projected.Messages {
 		original := projected.Messages[messageIndex]
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
+		projected.Messages[messageIndex].RiffAuthority = nil
 		if original.Publication != nil {
 			publication := *original.Publication
 			publication.OperationID = ""
 			publication.RiffThreadID = ""
 			publication.SourceMessageID = ""
 			publication.SelectionDigest = ""
+			publication.ContextManifestDigest = ""
+			publication.ContextSources = nil
 			projected.Messages[messageIndex].Publication = &publication
 		}
 		if original.Activity != nil {
@@ -1614,6 +1672,8 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 			activity.SourceMessageDigest = ""
 			activity.SourceWindowDigest = ""
 			activity.SourceAudienceDigest = ""
+			activity.ContextManifestDigest = ""
+			activity.ContextSources = nil
 			projected.Messages[messageIndex].Activity = &activity
 		}
 		if original.Reply != nil {
@@ -1661,6 +1721,21 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 }
 
 func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) scoutChatMessageRecord {
+	// Publication revocation is batch-wide, but ordinary message events retain
+	// the historical O(1-message) projection. Only a v2 publication scans its
+	// sibling provenance receipts, and it computes one authorized context map.
+	if message.Publication != nil && message.Publication.Version == privateRiffConversationPublicationVersion {
+		invalid := app.privateRiffInvalidPublicationRoots(thread)
+		if invalid[message.Publication.RootMessageID] {
+			message = redactPrivateRiffPublicationMessage(message)
+		}
+		// These receipts are server-only and the one-message projection below
+		// would otherwise repeat the already completed authorization scan.
+		publication := *message.Publication
+		publication.ContextManifestDigest = ""
+		publication.ContextSources = nil
+		message.Publication = &publication
+	}
 	projected := app.projectScoutChatThreadForViewer(viewerEmail, scoutChatThreadRecord{ID: thread.ID, OwnerEmail: thread.OwnerEmail, Visibility: thread.Visibility, Messages: []scoutChatMessageRecord{message}})
 	if len(projected.Messages) == 0 {
 		return message

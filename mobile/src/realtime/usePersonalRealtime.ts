@@ -62,6 +62,10 @@ type PersonalRealtimeReconnectBinding = {
   attempt: number;
 };
 
+export type PersonalRealtimeStartBinding = {
+  threadId: string;
+};
+
 function newVoiceSessionId(): string {
   const random = Math.random().toString(36).slice(2, 14);
   return `voice-${Date.now().toString(36)}-${random}`;
@@ -146,6 +150,7 @@ export function usePersonalRealtime(options: {
   const toolAbortControllerRef = useRef<AbortController | null>(null);
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const smoothedLevelRef = useRef(0);
+  const durableToolAnswerRef = useRef('');
   const onActionsRef = useRef(options.onActions);
   onActionsRef.current = options.onActions;
 
@@ -480,7 +485,13 @@ export function usePersonalRealtime(options: {
         || toolAbortController.signal.aborted
       ) return false;
       if (response.actions?.length) onActionsRef.current?.(response.actions);
-      return sendToolOutput(call.callId, response.result ?? { ok: response.ok !== false });
+      const result = response.result ?? { ok: response.ok !== false };
+      const durableMessage = isRecord(result) ? String(result.message ?? '').trim() : '';
+      if (durableMessage && mountedRef.current) {
+        durableToolAnswerRef.current = durableMessage;
+        setTurn((current) => ({ question: current?.question ?? '', answer: durableMessage }));
+      }
+      return sendToolOutput(call.callId, result);
     } catch (toolError) {
       if (
         generationRef.current !== connectionGeneration
@@ -521,9 +532,13 @@ export function usePersonalRealtime(options: {
 
     const transcript = transcriptFromRealtimeEvent(event);
     if (transcript && mountedRef.current) {
-      setTurn((current) => transcript.role === 'user'
-        ? { question: transcript.text, answer: '' }
-        : { question: current?.question ?? '', answer: transcript.text });
+      if (transcript.role === 'user') {
+        durableToolAnswerRef.current = '';
+        setTurn({ question: transcript.text, answer: '' });
+      } else {
+        const answer = durableToolAnswerRef.current || transcript.text;
+        setTurn((current) => ({ question: current?.question ?? '', answer }));
+      }
     }
     const toolCalls = realtimeFunctionCalls(event);
     if (toolCalls.length) void continueToolCalls(toolCalls, connectionGeneration);
@@ -596,9 +611,11 @@ export function usePersonalRealtime(options: {
     }, PERSONAL_REALTIME_LEASE_RENEW_MS);
   }, [sessionToken, terminateTransportWithError]);
 
-  const start = useCallback(async (reconnectBinding?: PersonalRealtimeReconnectBinding) => {
+  const start = useCallback(async (binding?: PersonalRealtimeReconnectBinding | PersonalRealtimeStartBinding) => {
     if (!NATIVE_REALTIME_VOICE_ENABLED || !sessionToken) return;
-    const reconnecting = Boolean(reconnectBinding);
+    const reconnecting = Boolean(binding && 'transportRevision' in binding);
+    const reconnectBinding = reconnecting ? binding as PersonalRealtimeReconnectBinding : undefined;
+    const requestedThreadId = String(binding?.threadId ?? '').trim();
     if (reconnecting) {
       if (
         statusRef.current !== 'connecting'
@@ -614,7 +631,8 @@ export function usePersonalRealtime(options: {
     setError(null);
     if (!reconnecting) {
       setTurn(null);
-      setThreadId(null);
+      durableToolAnswerRef.current = '';
+      setThreadId(requestedThreadId || null);
     }
     setLiveStatus('connecting');
     const connectionGeneration = ++generationRef.current;
@@ -635,7 +653,7 @@ export function usePersonalRealtime(options: {
       return;
     }
     const voiceSessionId = reconnectBinding?.voiceSessionId ?? newVoiceSessionId();
-    const expectedThreadId = reconnectBinding?.threadId ?? '';
+    const expectedThreadId = requestedThreadId;
     const previousTransportRevision = reconnectBinding?.transportRevision ?? 0;
     voiceSessionIdRef.current = voiceSessionId;
     voiceThreadIdRef.current = expectedThreadId;
@@ -831,6 +849,7 @@ export function usePersonalRealtime(options: {
         localSDP,
         voiceSessionId,
         createConversationOperationId(),
+        expectedThreadId,
       );
       if (
         generationRef.current !== connectionGeneration
@@ -848,6 +867,7 @@ export function usePersonalRealtime(options: {
         || answer.leaseGeneration <= 0
         || !Number.isFinite(new Date(answer.leaseExpiresAt).getTime())
         || (reconnecting && answer.threadId !== expectedThreadId)
+        || (!reconnecting && expectedThreadId && answer.threadId !== expectedThreadId)
       ) {
         throw new Error('Scout voice did not bind its private transcript.');
       }

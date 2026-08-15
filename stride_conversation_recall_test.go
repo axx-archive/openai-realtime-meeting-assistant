@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,6 +88,17 @@ func TestSTRIDECompanyConversationRecallUsesCurrentPublicSourceAndReactionState(
 	}
 	if strings.Contains(entries[0].Text, privateCanary) {
 		t.Fatalf("private channel entered authorized join: %+v", entries[0])
+	}
+	publicationPrincipal := RecallPrincipal{
+		ServiceID: "private-riff-publication", TenantID: canonicalArtifactTenantID(), Audience: "shared_channel", ThreadID: fixture.table.ID,
+	}
+	publicationEntries := fixture.app.authorizedSTRIDEConversationEntries(publicationPrincipal)
+	if len(publicationEntries) != 1 || !strings.Contains(publicationEntries[0].Text, exactURL) || strings.Contains(publicationEntries[0].Text, privateCanary) {
+		t.Fatalf("destination-bound publication recall=%+v", publicationEntries)
+	}
+	publicationSources, publicationManifest := privateRiffMemorySources(publicationEntries)
+	if publicationManifest == "" || !fixture.app.privateRiffContextSourcesPublishable(context.Background(), fixture.table.ID, publicationSources) {
+		t.Fatalf("authorized destination context could not be published: sources=%+v manifest=%q", publicationSources, publicationManifest)
 	}
 	if guest := fixture.app.authorizedSTRIDEConversationEntries(recallPrincipalForGuest("guest-1", "meeting-room", "sitting-1")); len(guest) != 0 {
 		t.Fatalf("guest received company conversation: %+v", guest)

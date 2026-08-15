@@ -43,6 +43,7 @@ import type {
   MeetingRecordIndexResponse,
   MeetingRecordDetailResponse,
   PrivateRiffPublishResponse,
+  PrivateRiffSelectionPublishResponse,
   PrivateRiffSharePreviewResponse,
 } from "./types";
 import {
@@ -476,6 +477,7 @@ export const api = {
     sdp: string,
     voiceSessionId: string,
     operationId: string,
+    threadId = "",
   ): Promise<{
     ok: boolean;
     sdp: string;
@@ -490,7 +492,7 @@ export const api = {
   }> {
     return request("/assistant/realtime-offer", {
       method: "POST",
-      body: { sdp, voiceSessionId, operationId },
+      body: { sdp, voiceSessionId, operationId, ...(threadId ? { threadId } : {}) },
       sessionToken,
     });
   },
@@ -948,6 +950,18 @@ export const api = {
     );
   },
 
+  publishPrivateRiff(
+    sessionToken: string,
+    riffThreadId: string,
+    body: { operationId: string; scope: "all" | "reply"; messageId?: string },
+  ): Promise<PrivateRiffPublishResponse> {
+    return request<PrivateRiffPublishResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/riff-publish`,
+      { method: "POST", body, sessionToken },
+    );
+  },
+
+  /** Build 64 compatibility only; current clients do not expose paragraph selection. */
   privateRiffSharePreview(
     sessionToken: string,
     riffThreadId: string,
@@ -959,17 +973,14 @@ export const api = {
     );
   },
 
-  publishPrivateRiff(
+  /** Build 64 compatibility only; current clients do not expose paragraph selection. */
+  publishPrivateRiffSelection(
     sessionToken: string,
     riffThreadId: string,
     messageId: string,
-    body: {
-      operationId: string;
-      mode: "agent" | "draft";
-      paragraphTokens: string[];
-    },
-  ): Promise<PrivateRiffPublishResponse> {
-    return request<PrivateRiffPublishResponse>(
+    body: { operationId: string; mode: "agent" | "draft"; paragraphTokens: string[] },
+  ): Promise<PrivateRiffSelectionPublishResponse> {
+    return request<PrivateRiffSelectionPublishResponse>(
       `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/messages/${encodeURIComponent(messageId)}/riff-publish`,
       { method: "POST", body, sessionToken },
     );

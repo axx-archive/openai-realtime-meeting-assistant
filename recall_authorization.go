@@ -97,7 +97,7 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 		return false
 	}
 	member := principal.User != nil && accountStore().findUser(principal.User.Email) != nil
-	sharedService := principal.Audience == "shared_room" && strings.TrimSpace(principal.ServiceID) != ""
+	sharedService := (principal.Audience == "shared_room" || principal.Audience == "shared_channel") && strings.TrimSpace(principal.ServiceID) != ""
 	if !member && !sharedService {
 		return false
 	}
@@ -224,7 +224,8 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 	}
 	app.memory.mu.Unlock()
 	for _, candidate := range artifacts {
-		serviceAllowed := principal.ServiceID != "" && principal.Audience == "shared_room" &&
+		publicationService := principal.ServiceID == "private-riff-publication" && principal.Audience == "shared_channel" && strings.TrimSpace(principal.ThreadID) != ""
+		serviceAllowed := principal.ServiceID != "" && (principal.Audience == "shared_room" || publicationService) &&
 			candidate.header.TenantID == strings.TrimSpace(principal.TenantID) &&
 			strings.EqualFold(strings.TrimSpace(candidate.header.Visibility), "organization")
 		if !serviceAllowed && !artifactHeaderAuthorized(ctx, principal.User, ACLReadContent, candidate.header) {

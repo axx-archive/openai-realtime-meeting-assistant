@@ -159,15 +159,15 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
               {onRiffPrivately ? <View style={styles.rule} /> : null}
               {onRiffPrivately ? (
                 <Pressable accessibilityRole="button" accessibilityLabel="Riff privately from this message" onPress={onRiffPrivately} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
-                  <SymbolView name="lock.fill" tintColor={colors.emberText} size={18} />
+                  <SymbolView name="guitars.fill" tintColor={colors.emberText} size={18} />
                   <Text style={styles.actionText}>Riff privately from here</Text>
                 </Pressable>
               ) : null}
               {onShareFromRiff ? <View style={styles.rule} /> : null}
               {onShareFromRiff ? (
-                <Pressable accessibilityRole="button" accessibilityLabel="Share selected parts of this Private Riff answer" onPress={onShareFromRiff} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Share this Private Riff reply to its source channel" onPress={onShareFromRiff} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
                   <SymbolView name="paperplane.fill" tintColor={colors.emberText} size={18} />
-                  <Text style={styles.actionText}>Share to source channel</Text>
+                  <Text style={styles.actionText}>Share this reply to source</Text>
                 </Pressable>
               ) : null}
               {own && onChangeProject ? <View style={styles.rule} /> : null}

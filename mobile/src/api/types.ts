@@ -284,11 +284,13 @@ export type PrivateRiffBinding = {
   newMessageCount?: number;
 };
 
+/** Build 64 compatibility projection. New share UI never exposes paragraph selection. */
 export type PrivateRiffParagraph = {
   token: string;
   text: string;
 };
 
+/** Build 64 compatibility projection. New share UI never calls this preview. */
 export type PrivateRiffSharePreviewResponse = {
   ok: boolean;
   threadId: string;
@@ -298,6 +300,17 @@ export type PrivateRiffSharePreviewResponse = {
 };
 
 export type PrivateRiffPublishResponse = {
+  ok: true;
+  scope: 'all' | 'reply';
+  replayed: boolean;
+  threadId: string;
+  rootMessageId: string;
+  messageIds: string[];
+  publishedCount: number;
+};
+
+/** Build 64 compatibility response for the superseded paragraph-selection flow. */
+export type PrivateRiffSelectionPublishResponse = {
   ok: boolean;
   mode: 'agent' | 'draft';
   threadId: string;

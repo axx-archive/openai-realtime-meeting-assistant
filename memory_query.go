@@ -79,6 +79,9 @@ type assistantQueryResult struct {
 	matchedCards int
 	matches      int
 	contextSize  int
+	// contextEntries is server-only authority evidence for revision-bound
+	// consumers such as Private Riff. It is never projected or serialized.
+	contextEntries []meetingMemoryEntry
 }
 
 type osAssistantAction struct {
@@ -212,14 +215,15 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	}
 
 	matches, contextEntries := []meetingMemoryMatch(nil), []meetingMemoryEntry(nil)
-	if !assistantExactSourceContext(ctx) {
+	includeAuthorizedRecall := !assistantExactSourceContext(ctx) || assistantAuthorizedRecall(ctx)
+	if includeAuthorizedRecall {
 		matches, contextEntries = recallApp.memoryMatchesAndContext(recallQuery)
 	}
 	// Files is a first-class Scout source, not just a visual tab. Relevance
 	// search remains useful for broad company recall, but an exact file ref
 	// selected by chat (or an explicit Files/catalog question) is pinned ahead
 	// of the fuzzy lane after the same principal-scoped authorization pass.
-	if !assistantExactSourceContext(ctx) {
+	if includeAuthorizedRecall {
 		contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, recallQuery), contextEntries)
 	}
 	if recallModelContextProbe != nil {
@@ -250,11 +254,12 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	}
 
 	return assistantQueryResult{
-		query:       recallQuery,
-		answer:      answer,
-		source:      "assistant",
-		matches:     len(matches),
-		contextSize: len(contextEntries),
+		query:          recallQuery,
+		answer:         answer,
+		source:         "assistant",
+		matches:        len(matches),
+		contextSize:    len(contextEntries),
+		contextEntries: contextEntries,
 	}, nil
 }
 
@@ -263,6 +268,7 @@ type assistantModelSuccessRequiredContextKey struct{}
 type assistantBoardShortcutDisabledContextKey struct{}
 type assistantRecallQueryContextKey struct{}
 type assistantExactSourceContextKey struct{}
+type assistantAuthorizedRecallContextKey struct{}
 
 // withAssistantExactSourceContext prevents a revision-bound surface from
 // silently widening into Board, Files, general recall, relationship memory, or
@@ -282,6 +288,25 @@ func assistantExactSourceContext(ctx context.Context) bool {
 	}
 	exact, _ := ctx.Value(assistantExactSourceContextKey{}).(bool)
 	return exact
+}
+
+// withAssistantAuthorizedRecall augments an exact, caller-supplied source
+// window with the normal requester-authorized company/meeting recall plane.
+// It does not re-enable the Board shortcut. Revision-bound callers must retain
+// and later reauthorize the returned context manifest before publication.
+func withAssistantAuthorizedRecall(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, assistantAuthorizedRecallContextKey{}, true)
+}
+
+func assistantAuthorizedRecall(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(assistantAuthorizedRecallContextKey{}).(bool)
+	return enabled
 }
 
 // withAssistantRecallQuery keeps structured channel-turn metadata in the

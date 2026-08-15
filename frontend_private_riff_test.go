@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesSelectively(t *testing.T) {
+func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicitScopes(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -19,12 +19,18 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesSelectively(t *
 		"private-riff-checkpoint--conversation",
 		"function refreshPrivateRiff(",
 		"function renderPrivateRiffShare(",
-		"function publishPrivateRiffSelection(",
+		"function publishPrivateRiffConversation(",
+		"function privateRiffReplyIsShareable(",
+		"function privateRiffPacificTimestamp(",
+		"timeZone: 'America/Los_Angeles'",
 		"message?.activity?.version === 'stride-private-riff/v1'",
 		"throughMessageId: through",
-		"paragraphTokens",
-		"Use in my message",
-		"Share as Scout",
+		"Share all to source",
+		"Share this reply to source",
+		"Private Riff · only you and Scout",
+		`data-icon="guitar"`,
+		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
+		`.chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"]))`,
 		"Hidden chain-of-thought is not shown.",
 		"Shared by ${message.publication.sharedBy || 'a teammate'} from a private riff",
 	} {
@@ -55,13 +61,47 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesSelectively(t *
 	if !strings.Contains(refresh, "!thread?.riff") || !strings.Contains(refresh, "renderActiveScoutThread()") {
 		t.Fatalf("Private Riff checkpoint refresh must work in both the desktop rail and narrow conversation: %s", refresh)
 	}
-	publish := functionBody(html, "async function publishPrivateRiffSelection(")
-	if !strings.Contains(publish, "destinationId !== String(activeScoutThreadId || '')") || !strings.Contains(publish, "await hydrateScoutChatThread(destinationId)") {
-		t.Fatalf("Private Riff draft must navigate to the server-returned source before prefilling: %s", publish)
+	share := functionBody(html, "function renderPrivateRiffShare(")
+	if strings.Count(share, "Share all to source") != 1 || strings.Count(share, "Share this reply to source") != 1 ||
+		strings.Contains(share, "checkbox") || strings.Contains(share, "paragraph") {
+		t.Fatalf("Private Riff share disclosure must offer exactly the two approved publication choices: %s", share)
+	}
+	publish := functionBody(html, "async function publishPrivateRiffConversation(")
+	for _, want := range []string{
+		"`/assistant/chat-threads/${encodeURIComponent(thread.id)}/riff-publish`",
+		"{ operationId: attempt.operationId, scope",
+		"scope === 'reply' ? { messageId: String(message.id) } : {}",
+		"privateRiffPublishAttempts.get(key)",
+	} {
+		if !strings.Contains(publish, want) {
+			t.Fatalf("Private Riff publication is missing %q: %s", want, publish)
+		}
+	}
+	for _, forbidden := range []string{"riff-share-preview", "paragraphTokens", "Use in my message", "Share as Scout"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("Private Riff web still exposes the retired selective-share contract %q", forbidden)
+		}
+	}
+	narrow := functionBody(html, "function scoutChatMessageRecordNode(")
+	if !strings.Contains(narrow, "!desktopChatLayoutQuery.matches") || !strings.Contains(narrow, "privateRiffShareTriggerNode(activeThread, message)") {
+		t.Fatalf("narrow web must retain full-screen Riff publication controls: %s", narrow)
+	}
+	realtime := functionBody(html, "async function startPrivateRiffRealtime(")
+	if !strings.Contains(realtime, "startPrivateRealtimeVoiceConversation({ threadId })") || !strings.Contains(realtime, "current?.riff") || !strings.Contains(realtime, "stillVisible") {
+		t.Fatalf("Private Riff Realtime must bind the exact still-visible Riff thread: %s", realtime)
+	}
+	if !strings.Contains(html, "const requestedThreadId = String(options?.threadId || '').trim()") ||
+		!strings.Contains(html, "privateRealtimeVoiceThreadID = String(reconnect?.threadId || requestedThreadId || '')") {
+		t.Fatal("the shared Realtime launcher must validate, consume, and retain an explicit threadId")
+	}
+	offer := functionBody(html, "async function exchangePrivateRealtimeOffer(")
+	if !strings.Contains(offer, "threadId: expectedThreadId") || !strings.Contains(offer, "expectedThreadId && threadId !== expectedThreadId") {
+		t.Fatalf("the Realtime offer must send and exact-match the requested Riff threadId: %s", offer)
 	}
 	for _, signature := range []string{
 		"function renderPrivateRiffContext(",
 		"function renderPrivateRiffShare(",
+		"function privateRiffGuitarIcon(",
 	} {
 		body := functionBody(html, signature)
 		if strings.Contains(body, "innerHTML") {
@@ -83,7 +123,8 @@ func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.
 		`height: 44px;`,
 		`transition-property: background-color, box-shadow, transform;`,
 		`.chat-convo-head__riff:active { transform: scale(0.96); }`,
-		`<span>Private riff</span>`,
+		`<span>Private Riff</span>`,
+		`data-icon="guitar"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("compact Private Riff header entry missing %q", want)

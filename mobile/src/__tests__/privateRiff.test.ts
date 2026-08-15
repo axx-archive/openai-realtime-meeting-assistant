@@ -3,11 +3,12 @@ import test from 'node:test';
 
 import type { PrivateRiffBinding, ScoutMessage } from '../api/types';
 import {
-  initialPrivateRiffParagraphTokens,
-  privateRiffAnswerShareable,
   privateRiffCheckpointSummary,
   privateRiffHasUpdates,
-  selectedPrivateRiffParagraphTokens,
+  privateRiffPacificDateTime,
+  privateRiffReplyAuthor,
+  privateRiffReplyShareable,
+  privateRiffShareAllCount,
 } from '../messaging/privateRiff';
 
 const riff: PrivateRiffBinding = {
@@ -24,41 +25,34 @@ const riff: PrivateRiffBinding = {
   newMessageCount: 3,
 };
 
+const turns = [
+  { id: 'root', role: 'user', authorName: 'AJ', text: 'Help me think this through.' },
+  {
+    id: 'scout-reply', role: 'scout', authorName: 'Scout', text: 'Here is a direction.',
+    activity: { version: 'stride-private-riff/v1', status: 'completed', contextRevision: 1, throughMessageId: 'message-2' },
+  },
+  { id: 'user-reply', role: 'user', authorName: 'AJ', text: 'That framing works.' },
+] as ScoutMessage[];
+
 test('the checkpoint names its source and only reports authorized updates', () => {
-  assert.match(privateRiffCheckpointSummary(riff), /^Private · grounded in #design-room through /);
+  assert.equal(privateRiffCheckpointSummary(riff), 'Private · grounded in #design-room through Aug 15, 2026, 9:30 AM PDT');
+  assert.equal(privateRiffPacificDateTime('2026-01-15T20:30:00.000Z'), 'Jan 15, 2026, 12:30 PM PST');
   assert.equal(privateRiffHasUpdates(riff), true);
   assert.equal(privateRiffHasUpdates({ ...riff, sourceAvailable: false }), false);
   assert.equal(privateRiffHasUpdates({ ...riff, newMessageCount: 0 }), false);
 });
 
-test('only server-bound complete Scout answers in an available riff can cross the boundary', () => {
-  const answer = {
-    id: 'answer-1', role: 'assistant', text: 'A considered answer.',
-    activity: {
-      version: 'stride-private-riff/v1', status: 'completed', stage: 'answered_from_checkpoint',
-      startedAt: '2026-08-15T16:31:00Z', completedAt: '2026-08-15T16:31:02Z', elapsedMs: 2000,
-      sourceCount: 2, evidenceKind: 'channel_checkpoint', rationale: 'Safe rationale.', contextRevision: 1,
-      sourceThreadId: 'channel-1', throughMessageId: 'message-2',
-    },
-  } as ScoutMessage;
-  assert.equal(privateRiffAnswerShareable(riff, answer), true);
-  assert.equal(privateRiffAnswerShareable(riff, { ...answer, activity: undefined }), false);
-  assert.equal(privateRiffAnswerShareable(riff, { ...answer, role: 'user' }), false);
-  assert.equal(privateRiffAnswerShareable(riff, { ...answer, text: '' }), false);
-  assert.equal(privateRiffAnswerShareable(riff, {
-    ...answer,
-    reply: { state: 'running', operationId: 'op-1', inReplyTo: 'prompt-1', attempt: 1 },
-  }), false);
-  assert.equal(privateRiffAnswerShareable({ ...riff, sourceAvailable: false }, answer), false);
+test('any complete non-root human or Scout reply is shareable under server authorship', () => {
+  assert.equal(privateRiffReplyShareable(riff, turns[0], turns), false);
+  assert.equal(privateRiffReplyShareable(riff, turns[1], turns), true);
+  assert.equal(privateRiffReplyShareable(riff, turns[2], turns), true);
+  assert.equal(privateRiffReplyAuthor(turns[1]), 'Scout');
+  assert.equal(privateRiffReplyAuthor(turns[2]), 'AJ');
+  assert.equal(privateRiffReplyShareable({ ...riff, sourceAvailable: false }, turns[1], turns), false);
+  assert.equal(privateRiffReplyShareable(riff, { ...turns[1], reply: { state: 'running', operationId: 'op', inReplyTo: 'root', attempt: 1 } }, turns), false);
 });
 
-test('paragraph selection rejects empty candidates and preserves server order', () => {
-  const paragraphs = [
-    { token: 'p-1', text: 'First' },
-    { token: '', text: 'No token' },
-    { token: 'p-2', text: 'Second' },
-    { token: 'p-3', text: '   ' },
-  ];
-  assert.deepEqual([...initialPrivateRiffParagraphTokens(paragraphs)], ['p-1', 'p-2']);
-  assert.deepEqual(selectedPrivateRiffParagraphTokens(paragraphs, new Set(['p-2', 'p-1'])), ['p-1', 'p-2']);
+test('share-all counts the authored conversation and excludes incomplete placeholders', () => {
+  const queued = { id: 'queued', role: 'scout', text: 'Working', reply: { state: 'queued', operationId: 'op', inReplyTo: 'root', attempt: 1 } } as ScoutMessage;
+  assert.equal(privateRiffShareAllCount([...turns, queued]), 3);
 });

@@ -144,6 +144,28 @@ func (app *kanbanBoardApp) strideConversationProjectionPrincipal(principal Recal
 		projected := strideRuntimePrincipalForEmail(user.Email)
 		return projected, principal.Audience == "shared_room", projected != ""
 	}
+	if principal.Audience == "shared_channel" && strings.TrimSpace(principal.ServiceID) == "private-riff-publication" && strings.TrimSpace(principal.ThreadID) != "" {
+		// Publication reauthorization represents the destination audience, not
+		// the sharer. Resolve one current runtime principal who is actually in
+		// the exact public destination; the projection below remains hard-bound
+		// to that thread and its current STRIDE audience/ACL revision.
+		for _, stored := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
+			thread, decoded := decodeScoutChatThreadEntry(stored)
+			if !decoded || thread.ID != strings.TrimSpace(principal.ThreadID) || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" {
+				continue
+			}
+			for _, member := range runtimeMemberPrincipals() {
+				email := strings.TrimPrefix(strings.TrimSpace(member), "user:")
+				if !scoutChatThreadAllowsViewer(thread, email) {
+					continue
+				}
+				if projected := strideRuntimePrincipalForEmail(email); projected != "" {
+					return projected, false, true
+				}
+			}
+		}
+		return "", false, false
+	}
 	if principal.Audience != "shared_room" || strings.TrimSpace(principal.ServiceID) != "scout-recall" {
 		return "", false, false
 	}

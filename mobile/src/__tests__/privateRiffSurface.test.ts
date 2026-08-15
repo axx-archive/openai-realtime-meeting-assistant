@@ -6,52 +6,67 @@ import test from 'node:test';
 const mobileRoot = path.resolve(import.meta.dirname, '..', '..');
 const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...parts), 'utf8');
 
-test('mobile uses the exact server-owned riff routes and replay-safe operation ids', () => {
+test('mobile publishes through the closed replay-safe all-or-reply contract', () => {
   const client = source('src', 'api', 'client.ts');
+  const types = source('src', 'api', 'types.ts');
   const screen = source('src', 'screens', 'ThreadScreen.tsx');
-  assert.match(client, /chat-threads\/\$\{encodeURIComponent\(sourceThreadId\)\}\/riff`/);
-  assert.match(client, /chat-threads\/\$\{encodeURIComponent\(riffThreadId\)\}\/riff\/refresh`/);
-  assert.match(client, /messages\/\$\{encodeURIComponent\(messageId\)\}\/riff-share-preview`/);
-  assert.match(client, /messages\/\$\{encodeURIComponent\(messageId\)\}\/riff-publish`/);
-  assert.match(screen, /privateRiffCreateAttemptRef/);
-  assert.match(screen, /privateRiffRefreshAttemptRef/);
+  assert.match(client, /chat-threads\/\$\{encodeURIComponent\(riffThreadId\)\}\/riff-publish`/);
+  assert.match(client, /body: \{ operationId: string; scope: "all" \| "reply"; messageId\?: string \}/);
+  assert.match(types, /scope: 'all' \| 'reply';[\s\S]*messageIds: string\[\];[\s\S]*publishedCount: number/);
+  assert.match(screen, /scope === "reply" \? \{ messageId: messageID \} : \{\}/);
   assert.match(screen, /privateRiffPublishAttemptRef/);
-  assert.match(screen, /throughMessageId: messageID,[\s\S]*agentId: ""/);
 });
 
-test('a public channel offers exact-message and latest-message private entry points', () => {
+test('legacy paragraph transport remains compatible but has no current UI caller', () => {
+  const client = source('src', 'api', 'client.ts');
+  const screen = source('src', 'screens', 'ThreadScreen.tsx');
+  const sheet = source('src', 'messaging', 'PrivateRiffShareSheet.tsx');
+  assert.match(client, /privateRiffSharePreview/);
+  assert.match(client, /publishPrivateRiffSelection/);
+  assert.doesNotMatch(screen, /privateRiffSharePreview|publishPrivateRiffSelection|paragraphTokens/);
+  assert.doesNotMatch(sheet, /accessibilityRole="checkbox"|paragraphTokens|PrivateRiffParagraph/);
+});
+
+test('public channel and Riff headers use a guitar with exact-message affordances', () => {
   const screen = source('src', 'screens', 'ThreadScreen.tsx');
   const actions = source('src', 'messaging', 'MessageActionSheet.tsx');
+  const context = source('src', 'messaging', 'PrivateRiffContextSheet.tsx');
   assert.match(screen, /threadVisibility === "public" && latestRiffAnchor/);
   assert.match(screen, /startPrivateRiff\(actionMessage\.message\)/);
+  assert.match(screen, /Share latest reply to #\$\{privateRiff\.sourceTitle/);
   assert.match(actions, /Riff privately from here/);
-  assert.match(actions, /minHeight: hitMin/);
+  assert.match(actions, /Share this reply to source/);
+  assert.match(screen, /name="guitars\.fill"/);
+  assert.match(actions, /name="guitars\.fill"/);
+  assert.match(context, /name="guitars\.fill"/);
   assert.match(screen, /<FlashList/);
 });
 
-test('private context and selective sharing use native sheets with explicit privacy copy', () => {
-  const context = source('src', 'messaging', 'PrivateRiffContextSheet.tsx');
-  const share = source('src', 'messaging', 'PrivateRiffShareSheet.tsx');
-  assert.match(context, /presentationStyle="pageSheet"/);
-  assert.match(context, /New public messages never enter silently/);
-  assert.match(context, /accessibilityHint="Creates a new immutable checkpoint/);
-  assert.match(share, /presentationStyle="pageSheet"/);
-  assert.match(share, /accessibilityRole="checkbox"/);
-  assert.match(share, /Only checked paragraphs will cross the private boundary/);
-  assert.match(share, /Use in my message/);
-  assert.match(share, /Share agent answer/);
+test('native share sheet presents exactly the two source publication scopes', () => {
+  const sheet = source('src', 'messaging', 'PrivateRiffShareSheet.tsx');
+  assert.match(sheet, /presentationStyle="pageSheet"/);
+  assert.match(sheet, /`Share all to \$\{source\}`/);
+  assert.match(sheet, /`Share this reply to \$\{source\}`/);
+  assert.match(sheet, /initiating message as the channel root/);
+  assert.match(sheet, /server-stamped author/);
+  assert.doesNotMatch(sheet, /Use in my message|Share agent answer|accessibilityRole="checkbox"/);
 });
 
-test('draft sharing navigates to the source without posting and agent sharing confirms provenance', () => {
+test('Private Riff composer reuses dictation and the singleton Realtime transport with exact thread binding', () => {
   const screen = source('src', 'screens', 'ThreadScreen.tsx');
-  const navigation = source('src', 'navigation', 'types.ts');
+  const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
+  const client = source('src', 'api', 'client.ts');
+  assert.match(screen, /useComposerDictation\(\{[\s\S]*threadId: route\.params\.threadId/);
+  assert.match(screen, /usePersonalRealtimeContext\(\)/);
+  assert.match(screen, /realtime\.start\(\{ threadId: route\.params\.threadId \}\)/);
+  assert.match(screen, /say “share to source”/);
+  assert.match(realtime, /!reconnecting && expectedThreadId && answer\.threadId !== expectedThreadId/);
+  assert.match(client, /\.\.\.\(threadId \? \{ threadId \} : \{\}\)/);
+});
+
+test('published channel messages render server-stamped Private Riff provenance', () => {
   const bubble = source('src', 'messaging', 'MessageBubble.tsx');
-  assert.match(navigation, /draft\?: string;[\s\S]*draftProvenance\?: 'private_riff'/);
-  assert.match(screen, /mode === "draft"[\s\S]*navigation\.push\("Thread"[\s\S]*draftProvenance: "private_riff"/);
-  assert.match(screen, /Private Riff draft · edit before sending/);
-  assert.match(screen, /mode === "agent" && !confirmed[\s\S]*Share as agent/);
-  assert.match(screen, /Only the selected paragraphs were posted, with Private Riff provenance/);
   assert.match(bubble, /Shared by \{publication\.sharedBy \|\| ['"]a teammate['"]\} from a private riff/);
+  assert.match(bubble, /name="guitars\.fill"/);
   assert.match(bubble, /threadId: publication\.sourceThreadId[\s\S]*messageId: publication\.sourceThroughMessageId/);
-  assert.match(screen, /source\.threadId && source\.threadId !== route\.params\.threadId[\s\S]*messageId: source\.messageId/);
 });

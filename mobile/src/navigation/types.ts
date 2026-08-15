@@ -22,8 +22,6 @@ export type RootStackParamList = {
     threadId: string;
     title: string;
     messageId?: string;
-    draft?: string;
-    draftProvenance?: 'private_riff';
   };
   Intelligence: undefined;
   Memory: undefined;

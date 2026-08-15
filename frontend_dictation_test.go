@@ -21,6 +21,7 @@ func TestWebComposerDictationInstallsEveryFirstPartyComposer(t *testing.T) {
 	for _, want := range []string{
 		`<script src="/public/composer-dictation.js"></script>`,
 		"mount(scoutChatForm, scoutChatInput, 'chat')",
+		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
 		"mount(homeScoutComposer, homeScoutInput, 'chat')",
 		"mount(roomChatForm, roomChatInput, 'chat')",
 		"mount(osAssistantForm, osAssistantInput, 'chat')",

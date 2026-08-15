@@ -18,9 +18,13 @@ func TestIPadChatRecoversFromKeyboardReducedViewport(t *testing.T) {
 		"document.addEventListener('focusout', settleAppViewportHeight)",
 		"[0, 80, 240, 520].map",
 		"document.documentElement.style.setProperty('--app-viewport-height'",
+		"Math.abs(height - appViewportLastHeight) < 2",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("iPad keyboard viewport recovery missing %q", want)
 		}
+	}
+	if strings.Contains(html, "visualViewport?.addEventListener('scroll', syncAppViewportHeight") {
+		t.Fatal("iPad Safari viewport scroll must not feed nested channel scrolling back into shell height")
 	}
 }

@@ -657,6 +657,9 @@ type scoutChatMessageRecord struct {
 	// Publication is server-stamped provenance when selected text from an
 	// owner-only Private Riff is deliberately shared into its source channel.
 	Publication *scoutChatPublicationProvenance `json:"publication,omitempty"`
+	// RiffAuthority is the server-only immutable context/actor receipt for a
+	// Private Riff turn. Viewer projections always remove it.
+	RiffAuthority *privateRiffMessageAuthority `json:"riffAuthority,omitempty"`
 	// proposalSource is process-only provenance from the router verdict to the
 	// durable mint event. It is intentionally not viewer-controlled or stored
 	// on the message body.
@@ -833,6 +836,38 @@ func (app *kanbanBoardApp) ensurePrivateRealtimeVoiceConversation(requesterEmail
 	return thread, true, nil
 }
 
+// bindPrivateRealtimeVoiceToRiff attaches the singleton private Realtime
+// transport to an existing owner-only Riff. A new session replaces the prior
+// binding and invalidates that older lease at the conversation boundary.
+func (app *kanbanBoardApp) bindPrivateRealtimeVoiceToRiff(requesterEmail, voiceSessionID, threadID string) (scoutChatThreadRecord, error) {
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	voiceSessionID, err := normalizePrivateRealtimeVoiceSessionID(voiceSessionID)
+	if err != nil || requesterEmail == "" || strings.TrimSpace(threadID) == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime Riff binding is invalid")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(requesterEmail, threadID)
+	if err != nil || thread.Riff == nil || normalizeAccountEmail(thread.OwnerEmail) != requesterEmail || scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate || thread.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff is unavailable for Realtime voice")
+	}
+	if _, _, err := app.currentPrivateRiffSource(requesterEmail, thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	now := time.Now().UTC()
+	thread.VoiceSession = &scoutChatVoiceSessionBinding{
+		Version: privateRealtimeVoiceSessionBindingVersion, SessionDigest: privateRealtimeVoiceSessionDigest(voiceSessionID),
+		BoundAt: now.Format(time.RFC3339Nano),
+	}
+	thread.UpdatedAt = now.Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	deliverScoutChatThreadMetadata(thread)
+	return thread, nil
+}
+
 // privateRealtimeVoiceConversation resolves, but never creates, the thread
 // previously minted by the offer. The client echoes both values returned by the
 // offer; disagreement, owner isolation, archive, or corrupt/missing binding is
@@ -844,12 +879,18 @@ func (app *kanbanBoardApp) privateRealtimeVoiceConversation(requesterEmail, voic
 		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session is invalid")
 	}
 	expectedThreadID := privateRealtimeVoiceThreadID(requesterEmail, voiceSessionID)
-	if strings.TrimSpace(threadID) != expectedThreadID {
-		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session and thread do not match")
-	}
-	thread, _, err := app.scoutChatThreadByID(requesterEmail, expectedThreadID)
+	threadID = strings.TrimSpace(threadID)
+	thread, _, err := app.scoutChatThreadByID(requesterEmail, threadID)
 	if err != nil || !validPrivateRealtimeVoiceThreadBinding(thread, requesterEmail, voiceSessionID) {
 		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session is unavailable")
+	}
+	if threadID != expectedThreadID {
+		if thread.Riff == nil {
+			return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice session and thread do not match")
+		}
+		if _, _, err := app.currentPrivateRiffSource(requesterEmail, thread); err != nil {
+			return scoutChatThreadRecord{}, err
+		}
 	}
 	if strings.TrimSpace(thread.ArchivedAt) != "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("private Realtime voice conversation is archived")
@@ -1133,6 +1174,27 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "refreshed": refreshed, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "riff-publish" && r.Method == http.MethodPost {
+		payload := struct {
+			OperationID string                      `json:"operationId"`
+			Scope       privateRiffPublicationScope `json:"scope"`
+			MessageID   string                      `json:"messageId"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read Private Riff publication request")
+			return
+		}
+		result, err := kanbanApp.publishPrivateRiffConversation(user, threadID, payload.OperationID, payload.Scope, payload.MessageID)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, result)
 		return
 	}
 
@@ -2178,6 +2240,16 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	visibleWorkerName := scoutParticipantName
 	if addressedAgentResolved && strings.TrimSpace(addressedAgent.DisplayName) != "" {
 		visibleWorkerName = addressedAgent.DisplayName
+	}
+	if thread.Riff != nil {
+		// A Private Riff is minted for one exact agent (Scout in v1). Mentions
+		// inside its private conversation are ordinary subject matter, never an
+		// implicit agent handoff or a chance to stamp another worker's name on a
+		// Scout-generated answer.
+		targetedAgentWork = false
+		targetedAgentMode = ""
+		addressedAgentResolved = false
+		visibleWorkerName = scoutParticipantName
 	}
 	// A Project-bound v2 turn cannot expose attachment bytes, derived text, or
 	// reply media to any provider until its complete canonical source group has
@@ -3495,6 +3567,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if meetingConversation != nil || thread.Riff != nil {
 		answerContext = withAssistantExactSourceContext(answerContext)
 	}
+	if thread.Riff != nil {
+		// A Riff stays anchored to its immutable quoted channel checkpoint while
+		// also receiving the same requester-authorized company/meeting recall as
+		// private Scout. The exact body-free manifest is stamped onto the answer
+		// and must be reauthorized before that answer can become public.
+		answerContext = withAssistantAuthorizedRecall(answerContext)
+	}
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		// Public-channel turns carry a structured identity/lineage envelope for
 		// the model, but retrieval must rank against what the person actually
@@ -3574,14 +3653,22 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	if thread.Riff != nil {
 		completedAt := time.Now().UTC()
+		contextSources, contextManifestDigest := privateRiffMemorySources(result.contextEntries)
+		evidenceKind := "channel_checkpoint"
+		rationale := "Answered from the frozen channel checkpoint and this private conversation. Hidden chain-of-thought is not shown."
+		if len(contextSources) > 0 {
+			evidenceKind = "channel_checkpoint_plus_authorized_memory"
+			rationale = "Answered from the frozen channel checkpoint, this private conversation, and authorized company context. Hidden chain-of-thought is not shown."
+		}
 		assistantMessage.Activity = &scoutChatAnswerActivity{
 			Version: privateRiffBindingVersion, Status: "completed", Stage: "answered_from_checkpoint",
 			StartedAt: turnStartedAt.Format(time.RFC3339Nano), CompletedAt: completedAt.Format(time.RFC3339Nano),
-			ElapsedMS: completedAt.Sub(turnStartedAt).Milliseconds(), SourceCount: privateRiffSourceCount,
-			EvidenceKind:    "channel_checkpoint",
-			Rationale:       "Answered from the frozen channel checkpoint and this private conversation. Hidden chain-of-thought is not shown.",
+			ElapsedMS: completedAt.Sub(turnStartedAt).Milliseconds(), SourceCount: privateRiffSourceCount + len(contextSources),
+			EvidenceKind:    evidenceKind,
+			Rationale:       rationale,
 			ContextRevision: thread.Riff.ContextRevision, SourceThreadID: thread.Riff.SourceThreadID, ThroughMessageID: thread.Riff.ThroughMessageID,
 			SourceMessageDigest: thread.Riff.SourceMessageDigest, SourceWindowDigest: thread.Riff.SourceWindowDigest, SourceAudienceDigest: thread.Riff.SourceAudienceDigest,
+			ContextManifestDigest: contextManifestDigest, ContextSources: contextSources,
 		}
 	}
 	saved, err := commitUserMessage(userMessage, assistantMessage)
@@ -5086,6 +5173,16 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessagesWithContext(ctx context.
 			return scoutChatThreadRecord{}, fmt.Errorf("chat attachment destination changed; attach the file again")
 		}
 		messages[index].attachmentDestinationRevision = ""
+		if thread.Riff != nil {
+			authority, authorityErr := privateRiffMessageAuthorityForThread(thread, messages[index])
+			if authorityErr != nil {
+				return scoutChatThreadRecord{}, authorityErr
+			}
+			messages[index].RiffAuthority = authority
+			if thread.Riff.InitiatingMessageID == "" && strings.EqualFold(messages[index].Role, "user") && messages[index].Kind == "message" && strings.TrimSpace(messages[index].Text) != "" {
+				thread.Riff.InitiatingMessageID = messages[index].ID
+			}
+		}
 	}
 	hasAttachmentSources := attachmentMessagesHaveSources(messages)
 	if hasAttachmentSources {

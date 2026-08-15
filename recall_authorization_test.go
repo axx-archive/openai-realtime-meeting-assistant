@@ -83,6 +83,26 @@ func TestSharedChannelAgentRecallNeverReceivesRequesterPrivateMemory(t *testing.
 	}
 }
 
+func TestPrivateRiffPublicationRecallAllowsOnlyOrganizationArtifactContext(t *testing.T) {
+	app, private := setupRecallAuthorizationTest(t)
+	organization, _, err := app.createOSArtifactWithMetadata("research", "organization context", "ORG-RIFF-CONTEXT-CANARY", "AJ", map[string]string{
+		"visibility": "organization", "requestedBy": "aj@shareability.com", "status": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := RecallPrincipal{
+		ServiceID: "private-riff-publication", TenantID: canonicalArtifactTenantID(), Audience: "shared_channel", ThreadID: "country-golf",
+	}
+	store := app.recallStoreForPrincipal(context.Background(), principal)
+	if _, ok := store.entryByID(organization.ID); !ok {
+		t.Fatal("organization artifact was unavailable to exact-channel publication reauthorization")
+	}
+	if _, ok := store.entryByID(private.ID); ok {
+		t.Fatal("private owner artifact reached exact-channel publication reauthorization")
+	}
+}
+
 func TestRecallPrincipalFiltersPrivateDigestLedgerAndKeepsLegacyOrgRoomHistory(t *testing.T) {
 	app, _ := setupRecallAuthorizationTest(t)
 	now := time.Now().UTC()

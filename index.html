@@ -10002,7 +10002,7 @@
       .chat-convo-head__riff {
         position: relative;
         flex: none;
-        min-height: 40px;
+	        min-height: 44px;
         display: inline-flex;
         align-items: center;
         gap: 7px;
@@ -13117,14 +13117,16 @@
           margin-bottom: 14px;
         }
 
-        #chatTool .private-riff-checkpoint__eyebrow,
+	        #chatTool .private-riff-checkpoint__eyebrow,
         #chatTool .private-riff-activity__summary,
         #chatTool .private-riff-provenance {
           color: var(--text-3);
           font: var(--type-label);
           letter-spacing: var(--track-label);
-          font-variant-numeric: tabular-nums;
-        }
+	          font-variant-numeric: tabular-nums;
+	        }
+	        #chatTool .private-riff-checkpoint__eyebrow { display: inline-flex; align-items: center; gap: 7px; }
+	        #chatTool .private-riff-guitar { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 		#chatTool button.private-riff-provenance { align-self: flex-start; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
 		#chatTool button.private-riff-provenance:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -13149,14 +13151,15 @@
         #chatTool .private-riff-action[data-primary="true"] { background: var(--accent); color: var(--on-accent); box-shadow: none; }
         #chatTool .private-riff-action:hover { background: var(--surface-3); }
         #chatTool .private-riff-action[data-primary="true"]:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
-        #chatTool .private-riff-action:active { transform: scale(0.98); }
+	        #chatTool .private-riff-action:active { transform: scale(0.96); }
         #chatTool .private-riff-action:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
         #chatTool .private-riff-activity { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line-1); }
         #chatTool .private-riff-activity__summary { cursor: pointer; }
         #chatTool .private-riff-activity__body { margin: 8px 0 0; color: var(--text-2); font: 12.5px/1.45 var(--font-sans); }
-        #chatTool .private-riff-share { display: grid; gap: 10px; }
-        #chatTool .private-riff-share__option { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; padding: 10px; border-radius: 12px; background: var(--surface-2); }
-        #chatTool .private-riff-share__option input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+	        #chatTool .private-riff-share { display: grid; gap: 9px; margin-top: 10px; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface-2)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, var(--line-1)); }
+	        #chatTool .private-riff-share[hidden] { display: none; }
+	        #chatTool .private-riff-share__copy { margin: 0; color: var(--text-2); font: 12.5px/1.45 var(--font-sans); text-wrap: pretty; }
+	        #chatTool .private-riff-share__actions > .private-riff-action { flex: 1 1 180px; }
         #chatTool .private-riff-thinking { display: flex; align-items: center; gap: 8px; color: var(--text-2); font: 12.5px/1.4 var(--font-sans); }
         #chatTool .private-riff-thinking::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 
@@ -13787,9 +13790,9 @@
           margin: 0;
         }
 
-        #chatTool .chat-context-reply__composer {
-          display: grid;
-          grid-template-columns: 40px minmax(0, 1fr) 40px;
+	        #chatTool .chat-context-reply__composer {
+	          display: grid;
+	          grid-template-columns: 44px minmax(0, 1fr) 44px;
           align-items: end;
           gap: 8px;
           padding: 7px 8px 7px 12px;
@@ -13798,8 +13801,8 @@
           box-shadow: 0 0 0 1px var(--line-1), 0 8px 22px rgba(0, 0, 0, 0.08);
         }
 
-        #chatTool .chat-context-reply textarea {
-          min-height: 40px;
+	        #chatTool .chat-context-reply textarea {
+	          min-height: 44px;
           max-height: 128px;
           resize: none;
           overflow-y: auto;
@@ -13811,9 +13814,9 @@
           font: 400 14px/1.45 var(--font-sans);
         }
 
-        #chatTool .chat-context-reply__composer > button {
-          width: 40px;
-          height: 40px;
+	        #chatTool .chat-context-reply__composer > button {
+	          width: 44px;
+	          height: 44px;
           display: inline-grid;
           place-items: center;
           padding: 0;
@@ -13843,7 +13846,7 @@
           transform: scale(0.96);
         }
 
-        #chatTool .chat-context-reply__composer > button[disabled] {
+	        #chatTool .chat-context-reply__composer > button[disabled] {
           opacity: 0.42;
           cursor: default;
         }
@@ -13876,6 +13879,31 @@
 	        #chatTool .chat-channel-create__input,
 	        #chatTool .chat-channel-create__go {
 	          min-height: 40px;
+	        }
+
+	        #chatTool .chat-context-reply__composer > .stride-dictation-composer--nested {
+	          align-items: flex-end;
+	          gap: 4px;
+	        }
+
+	        #chatTool .chat-context-reply__composer .stride-dictation-mic,
+	        #chatTool .chat-context-reply__composer .stride-dictation-action {
+	          width: 44px;
+	          min-width: 44px;
+	          height: 44px;
+	        }
+
+	        #chatTool .chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"])) {
+	          grid-template-columns: minmax(0, 1fr);
+	        }
+
+	        #chatTool .chat-context-reply__composer > .stride-dictation-composer:not([data-dictation-state="idle"]) {
+	          grid-column: 1 / -1;
+	        }
+
+	        #chatTool .chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"])) > .chat-context-reply__attach,
+	        #chatTool .chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"])) > #chatContextReplySend {
+	          display: none;
 	        }
 
         #chatTool .chat-thread-item {
@@ -15239,13 +15267,13 @@
         #chatTool .scout-chat-send,
 	        #chatTool .stride-dictation-mic,
 	        #chatTool .stride-dictation-action {
-          width: 40px;
-          min-width: 40px;
-          height: 40px;
+	          width: 44px;
+	          min-width: 44px;
+	          height: 44px;
         }
 
 	        #chatTool .stride-dictation-action {
-	          width: 40px;
+		          width: 44px;
 	          padding: 0;
 	          box-shadow: 0 0 0 1px var(--line-1);
 	        }
@@ -30819,13 +30847,13 @@
                   <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                 </svg>
               </button>
-              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Riff privately from the latest channel message" hidden>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M7 17 17 7"></path>
-                  <path d="M7 7h10v10"></path>
-                </svg>
-                <span>Private riff</span>
-              </button>
+	              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Riff privately from the latest channel message" hidden>
+	                <svg data-icon="guitar" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+	                  <path d="m14.5 5.5 4-4"></path><path d="m18 2 4 4"></path><path d="m19.5 4.5-6.2 6.2"></path>
+	                  <path d="M14.2 9.8c-1.9-1.5-4.4-1.6-5.8-.2l-1.1 1.1c-.7.7-.9 1.8-.5 2.7l-3.7 3.7a2.7 2.7 0 0 0 3.8 3.8l3.7-3.7c.9.4 2 .2 2.7-.5l1.1-1.1c1.4-1.4 1.3-3.9-.2-5.8Z"></path><circle cx="6.4" cy="17.6" r="1.2"></circle>
+	                </svg>
+	                <span>Private Riff</span>
+	              </button>
               <span id="chatConvoMeta" class="chat-convo-head__meta">private · only you and Scout</span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
                 <span id="chatConvoScope" class="desktop-chat-context__scope">private</span>
@@ -32586,6 +32614,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // so make it the shell's live ceiling and settle it more than once around
       // focus transitions (Safari reports the final value asynchronously).
       let appViewportFrame = 0
+      let appViewportLastHeight = 0
       let appViewportSettleTimers = []
       function syncAppViewportHeight() {
         window.cancelAnimationFrame(appViewportFrame)
@@ -32594,6 +32623,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const visualHeight = Number(window.visualViewport?.height || 0)
           const layoutHeight = Number(window.innerHeight || document.documentElement.clientHeight || 0)
           const height = Math.max(1, Math.round(visualHeight || layoutHeight))
+	          // iPad Safari can oscillate visualViewport by one physical pixel
+	          // while a long nested scroller is settling. Feeding that value
+	          // straight back into the shell height creates a visible page-wide
+	          // shake. Ignore sub-2px noise; keyboard and toolbar transitions
+	          // remain hundreds of pixels and still update immediately.
+	          if (appViewportLastHeight && Math.abs(height - appViewportLastHeight) < 2) return
+	          appViewportLastHeight = height
           document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
         })
       }
@@ -32604,7 +32640,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       settleAppViewportHeight()
       window.addEventListener('resize', settleAppViewportHeight, { passive: true })
       window.visualViewport?.addEventListener('resize', settleAppViewportHeight, { passive: true })
-      window.visualViewport?.addEventListener('scroll', syncAppViewportHeight, { passive: true })
       document.addEventListener('focusin', settleAppViewportHeight)
       document.addEventListener('focusout', settleAppViewportHeight)
       const toolRail = document.getElementById('toolRail')
@@ -33322,7 +33357,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatContextGeneration = 0
 	      let chatContextReplyAttempt = null
 	      let privateRiffCreateAttempt = null
-	      let privateRiffPublishAttempt = null
+	      let privateRiffPublishAttempts = new Map()
 	      let chatContextProjectContext = { available: false, scopeKey: '', choices: [], selected: null, explicitNone: false }
 	      let chatContextProjectGeneration = 0
 	      let chatContextProjectTimer = 0
@@ -42737,15 +42772,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
         await startPrivateRealtimeVoiceConversation()
       }
 
-      async function startPrivateRealtimeVoiceConversation(options = {}) {
-        const reconnect = options?.reconnect && typeof options.reconnect === 'object' ? options.reconnect : null
-        if (privateRealtimeVoiceStarting) {
-          setVoiceIslandState('connecting', 'connecting…')
-          return
-        }
-        if (privateRealtimeVoicePeer && privateRealtimeVoiceActive()) {
-          setVoiceIslandState('listening', 'listening…')
-          return
+	      async function startPrivateRealtimeVoiceConversation(options = {}) {
+	        const reconnect = options?.reconnect && typeof options.reconnect === 'object' ? options.reconnect : null
+	        const hasRequestedThread = Object.prototype.hasOwnProperty.call(options || {}, 'threadId')
+	        const requestedThreadId = String(options?.threadId || '').trim()
+	        if (hasRequestedThread && (!requestedThreadId || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(requestedThreadId))) {
+	          throw new Error('Realtime 2 voice needs a valid conversation')
+	        }
+	        if (reconnect && requestedThreadId && requestedThreadId !== String(reconnect.threadId || '').trim()) {
+	          throw new Error('Realtime 2 voice conversation changed during reconnect')
+	        }
+	        if (privateRealtimeVoiceStarting) {
+	          if (!requestedThreadId || requestedThreadId === privateRealtimeVoiceThreadID) {
+	            setVoiceIslandState('connecting', 'connecting…')
+	            return
+	          }
+	          closePrivateRealtimeVoiceSession()
+	        }
+	        if (privateRealtimeVoicePeer && privateRealtimeVoiceActive()) {
+	          if (!requestedThreadId || requestedThreadId === privateRealtimeVoiceThreadID) {
+	            setVoiceIslandState('listening', 'listening…')
+	            return
+	          }
+	          closePrivateRealtimeVoiceSession()
         }
 
         stopOSAssistantVoice()
@@ -42757,7 +42806,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceStarting = true
         const sessionToken = ++privateRealtimeVoiceSessionToken
         privateRealtimeVoiceID = String(reconnect?.voiceSessionId || '') || newPrivateRealtimeVoiceID()
-        privateRealtimeVoiceThreadID = String(reconnect?.threadId || '')
+	        privateRealtimeVoiceThreadID = String(reconnect?.threadId || requestedThreadId || '')
         privateRealtimeVoiceTransportRevision = Number(reconnect?.transportRevision || 0)
         privateRealtimeVoiceOfferOperationID = newPrivateRealtimeVoiceOperationID('offer')
         privateRealtimeVoiceMilestoneOperations = new Map()
@@ -43048,7 +43097,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const operationId = privateRealtimeVoiceOfferOperationID
           || newPrivateRealtimeVoiceOperationID('offer')
         privateRealtimeVoiceOfferOperationID = operationId
-        const result = await postAuthJSON('/assistant/realtime-offer', { sdp, voiceSessionId, operationId })
+	        const result = await postAuthJSON('/assistant/realtime-offer', {
+	          sdp,
+	          voiceSessionId,
+	          operationId,
+	          ...(expectedThreadId ? { threadId: expectedThreadId } : {})
+	        })
         if (!result.ok) {
           throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
         }
@@ -59841,6 +59895,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        node.dataset.messageId = String(message?.id || '')
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
+	        const activeThread = selectedScoutChatThread()
+	        if (!desktopChatLayoutQuery.matches && activeThread?.riff && privateRiffReplyIsShareable(message, activeThread)) {
+	          node.querySelector('.scout-chat-msg__stack')?.appendChild(privateRiffShareTriggerNode(activeThread, message))
+	        }
 	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
 		        const projectTitle = String(message?.project?.title || '').trim()
 		        if (projectTitle) {
@@ -60599,6 +60657,79 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return elapsed < 1000 ? `${elapsed}ms` : `${(elapsed / 1000).toFixed(elapsed < 10000 ? 1 : 0)}s`
 	      }
 
+	      function privateRiffPacificTimestamp(value) {
+	        const at = value ? new Date(value) : null
+	        if (!at || Number.isNaN(at.valueOf())) return 'time unavailable'
+	        return new Intl.DateTimeFormat('en-US', {
+	          timeZone: 'America/Los_Angeles',
+	          month: 'short',
+	          day: 'numeric',
+	          year: 'numeric',
+	          hour: 'numeric',
+	          minute: '2-digit',
+	          timeZoneName: 'short'
+	        }).format(at)
+	      }
+
+	      function privateRiffGuitarIcon() {
+	        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+	        svg.classList.add('private-riff-guitar')
+	        svg.setAttribute('viewBox', '0 0 24 24')
+	        svg.setAttribute('aria-hidden', 'true')
+	        const pathData = [
+	          'm14.5 5.5 4-4',
+	          'm18 2 4 4',
+	          'm19.5 4.5-6.2 6.2',
+	          'M14.2 9.8c-1.9-1.5-4.4-1.6-5.8-.2l-1.1 1.1c-.7.7-.9 1.8-.5 2.7l-3.7 3.7a2.7 2.7 0 0 0 3.8 3.8l3.7-3.7c.9.4 2 .2 2.7-.5l1.1-1.1c1.4-1.4 1.3-3.9-.2-5.8Z'
+	        ]
+	        pathData.forEach(value => {
+	          const path = document.createElementNS(svg.namespaceURI, 'path')
+	          path.setAttribute('d', value)
+	          svg.appendChild(path)
+	        })
+	        const soundHole = document.createElementNS(svg.namespaceURI, 'circle')
+	        soundHole.setAttribute('cx', '6.4')
+	        soundHole.setAttribute('cy', '17.6')
+	        soundHole.setAttribute('r', '1.2')
+	        svg.appendChild(soundHole)
+	        return svg
+	      }
+
+	      function privateRiffReplyIsShareable(message, thread) {
+	        if (!message?.id || String(message?.kind || 'message') !== 'message' || !String(message?.text || '').trim() ||
+	          String(message?.via || '') === 'private_riff_publication_control' || message?.thread || message?.work ||
+	          message?.proposal || message?.choices || message?.manifest || message?.image || message?.imageGeneration ||
+	          message?.reply || message?.publication || (Array.isArray(message?.files) && message.files.length > 0)) return false
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        const opening = messages.find(candidate => String(candidate?.kind || 'message') === 'message' &&
+	          String(candidate?.role || '').toLowerCase() === 'user' && String(candidate?.text || '').trim() &&
+	          String(candidate?.via || '') !== 'private_riff_publication_control')
+	        if (String(opening?.id || '') === String(message.id)) return false
+	        const role = String(message?.role || '').toLowerCase()
+	        if (role === 'user') return true
+	        return ['scout', 'assistant'].includes(role) && message?.activity?.version === 'stride-private-riff/v1' &&
+	          message?.activity?.status === 'completed' && Number(message?.activity?.contextRevision || 0) > 0 &&
+	          Boolean(String(message?.activity?.throughMessageId || ''))
+	      }
+
+	      function privateRiffShareTriggerNode(thread, message) {
+	        const wrap = bfEl('div', 'private-riff-share-control')
+	        const trigger = bfEl('button', 'private-riff-action', 'Share')
+	        trigger.type = 'button'
+	        trigger.setAttribute('aria-expanded', 'false')
+	        const panel = renderPrivateRiffShare(thread, message)
+	        panel.hidden = true
+	        trigger.setAttribute('aria-controls', panel.id)
+	        trigger.addEventListener('click', () => {
+	          panel.hidden = !panel.hidden
+	          trigger.setAttribute('aria-expanded', String(!panel.hidden))
+	          trigger.textContent = panel.hidden ? 'Share' : 'Hide share options'
+	          if (!panel.hidden) panel.querySelector('button')?.focus()
+	        })
+	        wrap.append(trigger, panel)
+	        return wrap
+	      }
+
 	      function privateRiffMessageCard(thread, message) {
 	        const card = desktopContextMessageCard(thread, message, { readOnly: true })
 	        const content = card.querySelector('.chat-context-card__content')
@@ -60611,16 +60742,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          details.append(summary, bfEl('p', 'private-riff-activity__body', rationale))
 	          content.appendChild(details)
 	        }
-	        const role = String(message?.role || '').toLowerCase()
-	        if (content && message?.id && ['scout', 'assistant'].includes(role) && String(message?.kind || 'message') === 'message' &&
-	          message?.activity?.version === 'stride-private-riff/v1' && message?.activity?.status === 'completed' &&
-	          Number(message?.activity?.contextRevision || 0) > 0 && String(message?.activity?.throughMessageId || '')) {
-	          const share = bfEl('button', 'private-riff-action', 'Share selected parts')
-	          share.type = 'button'
-	          share.setAttribute('aria-label', 'Choose parts of this answer to share with the channel')
-	          share.addEventListener('click', () => void openPrivateRiffSharePreview(thread, message, share))
-	          content.appendChild(share)
-	        }
+	        if (content && privateRiffReplyIsShareable(message, thread)) content.appendChild(privateRiffShareTriggerNode(thread, message))
 	        return card
 	      }
 
@@ -60633,10 +60755,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const locallyObservedNewCount = throughIndex >= 0 ? Math.max(0, sourceMessages.length - throughIndex - 1) : 0
 	        const newMessageCount = Math.max(Number(riff.newMessageCount || 0), locallyObservedNewCount)
 	        const checkpoint = bfEl('section', 'private-riff-checkpoint')
+	        const privacy = bfEl('span', 'private-riff-checkpoint__eyebrow')
+	        privacy.append(privateRiffGuitarIcon(), bfEl('span', '', 'Private Riff · only you and Scout'))
 	        checkpoint.append(
-	          bfEl('span', 'private-riff-checkpoint__eyebrow', 'Private · only you + Scout'),
-	          bfEl('strong', 'private-riff-checkpoint__title', `Grounded in #${riff.sourceTitle || 'channel'} through ${scoutChatTimeLabel(riff.throughCreatedAt)}`),
-	          bfEl('p', 'private-riff-checkpoint__meta', `${messageCount} message${messageCount === 1 ? '' : 's'} · checkpoint ${Number(riff.contextRevision || 1)}${riff.brainCapturedAt ? ` · Brain ${scoutChatTimeLabel(riff.brainCapturedAt)}` : ''}${newMessageCount ? ` · ${newMessageCount} new in channel` : ''}`)
+	          privacy,
+	          bfEl('strong', 'private-riff-checkpoint__title', `Grounded in #${riff.sourceTitle || 'channel'} through ${privateRiffPacificTimestamp(riff.throughCreatedAt)}`),
+	          bfEl('p', 'private-riff-checkpoint__meta', `${messageCount} message${messageCount === 1 ? '' : 's'} · checkpoint ${Number(riff.contextRevision || 1)}${riff.brainCapturedAt ? ` · Brain ${privateRiffPacificTimestamp(riff.brainCapturedAt)}` : ''}${newMessageCount ? ` · ${newMessageCount} new in channel` : ''}`)
 	        )
 	        const actions = bfEl('div', 'private-riff-checkpoint__actions')
 	        const refresh = bfEl('button', 'private-riff-action', newMessageCount ? `Update context (${newMessageCount})` : 'Update context')
@@ -60646,7 +60770,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const source = bfEl('button', 'private-riff-action', 'Open source')
 	        source.type = 'button'
 	        source.addEventListener('click', () => openScoutAnswerSource({ threadId: riff.sourceThreadId, messageId: riff.throughMessageId }))
-	        actions.append(refresh, source)
+	        const realtime = bfEl('button', 'private-riff-action', 'Riff in Realtime')
+	        realtime.type = 'button'
+	        realtime.disabled = !privateRealtimeVoiceSurfaceAvailable()
+	        realtime.setAttribute('aria-label', 'Continue this exact Private Riff in Realtime voice')
+	        realtime.title = realtime.disabled ? 'Private Realtime voice is not available yet' : 'Talk with Scout in this Private Riff'
+	        realtime.addEventListener('click', () => void startPrivateRiffRealtime(thread, realtime))
+	        actions.append(refresh, source, realtime)
 	        checkpoint.appendChild(actions)
 	        if (riff.sourceAvailable === false) checkpoint.appendChild(bfEl('p', 'private-riff-checkpoint__meta', riff.unavailableReason || 'Source unavailable.'))
 	        return checkpoint
@@ -60654,7 +60784,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function renderPrivateRiffContext(thread, options = {}) {
 	        if (chatContextState?.mode !== 'riff' || String(chatContextState.threadId || '') !== String(thread?.id || '')) return
-	        chatContextKicker.textContent = 'Private Riff'
+	        chatContextKicker.textContent = 'Private Riff · only you and Scout'
 	        chatContextTitle.textContent = String(thread?.riff?.agentName || 'Scout')
 	        chatContextMeta.textContent = `Private · grounded in #${thread?.riff?.sourceTitle || 'channel'}`
 	        chatContextParent.hidden = false
@@ -60731,85 +60861,73 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      async function openPrivateRiffSharePreview(thread, message, trigger) {
-	        trigger.disabled = true
-	        try {
-	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}/riff-share-preview`)
-	          if (!result.ok || !Array.isArray(result.data?.paragraphs)) throw new Error(result.data?.error || 'Share preview is unavailable')
-	          renderPrivateRiffShare(thread, message, result.data.paragraphs)
-	        } catch (error) {
-	          showToast({ text: error?.message || 'Share preview is unavailable', kind: 'error' })
-	        } finally {
-	          if (trigger?.isConnected) trigger.disabled = false
-	        }
-	      }
-
-	      function renderPrivateRiffShare(thread, message, paragraphs) {
-	        const panel = bfEl('section', 'private-riff-share')
-	        panel.append(
-	          bfEl('strong', 'chat-context-card__author', `Choose what goes to #${thread?.riff?.sourceTitle || 'channel'}`),
-	          bfEl('p', 'chat-context-card__body', 'Only checked sections will leave this private conversation.')
-	        )
-	        paragraphs.forEach((paragraph, index) => {
-	          const label = bfEl('label', 'private-riff-share__option')
-	          const input = document.createElement('input')
-	          input.type = 'checkbox'
-	          input.checked = true
-	          input.value = String(paragraph.token || '')
-	          input.setAttribute('aria-label', `Share section ${index + 1}`)
-	          label.append(input, bfEl('span', '', String(paragraph.text || '')))
-	          panel.appendChild(label)
-	        })
-	        const actions = bfEl('div', 'private-riff-share__actions')
-	        const back = bfEl('button', 'private-riff-action', 'Back')
-	        back.type = 'button'
-	        back.addEventListener('click', () => renderPrivateRiffContext(thread, { scrollToBottom: false }))
-	        const draft = bfEl('button', 'private-riff-action', 'Use in my message')
-	        draft.type = 'button'
-	        draft.addEventListener('click', () => void publishPrivateRiffSelection(thread, message, panel, 'draft', draft))
-	        const agent = bfEl('button', 'private-riff-action', 'Share as Scout')
-	        agent.type = 'button'
-	        agent.dataset.primary = 'true'
-	        agent.addEventListener('click', () => void publishPrivateRiffSelection(thread, message, panel, 'agent', agent))
-	        actions.append(back, draft, agent)
-	        panel.appendChild(actions)
-	        chatContextBody.replaceChildren(panel)
-	        panel.querySelector('input')?.focus()
-	      }
-
-	      async function publishPrivateRiffSelection(thread, message, panel, mode, trigger) {
-	        const paragraphTokens = Array.from(panel.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value)
-	        if (!paragraphTokens.length) {
-	          showToast({ text: 'Choose at least one section to share', kind: 'note' })
+	      async function startPrivateRiffRealtime(thread, trigger) {
+	        const threadId = String(thread?.id || '').trim()
+	        const current = scoutChatThreads.find(candidate => String(candidate?.id || '') === threadId)
+	        const stillVisible = (chatContextState?.mode === 'riff' && String(chatContextState.threadId || '') === threadId) ||
+	          String(activeScoutThreadId || '') === threadId
+	        if (!threadId || !current?.riff || !stillVisible) {
+	          showToast({ text: 'Open the Private Riff before starting voice', kind: 'note' })
 	          return
 	        }
 	        trigger.disabled = true
-	        const key = JSON.stringify({ threadId: thread.id, messageId: message.id, mode, paragraphTokens })
-	        const attempt = privateRiffPublishAttempt?.key === key ? privateRiffPublishAttempt : { key, operationId: privateRiffOperationId('riff-publish') }
-	        privateRiffPublishAttempt = attempt
 	        try {
-	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}/riff-publish`, { operationId: attempt.operationId, mode, paragraphTokens })
-	          if (!result.ok) throw new Error(result.data?.error || 'Selection could not be shared')
-	          privateRiffPublishAttempt = null
-	          if (mode === 'draft') {
-	            const destinationId = String(result.data?.threadId || '')
-	            if (destinationId && destinationId !== String(activeScoutThreadId || '')) {
-	              selectScoutChatThread(destinationId)
-	              await hydrateScoutChatThread(destinationId)
-	              setMobileChatView('convo')
-	            }
-	            scoutChatInput.value = String(result.data?.draft || '')
-	            resizeScoutChatInput()
-	            closeDesktopChatContext({ restoreFocus: false })
-	            scoutChatInput.focus()
-	            showToast({ text: 'Selected text is ready in your channel message', kind: 'done' })
-	            return
-	          }
-	          closeDesktopChatContext({ restoreFocus: false })
-	          showToast({ text: `Scout shared the selected answer in #${thread.riff?.sourceTitle || 'channel'}`, kind: 'done' })
+	          await startPrivateRealtimeVoiceConversation({ threadId })
 	        } catch (error) {
-	          showToast({ text: error?.message || 'Selection could not be shared', kind: 'error' })
-	          trigger.disabled = false
+	          showToast({ text: error?.message || 'Private Riff voice could not start', kind: 'error' })
+	        } finally {
+	          if (trigger?.isConnected) trigger.disabled = !privateRealtimeVoiceSurfaceAvailable()
+	        }
+	      }
+
+	      function renderPrivateRiffShare(thread, message) {
+	        const panel = bfEl('section', 'private-riff-share')
+	        panel.id = `private-riff-share-${String(thread?.id || '').replace(/[^A-Za-z0-9_-]/g, '-')}-${String(message?.id || '').replace(/[^A-Za-z0-9_-]/g, '-')}`
+	        panel.setAttribute('aria-label', `Share from this Private Riff to #${thread?.riff?.sourceTitle || 'channel'}`)
+	        panel.append(
+	          bfEl('strong', 'chat-context-card__author', `Share to #${thread?.riff?.sourceTitle || 'channel'}`),
+	          bfEl('p', 'private-riff-share__copy', 'Choose the whole conversation or only this reply. Original authors stay visible.')
+	        )
+	        const actions = bfEl('div', 'private-riff-share__actions')
+	        const all = bfEl('button', 'private-riff-action', 'Share all to source')
+	        all.type = 'button'
+	        all.disabled = thread?.riff?.sourceAvailable === false
+	        all.addEventListener('click', () => void publishPrivateRiffConversation(thread, message, panel, 'all'))
+	        const reply = bfEl('button', 'private-riff-action', 'Share this reply to source')
+	        reply.type = 'button'
+	        reply.dataset.primary = 'true'
+	        reply.disabled = thread?.riff?.sourceAvailable === false
+	        reply.addEventListener('click', () => void publishPrivateRiffConversation(thread, message, panel, 'reply'))
+	        actions.append(all, reply)
+	        panel.appendChild(actions)
+	        return panel
+	      }
+
+	      async function publishPrivateRiffConversation(thread, message, panel, scope) {
+	        if (!thread?.id || !['all', 'reply'].includes(scope) || (scope === 'reply' && !message?.id)) return
+	        const buttons = Array.from(panel.querySelectorAll('button'))
+	        buttons.forEach(button => { button.disabled = true })
+	        const key = JSON.stringify({ threadId: thread.id, scope, messageId: scope === 'reply' ? message.id : '' })
+	        const attempt = privateRiffPublishAttempts.get(key) || { operationId: privateRiffOperationId('riff-publish') }
+	        privateRiffPublishAttempts.set(key, attempt)
+	        try {
+	          const body = { operationId: attempt.operationId, scope, ...(scope === 'reply' ? { messageId: String(message.id) } : {}) }
+	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/riff-publish`, body)
+	          if (!result.ok) throw new Error(result.data?.error || 'Private Riff could not be shared')
+	          privateRiffPublishAttempts.delete(key)
+	          panel.dataset.publishedScope = scope
+	          const replayed = result.data?.replayed === true
+	          const label = scope === 'all' ? 'The full Private Riff' : 'This reply'
+	          buttons.forEach((button, index) => {
+	            const publishedChoice = scope === 'all' || index === 1
+	            button.disabled = publishedChoice || thread?.riff?.sourceAvailable === false
+	          })
+	          const publishedButton = buttons[scope === 'all' ? 0 : 1]
+	          if (publishedButton) publishedButton.textContent = replayed ? 'Already shared' : (scope === 'all' ? 'All shared' : 'Reply shared')
+	          showToast({ text: `${label} ${replayed ? 'is already' : 'was'} in #${thread.riff?.sourceTitle || 'channel'}`, kind: 'done' })
+	        } catch (error) {
+	          showToast({ text: error?.message || 'Private Riff could not be shared', kind: 'error' })
+	          buttons.forEach(button => { button.disabled = thread?.riff?.sourceAvailable === false })
 	        }
 	      }
 
@@ -75589,8 +75707,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             console.error('Could not mount composer dictation', error)
           }
         }
-        mount(scoutChatForm, scoutChatInput, 'chat')
-        mount(homeScoutComposer, homeScoutInput, 'chat')
+	        mount(scoutChatForm, scoutChatInput, 'chat')
+	        mount(chatContextReplyForm, chatContextReplyInput, 'chat')
+	        mount(homeScoutComposer, homeScoutInput, 'chat')
         mount(roomChatForm, roomChatInput, 'chat')
         mount(osAssistantForm, osAssistantInput, 'chat')
         mount(assistantForm, assistantInput, 'chat')

@@ -2428,6 +2428,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		SDP            string `json:"sdp"`
 		VoiceSessionID string `json:"voiceSessionId"`
 		OperationID    string `json:"operationId"`
+		ThreadID       string `json:"threadId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read realtime offer")
@@ -2444,7 +2445,12 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	voiceThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(user.Email, user.Name, voiceSessionID)
+	voiceThread := scoutChatThreadRecord{}
+	if requestedThreadID := strings.TrimSpace(payload.ThreadID); requestedThreadID != "" {
+		voiceThread, err = kanbanApp.bindPrivateRealtimeVoiceToRiff(user.Email, voiceSessionID, requestedThreadID)
+	} else {
+		voiceThread, _, err = kanbanApp.ensurePrivateRealtimeVoiceConversation(user.Email, user.Name, voiceSessionID)
+	}
 	if err != nil {
 		writeAuthError(w, http.StatusConflict, err.Error())
 		return
@@ -2472,7 +2478,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordCapabilityPoll(capabilityPrivateVoice, time.Now().UTC())
-	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP, user.Email)
+	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCallForThread(apiKey, realtimeModel(), offerSDP, user.Email, voiceThread)
 	if err != nil {
 		if persistErr := kanbanApp.finishPrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, voiceThread.ID, claim, false, "", time.Now().UTC()); persistErr != nil {
 			log.Errorf("Failed to persist private Realtime transport failure for %s: %v", user.Email, persistErr)

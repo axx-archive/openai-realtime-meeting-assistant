@@ -366,7 +366,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               })}
               style={({ pressed }) => [styles.publicationChip, own && styles.viaChipOwn, pressed && styles.replyContextPressed]}
             >
-              <SymbolView name="lock.open.fill" tintColor={own ? colors.onAccent : colors.emberText} size={10} />
+              <SymbolView name="guitars.fill" tintColor={own ? colors.onAccent : colors.emberText} size={12} />
               <Text style={[styles.publicationText, own && styles.viaTextOwn]}>Shared by {publication.sharedBy || 'a teammate'} from a private riff</Text>
             </Pressable>
           ) : null}
