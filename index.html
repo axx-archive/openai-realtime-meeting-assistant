@@ -63133,66 +63133,115 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       let scoutChatOverflowBodySequence = 0
+      let scoutChatOverflowFrame = 0
+      let scoutChatOverflowWidth = 0
+      let scoutChatOverflowWidthObserver = null
+      let scoutChatOverflowFontsReady = false
+      const scoutChatOverflowQueue = new Set()
+
+      function scheduleScoutChatOverflowMeasurement(record) {
+        if (!record) return
+        scoutChatOverflowQueue.add(record)
+        if (scoutChatOverflowFrame) return
+        scoutChatOverflowFrame = window.requestAnimationFrame(flushScoutChatOverflowMeasurements)
+      }
+
+      // One prepare/read/commit batch keeps long-message measurement from
+      // forcing a layout for every message. In particular, never observe a
+      // message whose height this callback changes: WebKit can otherwise
+      // oscillate between its clamped and natural scrollHeight indefinitely.
+      function flushScoutChatOverflowMeasurements() {
+        scoutChatOverflowFrame = 0
+        const records = Array.from(scoutChatOverflowQueue).filter(record => record.item.isConnected)
+        scoutChatOverflowQueue.clear()
+        if (!records.length) return
+
+        const stickToBottom = scoutChatIsNearBottom()
+        const previousScrollTop = scoutChatThread.scrollTop
+
+        // Prepare every body before any geometry read. scrollHeight on a
+        // -webkit-line-clamped node is not stable across Safari versions.
+        records.forEach(record => record.body.classList.remove('is-clamped'))
+        const measurements = records.map(record => {
+          const lineHeight = Number.parseFloat(window.getComputedStyle(record.body).lineHeight)
+          return {
+            record,
+            overflow: Number.isFinite(lineHeight) && lineHeight > 0
+              ? record.body.scrollHeight > (lineHeight * 8) + 1
+              : false,
+          }
+        })
+
+        // Commit only after all reads, so a channel full of long messages
+        // produces one layout pass instead of a read/write feedback cascade.
+        measurements.forEach(({ record, overflow }) => {
+          const { item, body, stack } = record
+          item.classList.toggle('scout-chat-msg--longform', overflow)
+          if (!overflow) {
+            body.classList.remove('is-clamped')
+            record.control?.remove()
+            record.control = null
+            record.expanded = false
+            return
+          }
+          if (!record.control) {
+            const control = document.createElement('button')
+            control.type = 'button'
+            control.className = 'scout-chat-msg__expand'
+            control.setAttribute('aria-controls', body.id)
+            control.addEventListener('click', () => {
+              record.expanded = !record.expanded
+              body.classList.toggle('is-clamped', !record.expanded)
+              control.textContent = record.expanded ? 'Show less' : 'Show more'
+              control.setAttribute('aria-expanded', String(record.expanded))
+            })
+            const meta = stack.querySelector('.scout-chat-msg__meta')
+            stack.insertBefore(control, meta || null)
+            record.control = control
+          }
+          body.classList.toggle('is-clamped', !record.expanded)
+          record.control.textContent = record.expanded ? 'Show less' : 'Show more'
+          record.control.setAttribute('aria-expanded', String(record.expanded))
+        })
+
+        scoutChatThread.scrollTop = stickToBottom ? scoutChatThread.scrollHeight : previousScrollTop
+      }
+
+      function scheduleMountedScoutChatOverflowMeasurements() {
+        scoutChatThread.querySelectorAll('.scout-chat-msg').forEach(item => {
+          scheduleScoutChatOverflowMeasurement(item._scoutChatOverflowRecord)
+        })
+      }
+
+      function ensureScoutChatOverflowMeasurementSources() {
+        if (!scoutChatOverflowWidthObserver && 'ResizeObserver' in window) {
+          scoutChatOverflowWidth = scoutChatThread.getBoundingClientRect().width
+          scoutChatOverflowWidthObserver = new ResizeObserver(entries => {
+            const entry = entries.find(candidate => candidate.target === scoutChatThread)
+            const width = Number(entry?.contentRect?.width || 0)
+            if (!Number.isFinite(width) || Math.abs(width - scoutChatOverflowWidth) < 1) return
+            scoutChatOverflowWidth = width
+            scheduleMountedScoutChatOverflowMeasurements()
+          })
+          scoutChatOverflowWidthObserver.observe(scoutChatThread)
+        }
+        if (!scoutChatOverflowFontsReady && document.fonts?.ready) {
+          scoutChatOverflowFontsReady = true
+          document.fonts.ready.then(scheduleMountedScoutChatOverflowMeasurements)
+        }
+      }
+
       function mountScoutChatMessageOverflow(item, body, stack) {
         if (!item || !body || !stack) return
         const bodyId = `scout-chat-message-body-${++scoutChatOverflowBodySequence}`
         body.id = bodyId
-		// Clamp before the node can paint. The rendered-line measurement still
-		// runs on the next frame, but a hydrated channel with several long posts
-		// must never flash at its full multi-page height and then collapse. Short
-		// messages are visually unchanged because their content does not reach
-		// the eight-line clamp.
-		body.classList.add('is-clamped')
-        let expanded = false
-        let control = null
-        let frame = 0
-        const evaluate = () => {
-          frame = 0
-          if (!item.isConnected) return
-          const lineHeight = Number.parseFloat(window.getComputedStyle(body).lineHeight)
-          if (!Number.isFinite(lineHeight) || lineHeight <= 0) return
-          const overflow = body.scrollHeight > (lineHeight * 8) + 1
-          item.classList.toggle('scout-chat-msg--longform', overflow)
-          if (!overflow) {
-            body.classList.remove('is-clamped')
-            control?.remove()
-            control = null
-            expanded = false
-            return
-          }
-          if (!control) {
-            control = document.createElement('button')
-            control.type = 'button'
-            control.className = 'scout-chat-msg__expand'
-            control.setAttribute('aria-controls', bodyId)
-            control.addEventListener('click', () => {
-              expanded = !expanded
-              body.classList.toggle('is-clamped', !expanded)
-              control.textContent = expanded ? 'Show less' : 'Show more'
-              control.setAttribute('aria-expanded', String(expanded))
-            })
-            const meta = stack.querySelector('.scout-chat-msg__meta')
-            stack.insertBefore(control, meta || null)
-          }
-          body.classList.toggle('is-clamped', !expanded)
-          control.textContent = expanded ? 'Show less' : 'Show more'
-          control.setAttribute('aria-expanded', String(expanded))
-        }
-        const schedule = () => {
-          if (frame) window.cancelAnimationFrame(frame)
-          frame = window.requestAnimationFrame(evaluate)
-        }
-        schedule()
-        if ('ResizeObserver' in window) {
-          const observer = new ResizeObserver(() => {
-            if (!item.isConnected) {
-              observer.disconnect()
-              return
-            }
-            schedule()
-          })
-          observer.observe(item)
-        }
+        // Clamp before the node can paint. Short messages are released by the
+        // next batched measurement; long ones never flash at full-page height.
+        body.classList.add('is-clamped')
+        const record = { item, body, stack, expanded: false, control: null }
+        item._scoutChatOverflowRecord = record
+        scheduleScoutChatOverflowMeasurement(record)
+        ensureScoutChatOverflowMeasurementSources()
       }
 
       function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {

@@ -199,16 +199,44 @@ func TestDesktopLongConversationStaysAMessageAndUsesTheThreadInspector(t *testin
 	overflow := functionBody(html, "function mountScoutChatMessageOverflow(item, body, stack)")
 	for _, want := range []string{
 		"body.classList.add('is-clamped')",
-		"window.getComputedStyle(body).lineHeight",
-		"body.scrollHeight > (lineHeight * 8) + 1",
+		"scheduleScoutChatOverflowMeasurement(record)",
+		"ensureScoutChatOverflowMeasurementSources()",
+	} {
+		if !strings.Contains(overflow, want) {
+			t.Errorf("rendered-line overflow contract missing %q", want)
+		}
+	}
+	if strings.Contains(overflow, "new ResizeObserver") || strings.Contains(overflow, "observer.observe(item)") {
+		t.Error("a clamped message must never observe its own mutable height")
+	}
+	batch := functionBody(html, "function flushScoutChatOverflowMeasurements()")
+	for _, want := range []string{
+		"records.forEach(record => record.body.classList.remove('is-clamped'))",
+		"window.getComputedStyle(record.body).lineHeight",
+		"record.body.scrollHeight > (lineHeight * 8) + 1",
+		"measurements.forEach",
 		"'Show more'",
 		"'Show less'",
 		"aria-controls",
 		"aria-expanded",
 	} {
-		if !strings.Contains(overflow, want) {
-			t.Errorf("rendered-line overflow contract missing %q", want)
+		if !strings.Contains(batch, want) {
+			t.Errorf("batched overflow contract missing %q", want)
 		}
+	}
+	measurementSources := functionBody(html, "function ensureScoutChatOverflowMeasurementSources()")
+	for _, want := range []string{
+		"new ResizeObserver",
+		"scoutChatOverflowWidthObserver.observe(scoutChatThread)",
+		"Math.abs(width - scoutChatOverflowWidth) < 1",
+		"document.fonts.ready.then(scheduleMountedScoutChatOverflowMeasurements)",
+	} {
+		if !strings.Contains(measurementSources, want) {
+			t.Errorf("stable overflow measurement source missing %q", want)
+		}
+	}
+	if strings.Contains(measurementSources, ".observe(item)") {
+		t.Error("overflow measurement source must observe only the thread width")
 	}
 	if strings.Contains(html, "· a letter") || strings.Contains(html, "read the full letter") {
 		t.Error("desktop conversation must not expose inferred letter copy")
