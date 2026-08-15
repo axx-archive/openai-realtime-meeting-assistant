@@ -476,7 +476,7 @@ const server = http.createServer((req, res) => {
   const shortMessage = {id:'message-short-prose',kind:'message',role:'user',authorName:'Synthetic',authorEmail:'synthetic@example.test',text:shortMessageText,createdAt:'2026-08-11T23:44:00Z'};
   const longMessageText = Array.from({length:14}, (_, index) => 'This is ordinary team-chat prose line ' + (index + 1) + ', with enough detail to make the rendered message taller without turning it into a document.').join(' ');
   const longMessage = {id:'message-long-prose',kind:'message',role:'user',authorName:'Synthetic',authorEmail:'synthetic@example.test',text:longMessageText,createdAt:'2026-08-11T23:45:00Z'};
-  await page.evaluate(({shortMessage, longMessage}) => {
+  const prePaintClamp = await page.evaluate(({shortMessage, longMessage}) => {
     scoutChatThreads=[{id:'channel-long-prose',title:'Bonfire Chat',visibility:'public',messages:[shortMessage,longMessage]}];
     activeScoutThreadId='channel-long-prose';
     const messageNode = message => {
@@ -486,7 +486,9 @@ const server = http.createServer((req, res) => {
       return node;
     };
     document.getElementById('scoutChatThread').replaceChildren(messageNode(shortMessage),messageNode(longMessage));
+    return Object.fromEntries(['message-short-prose','message-long-prose'].map(id => [id, document.querySelector('[data-message-id="'+id+'"] .scout-chat-text')?.classList.contains('is-clamped')]));
   }, {shortMessage,longMessage});
+  assert.deepEqual(prePaintClamp,{'message-short-prose':true,'message-long-prose':true});
   await page.waitForFunction(() => document.querySelector('[data-message-id="message-long-prose"] .scout-chat-msg__expand')?.textContent === 'Show more');
   assert.equal(await page.locator('[data-message-id="message-short-prose"] .scout-chat-msg__expand').count(),0);
   const ordinaryLongMessage = await page.locator('[data-message-id="message-long-prose"]').evaluate(node => ({

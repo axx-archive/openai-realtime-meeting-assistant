@@ -6825,7 +6825,7 @@
         #appShell.is-authed[data-tool="grill"] .workspace,
         #appShell.is-board-expanded .workspace {
           grid-template-rows: minmax(0, 1fr);
-          height: calc(100dvh - var(--shell-topbar-height, 0px));
+          height: calc(var(--app-viewport-height, 100dvh) - var(--shell-topbar-height, 0px));
         }
       }
 
@@ -32580,6 +32580,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
       const appShell = document.getElementById('appShell')
+
+      // iPadOS Safari can leave 100dvh pinned to the keyboard-reduced height
+      // after the software keyboard is dismissed. visualViewport does recover,
+      // so make it the shell's live ceiling and settle it more than once around
+      // focus transitions (Safari reports the final value asynchronously).
+      let appViewportFrame = 0
+      let appViewportSettleTimers = []
+      function syncAppViewportHeight() {
+        window.cancelAnimationFrame(appViewportFrame)
+        appViewportFrame = window.requestAnimationFrame(() => {
+          appViewportFrame = 0
+          const visualHeight = Number(window.visualViewport?.height || 0)
+          const layoutHeight = Number(window.innerHeight || document.documentElement.clientHeight || 0)
+          const height = Math.max(1, Math.round(visualHeight || layoutHeight))
+          document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
+        })
+      }
+      function settleAppViewportHeight() {
+        appViewportSettleTimers.forEach(timer => window.clearTimeout(timer))
+        appViewportSettleTimers = [0, 80, 240, 520].map(delay => window.setTimeout(syncAppViewportHeight, delay))
+      }
+      settleAppViewportHeight()
+      window.addEventListener('resize', settleAppViewportHeight, { passive: true })
+      window.visualViewport?.addEventListener('resize', settleAppViewportHeight, { passive: true })
+      window.visualViewport?.addEventListener('scroll', syncAppViewportHeight, { passive: true })
+      document.addEventListener('focusin', settleAppViewportHeight)
+      document.addEventListener('focusout', settleAppViewportHeight)
       const toolRail = document.getElementById('toolRail')
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
       const pd1PrimaryNav = document.getElementById('pd1PrimaryNav')
@@ -62992,6 +63019,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!item || !body || !stack) return
         const bodyId = `scout-chat-message-body-${++scoutChatOverflowBodySequence}`
         body.id = bodyId
+		// Clamp before the node can paint. The rendered-line measurement still
+		// runs on the next frame, but a hydrated channel with several long posts
+		// must never flash at its full multi-page height and then collapse. Short
+		// messages are visually unchanged because their content does not reach
+		// the eight-line clamp.
+		body.classList.add('is-clamped')
         let expanded = false
         let control = null
         let frame = 0

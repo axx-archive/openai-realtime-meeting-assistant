@@ -198,6 +198,7 @@ func TestDesktopLongConversationStaysAMessageAndUsesTheThreadInspector(t *testin
 	}
 	overflow := functionBody(html, "function mountScoutChatMessageOverflow(item, body, stack)")
 	for _, want := range []string{
+		"body.classList.add('is-clamped')",
 		"window.getComputedStyle(body).lineHeight",
 		"body.scrollHeight > (lineHeight * 8) + 1",
 		"'Show more'",
