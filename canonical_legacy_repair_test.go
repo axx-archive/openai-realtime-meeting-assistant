@@ -186,6 +186,23 @@ func TestCanonicalLegacyRepairExecutesOneBatchAndIdempotentReplay(t *testing.T) 
 	}
 }
 
+func TestCanonicalLegacyRepairFromObservedDoesNotRepeatPreMutationObservation(t *testing.T) {
+	manifest := legacyRepairTestManifest(legacyRepairTestCandidate("memory", "m-1", 2))
+	before := legacyRepairTestProof(manifest.Candidates, 100)
+	after := legacyRepairTestProof(nil, 102)
+	after.Diverged = false
+	after.DatabaseSHA256 = digestText("database-after")
+	after.EventStoreSHA256 = digestText("events-after")
+	after.ParitySHA256 = digestText("parity-after")
+	fake := &fakeCanonicalLegacyRepairEngine{proofs: []canonicalBoardRepairProof{after, after}}
+	if _, err := executeCanonicalLegacyRepairFromObserved(context.Background(), manifest, fake, time.Now().UTC(), false, before); err != nil {
+		t.Fatalf("execute from observed proof: %v", err)
+	}
+	if fake.observe != 2 || fake.appendCalls != 1 || fake.applyCalls != 2 {
+		t.Fatalf("unexpected calls observe=%d append=%d apply=%d", fake.observe, fake.appendCalls, fake.applyCalls)
+	}
+}
+
 func TestCanonicalLegacyRepairExistingReceiptRequiresExactLiveState(t *testing.T) {
 	manifest := legacyRepairTestManifest(legacyRepairTestCandidate("memory", "m-1", 1))
 	live := legacyRepairTestProof(nil, 102)

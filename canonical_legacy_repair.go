@@ -367,6 +367,16 @@ func executeCanonicalLegacyRepairWithRecovery(ctx context.Context, manifest cano
 	if err != nil {
 		return canonicalLegacyRepairReceipt{}, err
 	}
+	return executeCanonicalLegacyRepairFromObserved(ctx, manifest, engine, now, recoveryAllowed, before)
+}
+
+// executeCanonicalLegacyRepairFromObserved consumes the exact proof already
+// observed by the production CLI. Keeping that proof avoids repeating the
+// expensive full-store observation while the root authority marker ages.
+func executeCanonicalLegacyRepairFromObserved(ctx context.Context, manifest canonicalLegacyRepairManifest, engine canonicalLegacyRepairEngine, now time.Time, recoveryAllowed bool, before canonicalBoardRepairProof) (canonicalLegacyRepairReceipt, error) {
+	if err := validateCanonicalLegacyRepairManifest(manifest); err != nil {
+		return canonicalLegacyRepairReceipt{}, err
+	}
 	if err := canonicalLegacyRepairProofMatchesManifest(before, manifest); err != nil {
 		if !recoveryAllowed {
 			return canonicalLegacyRepairReceipt{}, err
@@ -545,7 +555,7 @@ func runCanonicalLegacyRepairCLI(ctx context.Context, manifestPath, manifestSHA,
 			return err
 		}
 	}
-	receipt, err := executeCanonicalLegacyRepairWithRecovery(ctx, manifest, productionEngine, time.Now().UTC(), recoveryAllowed)
+	receipt, err := executeCanonicalLegacyRepairFromObserved(ctx, manifest, productionEngine, time.Now().UTC(), recoveryAllowed, current)
 	if err != nil {
 		return err
 	}
