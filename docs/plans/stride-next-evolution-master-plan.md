@@ -1606,6 +1606,114 @@ private Realtime and one named agent, and prove matching current-source facts,
 privacy and bounded work. Physical iPhone availability does not block that
 server/simulator work or later critical builds.
 
+**2026-08-14 23:08 PT repair, migration and external-stop checkpoint:** the
+authority-resumed local candidate and repair foundation are now integrated on
+`axx/main`. The implementation commits are
+`ba2ea904697efb3478fe07734079da93d9e53cdf` and
+`8e8a73aa70aad258dc023e9e1baaa84e2327fea7`. A final fail-closed production
+preflight found that the repair CLI repeated its several-minute full-store
+observation and could therefore age its five-minute authority marker before
+the append. Commit `1e64bcaf522312ba13ef1967dbd1eb4db27321b4`
+reuses the exact already-observed proof while retaining the byte-exact,
+freshness-checked authority read inside `AppendLifecycleBatch`. Focused normal
+and race gates, the full main package (`619.647s`), `go vet`, diff checks and an
+independent critic pass on the exact correction. The unrelated untracked
+`stride-site/` remains untouched.
+
+Exact release generation 85 now serves that commit with source archive
+SHA-256 `222ee2c8539673f11b638658f013b117b390a69216a81116146ce0c394e3e73b`,
+bundle `b47074b5f5d128786ac806153ddd2e351b5ece41abb30444516c7353ea7c07e7`,
+application image
+`2d43dbf9ce11ee7e6823653726f46455d1787358436055d1c541783e1b615769`
+and renderer image
+`5f5640b5fa76ebe3bf583793fe0be15fecd4b6914471401f03da01702da71fcc`.
+The retained release verifier reports `verified-local-unsigned`; generation 84
+and both of its images remain the exact rollback.
+
+The production six-family repair ceremony is complete. A matched stopped-app
+backup (`data.tgz` `4324beae...`, PostgreSQL `cb7112a8...`) was copied and
+encrypted off-host (`80b58887...`, `2f3bbaac...`) and restored with PostgreSQL
+17 as `27914|23025|27914|23|23` plus 7,530 regular files. Two stable live
+observations, SHA-256 `62524a60...` and `713755d7...`, were 253.422 seconds
+apart and differed only by `observedAt`. Independent pre-mutation review passed
+their release/database/input/journal/source seals and the exact canonical 137
+candidate set: 104 memory, 20 file assignments, seven board cards, three file
+folders, one artifact revision and two notifications. Manifest SHA-256
+`c0ef1cbf...` bound candidate-set SHA-256 `0b0f1b56...`.
+
+The fresh root-only authority admitted one atomic 137-record lifecycle batch.
+Receipt SHA-256 `a9635493...` binds exact deltas of 274 events, 274 outbox rows
+and 274 version entries, zero remaining candidates, principal parity,
+projection replay validity, an idempotent second replay and lifecycle-journal
+SHA-256 `4074926d...`. Direct PostgreSQL readback was
+`28188|23162|28188|23|23`; an existing-receipt rerun proved event count
+`28188 -> 28188`. Ordinary cap-23 startup then reconciled high-water,
+dirty high-water and checkpoint at 44,422 and drained every import outbox row
+with zero failures.
+
+Migration 24 was kept distinct. A post-repair/pre-24 data/PostgreSQL backup
+(`6a36d417...`, `2ef70b8c...`) was encrypted off-host (`74546c38...`,
+`35b14d69...`) and restored with PostgreSQL 17 as
+`28191|23164|28191|0|23|23|0` plus 7,532 regular files. The migration cap then
+advanced from 23 to 24 while ambient replay stayed `off`. PostgreSQL stores the
+exact migration SHA-256 `55e77f96...`; the immutable promotion table is empty.
+Post-migration readiness closed with canonical high-water, dirty high-water
+and checkpoint all 44,430, outbox known empty, zero failures, and the exact
+release verifier still passing. No ambient replay, backfill or promotion was
+enabled.
+
+The one newly authorized synthetic Scout provider contract attempt did not
+pass and was not retried. The exact live candidate manifest was `ed39dc2f...`,
+the Linux probe binary was `dfa470fa...`, and pre-call normal/race plus
+independent review bound one fixed tools-off `gpt-realtime-2.1` high-reasoning
+turn to a USD 0.02 ceiling. The provider completed a response with audio and a
+48-character transcript, but `response.done.usage` contained a field outside
+the frozen strict schema; the harness therefore retained receipt SHA-256
+`08da2a7c...`, classified `schema_mismatch`, left usage/cost unreconciled and
+stopped. Project attribution remains
+`project_credential_bound_unreconciled`: the production key is project-scoped,
+but no raw `OPENAI_PROJECT_ID` is configured and the available Platform browser
+session redirects to login. This is neither provider qualification nor route
+activation.
+
+The post-attempt diagnostic is local and providerless. It preserves the strict
+failure while adding only bounded, sorted, domain-separated SHA-256 digests of
+unknown usage-field paths to a failed receipt; it retains no values or raw
+provider body, and known-schema receipts remain byte-compatible. Exact source
+and test SHA-256 are `99d50742...` and `60ed0b72...`; focused normal/race and
+the full `internal/e10probe` package pass. This diagnostic does not identify
+the live field, reconcile usage or cost, authorize a retry, qualify the model,
+or change the serving generation-85 release.
+
+Current Apple readback leaves the remaining device gate external. Build 63 is
+Validated, Testing, unexpired for 90 days and present in Bonfire external
+(seven testers) plus Team (Expo) internal (one tester). The build table shows
+seven invites, two installs, five sessions and no Build-63 crash or feedback;
+all seven Build-62 Crash Feedback rows remain attributable to Build 62.
+Tyler's tester row reports Build 63 installed on an iPhone 13 Pro-class device,
+but Apple contains no named start/speak/answer/interrupt/stop/resume, room-soak
+or other physical-flow receipt. The Paid Apps agreement is also shown expired.
+
+The governed organization flow is also externally incomplete. AJ's current
+authorized projection shows exactly one AJ-visible organization, Bonfire, with
+AJ as owner; it does not show an exact STRIDE organization, but private hidden
+organizations cannot be globally enumerated. The seven active Bonfire
+memberships deliberately redact person/account linkage, so Tyler's chat and
+TestFlight identities cannot establish one canonical PersonPrincipal and
+membership. Create Organization and Join Organization actions are live, but
+there is no owner Add Member/invite control and a new organization does not
+receive a join-code authority through the UI. Do not substitute a direct
+database edit or display-name match: the safe create -> governed join request
+-> AJ approval path first needs an owner-controlled join-code authority and
+Tyler's exact canonical identity binding.
+
+The honest stop is therefore signed-in Platform project/billing reconciliation,
+authoritatively identified usage-schema support plus separately authorized
+provider evidence, the preregistered real corpora, founder-connected physical
+flow acceptance, real two-person soak, the governed STRIDE join authority and
+Tyler identity binding, external attestation/HA and the later activation/cohort
+gates; full execution authority does not synthesize those external inputs.
+
 | Order | Wave, owner and immediate stop/resume point | Acceptance evidence | Rollback and authority boundary |
 |---|---|---|---|
 | 0 — complete | **Goal/ledger reconciliation**, single E10 coordinator. The controlling checkpoint and comparative study passed independent critics; preserve them as the sole resume authority. | exact live readback, 39-row obligation map, plan diff and independent critic PASS | documentation-only; no release/data mutation |

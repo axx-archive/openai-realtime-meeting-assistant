@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +42,12 @@ const (
 	scoutTextInputUSD       = 4.00
 	scoutTextCachedUSD      = 0.40
 	scoutTextOutputUSD      = 24.00
+
+	scoutUsageUnknownPathMaxCount        = 16
+	scoutUsageUnknownPathMaxDepth        = 8
+	scoutUsageUnknownPathMaxBytes        = 256
+	scoutUsageUnknownPathDigestDomain    = "stride.e10.realtime-scout.usage-unknown-path/v1\x00"
+	scoutUsageUnknownPathSetDigestDomain = "stride.e10.realtime-scout.usage-unknown-path-set/v1\x00"
 )
 
 // RealtimeScoutConfig is invocation-local only. WebSocketURL can override the
@@ -132,6 +139,11 @@ type RealtimeScoutReceipt struct {
 	PriceSourceURL              string  `json:"priceSourceUrl"`
 	PriceSourceRevision         string  `json:"priceSourceRevision"`
 	CreatedAt                   string  `json:"createdAt"`
+
+	UsageUnknownPathCount     int      `json:"usageUnknownPathCount,omitempty"`
+	UsageUnknownPathSHA256    []string `json:"usageUnknownPathSha256,omitempty"`
+	UsageUnknownPathSetSHA256 string   `json:"usageUnknownPathSetSha256,omitempty"`
+	UsageUnknownPathTruncated bool     `json:"usageUnknownPathTruncated,omitempty"`
 }
 
 // RunRealtimeScout performs one gpt-realtime-2.1 @ high, audio-output session.
@@ -513,6 +525,9 @@ func RunRealtimeScout(ctx context.Context, cfg RealtimeScoutConfig) (RealtimeSco
 			done, err := parseScoutResponseDone(raw)
 			recordScoutDoneStatus(&receipt, done)
 			if err != nil {
+				if errors.Is(err, errScoutResponseDoneUsageSchema) {
+					recordScoutUsageUnknownPathEvidence(&receipt, raw)
+				}
 				return finish("schema_mismatch", "event_schema", err)
 			}
 			tracker.eventIDs = append(tracker.eventIDs, done.EventID)
@@ -993,6 +1008,9 @@ func parseScoutOutputDone(raw []byte) (string, string, string, string, error) {
 	}
 	return e.ResponseID, e.EventID, e.Item.ID, e.Item.Status, nil
 }
+
+var errScoutResponseDoneUsageSchema = errors.New("response.done usage schema failed")
+
 func parseScoutResponseDone(raw []byte) (scoutDone, error) {
 	var e struct {
 		Type     string `json:"type"`
@@ -1015,7 +1033,7 @@ func parseScoutResponseDone(raw []byte) (scoutDone, error) {
 	done.StatusDetails = statusDetails
 	u, err := parseScoutUsage(e.Response.Usage)
 	if err != nil {
-		return done, err
+		return done, fmt.Errorf("%w: %v", errScoutResponseDoneUsageSchema, err)
 	}
 	done.Usage = u
 	return done, nil
@@ -1076,6 +1094,154 @@ func parseScoutResponseStatus(status string, raw json.RawMessage) (scoutResponse
 		return result, nil
 	}
 }
+
+// These are the complete object paths accepted by parseScoutUsage. Keeping the
+// allowlist explicit makes the diagnostic fail closed when the provider adds a
+// new usage category: the receipt retains hashes of unknown paths, never the
+// paths, values, or response body.
+var scoutUsageAllowedJSONPaths = map[string]bool{
+	"response.usage.total_tokens":                                           true,
+	"response.usage.input_tokens":                                           true,
+	"response.usage.output_tokens":                                          true,
+	"response.usage.input_token_details":                                    true,
+	"response.usage.input_token_details.text_tokens":                        true,
+	"response.usage.input_token_details.audio_tokens":                       true,
+	"response.usage.input_token_details.image_tokens":                       true,
+	"response.usage.input_token_details.cached_tokens":                      true,
+	"response.usage.input_token_details.cached_tokens_details":              true,
+	"response.usage.input_token_details.cached_tokens_details.text_tokens":  true,
+	"response.usage.input_token_details.cached_tokens_details.audio_tokens": true,
+	"response.usage.input_token_details.cached_tokens_details.image_tokens": true,
+	"response.usage.output_token_details":                                   true,
+	"response.usage.output_token_details.text_tokens":                       true,
+	"response.usage.output_token_details.audio_tokens":                      true,
+}
+
+var scoutUsageContainerJSONPaths = map[string]bool{
+	"response.usage":                                           true,
+	"response.usage.input_token_details":                       true,
+	"response.usage.input_token_details.cached_tokens_details": true,
+	"response.usage.output_token_details":                      true,
+}
+
+type scoutUsageUnknownPathEvidence struct {
+	digests   []string
+	setDigest string
+	truncated bool
+}
+
+func recordScoutUsageUnknownPathEvidence(receipt *RealtimeScoutReceipt, raw []byte) {
+	evidence := scoutUsageUnknownPathEvidenceForResponseDone(raw)
+	if len(evidence.digests) == 0 {
+		return
+	}
+	receipt.UsageUnknownPathCount = len(evidence.digests)
+	receipt.UsageUnknownPathSHA256 = evidence.digests
+	receipt.UsageUnknownPathSetSHA256 = evidence.setDigest
+	receipt.UsageUnknownPathTruncated = evidence.truncated
+}
+
+func scoutUsageUnknownPathEvidenceForResponseDone(raw []byte) scoutUsageUnknownPathEvidence {
+	var event struct {
+		Response struct {
+			Usage json.RawMessage `json:"usage"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(raw, &event) != nil || len(bytes.TrimSpace(event.Response.Usage)) == 0 {
+		return scoutUsageUnknownPathEvidence{}
+	}
+
+	paths := make(map[string]struct{}, scoutUsageUnknownPathMaxCount)
+	truncated := false
+	collectScoutUsageUnknownPaths("response.usage", event.Response.Usage, 0, paths, &truncated)
+	digests := make([]string, 0, len(paths))
+	for path := range paths {
+		digests = append(digests, digest(scoutUsageUnknownPathDigestDomain+path))
+	}
+	sort.Strings(digests)
+	if len(digests) == 0 {
+		return scoutUsageUnknownPathEvidence{truncated: truncated}
+	}
+	return scoutUsageUnknownPathEvidence{
+		digests:   digests,
+		setDigest: digest(scoutUsageUnknownPathSetDigestDomain + strings.Join(digests, "\n")),
+		truncated: truncated,
+	}
+}
+
+func collectScoutUsageUnknownPaths(prefix string, raw json.RawMessage, depth int, paths map[string]struct{}, truncated *bool) {
+	if depth >= scoutUsageUnknownPathMaxDepth {
+		*truncated = true
+		return
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return
+	}
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		path := prefix + "." + key
+		if !scoutUsageAllowedJSONPaths[path] {
+			if !addScoutUsageUnknownPath(path, paths, truncated) {
+				return
+			}
+			if len(path) <= scoutUsageUnknownPathMaxBytes {
+				collectScoutUsageUnknownDescendants(path, object[key], depth+1, paths, truncated)
+			}
+			continue
+		}
+		if scoutUsageContainerJSONPaths[path] {
+			collectScoutUsageUnknownPaths(path, object[key], depth+1, paths, truncated)
+		}
+	}
+}
+
+func collectScoutUsageUnknownDescendants(prefix string, raw json.RawMessage, depth int, paths map[string]struct{}, truncated *bool) {
+	if depth >= scoutUsageUnknownPathMaxDepth {
+		*truncated = true
+		return
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return
+	}
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		path := prefix + "." + key
+		if !addScoutUsageUnknownPath(path, paths, truncated) {
+			return
+		}
+		if len(path) <= scoutUsageUnknownPathMaxBytes {
+			collectScoutUsageUnknownDescendants(path, object[key], depth+1, paths, truncated)
+		}
+	}
+}
+
+func addScoutUsageUnknownPath(path string, paths map[string]struct{}, truncated *bool) bool {
+	boundedPath := path
+	if len(boundedPath) > scoutUsageUnknownPathMaxBytes {
+		boundedPath = fmt.Sprintf("%s\x00truncated-bytes=%d", boundedPath[:scoutUsageUnknownPathMaxBytes], len(boundedPath))
+		*truncated = true
+	}
+	if _, exists := paths[boundedPath]; exists {
+		return true
+	}
+	if len(paths) >= scoutUsageUnknownPathMaxCount {
+		*truncated = true
+		return false
+	}
+	paths[boundedPath] = struct{}{}
+	return true
+}
+
 func parseScoutUsage(raw json.RawMessage) (scoutUsage, error) {
 	var u struct {
 		Total        *int64 `json:"total_tokens"`

@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -374,6 +376,120 @@ func TestRealtimeScoutRejectsNonLoopbackOverrideAndUnclassifiedUsage(t *testing.
 	}
 	if scoutWorstCaseCost() >= 0.02 || MaxScoutOutputTokens != 256 {
 		t.Fatalf("bounded Scout token budget drifted: cost=%f output=%d", scoutWorstCaseCost(), MaxScoutOutputTokens)
+	}
+}
+
+func TestRealtimeScoutRetainsOnlyHashedUnknownUsagePaths(t *testing.T) {
+	config := ssConfig(t)
+	usage := ssUsage()
+	usage["reasoning_tokens"] = "unknown-top-level-value-secret"
+	usage["input_token_details"].(map[string]any)["novel_bucket"] = "unknown-nested-value-secret"
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, http.Header{"OpenAI-Project": []string{rtProject}, "X-Request-ID": []string{"request-secret"}})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		ssBegin(t, conn)
+		ssCompleteWithUsage(t, conn, usage)
+	}))
+	defer server.Close()
+	config.WebSocketURL = "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime?model=" + ScoutRealtimeModel
+
+	receipt, err := RunRealtimeScout(context.Background(), config)
+	if err == nil || receipt.Success || receipt.Outcome != "schema_mismatch" || receipt.FailureClass != "event_schema" {
+		t.Fatalf("unknown usage schema did not fail closed: receipt=%+v err=%v", receipt, err)
+	}
+	if receipt.UsageObserved || receipt.CostReconciled || receipt.ComputedCostUSD != 0 || receipt.CostState != "unreconciled_no_valid_response_done_usage" {
+		t.Fatalf("unknown usage reconciled cost: %+v", receipt)
+	}
+	wantPaths := map[string]bool{
+		digest(scoutUsageUnknownPathDigestDomain + "response.usage.reasoning_tokens"):                 true,
+		digest(scoutUsageUnknownPathDigestDomain + "response.usage.input_token_details.novel_bucket"): true,
+	}
+	if receipt.UsageUnknownPathCount != len(wantPaths) || len(receipt.UsageUnknownPathSHA256) != len(wantPaths) || receipt.UsageUnknownPathTruncated {
+		t.Fatalf("unknown path evidence bounds = %+v", receipt)
+	}
+	for _, got := range receipt.UsageUnknownPathSHA256 {
+		if !wantPaths[got] {
+			t.Fatalf("unexpected unknown path digest %q", got)
+		}
+	}
+	if receipt.UsageUnknownPathSetSHA256 != digest(scoutUsageUnknownPathSetDigestDomain+strings.Join(receipt.UsageUnknownPathSHA256, "\n")) {
+		t.Fatalf("unknown path set digest = %q", receipt.UsageUnknownPathSetSHA256)
+	}
+	encoded, marshalErr := json.Marshal(receipt)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	persisted, readErr := os.ReadFile(config.ReceiptDir + "/receipt.json")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	encoded = append(encoded, persisted...)
+	for _, forbidden := range []string{
+		"reasoning_tokens", "novel_bucket", "unknown-top-level-value-secret", "unknown-nested-value-secret",
+		rtAPIKey, rtProject, "request-secret",
+	} {
+		if bytes.Contains(encoded, []byte(forbidden)) {
+			t.Fatalf("receipt leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestScoutUnknownUsagePathEvidenceIsDeterministicAndBounded(t *testing.T) {
+	first := []byte(`{"response":{"usage":{"z_extension":1,"input_token_details":{"nested_extension":2},"a_extension":3}}}`)
+	second := []byte(`{"response":{"usage":{"a_extension":3,"input_token_details":{"nested_extension":2},"z_extension":1}}}`)
+	a := scoutUsageUnknownPathEvidenceForResponseDone(first)
+	b := scoutUsageUnknownPathEvidenceForResponseDone(second)
+	if strings.Join(a.digests, "\n") != strings.Join(b.digests, "\n") || a.setDigest != b.setDigest || a.truncated || b.truncated || len(a.digests) != 3 {
+		t.Fatalf("unknown path evidence was not deterministic: a=%+v b=%+v", a, b)
+	}
+
+	t.Run("many", func(t *testing.T) {
+		usage := make(map[string]any)
+		for i := 0; i < scoutUsageUnknownPathMaxCount*4; i++ {
+			usage[fmt.Sprintf("extension_%03d", i)] = i
+		}
+		raw, _ := json.Marshal(map[string]any{"response": map[string]any{"usage": usage}})
+		evidence := scoutUsageUnknownPathEvidenceForResponseDone(raw)
+		if len(evidence.digests) != scoutUsageUnknownPathMaxCount || !evidence.truncated {
+			t.Fatalf("many-field evidence escaped cap: %+v", evidence)
+		}
+	})
+
+	t.Run("deep", func(t *testing.T) {
+		var value any = "deep-value-secret"
+		for i := scoutUsageUnknownPathMaxDepth * 3; i >= 0; i-- {
+			value = map[string]any{fmt.Sprintf("level_%02d", i): value}
+		}
+		raw, _ := json.Marshal(map[string]any{"response": map[string]any{"usage": value}})
+		evidence := scoutUsageUnknownPathEvidenceForResponseDone(raw)
+		if len(evidence.digests) == 0 || len(evidence.digests) > scoutUsageUnknownPathMaxDepth || !evidence.truncated {
+			t.Fatalf("deep-field evidence escaped cap: %+v", evidence)
+		}
+	})
+
+	t.Run("long", func(t *testing.T) {
+		longField := strings.Repeat("unknown-long-field-secret", scoutUsageUnknownPathMaxBytes)
+		raw, _ := json.Marshal(map[string]any{"response": map[string]any{"usage": map[string]any{longField: "long-value-secret"}}})
+		evidence := scoutUsageUnknownPathEvidenceForResponseDone(raw)
+		if len(evidence.digests) != 1 || !evidence.truncated || strings.Contains(strings.Join(evidence.digests, ""), longField) {
+			t.Fatalf("long-field evidence escaped cap: %+v", evidence)
+		}
+	})
+}
+
+func TestScoutKnownUsageSchemaHasNoUnknownPathEvidence(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"response": map[string]any{"usage": ssUsage()}})
+	evidence := scoutUsageUnknownPathEvidenceForResponseDone(raw)
+	if len(evidence.digests) != 0 || evidence.setDigest != "" || evidence.truncated {
+		t.Fatalf("known usage schema produced diagnostic evidence: %+v", evidence)
+	}
+	if _, err := parseScoutUsage(ssUsageBytes()); err != nil {
+		t.Fatalf("known usage schema no longer parses: %v", err)
 	}
 }
 
