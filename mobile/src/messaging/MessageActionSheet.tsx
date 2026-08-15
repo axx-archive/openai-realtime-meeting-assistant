@@ -23,13 +23,15 @@ type Props = {
   onCopy: () => void;
   onSaveAttachment?: () => void;
   onReply: () => void;
+  onRiffPrivately?: () => void;
+  onShareFromRiff?: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onChangeProject?: () => void;
   projectChangePending?: boolean;
 };
 
-export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onSaveAttachment, onReply, onEdit, onDelete, onChangeProject, projectChangePending = false }: Props) {
+export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onSaveAttachment, onReply, onRiffPrivately, onShareFromRiff, onEdit, onDelete, onChangeProject, projectChangePending = false }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const visibleReactions = useMemo(() => reactions.slice(0, 12), [reactions]);
@@ -154,6 +156,20 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
                 <SymbolView name="arrowshape.turn.up.left" tintColor={colors.text1} size={18} />
                 <Text style={styles.actionText}>Reply</Text>
               </Pressable>
+              {onRiffPrivately ? <View style={styles.rule} /> : null}
+              {onRiffPrivately ? (
+                <Pressable accessibilityRole="button" accessibilityLabel="Riff privately from this message" onPress={onRiffPrivately} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+                  <SymbolView name="lock.fill" tintColor={colors.emberText} size={18} />
+                  <Text style={styles.actionText}>Riff privately from here</Text>
+                </Pressable>
+              ) : null}
+              {onShareFromRiff ? <View style={styles.rule} /> : null}
+              {onShareFromRiff ? (
+                <Pressable accessibilityRole="button" accessibilityLabel="Share selected parts of this Private Riff answer" onPress={onShareFromRiff} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+                  <SymbolView name="paperplane.fill" tintColor={colors.emberText} size={18} />
+                  <Text style={styles.actionText}>Share to source channel</Text>
+                </Pressable>
+              ) : null}
               {own && onChangeProject ? <View style={styles.rule} /> : null}
               {own && onChangeProject ? (
                 <Pressable

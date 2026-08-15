@@ -48,7 +48,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Project correction, and Board-retirement candidate. It retains Build
       // 62's exact Project attachment/reply source-group compatibility.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '63',
+      buildNumber: '64',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

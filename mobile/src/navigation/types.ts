@@ -18,7 +18,13 @@ export type RootStackParamList = {
   Room: { roomId: string; title: string };
   CreateRoom: undefined;
   NewConversation: undefined;
-  Thread: { threadId: string; title: string; messageId?: string };
+  Thread: {
+    threadId: string;
+    title: string;
+    messageId?: string;
+    draft?: string;
+    draftProvenance?: 'private_riff';
+  };
   Intelligence: undefined;
   Memory: undefined;
   Meetings: { meetingId?: string; segmentId?: string; returnToRoomId?: string; returnMode?: 'recap' | 'transcript' } | undefined;

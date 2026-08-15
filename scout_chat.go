@@ -204,19 +204,18 @@ var scoutChatChannelModePrefixes = []struct {
 	{prefix: "workflow:", mode: "workflow"},
 }
 
-// scoutChatWorkstreamKeywords are the workstreams a bare keyword can propose in
-// a channel — but only alongside an explicit @scout mention. The mention is a
-// routing signal; a persisted card still requires explicit approval to launch.
-var scoutChatWorkstreamKeywords = []string{"research", "design", "grill"}
-
-// scoutChatThreadModeForChannelText proposes a channel agent run on either
-// (1) an explicit "mode:" prefix — standalone at the start of the message or
-// immediately after an @scout mention — or (2) an @scout mention combined
-// with a bare workstream keyword (research / design / grill). Bare keywords
-// WITHOUT @scout never trigger anything.
+// scoutChatThreadModeForChannelText is the narrow compatibility guard for
+// public-channel work cards. It accepts an explicit mode prefix or an
+// unmistakable @Scout action request, but never routes on a topic word alone.
+// Negation wins so “do not start research; just talk” cannot become a card.
 func scoutChatThreadModeForChannelText(text string) string {
 	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
 	segments := strings.Split(lower, "@scout")
+	for _, negation := range []string{"do not ", "don't ", "dont ", "not start ", "not run ", "without starting ", "without running ", "just talk", "only talk"} {
+		if strings.Contains(lower, negation) {
+			return ""
+		}
+	}
 	for _, segment := range segments {
 		segment = strings.TrimSpace(segment)
 		for _, candidate := range scoutChatChannelModePrefixes {
@@ -226,16 +225,20 @@ func scoutChatThreadModeForChannelText(text string) string {
 		}
 	}
 	if len(segments) < 2 {
-		// No @scout mention — a bare keyword stays conversation.
 		return ""
 	}
-	tokens := strings.FieldsFunc(lower, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '-'
-	})
-	for _, keyword := range scoutChatWorkstreamKeywords {
-		for _, token := range tokens {
-			if token == keyword {
-				return keyword
+	requests := []struct {
+		mode    string
+		phrases []string
+	}{
+		{mode: "research", phrases: []string{"research the ", "research this ", "research report", "run research", "start research", "do research", "investigate the ", "dig into the ", "look into the "}},
+		{mode: "design", phrases: []string{"design the ", "design this ", "create a design", "make a design", "mock up ", "mockup "}},
+		{mode: "grill", phrases: []string{"grill the ", "grill this ", "pressure-test the ", "pressure test the "}},
+	}
+	for _, request := range requests {
+		for _, phrase := range request.phrases {
+			if strings.Contains(lower, phrase) {
+				return request.mode
 			}
 		}
 	}

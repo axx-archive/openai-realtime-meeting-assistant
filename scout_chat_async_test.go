@@ -462,9 +462,14 @@ func TestScoutHomeOpeningUsesAuthorizedMeetingBriefingBeforeGenericProvider(t *t
 		t.Fatal("test user missing")
 	}
 	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	spanStart := now.Add(-time.Hour)
+	if spanStart.Before(dayStart) {
+		spanStart = dayStart
+	}
 	digest := `{"meetingId":"home-opening-meeting","title":"Launch review","day":"` + now.Format("2006-01-02") + `",` +
 		`"decisions":[{"d":"Keep the Friday launch with AJ as rollback owner","status":"decided","importance":5}]}`
-	upsertBriefingTestDigest(t, app, "home-opening-meeting", digest, now.Format("2006-01-02"), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	upsertBriefingTestDigest(t, app, "home-opening-meeting", digest, now.Format("2006-01-02"), spanStart.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 
 	providerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {

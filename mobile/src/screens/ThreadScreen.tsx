@@ -42,7 +42,9 @@ import type {
   ChatMentionCandidate,
   DriveFileRecord,
   GiphySearchResult,
-	HomeProjectChoice,
+  HomeProjectChoice,
+  PrivateRiffBinding,
+  PrivateRiffSharePreviewResponse,
   ProjectCorrectionProjection,
 	WorkstreamCorrectionProjection,
 	ScoutAnswerSource,
@@ -141,6 +143,13 @@ import {
 } from "../artifacts/artifactDisposition";
 import { createConversationOperationId } from "../conversations/newConversation";
 import { RegenerateWorkSheet } from "../artifacts/RegenerateWorkSheet";
+import { PrivateRiffContextSheet } from "../messaging/PrivateRiffContextSheet";
+import { PrivateRiffShareSheet } from "../messaging/PrivateRiffShareSheet";
+import {
+  privateRiffAnswerShareable,
+  privateRiffCheckpointSummary,
+  privateRiffHasUpdates,
+} from "../messaging/privateRiff";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Thread">;
 
@@ -493,6 +502,17 @@ export function ThreadScreen({ route, navigation }: Props) {
     { name: "Scout", kind: "scout" },
   ]);
   const [threadVisibility, setThreadVisibility] = useState("private");
+  const [privateRiff, setPrivateRiff] = useState<PrivateRiffBinding | null>(null);
+  const [privateRiffContextOpen, setPrivateRiffContextOpen] = useState(false);
+  const [privateRiffRefreshing, setPrivateRiffRefreshing] = useState(false);
+  const [privateRiffContextError, setPrivateRiffContextError] = useState("");
+  const [privateRiffCreating, setPrivateRiffCreating] = useState(false);
+  const [privateRiffShareMessage, setPrivateRiffShareMessage] = useState<ScoutMessage | null>(null);
+  const [privateRiffSharePreview, setPrivateRiffSharePreview] = useState<PrivateRiffSharePreviewResponse | null>(null);
+  const [privateRiffShareLoading, setPrivateRiffShareLoading] = useState(false);
+  const [privateRiffPublishing, setPrivateRiffPublishing] = useState<"agent" | "draft" | null>(null);
+  const [privateRiffShareError, setPrivateRiffShareError] = useState("");
+  const [draftFromPrivateRiff, setDraftFromPrivateRiff] = useState(false);
   const [threadOwnerEmail, setThreadOwnerEmail] = useState("");
   const [threadTitle, setThreadTitle] = useState(route.params.title);
   const [editingThreadTitle, setEditingThreadTitle] = useState(false);
@@ -645,6 +665,18 @@ export function ThreadScreen({ route, navigation }: Props) {
     key: string;
     operationId: string;
   } | null>(null);
+  const privateRiffCreateAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  const privateRiffRefreshAttemptRef = useRef<{ revision: number; operationId: string } | null>(null);
+  const privateRiffPublishAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  const privateRiffShareGenerationRef = useRef(0);
+
+  useEffect(() => {
+    const incomingDraft = String(route.params.draft ?? "");
+    if (!incomingDraft) return;
+    setDraft(incomingDraft);
+    setDraftFromPrivateRiff(route.params.draftProvenance === "private_riff");
+    navigation.setParams({ draft: undefined, draftProvenance: undefined });
+  }, [navigation, route.params.draft, route.params.draftProvenance]);
 
   useEffect(() => {
     let current = true;
@@ -756,8 +788,16 @@ export function ThreadScreen({ route, navigation }: Props) {
 			navigation.navigate('Meetings', { meetingId: source.meetingId, segmentId: source.segmentId });
 			return;
 		}
+		if (source.threadId && source.threadId !== route.params.threadId) {
+			navigation.push('Thread', {
+				threadId: source.threadId,
+				title: source.threadTitle ? `#${source.threadTitle.replace(/^#/, '')}` : 'Source channel',
+				messageId: source.messageId,
+			});
+			return;
+		}
 		if (source.messageId) scrollToMessage(source.messageId);
-	}, [navigation, scrollToMessage]);
+	}, [navigation, route.params.threadId, scrollToMessage]);
 
   const openThreadContext = useCallback((message: ScoutMessage) => {
     const root = replyTopologyRef.current.rootFor(message);
@@ -807,6 +847,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         navigation.setParams({ title: displayTitle });
       }
       setThreadVisibility(String(response.thread?.visibility ?? "private"));
+      setPrivateRiff(response.thread?.riff ?? null);
       setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ""));
       const level = String(
         response.notificationLevel ?? (response.muted ? "mentions" : "all"),
@@ -899,6 +940,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       const next = response.thread?.messages ?? response.messages ?? [];
       if (!applyTranscriptSnapshot(generationAtStart, next)) return;
       setThreadVisibility(String(response.thread?.visibility ?? "private"));
+      setPrivateRiff(response.thread?.riff ?? null);
       setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ""));
       if (shouldFollow)
         requestAnimationFrame(() =>
@@ -1259,6 +1301,10 @@ export function ThreadScreen({ route, navigation }: Props) {
     () => [...messages].reverse().find(workThreadIsActive) ?? null,
     [messages],
   );
+  const latestRiffAnchor = useMemo(
+    () => [...messages].reverse().find((message) => Boolean(String(message.id ?? "").trim())) ?? null,
+    [messages],
+  );
 
   const rows = useMemo(
     () =>
@@ -1431,6 +1477,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       if (!editingMessage) messageSendAttemptRef.current = null;
       if (textOverride === undefined) {
         setDraft("");
+        setDraftFromPrivateRiff(false);
         setPendingFiles([]);
 		setEditingMessage(null);
 		setSelectedProject(null);
@@ -1456,6 +1503,153 @@ export function ThreadScreen({ route, navigation }: Props) {
       setSending(false);
     }
   }
+
+  const startPrivateRiff = useCallback(async (message: ScoutMessage) => {
+    const messageID = String(message.id ?? "").trim();
+    if (!sessionToken || threadVisibility !== "public" || !messageID || privateRiffCreating) return;
+    const key = `${route.params.threadId}\u0000${messageID}`;
+    const attempt = privateRiffCreateAttemptRef.current?.key === key
+      ? privateRiffCreateAttemptRef.current
+      : { key, operationId: createConversationOperationId() };
+    privateRiffCreateAttemptRef.current = attempt;
+    setPrivateRiffCreating(true);
+    setError(null);
+    try {
+      const response = await api.createPrivateRiff(sessionToken, route.params.threadId, {
+        throughMessageId: messageID,
+        agentId: "",
+        operationId: attempt.operationId,
+      });
+      const riffID = String(response.thread?.id ?? "").trim();
+      if (!riffID) throw new Error("Private Riff was created without a conversation.");
+      privateRiffCreateAttemptRef.current = null;
+      setActionMessage(null);
+      closeThreadContext();
+      navigation.push("Thread", {
+        threadId: riffID,
+        title: response.thread ? channelDisplayName(response.thread) : "Private Riff",
+      });
+    } catch (err) {
+      setError(err instanceof BonfireApiError ? err.message : "Private Riff could not be opened.");
+    } finally {
+      setPrivateRiffCreating(false);
+    }
+  }, [closeThreadContext, navigation, privateRiffCreating, route.params.threadId, sessionToken, threadVisibility]);
+
+  const refreshPrivateRiff = useCallback(async () => {
+    if (!sessionToken || !privateRiff || privateRiffRefreshing) return;
+    const revision = Number(privateRiff.contextRevision ?? 0);
+    const attempt = privateRiffRefreshAttemptRef.current?.revision === revision
+      ? privateRiffRefreshAttemptRef.current
+      : { revision, operationId: createConversationOperationId() };
+    privateRiffRefreshAttemptRef.current = attempt;
+    setPrivateRiffRefreshing(true);
+    setPrivateRiffContextError("");
+    try {
+      const response = await api.refreshPrivateRiff(sessionToken, route.params.threadId, attempt.operationId);
+      setPrivateRiff(response.thread?.riff ?? null);
+      privateRiffRefreshAttemptRef.current = null;
+    } catch (err) {
+      setPrivateRiffContextError(err instanceof BonfireApiError ? err.message : "Context could not be updated.");
+    } finally {
+      setPrivateRiffRefreshing(false);
+    }
+  }, [privateRiff, privateRiffRefreshing, route.params.threadId, sessionToken]);
+
+  const closePrivateRiffShare = useCallback(() => {
+    if (privateRiffPublishing) return;
+    privateRiffShareGenerationRef.current += 1;
+    setPrivateRiffShareMessage(null);
+    setPrivateRiffSharePreview(null);
+    setPrivateRiffShareLoading(false);
+    setPrivateRiffShareError("");
+  }, [privateRiffPublishing]);
+
+  const openPrivateRiffShare = useCallback(async (message: ScoutMessage) => {
+    const messageID = String(message.id ?? "").trim();
+    if (!sessionToken || !privateRiff || !messageID || !privateRiffAnswerShareable(privateRiff, message)) return;
+    const generation = privateRiffShareGenerationRef.current + 1;
+    privateRiffShareGenerationRef.current = generation;
+    setActionMessage(null);
+    closeThreadContext();
+    setPrivateRiffShareMessage(message);
+    setPrivateRiffSharePreview(null);
+    setPrivateRiffShareError("");
+    setPrivateRiffShareLoading(true);
+    try {
+      const preview = await api.privateRiffSharePreview(sessionToken, route.params.threadId, messageID);
+      if (privateRiffShareGenerationRef.current !== generation) return;
+      setPrivateRiffSharePreview(preview);
+    } catch (err) {
+      if (privateRiffShareGenerationRef.current !== generation) return;
+      setPrivateRiffShareError(err instanceof BonfireApiError ? err.message : "Share preview could not be prepared.");
+    } finally {
+      if (privateRiffShareGenerationRef.current === generation) setPrivateRiffShareLoading(false);
+    }
+  }, [closeThreadContext, privateRiff, route.params.threadId, sessionToken]);
+
+  const publishPrivateRiff = useCallback(async (mode: "agent" | "draft", paragraphTokens: string[], confirmed = false) => {
+    const messageID = String(privateRiffShareMessage?.id ?? "").trim();
+    if (!sessionToken || !privateRiff || !messageID || privateRiffPublishing || paragraphTokens.length === 0) return;
+    if (mode === "agent" && !confirmed) {
+      Alert.alert(
+        `Share to #${privateRiff.sourceTitle.replace(/^#/, "")}?`,
+        "Only the selected paragraphs will be posted as the agent. Your prompts and the rest of this Private Riff stay private.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Share as agent", onPress: () => { void publishPrivateRiff(mode, paragraphTokens, true); } },
+        ],
+      );
+      return;
+    }
+    const key = JSON.stringify({ threadId: route.params.threadId, messageID, mode, paragraphTokens });
+    const attempt = privateRiffPublishAttemptRef.current?.key === key
+      ? privateRiffPublishAttemptRef.current
+      : { key, operationId: createConversationOperationId() };
+    privateRiffPublishAttemptRef.current = attempt;
+    setPrivateRiffPublishing(mode);
+    setPrivateRiffShareError("");
+    try {
+      const response = await api.publishPrivateRiff(sessionToken, route.params.threadId, messageID, {
+        operationId: attempt.operationId,
+        mode,
+        paragraphTokens,
+      });
+      privateRiffPublishAttemptRef.current = null;
+      privateRiffShareGenerationRef.current += 1;
+      setPrivateRiffShareMessage(null);
+      setPrivateRiffSharePreview(null);
+      if (mode === "draft") {
+        navigation.push("Thread", {
+          threadId: response.threadId || privateRiff.sourceThreadId,
+          title: response.threadTitle ? `#${response.threadTitle.replace(/^#/, "")}` : `#${privateRiff.sourceTitle.replace(/^#/, "")}`,
+          draft: String(response.draft ?? ""),
+          draftProvenance: "private_riff",
+        });
+      } else {
+        const destinationTitle = String(response.threadTitle ?? privateRiff.sourceTitle).replace(/^#/, "");
+        Alert.alert(
+          `Shared to #${destinationTitle}`,
+          "Only the selected paragraphs were posted, with Private Riff provenance.",
+          [
+            { text: "Stay here", style: "cancel" },
+            {
+              text: "View channel",
+              onPress: () => navigation.push("Thread", {
+                threadId: response.threadId || privateRiff.sourceThreadId,
+                title: `#${destinationTitle}`,
+                messageId: response.messageId,
+              }),
+            },
+          ],
+        );
+      }
+    } catch (err) {
+      setPrivateRiffShareError(err instanceof BonfireApiError ? err.message : "Selected paragraphs could not be shared.");
+    } finally {
+      setPrivateRiffPublishing(null);
+    }
+  }, [navigation, privateRiff, privateRiffPublishing, privateRiffShareMessage?.id, route.params.threadId, sessionToken]);
 
   const sendThreadReply = useCallback(
     async (
@@ -2867,6 +3061,16 @@ export function ThreadScreen({ route, navigation }: Props) {
       onReply={() => {
         if (actionMessage) beginReply(actionMessage.message);
       }}
+      onRiffPrivately={
+        threadVisibility === "public" && actionMessage
+          ? () => { void startPrivateRiff(actionMessage.message); }
+          : undefined
+      }
+      onShareFromRiff={
+        privateRiffAnswerShareable(privateRiff, actionMessage?.message)
+          ? () => { if (actionMessage) void openPrivateRiffShare(actionMessage.message); }
+          : undefined
+      }
       onEdit={() => {
         if (actionMessage) beginEdit(actionMessage.message);
       }}
@@ -3048,6 +3252,27 @@ export function ThreadScreen({ route, navigation }: Props) {
             </View>
           </Pressable>
         )}
+        {threadVisibility === "public" && latestRiffAnchor ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Riff privately from the latest channel message"
+            accessibilityHint="Opens a private Scout conversation with channel context through that message"
+            accessibilityState={{ disabled: privateRiffCreating }}
+            disabled={privateRiffCreating}
+            onPress={() => { void startPrivateRiff(latestRiffAnchor); }}
+            style={({ pressed }) => [
+              styles.headerAction,
+              pressed && styles.headerActionPressed,
+              privateRiffCreating && styles.sendDim,
+            ]}
+          >
+            {privateRiffCreating ? (
+              <ActivityIndicator color={colors.text2} size="small" />
+            ) : (
+              <SymbolView name="lock.fill" tintColor={colors.text2} size={17} />
+            )}
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Notifications: ${notificationLevel}`}
@@ -3072,6 +3297,35 @@ export function ThreadScreen({ route, navigation }: Props) {
         </Pressable>
       </View>
 
+      {privateRiff ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${privateRiffCheckpointSummary(privateRiff)}${privateRiffHasUpdates(privateRiff) ? `, ${privateRiff.newMessageCount} new source messages` : ""}`}
+          accessibilityHint="Opens the private context checkpoint"
+          onPress={() => setPrivateRiffContextOpen(true)}
+          style={({ pressed }) => [styles.privateRiffBar, pressed && styles.headerActionPressed]}
+        >
+          <SymbolView name="lock.fill" tintColor={colors.emberText} size={14} />
+          <View style={styles.privateRiffBarCopy}>
+            <Text maxFontSizeMultiplier={1.8} numberOfLines={1} style={styles.privateRiffBarText}>
+              {privateRiffCheckpointSummary(privateRiff)}
+            </Text>
+            {!privateRiff.sourceAvailable ? (
+              <Text maxFontSizeMultiplier={1.8} numberOfLines={1} style={styles.privateRiffBarWarning}>
+                Source unavailable · checkpoint remains fixed
+              </Text>
+            ) : null}
+          </View>
+          {privateRiffHasUpdates(privateRiff) ? (
+            <View style={styles.privateRiffUpdateBadge}>
+              <Text style={styles.privateRiffUpdateText}>{privateRiff.newMessageCount} new</Text>
+            </View>
+          ) : (
+            <SymbolView name="chevron.right" tintColor={colors.text3} size={13} />
+          )}
+        </Pressable>
+      ) : null}
+
       <CatchUpSheet
         visible={catchUpOpen}
         catchUp={digest?.catchUp ?? null}
@@ -3088,6 +3342,25 @@ export function ThreadScreen({ route, navigation }: Props) {
         busy={notificationBusy}
         onClose={() => setNotificationMenuOpen(false)}
         onChange={(level) => void changeNotificationLevel(level)}
+      />
+
+      <PrivateRiffContextSheet
+        visible={privateRiffContextOpen}
+        riff={privateRiff}
+        refreshing={privateRiffRefreshing}
+        error={privateRiffContextError}
+        onClose={() => { if (!privateRiffRefreshing) setPrivateRiffContextOpen(false); }}
+        onRefresh={() => { void refreshPrivateRiff(); }}
+      />
+
+      <PrivateRiffShareSheet
+        visible={Boolean(privateRiffShareMessage)}
+        preview={privateRiffSharePreview}
+        loading={privateRiffShareLoading}
+        publishing={privateRiffPublishing}
+        error={privateRiffShareError}
+        onClose={closePrivateRiffShare}
+        onSubmit={(mode, paragraphTokens) => { void publishPrivateRiff(mode, paragraphTokens); }}
       />
 
       <FilePreviewModal
@@ -3562,6 +3835,25 @@ export function ThreadScreen({ route, navigation }: Props) {
 
 		{!editingMessage ? (
           <Glass radius={radius.xl} style={styles.composer}>
+            {draftFromPrivateRiff ? (
+              <View accessibilityRole="summary" style={styles.privateRiffDraft}>
+                <SymbolView name="lock.fill" tintColor={colors.emberText} size={13} />
+                <Text maxFontSizeMultiplier={1.8} style={styles.privateRiffDraftText}>
+                  Private Riff draft · edit before sending
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Discard Private Riff draft"
+                  onPress={() => {
+                    setDraft("");
+                    setDraftFromPrivateRiff(false);
+                  }}
+                  style={({ pressed }) => [styles.privateRiffDraftDiscard, pressed && styles.headerActionPressed]}
+                >
+                  <SymbolView name="xmark" tintColor={colors.text3} size={11} />
+                </Pressable>
+              </View>
+            ) : null}
             {pendingFiles.length > 0 || stagingFiles.length > 0 || uploading ? (
               <View style={styles.pendingFiles}>
                 {stagingFiles.map((file) => (
@@ -3852,6 +4144,32 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   headerActionPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
+  privateRiffBar: {
+    minHeight: hitMin,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[2],
+    marginHorizontal: space[4],
+    marginBottom: space[2],
+    paddingHorizontal: space[3],
+    paddingVertical: space[2],
+    borderRadius: radius.lg,
+    borderCurve: "continuous",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line1,
+    backgroundColor: colors.emberSoft,
+  },
+  privateRiffBarCopy: { flex: 1, minWidth: 0 },
+  privateRiffBarText: { ...type.captionMedium, color: colors.text1 },
+  privateRiffBarWarning: { ...type.caption, color: colors.danger },
+  privateRiffUpdateBadge: {
+    minHeight: 28,
+    justifyContent: "center",
+    paddingHorizontal: space[2],
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+  },
+  privateRiffUpdateText: { ...type.label, color: colors.onAccent },
   title: {
     ...type.headline,
     color: colors.text1,
@@ -4076,6 +4394,23 @@ const styles = StyleSheet.create({
     paddingTop: space[3],
     paddingBottom: space[2],
     gap: space[2],
+  },
+  privateRiffDraft: {
+    minHeight: hitMin,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[2],
+    paddingLeft: space[3],
+    borderRadius: radius.md,
+    backgroundColor: colors.emberSoft,
+  },
+  privateRiffDraftText: { ...type.captionMedium, flex: 1, color: colors.text1 },
+  privateRiffDraftDiscard: {
+    width: hitMin,
+    height: hitMin,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.full,
   },
   messageEditor: {
     ...shadow[2],

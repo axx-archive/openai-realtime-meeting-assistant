@@ -25,13 +25,15 @@ import (
 // direction for a trust feature.
 
 type answerSource struct {
-	Kind      string `json:"kind,omitempty"`
-	MessageID string `json:"messageId,omitempty"`
-	MeetingID string `json:"meetingId,omitempty"`
-	SegmentID string `json:"segmentId,omitempty"`
-	Revision  string `json:"revision,omitempty"`
-	At        string `json:"at,omitempty"`
-	Author    string `json:"author,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	MessageID   string `json:"messageId,omitempty"`
+	ThreadID    string `json:"threadId,omitempty"`
+	ThreadTitle string `json:"threadTitle,omitempty"`
+	MeetingID   string `json:"meetingId,omitempty"`
+	SegmentID   string `json:"segmentId,omitempty"`
+	Revision    string `json:"revision,omitempty"`
+	At          string `json:"at,omitempty"`
+	Author      string `json:"author,omitempty"`
 	/** The matched phrase, so a reader can see WHY this was cited. */
 	Quote string `json:"quote"`
 }

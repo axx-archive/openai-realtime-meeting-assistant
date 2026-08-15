@@ -923,9 +923,14 @@ func TestTypedPrivateScoutUsesSameAuthorizedMeetingBriefingAsVoice(t *testing.T)
 		t.Fatal("test user missing")
 	}
 	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	spanStart := now.Add(-time.Hour)
+	if spanStart.Before(dayStart) {
+		spanStart = dayStart
+	}
 	digest := `{"meetingId":"typed-meeting-today","title":"Partner review","day":"` + now.Format("2006-01-02") + `",` +
 		`"decisions":[{"d":"Advance the partner pilot with a two-week checkpoint","status":"decided","importance":5}]}`
-	upsertBriefingTestDigest(t, app, "typed-meeting-today", digest, now.Format("2006-01-02"), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	upsertBriefingTestDigest(t, app, "typed-meeting-today", digest, now.Format("2006-01-02"), spanStart.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 
 	providerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
@@ -1065,6 +1070,11 @@ func TestPrincipalMeetingBriefingVisitsOnlyRequestedWindowDespiteLargeUnrelatedL
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	now := time.Now().In(meetingTimeLocation())
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	spanStart := now.Add(-time.Hour)
+	if spanStart.Before(dayStart) {
+		spanStart = dayStart
+	}
 	app.memory.mu.Lock()
 	for index := 0; index < 1000; index++ {
 		app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
@@ -1077,7 +1087,7 @@ func TestPrincipalMeetingBriefingVisitsOnlyRequestedWindowDespiteLargeUnrelatedL
 	app.memory.mu.Unlock()
 	digest := `{"meetingId":"bounded-briefing","title":"Daily operations","day":"` + now.Format(dayBucketLayout) + `",` +
 		`"decisions":[{"d":"Keep the rollout checkpoint on Friday","status":"decided","importance":5}]}`
-	upsertBriefingTestDigest(t, app, "bounded-briefing", digest, now.Format(dayBucketLayout), now.Add(-time.Hour).UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	upsertBriefingTestDigest(t, app, "bounded-briefing", digest, now.Format(dayBucketLayout), spanStart.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 
 	visits := 0
 	app.memory.authorizationEntryVisitHook = func() { visits++ }

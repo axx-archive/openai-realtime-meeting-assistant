@@ -650,6 +650,13 @@ type scoutChatMessageRecord struct {
 	// fields persist for crash recovery but are stripped from every viewer
 	// projection.
 	Reply *scoutChatReplyLifecycle `json:"reply,omitempty"`
+	// Activity is a display-safe receipt for a completed conversational answer.
+	// It records elapsed time and the authorized evidence class, never hidden
+	// chain-of-thought, prompts, model names, effort, or tool transcripts.
+	Activity *scoutChatAnswerActivity `json:"activity,omitempty"`
+	// Publication is server-stamped provenance when selected text from an
+	// owner-only Private Riff is deliberately shared into its source channel.
+	Publication *scoutChatPublicationProvenance `json:"publication,omitempty"`
 	// proposalSource is process-only provenance from the router verdict to the
 	// durable mint event. It is intentionally not viewer-controlled or stored
 	// on the message body.
@@ -710,6 +717,10 @@ type scoutChatThreadRecord struct {
 	// reauthorizes the exact record revision and transcript sources before model
 	// admission; viewer projections strip this journal field.
 	MeetingRecord *scoutChatMeetingRecordBinding `json:"meetingRecord,omitempty"`
+	// Riff is the body-free, owner-only authority binding from this private
+	// conversation to one exact public-channel window. Viewer projection removes
+	// its digests while preserving display-safe checkpoint metadata.
+	Riff *privateRiffBinding `json:"riff,omitempty"`
 	// LegacyConversationOperations are server-only compatibility aliases. They
 	// never appear in viewer projections and cannot select a tool or authority.
 	LegacyConversationOperations []scoutChatLegacyConversationOperation `json:"legacyConversationOperations,omitempty"`
@@ -1078,6 +1089,85 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": scoutChatThreadMutationView(thread)})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "riff" && r.Method == http.MethodPost {
+		payload := struct {
+			ThroughMessageID string `json:"throughMessageId"`
+			AgentID          string `json:"agentId"`
+			OperationID      string `json:"operationId"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read Private Riff request")
+			return
+		}
+		thread, created, err := kanbanApp.createPrivateRiff(user, threadID, payload.ThroughMessageID, payload.AgentID, payload.OperationID)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		status := http.StatusCreated
+		if !created {
+			status = http.StatusOK
+		}
+		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		return
+	}
+
+	if len(parts) == 3 && parts[1] == "riff" && parts[2] == "refresh" && r.Method == http.MethodPost {
+		payload := struct {
+			OperationID string `json:"operationId"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read Private Riff refresh request")
+			return
+		}
+		thread, refreshed, err := kanbanApp.refreshPrivateRiff(user, threadID, payload.OperationID)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "refreshed": refreshed, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "riff-share-preview" && r.Method == http.MethodPost {
+		thread, message, paragraphs, err := kanbanApp.privateRiffSharePreview(user, threadID, parts[2])
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "threadId": thread.ID, "messageId": message.ID,
+			"destination": map[string]any{"threadId": thread.Riff.SourceThreadID, "title": thread.Riff.SourceTitle},
+			"paragraphs":  paragraphs,
+		})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "riff-publish" && r.Method == http.MethodPost {
+		payload := struct {
+			OperationID     string   `json:"operationId"`
+			Mode            string   `json:"mode"`
+			ParagraphTokens []string `json:"paragraphTokens"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read Private Riff publication request")
+			return
+		}
+		result, err := kanbanApp.publishPrivateRiffSelection(user, threadID, parts[2], payload.OperationID, payload.Mode, payload.ParagraphTokens)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, result)
 		return
 	}
 
@@ -2010,6 +2100,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if thread.ArchivedAt != "" {
 		return nil, fmt.Errorf("chat thread is archived")
 	}
+	if thread.Riff != nil && (strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != "" || projectLinkBinding.Token.Kind != "") {
+		return nil, fmt.Errorf("Private Riff accepts conversation only; start or revise durable work from the source channel or a regular private thread")
+	}
 	if turnOperation.ID != "" {
 		if replay, found, replayErr := app.replayConversationTurnInThread(ctx, user.Email, thread, turnOperation); found || replayErr != nil {
 			return replay, replayErr
@@ -2026,6 +2119,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	replyTargetsScout := scoutChatReplyTargetsScout(thread, replyToMessageID)
 
 	now := time.Now().UTC()
+	turnStartedAt := now
 	messageID := fmt.Sprintf("scout-chat-message-%d", now.UnixNano())
 	if turnOperation.ID != "" || turnOperation.BodyDigest != "" {
 		messageID = "scout-chat-message-" + sha256Hex([]byte("conversation-turn/v1\x00" + normalizeAccountEmail(user.Email) + "\x00" + threadID + "\x00" + turnOperation.ID))[:24]
@@ -2531,7 +2625,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if explicitScoutEngagement {
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
 		_, directMeetingBriefing := conversationMeetingBriefingRange(text, time.Now())
-		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil &&
+		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil && thread.Riff == nil &&
 			(!directMeetingBriefing || conversationRequestsDurableMeetingWork(text)) {
 			principal := app.recallPrincipalForMemberRoom(user.Email, app.memberCurrentRoom(user.Email))
 			meetingRef, meetingSourceRequested, meetingRefErr := app.meetingRangeContextRefForPrincipal(ctx, principal, text, time.Now())
@@ -2869,7 +2963,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// ask whether to use Calendar or user-provided notes. Public channels never
 	// widen into private meeting memory, and an exact Meeting Record conversation
 	// remains confined to its bound sitting above.
-	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil && !conversationRequestsDurableMeetingWork(text) {
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil && thread.Riff == nil && !conversationRequestsDurableMeetingWork(text) {
 		if briefingRange, ok := conversationMeetingBriefingRange(text, time.Now()); ok {
 			principal := app.recallPrincipalForMemberRoom(user.Email, app.memberCurrentRoom(user.Email))
 			briefing, _, briefingErr := app.crossMeetingBriefingToolForPrincipal(map[string]any{"range": briefingRange}, principal)
@@ -2915,7 +3009,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// workstream, router, and Q&A paths so no model can turn "clear the Board"
 	// into a goal card. Until durable Trash exists, a clear request is an exact,
 	// read-only board count plus navigation; it performs no mutation.
-	if boardIntent := scoutChatBoardIntent(text); boardIntent != "" {
+	if boardIntent := scoutChatBoardIntent(text); boardIntent != "" && thread.Riff == nil {
 		boardAction, replyText := app.scoutChatBoardActionForIntent(boardIntent)
 		assistantMessage := scoutChatMessageRecord{
 			ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -3061,6 +3155,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}, Source: routedIntent.Source}
 	}
 	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
+	// Private Riff v1 is a source-bound analysis conversation. Starting work or
+	// taking product actions would require carrying the public checkpoint through
+	// every downstream WorkRun and terminal effect. Refuse that widening until
+	// the complete launch spine has the same reauthorization contract.
+	if thread.Riff != nil && (routedIntent.Outcome == conversationIntentStartPrivateWork || routedIntent.Outcome == conversationIntentApprovalRequired) {
+		routedIntent = unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
+		routedVerdict = nil
+	}
 	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {
 		result, _, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
 		answerText := ""
@@ -3234,7 +3336,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	mode := ""
 	if targetedAgentWork {
 		mode = targetedAgentMode
-	} else if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+	} else if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentConversationalReply {
+		// Compatibility is deliberately downstream of the five-way router and
+		// accepts only explicit, non-negated action language. Topic words alone
+		// cannot override a conversational verdict.
 		mode = scoutChatThreadModeForChannelText(text)
 	}
 	// An explicit source-backed review is real work even when the user speaks
@@ -3300,6 +3405,32 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if meetingConversation != nil {
 		modelQuery = meetingConversation.modelQuery(text)
 	}
+	privateRiffSourceCount := 0
+	var privateRiffWindow []scoutChatMessageRecord
+	if thread.Riff != nil {
+		var riffErr error
+		modelQuery, privateRiffSourceCount, riffErr = app.privateRiffModelQuery(user.Email, thread, text)
+		if riffErr != nil {
+			unavailable := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+				Text:      riffErr.Error() + ". Your private message is saved, and nothing was shared.",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailable)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailable
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			return response, nil
+		}
+		_, privateRiffWindow, riffErr = app.currentPrivateRiffSource(user.Email, thread)
+		if riffErr != nil {
+			return nil, riffErr
+		}
+	}
 
 	// The signed, default-off coworker preview adds only body-free STRIDE
 	// authority/freshness lineage to the existing public-channel query. Chat
@@ -3361,7 +3492,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// of fuzzy memory hits. Legacy ask-bar callers may still use that fallback;
 	// a conversational Scout turn requires an actual model answer.
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, responseStyle))
-	if meetingConversation != nil {
+	if meetingConversation != nil || thread.Riff != nil {
 		answerContext = withAssistantExactSourceContext(answerContext)
 	}
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
@@ -3412,6 +3543,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		answer = "no answer yet"
 	}
 	sources := groundAnswerInMessages(answer, thread.Messages, 3)
+	if thread.Riff != nil {
+		sources = groundAnswerInMessages(answer, privateRiffWindow, 4)
+		for index := range sources {
+			sources[index].ThreadID = thread.Riff.SourceThreadID
+			sources[index].ThreadTitle = thread.Riff.SourceTitle
+		}
+	}
 	if meetingConversation != nil {
 		sources = meetingConversation.groundAnswer(answer, 4)
 		if len(sources) == 0 {
@@ -3433,6 +3571,18 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// answer that quotes nothing carries no chips, visibly, rather than
 		// borrowing unearned authority (design §10, shell §13.5).
 		Sources: sources,
+	}
+	if thread.Riff != nil {
+		completedAt := time.Now().UTC()
+		assistantMessage.Activity = &scoutChatAnswerActivity{
+			Version: privateRiffBindingVersion, Status: "completed", Stage: "answered_from_checkpoint",
+			StartedAt: turnStartedAt.Format(time.RFC3339Nano), CompletedAt: completedAt.Format(time.RFC3339Nano),
+			ElapsedMS: completedAt.Sub(turnStartedAt).Milliseconds(), SourceCount: privateRiffSourceCount,
+			EvidenceKind:    "channel_checkpoint",
+			Rationale:       "Answered from the frozen channel checkpoint and this private conversation. Hidden chain-of-thought is not shown.",
+			ContextRevision: thread.Riff.ContextRevision, SourceThreadID: thread.Riff.SourceThreadID, ThroughMessageID: thread.Riff.ThroughMessageID,
+			SourceMessageDigest: thread.Riff.SourceMessageDigest, SourceWindowDigest: thread.Riff.SourceWindowDigest, SourceAudienceDigest: thread.Riff.SourceAudienceDigest,
+		}
 	}
 	saved, err := commitUserMessage(userMessage, assistantMessage)
 	if err != nil {

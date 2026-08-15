@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, findNodeHandle, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -261,6 +261,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   const scout = isScout(message);
   const replyTo = message.replyTo;
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
+  const activity = message.activity;
+  const publication = message.publication;
+  const [activityExpanded, setActivityExpanded] = useState(false);
   const sources = Array.isArray(message.sources) ? message.sources : [];
   const longMessage = body.length > 700 || body.split('\n').length > 12;
   // A work-reference row is authored by the durable coworker named on the
@@ -346,6 +349,26 @@ export const MessageBubble = React.memo(function MessageBubble({
             <View style={[styles.viaChip, own && styles.viaChipOwn]}>
               <Text style={[styles.viaText, own && styles.viaTextOwn]}>via Scout</Text>
             </View>
+          ) : null}
+
+          {publication?.kind === 'private_riff' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Shared by ${publication.sharedBy || 'a teammate'} from a private riff grounded in ${publication.sourceTitle || 'the source channel'}`}
+              accessibilityHint="Opens the public source checkpoint"
+              disabled={!publication.sourceThreadId || !publication.sourceThroughMessageId}
+              onPress={() => onOpenSource?.({
+                kind: 'chat_thread',
+                threadId: publication.sourceThreadId,
+                threadTitle: publication.sourceTitle,
+                messageId: publication.sourceThroughMessageId,
+                quote: 'Private Riff source checkpoint',
+              })}
+              style={({ pressed }) => [styles.publicationChip, own && styles.viaChipOwn, pressed && styles.replyContextPressed]}
+            >
+              <SymbolView name="lock.open.fill" tintColor={own ? colors.onAccent : colors.emberText} size={10} />
+              <Text style={[styles.publicationText, own && styles.viaTextOwn]}>Shared by {publication.sharedBy || 'a teammate'} from a private riff</Text>
+            </Pressable>
           ) : null}
 
           {showReplyContext && replyTo?.messageId ? (
@@ -774,7 +797,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           </Pressable>
         ) : null}
 
-        {scout && sources.length > 0 ? (
+          {scout && sources.length > 0 ? (
           <View style={styles.sources}>
             {sources.map((source, index) => (
               <Pressable
@@ -790,7 +813,26 @@ export const MessageBubble = React.memo(function MessageBubble({
               </Pressable>
             ))}
           </View>
-        ) : null}
+          ) : null}
+          {scout && activity?.status === 'completed' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Worked ${Math.max(0, Math.round(Number(activity.elapsedMs ?? 0) / 1000))} seconds. Considered ${Math.max(0, Number(activity.sourceCount ?? 0))} sources. ${activity.rationale || ''}`}
+              accessibilityHint={activity.rationale ? 'Shows or hides the safe answer rationale. Hidden chain-of-thought is never shown.' : undefined}
+              accessibilityState={{ expanded: activityExpanded }}
+              onPress={() => setActivityExpanded((current) => !current)}
+              style={({ pressed }) => [styles.answerActivity, pressed && styles.replyContextPressed]}
+            >
+              <View style={styles.answerActivityHead}>
+                <SymbolView name="checkmark.circle.fill" tintColor={colors.success} size={12} />
+                <Text style={styles.answerActivityTitle}>
+                  Worked {Math.max(0, Math.round(Number(activity.elapsedMs ?? 0) / 1000))}s · Considered {Math.max(0, Number(activity.sourceCount ?? 0))} sources
+                </Text>
+                {activity.rationale ? <SymbolView name={activityExpanded ? 'chevron.up' : 'chevron.down'} tintColor={colors.text3} size={10} /> : null}
+              </View>
+              {activityExpanded && activity.rationale ? <Text style={styles.answerActivityRationale}>{activity.rationale}</Text> : null}
+            </Pressable>
+          ) : null}
       </Animated.View>
     </View>
   );
@@ -821,6 +863,8 @@ const styles = StyleSheet.create({
   viaChipOwn: { backgroundColor: 'rgba(0,0,0,0.08)' },
   viaText: { fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: 0.3, color: colors.emberText },
   viaTextOwn: { color: colors.onAccent },
+  publicationChip: { alignSelf: 'flex-start', minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: colors.emberSoft, marginBottom: 4 },
+  publicationText: { ...type.captionMedium, color: colors.emberText },
   replyContext: { minWidth: 176, maxWidth: 270, flexDirection: 'row', gap: space[2], paddingVertical: 5, marginBottom: 4 },
   replyContextPressed: { opacity: 0.7 },
   replyLine: { width: 3, alignSelf: 'stretch', borderRadius: radius.full, backgroundColor: colors.info },
@@ -935,6 +979,10 @@ const styles = StyleSheet.create({
   threadSummaryCount: { ...type.captionMedium, color: colors.text1, fontVariant: ['tabular-nums'] },
   threadSummaryLatest: { ...type.label, color: colors.text3, fontVariant: ['tabular-nums'] },
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5, marginLeft: space[1] },
+  answerActivity: { alignSelf: 'stretch', minHeight: 44, justifyContent: 'center', gap: 4, marginTop: space[2], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line1 },
+  answerActivityHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  answerActivityTitle: { ...type.captionMedium, color: colors.text2 },
+  answerActivityRationale: { ...type.caption, color: colors.text3 },
   sourceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, backgroundColor: colors.emberSoft, maxWidth: 150 },
   sourcePressed: { opacity: 0.6 },
   sourceText: { fontSize: 11, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', color: colors.emberText, flexShrink: 1 },

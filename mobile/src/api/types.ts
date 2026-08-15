@@ -251,6 +251,8 @@ export type ScoutThread = {
   table?: boolean;
   /** Per-viewer, computed server-side from the read marker. Never persisted. */
   unreadCount?: number;
+  /** Display-safe checkpoint for an owner-only conversation grounded in a public channel. */
+  riff?: PrivateRiffBinding;
   /** Anchors the client's "new messages" divider. */
   lastReadMessageId?: string;
   /** Body-free current work projection used by the lightweight Chat index. */
@@ -263,6 +265,47 @@ export type ScoutThread = {
   };
   archived?: boolean;
   [key: string]: unknown;
+};
+
+export type PrivateRiffBinding = {
+  version?: string;
+  sourceThreadId: string;
+  sourceTitle: string;
+  throughMessageId: string;
+  throughAuthorName?: string;
+  throughCreatedAt?: string;
+  messageCount: number;
+  contextRevision: number;
+  capturedAt: string;
+  brainCapturedAt?: string;
+  agentName: string;
+  sourceAvailable: boolean;
+  unavailableReason?: string;
+  newMessageCount?: number;
+};
+
+export type PrivateRiffParagraph = {
+  token: string;
+  text: string;
+};
+
+export type PrivateRiffSharePreviewResponse = {
+  ok: boolean;
+  threadId: string;
+  messageId: string;
+  destination: { threadId: string; title: string };
+  paragraphs: PrivateRiffParagraph[];
+};
+
+export type PrivateRiffPublishResponse = {
+  ok: boolean;
+  mode: 'agent' | 'draft';
+  threadId: string;
+  threadTitle?: string;
+  messageId?: string;
+  replayed?: boolean;
+  draft?: string;
+  provenance?: { kind?: string; assisted?: boolean };
 };
 
 export type ThreadCatchUpBullet = {
@@ -441,6 +484,8 @@ export type ScoutMessage = {
   proposal?: ScoutProposal;
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
+  activity?: ScoutAnswerActivity;
+  publication?: ScoutPublicationProvenance;
   project?: {
     status: 'pending' | 'confirmed' | 'unavailable' | 'removed';
     projectId?: string;
@@ -456,6 +501,31 @@ export type ScoutMessage = {
   image?: ScoutImageRef;
   imageGeneration?: ScoutImageGeneration;
   [key: string]: unknown;
+};
+
+export type ScoutAnswerActivity = {
+  version?: string;
+  status: string;
+  stage: string;
+  startedAt: string;
+  completedAt: string;
+  elapsedMs: number;
+  sourceCount: number;
+  evidenceKind: string;
+  rationale: string;
+  contextRevision?: number;
+  sourceThreadId?: string;
+  throughMessageId?: string;
+};
+
+export type ScoutPublicationProvenance = {
+  version?: string;
+  kind: string;
+  sharedBy: string;
+  sourceTitle: string;
+  sourceThreadId?: string;
+  sourceThroughMessageId?: string;
+  publishedAt: string;
 };
 
 export type ScoutProposal = {
@@ -488,6 +558,8 @@ export type ScoutMessageReaction = {
 export type ScoutAnswerSource = {
 	kind?: 'meeting_transcript' | string;
 	messageId?: string;
+	threadId?: string;
+	threadTitle?: string;
 	meetingId?: string;
 	segmentId?: string;
 	revision?: string;

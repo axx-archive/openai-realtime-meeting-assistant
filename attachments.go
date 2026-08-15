@@ -1552,6 +1552,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	projected.OpeningOperation = nil
 	projected.VoiceSession = nil
 	projected.MeetingRecord = nil
+	projected.Riff = app.projectPrivateRiffBinding(viewerEmail, thread)
 	projected.LegacyConversationOperations = nil
 	projected.ModerationReceipts = nil
 	projected.ProjectLinkOperations = nil
@@ -1600,6 +1601,21 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 		original := projected.Messages[messageIndex]
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
+		if original.Publication != nil {
+			publication := *original.Publication
+			publication.OperationID = ""
+			publication.RiffThreadID = ""
+			publication.SourceMessageID = ""
+			publication.SelectionDigest = ""
+			projected.Messages[messageIndex].Publication = &publication
+		}
+		if original.Activity != nil {
+			activity := *original.Activity
+			activity.SourceMessageDigest = ""
+			activity.SourceWindowDigest = ""
+			activity.SourceAudienceDigest = ""
+			projected.Messages[messageIndex].Activity = &activity
+		}
 		if original.Reply != nil {
 			reply := *original.Reply
 			reply.LeaseID = ""

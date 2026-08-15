@@ -42,6 +42,8 @@ import type {
   WorkstreamCorrectionResponse,
   MeetingRecordIndexResponse,
   MeetingRecordDetailResponse,
+  PrivateRiffPublishResponse,
+  PrivateRiffSharePreviewResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -921,6 +923,55 @@ export const api = {
     return request<ScoutThreadDetailResponse>(
       `/assistant/chat-threads/${encodeURIComponent(threadId)}`,
       { sessionToken },
+    );
+  },
+
+  createPrivateRiff(
+    sessionToken: string,
+    sourceThreadId: string,
+    body: { throughMessageId: string; agentId: string; operationId: string },
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(sourceThreadId)}/riff`,
+      { method: "POST", body, sessionToken },
+    );
+  },
+
+  refreshPrivateRiff(
+    sessionToken: string,
+    riffThreadId: string,
+    operationId: string,
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/riff/refresh`,
+      { method: "POST", body: { operationId }, sessionToken },
+    );
+  },
+
+  privateRiffSharePreview(
+    sessionToken: string,
+    riffThreadId: string,
+    messageId: string,
+  ): Promise<PrivateRiffSharePreviewResponse> {
+    return request<PrivateRiffSharePreviewResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/messages/${encodeURIComponent(messageId)}/riff-share-preview`,
+      { method: "POST", body: {}, sessionToken },
+    );
+  },
+
+  publishPrivateRiff(
+    sessionToken: string,
+    riffThreadId: string,
+    messageId: string,
+    body: {
+      operationId: string;
+      mode: "agent" | "draft";
+      paragraphTokens: string[];
+    },
+  ): Promise<PrivateRiffPublishResponse> {
+    return request<PrivateRiffPublishResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/messages/${encodeURIComponent(messageId)}/riff-publish`,
+      { method: "POST", body, sessionToken },
     );
   },
 

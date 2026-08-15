@@ -587,11 +587,13 @@ func TestScoutChatChannelModePrefixDetection(t *testing.T) {
 		{text: "@scout research: the rodeo creator market", want: "research"},
 		{text: "@scout Design: onboarding flow for the package", want: "design"},
 		{text: "@scout workflow: ship the EMBERS package", want: "workflow"},
-		// D5: an @scout mention plus a bare workstream keyword launches that
-		// workstream — the mention is the explicit invocation.
+		// Explicit action language may preserve the legacy proposal path, but a
+		// topic word or completed-work reference remains conversation.
 		{text: "@scout can you research the market for us?", want: "research"},
-		{text: "@scout what's in the design doc?", want: "design"},
-		{text: "@scout the grill run finished but I can't open the scorecard from here", want: "grill"},
+		{text: "@scout what's in the design doc?", want: ""},
+		{text: "@scout the grill run finished but I can't open the scorecard from here", want: ""},
+		{text: "@scout do not start research; just talk this through", want: ""},
+		{text: "@scout research: do not run anything; just talk this through", want: ""},
 		// Non-keyword @scout chatter stays conversational.
 		{text: "@scout from the pressure-test scorecard artifact, list the three hardest questions", want: ""},
 		{text: "let's discuss the pitch brief at 3pm @scout thoughts?", want: ""},
