@@ -70,6 +70,30 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesSelectively(t *
 	}
 }
 
+func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`--desktop-chat-header-gutter: clamp(18px, 1.5vw, 26px);`,
+		`padding: 13px var(--desktop-chat-header-gutter) 12px;`,
+		`padding: 0 12px 0 10px;`,
+		`height: 44px;`,
+		`transition-property: background-color, box-shadow, transform;`,
+		`.chat-convo-head__riff:active { transform: scale(0.96); }`,
+		`<span>Private riff</span>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("compact Private Riff header entry missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<span aria-hidden="true">↗</span> Riff privately`) {
+		t.Fatal("Private Riff header entry must not use the oversized text-glyph treatment")
+	}
+}
+
 func TestFrontendPrivateRiffUsesSemanticActivityInsteadOfReasoningTranscript(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {

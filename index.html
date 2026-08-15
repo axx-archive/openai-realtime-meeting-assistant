@@ -10000,29 +10000,51 @@
       }
 
       .chat-convo-head__riff {
+        position: relative;
         flex: none;
-        min-height: 44px;
+        min-height: 40px;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 0 13px;
-        border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line-1));
+        gap: 7px;
+        padding: 0 12px 0 10px;
+        border: 0;
         border-radius: var(--r-full);
-        background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-1));
+        background: color-mix(in srgb, var(--surface-2) 86%, var(--accent-soft));
         color: var(--text-1);
-        font: 600 12px/1 var(--font-sans);
+        box-shadow:
+          0 0 0 1px color-mix(in srgb, var(--text-1) 12%, transparent),
+          0 1px 2px rgba(0, 0, 0, 0.05);
+        font: 600 12.5px/1 var(--font-sans);
         cursor: pointer;
-        transition-property: background-color, border-color, box-shadow, transform;
+        transition-property: background-color, box-shadow, transform;
         transition-duration: var(--dur-fast);
         transition-timing-function: var(--ease);
       }
 
-      .chat-convo-head__riff:hover {
-        background: var(--accent-soft);
-        border-color: color-mix(in srgb, var(--accent) 46%, var(--line-1));
+      .chat-convo-head__riff::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        min-width: 44px;
+        height: 44px;
+        transform: translate(-50%, -50%);
       }
 
-      .chat-convo-head__riff:active { transform: scale(0.98); }
+      .chat-convo-head__riff svg {
+        flex: none;
+        transform: translateY(-0.5px);
+      }
+
+      .chat-convo-head__riff:hover {
+        background: color-mix(in srgb, var(--surface-3) 82%, var(--accent-soft));
+        box-shadow:
+          0 0 0 1px color-mix(in srgb, var(--text-1) 18%, transparent),
+          0 2px 5px rgba(0, 0, 0, 0.07);
+      }
+
+      .chat-convo-head__riff:active { transform: scale(0.96); }
       .chat-convo-head__riff:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
       .chat-convo-head__riff[hidden] { display: none; }
 
@@ -12894,6 +12916,7 @@
           --desktop-chat-image-preview-measure: 420px;
           --desktop-chat-work-measure: 820px;
           --desktop-chat-gutter: clamp(22px, 2.4vw, 48px);
+          --desktop-chat-header-gutter: clamp(18px, 1.5vw, 26px);
           --chat-thread-rail-width: 308px;
           --chat-context-rail-width: 440px;
           background:
@@ -13904,7 +13927,7 @@
         #chatTool .chat-convo-head {
           min-height: 64px;
           height: auto;
-          padding: 13px var(--desktop-chat-gutter) 12px;
+          padding: 13px var(--desktop-chat-header-gutter) 12px;
           flex-wrap: wrap;
           column-gap: 10px;
           row-gap: 3px;
@@ -30797,7 +30820,11 @@
                 </svg>
               </button>
               <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Riff privately from the latest channel message" hidden>
-                <span aria-hidden="true">↗</span> Riff privately
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M7 17 17 7"></path>
+                  <path d="M7 7h10v10"></path>
+                </svg>
+                <span>Private riff</span>
               </button>
               <span id="chatConvoMeta" class="chat-convo-head__meta">private · only you and Scout</span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
