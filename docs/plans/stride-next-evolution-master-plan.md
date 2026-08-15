@@ -1544,6 +1544,42 @@ flow. The body-free read-only receipt is
 with SHA-256
 `a6d61cbb917e67e3b98e9fe6d576e09a173b4f277026776e0f1846b25f965ec3`.
 
+**2026-08-14 22:35 PT authority-resumed integration and repair checkpoint:**
+the founder granted full execution authority for the remaining controlled Git,
+backup, release, canonical repair, migration and bounded-provider gates. The
+frozen 43-file implementation candidate recomputed exactly against manifest
+SHA-256 `79ba7e26...`, was committed as `ba2ea904697efb3478fe07734079da93d9e53cdf`,
+and was pushed only to `codex/country-golf-stride`; the unrelated
+`stride-site/` tree remains untracked and untouched.
+
+The retired exact-seven board ceremony has not been reused. A separate
+stopped-app six-family lifecycle repair foundation now admits only exact
+target-only `tombstone_required` candidates for memory, artifact revision,
+notification, file folder, file assignment and board card. It requires two
+root-only, byte-sealed, exactly stable observations 10 seconds to 15 minutes
+apart; binds release, tenant, database URL digest, all importer inputs,
+database/proof/file seals, candidates, principals, projection, versions,
+outbox and high-water; atomically replaces the journal with its sealed prefix
+plus one complete batch; rechecks a fresh exact authority marker at the
+mutation seam; resumes only inside the exact journal/database delta envelope;
+and requires zero candidates, exact `2N` event/outbox/version deltas, parity,
+idempotent second replay and a root-only self-verifying live-state receipt.
+The exact source/test/main hashes and acceptance are retained in
+`docs/evidence/e10/canonical-legacy-repair-candidate-20260815/README.md`.
+Focused normal/race, an actual disposable-PostgreSQL replay, six-family and
+crash/recovery adversarial tests, `go vet`, `git diff --check`, the full main
+package (`619.951s`) and the refreshed independent critic all pass with no
+P0-P2 finding.
+
+Production remains unchanged at this checkpoint. Read-only backup posture
+shows three recent same-droplet snapshots, but no configured S3 endpoint,
+bucket or encryption key; the canonical migration cap remains 23 and mode
+remains shadow. The next mutation therefore starts by producing a matched
+named-volume/PostgreSQL snapshot plus encrypted off-host copy and isolated
+restore proof. No on-droplet backup is being misrepresented as disaster
+recovery, migration 24 remains capped off until its distinct gate, and no
+provider/device acceptance is inferred from this local repair foundation.
+
 The permanent Meeting Record is no longer only a dirty local candidate. Its
 current source is in that exact serving release, while the replacement rendered
 evidence is separately bound to the same source through

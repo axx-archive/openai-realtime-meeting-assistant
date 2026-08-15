@@ -39,23 +39,30 @@ import (
 
 // nolint
 var (
-	addr                     = flag.String("addr", ":3000", "http service address")
-	renderRunnerWorker       = flag.Bool("render-runner", false, "run the render sidecar queue worker (PDF export)")
-	repairCanonical          = flag.Bool("repair-canonical", false, "run the manifest-bound one-time canonical board repair and exit")
-	repairManifest           = flag.String("candidate-manifest", "", "absolute path to the root-only canonical repair candidate manifest")
-	repairManifestSHA        = flag.String("candidate-manifest-sha256", "", "exact SHA-256 of the canonical repair candidate manifest")
-	repairAuthority          = flag.String("authority-marker", "", "absolute path to the root-only manifest-bound repair confirmation token")
-	repairReceipt            = flag.String("repair-receipt", "", "absolute path for the root-only canonical repair receipt")
-	observeRepair            = flag.Bool("observe-canonical-repair", false, "write a read-only canonical repair observation and exit")
-	repairObservation        = flag.String("repair-observation", "", "absolute root-only output path for a read-only canonical repair observation")
-	normalizeCanonical       = flag.Bool("normalize-canonical", false, "run sealed ordinary canonical normalization and exit")
-	normalizationInput       = flag.String("normalization-input", "", "absolute path to the root-only canonical normalization input")
-	normalizationInputSHA    = flag.String("normalization-input-sha256", "", "exact SHA-256 of the canonical normalization input")
-	normalizationReceipt     = flag.String("normalization-receipt", "", "absolute path for the root-only canonical normalization receipt")
-	generateRepairManifest   = flag.Bool("generate-canonical-repair-manifest", false, "generate the private exact-seven repair manifest from normalized evidence and exit")
-	repairEvidenceDir        = flag.String("evidence-dir", "", "absolute root-only canonical repair evidence directory")
-	repairEvidenceDescriptor = flag.String("classified-evidence-descriptor", "", "absolute path to the root-only classified evidence descriptor")
-	upgrader                 = websocket.Upgrader{
+	addr                          = flag.String("addr", ":3000", "http service address")
+	renderRunnerWorker            = flag.Bool("render-runner", false, "run the render sidecar queue worker (PDF export)")
+	repairCanonical               = flag.Bool("repair-canonical", false, "run the manifest-bound one-time canonical board repair and exit")
+	repairManifest                = flag.String("candidate-manifest", "", "absolute path to the root-only canonical repair candidate manifest")
+	repairManifestSHA             = flag.String("candidate-manifest-sha256", "", "exact SHA-256 of the canonical repair candidate manifest")
+	repairAuthority               = flag.String("authority-marker", "", "absolute path to the root-only manifest-bound repair confirmation token")
+	repairReceipt                 = flag.String("repair-receipt", "", "absolute path for the root-only canonical repair receipt")
+	observeRepair                 = flag.Bool("observe-canonical-repair", false, "write a read-only canonical repair observation and exit")
+	repairObservation             = flag.String("repair-observation", "", "absolute root-only output path for a read-only canonical repair observation")
+	normalizeCanonical            = flag.Bool("normalize-canonical", false, "run sealed ordinary canonical normalization and exit")
+	normalizationInput            = flag.String("normalization-input", "", "absolute path to the root-only canonical normalization input")
+	normalizationInputSHA         = flag.String("normalization-input-sha256", "", "exact SHA-256 of the canonical normalization input")
+	normalizationReceipt          = flag.String("normalization-receipt", "", "absolute path for the root-only canonical normalization receipt")
+	generateRepairManifest        = flag.Bool("generate-canonical-repair-manifest", false, "generate the private exact-seven repair manifest from normalized evidence and exit")
+	repairEvidenceDir             = flag.String("evidence-dir", "", "absolute root-only canonical repair evidence directory")
+	repairEvidenceDescriptor      = flag.String("classified-evidence-descriptor", "", "absolute path to the root-only classified evidence descriptor")
+	generateLegacyRepairManifest  = flag.Bool("generate-canonical-legacy-repair-manifest", false, "generate a sealed multi-family legacy lifecycle repair manifest and exit")
+	repairLegacyLifecycle         = flag.Bool("repair-canonical-legacy-lifecycle", false, "run the sealed multi-family legacy lifecycle repair and exit")
+	legacyRepairManifest          = flag.String("legacy-repair-manifest", "", "absolute path to the root-only legacy lifecycle repair manifest")
+	legacyRepairManifestSHA       = flag.String("legacy-repair-manifest-sha256", "", "exact SHA-256 of the legacy lifecycle repair manifest")
+	legacyRepairAuthority         = flag.String("legacy-repair-authority-marker", "", "absolute path to the root-only legacy lifecycle repair confirmation token")
+	legacyRepairReceipt           = flag.String("legacy-repair-receipt", "", "absolute path for the root-only legacy lifecycle repair receipt")
+	legacyRepairSecondObservation = flag.String("legacy-repair-second-observation", "", "absolute path to the second stable legacy lifecycle repair observation")
+	upgrader                      = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
 	}
 
@@ -880,6 +887,43 @@ func main() {
 		}
 		return
 	}
+	canonicalMaintenanceModes := 0
+	for _, enabled := range []bool{*repairCanonical, *observeRepair, *normalizeCanonical, *generateRepairManifest, *generateLegacyRepairManifest, *repairLegacyLifecycle} {
+		if enabled {
+			canonicalMaintenanceModes++
+		}
+	}
+	if canonicalMaintenanceModes > 1 {
+		fmt.Fprintln(os.Stderr, "Canonical maintenance modes are mutually exclusive")
+		os.Exit(2)
+	}
+	legacyRepairArgumentsPresent := *legacyRepairManifest != "" || *legacyRepairManifestSHA != "" || *legacyRepairAuthority != "" || *legacyRepairReceipt != "" || *legacyRepairSecondObservation != ""
+	if legacyRepairArgumentsPresent && !*generateLegacyRepairManifest && !*repairLegacyLifecycle {
+		fmt.Fprintln(os.Stderr, "Canonical legacy repair arguments require their matching mode")
+		os.Exit(2)
+	}
+	if *generateLegacyRepairManifest {
+		if *renderRunnerWorker || *repairLegacyLifecycle || *legacyRepairManifestSHA != "" || *legacyRepairAuthority != "" || *legacyRepairReceipt != "" || *repairObservation == "" || *legacyRepairSecondObservation == "" || *legacyRepairManifest == "" || *repairManifest != "" || *repairManifestSHA != "" || *repairAuthority != "" || *repairReceipt != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
+			fmt.Fprintln(os.Stderr, "Canonical legacy repair manifest generation requires only repair-observation and legacy-repair-manifest")
+			os.Exit(2)
+		}
+		if err := generateCanonicalLegacyRepairManifestCLI(*repairObservation, *legacyRepairSecondObservation, *legacyRepairManifest); err != nil {
+			fmt.Fprintf(os.Stderr, "Canonical legacy repair manifest generation failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	if *repairLegacyLifecycle {
+		if *renderRunnerWorker || *legacyRepairManifest == "" || *legacyRepairManifestSHA == "" || *legacyRepairAuthority == "" || *legacyRepairReceipt == "" || *legacyRepairSecondObservation != "" || *repairObservation != "" || *repairManifest != "" || *repairManifestSHA != "" || *repairAuthority != "" || *repairReceipt != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
+			fmt.Fprintln(os.Stderr, "Canonical legacy repair requires its exact manifest, digest, authority marker, and receipt")
+			os.Exit(2)
+		}
+		if err := runCanonicalLegacyRepairCLI(context.Background(), *legacyRepairManifest, *legacyRepairManifestSHA, *legacyRepairAuthority, *legacyRepairReceipt); err != nil {
+			fmt.Fprintf(os.Stderr, "Canonical legacy lifecycle repair failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
 	if *repairCanonical {
 		if *renderRunnerWorker || *observeRepair || *normalizeCanonical || *generateRepairManifest || *repairObservation != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
 			fmt.Fprintln(os.Stderr, "Canonical repair mode cannot be combined with another maintenance mode")
@@ -924,7 +968,7 @@ func main() {
 		}
 		return
 	}
-	if *repairManifest != "" || *repairManifestSHA != "" || *repairAuthority != "" || *repairReceipt != "" || *repairObservation != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
+	if *repairManifest != "" || *repairManifestSHA != "" || *repairAuthority != "" || *repairReceipt != "" || *repairObservation != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" || *legacyRepairManifest != "" || *legacyRepairManifestSHA != "" || *legacyRepairAuthority != "" || *legacyRepairReceipt != "" {
 		fmt.Fprintln(os.Stderr, "Canonical maintenance arguments require their matching mode flag")
 		os.Exit(2)
 	}
