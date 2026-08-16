@@ -30393,7 +30393,7 @@
                 </span>
                 <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
               </div>
-              <div id="homeStarters" class="home-starters" role="group" aria-label="Conversation starter categories" aria-busy="true" data-hydrated="false">
+              <div id="homeStarters" class="home-starters" role="group" aria-label="Conversation starter categories" aria-busy="true" data-hydrated="false" hidden>
                 <button type="button" class="home-starter pressable" data-category-id="continue" aria-label="Continue. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">↻</span><span class="home-starter__label">Continue</span><span class="home-starter__text"></span></button>
                 <button type="button" class="home-starter pressable" data-category-id="explore" aria-label="Explore. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">⌕</span><span class="home-starter__label">Explore</span><span class="home-starter__text"></span></button>
                 <button type="button" class="home-starter pressable" data-category-id="create" aria-label="Create. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true">✦</span><span class="home-starter__label">Create</span><span class="home-starter__text"></span></button>
@@ -73527,7 +73527,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             && category.suggestions.length > 0 && category.suggestions.length <= 4
             && category.suggestions.every(suggestion => suggestion && typeof suggestion.id === 'string'
               && typeof suggestion.text === 'string' && Boolean(suggestion.text.trim())
-              && typeof suggestion.whyThis === 'string' && Boolean(suggestion.whyThis.trim())
               && suggestion.destination && ['new-private', 'thread'].includes(suggestion.destination.route)
               && (suggestion.destination.route !== 'thread' || Boolean(String(suggestion.destination.threadId || '').trim()))))
           && typeof value.allClear === 'boolean')
@@ -73584,18 +73583,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const text = document.createElement('span')
         text.className = 'home-suggestion__text'
         text.textContent = String(suggestion?.text || '')
-        const why = document.createElement('span')
-        why.className = 'home-suggestion__why'
-        why.textContent = String(suggestion?.whyThis || '')
-        copy.append(text, why)
+        copy.append(text)
         const arrow = document.createElement('span')
         arrow.className = 'home-suggestion__arrow'
         arrow.setAttribute('aria-hidden', 'true')
         arrow.textContent = '→'
         button.append(icon, copy, arrow)
-        const whyThis = String(suggestion?.whyThis || '').trim()
-        button.setAttribute('aria-label', `Use suggestion: ${String(suggestion?.text || '')}${whyThis ? `. Why this: ${whyThis}` : ''}`)
-        if (whyThis) button.title = `Why this: ${whyThis}`
+        button.setAttribute('aria-label', `Use suggestion: ${String(suggestion?.text || '')}`)
         button.addEventListener('click', () => {
           if (!homeScoutInput || !String(suggestion?.text || '').trim()) return
           homeScoutInput.value = String(suggestion.text)
@@ -73645,29 +73639,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderHomeStarters() {
         if (!homeStarters) return
-        const suggestionsReady = Boolean(authedUser && !guestMode && homeSnapshot.starters.length === HOME_CATEGORY_SHELLS.length)
-        // This taxonomy is safe product chrome. Paint its reserved geometry
-        // before auth restoration and the permission-filtered Home fetch;
-        // guest mode is the only state that suppresses it.
-        const categories = !guestMode
-          ? (suggestionsReady ? homeSnapshot.starters : HOME_CATEGORY_SHELLS)
-          : []
-        if (!categories.some(category => category.id === selectedHomeCategoryId)) selectedHomeCategoryId = ''
-        const selected = categories.find(category => category.id === selectedHomeCategoryId)
-        homeStarters.hidden = !categories.length || Boolean(selected)
-        homeStarters.dataset.hydrated = String(suggestionsReady)
-        homeStarters.setAttribute('aria-busy', String(!suggestionsReady))
-        homeStarters.replaceChildren(...categories.map(category => homeCategoryNode(category, suggestionsReady)))
-        const suggestions = selected?.suggestions || []
-        officeLaunchHome?.classList.toggle('is-starter-open', Boolean(selected))
-        if (homeSuggestions) {
-          homeSuggestions.hidden = !suggestions.length
-          homeSuggestions.setAttribute('aria-label', selected ? `${selected.label} suggestions` : 'Suggestions based on your recent work')
-          homeSuggestions.replaceChildren(...(selected ? [homeSuggestionBackNode(selected), ...suggestions.map(homeSuggestionNode)] : []))
-        }
+        // Real work items from /assistant/home are the primary surface now.
+        // The generic Continue/Explore/Create/Challenge taxonomy is hidden;
+        // "no real work yet" shows an honest empty state, not a fake generic pack.
+        homeStarters.hidden = true
+        homeSuggestions.hidden = true
+        officeLaunchHome?.classList.remove('is-starter-open')
+        selectedHomeCategoryId = ''
         if (homeContinuity) {
           const availableContext = authedUser && !guestMode && homeSnapshot.items.some(item => item?.kind !== 'live-meeting')
-          homeContinuity.hidden = Boolean(categories.length) || !availableContext
+          homeContinuity.hidden = !availableContext
         }
       }
 
