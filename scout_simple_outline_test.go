@@ -276,15 +276,18 @@ func TestDeckDirectionEstablished(t *testing.T) {
 		{"minimal style in query", "minimal presentation about AI", nil, true},
 		{"corporate style in query", "corporate pitch deck", nil, true},
 
-		// User confirms after direction pass
-		{"yes confirmation after direction", "yes", []scoutChatTurn{
-			{role: "scout", text: "What visual direction would you like?"},
+		// User confirms after direction pass (realistic wording without "direction/aesthetic/visual/style")
+		{"yes confirmation after corporate/startup question", "yes", []scoutChatTurn{
+			{role: "user", text: "make a deck about our product"},
+			{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy?"},
 		}, true},
-		{"looks good confirmation", "looks good", []scoutChatTurn{
-			{role: "scout", text: "I'm thinking a dark, minimal aesthetic"},
+		{"looks good after full-bleed question", "looks good", []scoutChatTurn{
+			{role: "user", text: "make a presentation"},
+			{role: "scout", text: "Full-bleed imagery to set the mood, or clean typographic slides?"},
 		}, true},
-		{"proceed confirmation", "proceed", []scoutChatTurn{
-			{role: "scout", text: "What visual style would you prefer?"},
+		{"proceed after design question", "proceed", []scoutChatTurn{
+			{role: "user", text: "build a pitch deck"},
+			{role: "scout", text: "Are you presenting to investors or a creative team?"},
 		}, true},
 
 		// Direction in history
@@ -292,11 +295,22 @@ func TestDeckDirectionEstablished(t *testing.T) {
 			{role: "user", text: "I want a dark, modern look"},
 		}, true},
 
+		// Scout asked direction questions with explicit keywords
+		{"scout asked about visual direction", "ok", []scoutChatTurn{
+			{role: "user", text: "make a deck"},
+			{role: "scout", text: "What visual direction would you like?"},
+		}, true},
+
 		// No direction - should return false
 		{"plain deck request no history", "make a 5-slide deck", nil, false},
 		{"plain deck request with unrelated history", "make a 5-slide deck", []scoutChatTurn{
 			{role: "user", text: "hello"},
 			{role: "scout", text: "hi there"},
+		}, false},
+		// Confirmation without a deck request in history should NOT trigger
+		{"yes without deck request", "yes", []scoutChatTurn{
+			{role: "user", text: "hello"},
+			{role: "scout", text: "Should this feel corporate?"},
 		}, false},
 	}
 
@@ -425,14 +439,15 @@ func TestInlineDeckAfterDirectionConfirmation(t *testing.T) {
 </html>`, nil
 	})
 
-	// Simulate conversation where Scout asked direction questions
+	// Simulate conversation where Scout asked direction questions (realistic wording)
+	// This tests the live path: "Should this feel corporate or startup? Full-bleed or typographic?"
 	history := []scoutChatTurn{
 		{role: "user", text: "make a deck about our product"},
-		{role: "scout", text: "What visual direction would you like? Corporate and polished, or startup energy?"},
+		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Are you thinking full-bleed imagery or clean typographic slides?"},
 	}
 
-	// User confirms with "looks good"
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, "looks good, build it", history)
+	// User confirms with just "yes"
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
 	}
@@ -443,6 +458,44 @@ func TestInlineDeckAfterDirectionConfirmation(t *testing.T) {
 	}
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
 		t.Errorf("After direction confirmation, should get HTML deck. Got: %q", reply.Text[:min(100, len(reply.Text))])
+	}
+}
+
+// TestInlineDeckConfirmationVariants tests various confirmation phrases after direction pass.
+func TestInlineDeckConfirmationVariants(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		return `<!doctype html><html><head><title>Test</title></head><body></body></html>`, nil
+	})
+
+	// Realistic direction pass that doesn't contain "direction/aesthetic/visual/style"
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Full-bleed imagery to set the mood, or clean typographic slides?"},
+	}
+
+	confirmations := []string{"yes", "looks good", "proceed", "perfect", "great", "sure", "ok"}
+
+	for _, confirm := range confirmations {
+		t.Run(confirm, func(t *testing.T) {
+			reply, err := app.resolveInlineDeckReply(context.Background(), user, confirm, history)
+			if err != nil {
+				t.Fatalf("resolveInlineDeckReply(%q): %v", confirm, err)
+			}
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+				t.Errorf("Confirmation %q after direction pass should generate deck, got: %q", confirm, reply.Text[:min(80, len(reply.Text))])
+			}
+		})
 	}
 }
 

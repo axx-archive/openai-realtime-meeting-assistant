@@ -844,19 +844,9 @@ func deckDirectionEstablished(query string, history []scoutChatTurn) bool {
 	}
 	for _, phrase := range confirmPhrases {
 		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
-			// Check if previous message was a direction pass
-			if len(history) > 0 {
-				lastScout := ""
-				for i := len(history) - 1; i >= 0; i-- {
-					if history[i].role == "assistant" || history[i].role == "scout" {
-						lastScout = strings.ToLower(history[i].text)
-						break
-					}
-				}
-				if strings.Contains(lastScout, "direction") || strings.Contains(lastScout, "aesthetic") ||
-					strings.Contains(lastScout, "visual") || strings.Contains(lastScout, "style") {
-					return true
-				}
+			// Check if previous message was a direction pass (Scout asking about design)
+			if len(history) > 0 && hasDeckRequestInHistory(history) && lastScoutMessageIsDirectionPass(history) {
+				return true
 			}
 		}
 	}
@@ -874,13 +864,12 @@ func deckDirectionEstablished(query string, history []scoutChatTurn) bool {
 		}
 	}
 
-	// Check history for previous direction exchanges
+	// Check history for previous direction exchanges (only if there's a deck request context)
+	hasDeckContext := hasDeckRequestInHistory(history)
 	for _, turn := range history {
 		text := strings.ToLower(turn.text)
-		// Scout asked direction questions
-		if (turn.role == "assistant" || turn.role == "scout") &&
-			(strings.Contains(text, "direction") || strings.Contains(text, "aesthetic") ||
-				strings.Contains(text, "visual style") || strings.Contains(text, "look and feel")) {
+		// Scout asked direction questions — only counts if there's a deck request in context
+		if hasDeckContext && (turn.role == "assistant" || turn.role == "scout") && looksLikeDirectionPass(text) {
 			return true
 		}
 		// User provided direction in a previous message
@@ -890,6 +879,72 @@ func deckDirectionEstablished(query string, history []scoutChatTurn) bool {
 					return true
 				}
 			}
+		}
+	}
+
+	return false
+}
+
+// hasDeckRequestInHistory checks if there's a deck/presentation request in history.
+func hasDeckRequestInHistory(history []scoutChatTurn) bool {
+	for _, turn := range history {
+		if turn.role == "user" && scoutChatDeckRequestDetected(turn.text) {
+			return true
+		}
+	}
+	return false
+}
+
+// lastScoutMessageIsDirectionPass checks if the most recent Scout message
+// looks like a direction pass (asking about visual/design choices).
+func lastScoutMessageIsDirectionPass(history []scoutChatTurn) bool {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].role == "assistant" || history[i].role == "scout" {
+			return looksLikeDirectionPass(strings.ToLower(history[i].text))
+		}
+	}
+	return false
+}
+
+// looksLikeDirectionPass detects if text appears to be asking about design direction.
+// This is broader than just checking for "direction/aesthetic/visual/style" keywords —
+// a real direction pass might ask "Should this feel corporate or startup? Full-bleed or typographic?"
+func looksLikeDirectionPass(text string) bool {
+	// Direct keywords
+	directKeywords := []string{
+		"direction", "aesthetic", "visual", "style", "look and feel",
+		"design", "theme", "color", "vibe", "mood", "tone",
+	}
+	for _, kw := range directKeywords {
+		if strings.Contains(text, kw) {
+			return true
+		}
+	}
+
+	// Question patterns about design choices
+	designChoicePatterns := []string{
+		"corporate", "startup", "professional", "playful", "modern", "classic",
+		"full-bleed", "typographic", "minimal", "bold", "clean", "colorful",
+		"images", "photo", "buttoned-up", "energy", "feel", "investor",
+		"audience", "presenting to",
+	}
+	// If text contains a question mark AND any design choice pattern, it's likely direction
+	if strings.Contains(text, "?") {
+		for _, pattern := range designChoicePatterns {
+			if strings.Contains(text, pattern) {
+				return true
+			}
+		}
+	}
+
+	// Common direction pass question starters
+	questionStarters := []string{
+		"should this", "would you like", "what kind of", "how should",
+		"do you want", "are you thinking", "prefer",
+	}
+	for _, starter := range questionStarters {
+		if strings.Contains(text, starter) && strings.Contains(text, "?") {
+			return true
 		}
 	}
 

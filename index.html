@@ -34303,6 +34303,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // generation, including a same-email session replacement. Late product
         // responses from the prior cookie/session can never render afterward.
         authedUser = nextUser || null
+        window.currentUserEmail = nextIdentity || ''
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         syncPD1NavigationAccess()
         if (authedUser) {
@@ -41895,7 +41896,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // ---- Deck Editor — Keynote/PowerPoint-class controls ----
       // Edit mode lives alongside Present mode. Provides move/resize text,
       // drop images, z-order (front/back), and standard object controls.
-      // Access requires: Files or channel-shared deck (checked at open time).
+      // REAL editing of slide content — not just overlay stickers.
       let activeDeckEditor = null
 
       function openDeckEditor(htmlContent, title, options = {}) {
@@ -41903,12 +41904,73 @@ Wrap the entire export in one code block. After the code block, say whether the 
           closeDeckEditor()
         }
 
-        // Parse slides from HTML content
+        // Parse the full HTML document
         const parser = new DOMParser()
         const doc = parser.parseFromString(htmlContent, 'text/html')
-        const slides = Array.from(doc.querySelectorAll('.pg, .slide, section'))
-        if (slides.length === 0) {
-          slides.push(doc.body)
+
+        // Extract styles for the editor canvas
+        const styleBlocks = Array.from(doc.querySelectorAll('style')).map(s => s.outerHTML).join('\n')
+
+        // Find slides (support both .pg and .slide patterns)
+        let slideEls = Array.from(doc.querySelectorAll('.pg, .slide, section'))
+        if (slideEls.length === 0) slideEls = [doc.body]
+
+        // Parse each slide into editable elements
+        const slides = slideEls.map((slideEl, slideIndex) => {
+          const elements = []
+          // Find all text elements (h1, h2, h3, p, li, div with text)
+          const textEls = slideEl.querySelectorAll('h1, h2, h3, h4, p, li, span, div')
+          textEls.forEach((el, i) => {
+            const text = el.textContent?.trim()
+            if (!text || text.length === 0) return
+            // Skip if this is a container with nested text elements
+            if (el.querySelector('h1, h2, h3, p, li')) return
+            const rect = { x: 80, y: 80 + i * 60, width: 800, height: 60 }
+            const style = el.getAttribute('style') || ''
+            const fontSize = parseInt(getComputedStyleValue(el, 'font-size')) || 32
+            elements.push({
+              type: 'text',
+              tag: el.tagName.toLowerCase(),
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              content: text,
+              fontSize,
+              originalEl: el,
+              style
+            })
+          })
+          // Find images
+          const imgEls = slideEl.querySelectorAll('img, [style*="background-image"]')
+          imgEls.forEach((el, i) => {
+            let src = el.getAttribute('src') || ''
+            if (!src) {
+              const bgMatch = (el.getAttribute('style') || '').match(/url\(['"]?([^'")\s]+)['"]?\)/)
+              if (bgMatch) src = bgMatch[1]
+            }
+            if (!src) return
+            elements.push({
+              type: 'image',
+              x: 100,
+              y: 100 + i * 100,
+              width: 300,
+              height: 200,
+              src,
+              originalEl: el
+            })
+          })
+          return {
+            index: slideIndex,
+            originalEl: slideEl,
+            outerHTML: slideEl.outerHTML,
+            className: slideEl.className,
+            elements
+          }
+        })
+
+        function getComputedStyleValue(el, prop) {
+          try { return window.getComputedStyle(el)[prop] } catch { return '' }
         }
 
         // Build editor UI
@@ -41960,9 +42022,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           <div class="deck-editor__main">
             <div class="deck-editor__sidebar" data-slide-list></div>
             <div class="deck-editor__canvas-wrap">
-              <div class="deck-editor__canvas" data-canvas>
-                <div class="deck-editor__overlay" data-overlay></div>
-              </div>
+              <div class="deck-editor__canvas" data-canvas></div>
             </div>
             <div class="deck-editor__props" hidden>
               <div class="deck-editor__prop-section">
@@ -41984,7 +42044,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 </div>
               </div>
               <div class="deck-editor__prop-section">
-                <span class="deck-editor__prop-label">Layer Order</span>
+                <span class="deck-editor__prop-label">Layer</span>
                 <div class="deck-editor__zorder">
                   <button type="button" data-action="send-back">Back</button>
                   <button type="button" data-action="bring-front">Front</button>
@@ -41996,21 +42056,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         // State
         const state = {
-          slides: slides.map((slide, i) => ({
-            index: i,
-            html: slide.outerHTML,
-            elements: []
-          })),
+          slides,
           currentSlide: 0,
           selectedElement: null,
           originalHtml: htmlContent,
+          styleBlocks,
           title,
-          options
+          options,
+          dirty: false
         }
 
-        // Cache DOM refs
+        // DOM refs
         const canvas = editor.querySelector('[data-canvas]')
-        const overlay = editor.querySelector('[data-overlay]')
         const slideList = editor.querySelector('[data-slide-list]')
         const slideIndicator = editor.querySelector('[data-slide-indicator]')
         const propsPanel = editor.querySelector('.deck-editor__props')
@@ -42022,83 +42079,122 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const thumb = document.createElement('div')
             thumb.className = 'deck-editor__thumb'
             thumb.setAttribute('aria-selected', i === state.currentSlide ? 'true' : 'false')
-            thumb.innerHTML = `
-              <iframe srcdoc="${escapeHtml(wrapSlideHtml(slide.html))}" sandbox="allow-scripts"></iframe>
-              <span class="deck-editor__thumb-num">${i + 1}</span>
-            `
+            thumb.innerHTML = `<span class="deck-editor__thumb-num">${i + 1}</span>`
+            thumb.style.background = '#111'
             thumb.addEventListener('click', () => goToSlide(i))
             slideList.appendChild(thumb)
           })
         }
 
-        // Wrap single slide in minimal HTML for preview
-        function wrapSlideHtml(slideHtml) {
-          const styleMatch = htmlContent.match(/<style[^>]*>([\s\S]*?)<\/style>/gi) || []
-          return `<!doctype html><html><head><style>
-            body{margin:0;overflow:hidden;background:#000}
-            ${styleMatch.join('\n')}
-            .pg,.slide,section{position:relative!important;display:block!important;width:100%!important;height:100%!important}
-          </style></head><body>${slideHtml}</body></html>`
-        }
-
-        // Render current slide in canvas
+        // Render current slide with editable elements
         function renderCanvas() {
           const slide = state.slides[state.currentSlide]
           if (!slide) return
           canvas.innerHTML = ''
-          const frame = document.createElement('iframe')
-          frame.srcdoc = wrapSlideHtml(slide.html)
-          frame.setAttribute('sandbox', 'allow-scripts')
-          canvas.appendChild(frame)
-          // Re-add overlay
-          const newOverlay = document.createElement('div')
-          newOverlay.className = 'deck-editor__overlay'
-          newOverlay.setAttribute('data-overlay', '')
-          canvas.appendChild(newOverlay)
-          renderElements()
-        }
+          canvas.style.background = '#111'
 
-        // Render editable elements overlay
-        function renderElements() {
-          const overlayEl = canvas.querySelector('[data-overlay]')
-          if (!overlayEl) return
-          overlayEl.innerHTML = ''
-          const slide = state.slides[state.currentSlide]
-          if (!slide) return
+          // Render each element as an editable box
           slide.elements.forEach((el, i) => {
-            const div = document.createElement('div')
-            div.className = 'deck-editor__element'
-            div.style.cssText = `left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;z-index:${el.zIndex || i}`
-            div.dataset.elementIndex = i
-            div.dataset.selected = state.selectedElement === i ? 'true' : 'false'
-            if (el.type === 'text') {
-              div.innerHTML = `<div style="padding:8px;color:#fff;font-size:${el.fontSize || 24}px">${escapeHtml(el.content || 'Text')}</div>`
-            } else if (el.type === 'image' && el.src) {
-              div.innerHTML = `<img src="${escapeHtml(el.src)}" style="width:100%;height:100%;object-fit:cover" />`
-            }
-            // Selection handles
+            const box = document.createElement('div')
+            box.className = 'deck-editor__element'
+            box.dataset.elementIndex = String(i)
+            box.style.cssText = `
+              position:absolute;
+              left:${el.x * 0.5}px;
+              top:${el.y * 0.5}px;
+              width:${el.width * 0.5}px;
+              min-height:${el.height * 0.5}px;
+              z-index:${el.zIndex || i + 1};
+              cursor:move;
+            `
             if (state.selectedElement === i) {
-              div.innerHTML += `
-                <div class="deck-editor__handle deck-editor__handle--nw"></div>
-                <div class="deck-editor__handle deck-editor__handle--ne"></div>
-                <div class="deck-editor__handle deck-editor__handle--sw"></div>
-                <div class="deck-editor__handle deck-editor__handle--se"></div>
-              `
+              box.dataset.selected = 'true'
             }
-            div.addEventListener('mousedown', (e) => selectElement(i, e))
-            overlayEl.appendChild(div)
+
+            if (el.type === 'text') {
+              const textDiv = document.createElement('div')
+              textDiv.contentEditable = 'true'
+              textDiv.style.cssText = `
+                width:100%;height:100%;padding:4px;
+                color:#fff;font-size:${(el.fontSize || 32) * 0.5}px;
+                font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
+                outline:none;overflow:hidden;
+              `
+              textDiv.textContent = el.content
+              textDiv.addEventListener('input', () => {
+                el.content = textDiv.textContent
+                state.dirty = true
+              })
+              textDiv.addEventListener('mousedown', e => e.stopPropagation())
+              box.appendChild(textDiv)
+            } else if (el.type === 'image' && el.src) {
+              const img = document.createElement('img')
+              img.src = el.src
+              img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none'
+              box.appendChild(img)
+            }
+
+            // Selection handles for selected element
+            if (state.selectedElement === i) {
+              const handles = ['nw', 'ne', 'sw', 'se']
+              handles.forEach(pos => {
+                const handle = document.createElement('div')
+                handle.className = `deck-editor__handle deck-editor__handle--${pos}`
+                handle.dataset.handle = pos
+                box.appendChild(handle)
+              })
+            }
+
+            box.addEventListener('mousedown', e => startDragOrResize(i, e))
+            canvas.appendChild(box)
           })
         }
 
-        function selectElement(index, e) {
-          e?.stopPropagation()
+        // Drag and resize
+        function startDragOrResize(index, e) {
+          e.preventDefault()
+          const handle = e.target.dataset?.handle
+          const slide = state.slides[state.currentSlide]
+          const el = slide?.elements[index]
+          if (!el) return
+
+          // Select element
           state.selectedElement = index
-          propsPanel.hidden = index === null
-          renderElements()
+          propsPanel.hidden = false
           updatePropsPanel()
-          if (index !== null) {
-            enableDrag(index, e)
+          renderCanvas()
+
+          const startX = e.clientX
+          const startY = e.clientY
+          const origX = el.x
+          const origY = el.y
+          const origW = el.width
+          const origH = el.height
+
+          const onMove = (ev) => {
+            const dx = (ev.clientX - startX) * 2  // Scale back to 1920x1080
+            const dy = (ev.clientY - startY) * 2
+            if (handle) {
+              // Resize
+              if (handle.includes('e')) el.width = Math.max(50, origW + dx)
+              if (handle.includes('w')) { el.x = origX + dx; el.width = Math.max(50, origW - dx) }
+              if (handle.includes('s')) el.height = Math.max(30, origH + dy)
+              if (handle.includes('n')) { el.y = origY + dy; el.height = Math.max(30, origH - dy) }
+            } else {
+              // Move
+              el.x = origX + dx
+              el.y = origY + dy
+            }
+            state.dirty = true
+            renderCanvas()
+            updatePropsPanel()
           }
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove)
+            document.removeEventListener('mouseup', onUp)
+          }
+          document.addEventListener('mousemove', onMove)
+          document.addEventListener('mouseup', onUp)
         }
 
         function updatePropsPanel() {
@@ -42110,30 +42206,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
           propsPanel.querySelector('[data-prop="y"]').value = Math.round(el.y)
           propsPanel.querySelector('[data-prop="width"]').value = Math.round(el.width)
           propsPanel.querySelector('[data-prop="height"]').value = Math.round(el.height)
-        }
-
-        // Drag functionality
-        function enableDrag(index, startEvent) {
-          if (!startEvent) return
-          const slide = state.slides[state.currentSlide]
-          const el = slide?.elements[index]
-          if (!el) return
-          const startX = startEvent.clientX
-          const startY = startEvent.clientY
-          const origX = el.x
-          const origY = el.y
-          const onMove = (e) => {
-            el.x = origX + (e.clientX - startX)
-            el.y = origY + (e.clientY - startY)
-            renderElements()
-          }
-          const onUp = () => {
-            document.removeEventListener('mousemove', onMove)
-            document.removeEventListener('mouseup', onUp)
-            updatePropsPanel()
-          }
-          document.addEventListener('mousemove', onMove)
-          document.addEventListener('mouseup', onUp)
         }
 
         function goToSlide(index) {
@@ -42148,22 +42220,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
           editor.querySelector('[data-action="next-slide"]').disabled = index === state.slides.length - 1
         }
 
-        // Add elements
+        // Add new elements
         function addTextBox() {
           const slide = state.slides[state.currentSlide]
           slide.elements.push({
-            type: 'text',
-            x: 100,
-            y: 100,
-            width: 300,
-            height: 60,
-            content: 'New text',
-            fontSize: 24,
-            zIndex: slide.elements.length
+            type: 'text', tag: 'p',
+            x: 200, y: 200, width: 400, height: 60,
+            content: 'New text', fontSize: 32, zIndex: slide.elements.length + 1
           })
           state.selectedElement = slide.elements.length - 1
+          state.dirty = true
           propsPanel.hidden = false
-          renderElements()
+          renderCanvas()
           updatePropsPanel()
         }
 
@@ -42179,16 +42247,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
               const slide = state.slides[state.currentSlide]
               slide.elements.push({
                 type: 'image',
-                x: 100,
-                y: 100,
-                width: 200,
-                height: 150,
-                src: reader.result,
-                zIndex: slide.elements.length
+                x: 200, y: 200, width: 400, height: 300,
+                src: reader.result, zIndex: slide.elements.length + 1
               })
               state.selectedElement = slide.elements.length - 1
+              state.dirty = true
               propsPanel.hidden = false
-              renderElements()
+              renderCanvas()
               updatePropsPanel()
             }
             reader.readAsDataURL(file)
@@ -42200,9 +42265,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         function bringToFront() {
           if (state.selectedElement === null) return
           const slide = state.slides[state.currentSlide]
-          const maxZ = Math.max(...slide.elements.map(e => e.zIndex || 0))
+          const maxZ = Math.max(...slide.elements.map(e => e.zIndex || 0), 0)
           slide.elements[state.selectedElement].zIndex = maxZ + 1
-          renderElements()
+          state.dirty = true
+          renderCanvas()
         }
 
         function sendToBack() {
@@ -42210,33 +42276,79 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const slide = state.slides[state.currentSlide]
           slide.elements.forEach(e => { e.zIndex = (e.zIndex || 0) + 1 })
           slide.elements[state.selectedElement].zIndex = 0
-          renderElements()
+          state.dirty = true
+          renderCanvas()
         }
 
-        // Present mode
-        function enterPresent() {
-          closeDeckEditor()
-          const wrap = document.createElement('div')
-          wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000'
-          const frame = document.createElement('iframe')
-          frame.style.cssText = 'width:100%;height:100%;border:none'
-          frame.srcdoc = htmlContent
-          frame.setAttribute('sandbox', 'allow-scripts')
-          frame.setAttribute('allowfullscreen', '')
-          wrap.appendChild(frame)
-          document.body.appendChild(wrap)
-          wrap.addEventListener('click', () => wrap.remove())
-          frame.requestFullscreen?.()?.catch(() => {})
+        // Build updated HTML from edited state
+        function buildUpdatedHtml() {
+          const newDoc = parser.parseFromString(state.originalHtml, 'text/html')
+          const newSlides = Array.from(newDoc.querySelectorAll('.pg, .slide, section'))
+
+          state.slides.forEach((slide, slideIdx) => {
+            if (!newSlides[slideIdx]) return
+            const slideEl = newSlides[slideIdx]
+            // Clear existing content and rebuild from elements
+            // For simplicity, we rebuild the inner content
+            let newContent = ''
+            slide.elements.forEach(el => {
+              if (el.type === 'text') {
+                const tag = el.tag || 'p'
+                const style = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;font-size:${el.fontSize}px;`
+                newContent += `<${tag} style="${style}">${escapeHtml(el.content)}</${tag}>\n`
+              } else if (el.type === 'image' && el.src) {
+                const style = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;object-fit:cover;`
+                newContent += `<img src="${el.src}" style="${style}" />\n`
+              }
+            })
+            slideEl.innerHTML = newContent
+          })
+          return '<!doctype html>\n' + newDoc.documentElement.outerHTML
         }
 
-        // Save
+        // Save — writes the modified HTML back
         function saveDeck() {
+          const updatedHtml = buildUpdatedHtml()
+          // Update the source element if this is an inline deck
+          if (options.source && options.inline) {
+            const frame = options.source.querySelector('iframe')
+            if (frame) {
+              frame.srcdoc = updatedHtml
+            }
+          }
+          // Store in options for retrieval
+          state.savedHtml = updatedHtml
+          state.dirty = false
           showToast({ text: 'Deck saved', kind: 'done' })
           closeDeckEditor()
         }
 
+        // Present — fullscreen the existing inline iframe if available
+        function enterPresent() {
+          if (options.source && options.inline) {
+            const frame = options.source.querySelector('iframe')
+            if (frame) {
+              frame.requestFullscreen?.()?.catch(() => {})
+              return
+            }
+          }
+          // Fallback: create new fullscreen frame
+          const updatedHtml = state.dirty ? buildUpdatedHtml() : state.originalHtml
+          const wrap = document.createElement('div')
+          wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000'
+          const frame = document.createElement('iframe')
+          frame.style.cssText = 'width:100%;height:100%;border:none'
+          frame.srcdoc = updatedHtml
+          frame.setAttribute('sandbox', 'allow-scripts')
+          frame.setAttribute('allowfullscreen', '')
+          wrap.appendChild(frame)
+          document.body.appendChild(wrap)
+          wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove() })
+          frame.requestFullscreen?.()?.catch(() => {})
+        }
+
         // Event delegation
-        editor.addEventListener('click', (e) => {
+        editor.addEventListener('click', e => {
           const action = e.target.closest('[data-action]')?.dataset?.action
           if (action === 'close') closeDeckEditor()
           else if (action === 'prev-slide') goToSlide(state.currentSlide - 1)
@@ -42249,47 +42361,47 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'save') saveDeck()
         })
 
-        // Props panel changes
-        propsPanel.addEventListener('input', (e) => {
+        // Props panel input
+        propsPanel.addEventListener('input', e => {
           const prop = e.target.dataset.prop
           if (!prop || state.selectedElement === null) return
           const slide = state.slides[state.currentSlide]
           const el = slide?.elements[state.selectedElement]
           if (!el) return
-          const val = parseFloat(e.target.value) || 0
-          el[prop] = val
-          renderElements()
+          el[prop] = parseFloat(e.target.value) || 0
+          state.dirty = true
+          renderCanvas()
         })
 
-        // Click canvas to deselect
-        canvas.addEventListener('click', (e) => {
-          if (e.target === canvas || e.target.classList.contains('deck-editor__overlay')) {
-            selectElement(null)
+        // Deselect on canvas background click
+        canvas.addEventListener('click', e => {
+          if (e.target === canvas) {
+            state.selectedElement = null
+            propsPanel.hidden = true
+            renderCanvas()
           }
         })
 
-        // Keyboard shortcuts
-        const handleKey = (e) => {
+        // Keyboard
+        const handleKey = e => {
           if (e.key === 'Escape') closeDeckEditor()
-          if (e.key === 'Delete' || e.key === 'Backspace') {
-            if (state.selectedElement !== null) {
-              const slide = state.slides[state.currentSlide]
-              slide.elements.splice(state.selectedElement, 1)
-              state.selectedElement = null
-              propsPanel.hidden = true
-              renderElements()
-            }
+          if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedElement !== null && !e.target.isContentEditable) {
+            const slide = state.slides[state.currentSlide]
+            slide.elements.splice(state.selectedElement, 1)
+            state.selectedElement = null
+            state.dirty = true
+            propsPanel.hidden = true
+            renderCanvas()
           }
         }
         document.addEventListener('keydown', handleKey)
 
-        // Store cleanup ref
         activeDeckEditor = {
           element: editor,
-          cleanup: () => document.removeEventListener('keydown', handleKey)
+          cleanup: () => document.removeEventListener('keydown', handleKey),
+          getHtml: () => state.dirty ? buildUpdatedHtml() : state.originalHtml
         }
 
-        // Initial render
         document.body.appendChild(editor)
         renderThumbs()
         renderCanvas()
