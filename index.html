@@ -59210,18 +59210,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         'financial model', 'mixed package', 'scheduled work'
       ])
 
-      // Check if a title looks like inappropriate content (markdown, last spoken line, etc.)
-      function isInappropriateTitle(title) {
-        if (!title) return true
-        // Contains markdown syntax
-        if (/\*\*|\*[^*]|`[^`]|~~|__|^\s*[-*+]\s/.test(title)) return true
-        // Looks like a sentence (ends with punctuation, very long without structure)
-        if (/[.!?]$/.test(title) && title.length > 50) return true
-        // Starts with lowercase (likely a sentence fragment)
-        if (/^[a-z]/.test(title) && title.length > 30) return true
-        // Contains raw code or URLs
-        if (/https?:\/\/|<[a-z]|&[a-z]+;/.test(title)) return true
-        return false
+      // Check if text looks like a proper heading title (NOT spoken text or sentences)
+      function looksLikeHeadingTitle(title) {
+        if (!title || title.length < 3 || title.length > 80) return false
+        // Reject markdown syntax
+        if (/\*\*|\*[^*]|`[^`]|~~|__|^\s*[-*+]\s/.test(title)) return false
+        // Reject URLs and code
+        if (/https?:\/\/|<[a-z]|&[a-z]+;/.test(title)) return false
+        // Reject sentences (contain common sentence patterns)
+        if (/\b(I |I'|we |you |it |is |are |was |were |can |could |would |should |appears? |seems? |found |couldn't|can't|don't|didn't|won't|isn't|aren't)\b/i.test(title)) return false
+        // Reject if ends with sentence punctuation and is long
+        if (/[.!?…]$/.test(title) && title.length > 40) return false
+        // Reject if starts with "No " or "The " followed by long text (likely a sentence)
+        if (/^(No |The |A |An )/i.test(title) && title.length > 35) return false
+        // Reject verb phrases (past tense verb + word, like "Kept owner", "Found nothing")
+        if (/^(Kept|Found|Got|Saw|Made|Had|Did|Done|Gone|Taken|Given|Known|Seen|Said|Told|Sent|Left|Brought|Thought|Lost|Won|Spent|Meant|Held|Met|Paid|Sold|Built|Read)\s+\w/i.test(title)) return false
+        // Reject family labels
+        if (FAMILY_LABELS.has(title.toLowerCase())) return false
+        return true
       }
 
       function chatThreadDisplayTitle(thread) {
@@ -59234,28 +59240,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           return String(thread.title || 'team channel')
         }
-        // Private thread title resolution — never show raw prompt
-        // Order: real work name > markdown heading > em-dash title > family
+        // Private thread title resolution — ONLY headings, never spoken text
+        // Order: markdown heading (artifact body) > markdown heading (Scout messages) > em-dash title > family
+        // NEVER accept metadata.title or preview/spoken text directly as title
+        
         const artifactInfo = chatThreadLatestArtifactInfo(thread)
-        const artifactTitle = artifactInfo?.title || ''
-        const isFamilyLabel = FAMILY_LABELS.has(artifactTitle.toLowerCase())
+        const artifact = artifactInfo?.artifact
+        const familyLabel = artifactInfo?.family || ''
 
-        // 1. Real work name: metadata.title when ≠ query (not family label, not inappropriate)
-        if (artifactTitle && !isFamilyLabel && !isInappropriateTitle(artifactTitle)) {
-          return artifactTitle
+        // 1. First markdown heading (# / ## / ###) from artifact body
+        if (artifact?.text) {
+          const headingMatch = String(artifact.text).match(/^#{1,3}\s+([^\n]{3,80})/m)
+          if (headingMatch) {
+            const heading = headingMatch[1].trim()
+            if (looksLikeHeadingTitle(heading)) {
+              return heading
+            }
+          }
         }
 
-        // 2. First markdown heading (# / ## / ###) in Scout messages — but skip if inappropriate
+        // 2. First markdown heading from Scout messages
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
           const role = String(msg?.role || '').toLowerCase()
           if (role === 'assistant' || role === 'scout') {
             const text = String(msg?.text || '')
-            const headingMatch = text.match(/^#{1,3}\s+([^\n]{3,90})/m)
+            const headingMatch = text.match(/^#{1,3}\s+([^\n]{3,80})/m)
             if (headingMatch) {
               const heading = headingMatch[1].trim()
-              if (!isInappropriateTitle(heading)) {
+              if (looksLikeHeadingTitle(heading)) {
                 return heading
               }
             }
@@ -59263,30 +59277,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         // 3. Em-dash title pattern in preview (e.g., "STRIDE Brain Privacy — 5-Slide Outline")
-        // Check both stored preview AND computed preview
         const storedPreview = String(thread?.preview || '').trim()
         const computedPreview = chatThreadDisplayPreview(thread)
         const previewsToCheck = [storedPreview, computedPreview].filter(Boolean)
         
         for (const preview of previewsToCheck) {
-          // Match "Title — Subtitle" or "Title – Subtitle" or "Title - Subtitle" pattern
-          const emDashMatch = preview.match(/^([^—–\-\n]{3,60})\s*[—–-]\s*\S/)
+          // Match "Title — Subtitle" pattern (must have em-dash/en-dash with content after)
+          const emDashMatch = preview.match(/^([^—–\n]{3,60})\s*[—–]\s*\S/)
           if (emDashMatch) {
             const title = emDashMatch[1].trim()
-            const lower = title.toLowerCase()
-            if (!FAMILY_LABELS.has(lower) && !PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) && !isInappropriateTitle(title)) {
+            if (looksLikeHeadingTitle(title)) {
               return title
             }
           }
         }
 
-        // 4. Family (Work / Outline / Research) ONLY if none of the above
+        // 4. Family (Work / Outline / Research) ONLY as last resort
         if (chatThreadTitleIsPlaceholder(thread)) {
           return 'new thread'
         }
-        // Use artifact family if available, else compute from thread query
-        if (artifactTitle && isFamilyLabel) {
-          return artifactTitle
+        if (familyLabel && FAMILY_LABELS.has(familyLabel.toLowerCase())) {
+          return familyLabel
         }
         const threadQuery = String(thread.title || '').trim()
         if (!threadQuery) {
