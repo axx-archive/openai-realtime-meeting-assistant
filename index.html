@@ -59069,7 +59069,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return String(thread.title || 'team channel')
         }
         // Private thread title resolution — never show raw prompt
-        // Order: real work name > heading > preview sentence > family
+        // Order: real work name > markdown heading > em-dash title > family
         const artifactInfo = chatThreadLatestArtifactInfo(thread)
         const artifactTitle = artifactInfo?.title || ''
         const isFamilyLabel = FAMILY_LABELS.has(artifactTitle.toLowerCase())
@@ -59079,7 +59079,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return artifactTitle
         }
 
-        // 2. First heading / named title in artifact body or Scout messages
+        // 2. First markdown heading (# / ## / ###) in Scout messages
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
@@ -59093,18 +59093,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
 
-        // 3. First sentence of thread.preview if not status crumb and not family label
+        // 3. Em-dash title pattern in preview (e.g., "STRIDE Brain Privacy — 5-Slide Outline")
+        // Do NOT take first sentence of preview — that's the last spoken line, not a heading
         const preview = String(thread?.preview || '').trim()
         if (preview) {
-          const firstLine = preview.split(/[.\n]/)[0]?.trim()
-          if (firstLine && firstLine.length >= 3 && firstLine.length <= 90) {
-            const lower = firstLine.toLowerCase()
-            const isStatusCrumb = PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) ||
-              /^(scout is|approved\s*·|queued\s*·|waiting for|needs approval|needs attention)/.test(lower) ||
-              /^(research|presentation|design|document|work|outline)\s+(delivered|in progress|complete|draft)/i.test(lower)
-            const isJustFamily = FAMILY_LABELS.has(lower)
-            if (!isStatusCrumb && !isJustFamily) {
-              return firstLine
+          // Match "Title — Subtitle" or "Title – Subtitle" or "Title - Subtitle" pattern
+          const emDashMatch = preview.match(/^([A-Z][^—–\-\n]{2,60})\s*[—–-]\s*\S/i)
+          if (emDashMatch) {
+            const title = emDashMatch[1].trim()
+            const lower = title.toLowerCase()
+            if (!FAMILY_LABELS.has(lower) && !PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim())) {
+              return title
             }
           }
         }
