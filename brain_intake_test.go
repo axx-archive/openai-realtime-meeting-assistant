@@ -76,7 +76,7 @@ func TestBrainIntakeIngestsContributionsAndAdvances(t *testing.T) {
 	}
 
 	files := []scoutChatFileAttachment{{Name: "origin.txt", Kind: "text/plain", Size: 64, Text: "Founded 2015 by Tim and Nick."}}
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Shareability started as a viral video studio.", files, "")
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "We started as a viral video studio.", files, "")
 	if err != nil {
 		t.Fatalf("append intake message: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestBrainIntakeContributionsSynthesizeIntoBrain(t *testing.T) {
 		if !strings.Contains(request.Input, "Adobe launch") {
 			t.Fatalf("brain input missing intake material: %s", request.Input)
 		}
-		return "## Overview\nShareability's Adobe launch drove 400M views.", nil
+		return "## Overview\nThe Adobe launch campaign drove 400M views.", nil
 	})
 	if err != nil {
 		t.Fatalf("runMeetingBrainOnce: %v", err)

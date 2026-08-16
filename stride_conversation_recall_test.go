@@ -250,6 +250,145 @@ func TestAgentThreadTerminalSourceAuthorityIsHeldThroughFinalEffect(t *testing.T
 	}
 }
 
+// TestPrivateChannelRecallMembershipDoctrine validates the privacy doctrine:
+// - Private channels (public visibility with member restrictions) ARE recallable by members
+// - Private channels are NOT recallable by non-members
+// - 1:1 private Scout chats remain excluded from all recall and brain synthesis
+//
+// This test validates the filtering logic at the scoutChatThreadAllowsViewer level
+// since that is the enforcement point for the doctrine. The full STRIDE conversation
+// ledger integration is tested separately in TestSTRIDECompanyConversationRecall*.
+func TestPrivateChannelRecallMembershipDoctrine(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	const (
+		privateOneOnOne = "PRIVATE-SCOUT-CHAT-CANARY-7734"
+	)
+
+	// Create a project channel with member restrictions (public visibility + member list)
+	// Per the doctrine: "The company brain MUST ingest private channels"
+	// AND "Humans must NOT see other people's private-channel clutter in the IA"
+	projectChannel, created, err := app.ensureScoutChatThread(
+		"doctrine-project-channel",
+		"aj@shareability.com",
+		"AJ",
+		"Project Alpha",
+		scoutChatVisibilityPublic,
+		[]string{"e@shareability.com"}, // Erick is a member
+	)
+	if err != nil || !created {
+		t.Fatalf("create project channel: created=%v err=%v", created, err)
+	}
+	if scoutChatThreadIsOrganizationPublic(projectChannel) {
+		t.Fatal("project channel should NOT be organization-public (it has member restrictions)")
+	}
+	if scoutChatThreadVisibility(projectChannel) != scoutChatVisibilityPublic {
+		t.Fatal("project channel should have public visibility")
+	}
+
+	// Create an org-public channel (no member restrictions)
+	orgChannel, created, err := app.ensureScoutChatThread(
+		"doctrine-org-channel",
+		"aj@shareability.com",
+		"AJ",
+		"General",
+		scoutChatVisibilityPublic,
+		nil, // No member restrictions = org-public
+	)
+	if err != nil || !created {
+		t.Fatalf("create org channel: created=%v err=%v", created, err)
+	}
+	if !scoutChatThreadIsOrganizationPublic(orgChannel) {
+		t.Fatal("org channel should be organization-public (no member restrictions)")
+	}
+
+	// Create a 1:1 private Scout chat (owner + Scout only)
+	// Per the doctrine: "1:1 private Scout chats stay owner-only and stay OUT of the company brain"
+	privateScout, err := app.createScoutChatThread("aj@shareability.com", "AJ", "My private notes", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoutChatThreadVisibility(privateScout) != scoutChatVisibilityPrivate {
+		t.Fatal("private Scout chat should have private visibility")
+	}
+
+	// DOCTRINE TEST: scoutChatThreadAllowsViewer enforcement
+	// This is the core enforcement point for "Humans must NOT see other people's private-channel clutter"
+
+	// Project owner can view project channel
+	if !scoutChatThreadAllowsViewer(projectChannel, "aj@shareability.com") {
+		t.Fatal("DOCTRINE VIOLATION: project owner cannot view own project")
+	}
+
+	// Project member can view project channel
+	if !scoutChatThreadAllowsViewer(projectChannel, "e@shareability.com") {
+		t.Fatal("DOCTRINE VIOLATION: project member cannot view project they are part of")
+	}
+
+	// Non-member CANNOT view project channel
+	if scoutChatThreadAllowsViewer(projectChannel, "caitlyn@shareability.com") {
+		t.Fatal("PRIVACY LEAK: non-member can view restricted project channel")
+	}
+
+	// Anyone can view org-public channel
+	if !scoutChatThreadAllowsViewer(orgChannel, "aj@shareability.com") || !scoutChatThreadAllowsViewer(orgChannel, "caitlyn@shareability.com") {
+		t.Fatal("org-public channel should be viewable by any org member")
+	}
+
+	// Private Scout chat only allows owner
+	if !scoutChatThreadAllowsViewer(privateScout, "aj@shareability.com") {
+		t.Fatal("private Scout owner cannot view own thread")
+	}
+	if scoutChatThreadAllowsViewer(privateScout, "e@shareability.com") {
+		t.Fatal("PRIVACY LEAK: non-owner can view 1:1 private Scout chat")
+	}
+
+	// Add messages to the private Scout chat
+	now := time.Now().UTC()
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", privateScout.ID, scoutChatMessageRecord{
+		ID: "private-scout-note", Kind: "message", Role: "user",
+		Text:        privateOneOnOne + " — this is my private thought",
+		CreatedAt:   now.Format(time.RFC3339Nano),
+		AuthorName:  "AJ",
+		AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// BRAIN EXCLUSION: 1:1 Scout chats should never enter brain summarization
+	// This is enforced by isUIStateMemoryKind classifying meetingMemoryKindScoutChat as UI state
+	for _, entry := range app.memory.unsummarizedTranscripts(500) {
+		if strings.Contains(entry.Text, privateOneOnOne) {
+			t.Fatalf("PRIVACY LEAK: 1:1 Scout chat queued for brain summarization: %+v", entry)
+		}
+	}
+
+	// SEARCH EXCLUSION: 1:1 Scout chats should not be directly searchable in non-UI contexts
+	// The scout_chat_thread kind is classified as UI state and excluded from general recall
+	if matches := app.memory.search(privateOneOnOne, 20); len(matches) != 0 {
+		for _, m := range matches {
+			if m.Entry.Kind != meetingMemoryKindScoutChat {
+				t.Fatalf("private Scout chat appeared in non-UI-state search: %+v", m.Entry)
+			}
+		}
+	}
+
+	// Verify the raw scout chat entry IS stored (for UI state purposes)
+	storedPrivate := false
+	for _, entry := range app.memory.snapshot(0) {
+		if strings.Contains(entry.Text, privateOneOnOne) {
+			storedPrivate = true
+			if entry.Kind != meetingMemoryKindScoutChat {
+				t.Fatalf("private chat stored under wrong kind: %s", entry.Kind)
+			}
+		}
+	}
+	if !storedPrivate {
+		t.Fatal("private Scout chat was not stored at all — test seed failed")
+	}
+}
+
 func strideConversationProjectionForTest(t *testing.T, runtime *STRIDERuntime, email, sourceID string) STRIDEConversationMessageProjection {
 	t.Helper()
 	var found STRIDEConversationMessageProjection
