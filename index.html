@@ -62210,8 +62210,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const ref = message?.thread || {}
 	        const query = String(ref.query || message?.text || 'Work in progress').trim()
 	        const family = desktopWorkFamily(ref, artifact)
-	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
-	        const rawPct = ref.progressPercent ?? artifact?.metadata?.progressPercent
+	        // Artifact wins when it has a blocked/terminal status or a saved draft
+	        const artifactStatus = String(artifact?.metadata?.threadStatus || artifact?.metadata?.status || '').toLowerCase()
+	        const artifactBlocked = ['error', 'failed', 'needs_attention', 'rejected'].includes(artifactStatus)
+	        const artifactHasDraft = Boolean(artifact?.text)
+	        const artifactWins = artifactBlocked || artifactHasDraft
+	        const status = artifactWins
+	          ? (artifactStatus || artifactStatusValue(artifact) || 'running')
+	          : String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
+	        const rawPct = artifactWins
+	          ? artifact?.metadata?.progressPercent
+	          : (ref.progressPercent ?? artifact?.metadata?.progressPercent)
 	        const pctValue = rawPct != null ? Number(rawPct) : null
 	        const hasKnownProgress = pctValue != null && Number.isFinite(pctValue) && pctValue > 0
 	        const pct = hasKnownProgress ? Math.max(0, Math.min(100, pctValue)) : 0
