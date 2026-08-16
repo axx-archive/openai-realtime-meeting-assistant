@@ -148,10 +148,12 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
-	// Conversational voice defaults to tool_choice=none so the model speaks
-	// first without routing/thinking delay.
-	if toolChoice := session["tool_choice"]; toolChoice != "none" {
-		t.Fatalf("tool_choice=%v, want none for conversational voice latency", toolChoice)
+	// Conversational voice uses tool_choice=auto so the model CAN call tools
+	// when the user explicitly asks for an action. The instructions guide when:
+	// ordinary talk speaks directly (no tool); work/approval/unavailable calls
+	// route_conversation_turn.
+	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
+		t.Fatalf("tool_choice=%v, want auto so route_conversation_turn is reachable for actions", toolChoice)
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{

@@ -44510,9 +44510,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           // confirm beat: on a successful mutating action, record the ledger
           // line, drop a durable toast receipt, and show the confirm verb. Pure
-          // reads (read_thread_aloud, answer_memory_question, do_nothing) and the
-          // grill ritual (its own stage IS the feedback) don't earn a receipt.
-          const mutating = name !== 'do_nothing' && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
+          // reads (read_thread_aloud, answer_memory_question, do_nothing),
+          // route_conversation_turn (conversation router, not a visible mutation),
+          // and the grill ritual (its own stage IS the feedback) don't earn a receipt.
+          const mutating = name !== 'do_nothing' && name !== 'route_conversation_turn'
+            && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
             && name !== 'start_private_grill' && name !== 'end_private_grill'
           if (output?.ok !== false && mutating) {
             recordScoutAction(name, output)
@@ -44520,7 +44522,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
           } else if (output?.ok === false && output?.error) {
             setVoiceIslandState('error', String(output.error))
-          } else {
+          } else if (name !== 'do_nothing' && name !== 'route_conversation_turn') {
+            // Non-mutating tools that aren't quiet (do_nothing/route) still show acting
             setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
           }
         } catch (error) {

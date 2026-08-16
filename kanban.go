@@ -1625,10 +1625,12 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
-	// Conversational voice defaults to tool_choice=none so the model speaks
-	// first without routing/thinking delay. Tools remain available for explicit
-	// user actions; the server's route_conversation_turn handles those cases.
-	session["tool_choice"] = "none"
+	// Conversational voice uses tool_choice=auto so the model CAN call tools
+	// when the user explicitly asks for an action. The instructions guide when:
+	// ordinary talk speaks directly (no tool); work/approval/unavailable calls
+	// route_conversation_turn. This is "default none unless the user asked for
+	// an action" enforced by instruction, not by blocking tools at the session.
+	session["tool_choice"] = "auto"
 	// Private Scout is a direct one-to-one conversation, so provider-side VAD
 	// can create responses immediately. Shared rooms deliberately wait for the
 	// server's deterministic Scout-invocation gate before response.create.
