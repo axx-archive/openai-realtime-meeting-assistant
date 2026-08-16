@@ -58996,6 +58996,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	          return String(thread.title || 'team channel')
 	        }
+	        // Private thread: show artifact name when one exists (not first-prompt leftover)
+	        const artifactInfo = chatThreadLatestArtifactInfo(thread)
+	        if (artifactInfo?.title) {
+	          return artifactInfo.title
+	        }
 	        return chatThreadTitleIsPlaceholder(thread) ? 'new thread' : String(thread.title)
 	      }
 
@@ -59030,11 +59035,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return preview || (chatThreadIsChannel(thread) ? 'new team channel' : 'new chat thread')
 	      }
 
-	      function chatThreadArtifactPreview(thread) {
-	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	      // Shared helper: find latest artifact info from thread (same source as chatThreadActiveWork)
+	      function chatThreadLatestArtifactInfo(thread) {
+	        // Use same source pattern as chatThreadActiveWork: messages OR activeWork
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : (thread?.activeWork ? [thread.activeWork] : [])
 	        for (let index = messages.length - 1; index >= 0; index -= 1) {
 	          const message = messages[index]
-	          if (String(message?.kind || '') !== 'thread' || !message?.thread) continue
+	          if (!message?.thread) continue
 	          const ref = message.thread
 	          const artifactId = String(ref.artifactId || '')
 	          const artifact = artifactId ? artifactEntries.find(entry => String(entry?.id || '') === artifactId) : null
@@ -59050,9 +59057,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            : status === 'running' || status === 'queued'
 	            ? 'in progress'
 	            : 'draft'
-	          return `${title} · ${statusLabel}`
+	          return { title, status, statusLabel, artifact, message }
 	        }
-	        return ''
+	        return null
+	      }
+
+	      function chatThreadArtifactPreview(thread) {
+	        // Status on preview line (title moved to title row via chatThreadLatestArtifactInfo)
+	        const info = chatThreadLatestArtifactInfo(thread)
+	        return info ? info.statusLabel : ''
 	      }
 
 	      // sidebar timestamps — design grammar: now · HH:MM · tue · jun 30
