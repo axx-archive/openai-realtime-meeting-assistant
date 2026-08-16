@@ -957,7 +957,12 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 	// Collect direction context from history
 	directionContext := extractDirectionContext(history)
 
-	deckPrompt := inlineDeckGenerationPromptWithDirection(query, directionContext)
+	// If query is a short confirmation (yes/looks good/etc), extract the actual
+	// deck request and topic from history. Otherwise the LLM sees "User request: yes"
+	// and refuses with "I'm missing the deck's subject".
+	effectiveQuery := extractEffectiveDeckQuery(query, history)
+
+	deckPrompt := inlineDeckGenerationPromptWithDirection(effectiveQuery, directionContext)
 	answerContext := withAssistantModelSuccessRequired(ctx)
 	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, history)
 	if err != nil {
@@ -966,7 +971,7 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 	deckHTML := extractHTMLDeckContent(result.answer)
 	if deckHTML == "" {
 		// Fallback: wrap the answer in minimal HTML deck structure
-		deckHTML = wrapInHTMLDeck(query, result.answer)
+		deckHTML = wrapInHTMLDeck(effectiveQuery, result.answer)
 	}
 	// Return as a regular conversational message with HTML deck content.
 	// The frontend detects HTML deck content and renders with the in-thread
@@ -978,6 +983,117 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 		Text:          deckHTML,
 		IntentOutcome: string(conversationIntentConversationalReply),
 	}, nil
+}
+
+// extractEffectiveDeckQuery determines the actual deck request to use for generation.
+// If the current query is a short confirmation (yes/looks good), we need to pull
+// the real request from history. If the original request had no specific topic,
+// we extract one from Scout's direction pass or use a sensible default.
+func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
+	lower := strings.ToLower(strings.TrimSpace(query))
+
+	// Check if this is a short confirmation
+	confirmPhrases := []string{
+		"just make it", "make it", "proceed", "go ahead", "looks good",
+		"that works", "perfect", "do it", "yes", "yep", "sure", "ok", "okay",
+		"sounds good", "i like it", "great", "let's go", "build it",
+		"let's do it", "go for it", "yes please", "please", "thanks",
+	}
+	isConfirmation := false
+	for _, phrase := range confirmPhrases {
+		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
+			isConfirmation = true
+			break
+		}
+	}
+
+	if !isConfirmation {
+		// Not a confirmation, use query as-is
+		return query
+	}
+
+	// Find the original deck request in history
+	var originalRequest string
+	for _, turn := range history {
+		if turn.role == "user" && scoutChatDeckRequestDetected(turn.text) {
+			originalRequest = turn.text
+			break
+		}
+	}
+
+	// Check if original request has a specific topic (more than just "make a deck")
+	if originalRequest != "" && hasDeckTopic(originalRequest) {
+		return originalRequest
+	}
+
+	// No specific topic in original request — extract from Scout's direction pass
+	// or propose a sensible default
+	scoutDirection := extractScoutDirectionProposal(history)
+	if scoutDirection != "" {
+		// Scout proposed something like "Should this feel corporate or startup? Full-bleed imagery..."
+		// Build a request that incorporates the direction
+		if originalRequest != "" {
+			return fmt.Sprintf("%s. Direction: %s", originalRequest, scoutDirection)
+		}
+		return fmt.Sprintf("Create a 5-slide presentation. Direction: %s", scoutDirection)
+	}
+
+	// Last resort: if we have an original request, use it
+	if originalRequest != "" {
+		return originalRequest + ". Create an engaging presentation on a compelling professional topic of your choice."
+	}
+
+	// Absolute fallback: create something compelling
+	return "Create a 5-slide presentation on a compelling professional topic — innovation, leadership, or industry trends. Make it engaging and visually striking."
+}
+
+// hasDeckTopic checks if a deck request contains a specific topic beyond just
+// "make a deck" or "create a presentation".
+func hasDeckTopic(request string) bool {
+	lower := strings.ToLower(request)
+
+	// Topic indicators — if the request contains "about", "for", "on", etc. followed by
+	// substantive content, there's a topic
+	topicIndicators := []string{" about ", " for ", " on ", " regarding ", " covering "}
+	for _, indicator := range topicIndicators {
+		if idx := strings.Index(lower, indicator); idx >= 0 {
+			afterIndicator := strings.TrimSpace(lower[idx+len(indicator):])
+			// Must have at least one substantive word after the indicator
+			if len(strings.Fields(afterIndicator)) >= 1 {
+				return true
+			}
+		}
+	}
+
+	// Check for specific topic patterns that wouldn't have indicator words
+	// e.g., "AI deck", "strategy presentation", "Q4 slides"
+	topicWords := []string{
+		"ai", "strategy", "quarterly", "q1", "q2", "q3", "q4", "product",
+		"sales", "marketing", "roadmap", "investor", "company", "team",
+		"project", "launch", "analysis", "report", "overview", "update",
+	}
+	for _, word := range topicWords {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// extractScoutDirectionProposal extracts Scout's proposed direction/topic from history.
+// This is used when the original request had no specific topic.
+func extractScoutDirectionProposal(history []scoutChatTurn) string {
+	// Find the last Scout message that looks like a direction pass
+	for i := len(history) - 1; i >= 0; i-- {
+		turn := history[i]
+		if turn.role == "assistant" || turn.role == "scout" {
+			if scoutChatLooksLikeDirectionPass(strings.ToLower(turn.text)) {
+				return turn.text
+			}
+		}
+	}
+	return ""
 }
 
 // extractDirectionContext pulls aesthetic direction from conversation history.
