@@ -73639,28 +73639,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderHomeStarters() {
         if (!homeStarters) return
-        const suggestionsReady = Boolean(authedUser && !guestMode && homeSnapshot.starters.length === HOME_CATEGORY_SHELLS.length)
-        const categories = !guestMode
-          ? (suggestionsReady ? homeSnapshot.starters : HOME_CATEGORY_SHELLS)
-          : []
-        if (!categories.some(category => category.id === selectedHomeCategoryId)) selectedHomeCategoryId = ''
-        const selected = categories.find(category => category.id === selectedHomeCategoryId)
         // Real work items from /assistant/home are the primary surface now.
-        // The generic Continue/Explore/Create/Challenge taxonomy is demoted;
-        // show it only when no continuity items exist and no category is expanded.
-        const availableContext = authedUser && !guestMode && homeSnapshot.items.some(item => item?.kind !== 'live-meeting')
-        homeStarters.hidden = Boolean(availableContext) || Boolean(selected) || !categories.length
-        homeStarters.dataset.hydrated = String(suggestionsReady)
-        homeStarters.setAttribute('aria-busy', String(!suggestionsReady))
-        homeStarters.replaceChildren(...categories.map(category => homeCategoryNode(category, suggestionsReady)))
-        const suggestions = selected?.suggestions || []
-        officeLaunchHome?.classList.toggle('is-starter-open', Boolean(selected))
-        if (homeSuggestions) {
-          homeSuggestions.hidden = !suggestions.length
-          homeSuggestions.setAttribute('aria-label', selected ? `${selected.label} suggestions` : 'Suggestions based on your recent work')
-          homeSuggestions.replaceChildren(...(selected ? [homeSuggestionBackNode(selected), ...suggestions.map(homeSuggestionNode)] : []))
-        }
+        // The generic Continue/Explore/Create/Challenge taxonomy is hidden;
+        // "no real work yet" shows an honest empty state, not a fake generic pack.
+        homeStarters.hidden = true
+        homeSuggestions.hidden = true
+        officeLaunchHome?.classList.remove('is-starter-open')
+        selectedHomeCategoryId = ''
         if (homeContinuity) {
+          const availableContext = authedUser && !guestMode && homeSnapshot.items.some(item => item?.kind !== 'live-meeting')
           homeContinuity.hidden = !availableContext
         }
       }

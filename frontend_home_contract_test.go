@@ -36,9 +36,8 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`const HOME_CATEGORY_SHELLS = Object.freeze([`,
 		`data-hydrated="false"`,
 		`aria-busy="true"`,
-		`button.disabled = !suggestionsReady`,
-		`const categories = !guestMode`,
-		`homeStarters.dataset.hydrated = String(suggestionsReady)`,
+		`homeStarters.hidden = true`,
+		`homeSuggestions.hidden = true`,
 		`homeSnapshotRequest?.audienceKey === audienceKey`,
 		`if (refreshAfterCurrent) homeSnapshotRefreshQueued = true`,
 		`resetHomeProjection()`,
@@ -277,8 +276,8 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
    draft:document.getElementById('homeScoutInput').value,
    retry:document.getElementById('homeRefreshRetry').textContent.trim()
  }));
- // When refresh fails and clears items, starters become visible as fallback
-	assert.deepEqual(failed,{continuity:0,startersHidden:false,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
+ // When refresh fails, starters stay hidden (honest empty state, no fake generic pack)
+	assert.deepEqual(failed,{continuity:0,startersHidden:true,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
 	homeAvailable=true;
 	await page.evaluate(()=>document.getElementById('homeRefreshRetry').click());
 	await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3&&document.getElementById('homeRefreshRetry').hidden);
@@ -311,30 +310,15 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  for(const theme of ['dark','light'])await capture('phone-home-voice-live',theme);
  await page.evaluate(()=>{setRealtimeVoiceMode('idle');setVoiceIslandState('idle');});
  await page.setViewportSize({width:1440,height:900});
- // Test the fallback scenario: clear items so starters become visible
+ // Generic starters are always hidden now (not a fallback for empty Home)
  await page.evaluate(()=>{homeSnapshot.items=[];renderHomeSnapshot();});
- await page.waitForFunction(()=>!document.getElementById('homeStarters').hidden && document.getElementById('homeContinuity').hidden);
- await page.focus('#homeScoutInput');
- await page.click('#homeStarters .home-starter:nth-child(2)');
- assert.equal(await page.locator('#homeScoutInput').inputValue(),'');
- assert.equal(await page.locator('#homeSuggestions .home-suggestion').count(),2);
- for(const theme of ['dark','light'])await capture('desktop-home-category-selected',theme);
- await page.setViewportSize({width:390,height:844});
- await page.waitForTimeout(100);
- for(const theme of ['dark','light'])await capture('phone-home-category-selected',theme);
- assert.equal(await page.locator('#homeSuggestions .home-suggestions__back').isVisible(),true);
- await page.click('#homeSuggestions .home-suggestions__back');
- assert.equal(await page.locator('#homeStarters .home-starter:visible').count(),4);
- assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-category-id')),'explore');
- assert.equal(await page.locator('#homeScoutInput').inputValue(),'');
- await page.click('#homeStarters .home-starter:nth-child(2)');
- await page.setViewportSize({width:1440,height:900});
- await page.locator('#homeSuggestions .home-suggestion').first().click();
- assert.equal(await page.locator('#homeScoutInput').inputValue(),'Explore the biggest open question in Country Golf.');
- assert.equal(new URL(page.url()).pathname,'/');
+ const emptyState=await page.evaluate(()=>({startersHidden:document.getElementById('homeStarters').hidden,continuityHidden:document.getElementById('homeContinuity').hidden}));
+ assert.deepEqual(emptyState,{startersHidden:true,continuityHidden:true},'empty Home shows honest empty state, not generic pack');
+ // Test composer still works when Home is empty
+ await page.fill('#homeScoutInput','Whatever I want to ask');
+ assert.equal(await page.locator('#homeScoutInput').inputValue(),'Whatever I want to ask');
 	 assert.equal(await page.locator('#homeProjectChip').count(),0,'retired Home Project control remains in the DOM');
 	 assert.equal(projectContextRequestCount,0,'retired Home Project control requested a preflight');
- await page.waitForTimeout(50);
  await page.focus('#homeScoutInput');
  const focusedComposer=await page.evaluate(()=>({
    border:getComputedStyle(document.getElementById('homeScoutComposer')).borderColor,
@@ -344,23 +328,15 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  assert.equal(focusedComposer.border,'rgba(0, 0, 0, 0)');
  assert.equal(focusedComposer.inputBackground,'rgba(0, 0, 0, 0)');
  assert.equal(focusedComposer.inputOutline,'none');
- for(const theme of ['dark','light'])await capture('desktop-home-suggestion-populated',theme);
- await page.setViewportSize({width:390,height:844});
- await page.waitForTimeout(100);
- for(const theme of ['dark','light'])await capture('phone-home-suggestion-populated',theme);
- await page.setViewportSize({width:1440,height:900});
- await page.fill('#homeScoutInput','Whatever else I want to ask');
- assert.equal(await page.locator('#homeScoutInput').inputValue(),'Whatever else I want to ask');
  await page.fill('#homeScoutInput','');
- // With items cleared, starters remain visible
- await page.waitForFunction(()=>!document.getElementById('homeStarters').hidden);
- await page.evaluate(async()=>{selectedHomeCategoryId='';renderHomeStarters();document.activeElement?.blur();await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();});
+ // Test live meeting rendering with empty Home
+ await page.evaluate(async()=>{renderHomeStarters();document.activeElement?.blur();await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();});
  for(const theme of ['dark','light'])await capture('desktop-home-live-meeting',theme);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
  for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme);
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,startersHidden:document.getElementById('homeStarters').hidden,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
- assert.equal(phone.fits,true);assert.equal(phone.startersHidden,false,'starters visible when no items');assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
+ assert.equal(phone.fits,true);assert.equal(phone.startersHidden,true,'starters always hidden');assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
  await page.evaluate(async()=>{
 	   homeScoutInput.value='Country Golf';
    homeScoutInput.dispatchEvent(new Event('input',{bubbles:true}));
