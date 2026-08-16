@@ -10,8 +10,10 @@ import { useAuth } from '../auth/AuthContext';
 import { usePushRegistration } from '../push/usePushRegistration';
 import type { PushTarget } from '../push/deepLink';
 import { CanvasScreen } from '../screens/CanvasScreen';
+import { ChatScreen } from '../screens/ChatScreen';
 import { DeckScreen } from '../screens/DeckScreen';
 import { LoginScreen } from '../screens/LoginScreen';
+import { MeetScreen } from '../screens/MeetScreen';
 import { OSWebScreen } from '../screens/OSWebScreen';
 import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
@@ -64,17 +66,12 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  *
  * The Canvas remains the voice-first Home root. PD1 adds one universal,
  * semantic destination shell around this stack: a compact iPhone rail and an
- * adaptive iPad sidebar. The Deck remains a native form sheet for the existing
- * Threads / Rooms / Work conversation model; it is not duplicated as another
- * nested navigator.
+ * adaptive iPad sidebar.
  *
- * The detents are real `UISheetPresentationController` detents rather than a
- * hand-rolled pan sheet, which buys correct rubber-banding, interactive
- * dismissal, and VoiceOver behaviour for free:
- *
- *   0.14  peek  — the segment header and the first rows; a glance, not a commit
- *   0.5   half
- *   1.0   full
+ * Meet and Chat are now proper card destinations that fill the content area
+ * (with the rail visible on phone, sidebar on tablet ≥744). They are no longer
+ * peek sheets over Home. The Deck remains available for backward compatibility
+ * and the Work segment.
  */
 const DECK_DETENTS = [0.14, 0.5, 1];
 
@@ -231,9 +228,9 @@ export function RootNavigator() {
       const actionType = String(action.type ?? '').trim();
       const tool = String(action.tool ?? action.mode ?? '').trim();
       if (!['open_tool', 'assistant_mode'].includes(actionType)) continue;
-      if (tool === 'chat') navigationRef.navigate('Deck', { segment: 'threads' });
+      if (tool === 'chat') navigationRef.navigate('Chat');
       else if (['workflow', 'research', 'design', 'grill'].includes(tool)) {
-        navigationRef.navigate('Deck', { segment: 'work' });
+        navigationRef.navigate('WorkHome');
       } else if (tool === 'board') navigationRef.navigate('WorkHome');
       else if (tool === 'artifacts' || tool === 'files') navigationRef.navigate('Files');
       else if (tool === 'meetings') navigationRef.navigate('Meetings');
@@ -275,6 +272,8 @@ export function RootNavigator() {
         {user && sessionToken ? (
           <>
             <Stack.Screen name="Canvas" component={CanvasScreen} />
+            <Stack.Screen name="Meet" component={MeetScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="WorkHome" component={WorkHomeScreen} />
             <Stack.Screen name="NetworkHome" component={NetworkHomeScreen} />
             <Stack.Screen name="WorkSearchHome" component={WorkSearchHomeScreen} />
@@ -285,8 +284,6 @@ export function RootNavigator() {
               options={{
                 presentation: 'formSheet',
                 sheetAllowedDetents: DECK_DETENTS,
-                // Opens at half: enough to be useful on arrival without
-                // burying the canvas the user just left.
                 sheetInitialDetentIndex: 1,
                 sheetGrabberVisible: true,
                 sheetCornerRadius: 28,

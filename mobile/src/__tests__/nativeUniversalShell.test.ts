@@ -126,13 +126,13 @@ test('mounted shell press preserves its navigator child through destination, ful
 
   const chatPressable = renderer!.root.findByProps({ accessibilityLabel: 'Chat' });
   await act(async () => { chatPressable.props.onPress(); });
-  assert.equal(requestedRoute, 'Deck');
-  assert.deepEqual(requestedParams, { segment: 'threads' });
+  assert.equal(requestedRoute, 'Chat');
+  assert.equal(requestedParams, undefined);
 
   const videoPressable = renderer!.root.findByProps({ accessibilityLabel: 'Meet' });
   await act(async () => { videoPressable.props.onPress(); });
-  assert.equal(requestedRoute, 'Deck');
-  assert.deepEqual(requestedParams, { segment: 'rooms' });
+  assert.equal(requestedRoute, 'Meet');
+  assert.equal(requestedParams, undefined);
 
   await act(async () => { renderer!.update(shell(selected, true)); });
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
@@ -179,7 +179,9 @@ test('deep destinations preserve their owning top-level context', () => {
   const coordinator = createNativeShellSelectionCoordinator(() => {}, 'work');
   assert.equal(coordinator.commit('Thread'), 'work');
   assert.equal(nativeShellDestinationForRoute('Board'), 'work');
-  assert.equal(nativeShellDestinationForRoute('Deck'), 'chat');
+  assert.equal(nativeShellDestinationForRoute('Meet'), 'video');
+  assert.equal(nativeShellDestinationForRoute('Chat'), 'chat');
+  assert.equal(nativeShellDestinationForRoute('Deck'), 'work');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');

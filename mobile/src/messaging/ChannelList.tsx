@@ -312,7 +312,14 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
     );
   }
   if (!scopedThreads.length) {
-    return <Text style={styles.empty}>No threads yet. Hold the mic and say something.</Text>;
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>No conversations yet</Text>
+        <Text style={styles.emptyBody}>
+          Start a private chat with Scout or create a channel to talk with your team.
+        </Text>
+      </View>
+    );
   }
 
   return (
@@ -500,12 +507,22 @@ const styles = StyleSheet.create({
 	},
 	unreadBadgeLarge: { minWidth: 28, minHeight: 28, paddingVertical: 4 },
 	unreadText: { ...type.label, color: colors.onAccent, fontSize: 10, lineHeight: 12 },
-  empty: {
+  emptyContainer: {
+    alignItems: 'center',
+    gap: space[2],
+    paddingHorizontal: space[4],
+    paddingVertical: space[8],
+  },
+  emptyTitle: {
+    ...type.bodyMedium,
+    color: colors.text1,
+    textAlign: 'center',
+  },
+  emptyBody: {
     ...type.bodySm,
     color: colors.text2,
-    paddingHorizontal: space[4],
-    paddingVertical: space[6],
     textAlign: 'center',
+    maxWidth: 280,
   },
   errorBox: { padding: space[4], gap: space[2] },
   error: { ...type.bodySm, color: colors.danger },
