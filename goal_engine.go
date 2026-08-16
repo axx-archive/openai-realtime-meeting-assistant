@@ -4131,6 +4131,11 @@ func (e *goalEngine) finish(plan *goalPlan, parentID string) {
 	// a "draft to finish" (and no salvage signal double-counts the misfire).
 	if plan.State == goalStateBlocked && !plan.Cancelled {
 		e.salvageBlockedDeliverable(plan, parentID)
+		// Emit the salvaged draft to the origin thread so it's visible in-thread
+		// instead of silently parking on NEEDS ATTENTION with no output.
+		if draftID := strings.TrimSpace(plan.Report.DeliverableArtifactID); draftID != "" {
+			e.app.postGoalSalvagedDraftMessage(parentID, draftID, plan.Report.Gap)
+		}
 	}
 	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
 	if strings.TrimSpace(artifact.ID) == "" {
