@@ -59067,7 +59067,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (artifactInfo?.title) {
           return artifactInfo.title
         }
-        // 2. No artifact yet — scan Scout responses for first heading
+        // 2. Extract heading from thread.preview (the same content shown in preview line)
+        const preview = String(thread?.preview || '').trim()
+        if (preview) {
+          // Preview might start with the work name heading (already markdown-stripped)
+          // Extract first sentence or first line as title candidate
+          const firstLine = preview.split(/[.\n]/)[0]?.trim()
+          if (firstLine && firstLine.length >= 3 && firstLine.length <= 90) {
+            // Only skip if it's a pure status crumb, not a real work name
+            const lower = firstLine.toLowerCase()
+            const isStatusCrumb = PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) ||
+              /^(scout is|approved\s*·|queued\s*·|waiting for|needs approval|needs attention)/.test(lower) ||
+              /^(research|presentation|design|document|work|outline)\s+(delivered|in progress|complete|draft)/i.test(lower)
+            if (!isStatusCrumb) {
+              return firstLine
+            }
+          }
+        }
+        // 3. Scan Scout responses for markdown heading
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
@@ -59080,7 +59097,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             }
           }
         }
-        // 3. Fall back to family based on thread query — never the raw prompt
+        // 4. Fall back to family based on thread query — never the raw prompt
         if (chatThreadTitleIsPlaceholder(thread)) {
           return 'new thread'
         }
