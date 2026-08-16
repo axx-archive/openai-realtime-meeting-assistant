@@ -4359,65 +4359,80 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 // privateRealtimeVoiceShouldRoute returns whether the client should flip
 // tool_choice from none to auto for this utterance. Session default is none
 // for conversational latency; this enables tools only when needed.
+//
+// Unlike the text chat router (which uses a model call), this is a lightweight
+// deterministic classifier that reuses the existing detection functions. It
+// must not false-positive on ordinary conversation.
 func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript string) bool {
 	// Riff-bound sessions always need route (every utterance routes through server)
-	if thread, _, err := app.scoutChatThreadByID("", threadID); err == nil && thread.Riff != nil {
+	thread, _, err := app.scoutChatThreadByID("", threadID)
+	if err == nil && thread.Riff != nil {
 		return true
 	}
-	// Analyze transcript for action intent (server-side, not client regex)
-	return privateRealtimeVoiceTranscriptIndicatesAction(transcript)
+	// Short confirmation ("yes", "ok", etc.) only routes if there's a pending
+	// clarification in the thread — same as the text path. Without a pending
+	// direction pass, "yes" is ordinary talk.
+	text := strings.TrimSpace(transcript)
+	if err == nil && privateRealtimeVoiceIsConfirmation(text) {
+		return scoutChatClarificationAlreadyAsked(thread)
+	}
+	// Named studio asks via existing detection (deck, image, work-shaped turns)
+	return privateRealtimeVoiceTranscriptIndicatesAction(text)
 }
 
-// privateRealtimeVoiceTranscriptIndicatesAction detects if the user's words
-// suggest an action that needs route_conversation_turn. This is the server-
-// side classifier for conversational voice tool_choice flipping.
-func privateRealtimeVoiceTranscriptIndicatesAction(transcript string) bool {
-	text := strings.ToLower(strings.TrimSpace(transcript))
-	if text == "" {
+// privateRealtimeVoiceIsConfirmation returns true for short affirmative replies
+// that could confirm a pending direction pass.
+func privateRealtimeVoiceIsConfirmation(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" || len(lower) > 40 {
 		return false
 	}
-	// Studio-level asks that require server work
-	studioPatterns := []string{
-		"make a", "make me", "create a", "create me", "build a", "build me",
-		"write a", "write me", "draft a", "draft me", "prepare a", "prepare me",
-		"deck", "slide", "presentation", "document", "report", "summary",
-		"research", "look up", "look into", "find out", "investigate",
-		"image", "picture", "visual", "diagram", "chart", "graph",
-		"ideation", "brainstorm", "ideas for", "options for",
-	}
-	// Explicit action verbs
-	actionVerbs := []string{
-		"start work", "start a task", "start the task", "start this",
-		"launch", "kick off", "initiate", "begin work",
-		"send ", "share ", "post ", "publish ", "submit ",
-		"approve", "reject", "confirm this", "accept this", "decline",
-		"mark unavailable", "mark me unavailable", "set unavailable",
-		"go unavailable", "going unavailable", "i'm unavailable",
-		"i need to leave", "i have to leave", "stepping away",
-		"start a riff", "start riff", "new riff",
-	}
-	// Direction confirmation (after a model proposal)
+	// Only match if the entire utterance is a short confirmation
 	confirmations := []string{
 		"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead",
 		"do it", "sounds good", "let's do it", "please do",
-		"that works", "perfect", "great", "proceed",
+		"that works", "perfect", "great", "proceed", "yes please",
+		"go for it", "let's go", "do that", "yes do it",
 	}
-	for _, pattern := range studioPatterns {
-		if strings.Contains(text, pattern) {
+	for _, c := range confirmations {
+		if lower == c {
 			return true
 		}
 	}
-	for _, pattern := range actionVerbs {
-		if strings.Contains(text, pattern) {
-			return true
-		}
+	return false
+}
+
+// privateRealtimeVoiceTranscriptIndicatesAction detects if the user's words
+// suggest an action that needs route_conversation_turn. Reuses existing
+// server-side detectors to avoid false positives on ordinary conversation.
+func privateRealtimeVoiceTranscriptIndicatesAction(transcript string) bool {
+	text := strings.TrimSpace(transcript)
+	if text == "" {
+		return false
 	}
-	// Confirmations only trigger if the utterance is very short (likely a response)
-	if len(text) <= 30 {
-		for _, pattern := range confirmations {
-			if strings.HasPrefix(text, pattern) || text == pattern {
-				return true
-			}
+	// Deck/presentation request (uses existing studio detector)
+	if scoutChatDeckRequestDetected(text) {
+		return true
+	}
+	// Image generation request (uses existing image detector)
+	if scoutChatImageRequestDetected(text) {
+		return true
+	}
+	// General work-shaped turn (research, create, build, draft, etc.)
+	if scoutTurnAppearsWorkShaped(text) {
+		return true
+	}
+	// Explicit unavailable markers (narrow, not "share your thoughts")
+	lower := strings.ToLower(text)
+	unavailablePatterns := []string{
+		"mark me unavailable", "mark unavailable", "set unavailable",
+		"go unavailable", "going unavailable", "i'm unavailable",
+		"i need to leave", "i have to leave", "stepping away",
+		"mark me as away", "going away",
+	}
+	for _, pattern := range unavailablePatterns {
+		if strings.Contains(lower, pattern) {
+			return true
 		}
 	}
 	return false
