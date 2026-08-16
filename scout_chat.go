@@ -693,6 +693,68 @@ func scoutChatImageRequestDetected(text string) bool {
 	return false
 }
 
+// scoutRouterSimpleOutlinePhrases is the reviewed phrase list that forces
+// simple in-thread outline/presentation asks to conversational_reply (Tier 0).
+// These asks should be answered directly in chat without any agent thread,
+// workstream, or goal loop. Heavier asks that mention "review", "process",
+// "full deck outline", etc. are NOT matched and can still route to tool_run.
+var scoutRouterSimpleOutlinePhrases = []string{
+	"slide outline",
+	"5-slide outline",
+	"5 slide outline",
+	"five-slide outline",
+	"five slide outline",
+	"quick outline",
+	"simple outline",
+	"outline in this thread",
+	"outline in-thread",
+	"outline, keep in-thread",
+	"outline keep in-thread",
+	"outline, keep in thread",
+	"outline keep in thread",
+	"keep in-thread",
+	"keep in thread",
+	"do not email",
+	"don't email",
+	"in-thread outline",
+	"in thread outline",
+}
+
+// scoutChatSimpleOutlineRequestDetected returns true when the message matches
+// the reviewed phrase list for simple in-thread outline/presentation asks.
+// These are forced to conversational_reply (Tier 0) BEFORE the deterministic
+// guard or router model runs, so they can never be routed to workstream/tool/goal.
+func scoutChatSimpleOutlineRequestDetected(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	// Must contain "outline" or "presentation" to be an outline ask
+	if !strings.Contains(lower, "outline") && !strings.Contains(lower, "presentation") {
+		return false
+	}
+	// Heavier asks that mention review/process/full should NOT be short-circuited
+	for _, heavy := range []string{"with review", "full process", "deck outline process", "run the deck outline", "full deck outline"} {
+		if strings.Contains(lower, heavy) {
+			return false
+		}
+	}
+	// Check for simple outline phrases
+	for _, phrase := range scoutRouterSimpleOutlinePhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoutAgentWorkerAvailable returns true when the agent runner is configured
+// and ready to execute work. When false, no work proposals (workstream, tool_run,
+// or goal) should be minted — fall through to inline answer instead.
+func scoutAgentWorkerAvailable() bool {
+	return selectedAgentRunnerName() != agentRunnerStub
+}
+
 // scoutGuardEligibleMessage returns true when a message is work-shaped enough
 // for the deterministic guard to arm a proposal: not a question (a question
 // defers to the answer brain, which now carries the capabilities digest +
@@ -851,12 +913,22 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
+	// Simple in-thread outline/presentation guard: forces conversational_reply
+	// BEFORE the deterministic guard or router model runs. These asks must be
+	// answered directly in chat without any agent thread, workstream, or goal.
+	if scoutChatSimpleOutlineRequestDetected(intentText) {
+		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline"})
+		return decision
+	}
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
 	// so thread-context gravity can never drag the literal words off the flagship
 	// again. Image asks deliberately skip this guard: they need the router's
 	// informed prompt interpretation before the app starts generation.
-	if !imageRequest {
+	// When the agent worker is not available, skip the guard entirely to avoid
+	// minting proposals that would fail with "agent worker is not configured."
+	if !imageRequest && scoutAgentWorkerAvailable() {
 		if verdict := deterministicRouterGuard(intentText); verdict != nil {
 			work, err := conversationWorkFromScoutProposal(verdict.proposal)
 			if err != nil {
@@ -937,6 +1009,16 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 	// conservative prompt fallback; a stray action/proposal must not steal it.
 	if imageRequest && (decision.Outcome != conversationIntentStartPrivateWork || decision.Work == nil || decision.Work.Kind != conversationWorkImage) {
 		decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
+	}
+	// Agent worker guard: if the agent runner is not available (stub), don't
+	// mint work proposals — fall through to inline answer. Image asks are
+	// exempt because they use a different execution path (image generation).
+	if !scoutAgentWorkerAvailable() && !imageRequest {
+		if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
+			decision = conversationalReplyDecision(proposalSourceChatRouter)
+			recordConversationIntentOutcome(decision, map[string]any{"degraded": "agent_worker_unavailable"})
+			return decision
+		}
 	}
 	recordConversationIntentOutcome(decision, nil)
 	return decision
