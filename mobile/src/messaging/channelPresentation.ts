@@ -31,14 +31,17 @@ export function threadHeadingTitle(thread: Pick<ScoutThread, 'title'>): string {
   return raw;
 }
 
+/**
+ * Channel display name — heading-only lift (locked plan).
+ *
+ * Never fall back to raw title (the prompt), preview, or last spoken line.
+ * Uses threadHeadingTitle which filters forbidden patterns.
+ */
 export function channelDisplayName(thread: Pick<ScoutThread, 'table' | 'title' | 'visibility' | 'preview'>): string {
   if (isBonfireChat(thread)) return 'Bonfire Chat';
-  // Heading-only: use proper title, not preview or work status
+  // Heading-only: never fall back to raw title (the prompt)
   const heading = threadHeadingTitle(thread);
-  const title = heading === 'Conversation'
-    ? String(thread.title || '').trim() || 'Conversation'
-    : heading;
-  return thread.visibility === 'public' ? `#${title.replace(/^#/, '')}` : title;
+  return thread.visibility === 'public' ? `#${heading.replace(/^#/, '')}` : heading;
 }
 
 export function pinBonfireChatFirst<T extends Pick<ScoutThread, 'table' | 'title' | 'visibility'>>(threads: readonly T[]): T[] {

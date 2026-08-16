@@ -515,7 +515,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : workThread && workThread.complete && detectInlineArtifactKind(message) ? (
             <InlineArtifactPreview
               kind={detectInlineArtifactKind(message)!}
-              title={String(workThread.ref.resultTitle ?? '').trim() || workThread.query}
+              title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
               text={String(workThread.ref.resultPreview ?? '')}
               agentName={workThread.agentName}
               onEdit={workThread.governedRecord ? undefined : () => onRegenerateWorkArtifact?.(message)}
@@ -556,7 +556,7 @@ export const MessageBubble = React.memo(function MessageBubble({
 				  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
-              <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || workThread.query}</Text>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || 'Work'}</Text>
               {String(workThread.ref.projectTitle ?? '').trim() ? (
                 <View accessible accessibilityLabel={`Project: ${String(workThread.ref.projectTitle).trim()}`} style={styles.workProjectChip}>
                   <SymbolView name="folder.fill" tintColor={colors.emberText} size={12} />

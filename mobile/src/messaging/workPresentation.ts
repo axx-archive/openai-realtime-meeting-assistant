@@ -6,25 +6,27 @@ export type WorkPresentationInput = {
   progressNote?: unknown;
 };
 
+/**
+ * Work family label — NOT inferred from query (locked plan).
+ *
+ * Returns a stable family based on mode only (not the user's prompt).
+ * Falls back to "Work" for any unknown or untyped work.
+ */
 export function workFamilyLabel(work?: WorkPresentationInput | null): string {
-  const description = `${String(work?.query ?? '')} ${String(work?.mode ?? '')}`.toLowerCase();
-  const hasResearch = /\b(research|investigate|compare|market scan|sources?|due diligence)\b/u.test(description);
-  const hasDocument = /\b(document|memo|brief|one-pager|report)\b/u.test(description);
-  const hasDeck = /\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/u.test(description);
-  const hasWorkbook = /\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/u.test(description);
-  if (/\b(schedule|scheduled|recurring|daily|weekly|monthly|every (?:day|weekday|week|month))\b/u.test(description)) return 'Scheduled work';
-  if (/\b(revise|revision|redline|translate|translation|regenerate|rewrite|edit (?:this|the|my)|update (?:this|the|my))\b/u.test(description)) return 'Revision';
-  if (/\b(mixed package|investor package|diligence package|fundraising package|data room package)\b/u.test(description)
-    || [hasResearch, hasDocument, hasDeck, hasWorkbook].filter(Boolean).length >= 2) return 'Mixed package';
-  if (/\b(meeting recap|meeting notes|action record|decision log|transcript recap)\b/u.test(description)) return 'Meeting recap';
-  if (/\b(chart|visualization|dashboard|plot|graph|data table)\b/u.test(description)) return 'Data visualization';
-  if (/\b(code|implementation|repository|pull request|execution handoff|deployment handoff)\b/u.test(description)) return 'Build';
-  if (/\b(project plan|task board|operating plan|roadmap|work breakdown)\b/u.test(description)) return 'Project plan';
-  if (hasWorkbook) return 'Financial model';
-  if (hasDeck) return 'Presentation';
-  if (/\b(image|images|design|visual|logo|brand|mockup|illustration|render|creative)\b/u.test(description)) return 'Design';
-  if (hasResearch) return 'Research';
-  if (hasDocument) return 'Document';
+  // Only use mode, never infer from query (the prompt)
+  const mode = String(work?.mode ?? '').toLowerCase();
+  if (/schedul|recurring/u.test(mode)) return 'Scheduled work';
+  if (/revis|redline|translat|regenerat/u.test(mode)) return 'Revision';
+  if (/mixed|package/u.test(mode)) return 'Mixed package';
+  if (/recap|meeting|transcript/u.test(mode)) return 'Meeting recap';
+  if (/chart|dashboard/u.test(mode)) return 'Data visualization';
+  if (/code|build|implement/u.test(mode)) return 'Build';
+  if (/plan|roadmap|task/u.test(mode)) return 'Project plan';
+  if (/model|workbook|spreadsheet/u.test(mode)) return 'Financial model';
+  if (/deck|presentation|slides?/u.test(mode)) return 'Presentation';
+  if (/design|image|creative/u.test(mode)) return 'Design';
+  if (/research|investigat/u.test(mode)) return 'Research';
+  if (/document|memo|brief|report/u.test(mode)) return 'Document';
   return 'Work';
 }
 
