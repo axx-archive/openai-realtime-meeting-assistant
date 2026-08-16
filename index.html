@@ -15254,7 +15254,7 @@
 
         #chatTool .scout-chat-work-card__progress > span {
           display: block;
-          width: var(--work-progress, 4%);
+          width: var(--work-progress, 0%);
           height: 100%;
           border-radius: inherit;
           background: var(--ember-text);
@@ -15502,7 +15502,7 @@
 
 	      #chatTool .scout-chat-work-card__progress > span {
 	        display: block;
-	        width: var(--work-progress, 4%);
+	        width: var(--work-progress, 0%);
 	        height: 100%;
 	        border-radius: inherit;
 	        background: var(--ember-text);
@@ -54008,7 +54008,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              intentOutcome: 'start_private_work', causedByMessageId: 'pd1-presentation-request', createdAt: '2026-08-11T17:32:00Z',
 	              thread: {
 	                id: 'pd1-presentation-run', mode: 'goal', query: objective, status: 'running', artifactId: 'pd1-presentation-artifact',
-	                agentName: 'Scout', currentStage: 'identify_goal', progressPercent: 4, progressNote: 'Shaping the deck brief', startedAt: '2026-08-11T17:32:00Z'
+	                agentName: 'Scout', currentStage: 'identify_goal', progressPercent: 35, progressNote: 'Shaping the deck brief', startedAt: '2026-08-11T17:32:00Z'
 	              }
 	            }
 	          ]
@@ -61691,13 +61691,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
 	          worklog.appendChild(sourceList)
 	        }
-	        const governance = document.createElement('details')
-	        governance.className = 'chat-context-card'
-	        const governanceTitle = document.createElement('summary')
-	        governanceTitle.className = 'chat-context-card__author'
-	        governanceTitle.textContent = 'Governance and provenance'
-	        governance.append(governanceTitle, bfEl('p', 'chat-context-card__body', `${agentName} is the visible worker. STRIDE keeps routing, authority and output contracts server-managed while this private workstream remains durable and auditable.`))
-	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null, governance].filter(Boolean))
+	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null].filter(Boolean))
 	      }
 
 	      function openDesktopWorkContext(message, trigger) {
@@ -62216,18 +62210,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const ref = message?.thread || {}
 	        const query = String(ref.query || message?.text || 'Work in progress').trim()
 	        const family = desktopWorkFamily(ref, artifact)
-	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
-	        const pctValue = Number(ref.progressPercent || artifact?.metadata?.progressPercent || 4)
-	        const pct = Math.max(0, Math.min(100, Number.isFinite(pctValue) ? pctValue : 4))
+	        // Artifact wins when it has a blocked/terminal status or a saved draft
+	        const artifactStatus = String(artifact?.metadata?.threadStatus || artifact?.metadata?.status || '').toLowerCase()
+	        const artifactBlocked = ['error', 'failed', 'needs_attention', 'rejected'].includes(artifactStatus)
+	        const artifactHasDraft = Boolean(artifact?.text)
+	        const artifactWins = artifactBlocked || artifactHasDraft
+	        const status = artifactWins
+	          ? (artifactStatus || artifactStatusValue(artifact) || 'running')
+	          : String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
+	        const rawPct = artifactWins
+	          ? artifact?.metadata?.progressPercent
+	          : (ref.progressPercent ?? artifact?.metadata?.progressPercent)
+	        const pctValue = rawPct != null ? Number(rawPct) : null
+	        const hasKnownProgress = pctValue != null && Number.isFinite(pctValue) && pctValue > 0
+	        const pct = hasKnownProgress ? Math.max(0, Math.min(100, pctValue)) : 0
+	        const isStalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
+	        const isComplete = ['complete', 'completed', 'published'].includes(status)
+	        const showProgressBar = hasKnownProgress && !isComplete
 	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
 	        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
 	        const phase = desktopWorkPhase(artifact, status, ref)
 	        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
 	        const state = status === 'approval_required'
 	          ? 'Needs approval'
-	          : ['complete', 'completed', 'published'].includes(status)
+	          : isComplete
 	            ? 'Delivered'
-	            : ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
+	            : isStalled
 	              ? 'Needs attention'
 	              : 'In progress'
 	        const step = progress || phase.label
@@ -62247,38 +62255,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        eyebrow.setAttribute('aria-atomic', 'true')
 	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', query))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
-	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step} · ${Math.round(pct)}%`))
-	        const progressBar = bfEl('span', 'scout-chat-work-card__progress')
-	        progressBar.setAttribute('role', 'progressbar')
-	        progressBar.setAttribute('aria-label', `${state} ${Math.round(pct)} percent`)
-	        progressBar.setAttribute('aria-valuemin', '0')
-	        progressBar.setAttribute('aria-valuemax', '100')
-	        progressBar.setAttribute('aria-valuenow', String(Math.round(pct)))
-	        progressBar.style.setProperty('--work-progress', `${pct}%`)
-	        progressBar.appendChild(document.createElement('span'))
-	        copy.appendChild(progressBar)
+	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
+	        if (showProgressBar) {
+	          const progressBar = bfEl('span', 'scout-chat-work-card__progress')
+	          progressBar.setAttribute('role', 'progressbar')
+	          progressBar.setAttribute('aria-label', `${state} ${Math.round(pct)} percent`)
+	          progressBar.setAttribute('aria-valuemin', '0')
+	          progressBar.setAttribute('aria-valuemax', '100')
+	          progressBar.setAttribute('aria-valuenow', String(Math.round(pct)))
+	          progressBar.style.setProperty('--work-progress', `${pct}%`)
+	          progressBar.appendChild(document.createElement('span'))
+	          copy.appendChild(progressBar)
+	        }
 	        const open = bfEl('button', 'scout-chat-work-card__open', 'View activity')
 	        open.type = 'button'
-	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}, ${Math.round(pct)}% complete`)
+	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}${hasKnownProgress ? `, ${Math.round(pct)}% complete` : ''}`)
 	        const details = bfEl('div', 'scout-chat-work-card__details')
 	        details.hidden = !expandedWorkDetails.has(workCardID)
 	        open.textContent = details.hidden ? 'View activity' : 'Hide activity'
 	        open.setAttribute('aria-expanded', String(!details.hidden))
 	        details.append(
 	          bfEl('strong', '', `${agent} · ${family}`),
-	          bfEl('span', '', `${phase.label} · ${Math.round(pct)}% complete`),
-	          bfEl('span', '', progress || 'Work is moving forward.'),
-	          bfEl('span', '', 'Private, durable work. Routing and tools stay server-managed.')
+	          bfEl('span', '', hasKnownProgress ? `${phase.label} · ${Math.round(pct)}% complete` : phase.label)
 	        )
-	        if (['complete', 'completed', 'published'].includes(status) && artifact?.id) {
+	        if (artifact?.id) {
 	          const compactActions = bfEl('div', 'chat-context-actions scout-chat-work-card__actions')
-	          const view = bfEl('button', 'chat-context-action', 'Open')
+	          const view = bfEl('button', 'chat-context-action', isComplete ? 'Open' : 'Inspect draft')
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          compactActions.appendChild(view)
-	          const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
-	          if (save) compactActions.appendChild(save)
-	          const regenerate = bfEl('button', 'chat-context-action', 'Regenerate')
+	          if (isComplete) {
+	            const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
+	            if (save) compactActions.appendChild(save)
+	          }
+	          const regenerate = bfEl('button', 'chat-context-action', isStalled ? 'Retry' : 'Regenerate')
 	          regenerate.type = 'button'
 	          regenerate.addEventListener('click', () => {
 	            armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })

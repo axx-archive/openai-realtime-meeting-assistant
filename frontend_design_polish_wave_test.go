@@ -161,7 +161,7 @@ func TestPD1PresentationRejectionFixtureRendersOneConversationAndOneWorkState(t 
 		t.Fatalf("PD1 presentation fixture must contain one work card, got %d", strings.Count(fixture, "kind: 'thread'"))
 	}
 	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
-	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "progressbar", "openDesktopWorkContext", "Private, durable work", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "progressbar", "openDesktopWorkContext", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
 		if !strings.Contains(renderer, want) {
 			t.Errorf("compact presentation work card missing %q", want)
 		}
@@ -243,7 +243,7 @@ func TestPD1RecurringWorkUsesOnePremiumPresentationGrammar(t *testing.T) {
 		t.Fatal("desktop progress sanitizer still relies on a bypassable runtime-token denylist")
 	}
 	context := functionBody(html, "function renderDesktopWorkContext(")
-	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "Governance and provenance", "routing, authority and output contracts server-managed"} {
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote"} {
 		if !strings.Contains(context, want) {
 			t.Errorf("desktop work inspector missing %q", want)
 		}
