@@ -318,6 +318,14 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
         <Text style={styles.emptyBody}>
           Start a private chat with Scout or create a channel to talk with your team.
         </Text>
+        <Pressable
+          accessibilityLabel="Start your first conversation"
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('NewConversation')}
+          style={({ pressed }) => [styles.emptyAction, pressed && styles.emptyActionPressed]}
+        >
+          <Text style={styles.emptyActionText}>Start your first conversation</Text>
+        </Pressable>
       </View>
     );
   }
@@ -364,7 +372,7 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
                   }
                   if (onOpenThread) onOpenThread(thread);
                   else {
-                    navigation.replace('Thread', {
+                    navigation.navigate('Thread', {
                       threadId: threadID,
                       title: channelDisplayName(thread),
                     });
@@ -524,6 +532,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 280,
   },
+  emptyAction: {
+    minHeight: 44,
+    paddingHorizontal: space[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    marginTop: space[3],
+  },
+  emptyActionPressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+  emptyActionText: { ...type.button, color: colors.onAccent },
   errorBox: { padding: space[4], gap: space[2] },
   error: { ...type.bodySm, color: colors.danger },
   retry: { ...type.button, color: colors.ember },

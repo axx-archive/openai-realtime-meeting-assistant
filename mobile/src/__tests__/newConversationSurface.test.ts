@@ -32,7 +32,7 @@ test('Work exposes a real native private-chat and channel creation route', () =>
   assert.match(root, /name="NewConversation"[\s\S]*presentation: 'formSheet'/);
   assert.match(screen, /'Private chat'[\s\S]*'Channel'/);
   assert.match(screen, /api\.createScoutThread\(sessionToken, newConversationBody\(attempt\)\)/);
-  assert.match(screen, /navigation\.replace\('Thread'/);
+  assert.match(screen, /navigation\.navigate\('Thread'/);
   assert.match(client, /operationId\?: string/);
 });
 

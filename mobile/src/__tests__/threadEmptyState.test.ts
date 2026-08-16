@@ -51,3 +51,15 @@ test("iPad keeps destination, conversation, and selected thread context together
   assert.match(rootNavigator, /presentation: 'card'/);
   assert.doesNotMatch(rootNavigator, /presentation: 'fullScreenModal'/);
 });
+
+test("Chat thread opening stacks on Chat, same pattern Meet uses for Room", () => {
+  assert.match(channelList, /navigation\.navigate\('Thread'/);
+  assert.doesNotMatch(channelList, /navigation\.replace\('Thread'/);
+});
+
+test("empty Chat shows a CTA for starting first conversation", () => {
+  assert.match(channelList, /No conversations yet/);
+  assert.match(channelList, /Start your first conversation/);
+  assert.match(channelList, /navigation\.navigate\('NewConversation'\)/);
+  assert.match(channelList, /emptyAction/);
+});

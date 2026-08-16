@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 import { useNavigation } from '@react-navigation/native';
@@ -7,7 +7,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ChannelList } from '../messaging/ChannelList';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
-import { NATIVE_SHELL_SIDEBAR_MIN_WIDTH } from '../navigation/nativeShellModel';
 
 type ChatNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -24,8 +23,6 @@ type ChatNav = NativeStackNavigationProp<RootStackParamList>;
 
 export function ChatScreen() {
   const navigation = useNavigation<ChatNav>();
-  const { width } = useWindowDimensions();
-  const tablet = width >= NATIVE_SHELL_SIDEBAR_MIN_WIDTH;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -38,7 +35,7 @@ export function ChatScreen() {
           style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
         >
           <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
-          {tablet ? <Text style={styles.createText}>New conversation</Text> : null}
+          <Text style={styles.createText}>New</Text>
         </Pressable>
       </View>
 
