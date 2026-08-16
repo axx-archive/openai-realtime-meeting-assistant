@@ -44442,9 +44442,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceHandledCalls.add(callId)
         // announce beat: posting-as-user pauses on a consent-signalling
         // hand-raised state; every other action shows the ember "acting" state
-        // with the live verb. do_nothing stays quiet.
-        if (name === 'do_nothing') {
-          setVoiceIslandState('thinking', 'thinking…')
+        // with the live verb. do_nothing and route_conversation_turn stay quiet
+        // — conversational voice must not show an "acting" beat or toast before
+        // audio arrives (tight back-and-forth like talking to a person).
+        if (name === 'do_nothing' || name === 'route_conversation_turn') {
+          // Stay in current state — no acting/thinking beat for conversational turns
         } else if (name === 'start_chat_as_user') {
           setVoiceIslandState('hand-raised', scoutActionVerb(name, 'announce'))
         } else {
