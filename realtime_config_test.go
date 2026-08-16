@@ -241,14 +241,13 @@ func TestPrivateRealtimeVoiceOrdinaryQuestionPlusYesStaysFalse(t *testing.T) {
 	user := &userAccount{Email: "test@example.com", Name: "Test"}
 
 	// Create a thread where Scout asked an ordinary conversational question
-	// (NOT a clarify_once choices card)
 	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 
 	// Add Scout message with an ordinary question — this is NOT a direction pass
-	// because it's Kind="message", not Kind="choices" with IntentOutcome=clarify_once
+	// because IntentOutcome=conversational_reply, not clarify_once
 	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
 		ID:            "scout-msg-1",
 		Kind:          "message",
@@ -264,54 +263,45 @@ func TestPrivateRealtimeVoiceOrdinaryQuestionPlusYesStaysFalse(t *testing.T) {
 
 	// "yes" should NOT route — ordinary question is not a direction pass
 	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
-		t.Error("shouldRoute('yes') = true after ordinary question, want false")
+		t.Error("shouldRoute('yes') = true after ordinary question 'How's the week going?', want false")
 	}
 	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yeah") {
 		t.Error("shouldRoute('yeah') = true after ordinary question, want false")
 	}
 }
 
-func TestPrivateRealtimeVoiceRealDirectionPassPlusYesRoutes(t *testing.T) {
+func TestPrivateRealtimeVoiceProseDirectionPassPlusYesRoutes(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	user := &userAccount{Email: "test@example.com", Name: "Test"}
 
-	// Create a thread where Scout asked a REAL direction pass (clarify_once choices card)
+	// Create a thread where Scout asked an Approach B prose direction pass
+	// (Kind=message but IntentOutcome=clarify_once)
 	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 
-	// Add a real direction pass — Kind=choices with IntentOutcome=clarify_once
-	// This is what the router produces for "What's the deck about... typographic deck?"
+	// Add a prose direction pass — Kind=message with IntentOutcome=clarify_once
+	// This is Approach B: Scout asks about work direction in a regular message
 	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
-		ID:            "scout-choices-1",
-		Kind:          scoutChatMessageKindChoices,
+		ID:            "scout-msg-1",
+		Kind:          "message",
 		Role:          "assistant",
 		AuthorName:    "Scout",
 		IntentOutcome: string(conversationIntentClarifyOnce),
-		Text:          "What's the deck about — typographic deck?",
+		Text:          "What's the deck about — a tight typographic deck?",
 		CreatedAt:     "2024-01-01T00:00:00Z",
-		Choices: &scoutChatChoices{
-			Question: "What's the deck about — typographic deck?",
-			Options: []scoutChatChoiceOption{
-				{ID: "1", Label: "Company overview"},
-				{ID: "2", Label: "Product launch"},
-			},
-		},
 	})
 	if err := app.saveScoutChatThread(thread); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
-	// "yes" should route — real direction pass is pending
+	// "yes" should route — prose direction pass is pending
 	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
-		t.Error("shouldRoute('yes') = false after real direction pass (choices card), want true")
+		t.Error("shouldRoute('yes') = false after prose direction pass 'What's the deck about...', want true")
 	}
 	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "Yes.") {
-		t.Error("shouldRoute('Yes.') = false after real direction pass, want true")
-	}
-	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "Yeah!") {
-		t.Error("shouldRoute('Yeah!') = false after real direction pass, want true")
+		t.Error("shouldRoute('Yes.') = false after prose direction pass, want true")
 	}
 
 	// Add user response - direction pass should clear
@@ -328,7 +318,47 @@ func TestPrivateRealtimeVoiceRealDirectionPassPlusYesRoutes(t *testing.T) {
 
 	// "yes" should NOT route without pending direction pass
 	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
-		t.Error("shouldRoute('yes') = true without direction pass, want false")
+		t.Error("shouldRoute('yes') = true after user response cleared direction pass, want false")
+	}
+}
+
+func TestPrivateRealtimeVoiceChoicesCardPlusYesRoutes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	user := &userAccount{Email: "test@example.com", Name: "Test"}
+
+	// Create a thread where Scout asked a formal choices card direction pass
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Add a formal choices card — Kind=choices with IntentOutcome=clarify_once
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID:            "scout-choices-1",
+		Kind:          scoutChatMessageKindChoices,
+		Role:          "assistant",
+		AuthorName:    "Scout",
+		IntentOutcome: string(conversationIntentClarifyOnce),
+		Text:          "What topic should the deck cover?",
+		CreatedAt:     "2024-01-01T00:00:00Z",
+		Choices: &scoutChatChoices{
+			Question: "What topic should the deck cover?",
+			Options: []scoutChatChoiceOption{
+				{ID: "1", Label: "Company overview"},
+				{ID: "2", Label: "Product launch"},
+			},
+		},
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	// "yes" should route — choices card direction pass is pending
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
+		t.Error("shouldRoute('yes') = false after choices card, want true")
+	}
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "Yeah!") {
+		t.Error("shouldRoute('Yeah!') = false after choices card, want true")
 	}
 }
 

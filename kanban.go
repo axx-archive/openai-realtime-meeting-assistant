@@ -4379,19 +4379,57 @@ func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript 
 		return true
 	}
 	// Short confirmation ("yes", "ok", etc.) only routes if there's a pending
-	// clarification in the thread. A real direction pass is a choices card with
-	// IntentOutcome=clarify_once — NOT any Scout message ending in "?".
-	// "How's the week going?" + "yes" must stay false.
-	// A router clarify_once choices card + "yes" must route.
+	// direction pass in the thread. A direction pass is:
+	// 1. Kind=choices with IntentOutcome=clarify_once (scoutChatClarificationAlreadyAsked)
+	// 2. Kind=message with IntentOutcome=clarify_once (Approach B prose direction pass)
+	// "How's the week going?" (IntentOutcome=conversational_reply) + "yes" stays false.
+	// "What's the deck about..." (IntentOutcome=clarify_once) + "yes" routes.
 	text := strings.TrimSpace(transcript)
 	if threadLoaded && privateRealtimeVoiceIsConfirmation(text) {
-		return scoutChatClarificationAlreadyAsked(thread)
+		return scoutChatDirectionPassPending(thread)
 	}
 	// Named studio asks via tight detection (deck, image only)
 	// Deliberately NOT using scoutTurnAppearsWorkShaped — it's too broad and
 	// matches ordinary conversation like "does that make sense?" / "let me write
 	// that down" / "I'll send it later".
 	return privateRealtimeVoiceTranscriptIndicatesAction(text)
+}
+
+// scoutChatDirectionPassPending returns true when Scout's last turn was a
+// direction pass — asking for direction about work. A direction pass is:
+// 1. Kind=choices with Choices != nil (formal clarify_once choices card)
+// 2. Kind=message with IntentOutcome=clarify_once (Approach B prose question)
+// Ordinary questions like "How's the week going?" have IntentOutcome=conversational_reply
+// and do NOT count as direction passes.
+func scoutChatDirectionPassPending(thread scoutChatThreadRecord) bool {
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		// User message means no pending Scout direction
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return false
+		}
+		// Formal choices card (clarify_once outcome)
+		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
+			return true
+		}
+		// Approach B prose direction pass: kind=message with IntentOutcome=clarify_once
+		if message.Kind == "message" {
+			author := strings.TrimSpace(message.AuthorName)
+			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
+			if isScout && message.IntentOutcome == string(conversationIntentClarifyOnce) {
+				return true
+			}
+			// Any other Scout message (including conversational_reply) is not a direction pass
+			if isScout {
+				return false
+			}
+		}
+		// Other kinds (proposal, thread) don't count as direction passes
+		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+			return false
+		}
+	}
+	return false
 }
 
 // privateRealtimeVoiceIsConfirmation returns true for short affirmative replies
