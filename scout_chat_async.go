@@ -954,7 +954,7 @@ Respond naturally as if you're a design collaborator having a quick conversation
 
 // resolveDeckGeneration creates the actual HTML deck with direction context.
 func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
-	// Collect direction context from history
+	// Collect direction context from history (filtered to aesthetic-only)
 	directionContext := extractDirectionContext(history)
 
 	// If query is a short confirmation (yes/looks good/etc), extract the actual
@@ -964,7 +964,12 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 
 	deckPrompt := inlineDeckGenerationPromptWithDirection(effectiveQuery, directionContext)
 	answerContext := withAssistantModelSuccessRequired(ctx)
-	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, history)
+
+	// CRITICAL: Filter history to remove topic-asking questions before passing to LLM.
+	// Otherwise "What's the deck about?" ends up in the conversation context and the LLM
+	// interprets it as needing an answer.
+	filteredHistory := filterHistoryForDeckGeneration(history)
+	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, filteredHistory)
 	if err != nil {
 		return scoutChatMessageRecord{}, err
 	}
@@ -1122,25 +1127,96 @@ func hasDeckTopic(request string) bool {
 }
 
 
-// extractDirectionContext pulls aesthetic direction from conversation history.
-func extractDirectionContext(history []scoutChatTurn) string {
-	var context strings.Builder
+// filterHistoryForDeckGeneration removes messages that would cause the LLM to refuse
+// deck generation, specifically topic-asking questions like "What's the deck about?"
+func filterHistoryForDeckGeneration(history []scoutChatTurn) []scoutChatTurn {
+	var filtered []scoutChatTurn
 	for _, turn := range history {
-		text := strings.ToLower(turn.text)
-		// Look for direction-related content
-		if strings.Contains(text, "dark") || strings.Contains(text, "light") ||
-			strings.Contains(text, "minimal") || strings.Contains(text, "bold") ||
-			strings.Contains(text, "corporate") || strings.Contains(text, "modern") ||
-			strings.Contains(text, "color") || strings.Contains(text, "style") ||
-			strings.Contains(text, "image") || strings.Contains(text, "typographic") ||
-			strings.Contains(text, "photo") || strings.Contains(text, "clean") {
-			if context.Len() > 0 {
-				context.WriteString(" ")
+		lower := strings.ToLower(turn.text)
+		// Skip Scout messages that ask about topic — these cause refuses
+		if (turn.role == "assistant" || turn.role == "scout") &&
+			(strings.Contains(lower, "what's the deck about") ||
+				strings.Contains(lower, "what is the deck about") ||
+				strings.Contains(lower, "what's it about") ||
+				strings.Contains(lower, "what topic") ||
+				strings.Contains(lower, "what subject") ||
+				strings.Contains(lower, "i still need the") ||
+				strings.Contains(lower, "i need to know")) {
+			continue
+		}
+		filtered = append(filtered, turn)
+	}
+	return filtered
+}
+
+// extractDirectionContext pulls aesthetic direction from conversation history.
+// CRITICAL: Only returns aesthetic choices, NEVER forwards topic-asking questions
+// like "What's the deck about?" even if they contain aesthetic keywords.
+func extractDirectionContext(history []scoutChatTurn) string {
+	var choices []string
+
+	for _, turn := range history {
+		lower := strings.ToLower(turn.text)
+
+		// Skip messages that ask about topic/subject — these should never be forwarded
+		if strings.Contains(lower, "what's the deck about") ||
+			strings.Contains(lower, "what is the deck about") ||
+			strings.Contains(lower, "what's it about") ||
+			strings.Contains(lower, "what topic") ||
+			strings.Contains(lower, "what subject") ||
+			(strings.Contains(lower, "about") && strings.Contains(lower, "?") && strings.Contains(lower, "deck")) {
+			// Extract only the aesthetic portion, not the topic question
+			aesthetic := extractAestheticPhrasesOnly(lower)
+			if aesthetic != "" {
+				choices = append(choices, aesthetic)
 			}
-			context.WriteString(turn.text)
+			continue
+		}
+
+		// For user messages with explicit direction, extract the direction
+		if turn.role == "user" {
+			if strings.Contains(lower, "dark") || strings.Contains(lower, "light") ||
+				strings.Contains(lower, "minimal") || strings.Contains(lower, "bold") ||
+				strings.Contains(lower, "corporate") || strings.Contains(lower, "modern") ||
+				strings.Contains(lower, "clean") || strings.Contains(lower, "colorful") {
+				choices = append(choices, turn.text)
+			}
 		}
 	}
-	return context.String()
+
+	return strings.Join(choices, " ")
+}
+
+// extractAestheticPhrasesOnly extracts only aesthetic direction phrases from text,
+// filtering out topic questions. Returns empty if no useful aesthetic content.
+func extractAestheticPhrasesOnly(text string) string {
+	// Map of aesthetic keywords to descriptive phrases
+	aestheticOptions := map[string]string{
+		"corporate":       "polished and corporate",
+		"cinematic":       "cinematic and dramatic",
+		"culture-forward": "culture-forward and modern",
+		"startup":         "startup energy",
+		"polished":        "polished and professional",
+		"minimal":         "minimal and clean",
+		"bold":            "bold and impactful",
+		"modern":          "modern and sleek",
+		"full-bleed":      "full-bleed imagery",
+		"typographic":     "clean typographic design",
+		"dark":            "dark theme",
+		"light":           "light theme",
+	}
+
+	var found []string
+	for keyword, description := range aestheticOptions {
+		if strings.Contains(text, keyword) {
+			found = append(found, description)
+		}
+	}
+
+	if len(found) > 0 {
+		return strings.Join(found, ", ")
+	}
+	return ""
 }
 
 // inlineDeckGenerationPrompt creates the prompt for generating an HTML deck.

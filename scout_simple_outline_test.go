@@ -612,6 +612,10 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 
 	// Mock the LLM response
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// CRITICAL: The prompt must NOT contain "What's the deck about" — that's the #34 hole
+		if strings.Contains(request.Input, "What's the deck about") {
+			t.Error("Prompt contains 'What's the deck about' — this causes the LLM to refuse. extractDirectionContext must filter it out.")
+		}
 		// Check that the prompt does NOT just say "User request: yes"
 		if strings.Contains(request.Input, "User request: yes") {
 			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
@@ -628,7 +632,7 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	})
 
 	// Scenario: "make a 5-slide deck" (no topic), then direction pass asking about topic, then "yes"
-	// This is the exact prod-test scenario that failed
+	// This is the exact prod-test scenario that failed at 381d004a
 	history := []scoutChatTurn{
 		{role: "user", text: "make a 5-slide deck"},
 		{role: "scout", text: "What's the deck about, and who needs to buy into it? Should it feel polished and corporate, or more cinematic and culture-forward?"},
@@ -653,6 +657,55 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(reply.Text), "missing") && strings.Contains(strings.ToLower(reply.Text), "subject") {
 		t.Error("Reply contains 'missing...subject' refusal — should have generated a deck")
+	}
+}
+
+// TestExtractDirectionContextFiltersTopicQuestions tests that extractDirectionContext
+// does NOT forward topic-asking questions like "What's the deck about?"
+func TestExtractDirectionContextFiltersTopicQuestions(t *testing.T) {
+	cases := []struct {
+		name           string
+		history        []scoutChatTurn
+		wantNotContain string
+		wantContain    string
+	}{
+		{
+			name: "filters out topic question but keeps aesthetic",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "What's the deck about, and who needs to buy into it? Should it feel polished and corporate, or more cinematic and culture-forward?"},
+			},
+			wantNotContain: "What's the deck about",
+			wantContain:    "corporate", // Should extract aesthetic choice
+		},
+		{
+			name: "keeps user aesthetic direction",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck with dark theme and minimal style"},
+			},
+			wantContain: "dark",
+		},
+		{
+			name: "empty for no direction",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "I'll create that for you."},
+			},
+			wantNotContain: "create that",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractDirectionContext(tc.history)
+			lower := strings.ToLower(result)
+			if tc.wantNotContain != "" && strings.Contains(lower, strings.ToLower(tc.wantNotContain)) {
+				t.Errorf("extractDirectionContext should NOT contain %q, got: %q", tc.wantNotContain, result)
+			}
+			if tc.wantContain != "" && !strings.Contains(lower, strings.ToLower(tc.wantContain)) {
+				t.Errorf("extractDirectionContext should contain %q, got: %q", tc.wantContain, result)
+			}
+		})
 	}
 }
 
