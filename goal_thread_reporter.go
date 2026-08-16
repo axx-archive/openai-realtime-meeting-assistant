@@ -139,3 +139,37 @@ func (app *kanbanBoardApp) postGoalCheckpointMessage(parentID string, question s
 		},
 	})
 }
+
+// postGoalSalvagedDraftMessage posts a salvaged draft into the origin thread
+// when a goal parks on NEEDS ATTENTION. This ensures the draft is visible
+// in-thread instead of just being attached to the package silently.
+func (app *kanbanBoardApp) postGoalSalvagedDraftMessage(parentID string, draftArtifactID string, gap string) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	draftArtifactID = strings.TrimSpace(draftArtifactID)
+	if draftArtifactID == "" {
+		return
+	}
+	draft, ok := app.osArtifactByID(draftArtifactID)
+	if !ok {
+		return
+	}
+	draftTitle := firstNonEmptyString(strings.TrimSpace(draft.Metadata["title"]), "Draft")
+	gap = strings.TrimSpace(gap)
+	text := draftTitle + " is saved — needs attention"
+	if gap != "" {
+		text += ": " + compactAssistantLine(gap)
+	}
+	app.postGoalOriginMessage(parentID, scoutChatMessageRecord{
+		Kind: "artifact",
+		Role: "scout",
+		Text: text,
+		Thread: &scoutChatThreadRef{
+			ArtifactID: draftArtifactID,
+			Mode:       firstNonEmptyString(strings.TrimSpace(draft.Metadata["mode"]), "artifacts"),
+			Query:      draftTitle,
+			Status:     "needs_attention",
+		},
+	})
+}
