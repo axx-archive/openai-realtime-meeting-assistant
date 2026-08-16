@@ -271,9 +271,38 @@ func homeConversationCompactionForThread(thread scoutChatThreadRecord) homeConve
 	return compaction
 }
 
+// homeConversationIsOwnerOnlyPrivate returns true if the metadata represents an
+// owner-only private Scout conversation with no room, channel, or project binding.
+// These threads are excluded from company Home to preserve Scout's confidential
+// 1:1 advisory relationship while appearing in the owner's personal Chat list.
+func homeConversationIsOwnerOnlyPrivate(metadata map[string]string) bool {
+	if normalizeScoutChatVisibility(metadata["visibility"]) != scoutChatVisibilityPrivate {
+		return false
+	}
+	// A private thread is owner-only if it has no binding to a shared context:
+	// - memberEmails → shared project thread
+	// - conversationKind "channel_riff" → private riff bound to a public channel
+	// - table "true" → the permanent team Table thread
+	if strings.TrimSpace(metadata["memberEmails"]) != "" {
+		return false
+	}
+	if strings.TrimSpace(metadata["conversationKind"]) == "channel_riff" {
+		return false
+	}
+	if strings.TrimSpace(metadata["table"]) == "true" {
+		return false
+	}
+	return true
+}
+
 func validHomeConversationCompaction(entry meetingMemoryEntry, viewerEmail string, now time.Time) (homeConversationCompaction, bool) {
 	var compaction homeConversationCompaction
 	if entry.Kind != meetingMemoryKindScoutChat || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, viewerEmail) {
+		return compaction, false
+	}
+	// Owner-only private 1:1 Scout threads are excluded from company Home.
+	// They remain accessible in the owner's personal Chat list.
+	if homeConversationIsOwnerOnlyPrivate(entry.Metadata) {
 		return compaction, false
 	}
 	if json.Unmarshal([]byte(strings.TrimSpace(entry.Metadata[homeConversationCompactionKey])), &compaction) != nil {

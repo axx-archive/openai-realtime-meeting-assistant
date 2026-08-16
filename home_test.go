@@ -211,9 +211,10 @@ func TestHomeChiefOfStaffRecommendationsSynthesizeOnlyViewerAuthorizedThreads(t 
 
 func TestHomeConversationCompactionIsBodyMinimizedFreshAndFailClosed(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	// Use a public channel so it appears in Home (private owner-only threads are filtered)
 	thread := scoutChatThreadRecord{
 		ID: "customer-risk", Title: "Customer renewal", OwnerEmail: artifactLibraryAdminEmail,
-		Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		Visibility: scoutChatVisibilityPublic, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
 		Messages: []scoutChatMessageRecord{{ID: "message-1", Role: "user", Text: "The onboarding risk needs an owner before Friday.", CreatedAt: now.Format(time.RFC3339Nano)}},
 	}
 	metadata := scoutChatThreadMetadata(thread)
@@ -254,9 +255,10 @@ func TestHomeRecurringThemeReadsDurableCompactionWithoutDecodingRawHistory(t *te
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	now := time.Now().UTC()
+	// Use public channels so they appear in Home (private owner-only threads are filtered)
 	threads := []scoutChatThreadRecord{
-		{ID: "current-readable", Title: "Onboarding plan", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "current-message", Role: "user", Text: "Revisit the onboarding timeline.", CreatedAt: now.Format(time.RFC3339Nano)}}},
-		{ID: "body-unavailable", Title: "Customer rollout", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "unavailable-message", Role: "user", Text: "The onboarding risk needs attention.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}},
+		{ID: "current-readable", Title: "Onboarding plan", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPublic, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "current-message", Role: "user", Text: "Revisit the onboarding timeline.", CreatedAt: now.Format(time.RFC3339Nano)}}},
+		{ID: "body-unavailable", Title: "Customer rollout", OwnerEmail: artifactLibraryAdminEmail, Visibility: scoutChatVisibilityPublic, CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Messages: []scoutChatMessageRecord{{ID: "unavailable-message", Role: "user", Text: "The onboarding risk needs attention.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}},
 	}
 	for _, thread := range threads {
 		encoded, err := encodeScoutChatThread(thread)
@@ -393,5 +395,157 @@ func TestHomeWorkFamilyMatchesTheRecurringCatalogWithoutSubstringGuessing(t *tes
 		if got := homeWorkFamily(scoutChatThreadRef{Query: query}); got != want {
 			t.Errorf("homeWorkFamily(%q)=%q, want %q", query, got, want)
 		}
+	}
+}
+
+func TestHomeOmitsOwnerOnlyPrivateScoutThreadsFromCompanyHome(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().UTC()
+	owner := artifactLibraryAdminEmail
+	other := "tim@shareability.com"
+
+	// Owner-only private 1:1 Scout thread (should be filtered from Home)
+	privateThread := scoutChatThreadRecord{
+		ID: "private-scout", Title: "Private strategy", OwnerEmail: owner,
+		Visibility: scoutChatVisibilityPrivate,
+		CreatedAt:  now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		Messages:   []scoutChatMessageRecord{{ID: "private-message", Role: "user", Text: "Review my confidential notes.", CreatedAt: now.Format(time.RFC3339Nano)}},
+	}
+	// Organization-wide public channel (should appear in Home)
+	orgChannel := scoutChatThreadRecord{
+		ID: "org-channel", Title: "Team updates", OwnerEmail: owner,
+		Visibility: scoutChatVisibilityPublic,
+		CreatedAt:  now.Add(-2 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		Messages:   []scoutChatMessageRecord{{ID: "channel-message", Role: "user", Text: "Team standup notes.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}},
+	}
+	// Project thread with member emails (should appear in Home for members)
+	projectThread := scoutChatThreadRecord{
+		ID: "project-thread", Title: "Customer rollout", OwnerEmail: owner,
+		Visibility:   scoutChatVisibilityPublic,
+		MemberEmails: []string{owner, other},
+		CreatedAt:    now.Add(-3 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+		Messages:     []scoutChatMessageRecord{{ID: "project-message", Role: "user", Text: "Project kickoff.", CreatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano)}},
+	}
+
+	for _, thread := range []scoutChatThreadRecord{privateThread, orgChannel, projectThread} {
+		encoded, err := encodeScoutChatThread(thread)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := app.memory.appendScoutChatThread(thread.ID, encoded, scoutChatThreadMetadata(thread)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Verify Home snapshot excludes the private 1:1 Scout thread
+	snapshot := app.homeSnapshotForViewer(owner)
+	for _, item := range snapshot.Items {
+		if item.Destination.ThreadID == "private-scout" {
+			t.Fatalf("Home items contain owner-only private Scout thread: %+v", item)
+		}
+	}
+	// Verify org channel and project thread appear (or would if they have enough activity)
+	compactions := app.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
+	threads := homeThreadsFromCompactions(compactions, owner, now, 100)
+	privateFound := false
+	orgFound := false
+	projectFound := false
+	for _, thread := range threads {
+		switch thread.ID {
+		case "private-scout":
+			privateFound = true
+		case "org-channel":
+			orgFound = true
+		case "project-thread":
+			projectFound = true
+		}
+	}
+	if privateFound {
+		t.Fatal("homeThreadsFromCompactions returned owner-only private Scout thread")
+	}
+	if !orgFound {
+		t.Fatal("homeThreadsFromCompactions excluded org channel")
+	}
+	if !projectFound {
+		t.Fatal("homeThreadsFromCompactions excluded project thread")
+	}
+
+	// Verify owner still sees the private thread in Chat listing
+	chatThreads := app.scoutChatThreadsSnapshot(owner, false, 100)
+	chatPrivateFound := false
+	for _, thread := range chatThreads {
+		if thread.ID == "private-scout" {
+			chatPrivateFound = true
+			break
+		}
+	}
+	if !chatPrivateFound {
+		t.Fatal("Chat listing excluded owner's private Scout thread")
+	}
+
+	// Verify metadata helper identifies owner-only private correctly
+	privateMetadata := scoutChatThreadMetadata(privateThread)
+	if !homeConversationIsOwnerOnlyPrivate(privateMetadata) {
+		t.Fatal("homeConversationIsOwnerOnlyPrivate returned false for owner-only private thread")
+	}
+	orgMetadata := scoutChatThreadMetadata(orgChannel)
+	if homeConversationIsOwnerOnlyPrivate(orgMetadata) {
+		t.Fatal("homeConversationIsOwnerOnlyPrivate returned true for org channel")
+	}
+	projectMetadata := scoutChatThreadMetadata(projectThread)
+	if homeConversationIsOwnerOnlyPrivate(projectMetadata) {
+		t.Fatal("homeConversationIsOwnerOnlyPrivate returned true for project thread")
+	}
+}
+
+func TestHomeConversationIsOwnerOnlyPrivateClassifiesBindingsCorrectly(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		want     bool
+	}{
+		{
+			name:     "private with no bindings is owner-only",
+			metadata: map[string]string{"visibility": "private"},
+			want:     true,
+		},
+		{
+			name:     "empty visibility defaults to private owner-only",
+			metadata: map[string]string{},
+			want:     true,
+		},
+		{
+			name:     "public channel is not owner-only",
+			metadata: map[string]string{"visibility": "public"},
+			want:     false,
+		},
+		{
+			name:     "private with memberEmails is shared project, not owner-only",
+			metadata: map[string]string{"visibility": "private", "memberEmails": "a@test.com,b@test.com"},
+			want:     false,
+		},
+		{
+			name:     "private riff is channel-bound, not owner-only",
+			metadata: map[string]string{"visibility": "private", "conversationKind": "channel_riff"},
+			want:     false,
+		},
+		{
+			name:     "private table is not owner-only",
+			metadata: map[string]string{"visibility": "private", "table": "true"},
+			want:     false,
+		},
+		{
+			name:     "public with memberEmails is not owner-only",
+			metadata: map[string]string{"visibility": "public", "memberEmails": "a@test.com"},
+			want:     false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := homeConversationIsOwnerOnlyPrivate(test.metadata); got != test.want {
+				t.Errorf("homeConversationIsOwnerOnlyPrivate(%v)=%v, want %v", test.metadata, got, test.want)
+			}
+		})
 	}
 }
