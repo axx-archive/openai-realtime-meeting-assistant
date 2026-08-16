@@ -44,10 +44,10 @@ test("iPad keeps destination, conversation, and selected thread context together
   assert.match(screen, /const iPadWorkspace = workspaceLayout\.conversationPane/);
   assert.match(screen, /accessibilityLabel="Conversations"/);
   assert.match(screen, /<ChannelList/);
-  assert.match(screen, /selectedThreadId=\{route\.params\.threadId\}/);
+  assert.match(screen, /selectedThreadId=\{privateRiff\?\.sourceThreadId \?\? route\.params\.sourceThreadId \?\? route\.params\.threadId\}/);
   assert.match(screen, /navigation\.replace\("Thread"/);
   assert.match(channelList, /accessibilityState=\{\{ selected: selectedThreadId === threadID \}\}/);
-  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && activeRoute === 'Thread'\)\}/);
+  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(activeRoute === 'Thread' \|\| activeRoute === 'ChannelRiff'\)\)\}/);
   assert.match(rootNavigator, /presentation: 'card'/);
   assert.doesNotMatch(rootNavigator, /presentation: 'fullScreenModal'/);
 });

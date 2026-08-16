@@ -15,7 +15,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { OSWebScreen } from '../screens/OSWebScreen';
 import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
-import { ThreadScreen } from '../screens/ThreadScreen';
+import { ChannelRiffScreen, ThreadScreen } from '../screens/ThreadScreen';
 import { NewConversationScreen } from '../screens/NewConversationScreen';
 import { AlertsScreen } from '../screens/AlertsScreen';
 import { AgentTeamScreen } from '../screens/AgentTeamScreen';
@@ -259,7 +259,7 @@ export function RootNavigator() {
         <NativeUniversalShell
           active={activeShellDestination}
           access={user?.shellAccess}
-          keepSidebarForFocusedRoute={Boolean(user && sessionToken && activeRoute === 'Thread')}
+          keepSidebarForFocusedRoute={Boolean(user && sessionToken && (activeRoute === 'Thread' || activeRoute === 'ChannelRiff'))}
           personalRealtimeVisible={Boolean(user && sessionToken && activeRoute !== 'Room')}
           visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
           onOpenPersonalRealtimeThread={openPersonalRealtimeThread}
@@ -305,6 +305,23 @@ export function RootNavigator() {
                 presentation: 'card',
                 animation: 'simple_push',
               }}
+            />
+            <Stack.Screen
+              name="ChannelRiff"
+              component={ChannelRiffScreen}
+              options={({ route }) => route.params.displayMode === 'sheet'
+                ? {
+                    presentation: 'formSheet',
+                    sheetAllowedDetents: [0.72, 1],
+                    sheetInitialDetentIndex: 0,
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 28,
+                    animation: 'slide_from_bottom',
+                  }
+                : {
+                    presentation: 'card',
+                    animation: 'simple_push',
+                  }}
             />
             {/* A call is not a sheet — joining a room takes the full screen. */}
             <Stack.Screen name="Room" component={RoomScreen} />

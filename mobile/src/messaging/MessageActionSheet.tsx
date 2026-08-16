@@ -19,14 +19,14 @@ type Props = {
   snippet: string;
   reactions: ScoutMessageReaction[];
   onClose: () => void;
-  onReact: (emoji: string) => void;
+  onReact?: (emoji: string) => void;
   onCopy: () => void;
   onSaveAttachment?: () => void;
-  onReply: () => void;
+  onReply?: () => void;
   onRiffPrivately?: () => void;
   onShareFromRiff?: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
   onChangeProject?: () => void;
   projectChangePending?: boolean;
 };
@@ -54,14 +54,14 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
         <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, { opacity: progress }]} />
       </Pressable>
         <View style={styles.sheet}>
-          <Animated.View
+          {onReact ? <Animated.View
             style={{
               opacity: progress.interpolate({ inputRange: [0, 0.72], outputRange: [0, 1], extrapolate: 'clamp' }),
               transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
             }}
           >
             <Text numberOfLines={2} style={styles.snippet}>{snippet || 'Attachment'}</Text>
-          </Animated.View>
+          </Animated.View> : null}
           <Animated.View
             accessibilityLabel="React to message"
             style={[
@@ -87,7 +87,7 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
                   key={emoji}
                   accessibilityRole="button"
                   accessibilityLabel={`React ${emoji}`}
-                  onPress={() => onReact(emoji)}
+                  onPress={() => onReact?.(emoji)}
                   style={({ pressed }) => [styles.reaction, pressed && styles.reactionPressed]}
                 >
                   <Text style={styles.emoji}>{emoji}</Text>
@@ -152,10 +152,10 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
                   <View style={styles.rule} />
                 </>
               ) : null}
-              <Pressable accessibilityRole="button" accessibilityLabel="Reply to message" onPress={onReply} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+              {onReply ? <Pressable accessibilityRole="button" accessibilityLabel="Reply to message" onPress={onReply} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
                 <SymbolView name="arrowshape.turn.up.left" tintColor={colors.text1} size={18} />
                 <Text style={styles.actionText}>Reply</Text>
-              </Pressable>
+              </Pressable> : null}
               {onRiffPrivately ? <View style={styles.rule} /> : null}
               {onRiffPrivately ? (
                 <Pressable accessibilityRole="button" accessibilityLabel="Riff privately from this message" onPress={onRiffPrivately} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
@@ -184,8 +184,8 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
                   <Text style={styles.actionText}>Change project</Text>
                 </Pressable>
               ) : null}
-              {own ? <View style={styles.rule} /> : null}
-              {own ? (
+              {own && onEdit && onDelete ? <View style={styles.rule} /> : null}
+              {own && onEdit && onDelete ? (
                 <>
               <Pressable accessibilityRole="button" onPress={onEdit} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
                 <SymbolView name="pencil" tintColor={colors.text1} size={18} />

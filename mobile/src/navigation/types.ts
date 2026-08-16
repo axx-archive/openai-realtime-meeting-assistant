@@ -22,6 +22,19 @@ export type RootStackParamList = {
     threadId: string;
     title: string;
     messageId?: string;
+    riffSpace?: boolean;
+    sourceThreadId?: string;
+    sourceTitle?: string;
+    displayMode?: 'screen' | 'sheet' | 'rail';
+  };
+  ChannelRiff: {
+    threadId: string;
+    title: string;
+    messageId?: string;
+    riffSpace: true;
+    sourceThreadId: string;
+    sourceTitle: string;
+    displayMode: 'screen' | 'sheet' | 'rail';
   };
   Intelligence: undefined;
   Memory: undefined;

@@ -146,12 +146,15 @@ import { PrivateRiffContextSheet } from "../messaging/PrivateRiffContextSheet";
 import { PrivateRiffShareSheet } from "../messaging/PrivateRiffShareSheet";
 import {
   privateRiffCheckpointSummary,
-  privateRiffHasUpdates,
+  privateRiffCurrentEpisodeMessages,
+  privateRiffDisplayedPassNumber,
+  privateRiffFreshnessSummary,
   privateRiffReplyShareable,
 } from "../messaging/privateRiff";
 import { usePersonalRealtimeContext } from "../realtime/PersonalRealtimeContext";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Thread">;
+type ChannelRiffProps = NativeStackScreenProps<RootStackParamList, "ChannelRiff">;
 
 type ProjectCorrectionTarget = {
   messageId: string;
@@ -505,12 +508,18 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [threadVisibility, setThreadVisibility] = useState("private");
   const [privateRiff, setPrivateRiff] = useState<PrivateRiffBinding | null>(null);
   const [privateRiffContextOpen, setPrivateRiffContextOpen] = useState(false);
-  const [privateRiffRefreshing, setPrivateRiffRefreshing] = useState(false);
+  const [privateRiffViewingEpisodeID, setPrivateRiffViewingEpisodeID] = useState<string | null>(null);
+  const [privateRiffResumingEpisodeID, setPrivateRiffResumingEpisodeID] = useState<string | null>(null);
   const [privateRiffContextError, setPrivateRiffContextError] = useState("");
   const [privateRiffCreating, setPrivateRiffCreating] = useState(false);
   const [privateRiffShareMessage, setPrivateRiffShareMessage] = useState<ScoutMessage | null>(null);
   const [privateRiffPublishing, setPrivateRiffPublishing] = useState<"all" | "reply" | null>(null);
   const [privateRiffShareError, setPrivateRiffShareError] = useState("");
+  const viewingEarlierRiffEpisode = Boolean(
+    privateRiff?.viewedEpisodeId
+    && privateRiff.viewedEpisodeId !== privateRiff.activeEpisodeId,
+  );
+  const privateRiffReadOnly = Boolean(privateRiff && (!privateRiff.sourceAvailable || viewingEarlierRiffEpisode));
   const [threadOwnerEmail, setThreadOwnerEmail] = useState("");
   const [threadTitle, setThreadTitle] = useState(route.params.title);
   const [editingThreadTitle, setEditingThreadTitle] = useState(false);
@@ -583,9 +592,13 @@ export function ThreadScreen({ route, navigation }: Props) {
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
   const messagesRef = useRef<ScoutMessage[]>([]);
   messagesRef.current = messages;
+  const visibleMessages = useMemo(
+    () => privateRiffCurrentEpisodeMessages(privateRiff, messages),
+    [messages, privateRiff],
+  );
   const replyTopology = useMemo(
-    () => buildThreadReplyTopology(messages),
-    [messages],
+    () => buildThreadReplyTopology(visibleMessages),
+    [visibleMessages],
   );
   const replyTopologyRef = useRef(replyTopology);
   replyTopologyRef.current = replyTopology;
@@ -664,8 +677,24 @@ export function ThreadScreen({ route, navigation }: Props) {
     operationId: string;
   } | null>(null);
   const privateRiffCreateAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
-  const privateRiffRefreshAttemptRef = useRef<{ revision: number; operationId: string } | null>(null);
   const privateRiffPublishAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  const privateRiffLatestThroughMessageIDRef = useRef("");
+  const privateRiffViewedEpisodeIDRef = useRef("");
+
+  useEffect(() => {
+    if (!privateRiff || viewingEarlierRiffEpisode) return;
+    privateRiffLatestThroughMessageIDRef.current = String(privateRiff.throughMessageId ?? "").trim();
+  }, [privateRiff, viewingEarlierRiffEpisode]);
+
+  useEffect(() => {
+    privateRiffViewedEpisodeIDRef.current = viewingEarlierRiffEpisode
+      ? String(privateRiff?.viewedEpisodeId ?? "").trim()
+      : "";
+  }, [privateRiff?.viewedEpisodeId, viewingEarlierRiffEpisode]);
+
+  useEffect(() => {
+    privateRiffViewedEpisodeIDRef.current = "";
+  }, [route.params.threadId]);
 
   useEffect(() => {
     let current = true;
@@ -823,10 +852,10 @@ export function ThreadScreen({ route, navigation }: Props) {
     if (!sessionToken) return;
     const generationAtRequest = transcriptGenerationRef.current;
     try {
-      const response = await api.scoutThread(
-        sessionToken,
-        route.params.threadId,
-      );
+      const viewedEpisodeID = privateRiffViewedEpisodeIDRef.current;
+      const response = viewedEpisodeID
+        ? await api.scoutRiffEpisode(sessionToken, route.params.threadId, viewedEpisodeID)
+        : await api.scoutThread(sessionToken, route.params.threadId);
       const next = response.thread?.messages ?? response.messages ?? [];
       applyTranscriptSnapshot(generationAtRequest, next);
       if (response.thread) {
@@ -917,10 +946,10 @@ export function ThreadScreen({ route, navigation }: Props) {
     if (!sessionToken) return;
     const generationAtStart = transcriptGenerationRef.current;
     try {
-      const response = await api.scoutThread(
-        sessionToken,
-        route.params.threadId,
-      );
+      const viewedEpisodeID = privateRiffViewedEpisodeIDRef.current;
+      const response = viewedEpisodeID
+        ? await api.scoutRiffEpisode(sessionToken, route.params.threadId, viewedEpisodeID)
+        : await api.scoutThread(sessionToken, route.params.threadId);
       if (generationAtStart !== transcriptGenerationRef.current) return;
       const shouldFollow = shouldFollowThreadTail(
         atBottomRef.current,
@@ -945,6 +974,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   // and deletions land immediately without waiting on a network round trip.
   useEffect(() => {
     if (office.event !== "chat_thread" || !sessionToken) return;
+    if (privateRiffViewedEpisodeIDRef.current) return;
     const payload = office.data as ChatThreadEventPayload | null;
     if (!payload || String(payload.id ?? "") !== route.params.threadId) return;
     const generation = transcriptGenerationRef.current + 1;
@@ -1043,6 +1073,7 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (office.event !== "chat_typing") return;
+    if (privateRiffViewedEpisodeIDRef.current) return;
     const payload = office.data as ChatTypingEventPayload | null;
     if (String(payload?.threadId ?? "") !== route.params.threadId) return;
     const actorEmail = String(payload?.email ?? "")
@@ -1295,8 +1326,10 @@ export function ThreadScreen({ route, navigation }: Props) {
     [messages],
   );
   const latestRiffReply = useMemo(
-    () => [...messages].reverse().find((message) => privateRiffReplyShareable(privateRiff, message, messages)) ?? null,
-    [messages, privateRiff],
+    () => viewingEarlierRiffEpisode
+      ? null
+      : [...visibleMessages].reverse().find((message) => privateRiffReplyShareable(privateRiff, message, visibleMessages)) ?? null,
+    [privateRiff, viewingEarlierRiffEpisode, visibleMessages],
   );
 
   const rows = useMemo(
@@ -1430,6 +1463,10 @@ export function ThreadScreen({ route, navigation }: Props) {
       uploading
     )
       return;
+	if (privateRiff && !privateRiff.sourceAvailable) {
+		setError(privateRiff.unavailableReason || "This Riff is read-only because its source channel is unavailable.");
+		return;
+	}
 	if (explicitProjectAttachmentEnabled && !editingMessage && selectedProject?.token && !projectContextToken) {
 		setError("Project context is refreshing for these sources. Try Send again in a moment.");
 		return;
@@ -1496,10 +1533,13 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  const startPrivateRiff = useCallback(async (message: ScoutMessage) => {
+  const startPrivateRiff = useCallback(async (
+    message: ScoutMessage,
+    entryPoint: "resume" | "message" = "message",
+  ) => {
     const messageID = String(message.id ?? "").trim();
     if (!sessionToken || threadVisibility !== "public" || !messageID || privateRiffCreating) return;
-    const key = `${route.params.threadId}\u0000${messageID}`;
+    const key = `${route.params.threadId}\u0000${messageID}\u0000${entryPoint}`;
     const attempt = privateRiffCreateAttemptRef.current?.key === key
       ? privateRiffCreateAttemptRef.current
       : { key, operationId: createConversationOperationId() };
@@ -1511,42 +1551,86 @@ export function ThreadScreen({ route, navigation }: Props) {
         throughMessageId: messageID,
         agentId: "",
         operationId: attempt.operationId,
+        entryPoint,
       });
       const riffID = String(response.thread?.id ?? "").trim();
       if (!riffID) throw new Error("Private Riff was created without a conversation.");
       privateRiffCreateAttemptRef.current = null;
       setActionMessage(null);
       closeThreadContext();
-      navigation.push("Thread", {
+      const sourceTitle = String(response.thread?.riff?.sourceTitle ?? threadTitle).replace(/^#/, "");
+      const displayMode = Platform.OS === "ios" && Platform.isPad
+        ? (iPadWorkspace ? "rail" as const : "sheet" as const)
+        : "screen" as const;
+      navigation.push("ChannelRiff", {
         threadId: riffID,
         title: response.thread ? channelDisplayName(response.thread) : "Private Riff",
+        riffSpace: true,
+        sourceThreadId: route.params.threadId,
+        sourceTitle,
+        displayMode,
       });
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : "Private Riff could not be opened.");
     } finally {
       setPrivateRiffCreating(false);
     }
-  }, [closeThreadContext, navigation, privateRiffCreating, route.params.threadId, sessionToken, threadVisibility]);
+  }, [closeThreadContext, iPadWorkspace, navigation, privateRiffCreating, route.params.threadId, sessionToken, threadTitle, threadVisibility]);
 
-  const refreshPrivateRiff = useCallback(async () => {
-    if (!sessionToken || !privateRiff || privateRiffRefreshing) return;
-    const revision = Number(privateRiff.contextRevision ?? 0);
-    const attempt = privateRiffRefreshAttemptRef.current?.revision === revision
-      ? privateRiffRefreshAttemptRef.current
-      : { revision, operationId: createConversationOperationId() };
-    privateRiffRefreshAttemptRef.current = attempt;
-    setPrivateRiffRefreshing(true);
+  const viewPrivateRiffEpisode = useCallback(async (episodeID: string) => {
+    episodeID = String(episodeID ?? "").trim();
+    if (!sessionToken || !privateRiff || !episodeID || privateRiffViewingEpisodeID) return;
+    setPrivateRiffViewingEpisodeID(episodeID);
     setPrivateRiffContextError("");
+    const priorViewedEpisodeID = privateRiffViewedEpisodeIDRef.current;
+    privateRiffViewedEpisodeIDRef.current = episodeID;
+    const generationAtRequest = transcriptGenerationRef.current;
     try {
-      const response = await api.refreshPrivateRiff(sessionToken, route.params.threadId, attempt.operationId);
+      if (realtime.active) await realtime.stop("cancelled");
+      if (dictation.state !== "idle") await dictation.discard();
+      const response = await api.scoutRiffEpisode(sessionToken, route.params.threadId, episodeID);
+      applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
       setPrivateRiff(response.thread?.riff ?? null);
-      privateRiffRefreshAttemptRef.current = null;
+      setPrivateRiffContextOpen(false);
     } catch (err) {
-      setPrivateRiffContextError(err instanceof BonfireApiError ? err.message : "Context could not be updated.");
+      privateRiffViewedEpisodeIDRef.current = priorViewedEpisodeID;
+      setPrivateRiffContextError(err instanceof BonfireApiError ? err.message : "That Riff pass could not be opened.");
     } finally {
-      setPrivateRiffRefreshing(false);
+      setPrivateRiffViewingEpisodeID(null);
     }
-  }, [privateRiff, privateRiffRefreshing, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, dictation, privateRiff, privateRiffViewingEpisodeID, realtime, route.params.threadId, sessionToken]);
+
+  const resumeViewedPrivateRiffEpisode = useCallback(async () => {
+    const episodeID = String(privateRiff?.viewedEpisodeId ?? "").trim();
+    const sourceThreadID = String(privateRiff?.sourceThreadId ?? "").trim();
+    const throughMessageID = privateRiffLatestThroughMessageIDRef.current || String(privateRiff?.throughMessageId ?? "").trim();
+    if (!sessionToken || !privateRiff || !episodeID || !sourceThreadID || !throughMessageID || privateRiffResumingEpisodeID) return;
+    const key = `${sourceThreadID}\u0000${episodeID}\u0000resume`;
+    const attempt = privateRiffCreateAttemptRef.current?.key === key
+      ? privateRiffCreateAttemptRef.current
+      : { key, operationId: createConversationOperationId() };
+    privateRiffCreateAttemptRef.current = attempt;
+    setPrivateRiffResumingEpisodeID(episodeID);
+    setError(null);
+    const generationAtRequest = transcriptGenerationRef.current;
+    try {
+      const response = await api.createPrivateRiff(sessionToken, sourceThreadID, {
+        throughMessageId: throughMessageID,
+        agentId: "",
+        operationId: attempt.operationId,
+        entryPoint: "resume",
+        episodeId: episodeID,
+      });
+      applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+      privateRiffViewedEpisodeIDRef.current = "";
+      setPrivateRiff(response.thread?.riff ?? null);
+      privateRiffCreateAttemptRef.current = null;
+    } catch (err) {
+      setError(err instanceof BonfireApiError ? err.message : "That Riff pass could not be resumed.");
+    } finally {
+      setPrivateRiffResumingEpisodeID(null);
+    }
+  }, [applyTranscriptSnapshot, privateRiff, privateRiffResumingEpisodeID, sessionToken]);
 
   const closePrivateRiffShare = useCallback(() => {
     if (privateRiffPublishing) return;
@@ -1556,12 +1640,12 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const openPrivateRiffShare = useCallback((message: ScoutMessage) => {
     const messageID = String(message.id ?? "").trim();
-    if (!sessionToken || !privateRiff || !messageID || !privateRiffReplyShareable(privateRiff, message, messagesRef.current)) return;
+    if (!sessionToken || !privateRiff || viewingEarlierRiffEpisode || !messageID || !privateRiffReplyShareable(privateRiff, message, visibleMessages)) return;
     setActionMessage(null);
     closeThreadContext();
     setPrivateRiffShareMessage(message);
     setPrivateRiffShareError("");
-  }, [closeThreadContext, privateRiff, sessionToken]);
+  }, [closeThreadContext, privateRiff, sessionToken, viewingEarlierRiffEpisode, visibleMessages]);
 
   const publishPrivateRiff = useCallback(async (scope: "all" | "reply") => {
     const messageID = String(privateRiffShareMessage?.id ?? "").trim();
@@ -1577,6 +1661,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       const response = await api.publishPrivateRiff(sessionToken, route.params.threadId, {
         operationId: attempt.operationId,
         scope,
+        ...(privateRiff.activeEpisodeId ? { episodeId: privateRiff.activeEpisodeId } : {}),
         ...(scope === "reply" ? { messageId: messageID } : {}),
       });
       privateRiffPublishAttemptRef.current = null;
@@ -3018,7 +3103,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       }
       reactions={actionMessage?.message.reactions ?? []}
       onClose={() => setActionMessage(null)}
-      onReact={(emoji) => {
+      onReact={viewingEarlierRiffEpisode ? undefined : (emoji) => {
         if (!actionMessage) return;
         const current = groupMessageReactions(
           actionMessage.message.reactions,
@@ -3036,7 +3121,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       onSaveAttachment={
         actionMessage?.attachment ? beginSaveChatAttachment : undefined
       }
-      onReply={() => {
+      onReply={viewingEarlierRiffEpisode ? undefined : () => {
         if (actionMessage) beginReply(actionMessage.message);
       }}
       onRiffPrivately={
@@ -3045,14 +3130,14 @@ export function ThreadScreen({ route, navigation }: Props) {
           : undefined
       }
       onShareFromRiff={
-        privateRiffReplyShareable(privateRiff, actionMessage?.message, messages)
+        !viewingEarlierRiffEpisode && privateRiffReplyShareable(privateRiff, actionMessage?.message, visibleMessages)
           ? () => { if (actionMessage) openPrivateRiffShare(actionMessage.message); }
           : undefined
       }
-      onEdit={() => {
+      onEdit={viewingEarlierRiffEpisode ? undefined : () => {
         if (actionMessage) beginEdit(actionMessage.message);
       }}
-      onDelete={() => {
+      onDelete={viewingEarlierRiffEpisode ? undefined : () => {
         if (actionMessage) confirmDelete(actionMessage.message);
       }}
     />
@@ -3135,7 +3220,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
           <View style={styles.conversationPaneList}>
             <ChannelList
-              selectedThreadId={route.params.threadId}
+              selectedThreadId={privateRiff?.sourceThreadId ?? route.params.sourceThreadId ?? route.params.threadId}
               onOpenThread={(thread) => {
                 const threadId = String(thread.id);
                 if (threadId === route.params.threadId) return;
@@ -3157,14 +3242,27 @@ export function ThreadScreen({ route, navigation }: Props) {
       edges={["left", "right", "bottom"]}
     >
       <View style={styles.header}>
-        {iPadWorkspace ? (
+        {iPadWorkspace && !privateRiff && !route.params.riffSpace ? (
           <View accessibilityElementsHidden importantForAccessibility="no" style={styles.back} />
         ) : (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Back"
+            accessibilityLabel={privateRiff || route.params.riffSpace
+              ? `Back to #${String(privateRiff?.sourceTitle ?? route.params.sourceTitle ?? "source").replace(/^#/, "")}`
+              : "Back"}
             hitSlop={10}
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              const sourceThreadID = String(privateRiff?.sourceThreadId ?? route.params.sourceThreadId ?? "").trim();
+              if (!sourceThreadID) {
+                navigation.goBack();
+                return;
+              }
+              navigation.replace("Thread", {
+                threadId: sourceThreadID,
+                title: `#${String(privateRiff?.sourceTitle ?? route.params.sourceTitle ?? "source").replace(/^#/, "")}`,
+                messageId: privateRiff?.throughMessageId,
+              });
+            }}
             style={styles.back}
           >
             <SymbolView name="chevron.left" tintColor={colors.text1} size={19} />
@@ -3196,16 +3294,16 @@ export function ThreadScreen({ route, navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel={threadTitle}
             accessibilityHint={
-              threadVisibility === "private" && !loading
+              threadVisibility === "private" && !loading && !privateRiff
                 ? "Touch and hold to rename this thread"
                 : undefined
             }
             accessibilityActions={
-              threadVisibility === "private" && !loading
+              threadVisibility === "private" && !loading && !privateRiff
                 ? [{ name: "longpress", label: "Rename thread" }]
                 : undefined
             }
-            disabled={loading || threadVisibility !== "private"}
+            disabled={loading || threadVisibility !== "private" || Boolean(privateRiff)}
             onAccessibilityAction={(event) => {
               if (event.nativeEvent.actionName === "longpress")
                 beginThreadTitleRename();
@@ -3218,12 +3316,14 @@ export function ThreadScreen({ route, navigation }: Props) {
             </Text>
             <View style={styles.titleMetaRow}>
               <SymbolView
-                name={threadVisibility === "private" ? "lock.fill" : "number"}
-                tintColor={colors.text3}
-                size={9}
+                name={privateRiff ? "guitars.fill" : threadVisibility === "private" ? "person.fill" : "number"}
+                tintColor={privateRiff ? colors.emberText : colors.text3}
+                size={privateRiff ? 12 : 9}
               />
               <Text maxFontSizeMultiplier={1.6} style={styles.titleMeta} numberOfLines={1}>
-                {threadVisibility === "private"
+                {privateRiff
+                  ? `Private Riff · #${privateRiff.sourceTitle.replace(/^#/, "")}${viewingEarlierRiffEpisode ? " · Earlier pass" : ""}`
+                  : threadVisibility === "private"
                   ? "Private · Hold to rename"
                   : "Channel"}
               </Text>
@@ -3237,7 +3337,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             accessibilityHint="Opens a private Scout conversation with channel context through that message"
             accessibilityState={{ disabled: privateRiffCreating }}
             disabled={privateRiffCreating}
-            onPress={() => { void startPrivateRiff(latestRiffAnchor); }}
+            onPress={() => { void startPrivateRiff(latestRiffAnchor, "resume"); }}
             style={({ pressed }) => [
               styles.headerAction,
               pressed && styles.headerActionPressed,
@@ -3289,7 +3389,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       {privateRiff ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${privateRiffCheckpointSummary(privateRiff)}${privateRiffHasUpdates(privateRiff) ? `, ${privateRiff.newMessageCount} new source messages` : ""}`}
+          accessibilityLabel={`${privateRiffCheckpointSummary(privateRiff)}. ${privateRiffFreshnessSummary(privateRiff)}`}
           accessibilityHint="Opens the private context checkpoint"
           onPress={() => setPrivateRiffContextOpen(true)}
           style={({ pressed }) => [styles.privateRiffBar, pressed && styles.headerActionPressed]}
@@ -3299,20 +3399,32 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Text maxFontSizeMultiplier={1.8} numberOfLines={1} style={styles.privateRiffBarText}>
               {privateRiffCheckpointSummary(privateRiff)}
             </Text>
-            {!privateRiff.sourceAvailable ? (
-              <Text maxFontSizeMultiplier={1.8} numberOfLines={1} style={styles.privateRiffBarWarning}>
-                Source unavailable · checkpoint remains fixed
-              </Text>
-            ) : null}
+            <Text maxFontSizeMultiplier={1.8} numberOfLines={1} style={privateRiff.sourceAvailable ? styles.privateRiffBarDetail : styles.privateRiffBarWarning}>
+              {privateRiffFreshnessSummary(privateRiff)}
+            </Text>
           </View>
-          {privateRiffHasUpdates(privateRiff) ? (
-            <View style={styles.privateRiffUpdateBadge}>
-              <Text style={styles.privateRiffUpdateText}>{privateRiff.newMessageCount} new</Text>
-            </View>
-          ) : (
-            <SymbolView name="chevron.right" tintColor={colors.text3} size={13} />
-          )}
+          <SymbolView name="chevron.right" tintColor={colors.text3} size={13} />
         </Pressable>
+      ) : null}
+
+      {privateRiff && viewingEarlierRiffEpisode ? (
+        <View accessibilityRole="summary" style={styles.privateRiffHistoryBar}>
+          <View style={styles.privateRiffHistoryCopy}>
+            <Text maxFontSizeMultiplier={1.8} style={styles.privateRiffHistoryTitle}>Earlier pass · Read-only</Text>
+            <Text maxFontSizeMultiplier={1.8} style={styles.privateRiffHistoryBody}>Looking here does not change the current Riff pass.</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Resume this pass"
+            accessibilityHint="Makes this earlier pass current so you can continue it"
+            accessibilityState={{ disabled: Boolean(privateRiffResumingEpisodeID) || !privateRiff.sourceAvailable }}
+            disabled={Boolean(privateRiffResumingEpisodeID) || !privateRiff.sourceAvailable}
+            onPress={() => { void resumeViewedPrivateRiffEpisode(); }}
+            style={({ pressed }) => [styles.privateRiffResume, pressed && styles.headerActionPressed, (!privateRiff.sourceAvailable || privateRiffResumingEpisodeID) && styles.sendDim]}
+          >
+            {privateRiffResumingEpisodeID ? <ActivityIndicator color={colors.onAccent} size="small" /> : <Text style={styles.privateRiffResumeText}>Resume this pass</Text>}
+          </Pressable>
+        </View>
       ) : null}
 
       <CatchUpSheet
@@ -3336,17 +3448,17 @@ export function ThreadScreen({ route, navigation }: Props) {
       <PrivateRiffContextSheet
         visible={privateRiffContextOpen}
         riff={privateRiff}
-        refreshing={privateRiffRefreshing}
+        viewingEpisodeId={privateRiffViewingEpisodeID}
         error={privateRiffContextError}
-        onClose={() => { if (!privateRiffRefreshing) setPrivateRiffContextOpen(false); }}
-        onRefresh={() => { void refreshPrivateRiff(); }}
+        onClose={() => setPrivateRiffContextOpen(false)}
+        onViewEpisode={(episodeID) => { void viewPrivateRiffEpisode(episodeID); }}
       />
 
       <PrivateRiffShareSheet
         visible={Boolean(privateRiffShareMessage)}
         riff={privateRiff}
         reply={privateRiffShareMessage}
-        messages={messages}
+        messages={visibleMessages}
         publishing={privateRiffPublishing}
         error={privateRiffShareError}
         onClose={closePrivateRiffShare}
@@ -3616,7 +3728,9 @@ export function ThreadScreen({ route, navigation }: Props) {
                     ]}
                   >
                     <Text style={styles.emptyThreadEyebrow}>
-                      {threadVisibility === "private"
+                      {privateRiff
+                        ? `PRIVATE RIFF · PASS ${privateRiffDisplayedPassNumber(privateRiff)}`
+                        : threadVisibility === "private"
                         ? "PRIVATE WORK WITH SCOUT"
                         : "SHARED CHANNEL"}
                     </Text>
@@ -3624,16 +3738,22 @@ export function ThreadScreen({ route, navigation }: Props) {
                       accessibilityRole="header"
                       style={styles.emptyThreadTitle}
                     >
-                      {threadVisibility === "private"
+                      {privateRiff
+                        ? `Riff on #${privateRiff.sourceTitle.replace(/^#/, "")}`
+                        : threadVisibility === "private"
                         ? "What do you want to accomplish?"
                         : "Start the conversation"}
                     </Text>
                     <Text style={styles.emptyThreadBody}>
-                      {threadVisibility === "private"
+                      {privateRiff
+                        ? privateRiff.sourceAvailable
+                          ? "Start wherever you want. Scout has the current channel and company context; this pass stays private until you choose to share."
+                          : privateRiff.unavailableReason || "This Riff is read-only because its source channel is unavailable."
+                        : threadVisibility === "private"
                         ? "Ask anything, or describe the outcome you want. Scout can answer, start private work, or ask for approval when it actually matters."
                         : "Message the team. Mention @Scout when you want help."}
                     </Text>
-                    {threadVisibility === "private" ? (
+                    {threadVisibility === "private" && !privateRiff ? (
                       <>
                         <View style={styles.emptyThreadStarters}>
                           {privateThreadStarters.map((starter) => (
@@ -3933,7 +4053,7 @@ export function ThreadScreen({ route, navigation }: Props) {
                 }
                 onBlur={() => stopTyping()}
                 candidates={participants}
-                editable
+                editable={!privateRiffReadOnly}
               />
             )}
 
@@ -3943,11 +4063,13 @@ export function ThreadScreen({ route, navigation }: Props) {
                 accessibilityLabel="Add attachment"
                 accessibilityState={{
                   disabled:
+                    privateRiffReadOnly ||
                     dictationActive ||
                     uploading ||
                     pendingFiles.length >= maxMessageAttachments,
                 }}
                 disabled={
+                  privateRiffReadOnly ||
                   dictationActive ||
                   uploading ||
                   pendingFiles.length >= maxMessageAttachments
@@ -3956,7 +4078,8 @@ export function ThreadScreen({ route, navigation }: Props) {
                 style={({ pressed }) => [
                   styles.mic,
                   pressed && styles.micPressed,
-                  (dictationActive ||
+                  (privateRiffReadOnly ||
+                    dictationActive ||
                     uploading ||
                     pendingFiles.length >= maxMessageAttachments) &&
                     styles.sendDim,
@@ -3969,6 +4092,8 @@ export function ThreadScreen({ route, navigation }: Props) {
                   accessibilityRole="button"
                   accessibilityLabel="Dictate a message"
                   accessibilityHint="Starts dictation. Press Send once when you are finished to transcribe and post it."
+                  accessibilityState={{ disabled: privateRiffReadOnly }}
+                  disabled={privateRiffReadOnly}
                   onPress={() => {
                     void dictation.start();
                   }}
@@ -4012,6 +4137,8 @@ export function ThreadScreen({ route, navigation }: Props) {
                         : "Start voice in this Private Riff"
                   }
                   accessibilityHint="Uses the existing full-duplex Scout voice transport with this Riff's channel checkpoint and company context. If you say share to source, Scout asks whether to share all or this reply."
+                  accessibilityState={{ disabled: privateRiffReadOnly }}
+                  disabled={privateRiffReadOnly}
                   onPress={() => { void togglePrivateRiffVoice(); }}
                   style={({ pressed }) => [
                     styles.privateRiffVoice,
@@ -4031,6 +4158,7 @@ export function ThreadScreen({ route, navigation }: Props) {
                     : "Send"
                 }
                 disabled={
+                  privateRiffReadOnly ||
                   dictation.state === "transcribing" ||
                   (!dictationCanCommit &&
                     ((!draft.trim() && pendingFiles.length === 0) ||
@@ -4043,7 +4171,8 @@ export function ThreadScreen({ route, navigation }: Props) {
                 }}
                 style={({ pressed }) => [
                   styles.send,
-                  (dictation.state === "transcribing" ||
+                  (privateRiffReadOnly ||
+                    dictation.state === "transcribing" ||
                     (!dictationCanCommit &&
                       ((!draft.trim() && pendingFiles.length === 0) ||
                         sending ||
@@ -4084,6 +4213,12 @@ export function ThreadScreen({ route, navigation }: Props) {
     </SafeAreaView>
     </View>
   );
+}
+
+/** Semantic route for a channel-owned Riff Space; the conversation engine,
+ * dictation controller, FlashList, and singleton Realtime transport stay shared. */
+export function ChannelRiffScreen(props: ChannelRiffProps) {
+  return <ThreadScreen {...(props as unknown as Props)} />;
 }
 
 const styles = StyleSheet.create({
@@ -4167,6 +4302,7 @@ const styles = StyleSheet.create({
   },
   privateRiffBarCopy: { flex: 1, minWidth: 0 },
   privateRiffBarText: { ...type.captionMedium, color: colors.text1 },
+  privateRiffBarDetail: { ...type.caption, color: colors.text2 },
   privateRiffBarWarning: { ...type.caption, color: colors.danger },
   privateRiffUpdateBadge: {
     minHeight: 28,
@@ -4176,6 +4312,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   privateRiffUpdateText: { ...type.label, color: colors.onAccent },
+  privateRiffHistoryBar: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[3],
+    paddingHorizontal: space[4],
+    paddingVertical: space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line1,
+    backgroundColor: colors.surface1,
+  },
+  privateRiffHistoryCopy: { flex: 1, minWidth: 0, gap: 2 },
+  privateRiffHistoryTitle: { ...type.captionMedium, color: colors.text1 },
+  privateRiffHistoryBody: { ...type.caption, color: colors.text2 },
+  privateRiffResume: { minHeight: hitMin, alignItems: "center", justifyContent: "center", paddingHorizontal: space[4], borderRadius: radius.full, backgroundColor: colors.accent },
+  privateRiffResumeText: { ...type.button, color: colors.onAccent },
   title: {
     ...type.headline,
     color: colors.text1,

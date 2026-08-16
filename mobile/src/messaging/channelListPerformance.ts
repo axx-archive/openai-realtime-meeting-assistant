@@ -28,7 +28,9 @@ export function channelActiveWork(thread: ScoutThread): ChannelActiveWork | null
 }
 
 export function channelListRows(threads: readonly ScoutThread[]): ChannelListRow[] {
-  const ordered = pinBonfireChatFirst([...threads]);
+  const ordered = pinBonfireChatFirst(
+    threads.filter((thread) => !thread.riff && String(thread.conversationKind ?? '').toLowerCase() !== 'channel_riff'),
+  );
   const sections = [
     { label: 'CHANNELS', threads: ordered.filter((thread) => thread.visibility === 'public') },
     { label: 'PRIVATE', threads: ordered.filter((thread) => thread.visibility !== 'public') },

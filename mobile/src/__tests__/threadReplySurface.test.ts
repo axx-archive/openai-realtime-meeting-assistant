@@ -13,7 +13,7 @@ const bubbleSource = fs.readFileSync(path.join(messagingRoot, 'MessageBubble.tsx
 const apiSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'api', 'client.ts'), 'utf8');
 
 test('mobile channel rows render only topology roots with one persistent reply affordance', () => {
-  assert.match(screenSource, /buildThreadReplyTopology\(messages\)/);
+  assert.match(screenSource, /buildThreadReplyTopology\(visibleMessages\)/);
   assert.match(screenSource, /const feedMessages = replyTopology\.feedMessages/);
   assert.match(screenSource, /feedMessages\.map\(\(message, index\)/);
   assert.match(screenSource, /threadReplies: replyTopology\.repliesFor\(message\)/);

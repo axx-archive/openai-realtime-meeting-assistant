@@ -85,7 +85,7 @@ func TestIndexThreadNavRendersBothLists(t *testing.T) {
 	}
 	for _, want := range []string{
 		"const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))",
-		"const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))",
+		"const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))",
 		"chatDefaultThread.hidden = privates.length > 0",
 		"chatChannelsEmpty.hidden = channels.length > 0",
 		"chatChannelThreads?.replaceChildren(",
@@ -100,7 +100,7 @@ func TestIndexThreadNavRendersBothLists(t *testing.T) {
 func TestIndexPrivateEmptyRowWorksWhileAChannelIsSelected(t *testing.T) {
 	html := readIndexForThreadNavSplit(t)
 	for _, want := range []string{
-		"const hasPrivateThread = scoutChatThreads.some(thread => !chatThreadIsChannel(thread))",
+		"const hasPrivateThread = scoutChatThreads.some(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))",
 		"if (authedUser && !hasPrivateThread)",
 	} {
 		if !strings.Contains(html, want) {

@@ -34,7 +34,7 @@ export function PrivateRiffShareSheet({ visible, riff, reply, messages, publishi
   if (!riff || !reply) return null;
   const source = privateRiffSourceTitle(riff);
   const replyAuthor = privateRiffReplyAuthor(reply);
-  const turnCount = privateRiffShareAllCount(messages);
+  const turnCount = privateRiffShareAllCount(messages, riff);
   const busy = Boolean(publishing);
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -59,7 +59,7 @@ export function PrivateRiffShareSheet({ visible, riff, reply, messages, publishi
         <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
           <View style={styles.boundary}>
             <SymbolView name="guitars.fill" size={18} tintColor={colors.emberText} />
-            <Text style={styles.boundaryText}>Choose the whole conversation or only this reply. Authors stay attached to what they said.</Text>
+            <Text style={styles.boundaryText}>Choose this Riff pass or only this reply. Earlier passes stay private, and authors stay attached to what they said.</Text>
           </View>
 
           <Pressable
@@ -76,7 +76,7 @@ export function PrivateRiffShareSheet({ visible, riff, reply, messages, publishi
             </View>
             <View style={styles.choiceCopy}>
               <Text style={styles.choiceTitle}>{publishing === 'all' ? 'Sharing all…' : `Share all to ${source}`}</Text>
-              <Text style={styles.choiceBody}>Your first message becomes the channel post. The next {Math.max(0, turnCount - 1)} {turnCount - 1 === 1 ? 'turn follows' : 'turns follow'} as replies, under each author’s name.</Text>
+              <Text style={styles.choiceBody}>The first message in this pass becomes the channel post. The next {Math.max(0, turnCount - 1)} {turnCount - 1 === 1 ? 'turn follows' : 'turns follow'} as replies, under each author’s name.</Text>
             </View>
             <SymbolView name="chevron.right" size={14} tintColor={colors.text3} />
           </Pressable>

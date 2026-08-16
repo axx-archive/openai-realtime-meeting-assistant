@@ -10048,6 +10048,114 @@
       .chat-convo-head__riff:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
       .chat-convo-head__riff[hidden] { display: none; }
 
+      .private-riff-episode {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 28px;
+        margin: 14px 2px 8px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .private-riff-episode::before,
+      .private-riff-episode::after {
+        content: "";
+        height: 1px;
+        flex: 1 1 auto;
+        background: var(--line-1);
+      }
+
+      .private-riff-episode__label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+      }
+
+      .private-riff-checkpoint__freshness {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0;
+        color: var(--text-2);
+        font: 600 12px/1.45 var(--font-sans);
+      }
+
+      .private-riff-checkpoint__freshness::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--success, #31a86b);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #31a86b) 15%, transparent);
+      }
+
+      .private-riff-checkpoint__freshness[data-state="waiting"]::before {
+        background: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+      }
+
+      .private-riff-checkpoint__freshness[data-state="unavailable"]::before {
+        background: var(--danger);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 15%, transparent);
+      }
+
+      .private-riff-history {
+        border-top: 1px solid var(--line-1);
+        padding-top: 9px;
+      }
+
+      .private-riff-history > summary {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font: 600 12px/1.3 var(--font-sans);
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .private-riff-history > summary::-webkit-details-marker { display: none; }
+      .private-riff-history > summary::after { content: "+"; margin-left: auto; color: var(--text-3); }
+      .private-riff-history[open] > summary::after { content: "−"; }
+
+      .private-riff-history__list {
+        display: grid;
+        gap: 7px;
+        padding: 2px 0 4px;
+      }
+
+      .private-riff-history__pass {
+        width: 100%;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 11px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--surface-2);
+        color: var(--text-1);
+        box-shadow: 0 0 0 1px var(--line-1);
+        font: 600 12px/1.35 var(--font-sans);
+        text-align: left;
+        cursor: pointer;
+        transition-property: background-color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .private-riff-history__pass:hover { background: var(--surface-3); }
+      .private-riff-history__pass:active { transform: scale(0.98); }
+      .private-riff-history__pass:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      .private-riff-history__count { color: var(--text-3); font-weight: 500; white-space: nowrap; }
+
       .chat-convo-head__meta {
         min-width: 0;
         font: var(--type-label);
@@ -30847,12 +30955,12 @@
                   <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                 </svg>
               </button>
-	              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Riff privately from the latest channel message" hidden>
+	              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Open your private Riff for this channel" hidden>
 	                <svg data-icon="guitar" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 	                  <path d="m14.5 5.5 4-4"></path><path d="m18 2 4 4"></path><path d="m19.5 4.5-6.2 6.2"></path>
 	                  <path d="M14.2 9.8c-1.9-1.5-4.4-1.6-5.8-.2l-1.1 1.1c-.7.7-.9 1.8-.5 2.7l-3.7 3.7a2.7 2.7 0 0 0 3.8 3.8l3.7-3.7c.9.4 2 .2 2.7-.5l1.1-1.1c1.4-1.4 1.3-3.9-.2-5.8Z"></path><circle cx="6.4" cy="17.6" r="1.2"></circle>
 	                </svg>
-	                <span>Private Riff</span>
+	                <span>Your Riff</span>
 	              </button>
               <span id="chatConvoMeta" class="chat-convo-head__meta">private · only you and Scout</span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
@@ -34870,7 +34978,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        // This row is the private section's empty-state action. A public
 	        // channel may still be selected when it is clicked, so selection is
 	        // not evidence that a private thread already exists.
-	        const hasPrivateThread = scoutChatThreads.some(thread => !chatThreadIsChannel(thread))
+	        const hasPrivateThread = scoutChatThreads.some(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))
 	        if (authedUser && !hasPrivateThread) {
 	          startNewScoutThread()
 	        }
@@ -54163,6 +54271,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
+	        if (privateRiffViewingEarlier(selectedScoutChatThread())) {
+	          showToast({ text: 'This is an earlier Riff pass. Resume it before sending a new message.', kind: 'note' })
+	          return false
+	        }
 	        const selectedProject = scoutChatProjectContext.selected
 		if (selectedProject?.token && selectedProject.sourceKey !== scoutChatProjectSourceKey(files, scoutChatReplyTarget)) {
 		  showToast({ text: 'Project context is refreshing for these sources. Try Send again in a moment.', kind: 'note' })
@@ -54757,6 +54869,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return isPhone ? 'answer, attach, or skip' : 'answer, attach files, or say "skip"'
 	        }
 	        const directAgent = scoutChatDirectAgentName(thread)
+	        if (privateRiffThread(thread)) return isPhone ? 'riff with Scout…' : `riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
 	        return chatThreadIsChannel(thread)
 	          ? (isPhone ? 'message…' : 'message the channel')
 	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'} anything`)
@@ -54789,12 +54902,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--channel', isChannel)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--private', !isChannel)
 	        const title = chatThreadDisplayTitle(thread)
-	        scoutChatDestination.textContent = isChannel
+	        scoutChatDestination.textContent = privateRiffThread(thread)
+	          ? `→ your riff · #${thread?.riff?.sourceTitle || 'channel'} · private to you`
+	          : isChannel
 	          ? `→ #${title} · ${isTeam ? 'everyone in the office' : 'project members only'}`
 	          : `→ ${privateTarget} · private to you`
 	        scoutChatDestination.hidden = false
 	        if (scoutChatInput) {
-	          scoutChatInput.setAttribute('aria-label', isChannel
+	          scoutChatInput.setAttribute('aria-label', privateRiffThread(thread)
+	            ? `Riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
+	            : isChannel
 	            ? `Message #${title} — ${isTeam ? 'everyone in the office' : 'project members only'}`
 	            : `Message ${privateTarget} privately`)
 	        }
@@ -59183,7 +59300,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // spans both lists.
 	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
 	        channels.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
-	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
+	        // A channel Riff is a contextual workspace, not a private-chat row.
+	        // It remains durable and directly addressable, but the channel guitar
+	        // is its canonical doorway so repeated Riffs never flood this list.
+	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))
 	        if (chatDefaultThread) {
 	          // the default "new thread" row is the private section's empty state:
 	          // it shows only when there is no real private thread to list
@@ -59197,6 +59317,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))
 	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
+	      }
+
+	      function privateRiffThread(thread) {
+	        return Boolean(thread?.riff) || String(thread?.conversationKind || '').toLowerCase() === 'channel_riff'
+	      }
+
+	      function privateRiffViewingEarlier(thread) {
+	        const activeEpisodeId = String(thread?.riff?.activeEpisodeId || '')
+	        const viewedEpisodeId = String(thread?.riff?.viewedEpisodeId || activeEpisodeId)
+	        return Boolean(activeEpisodeId && viewedEpisodeId && activeEpisodeId !== viewedEpisodeId)
 	      }
 
 	      function syncChatThreadSelection(nextId) {
@@ -59273,7 +59403,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const isChannel = chatThreadIsChannel(thread)
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        const privateTarget = directAgent || 'Scout'
-	        chatConvoTitle.textContent = chatThreadDisplayTitle(thread)
+	        chatConvoTitle.textContent = thread?.riff ? `Your Riff · #${thread.riff.sourceTitle || 'channel'}` : chatThreadDisplayTitle(thread)
 	        chatConvoTitle.hidden = chatRenameActive
 	        if (chatConvoRenameInput) {
 	          chatConvoRenameInput.hidden = !chatRenameActive
@@ -59281,7 +59411,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatConvoRename) {
 	          // renamable on public + private threads alike; nothing to rename
 	          // before the first persisted thread exists
-	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsTeam(thread)
+	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsTeam(thread) || privateRiffThread(thread)
 	        }
 	        if (chatConvoRiff) {
 	          const messages = Array.isArray(thread?.messages) ? thread.messages : []
@@ -59290,7 +59420,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatConvoMeta) {
 	          const isTeam = chatThreadIsTeam(thread)
 	          chatConvoMeta.textContent = thread?.riff
-	            ? `private riff · grounded in #${thread.riff.sourceTitle || 'channel'}`
+	            ? `your riff · #${thread.riff.sourceTitle || 'channel'}`
 	            : isChannel
 	            ? (isTeam ? 'public · everyone in the office' : 'project · members only')
 	            : `private · only you and ${privateTarget}`
@@ -59304,9 +59434,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatConvoContext.setAttribute('aria-label', `${scope}; ${policy}`)
 	        }
 	        if (scoutChatThread) {
-	          scoutChatThread.setAttribute('aria-label', isChannel
-	            ? `Channel chat ${chatThreadDisplayTitle(thread)}`
-	            : `Private chat with ${privateTarget}`)
+	          scoutChatThread.setAttribute('aria-label', thread?.riff
+	            ? `Your private Riff for ${thread.riff.sourceTitle || 'this channel'}`
+	            : isChannel ? `Channel chat ${chatThreadDisplayTitle(thread)}` : `Private chat with ${privateTarget}`)
 	        }
 	        // card 070: keep the composer destination guard in lockstep with the head
 	        renderScoutChatDestination()
@@ -59390,7 +59520,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -59610,6 +59740,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        syncChatConvoHeader()
 	        if (scoutChatInput) {
 	          scoutChatInput.placeholder = scoutChatDefaultPlaceholder()
+	          const riffUnavailable = thread?.riff && thread.riff.sourceAvailable === false
+	          const viewingEarlierRiff = privateRiffViewingEarlier(thread)
+	          scoutChatInput.disabled = Boolean(riffUnavailable || viewingEarlierRiff)
+	          if (viewingEarlierRiff) scoutChatInput.placeholder = 'Resume this pass to keep riffing…'
+	          else if (riffUnavailable) scoutChatInput.placeholder = 'Source access is unavailable'
+	          if (scoutChatSend && (viewingEarlierRiff || riffUnavailable)) scoutChatSend.disabled = true
 	        }
 	        // card 070: the destination guard tracks the thread the composer sends to
 	        renderScoutChatDestination()
@@ -59649,7 +59785,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-chat-brain-chip, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        let unreadBoundaryMounted = false
+	        let renderedRiffEpisodeId = ''
 	        boundedFeedMessages.forEach((message, messageIndex) => {
+	          if (thread?.riff) {
+	            const messageEpisodeId = String(message?.riffEpisodeId || message?.riffAuthority?.episodeId || thread.riff.activeEpisodeId || 'legacy')
+	            if (messageEpisodeId !== renderedRiffEpisodeId) {
+	              renderedRiffEpisodeId = messageEpisodeId
+	              appendScoutChatNode(privateRiffEpisodeNode(thread, message, 1))
+	            }
+	          }
 	          if (!unreadBoundaryMounted && priorSeenAt && String(message?.createdAt || '') > priorSeenAt) {
 	            const boundary = desktopChatUnreadBoundaryNode()
 	            // the boundary names its debt — "n new messages", not a bare
@@ -60700,8 +60844,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          String(message?.via || '') === 'private_riff_publication_control' || message?.thread || message?.work ||
 	          message?.proposal || message?.choices || message?.manifest || message?.image || message?.imageGeneration ||
 	          message?.reply || message?.publication || (Array.isArray(message?.files) && message.files.length > 0)) return false
+	        const activeEpisodeId = String(thread?.riff?.activeEpisodeId || '')
+	        const messageEpisodeId = String(message?.riffEpisodeId || message?.riffAuthority?.episodeId || '')
+	        if (activeEpisodeId && messageEpisodeId && activeEpisodeId !== messageEpisodeId) return false
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 	        const opening = messages.find(candidate => String(candidate?.kind || 'message') === 'message' &&
+	          (!messageEpisodeId || String(candidate?.riffEpisodeId || candidate?.riffAuthority?.episodeId || '') === messageEpisodeId) &&
 	          String(candidate?.role || '').toLowerCase() === 'user' && String(candidate?.text || '').trim() &&
 	          String(candidate?.via || '') !== 'private_riff_publication_control')
 	        if (String(opening?.id || '') === String(message.id)) return false
@@ -60710,6 +60858,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return ['scout', 'assistant'].includes(role) && message?.activity?.version === 'stride-private-riff/v1' &&
 	          message?.activity?.status === 'completed' && Number(message?.activity?.contextRevision || 0) > 0 &&
 	          Boolean(String(message?.activity?.throughMessageId || ''))
+	      }
+
+	      function privateRiffEpisodeNode(thread, message, ordinal = 1) {
+	        const activeEpisodeId = String(thread?.riff?.activeEpisodeId || '')
+	        const episodeId = String(message?.riffEpisodeId || message?.riffAuthority?.episodeId || activeEpisodeId)
+	        const active = !activeEpisodeId || !episodeId || episodeId === activeEpisodeId
+	        const divider = bfEl('div', 'private-riff-episode')
+	        divider.dataset.episodeId = episodeId
+	        const label = bfEl('span', 'private-riff-episode__label')
+	        label.append(
+	          privateRiffGuitarIcon(),
+	          bfEl('span', '', active ? `Current pass · ${privateRiffPacificTimestamp(message?.createdAt)}` : `Earlier pass ${ordinal} · ${privateRiffPacificTimestamp(message?.createdAt)}`)
+	        )
+	        divider.appendChild(label)
+	        return divider
+	      }
+
+	      function appendPrivateRiffMessages(fragment, thread, messages) {
+	        let episodeId = null
+	        let episodeOrdinal = 0
+	        for (const message of messages) {
+	          const nextEpisodeId = String(message?.riffEpisodeId || message?.riffAuthority?.episodeId || thread?.riff?.activeEpisodeId || 'legacy')
+	          if (nextEpisodeId !== episodeId) {
+	            episodeId = nextEpisodeId
+	            episodeOrdinal += 1
+	            fragment.appendChild(privateRiffEpisodeNode(thread, message, episodeOrdinal))
+	          }
+	          fragment.appendChild(privateRiffMessageCard(thread, message))
+	        }
 	      }
 
 	      function privateRiffShareTriggerNode(thread, message) {
@@ -60748,6 +60925,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function privateRiffCheckpointNode(thread) {
 	        const riff = thread?.riff || {}
+	        const viewingEarlier = privateRiffViewingEarlier(thread)
 	        const messageCount = Math.max(0, Number(riff.messageCount || 0))
 	        const sourceThread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(riff.sourceThreadId || ''))
 	        const sourceMessages = Array.isArray(sourceThread?.messages) ? sourceThread.messages : []
@@ -60757,43 +60935,153 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const checkpoint = bfEl('section', 'private-riff-checkpoint')
 	        const privacy = bfEl('span', 'private-riff-checkpoint__eyebrow')
 	        privacy.append(privateRiffGuitarIcon(), bfEl('span', '', 'Private Riff · only you and Scout'))
+	        const episodeCount = Math.max(1, Number(riff.episodeCount || 1))
+	        const checkpointNumber = Math.max(1, Number(riff.contextRevision || 1))
 	        checkpoint.append(
 	          privacy,
-	          bfEl('strong', 'private-riff-checkpoint__title', `Grounded in #${riff.sourceTitle || 'channel'} through ${privateRiffPacificTimestamp(riff.throughCreatedAt)}`),
-	          bfEl('p', 'private-riff-checkpoint__meta', `${messageCount} message${messageCount === 1 ? '' : 's'} · checkpoint ${Number(riff.contextRevision || 1)}${riff.brainCapturedAt ? ` · Brain ${privateRiffPacificTimestamp(riff.brainCapturedAt)}` : ''}${newMessageCount ? ` · ${newMessageCount} new in channel` : ''}`)
+	          bfEl('strong', 'private-riff-checkpoint__title', viewingEarlier ? `Earlier pass in #${riff.sourceTitle || 'channel'}` : `Your Riff for #${riff.sourceTitle || 'channel'}`),
+	          bfEl('p', 'private-riff-checkpoint__meta', `${viewingEarlier ? 'Read-only pass' : 'Current pass'} grounded through ${privateRiffPacificTimestamp(riff.throughCreatedAt)} · ${messageCount} message${messageCount === 1 ? '' : 's'} · checkpoint ${checkpointNumber}`),
+	          bfEl('p', 'private-riff-checkpoint__meta', `Pass ${episodeCount}${riff.brainCapturedAt ? ` · company context captured ${privateRiffPacificTimestamp(riff.brainCapturedAt)}` : ''}`)
 	        )
+	        const freshness = bfEl('p', 'private-riff-checkpoint__freshness', viewingEarlier
+	          ? 'This earlier pass stays frozen until you explicitly resume it'
+	          : riff.sourceAvailable === false
+	          ? (riff.unavailableReason || 'Source access is unavailable')
+	          : newMessageCount
+	            ? `${newMessageCount} new in the channel will be included when you send`
+	            : 'Channel and company context refresh automatically when you send')
+	        freshness.dataset.state = riff.sourceAvailable === false ? 'unavailable' : viewingEarlier || newMessageCount ? 'waiting' : 'current'
+	        checkpoint.appendChild(freshness)
 	        const actions = bfEl('div', 'private-riff-checkpoint__actions')
-	        const refresh = bfEl('button', 'private-riff-action', newMessageCount ? `Update context (${newMessageCount})` : 'Update context')
-	        refresh.type = 'button'
-	        refresh.disabled = riff.sourceAvailable === false
-	        refresh.addEventListener('click', () => void refreshPrivateRiff(thread, refresh))
 	        const source = bfEl('button', 'private-riff-action', 'Open source')
 	        source.type = 'button'
 	        source.addEventListener('click', () => openScoutAnswerSource({ threadId: riff.sourceThreadId, messageId: riff.throughMessageId }))
 	        const realtime = bfEl('button', 'private-riff-action', 'Riff in Realtime')
 	        realtime.type = 'button'
-	        realtime.disabled = !privateRealtimeVoiceSurfaceAvailable()
+	        realtime.disabled = viewingEarlier || !privateRealtimeVoiceSurfaceAvailable()
 	        realtime.setAttribute('aria-label', 'Continue this exact Private Riff in Realtime voice')
 	        realtime.title = realtime.disabled ? 'Private Realtime voice is not available yet' : 'Talk with Scout in this Private Riff'
 	        realtime.addEventListener('click', () => void startPrivateRiffRealtime(thread, realtime))
-	        actions.append(refresh, source, realtime)
+	        actions.append(source)
+	        if (viewingEarlier) {
+	          const resume = bfEl('button', 'private-riff-action', 'Resume this pass')
+	          resume.type = 'button'
+	          resume.dataset.primary = 'true'
+	          resume.disabled = riff.sourceAvailable === false
+	          resume.addEventListener('click', () => void resumePrivateRiffEpisode(thread, String(riff.viewedEpisodeId || ''), resume))
+	          actions.appendChild(resume)
+	        } else {
+	          actions.appendChild(realtime)
+	        }
 	        checkpoint.appendChild(actions)
-	        if (riff.sourceAvailable === false) checkpoint.appendChild(bfEl('p', 'private-riff-checkpoint__meta', riff.unavailableReason || 'Source unavailable.'))
+	        const history = privateRiffHistoryNode(thread)
+	        if (history) checkpoint.appendChild(history)
 	        return checkpoint
+	      }
+
+	      function privateRiffHistoryNode(thread) {
+	        const riff = thread?.riff || {}
+	        const activeEpisodeId = String(riff.activeEpisodeId || '')
+	        const viewedEpisodeId = String(riff.viewedEpisodeId || activeEpisodeId)
+	        const episodes = Array.isArray(riff.episodes) ? riff.episodes : []
+	        const prior = episodes.filter(episode => String(episode?.id || '') && String(episode.id) !== viewedEpisodeId).slice().reverse()
+	        const legacyCount = Math.max(0, Number(riff.legacyEpisodeCount || 0))
+	        if (!prior.length && !legacyCount) return null
+	        const history = document.createElement('details')
+	        history.className = 'private-riff-history'
+	        const total = prior.length + legacyCount
+	        history.appendChild(bfEl('summary', '', `${total} earlier ${total === 1 ? 'pass' : 'passes'}`))
+	        const list = bfEl('div', 'private-riff-history__list')
+	        prior.forEach((episode, index) => {
+	          const button = bfEl('button', 'private-riff-history__pass')
+	          button.type = 'button'
+	          const current = String(episode.id) === activeEpisodeId
+	          button.setAttribute('aria-label', `${current ? 'Return to current' : 'View earlier'} private Riff pass from ${privateRiffPacificTimestamp(episode.createdAt)}`)
+	          const ordinal = Math.max(1, episodes.findIndex(candidate => String(candidate?.id || '') === String(episode.id)) + 1)
+	          button.append(
+	            bfEl('span', '', `${current ? 'Current pass' : `Pass ${ordinal}`} · ${privateRiffPacificTimestamp(episode.createdAt)}`),
+	            bfEl('span', 'private-riff-history__count', `${Math.max(0, Number(episode.messageCount || 0))} messages · View`)
+	          )
+	          button.addEventListener('click', () => void viewPrivateRiffEpisode(thread, String(episode.id), button))
+	          list.appendChild(button)
+	        })
+	        if (legacyCount) list.appendChild(bfEl('p', 'private-riff-checkpoint__meta', `${legacyCount} earlier ${legacyCount === 1 ? 'Riff is' : 'Riffs are'} preserved as legacy history.`))
+	        history.appendChild(list)
+	        return history
+	      }
+
+	      async function viewPrivateRiffEpisode(thread, episodeId, trigger) {
+	        if (!thread?.id || !episodeId) return
+	        trigger.disabled = true
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}?episodeId=${encodeURIComponent(episodeId)}`, { cache: 'no-store' })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload?.thread?.id) throw new Error(payload?.error || 'That Riff pass could not be opened')
+	          const viewed = upsertScoutChatThread({ ...payload.thread, messagesLoaded: true }, { select: false })
+	          if (chatContextState?.mode === 'riff' && String(chatContextState.threadId || '') === String(viewed.id || '')) {
+	            chatContextState.readOnlyEpisode = privateRiffViewingEarlier(viewed)
+	            chatContextState.viewedEpisodeId = String(viewed.riff?.viewedEpisodeId || episodeId)
+	            renderPrivateRiffContext(viewed)
+	          }
+	          if (String(activeScoutThreadId || '') === String(viewed.id || '')) renderActiveScoutThread()
+	        } catch (error) {
+	          showToast({ text: error?.message || 'That Riff pass could not be opened', kind: 'error' })
+	        } finally {
+	          if (trigger?.isConnected) trigger.disabled = false
+	        }
+	      }
+
+	      async function resumePrivateRiffEpisode(thread, episodeId, trigger) {
+	        if (!thread?.riff?.sourceThreadId || !episodeId) return
+	        const source = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(thread.riff.sourceThreadId || ''))
+	        const sourceMessages = Array.isArray(source?.messages) ? source.messages : []
+	        const throughMessageId = String(sourceMessages[sourceMessages.length - 1]?.id || thread.riff.throughMessageId || '')
+	        if (!throughMessageId) return
+	        trigger.disabled = true
+	        try {
+	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.riff.sourceThreadId)}/riff`, {
+	            throughMessageId,
+	            entryPoint: 'resume',
+	            episodeId,
+	            agentId: '',
+	            operationId: privateRiffOperationId('riff-resume')
+	          })
+	          if (!result.ok || !result.data?.thread?.id) throw new Error(result.data?.error || 'That Riff pass could not be resumed')
+	          const updated = upsertScoutChatThread(result.data.thread, { select: false })
+	          if (chatContextState?.mode === 'riff' && String(chatContextState.threadId || '') === String(updated.id || '')) {
+	            chatContextState.readOnlyEpisode = false
+	            chatContextState.viewedEpisodeId = String(updated.riff?.viewedEpisodeId || updated.riff?.activeEpisodeId || '')
+	          }
+	          if (String(activeScoutThreadId || '') === String(updated.id || '')) renderActiveScoutThread()
+	          renderPrivateRiffContext(updated)
+	          showToast({ text: `Resumed an earlier pass in #${updated.riff?.sourceTitle || 'channel'}`, kind: 'done' })
+	        } catch (error) {
+	          showToast({ text: error?.message || 'That Riff pass could not be resumed', kind: 'error' })
+	        } finally {
+	          if (trigger?.isConnected) trigger.disabled = false
+	        }
 	      }
 
 	      function renderPrivateRiffContext(thread, options = {}) {
 	        if (chatContextState?.mode !== 'riff' || String(chatContextState.threadId || '') !== String(thread?.id || '')) return
-	        chatContextKicker.textContent = 'Private Riff · only you and Scout'
-	        chatContextTitle.textContent = String(thread?.riff?.agentName || 'Scout')
-	        chatContextMeta.textContent = `Private · grounded in #${thread?.riff?.sourceTitle || 'channel'}`
+	        chatContextKicker.textContent = 'Your Riff · private to you'
+	        chatContextTitle.textContent = `#${thread?.riff?.sourceTitle || 'channel'}`
+	        chatContextMeta.textContent = `${String(thread?.riff?.agentName || 'Scout')} · ${Math.max(1, Number(thread?.riff?.episodeCount || 1))} pass${Number(thread?.riff?.episodeCount || 1) === 1 ? '' : 'es'}`
 	        chatContextParent.hidden = false
 	        chatContextParent.replaceChildren(privateRiffCheckpointNode(thread))
+	        const readOnlyEpisode = privateRiffViewingEarlier(thread)
+	        chatContextState.readOnlyEpisode = readOnlyEpisode
+	        if (chatContextReplyInput) {
+	          chatContextReplyInput.disabled = readOnlyEpisode || thread?.riff?.sourceAvailable === false
+	          chatContextReplyInput.placeholder = readOnlyEpisode ? 'Resume this pass to keep riffing…' : 'Riff privately with Scout…'
+	        }
+	        if (chatContextReplyAttach) chatContextReplyAttach.disabled = readOnlyEpisode || thread?.riff?.sourceAvailable === false
+	        if (chatContextReplySend && readOnlyEpisode) chatContextReplySend.disabled = true
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 	        const fragment = document.createDocumentFragment()
-	        messages.forEach(message => fragment.appendChild(privateRiffMessageCard(thread, message)))
+	        appendPrivateRiffMessages(fragment, thread, messages)
 	        if (!messages.length) fragment.appendChild(bfEl('div', 'chat-context-empty', 'Ask Scout to explore, pressure-test, or rewrite something without adding the private exchange to the channel.'))
-	        if (chatContextState.pending) fragment.appendChild(bfEl('div', 'private-riff-thinking', 'Reviewing the frozen channel checkpoint…'))
+	        if (chatContextState.pending) fragment.appendChild(bfEl('div', 'private-riff-thinking', 'Refreshing the authorized channel and company context…'))
 	        chatContextBody.replaceChildren(fragment)
 	        if (options.scrollToBottom !== false) chatContextBody.scrollTop = chatContextBody.scrollHeight
 	      }
@@ -60801,6 +61089,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      async function openPrivateRiff(throughMessageId, trigger) {
 	        const source = selectedScoutChatThread()
 	        const messages = Array.isArray(source?.messages) ? source.messages : []
+	        const exactMessage = Boolean(String(throughMessageId || ''))
+	        const entryPoint = exactMessage ? 'message' : 'resume'
 	        const through = String(throughMessageId || messages[messages.length - 1]?.id || '')
 	        if (!source?.id || String(source.visibility || '').toLowerCase() !== 'public' || !through) return
 	        const desktopRail = desktopChatLayoutQuery.matches
@@ -60817,11 +61107,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        } else if (trigger) {
 	          trigger.disabled = true
 	        }
-	        const key = `${source.id}:${through}`
+	        const key = `${source.id}:${entryPoint}:${through}`
 	        const attempt = privateRiffCreateAttempt?.key === key ? privateRiffCreateAttempt : { key, operationId: privateRiffOperationId('riff-create') }
 	        privateRiffCreateAttempt = attempt
 	        try {
-	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(source.id)}/riff`, { throughMessageId: through, agentId: '', operationId: attempt.operationId })
+	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(source.id)}/riff`, { throughMessageId: through, entryPoint, agentId: '', operationId: attempt.operationId })
 	          if (!result.ok || !result.data?.thread?.id) throw new Error(result.data?.error || 'Private Riff could not be opened')
 	          privateRiffCreateAttempt = null
 	          const thread = upsertScoutChatThread(result.data.thread, { select: !desktopRail })
@@ -60886,7 +61176,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        panel.setAttribute('aria-label', `Share from this Private Riff to #${thread?.riff?.sourceTitle || 'channel'}`)
 	        panel.append(
 	          bfEl('strong', 'chat-context-card__author', `Share to #${thread?.riff?.sourceTitle || 'channel'}`),
-	          bfEl('p', 'private-riff-share__copy', 'Choose the whole conversation or only this reply. Original authors stay visible.')
+	          bfEl('p', 'private-riff-share__copy', 'Share this pass as one channel thread, or publish only this reply. Original authors stay visible.')
 	        )
 	        const actions = bfEl('div', 'private-riff-share__actions')
 	        const all = bfEl('button', 'private-riff-action', 'Share all to source')
@@ -60907,17 +61197,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!thread?.id || !['all', 'reply'].includes(scope) || (scope === 'reply' && !message?.id)) return
 	        const buttons = Array.from(panel.querySelectorAll('button'))
 	        buttons.forEach(button => { button.disabled = true })
-	        const key = JSON.stringify({ threadId: thread.id, scope, messageId: scope === 'reply' ? message.id : '' })
+	        const episodeId = String(message?.riffEpisodeId || thread?.riff?.activeEpisodeId || '')
+	        const key = JSON.stringify({ threadId: thread.id, episodeId, scope, messageId: scope === 'reply' ? message.id : '' })
 	        const attempt = privateRiffPublishAttempts.get(key) || { operationId: privateRiffOperationId('riff-publish') }
 	        privateRiffPublishAttempts.set(key, attempt)
 	        try {
-	          const body = { operationId: attempt.operationId, scope, ...(scope === 'reply' ? { messageId: String(message.id) } : {}) }
+	          const body = { operationId: attempt.operationId, scope, ...(episodeId ? { episodeId } : {}), ...(scope === 'reply' ? { messageId: String(message.id) } : {}) }
 	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/riff-publish`, body)
 	          if (!result.ok) throw new Error(result.data?.error || 'Private Riff could not be shared')
 	          privateRiffPublishAttempts.delete(key)
 	          panel.dataset.publishedScope = scope
 	          const replayed = result.data?.replayed === true
-	          const label = scope === 'all' ? 'The full Private Riff' : 'This reply'
+	          const label = scope === 'all' ? 'This Riff pass' : 'This reply'
 	          buttons.forEach((button, index) => {
 	            const publishedChoice = scope === 'all' || index === 1
 	            button.disabled = publishedChoice || thread?.riff?.sourceAvailable === false
@@ -61033,7 +61324,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function syncDesktopReplyComposerState() {
 	        if (chatContextReplySend) {
-	          chatContextReplySend.disabled = !String(chatContextReplyInput?.value || '').trim() && pendingDesktopReplyFiles.length === 0
+	          chatContextReplySend.disabled = Boolean(chatContextState?.readOnlyEpisode) || (!String(chatContextReplyInput?.value || '').trim() && pendingDesktopReplyFiles.length === 0)
 	        }
 	      }
 
@@ -61192,6 +61483,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const text = String(chatContextReplyInput?.value || '').trim()
 	        const files = pendingDesktopReplyFiles.slice()
 	        if (state?.mode === 'riff') {
+	          if (state.readOnlyEpisode) {
+	            showToast({ text: 'Resume this Riff pass before sending a new message.', kind: 'note' })
+	            return
+	          }
 	          if ((!text && !files.length) || !state.threadId) return
 	          chatContextReplySend.disabled = true
 	          const riffThread = scoutChatThreads.find(thread => String(thread?.id || '') === String(state.threadId))
@@ -61480,6 +61775,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const riffThread = scoutChatThreads.find(thread => String(thread?.id || '') === String(chatContextState.threadId || ''))
 	          if (!riffThread?.riff) {
 	            closeDesktopChatContext({ restoreFocus: false })
+	            return
+	          }
+	          if (chatContextState.readOnlyEpisode && chatContextState.viewedEpisodeId &&
+	            String(riffThread.riff.viewedEpisodeId || riffThread.riff.activeEpisodeId || '') !== String(chatContextState.viewedEpisodeId)) {
+	            // A live update from the active episode must not silently replace
+	            // an earlier pass the user is inspecting or unlock its composer.
 	            return
 	          }
 	          renderPrivateRiffContext(riffThread, { scrollToBottom: false })

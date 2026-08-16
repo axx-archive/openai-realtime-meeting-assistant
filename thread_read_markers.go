@@ -185,6 +185,9 @@ func (app *kanbanBoardApp) scoutChatThreadsView(viewerEmail string, includeArchi
 
 	view := make([]map[string]any, 0, len(threads))
 	for _, thread := range threads {
+		if thread.Riff != nil || thread.ConversationKind == "channel_riff" {
+			continue
+		}
 		thread = app.projectScoutChatThreadForViewer(viewerEmail, thread)
 		encoded, err := json.Marshal(thread)
 		if err != nil {
@@ -238,6 +241,23 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 		if entry.Kind != meetingMemoryKindScoutChat || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, viewerEmail) {
 			continue
 		}
+		if strings.TrimSpace(entry.Metadata["conversationKind"]) == "channel_riff" {
+			continue
+		}
+		// Pre-v2 Riffs may predate the conversationKind metadata marker. Limit the
+		// compatibility read to legacy-looking private candidates, then classify
+		// only from the decoded durable Riff binding—never from a user-visible title
+		// alone. This prevents a first-load source-title flash while the async
+		// metadata backfill is still pending without decoding every private chat.
+		legacyRiffCandidate := normalizeScoutChatVisibility(entry.Metadata["visibility"]) == scoutChatVisibilityPrivate &&
+			(strings.HasPrefix(strings.TrimSpace(entry.Metadata["title"]), "Riff on #") || strings.Contains(entry.Metadata["preview"], "Private Riff"))
+		if legacyRiffCandidate {
+			if durable, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, entry.ID); ok {
+				if thread, decoded := decodeScoutChatThreadEntry(durable); decoded && thread.Riff != nil {
+					continue
+				}
+			}
+		}
 		archivedAt := strings.TrimSpace(entry.Metadata["archivedAt"])
 		if archivedAt != "" && !includeArchived {
 			continue
@@ -251,6 +271,9 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 			"createdAt":      entry.Metadata["createdAt"],
 			"updatedAt":      entry.Metadata["updatedAt"],
 			"messagesLoaded": false,
+		}
+		if conversationKind := strings.TrimSpace(entry.Metadata["conversationKind"]); conversationKind != "" {
+			row["conversationKind"] = conversationKind
 		}
 		if createdBy := strings.TrimSpace(entry.Metadata["createdBy"]); createdBy != "" {
 			row["createdBy"] = createdBy

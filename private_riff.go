@@ -12,6 +12,7 @@ import (
 
 const (
 	privateRiffBindingVersion                 = "stride-private-riff/v1"
+	privateRiffSpaceVersion                   = "stride-private-riff-space/v2"
 	privateRiffParagraphVersion               = "stride-private-riff-paragraph/v1"
 	privateRiffPublicationVersion             = "stride-private-riff-publication/v1"
 	privateRiffConversationPublicationVersion = "stride-private-riff-publication/v2"
@@ -22,11 +23,90 @@ const (
 	privateRiffMaxPublishedTotalRunes         = 48_000
 )
 
+const (
+	privateRiffEntryPointMessage = "message"
+	privateRiffEntryPointResume  = "resume"
+	privateRiffEpisodeActive     = "active"
+	privateRiffEpisodeClosed     = "closed"
+)
+
+// A Riff Space is one canonical owner-only chat record for one tenant, owner,
+// and public source-channel incarnation. Distinct explorations remain isolated
+// as episodes inside that record; checkpoints are append-only so a later source
+// refresh can never rewrite the authority receipt for an earlier answer.
+type privateRiffCheckpointRecord struct {
+	ID                   string `json:"id"`
+	Revision             int    `json:"revision"`
+	SourceMessageID      string `json:"sourceMessageId"`
+	SourceMessageDigest  string `json:"sourceMessageDigest"`
+	SourceWindowDigest   string `json:"sourceWindowDigest"`
+	SourceAudienceDigest string `json:"sourceAudienceDigest"`
+	ThroughMessageID     string `json:"throughMessageId"`
+	ThroughAuthorName    string `json:"throughAuthorName,omitempty"`
+	ThroughCreatedAt     string `json:"throughCreatedAt,omitempty"`
+	MessageCount         int    `json:"messageCount"`
+	CapturedAt           string `json:"capturedAt"`
+	BrainRevision        string `json:"brainRevision,omitempty"`
+	BrainCapturedAt      string `json:"brainCapturedAt,omitempty"`
+}
+
+type privateRiffEpisodeRecord struct {
+	ID                  string                        `json:"id"`
+	CreationOperationID string                        `json:"creationOperationId"`
+	EntryPoint          string                        `json:"entryPoint"`
+	AnchorMessageID     string                        `json:"anchorMessageId"`
+	InitiatingMessageID string                        `json:"initiatingMessageId,omitempty"`
+	ActiveCheckpointID  string                        `json:"activeCheckpointId"`
+	Checkpoints         []privateRiffCheckpointRecord `json:"checkpoints"`
+	Status              string                        `json:"status"`
+	CreatedAt           string                        `json:"createdAt"`
+	UpdatedAt           string                        `json:"updatedAt"`
+}
+
+type privateRiffEpisodeSummary struct {
+	ID               string `json:"id"`
+	CreatedAt        string `json:"createdAt"`
+	ThroughCreatedAt string `json:"throughCreatedAt,omitempty"`
+	MessageCount     int    `json:"messageCount"`
+	Status           string `json:"status"`
+}
+
+type privateRiffResumeOperation struct {
+	OperationID             string `json:"operationId"`
+	RequestedEpisodeID      string `json:"requestedEpisodeId,omitempty"`
+	ResolvedEpisodeID       string `json:"resolvedEpisodeId"`
+	RequestedThroughMessage string `json:"requestedThroughMessageId,omitempty"`
+	CreatedAt               string `json:"createdAt"`
+}
+
+type privateRiffRefreshOperation struct {
+	OperationID  string `json:"operationId"`
+	EpisodeID    string `json:"episodeId"`
+	CheckpointID string `json:"checkpointId"`
+	CompletedAt  string `json:"completedAt"`
+}
+
 // privateRiffBinding deliberately retains no source body. The public channel
 // remains the authority; every private turn, refresh, preview, and publication
 // resolves it again and verifies these exact digests.
 type privateRiffBinding struct {
 	Version               string                            `json:"version"`
+	SpaceVersion          string                            `json:"spaceVersion,omitempty"`
+	SpaceID               string                            `json:"spaceId,omitempty"`
+	TenantID              string                            `json:"tenantId,omitempty"`
+	OwnerPrincipalDigest  string                            `json:"ownerPrincipalDigest,omitempty"`
+	SourceIncarnation     string                            `json:"sourceIncarnation,omitempty"`
+	ActiveEpisodeID       string                            `json:"activeEpisodeId,omitempty"`
+	ViewedEpisodeID       string                            `json:"viewedEpisodeId,omitempty"`
+	CheckpointID          string                            `json:"checkpointId,omitempty"`
+	AutoFresh             bool                              `json:"autoFresh,omitempty"`
+	EpisodeCount          int                               `json:"episodeCount,omitempty"`
+	Episodes              []privateRiffEpisodeSummary       `json:"episodes,omitempty"`
+	LegacyEpisodeCount    int                               `json:"legacyEpisodeCount,omitempty"`
+	LegacyEpisodeIDs      []string                          `json:"legacyEpisodeIds,omitempty"`
+	EpisodeRecords        []privateRiffEpisodeRecord        `json:"episodeRecords,omitempty"`
+	ResumeOperations      []privateRiffResumeOperation      `json:"resumeOperations,omitempty"`
+	RefreshOperations     []privateRiffRefreshOperation     `json:"refreshOperations,omitempty"`
 	SourceThreadID        string                            `json:"sourceThreadId"`
 	SourceTitle           string                            `json:"sourceTitle"`
 	SourceMessageID       string                            `json:"sourceMessageId"`
@@ -45,6 +125,7 @@ type privateRiffBinding struct {
 	AgentName             string                            `json:"agentName"`
 	CreationOperationID   string                            `json:"creationOperationId,omitempty"`
 	LastRefreshOperation  string                            `json:"lastRefreshOperationId,omitempty"`
+	LastRefreshEpisodeID  string                            `json:"lastRefreshEpisodeId,omitempty"`
 	LastRefreshDigest     string                            `json:"lastRefreshDigest,omitempty"`
 	SourceAvailable       bool                              `json:"sourceAvailable"`
 	UnavailableReason     string                            `json:"unavailableReason,omitempty"`
@@ -67,6 +148,8 @@ type privateRiffMessageAuthority struct {
 	ContentDigest         string                    `json:"contentDigest"`
 	ActorKind             string                    `json:"actorKind"`
 	ActorID               string                    `json:"actorId"`
+	EpisodeID             string                    `json:"episodeId,omitempty"`
+	CheckpointID          string                    `json:"checkpointId,omitempty"`
 	ContextRevision       int                       `json:"contextRevision"`
 	SourceThreadID        string                    `json:"sourceThreadId"`
 	ThroughMessageID      string                    `json:"throughMessageId"`
@@ -90,6 +173,7 @@ type privateRiffPublicationOperation struct {
 	OperationID         string                       `json:"operationId"`
 	RequestDigest       string                       `json:"requestDigest"`
 	State               string                       `json:"state"`
+	EpisodeID           string                       `json:"episodeId,omitempty"`
 	Scope               privateRiffPublicationScope  `json:"scope"`
 	SelectedMessageID   string                       `json:"selectedMessageId,omitempty"`
 	ThroughMessageID    string                       `json:"throughMessageId"`
@@ -105,6 +189,7 @@ type privateRiffPendingShareChoice struct {
 	Version           string `json:"version"`
 	SelectedMessageID string `json:"selectedMessageId"`
 	OperationID       string `json:"operationId"`
+	EpisodeID         string `json:"episodeId,omitempty"`
 	CreatedAt         string `json:"createdAt"`
 }
 
@@ -119,6 +204,8 @@ type scoutChatAnswerActivity struct {
 	EvidenceKind          string                    `json:"evidenceKind"`
 	Rationale             string                    `json:"rationale"`
 	ContextRevision       int                       `json:"contextRevision,omitempty"`
+	EpisodeID             string                    `json:"episodeId,omitempty"`
+	CheckpointID          string                    `json:"checkpointId,omitempty"`
 	SourceThreadID        string                    `json:"sourceThreadId,omitempty"`
 	ThroughMessageID      string                    `json:"throughMessageId,omitempty"`
 	SourceMessageDigest   string                    `json:"sourceMessageDigest,omitempty"`
@@ -233,12 +320,28 @@ func privateRiffMessageAuthorityForThread(thread scoutChatThreadRecord, message 
 	}
 	authority := &privateRiffMessageAuthority{
 		Version: privateRiffConversationPublicationVersion, MessageID: message.ID, ContentDigest: contentDigest,
-		ActorKind: actorKind, ActorID: actorID, ContextRevision: thread.Riff.ContextRevision,
-		SourceThreadID: thread.Riff.SourceThreadID, ThroughMessageID: thread.Riff.ThroughMessageID,
+		ActorKind: actorKind, ActorID: actorID, EpisodeID: message.RiffEpisodeID, CheckpointID: message.RiffCheckpointID,
+		ContextRevision: thread.Riff.ContextRevision,
+		SourceThreadID:  thread.Riff.SourceThreadID, ThroughMessageID: thread.Riff.ThroughMessageID,
 		SourceMessageDigest: thread.Riff.SourceMessageDigest, SourceWindowDigest: thread.Riff.SourceWindowDigest,
 		SourceAudienceDigest: thread.Riff.SourceAudienceDigest,
 	}
 	if message.Activity != nil {
+		if privateRiffIsSpace(thread) {
+			episodeIndex := privateRiffEpisodeIndex(thread.Riff, message.RiffEpisodeID)
+			checkpointIndex := -1
+			if episodeIndex >= 0 {
+				checkpointIndex = privateRiffCheckpointIndex(&thread.Riff.EpisodeRecords[episodeIndex], message.RiffCheckpointID)
+			}
+			if episodeIndex < 0 || checkpointIndex < 0 {
+				return nil, fmt.Errorf("Private Riff answer checkpoint does not match its episode")
+			}
+			activityEpisode := strings.TrimSpace(message.Activity.EpisodeID)
+			activityCheckpoint := strings.TrimSpace(message.Activity.CheckpointID)
+			if (activityEpisode != "" || activityCheckpoint != "") && (activityEpisode != message.RiffEpisodeID || activityCheckpoint != message.RiffCheckpointID) {
+				return nil, fmt.Errorf("Private Riff answer checkpoint does not match its episode")
+			}
+		}
 		authority.ContextRevision = message.Activity.ContextRevision
 		authority.SourceThreadID = message.Activity.SourceThreadID
 		authority.ThroughMessageID = message.Activity.ThroughMessageID
@@ -282,8 +385,136 @@ func (app *kanbanBoardApp) privateRiffContextSourcesPublishable(ctx context.Cont
 	return len(sources) == 0 || privateRiffContextSourcesMatchAuthorized(app.privateRiffAuthorizedContextSources(ctx, destinationThreadID), sources)
 }
 
-func privateRiffThreadID(ownerEmail, operationID string) string {
-	return "private-riff-" + sha256Hex([]byte(privateRiffBindingVersion + "\x00" + normalizeAccountEmail(ownerEmail) + "\x00" + operationID))[:24]
+func privateRiffOwnerPrincipalDigest(ownerEmail string) string {
+	return sha256Hex([]byte("private-riff-owner/v1\x00" + normalizeAccountEmail(ownerEmail)))
+}
+
+func privateRiffSourceIncarnation(source scoutChatThreadRecord) string {
+	return sha256Hex([]byte(strings.Join([]string{privateRiffSpaceVersion, source.ID, strings.TrimSpace(source.CreatedAt)}, "\x00")))
+}
+
+func privateRiffSpaceThreadID(ownerEmail string, source scoutChatThreadRecord) string {
+	return "private-riff-space-" + sha256Hex([]byte(strings.Join([]string{
+		privateRiffSpaceVersion, canonicalTenantID(), privateRiffOwnerPrincipalDigest(ownerEmail), source.ID, privateRiffSourceIncarnation(source),
+	}, "\x00")))[:24]
+}
+
+func privateRiffEpisodeID(spaceID, operationID string) string {
+	return "riff-episode-" + sha256Hex([]byte(privateRiffSpaceVersion + "\x00" + spaceID + "\x00" + operationID))[:24]
+}
+
+func privateRiffCheckpointID(spaceID, episodeID string, revision int, source scoutChatSourceBinding, audienceDigest string) string {
+	return "riff-checkpoint-" + sha256Hex([]byte(strings.Join([]string{
+		privateRiffSpaceVersion, spaceID, episodeID, fmt.Sprintf("%d", revision), source.MessageID, source.MessageDigest, source.WindowDigest, audienceDigest,
+	}, "\x00")))[:24]
+}
+
+func privateRiffIsSpace(thread scoutChatThreadRecord) bool {
+	return thread.Riff != nil && thread.Riff.SpaceVersion == privateRiffSpaceVersion && thread.Riff.SpaceID == thread.ID && len(thread.Riff.EpisodeRecords) > 0
+}
+
+func privateRiffEpisodeIndex(binding *privateRiffBinding, episodeID string) int {
+	if binding == nil {
+		return -1
+	}
+	episodeID = strings.TrimSpace(episodeID)
+	for index := range binding.EpisodeRecords {
+		if binding.EpisodeRecords[index].ID == episodeID {
+			return index
+		}
+	}
+	return -1
+}
+
+func privateRiffCheckpointIndex(episode *privateRiffEpisodeRecord, checkpointID string) int {
+	if episode == nil {
+		return -1
+	}
+	checkpointID = strings.TrimSpace(checkpointID)
+	for index := range episode.Checkpoints {
+		if episode.Checkpoints[index].ID == checkpointID {
+			return index
+		}
+	}
+	return -1
+}
+
+func privateRiffActivateEpisode(binding *privateRiffBinding, episodeID string) error {
+	index := privateRiffEpisodeIndex(binding, episodeID)
+	if index < 0 {
+		return fmt.Errorf("Private Riff episode is unavailable")
+	}
+	for candidate := range binding.EpisodeRecords {
+		binding.EpisodeRecords[candidate].Status = privateRiffEpisodeClosed
+	}
+	binding.EpisodeRecords[index].Status = privateRiffEpisodeActive
+	binding.ActiveEpisodeID = episodeID
+	binding.PendingShareChoice = nil
+	return privateRiffSyncActiveCompatibility(binding)
+}
+
+func privateRiffSyncActiveCompatibility(binding *privateRiffBinding) error {
+	if binding == nil || binding.SpaceVersion != privateRiffSpaceVersion {
+		return nil
+	}
+	episodeIndex := privateRiffEpisodeIndex(binding, binding.ActiveEpisodeID)
+	if episodeIndex < 0 {
+		return fmt.Errorf("Private Riff active episode is unavailable")
+	}
+	episode := &binding.EpisodeRecords[episodeIndex]
+	checkpointIndex := privateRiffCheckpointIndex(episode, episode.ActiveCheckpointID)
+	if checkpointIndex < 0 {
+		return fmt.Errorf("Private Riff active checkpoint is unavailable")
+	}
+	checkpoint := episode.Checkpoints[checkpointIndex]
+	binding.CheckpointID = checkpoint.ID
+	binding.SourceMessageID = checkpoint.SourceMessageID
+	binding.SourceMessageDigest = checkpoint.SourceMessageDigest
+	binding.SourceWindowDigest = checkpoint.SourceWindowDigest
+	binding.SourceAudienceDigest = checkpoint.SourceAudienceDigest
+	binding.ThroughMessageID = checkpoint.ThroughMessageID
+	binding.ThroughAuthorName = checkpoint.ThroughAuthorName
+	binding.ThroughCreatedAt = checkpoint.ThroughCreatedAt
+	binding.MessageCount = checkpoint.MessageCount
+	binding.ContextRevision = checkpoint.Revision
+	binding.CapturedAt = checkpoint.CapturedAt
+	binding.BrainRevision = checkpoint.BrainRevision
+	binding.BrainCapturedAt = checkpoint.BrainCapturedAt
+	binding.CreationOperationID = episode.CreationOperationID
+	binding.InitiatingMessageID = episode.InitiatingMessageID
+	binding.AutoFresh = true
+	binding.EpisodeCount = len(binding.EpisodeRecords)
+	return nil
+}
+
+func (app *kanbanBoardApp) privateRiffCheckpoint(spaceID, episodeID string, revision int, window []scoutChatMessageRecord, source scoutChatSourceBinding, through scoutChatMessageRecord, audienceDigest string, now time.Time) privateRiffCheckpointRecord {
+	brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
+	return privateRiffCheckpointRecord{
+		ID: privateRiffCheckpointID(spaceID, episodeID, revision, source, audienceDigest), Revision: revision,
+		SourceMessageID: source.MessageID, SourceMessageDigest: source.MessageDigest, SourceWindowDigest: source.WindowDigest,
+		SourceAudienceDigest: audienceDigest, ThroughMessageID: through.ID,
+		ThroughAuthorName: firstNonEmptyString(strings.TrimSpace(through.AuthorName), participantNameForEmail(through.AuthorEmail), scoutParticipantName),
+		ThroughCreatedAt:  through.CreatedAt, MessageCount: len(window), CapturedAt: now.Format(time.RFC3339Nano),
+		BrainRevision: brainRevision, BrainCapturedAt: brainCapturedAt,
+	}
+}
+
+func (app *kanbanBoardApp) privateRiffLegacyEpisodeIDs(ownerEmail, sourceThreadID, canonicalThreadID string) []string {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	ownerEmail = normalizeAccountEmail(ownerEmail)
+	ids := []string{}
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || thread.ID == canonicalThreadID || thread.Riff == nil || privateRiffIsSpace(thread) ||
+			normalizeAccountEmail(thread.OwnerEmail) != ownerEmail || thread.Riff.SourceThreadID != sourceThreadID {
+			continue
+		}
+		ids = append(ids, thread.ID)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (app *kanbanBoardApp) latestBrainCheckpoint() (string, string) {
@@ -320,6 +551,10 @@ func privateRiffSourceBinding(thread scoutChatThreadRecord, throughMessageID str
 }
 
 func (app *kanbanBoardApp) createPrivateRiff(user *userAccount, sourceThreadID, throughMessageID, agentID, operationID string) (scoutChatThreadRecord, bool, error) {
+	return app.createPrivateRiffWithEntryPoint(user, sourceThreadID, throughMessageID, agentID, operationID, privateRiffEntryPointMessage, "")
+}
+
+func (app *kanbanBoardApp) createPrivateRiffWithEntryPoint(user *userAccount, sourceThreadID, throughMessageID, agentID, operationID, entryPoint, requestedEpisodeID string) (scoutChatThreadRecord, bool, error) {
 	if app == nil || app.memory == nil || user == nil {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff is unavailable")
 	}
@@ -330,6 +565,17 @@ func (app *kanbanBoardApp) createPrivateRiff(user *userAccount, sourceThreadID, 
 	source, _, err := app.scoutChatThreadByID(user.Email, sourceThreadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff source is unavailable")
+	}
+	entryPoint = strings.ToLower(strings.TrimSpace(entryPoint))
+	if entryPoint == "" {
+		entryPoint = privateRiffEntryPointMessage
+	}
+	if entryPoint != privateRiffEntryPointMessage && entryPoint != privateRiffEntryPointResume {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff entryPoint is invalid")
+	}
+	requestedEpisodeID = strings.TrimSpace(requestedEpisodeID)
+	if requestedEpisodeID != "" && entryPoint != privateRiffEntryPointResume {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff episode can only be resumed explicitly")
 	}
 	window, sourceBinding, through, err := privateRiffSourceBinding(source, throughMessageID)
 	if err != nil {
@@ -344,31 +590,109 @@ func (app *kanbanBoardApp) createPrivateRiff(user *userAccount, sourceThreadID, 
 	}
 	agentID = agentMindScoutID
 	agentName := scoutParticipantName
-	brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
 	now := time.Now().UTC()
-	binding := &privateRiffBinding{
-		Version: privateRiffBindingVersion, SourceThreadID: source.ID, SourceTitle: source.Title,
-		SourceMessageID: sourceBinding.MessageID, SourceMessageDigest: sourceBinding.MessageDigest,
-		SourceWindowDigest: sourceBinding.WindowDigest, SourceAudienceDigest: conversationContinuityAudienceDigest(source), ThroughMessageID: through.ID,
-		ThroughAuthorName: firstNonEmptyString(strings.TrimSpace(through.AuthorName), participantNameForEmail(through.AuthorEmail), scoutParticipantName),
-		ThroughCreatedAt:  through.CreatedAt, MessageCount: len(window), ContextRevision: 1,
-		CapturedAt: now.Format(time.RFC3339Nano), BrainRevision: brainRevision, BrainCapturedAt: brainCapturedAt,
-		AgentID: agentID, AgentName: agentName, CreationOperationID: operationID, SourceAvailable: true,
-	}
-	threadID := privateRiffThreadID(user.Email, operationID)
+	threadID := privateRiffSpaceThreadID(user.Email, source)
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
 	if existing, _, existingErr := app.scoutChatThreadByID(user.Email, threadID); existingErr == nil {
-		if existing.Riff == nil || existing.Riff.Version != privateRiffBindingVersion ||
-			existing.Riff.CreationOperationID != operationID || existing.Riff.SourceThreadID != source.ID ||
-			existing.Riff.SourceMessageID != sourceBinding.MessageID || existing.Riff.AgentID != agentID {
-			return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff operation already exists with different authority")
+		if !privateRiffIsSpace(existing) || existing.Riff.TenantID != canonicalTenantID() ||
+			existing.Riff.OwnerPrincipalDigest != privateRiffOwnerPrincipalDigest(user.Email) || existing.Riff.SourceThreadID != source.ID ||
+			existing.Riff.SourceIncarnation != privateRiffSourceIncarnation(source) || existing.Riff.AgentID != agentID {
+			return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff space already exists with different authority")
 		}
-		return existing, false, nil
+		for index := range existing.Riff.EpisodeRecords {
+			if existing.Riff.EpisodeRecords[index].CreationOperationID != operationID {
+				continue
+			}
+			episode := existing.Riff.EpisodeRecords[index]
+			if (strings.TrimSpace(throughMessageID) != "" && episode.AnchorMessageID != sourceBinding.MessageID) || episode.EntryPoint != entryPoint ||
+				(requestedEpisodeID != "" && episode.ID != requestedEpisodeID) {
+				return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff operation already exists with different authority")
+			}
+			existing.Riff.ViewedEpisodeID = episode.ID
+			return existing, false, nil
+		}
+		for _, resume := range existing.Riff.ResumeOperations {
+			if resume.OperationID != operationID {
+				continue
+			}
+			if entryPoint != privateRiffEntryPointResume || resume.RequestedEpisodeID != requestedEpisodeID ||
+				resume.RequestedThroughMessage != strings.TrimSpace(throughMessageID) || privateRiffEpisodeIndex(existing.Riff, resume.ResolvedEpisodeID) < 0 {
+				return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff resume operation already exists with different authority")
+			}
+			existing.Riff.ViewedEpisodeID = resume.ResolvedEpisodeID
+			return existing, false, nil
+		}
+		if entryPoint == privateRiffEntryPointResume {
+			episodeID := requestedEpisodeID
+			if episodeID == "" {
+				episodeID = existing.Riff.ActiveEpisodeID
+			}
+			if episodeIndex := privateRiffEpisodeIndex(existing.Riff, episodeID); episodeIndex >= 0 {
+				if len(existing.Riff.ResumeOperations) >= 128 {
+					return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff resume history is full")
+				}
+				if err := privateRiffActivateEpisode(existing.Riff, episodeID); err != nil {
+					return scoutChatThreadRecord{}, false, err
+				}
+				existing.Riff.ResumeOperations = append(existing.Riff.ResumeOperations, privateRiffResumeOperation{
+					OperationID: operationID, RequestedEpisodeID: requestedEpisodeID, ResolvedEpisodeID: episodeID,
+					RequestedThroughMessage: strings.TrimSpace(throughMessageID), CreatedAt: now.Format(time.RFC3339Nano),
+				})
+				existing.Riff.ViewedEpisodeID = ""
+				existing.UpdatedAt = now.Format(time.RFC3339Nano)
+				if err := app.saveScoutChatThread(existing); err != nil {
+					return scoutChatThreadRecord{}, false, err
+				}
+				existing.Riff.ViewedEpisodeID = episodeID
+				return existing, false, nil
+			}
+			if requestedEpisodeID != "" {
+				return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff episode is unavailable")
+			}
+		}
+		episodeID := privateRiffEpisodeID(threadID, operationID)
+		checkpoint := app.privateRiffCheckpoint(threadID, episodeID, 1, window, sourceBinding, through, conversationContinuityAudienceDigest(source), now)
+		existing.Riff.EpisodeRecords = append(existing.Riff.EpisodeRecords, privateRiffEpisodeRecord{
+			ID: episodeID, CreationOperationID: operationID, EntryPoint: entryPoint, AnchorMessageID: sourceBinding.MessageID,
+			ActiveCheckpointID: checkpoint.ID, Checkpoints: []privateRiffCheckpointRecord{checkpoint}, Status: privateRiffEpisodeActive,
+			CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		})
+		if err := privateRiffActivateEpisode(existing.Riff, episodeID); err != nil {
+			return scoutChatThreadRecord{}, false, err
+		}
+		existing.Riff.LegacyEpisodeIDs = app.privateRiffLegacyEpisodeIDs(user.Email, source.ID, threadID)
+		existing.Riff.LegacyEpisodeCount = len(existing.Riff.LegacyEpisodeIDs)
+		existing.UpdatedAt = now.Format(time.RFC3339Nano)
+		existing.Riff.ViewedEpisodeID = ""
+		if err := app.saveScoutChatThread(existing); err != nil {
+			return scoutChatThreadRecord{}, false, err
+		}
+		existing.Riff.ViewedEpisodeID = episodeID
+		deliverScoutChatThreadMetadata(existing)
+		return existing, true, nil
+	}
+	episodeID := privateRiffEpisodeID(threadID, operationID)
+	checkpoint := app.privateRiffCheckpoint(threadID, episodeID, 1, window, sourceBinding, through, conversationContinuityAudienceDigest(source), now)
+	binding := &privateRiffBinding{
+		Version: privateRiffBindingVersion, SpaceVersion: privateRiffSpaceVersion, SpaceID: threadID,
+		TenantID: canonicalTenantID(), OwnerPrincipalDigest: privateRiffOwnerPrincipalDigest(user.Email), SourceIncarnation: privateRiffSourceIncarnation(source),
+		SourceThreadID: source.ID, SourceTitle: source.Title, AgentID: agentID, AgentName: agentName, SourceAvailable: true,
+		ActiveEpisodeID: episodeID,
+		EpisodeRecords: []privateRiffEpisodeRecord{{
+			ID: episodeID, CreationOperationID: operationID, EntryPoint: entryPoint, AnchorMessageID: sourceBinding.MessageID,
+			ActiveCheckpointID: checkpoint.ID, Checkpoints: []privateRiffCheckpointRecord{checkpoint}, Status: privateRiffEpisodeActive,
+			CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		}},
+	}
+	binding.LegacyEpisodeIDs = app.privateRiffLegacyEpisodeIDs(user.Email, source.ID, threadID)
+	binding.LegacyEpisodeCount = len(binding.LegacyEpisodeIDs)
+	if err := privateRiffSyncActiveCompatibility(binding); err != nil {
+		return scoutChatThreadRecord{}, false, err
 	}
 	thread := scoutChatThreadRecord{
-		ID: threadID, Title: "Riff on #" + strings.TrimSpace(source.Title),
+		ID: threadID, Title: "Riff on #" + strings.TrimSpace(source.Title), ConversationKind: "channel_riff",
 		Preview:    "Private Riff grounded in #" + strings.TrimSpace(source.Title),
 		OwnerEmail: normalizeAccountEmail(user.Email), CreatedBy: canonicalRoomActorName(user.Name),
 		Visibility: scoutChatVisibilityPrivate, CreatedAt: now.Format(time.RFC3339Nano),
@@ -381,6 +705,7 @@ func (app *kanbanBoardApp) createPrivateRiff(user *userAccount, sourceThreadID, 
 	if _, _, err = app.memory.appendScoutChatThread(thread.ID, entryText, scoutChatThreadMetadata(thread)); err != nil {
 		return scoutChatThreadRecord{}, false, err
 	}
+	thread.Riff.ViewedEpisodeID = episodeID
 	deliverScoutChatThreadMetadata(thread)
 	return thread, true, nil
 }
@@ -406,25 +731,88 @@ func (app *kanbanBoardApp) currentPrivateRiffSource(viewerEmail string, riffThre
 	return source, window, nil
 }
 
+func (app *kanbanBoardApp) privateRiffSourceAccessible(viewerEmail string, thread scoutChatThreadRecord) bool {
+	if app == nil || thread.Riff == nil || normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(viewerEmail) ||
+		scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate {
+		return false
+	}
+	source, _, err := app.scoutChatThreadByID(viewerEmail, thread.Riff.SourceThreadID)
+	return err == nil && scoutChatThreadVisibility(source) == scoutChatVisibilityPublic
+}
+
 func (app *kanbanBoardApp) projectPrivateRiffBinding(viewerEmail string, thread scoutChatThreadRecord) *privateRiffBinding {
+	return app.projectPrivateRiffBindingForEpisode(viewerEmail, thread, "")
+}
+
+func (app *kanbanBoardApp) projectPrivateRiffBindingForEpisode(viewerEmail string, thread scoutChatThreadRecord, episodeID string) *privateRiffBinding {
 	if thread.Riff == nil {
 		return nil
 	}
 	projected := *thread.Riff
+	viewedThread := thread
+	if privateRiffIsSpace(thread) {
+		if episodeID == "" {
+			episodeID = thread.Riff.ActiveEpisodeID
+		}
+		if privateRiffEpisodeIndex(&projected, episodeID) < 0 {
+			return nil
+		}
+		projected.ActiveEpisodeID = thread.Riff.ActiveEpisodeID
+		projected.ViewedEpisodeID = episodeID
+		// Sync a copy to the viewed episode without mutating the durable active
+		// episode. GET ?episodeId therefore remains a read-only operation.
+		viewedBinding := projected
+		viewedBinding.ActiveEpisodeID = episodeID
+		if err := privateRiffSyncActiveCompatibility(&viewedBinding); err != nil {
+			return nil
+		}
+		viewedBinding.ActiveEpisodeID = thread.Riff.ActiveEpisodeID
+		viewedBinding.ViewedEpisodeID = episodeID
+		projected = viewedBinding
+		viewedThread.Riff = &viewedBinding
+		projected.EpisodeCount = len(thread.Riff.EpisodeRecords)
+		projected.Episodes = make([]privateRiffEpisodeSummary, 0, len(thread.Riff.EpisodeRecords))
+		for _, episode := range thread.Riff.EpisodeRecords {
+			throughCreatedAt := ""
+			if checkpointIndex := privateRiffCheckpointIndex(&episode, episode.ActiveCheckpointID); checkpointIndex >= 0 {
+				throughCreatedAt = episode.Checkpoints[checkpointIndex].ThroughCreatedAt
+			}
+			messageCount := 0
+			for _, message := range thread.Messages {
+				if message.RiffEpisodeID == episode.ID {
+					messageCount++
+				}
+			}
+			projected.Episodes = append(projected.Episodes, privateRiffEpisodeSummary{
+				ID: episode.ID, CreatedAt: episode.CreatedAt, ThroughCreatedAt: throughCreatedAt, MessageCount: messageCount, Status: episode.Status,
+			})
+		}
+	}
 	projected.SourceMessageDigest = ""
 	projected.SourceWindowDigest = ""
 	projected.SourceAudienceDigest = ""
 	projected.BrainRevision = ""
+	projected.BrainCapturedAt = ""
+	projected.TenantID = ""
+	projected.OwnerPrincipalDigest = ""
+	projected.SourceIncarnation = ""
 	projected.CreationOperationID = ""
 	projected.LastRefreshOperation = ""
+	projected.LastRefreshEpisodeID = ""
 	projected.LastRefreshDigest = ""
 	projected.InitiatingMessageID = ""
+	projected.EpisodeRecords = nil
+	projected.ResumeOperations = nil
+	projected.RefreshOperations = nil
 	projected.PublicationOperations = nil
 	projected.PendingShareChoice = nil
 	projected.SourceAvailable = false
 	projected.UnavailableReason = "Source unavailable"
 	projected.NewMessageCount = 0
-	source, _, err := app.currentPrivateRiffSource(viewerEmail, thread)
+	if app == nil {
+		return &projected
+	}
+	source, _, err := app.currentPrivateRiffSource(viewerEmail, viewedThread)
 	if err != nil {
 		return &projected
 	}
@@ -436,7 +824,7 @@ func (app *kanbanBoardApp) projectPrivateRiffBinding(viewerEmail string, thread 
 		if found {
 			projected.NewMessageCount++
 		}
-		if message.ID == thread.Riff.ThroughMessageID {
+		if message.ID == viewedThread.Riff.ThroughMessageID {
 			found = true
 		}
 	}
@@ -458,7 +846,20 @@ func (app *kanbanBoardApp) refreshPrivateRiff(user *userAccount, threadID, opera
 	if err != nil || thread.Riff == nil || normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(user.Email) {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff is unavailable")
 	}
-	if thread.Riff.LastRefreshOperation == operationID {
+	if privateRiffIsSpace(thread) {
+		for _, operation := range thread.Riff.RefreshOperations {
+			if operation.OperationID != operationID {
+				continue
+			}
+			if operation.EpisodeID != thread.Riff.ActiveEpisodeID {
+				return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff refresh operation belongs to a different episode")
+			}
+			return thread, false, nil
+		}
+		if len(thread.Riff.RefreshOperations) >= 256 {
+			return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff refresh history is full")
+		}
+	} else if thread.Riff.LastRefreshOperation == operationID {
 		return thread, false, nil
 	}
 	source, _, err := app.scoutChatThreadByID(user.Email, thread.Riff.SourceThreadID)
@@ -472,6 +873,44 @@ func (app *kanbanBoardApp) refreshPrivateRiff(user *userAccount, threadID, opera
 	audienceDigest := conversationContinuityAudienceDigest(source)
 	refreshDigest := sha256Hex([]byte(strings.Join([]string{thread.ID, source.ID, sourceBinding.MessageID, sourceBinding.MessageDigest, sourceBinding.WindowDigest, audienceDigest}, "\x00")))
 	now := time.Now().UTC()
+	if privateRiffIsSpace(thread) {
+		brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
+		episodeIndex := privateRiffEpisodeIndex(thread.Riff, thread.Riff.ActiveEpisodeID)
+		if episodeIndex < 0 {
+			return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff active episode is unavailable")
+		}
+		episode := &thread.Riff.EpisodeRecords[episodeIndex]
+		checkpointIndex := privateRiffCheckpointIndex(episode, episode.ActiveCheckpointID)
+		if checkpointIndex < 0 {
+			return scoutChatThreadRecord{}, false, fmt.Errorf("Private Riff active checkpoint is unavailable")
+		}
+		current := episode.Checkpoints[checkpointIndex]
+		changed := current.SourceMessageID != sourceBinding.MessageID || current.SourceMessageDigest != sourceBinding.MessageDigest ||
+			current.SourceWindowDigest != sourceBinding.WindowDigest || current.SourceAudienceDigest != audienceDigest ||
+			current.BrainRevision != brainRevision || current.BrainCapturedAt != brainCapturedAt
+		thread.Riff.LastRefreshOperation = operationID
+		thread.Riff.LastRefreshEpisodeID = episode.ID
+		thread.Riff.LastRefreshDigest = refreshDigest
+		if changed {
+			checkpoint := app.privateRiffCheckpoint(thread.ID, episode.ID, current.Revision+1, window, sourceBinding, through, audienceDigest, now)
+			episode.Checkpoints = append(episode.Checkpoints, checkpoint)
+			episode.ActiveCheckpointID = checkpoint.ID
+			episode.UpdatedAt = now.Format(time.RFC3339Nano)
+		}
+		thread.Riff.SourceTitle = source.Title
+		if err := privateRiffSyncActiveCompatibility(thread.Riff); err != nil {
+			return scoutChatThreadRecord{}, false, err
+		}
+		thread.Riff.RefreshOperations = append(thread.Riff.RefreshOperations, privateRiffRefreshOperation{
+			OperationID: operationID, EpisodeID: episode.ID, CheckpointID: thread.Riff.CheckpointID, CompletedAt: now.Format(time.RFC3339Nano),
+		})
+		thread.UpdatedAt = now.Format(time.RFC3339Nano)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutChatThreadRecord{}, false, err
+		}
+		deliverScoutChatThreadMetadata(thread)
+		return thread, changed, nil
+	}
 	brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
 	thread.Riff.SourceTitle = source.Title
 	thread.Riff.SourceMessageID = sourceBinding.MessageID
@@ -494,6 +933,84 @@ func (app *kanbanBoardApp) refreshPrivateRiff(user *userAccount, threadID, opera
 	}
 	deliverScoutChatThreadMetadata(thread)
 	return thread, true, nil
+}
+
+// autoRefreshPrivateRiffForTurn advances only the active episode to the latest
+// currently authorized source window. It runs before provider admission on each
+// new user turn. Earlier checkpoints remain immutable and every message commit
+// is fenced to the returned episode/checkpoint pair.
+func (app *kanbanBoardApp) autoRefreshPrivateRiffForTurn(user *userAccount, threadID string) (scoutChatThreadRecord, error) {
+	if app == nil || user == nil {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff is unavailable")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil || thread.Riff == nil || normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(user.Email) {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff is unavailable")
+	}
+	source, _, err := app.scoutChatThreadByID(user.Email, thread.Riff.SourceThreadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff source is no longer available")
+	}
+	window, sourceBinding, through, err := privateRiffSourceBinding(source, "")
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	audienceDigest := conversationContinuityAudienceDigest(source)
+	now := time.Now().UTC()
+	if !privateRiffIsSpace(thread) {
+		brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
+		thread.Riff.SourceTitle = source.Title
+		thread.Riff.SourceMessageID = sourceBinding.MessageID
+		thread.Riff.SourceMessageDigest = sourceBinding.MessageDigest
+		thread.Riff.SourceWindowDigest = sourceBinding.WindowDigest
+		thread.Riff.SourceAudienceDigest = audienceDigest
+		thread.Riff.ThroughMessageID = through.ID
+		thread.Riff.ThroughAuthorName = firstNonEmptyString(strings.TrimSpace(through.AuthorName), participantNameForEmail(through.AuthorEmail), scoutParticipantName)
+		thread.Riff.ThroughCreatedAt = through.CreatedAt
+		thread.Riff.MessageCount = len(window)
+		thread.Riff.ContextRevision++
+		thread.Riff.CapturedAt = now.Format(time.RFC3339Nano)
+		thread.Riff.BrainRevision = brainRevision
+		thread.Riff.BrainCapturedAt = brainCapturedAt
+		thread.UpdatedAt = now.Format(time.RFC3339Nano)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutChatThreadRecord{}, err
+		}
+		return thread, nil
+	}
+	episodeIndex := privateRiffEpisodeIndex(thread.Riff, thread.Riff.ActiveEpisodeID)
+	if episodeIndex < 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff active episode is unavailable")
+	}
+	episode := &thread.Riff.EpisodeRecords[episodeIndex]
+	checkpointIndex := privateRiffCheckpointIndex(episode, episode.ActiveCheckpointID)
+	if checkpointIndex < 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff active checkpoint is unavailable")
+	}
+	current := episode.Checkpoints[checkpointIndex]
+	brainRevision, brainCapturedAt := app.latestBrainCheckpoint()
+	if current.SourceMessageID != sourceBinding.MessageID || current.SourceMessageDigest != sourceBinding.MessageDigest ||
+		current.SourceWindowDigest != sourceBinding.WindowDigest || current.SourceAudienceDigest != audienceDigest ||
+		current.BrainRevision != brainRevision || current.BrainCapturedAt != brainCapturedAt {
+		checkpoint := app.privateRiffCheckpoint(thread.ID, episode.ID, current.Revision+1, window, sourceBinding, through, audienceDigest, now)
+		episode.Checkpoints = append(episode.Checkpoints, checkpoint)
+		episode.ActiveCheckpointID = checkpoint.ID
+		episode.UpdatedAt = now.Format(time.RFC3339Nano)
+		thread.UpdatedAt = now.Format(time.RFC3339Nano)
+	}
+	thread.Riff.SourceTitle = source.Title
+	if err := privateRiffSyncActiveCompatibility(thread.Riff); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if thread.UpdatedAt == now.Format(time.RFC3339Nano) {
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutChatThreadRecord{}, err
+		}
+	}
+	return thread, nil
 }
 
 func (app *kanbanBoardApp) privateRiffModelQuery(viewerEmail string, thread scoutChatThreadRecord, request string) (string, int, error) {
@@ -578,6 +1095,18 @@ func (app *kanbanBoardApp) privateRiffAnswerSource(viewerEmail string, riffThrea
 		activity.Status != "completed" || activity.SourceThreadID != riffThread.Riff.SourceThreadID {
 		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff answer checkpoint is unavailable")
 	}
+	if privateRiffIsSpace(riffThread) {
+		episodeIndex := privateRiffEpisodeIndex(riffThread.Riff, message.RiffEpisodeID)
+		checkpointIndex := -1
+		if episodeIndex >= 0 {
+			checkpointIndex = privateRiffCheckpointIndex(&riffThread.Riff.EpisodeRecords[episodeIndex], message.RiffCheckpointID)
+		}
+		if episodeIndex < 0 || checkpointIndex < 0 ||
+			(strings.TrimSpace(activity.EpisodeID) != "" && activity.EpisodeID != message.RiffEpisodeID) ||
+			(strings.TrimSpace(activity.CheckpointID) != "" && activity.CheckpointID != message.RiffCheckpointID) {
+			return scoutChatThreadRecord{}, fmt.Errorf("Private Riff answer episode is unavailable")
+		}
+	}
 	source, _, err := app.scoutChatThreadByID(viewerEmail, activity.SourceThreadID)
 	if err != nil || scoutChatThreadVisibility(source) != scoutChatVisibilityPublic || source.ArchivedAt != "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff answer source is no longer available")
@@ -630,6 +1159,9 @@ func (app *kanbanBoardApp) privateRiffSharePreview(user *userAccount, threadID, 
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, nil, fmt.Errorf("Private Riff answer not found")
 	}
 	message := thread.Messages[index]
+	if privateRiffIsSpace(thread) && message.RiffEpisodeID != thread.Riff.ActiveEpisodeID {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, nil, fmt.Errorf("Only the active Private Riff episode can be shared")
+	}
 	if _, err := app.privateRiffAnswerSource(user.Email, thread, message); err != nil {
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, nil, err
 	}
@@ -669,6 +1201,15 @@ func (app *kanbanBoardApp) privateRiffConversationMessageForPublication(ctx cont
 	if err != nil || authority == nil || authority.Version != privateRiffConversationPublicationVersion ||
 		authority.MessageID != message.ID || authority.ContentDigest != contentDigest || authority.ActorKind == "" || authority.ActorID == "" {
 		return fmt.Errorf("This reply predates safe Riff sharing; send it again before publishing")
+	}
+	if privateRiffIsSpace(thread) {
+		if message.RiffEpisodeID == "" || message.RiffCheckpointID == "" || authority.EpisodeID != message.RiffEpisodeID || authority.CheckpointID != message.RiffCheckpointID {
+			return fmt.Errorf("Private Riff reply episode receipt is invalid")
+		}
+		episodeIndex := privateRiffEpisodeIndex(thread.Riff, message.RiffEpisodeID)
+		if episodeIndex < 0 || privateRiffCheckpointIndex(&thread.Riff.EpisodeRecords[episodeIndex], message.RiffCheckpointID) < 0 {
+			return fmt.Errorf("Private Riff reply checkpoint is unavailable")
+		}
 	}
 	if (role == "user" && (authority.ActorKind != "user" || normalizeAccountEmail(authority.ActorID) != normalizeAccountEmail(thread.OwnerEmail))) ||
 		((role == "scout" || role == "assistant") && (authority.ActorKind != "agent" || authority.ActorID != agentMindScoutID)) {
@@ -778,6 +1319,9 @@ func privateRiffPendingShareResolution(value string) (privateRiffPublicationScop
 func latestPrivateRiffReplyID(thread scoutChatThreadRecord) string {
 	for index := len(thread.Messages) - 1; index >= 0; index-- {
 		message := thread.Messages[index]
+		if privateRiffIsSpace(thread) && message.RiffEpisodeID != thread.Riff.ActiveEpisodeID {
+			continue
+		}
 		if message.ID == thread.Riff.InitiatingMessageID || message.Via == privateRiffPublicationControlVia || message.Kind != "message" || strings.TrimSpace(message.Text) == "" {
 			continue
 		}
@@ -817,6 +1361,15 @@ func (app *kanbanBoardApp) handlePrivateRiffVoiceShareIntent(ctx context.Context
 		return nil, false, fmt.Errorf("Private Riff is unavailable")
 	}
 	pending := current.Riff.PendingShareChoice
+	if pending != nil && pending.EpisodeID != "" && pending.EpisodeID != current.Riff.ActiveEpisodeID {
+		current.Riff.PendingShareChoice = nil
+		err = app.saveScoutChatThread(current)
+		lock.Unlock()
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, true, fmt.Errorf("Private Riff episode changed; ask to share again")
+	}
 	if !intent && pending != nil {
 		if resolved, ok := privateRiffPendingShareResolution(utterance); ok {
 			scope, intent, ambiguous = resolved, true, false
@@ -843,7 +1396,7 @@ func (app *kanbanBoardApp) handlePrivateRiffVoiceShareIntent(ctx context.Context
 	if ambiguous {
 		current.Riff.PendingShareChoice = &privateRiffPendingShareChoice{
 			Version: privateRiffConversationPublicationVersion, SelectedMessageID: selectedMessageID,
-			OperationID: callID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			OperationID: callID, EpisodeID: current.Riff.ActiveEpisodeID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if err := app.saveScoutChatThread(current); err != nil {
 			lock.Unlock()
@@ -897,10 +1450,18 @@ func (app *kanbanBoardApp) handlePrivateRiffVoiceShareIntent(ctx context.Context
 }
 
 func (app *kanbanBoardApp) publishPrivateRiffConversation(user *userAccount, threadID, operationID string, scope privateRiffPublicationScope, messageID string) (privateRiffPublicationResult, error) {
-	return app.publishPrivateRiffConversationThrough(user, threadID, operationID, scope, messageID, "")
+	return app.publishPrivateRiffConversationThroughEpisode(user, threadID, "", operationID, scope, messageID, "")
+}
+
+func (app *kanbanBoardApp) publishPrivateRiffConversationEpisode(user *userAccount, threadID, episodeID, operationID string, scope privateRiffPublicationScope, messageID string) (privateRiffPublicationResult, error) {
+	return app.publishPrivateRiffConversationThroughEpisode(user, threadID, episodeID, operationID, scope, messageID, "")
 }
 
 func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccount, threadID, operationID string, scope privateRiffPublicationScope, messageID, highWaterMessageID string) (privateRiffPublicationResult, error) {
+	return app.publishPrivateRiffConversationThroughEpisode(user, threadID, "", operationID, scope, messageID, highWaterMessageID)
+}
+
+func (app *kanbanBoardApp) publishPrivateRiffConversationThroughEpisode(user *userAccount, threadID, episodeID, operationID string, scope privateRiffPublicationScope, messageID, highWaterMessageID string) (privateRiffPublicationResult, error) {
 	result := privateRiffPublicationResult{Scope: scope, MessageIDs: []string{}}
 	if app == nil || user == nil {
 		return result, fmt.Errorf("Private Riff is unavailable")
@@ -937,6 +1498,15 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 	if err != nil || thread.Riff == nil || normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(user.Email) || thread.Riff.SourceThreadID != destinationThreadID {
 		return result, fmt.Errorf("Private Riff is unavailable")
 	}
+	episodeID = strings.TrimSpace(episodeID)
+	if privateRiffIsSpace(thread) {
+		if episodeID == "" {
+			episodeID = thread.Riff.ActiveEpisodeID
+		}
+		if episodeID != thread.Riff.ActiveEpisodeID || privateRiffEpisodeIndex(thread.Riff, episodeID) < 0 {
+			return result, fmt.Errorf("Only the active Private Riff episode can be published")
+		}
+	}
 	destination, _, err := app.scoutChatThreadByID(user.Email, destinationThreadID)
 	if err != nil || scoutChatThreadVisibility(destination) != scoutChatVisibilityPublic || destination.ArchivedAt != "" {
 		return result, fmt.Errorf("Private Riff destination is no longer available")
@@ -954,7 +1524,7 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 	}
 	if operationIndex >= 0 {
 		operation := thread.Riff.PublicationOperations[operationIndex]
-		if operation.Version != privateRiffConversationPublicationVersion || operation.Scope != scope || operation.SelectedMessageID != messageID ||
+		if operation.Version != privateRiffConversationPublicationVersion || operation.Scope != scope || operation.SelectedMessageID != messageID || operation.EpisodeID != episodeID ||
 			operation.DestinationThreadID != destination.ID || operation.DestinationAudience != thread.Riff.SourceAudienceDigest || len(operation.Items) == 0 {
 			return result, fmt.Errorf("Private Riff publication operation already exists with different content")
 		}
@@ -1006,6 +1576,9 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 				return result, fmt.Errorf("A prepared Riff reply is no longer available")
 			}
 			message := thread.Messages[index]
+			if episodeID != "" && message.RiffEpisodeID != episodeID {
+				return result, fmt.Errorf("A prepared Riff reply is no longer in the active episode")
+			}
 			if err := app.privateRiffConversationMessageForPublication(context.Background(), user.Email, destination.ID, thread, message); err != nil {
 				return result, err
 			}
@@ -1024,6 +1597,9 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 			return result, fmt.Errorf("Private Riff reply not found")
 		}
 		message := thread.Messages[index]
+		if episodeID != "" && message.RiffEpisodeID != episodeID {
+			return result, fmt.Errorf("Private Riff reply is not in the active episode")
+		}
 		if err := app.privateRiffConversationMessageForPublication(context.Background(), user.Email, destination.ID, thread, message); err != nil {
 			return result, err
 		}
@@ -1032,6 +1608,9 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 		started := thread.Riff.InitiatingMessageID == ""
 		highWaterMessageID = strings.TrimSpace(highWaterMessageID)
 		for _, message := range thread.Messages {
+			if episodeID != "" && message.RiffEpisodeID != episodeID {
+				continue
+			}
 			if message.Via == privateRiffPublicationControlVia {
 				continue
 			}
@@ -1092,15 +1671,21 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 	for index := range requestDigestItems {
 		requestDigestItems[index].PublicDigest = ""
 	}
-	requestDigest, err := digestAny(map[string]any{"scope": scope, "messageId": messageID, "throughMessageId": throughMessageID, "items": requestDigestItems})
+	requestDigest, err := digestAny(map[string]any{"episodeId": episodeID, "scope": scope, "messageId": messageID, "throughMessageId": throughMessageID, "items": requestDigestItems})
 	if err != nil {
 		return result, fmt.Errorf("Private Riff publication receipt is unavailable")
 	}
 	if operationIndex >= 0 && thread.Riff.PublicationOperations[operationIndex].RequestDigest != requestDigest {
 		return result, fmt.Errorf("Private Riff publication operation already exists with different content")
 	}
-	if operationIndex < 0 && len(thread.Riff.PublicationOperations) >= 128 {
-		return result, fmt.Errorf("This Riff has reached its publication history limit")
+	publicationCount := 0
+	for _, operation := range thread.Riff.PublicationOperations {
+		if !privateRiffIsSpace(thread) || operation.EpisodeID == episodeID {
+			publicationCount++
+		}
+	}
+	if operationIndex < 0 && publicationCount >= 128 {
+		return result, fmt.Errorf("This Riff episode has reached its publication history limit")
 	}
 
 	preparedAt := time.Now().UTC()
@@ -1149,7 +1734,8 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 	if operationIndex < 0 {
 		thread.Riff.PublicationOperations = append(thread.Riff.PublicationOperations, privateRiffPublicationOperation{
 			Version: privateRiffConversationPublicationVersion, OperationID: operationID, RequestDigest: requestDigest, State: "prepared",
-			Scope: scope, SelectedMessageID: messageID, ThroughMessageID: throughMessageID, DestinationThreadID: destination.ID,
+			EpisodeID: episodeID,
+			Scope:     scope, SelectedMessageID: messageID, ThroughMessageID: throughMessageID, DestinationThreadID: destination.ID,
 			DestinationAudience: thread.Riff.SourceAudienceDigest, RootMessageID: rootID, Items: requestItems, PreparedAt: preparedAt.Format(time.RFC3339Nano),
 		})
 		operationIndex = len(thread.Riff.PublicationOperations) - 1
@@ -1159,7 +1745,7 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThrough(user *userAccou
 		}
 	}
 	operation := thread.Riff.PublicationOperations[operationIndex]
-	if operation.Version != privateRiffConversationPublicationVersion || operation.DestinationThreadID != destination.ID || operation.RootMessageID != rootID ||
+	if operation.Version != privateRiffConversationPublicationVersion || operation.EpisodeID != episodeID || operation.DestinationThreadID != destination.ID || operation.RootMessageID != rootID ||
 		operation.DestinationAudience != thread.Riff.SourceAudienceDigest || len(operation.Items) != len(requestItems) {
 		return result, fmt.Errorf("Private Riff publication receipt is invalid")
 	}

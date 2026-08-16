@@ -72,6 +72,7 @@ const destinationRoutes: Partial<Record<keyof RootStackParamList, NativeShellDes
 const focusedRoutes = new Set<keyof RootStackParamList>([
   'Login',
   'Thread',
+  'ChannelRiff',
   'Room',
   'CreateRoom',
   'NewConversation',

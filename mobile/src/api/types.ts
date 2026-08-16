@@ -241,6 +241,8 @@ export type ScoutThread = {
   id: string;
   title?: string;
   visibility?: string;
+  /** Server-owned conversation class. Channel Riffs are durable spaces, not ordinary private-chat rows. */
+  conversationKind?: 'channel_riff' | string;
   ownerEmail?: string;
   memberEmails?: string[];
   updatedAt?: string;
@@ -269,6 +271,23 @@ export type ScoutThread = {
 
 export type PrivateRiffBinding = {
   version?: string;
+  /** Stable owner + source-channel identity for the canonical Riff Space. */
+  spaceId?: string;
+  /** Current invocation boundary. Transcript and share-all stay inside this episode. */
+  activeEpisodeId?: string;
+  viewedEpisodeId?: string;
+  episodeCount?: number;
+  episodes?: Array<{
+    id: string;
+    createdAt: string;
+    throughCreatedAt?: string;
+    messageCount: number;
+    status: 'active' | 'closed' | string;
+  }>;
+  legacyEpisodeCount?: number;
+  legacyEpisodeIds?: string[];
+  checkpointId?: string;
+  autoFresh?: boolean;
   sourceThreadId: string;
   sourceTitle: string;
   throughMessageId: string;
@@ -482,6 +501,10 @@ export type ScoutImageGeneration = {
 
 export type ScoutMessage = {
   id: string;
+  /** Immutable Riff invocation boundary, server-stamped on every episode turn. */
+  riffEpisodeId?: string;
+  /** Exact source-context receipt used for this Riff turn. */
+  riffCheckpointId?: string;
   kind?: string;
   role: string;
   text?: string;
@@ -529,6 +552,8 @@ export type ScoutAnswerActivity = {
   contextRevision?: number;
   sourceThreadId?: string;
   throughMessageId?: string;
+  episodeId?: string;
+  checkpointId?: string;
 };
 
 export type ScoutPublicationProvenance = {

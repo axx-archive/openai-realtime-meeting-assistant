@@ -104,6 +104,19 @@ test('a 200-thread rail is virtualized, stable-keyed and driven by one shared cl
   assert.doesNotMatch(listSource, /section\.threads\.map/u);
 });
 
+test('channel Riff spaces never pollute the ordinary private-chat rail', () => {
+  const rows = channelListRows([
+    { id: 'channel', title: 'Design', visibility: 'public' },
+    { id: 'private', title: 'Scout', visibility: 'private' },
+    { id: 'riff-v2', title: 'Riff', visibility: 'private', conversationKind: 'channel_riff' },
+    { id: 'riff-legacy', title: 'Legacy Riff', visibility: 'private', riff: {} as ScoutThread['riff'] },
+  ] as ScoutThread[]);
+  assert.deepEqual(
+    rows.filter((row) => row.kind === 'thread').map((row) => row.id),
+    ['channel', 'private'],
+  );
+});
+
 test('thread rows and work surfaces expose state without clipping large text or spamming percent updates', () => {
   const thread = {
     id: 'thread-accessibility',

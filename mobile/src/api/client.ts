@@ -928,10 +928,27 @@ export const api = {
     );
   },
 
+  scoutRiffEpisode(
+    sessionToken: string,
+    riffThreadId: string,
+    episodeId: string,
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}?episodeId=${encodeURIComponent(episodeId)}`,
+      { sessionToken },
+    );
+  },
+
   createPrivateRiff(
     sessionToken: string,
     sourceThreadId: string,
-    body: { throughMessageId: string; agentId: string; operationId: string },
+    body: {
+      throughMessageId: string;
+      agentId: string;
+      operationId: string;
+      entryPoint?: "resume" | "message";
+      episodeId?: string;
+    },
   ): Promise<ScoutThreadDetailResponse> {
     return request<ScoutThreadDetailResponse>(
       `/assistant/chat-threads/${encodeURIComponent(sourceThreadId)}/riff`,
@@ -953,7 +970,12 @@ export const api = {
   publishPrivateRiff(
     sessionToken: string,
     riffThreadId: string,
-    body: { operationId: string; scope: "all" | "reply"; messageId?: string },
+    body: {
+      operationId: string;
+      scope: "all" | "reply";
+      messageId?: string;
+      episodeId?: string;
+    },
   ): Promise<PrivateRiffPublishResponse> {
     return request<PrivateRiffPublishResponse>(
       `/assistant/chat-threads/${encodeURIComponent(riffThreadId)}/riff-publish`,

@@ -84,7 +84,7 @@ test('private thread names save inline on Done or blur', () => {
   assert.match(list, /api\.updateScoutThread\(sessionToken, threadID, \{ title \}\)/);
   assert.match(thread, /onLongPress=\{beginThreadTitleRename\}/);
   assert.match(thread, /name: ["']longpress["'], label: ["']Rename thread["']/);
-  assert.match(thread, /disabled=\{loading \|\| threadVisibility !== ["']private["']\}/);
+  assert.match(thread, /disabled=\{loading \|\| threadVisibility !== ["']private["'] \|\| Boolean\(privateRiff\)\}/);
   assert.match(thread, /onBlur=\{\(\) => \{\s*void commitThreadTitleRename\(\);\s*\}\}/);
   assert.match(thread, /onSubmitEditing=\{\(\) => \{\s*void commitThreadTitleRename\(\);\s*\}\}/);
   assert.match(thread, /navigation\.setParams\(\{ title \}\)/);

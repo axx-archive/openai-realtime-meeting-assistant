@@ -1586,7 +1586,14 @@ func redactPrivateRiffPublicationMessage(message scoutChatMessageRecord) scoutCh
 // websocket events, Files/deposits views, and model-history construction, but
 // must never be used for a durable write.
 func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
+	return app.projectScoutChatThreadForViewerEpisode(viewerEmail, thread, "")
+}
+
+func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail string, thread scoutChatThreadRecord, episodeID string) scoutChatThreadRecord {
 	projected := thread
+	if thread.Riff != nil {
+		projected.ConversationKind = "channel_riff"
+	}
 	meetingRecordCurrent := app == nil || app.meetingRecordConversationBindingCurrent(viewerEmail, thread)
 	pendingDeletes := map[string]bool{}
 	for _, operation := range thread.ProjectSourceMutationOperations {
@@ -1597,12 +1604,18 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	projected.OpeningOperation = nil
 	projected.VoiceSession = nil
 	projected.MeetingRecord = nil
-	projected.Riff = app.projectPrivateRiffBinding(viewerEmail, thread)
+	projected.Riff = app.projectPrivateRiffBindingForEpisode(viewerEmail, thread, episodeID)
 	projected.LegacyConversationOperations = nil
 	projected.ModerationReceipts = nil
 	projected.ProjectLinkOperations = nil
 	projected.ProjectCorrectionOperations = nil
 	projected.ProjectSourceMutationOperations = nil
+	if thread.Riff != nil && !app.privateRiffSourceAccessible(viewerEmail, thread) {
+		projected.Title = "Private Riff"
+		projected.Preview = "Private channel context is no longer available"
+		projected.Messages = nil
+		return projected
+	}
 	if thread.MeetingRecord != nil && !meetingRecordCurrent {
 		projected.Title = "Meeting Record conversation"
 		projected.Preview = "The bound Meeting Record revision is unavailable"
@@ -1626,7 +1639,14 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 	// conversation as complete.
 	invalidRiffPublicationRoots := app.privateRiffInvalidPublicationRoots(thread)
 	projected.Messages = make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	viewedEpisodeID := ""
+	if projected.Riff != nil && privateRiffIsSpace(thread) {
+		viewedEpisodeID = projected.Riff.ViewedEpisodeID
+	}
 	for _, message := range thread.Messages {
+		if viewedEpisodeID != "" && message.RiffEpisodeID != viewedEpisodeID {
+			continue
+		}
 		if pendingDeletes[message.ID] || (message.CausedByMessageID != "" && pendingDeletes[message.CausedByMessageID]) {
 			continue
 		}
@@ -1736,9 +1756,13 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, 
 		publication.ContextSources = nil
 		message.Publication = &publication
 	}
-	projected := app.projectScoutChatThreadForViewer(viewerEmail, scoutChatThreadRecord{ID: thread.ID, OwnerEmail: thread.OwnerEmail, Visibility: thread.Visibility, Messages: []scoutChatMessageRecord{message}})
+	projected := app.projectScoutChatThreadForViewerEpisode(viewerEmail, scoutChatThreadRecord{
+		ID: thread.ID, OwnerEmail: thread.OwnerEmail, Visibility: thread.Visibility, ConversationKind: thread.ConversationKind,
+		Riff: thread.Riff, Messages: []scoutChatMessageRecord{message},
+	}, message.RiffEpisodeID)
 	if len(projected.Messages) == 0 {
-		return message
+		return scoutChatMessageRecord{ID: message.ID, Kind: message.Kind, Role: message.Role, CreatedAt: message.CreatedAt,
+			RiffEpisodeID: message.RiffEpisodeID, RiffCheckpointID: message.RiffCheckpointID}
 	}
 	return projected.Messages[0]
 }

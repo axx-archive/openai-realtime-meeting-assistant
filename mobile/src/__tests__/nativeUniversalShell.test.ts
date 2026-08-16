@@ -193,7 +193,7 @@ test('focused flows hide compact chrome while iPad threads may retain only the s
   assert.equal(nativeShellVisibleForRoute('Canvas'), true);
   assert.equal(nativeShellVisibleForRoute('NetworkHome'), true);
   const root = source('src', 'navigation', 'RootNavigator.tsx');
-  assert.match(root, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && activeRoute === 'Thread'\)\}/);
+  assert.match(root, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(activeRoute === 'Thread' \|\| activeRoute === 'ChannelRiff'\)\)\}/);
   assert.match(root, /presentation: 'card'/);
   assert.doesNotMatch(root, /presentation: 'fullScreenModal'/);
 });

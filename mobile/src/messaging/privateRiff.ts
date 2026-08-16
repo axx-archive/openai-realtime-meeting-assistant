@@ -28,7 +28,37 @@ export function privateRiffCheckpointSummary(riff: PrivateRiffBinding): string {
   const source = privateRiffSourceTitle(riff);
   const checkpoint = privateRiffPacificDateTime(riff.throughCreatedAt ?? riff.capturedAt);
   const through = checkpoint === 'Not available' ? '' : ` through ${checkpoint}`;
-  return `Private · grounded in ${source}${through}`;
+  return `Private Riff · ${source}${through}`;
+}
+
+export function privateRiffFreshnessSummary(riff: PrivateRiffBinding): string {
+  if (!riff.sourceAvailable) return riff.unavailableReason || 'Source access is unavailable';
+  if (riff.viewedEpisodeId && riff.viewedEpisodeId !== riff.activeEpisodeId) return 'Earlier pass is source-reauthorized and read-only';
+  if (riff.autoFresh) return 'Channel context stays current automatically';
+  return 'Context is fixed to this episode checkpoint';
+}
+
+export function privateRiffDisplayedPassNumber(riff: PrivateRiffBinding): number {
+  const displayedID = String(riff.viewedEpisodeId ?? riff.activeEpisodeId ?? '').trim();
+  const episodeIndex = riff.episodes?.findIndex((episode) => episode.id === displayedID) ?? -1;
+  return episodeIndex >= 0 ? episodeIndex + 1 : Math.max(1, Number(riff.episodeCount ?? 1));
+}
+
+/**
+ * A canonical Riff Space can contain many invocations. The server stamps every
+ * new turn with the active episode; legacy one-off Riffs remain readable as a
+ * single episode without guessing boundaries from message text or timestamps.
+ */
+export function privateRiffCurrentEpisodeMessages(
+  riff: PrivateRiffBinding | null | undefined,
+  messages: readonly ScoutMessage[],
+): ScoutMessage[] {
+  const activeEpisodeID = String(riff?.viewedEpisodeId ?? riff?.activeEpisodeId ?? '').trim();
+  if (!riff || !activeEpisodeID) return [...messages];
+  const current = messages.filter((message) => (
+    String(message.riffEpisodeId ?? message.activity?.episodeId ?? '').trim() === activeEpisodeID
+  ));
+  return current;
 }
 
 export function privateRiffHasUpdates(riff: PrivateRiffBinding): boolean {
@@ -66,8 +96,11 @@ export function privateRiffReplyAuthor(message: ScoutMessage | null | undefined)
     || (role === 'assistant' || role === 'scout' ? 'Scout' : 'You');
 }
 
-export function privateRiffShareAllCount(messages: readonly ScoutMessage[]): number {
-  return messages.filter((message) => {
+export function privateRiffShareAllCount(
+  messages: readonly ScoutMessage[],
+  riff?: PrivateRiffBinding | null,
+): number {
+  return privateRiffCurrentEpisodeMessages(riff, messages).filter((message) => {
     const role = String(message.role ?? '').toLowerCase();
     const text = String(message.text ?? message.content ?? '').trim();
     return ['user', 'assistant', 'scout'].includes(role)

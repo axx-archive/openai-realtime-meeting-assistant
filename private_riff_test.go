@@ -269,6 +269,7 @@ func TestPrivateRiffPublishesOnlySelectedParagraphsWithPublicProvenance(t *testi
 func completedPrivateRiffActivity(riff scoutChatThreadRecord) *scoutChatAnswerActivity {
 	return &scoutChatAnswerActivity{
 		Version: privateRiffBindingVersion, Status: "completed", ContextRevision: riff.Riff.ContextRevision,
+		EpisodeID: riff.Riff.ActiveEpisodeID, CheckpointID: riff.Riff.CheckpointID,
 		SourceThreadID: riff.Riff.SourceThreadID, ThroughMessageID: riff.Riff.ThroughMessageID,
 		SourceMessageDigest: riff.Riff.SourceMessageDigest, SourceWindowDigest: riff.Riff.SourceWindowDigest,
 		SourceAudienceDigest: riff.Riff.SourceAudienceDigest,

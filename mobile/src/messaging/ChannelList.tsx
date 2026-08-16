@@ -55,6 +55,7 @@ function chatIndexMetadata(thread: ScoutThread): Partial<ScoutThread> {
     id: thread.id,
     title: thread.title,
     visibility: thread.visibility,
+    conversationKind: thread.conversationKind,
     ownerEmail: thread.ownerEmail,
     memberEmails: thread.memberEmails,
     updatedAt: thread.updatedAt,
@@ -63,6 +64,7 @@ function chatIndexMetadata(thread: ScoutThread): Partial<ScoutThread> {
     table: thread.table,
     archived: thread.archived,
     activeWork: thread.activeWork,
+    riff: thread.riff,
   };
 }
 

@@ -4,6 +4,8 @@ import test from 'node:test';
 import type { PrivateRiffBinding, ScoutMessage } from '../api/types';
 import {
   privateRiffCheckpointSummary,
+  privateRiffCurrentEpisodeMessages,
+  privateRiffFreshnessSummary,
   privateRiffHasUpdates,
   privateRiffPacificDateTime,
   privateRiffReplyAuthor,
@@ -23,6 +25,9 @@ const riff: PrivateRiffBinding = {
   agentName: 'Scout',
   sourceAvailable: true,
   newMessageCount: 3,
+  autoFresh: true,
+  activeEpisodeId: 'episode-current',
+  episodeCount: 2,
 };
 
 const turns = [
@@ -34,12 +39,30 @@ const turns = [
   { id: 'user-reply', role: 'user', authorName: 'AJ', text: 'That framing works.' },
 ] as ScoutMessage[];
 
-test('the checkpoint names its source and only reports authorized updates', () => {
-  assert.equal(privateRiffCheckpointSummary(riff), 'Private · grounded in #design-room through Aug 15, 2026, 9:30 AM PDT');
+test('the checkpoint names its source and reports automatic freshness without a refresh burden', () => {
+  assert.equal(privateRiffCheckpointSummary(riff), 'Private Riff · #design-room through Aug 15, 2026, 9:30 AM PDT');
+  assert.equal(privateRiffFreshnessSummary(riff), 'Channel context stays current automatically');
+  assert.equal(privateRiffFreshnessSummary({ ...riff, sourceAvailable: false, unavailableReason: 'Access changed' }), 'Access changed');
   assert.equal(privateRiffPacificDateTime('2026-01-15T20:30:00.000Z'), 'Jan 15, 2026, 12:30 PM PST');
   assert.equal(privateRiffHasUpdates(riff), true);
   assert.equal(privateRiffHasUpdates({ ...riff, sourceAvailable: false }), false);
   assert.equal(privateRiffHasUpdates({ ...riff, newMessageCount: 0 }), false);
+});
+
+test('the visible transcript and share-all boundary stay in the active episode', () => {
+  const prior = { ...turns[0], id: 'prior', riffEpisodeId: 'episode-prior' };
+  const current = turns.map((message) => ({ ...message, riffEpisodeId: 'episode-current' }));
+  assert.deepEqual(
+    privateRiffCurrentEpisodeMessages(riff, [prior, ...current]).map((message) => message.id),
+    ['root', 'scout-reply', 'user-reply'],
+  );
+  assert.equal(privateRiffShareAllCount([prior, ...current], riff), 3);
+  assert.equal(privateRiffCurrentEpisodeMessages(riff, [prior]).length, 0);
+  assert.deepEqual(
+    privateRiffCurrentEpisodeMessages({ ...riff, viewedEpisodeId: 'episode-prior' }, [prior, ...current]).map((message) => message.id),
+    ['prior'],
+  );
+  assert.equal(privateRiffCurrentEpisodeMessages({ ...riff, activeEpisodeId: undefined }, [prior]).length, 1);
 });
 
 test('any complete non-root human or Scout reply is shareable under server authorship', () => {

@@ -17,7 +17,6 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"function openPrivateRiff(",
 		"function renderPrivateRiffContext(",
 		"private-riff-checkpoint--conversation",
-		"function refreshPrivateRiff(",
 		"function renderPrivateRiffShare(",
 		"function publishPrivateRiffConversation(",
 		"function privateRiffReplyIsShareable(",
@@ -25,9 +24,11 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"timeZone: 'America/Los_Angeles'",
 		"message?.activity?.version === 'stride-private-riff/v1'",
 		"throughMessageId: through",
+		"entryPoint",
 		"Share all to source",
 		"Share this reply to source",
-		"Private Riff · only you and Scout",
+		"Your Riff · private to you",
+		"Channel and company context refresh automatically when you send",
 		`data-icon="guitar"`,
 		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
 		`.chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"]))`,
@@ -57,9 +58,9 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		!strings.Contains(emptyState, "!isChannel && !isRiff && !hasStarters") {
 		t.Fatalf("an empty Private Riff must explain the source-bound conversation without offering durable-work starters: %s", emptyState)
 	}
-	refresh := functionBody(html, "async function refreshPrivateRiff(")
-	if !strings.Contains(refresh, "!thread?.riff") || !strings.Contains(refresh, "renderActiveScoutThread()") {
-		t.Fatalf("Private Riff checkpoint refresh must work in both the desktop rail and narrow conversation: %s", refresh)
+	checkpoint := functionBody(html, "function privateRiffCheckpointNode(")
+	if strings.Contains(checkpoint, "Update context") || !strings.Contains(checkpoint, "will be included when you send") {
+		t.Fatalf("Private Riff freshness must be automatic instead of making the user manage a checkpoint: %s", checkpoint)
 	}
 	share := functionBody(html, "function renderPrivateRiffShare(")
 	if strings.Count(share, "Share all to source") != 1 || strings.Count(share, "Share this reply to source") != 1 ||
@@ -72,6 +73,7 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"{ operationId: attempt.operationId, scope",
 		"scope === 'reply' ? { messageId: String(message.id) } : {}",
 		"privateRiffPublishAttempts.get(key)",
+		"episodeId",
 	} {
 		if !strings.Contains(publish, want) {
 			t.Fatalf("Private Riff publication is missing %q: %s", want, publish)
@@ -110,6 +112,53 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 	}
 }
 
+func TestFrontendPrivateRiffIsAChannelWorkspaceNotAPrivateChatRow(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(raw)
+	renderThreads := functionBody(html, "function renderChatAgentThreads(")
+	if !strings.Contains(renderThreads, "!privateRiffThread(thread)") {
+		t.Fatalf("ordinary private history must exclude channel Riff Spaces: %s", renderThreads)
+	}
+	classifier := functionBody(html, "function privateRiffThread(")
+	if !strings.Contains(classifier, "conversationKind") || !strings.Contains(classifier, "channel_riff") {
+		t.Fatalf("Riff list filtering must use the closed server-owned conversation kind: %s", classifier)
+	}
+	open := functionBody(html, "async function openPrivateRiff(")
+	for _, want := range []string{
+		"const entryPoint = exactMessage ? 'message' : 'resume'",
+		"{ throughMessageId: through, entryPoint, agentId: '', operationId: attempt.operationId }",
+	} {
+		if !strings.Contains(open, want) {
+			t.Fatalf("channel guitar and exact-message entry must have distinct episode semantics; missing %q: %s", want, open)
+		}
+	}
+	if !strings.Contains(html, "Your Riff") || !strings.Contains(html, "Current pass") {
+		t.Fatal("Riff Space UI must name the stable workspace and current episode")
+	}
+	history := functionBody(html, "function privateRiffHistoryNode(")
+	if !strings.Contains(history, "riff.episodes") || !strings.Contains(history, "viewPrivateRiffEpisode") ||
+		!strings.Contains(history, "legacyEpisodeCount") || !strings.Contains(history, "preserved as legacy history") {
+		t.Fatalf("prior Riff episodes must remain inspectable without becoming private-chat rows: %s", history)
+	}
+	view := functionBody(html, "async function viewPrivateRiffEpisode(")
+	if !strings.Contains(view, "?episodeId=${encodeURIComponent(episodeId)}") || !strings.Contains(view, "readOnlyEpisode") {
+		t.Fatalf("looking at an earlier pass must use the source-reauthorized read-only endpoint: %s", view)
+	}
+	resume := functionBody(html, "async function resumePrivateRiffEpisode(")
+	for _, want := range []string{"entryPoint: 'resume'", "episodeId", "riff-resume"} {
+		if !strings.Contains(resume, want) {
+			t.Fatalf("resuming a prior pass must use the closed server episode contract; missing %q: %s", want, resume)
+		}
+	}
+	if !strings.Contains(html, "Resume this pass") || !strings.Contains(functionBody(html, "function submitDesktopThreadReply("), "state.readOnlyEpisode") ||
+		!strings.Contains(functionBody(html, "function sendScoutChat("), "privateRiffViewingEarlier") {
+		t.Fatal("earlier-pass inspection must lock both Riff composers until explicit resume")
+	}
+}
+
 func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
@@ -123,7 +172,7 @@ func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.
 		`height: 44px;`,
 		`transition-property: background-color, box-shadow, transform;`,
 		`.chat-convo-head__riff:active { transform: scale(0.96); }`,
-		`<span>Private Riff</span>`,
+		`<span>Your Riff</span>`,
 		`data-icon="guitar"`,
 	} {
 		if !strings.Contains(html, want) {
@@ -142,7 +191,7 @@ func TestFrontendPrivateRiffUsesSemanticActivityInsteadOfReasoningTranscript(t *
 	}
 	html := string(raw)
 	for _, want := range []string{
-		"Reviewing the frozen channel checkpoint…",
+		"Refreshing the authorized channel and company context…",
 		"Worked ${privateRiffElapsedLabel(activity.elapsedMs)}",
 		"considered ${Number(activity.sourceCount || 0)} channel messages",
 	} {

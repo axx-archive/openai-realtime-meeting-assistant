@@ -2513,7 +2513,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	// empty state, and the channels-empty note is the channel section's
 	renderBody := functionBody(html, "function renderChatAgentThreads()")
 	if !strings.Contains(renderBody, "const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))") ||
-		!strings.Contains(renderBody, "const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))") {
+		!strings.Contains(renderBody, "const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))") {
 		t.Fatal("renderChatAgentThreads must always compute both the channels and private lists")
 	}
 	if !strings.Contains(renderBody, "chatDefaultThread.hidden = privates.length > 0") {
