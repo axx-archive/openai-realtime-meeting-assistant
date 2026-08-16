@@ -1732,7 +1732,7 @@
         width: 13px;
         height: 13px;
         flex: none;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><line x1='2' x2='22' y1='2' y2='22'/><path d='M5 10v2a7 7 0 0 0 12 0'/><path d='M15 9.34V5a3 3 0 0 0-5.68-1.33'/><path d='M9 9v3a3 3 0 0 0 5.12 2.12'/><line x1='12' x2='12' y1='19' y2='22'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><line x1='2' x2='22' y1='2' y2='22'/><path d='M5 10v2a7 7 0 0 0 12 0'/><path d='M15 9.34V5a3 3 0 0 0-5.68-1.33'/><path d='M9 9v3a3 3 0 0 0 5.12 2.12'/><line x1='12' x2='12' y1='19' y2='22'/></svg>");
         background-size: 13px 13px;
         background-repeat: no-repeat;
       }
@@ -2188,13 +2188,13 @@
         appearance: none;
         -webkit-appearance: none;
         padding-right: 38px;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-repeat: no-repeat;
         background-position: right 14px center;
       }
 
       [data-theme="dark"] .field select {
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%28245%2C245%2C247%2C0.40%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%28245%2C245%2C247%2C0.40%29' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
       }
 
       .field select:focus,
@@ -4120,7 +4120,7 @@
         border: 1px solid var(--line-1);
         border-radius: var(--r-md);
         background-color: var(--surface-3);
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-position: right 14px center;
         background-repeat: no-repeat;
         color: var(--text-1);
@@ -4132,7 +4132,7 @@
       }
 
       [data-theme="dark"] .device-select {
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%28245%2C245%2C247%2C0.40%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%28245%2C245%2C247%2C0.40%29' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
       }
 
       .device-select:focus-visible {
@@ -7251,16 +7251,15 @@
         margin-top: 44px;
         padding: 8px 9px 8px 17px;
         border: 1px solid var(--line-1);
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--surface-2) 86%, transparent);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 2%, transparent), 0 14px 34px rgba(12, 10, 8, 0.045);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
         color: var(--text-2);
-        transition: box-shadow var(--dur-fast) var(--ease);
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
 
       .home-scout-composer:focus-within {
-        border-color: transparent;
-        box-shadow: 0 16px 42px rgba(12, 10, 8, 0.07);
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--ring);
       }
 
       #homeScoutComposer .stride-dictation-mic,
@@ -7280,24 +7279,26 @@
       .home-realtime-voice {
         display: grid;
         place-items: center;
-        border: 0;
-        background: var(--text-1);
-        color: var(--surface-1);
+        border: 1px solid var(--line-1);
+        background: transparent;
+        color: var(--text-2);
         cursor: pointer;
-        box-shadow: 0 5px 16px rgba(12, 10, 8, 0.12);
         transition:
           transform var(--dur-fast) var(--ease),
-          box-shadow var(--dur-fast) var(--ease),
-          background var(--dur-fast) var(--ease);
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease);
       }
 
-      .home-realtime-voice:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 8px 20px rgba(12, 10, 8, 0.18);
+      .home-realtime-voice:hover:not([disabled]) {
+        background: var(--surface-2);
+        border-color: var(--line-2);
+        color: var(--text-1);
       }
-      .home-realtime-voice:active { transform: scale(0.95); }
+      .home-realtime-voice:active:not([disabled]) { transform: scale(0.95); }
       .office-launch.is-listening .home-realtime-voice {
         background: var(--ember);
+        border-color: var(--ember);
         color: var(--on-ember);
       }
 
@@ -7348,14 +7349,34 @@
         display: grid;
         place-items: center;
         border: 0;
-        border-radius: 999px;
-        background: var(--text-1);
-        color: var(--surface-1);
-        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
-      .home-scout-composer__send:disabled { opacity: 0.34; }
-      .home-scout-composer__send:not(:disabled):active { transform: scale(0.94); }
+      @media (hover: hover) and (pointer: fine) {
+        .home-scout-composer__send:hover:not(:disabled) {
+          transform: scale(1.08);
+        }
+      }
+
+      .home-scout-composer__send:active:not(:disabled) { transform: scale(0.94); }
+
+      .home-scout-composer:has(.home-scout-composer__input:placeholder-shown) .home-scout-composer__send:not(:disabled) {
+        background: var(--surface-2);
+        color: var(--text-2);
+        cursor: default;
+        transform: none;
+      }
+
+      .home-scout-composer__send:disabled {
+        background: var(--surface-2);
+        color: var(--text-disabled);
+        cursor: default;
+        transform: none;
+      }
 
       .home-scout-composer-status {
         min-height: 18px;
@@ -7508,17 +7529,23 @@
 	  }
 
       .home-refresh-retry {
-        min-height: 40px;
-        margin-top: 4px;
-        padding: 7px 12px;
-        border: 0;
-        border-radius: 999px;
-        background: transparent;
-        color: var(--text-2);
-        font: var(--type-caption);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 38px;
+        margin-top: 12px;
+        padding: 8px 16px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: 500 13px var(--font-sans);
         cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
-      .home-refresh-retry:hover { background: var(--surface-2); color: var(--text-1); }
+      .home-refresh-retry:hover { background: var(--surface-3); border-color: var(--line-2); }
+      .home-refresh-retry:active { transform: scale(0.98); }
       .home-refresh-retry[hidden] { display: none; }
 
       .home-starters,
@@ -10237,6 +10264,7 @@
            the gap carries the in-group beat, per-voice margins add the rest */
         gap: 6px;
         min-height: 0;
+        overflow-x: hidden;
         overflow-y: auto;
         overflow-anchor: none;
         overscroll-behavior: contain;
@@ -17016,10 +17044,10 @@
         transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
+      .drive-nav__item > svg:first-child,
       .drive-nav__item > span:first-child {
         color: var(--text-3);
-        font: 15px/1 var(--font-sans);
-        text-align: center;
+        justify-self: center;
       }
 
       .drive-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
@@ -17029,6 +17057,7 @@
         color: var(--text-1);
         box-shadow: inset 2px 0 var(--accent);
       }
+      .drive-nav__item.is-active > svg:first-child,
       .drive-nav__item.is-active > span:first-child { color: var(--accent); }
 
       .drive-main {
@@ -21085,11 +21114,17 @@
         font: 600 14px var(--font-sans);
         letter-spacing: 0;
         cursor: pointer;
-        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+        transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
       }
       .lobby__center > .room-empty__join { width: 100%; }
 
-      .room-empty__join:active {
+      @media (hover: hover) and (pointer: fine) {
+        .room-empty__join:hover:not([disabled]) {
+          opacity: 0.88;
+        }
+      }
+
+      .room-empty__join:active:not([disabled]) {
         transform: scale(0.96);
       }
 
@@ -21862,8 +21897,8 @@
       .lobby__rail[hidden] { display: none; }
       .lobby__rail-label {
         padding: 2px 8px 6px;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        font: 500 11px var(--font-sans);
+        letter-spacing: 0.02em;
         color: rgba(var(--lob-fg), 0.62);
       }
       /* the rows list is quiet — the rail card is the surface; rows are
@@ -21955,7 +21990,7 @@
         outline-offset: 2px;
         box-shadow: none;
       }
-      /* canon "new room" — a full-width dashed affordance beneath the list */
+      /* canon "new room" — a full-width solid button beneath the list */
       .lobby__new {
         display: flex;
         align-items: center;
@@ -21965,15 +22000,15 @@
         margin-top: 4px;
         padding: 0 14px;
         border-radius: 12px;
-        border: 1px dashed rgba(var(--lob-fg), 0.22);
-        background: none;
-        color: rgba(var(--lob-fg), 0.75);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        border: 1px solid rgba(var(--lob-fg), 0.18);
+        background: rgba(var(--lob-fg), 0.06);
+        color: var(--lob-ink);
+        font: 500 13px var(--font-sans);
         cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
       .lobby__new svg { flex: none; }
-      .lobby__new:hover { color: var(--lob-ink); border-color: rgba(var(--lob-fg), 0.4); }
+      .lobby__new:hover { background: rgba(var(--lob-fg), 0.12); border-color: rgba(var(--lob-fg), 0.28); }
       /* archived rooms fold under a toggle row (chevron + "N archived") */
       .lobby__archived-toggle {
         display: flex;
@@ -30412,7 +30447,7 @@
             <span id="topbarLiveText">live</span>
           </button>
           <button id="topbarLiveLeave" class="topbar-live-leave" type="button" aria-label="Leave room" title="Leave room">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           </button>
         </span>
         <button id="topbarBell" class="topbar__bell" type="button" aria-label="Notifications" aria-haspopup="dialog">
@@ -30515,7 +30550,7 @@
                   <p id="homeProjectStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
                 </div>
               </dialog>
-              <button id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Home unavailable · Retry</button>
+              <button id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Retry</button>
             </div>
             <div id="homeContinuity" class="home-continuity" aria-label="Your current context" aria-live="polite" hidden></div>
             <!-- multi-room: home carries ONLY a glanceable live-now chip when
@@ -30812,7 +30847,7 @@
                         <video id="greenRoomVideo" class="greenroom__video" autoplay muted playsinline></video>
                         <span id="greenRoomAvatar" class="greenroom__avatar" aria-hidden="true"></span>
                         <span id="greenRoomHint" class="greenroom__hint">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
                           <span id="greenRoomHintText">check your camera</span>
                         </span>
                         <span class="greenroom__status" aria-hidden="true">
@@ -30825,14 +30860,14 @@
                       </button>
                       <div class="greenroom__stack">
                         <button id="greenRoomMicChip" type="button" class="greenroom__ctl" aria-pressed="true" aria-label="mute microphone">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
                         </button>
                         <button id="greenRoomCamChip" type="button" class="greenroom__ctl" aria-pressed="true" aria-label="turn camera off">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
                         </button>
                         <div class="greenroom__filterswrap">
                           <button id="greenRoomFiltersBtn" type="button" class="greenroom__ctl greenroom__filtersbtn" aria-label="video filters" aria-haspopup="true" aria-expanded="false">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
                           </button>
                           <!-- filters popover: five swatches (canon CSS filters) +
                                the blur switch. The swatches keep the shared
@@ -30915,7 +30950,7 @@
                   <span id="localTileAvatar" class="tile-avatar" aria-hidden="true"></span>
                   <span class="media-flags" aria-hidden="true">
                     <span class="media-flag media-flag--muted" title="muted">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="2" y1="2" x2="22" y2="22"></line>
                         <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
                         <path d="M5 10v2a7 7 0 0 0 12 5"></path>
@@ -30925,14 +30960,14 @@
                       </svg>
                     </span>
                     <span class="media-flag media-flag--camera" title="camera off">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
                         <rect x="3" y="6" width="12" height="12" rx="2"></rect>
                         <line x1="2" y1="2" x2="22" y2="22"></line>
                       </svg>
                     </span>
                     <span class="media-flag media-flag--share" title="sharing">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <rect x="2" y="4" width="20" height="12" rx="2"></rect>
                         <path d="M8 20h8"></path>
                         <path d="M12 16v4"></path>
@@ -30940,7 +30975,7 @@
                     </span>
                   </span>
                   <button class="pin-speaker" type="button" aria-label="Pin full screen" aria-pressed="false" title="pin full screen">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 2v6"></path>
                       <path d="M5 8h14l-2 6H7L5 8Z"></path>
                       <path d="M12 14v8"></path>
@@ -31003,7 +31038,7 @@
                   <span class="chat-thread-item__title">new thread</span>
                   <span id="chatThreadTime" class="chat-thread-item__time" hidden></span>
                 </span>
-                <span id="chatThreadPreview" class="chat-thread-item__preview">scout names it after your first message</span>
+                <span id="chatThreadPreview" class="chat-thread-item__preview"></span>
               </span>
             </button>
             <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Chat threads"></div>
@@ -31023,11 +31058,11 @@
               </button>
 	              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Open your private Riff for this channel" hidden>
                 <svg class="stride-mark stride-riff-mark" data-icon="riff" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M7 4v16"/><path d="M7 12c5 0 7 3 7 8"/><circle cx="14" cy="20" r="2"/>
+                  <path d="M6 8h8"/><path d="M10 16h8"/>
                 </svg>
                 <span>Riff</span>
               </button>
-              <span id="chatConvoMeta" class="chat-convo-head__meta">private · only you and Scout</span>
+              <span id="chatConvoMeta" class="chat-convo-head__meta"></span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
                 <span id="chatConvoScope" class="desktop-chat-context__scope">private</span>
                 <span id="chatConvoPolicy" class="desktop-chat-context__policy">only you + Scout</span>
@@ -31584,10 +31619,10 @@
                 <span aria-hidden="true">＋</span><span>New</span>
               </button>
               <nav class="drive-nav" aria-label="Drive views">
-                <button class="drive-nav__item is-active" type="button" data-drive-scope="home" aria-pressed="true"><span aria-hidden="true">⌂</span><span>Home</span></button>
-                <button class="drive-nav__item" type="button" data-drive-scope="mine" aria-pressed="false"><span aria-hidden="true">◇</span><span>My Drive</span></button>
-                <button class="drive-nav__item" type="button" data-drive-scope="shared" aria-pressed="false"><span aria-hidden="true">◎</span><span>Shared</span></button>
-                <button class="drive-nav__item" type="button" data-drive-scope="recent" aria-pressed="false"><span aria-hidden="true">◷</span><span>Recent</span></button>
+                <button class="drive-nav__item is-active" type="button" data-drive-scope="home" aria-pressed="true"><svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Home</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="mine" aria-pressed="false"><svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg><span>My Drive</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="shared" aria-pressed="false"><svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Shared</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="recent" aria-pressed="false"><svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Recent</span></button>
               </nav>
             </aside>
             <main class="drive-main">
@@ -31720,20 +31755,20 @@
               <span id="boardDockNow" class="board-dock-now">room visible</span>
               <span class="board-dock-sep" aria-hidden="true"></span>
               <button id="boardDockMute" class="board-dock-icon" type="button" aria-label="Mute microphone" title="mic">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                   <path d="M12 19v3"></path>
                 </svg>
               </button>
               <button id="boardDockCamera" class="board-dock-icon" type="button" aria-label="Toggle camera" title="camera">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
                   <rect x="3" y="6" width="12" height="12" rx="2"></rect>
                 </svg>
               </button>
               <button id="boardDockShare" class="board-dock-icon" type="button" aria-label="Share screen" title="share screen">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <rect x="2" y="4" width="20" height="12" rx="2"></rect>
                   <path d="M8 20h8"></path>
                   <path d="M12 16v4"></path>
@@ -31773,12 +31808,12 @@
           <span id="roomClock" class="room-clock" aria-live="polite">00:00</span>
           <button id="join" class="btn btn--primary" type="button">Enter</button>
           <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
-            <svg class="mute-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="mute-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <path d="M12 19v3"></path>
             </svg>
-            <svg class="mute-icon--off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="mute-icon--off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="2" x2="22" y1="2" y2="22"></line>
               <path d="M5 10v2a7 7 0 0 0 12 0"></path>
               <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path>
@@ -31788,11 +31823,11 @@
             <span class="mute-label">Mute</span>
           </button>
           <button id="toggleCamera" class="btn btn--ghost" type="button" aria-label="Turn camera off" aria-pressed="false" title="Turn camera off" disabled>
-            <svg class="camera-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="camera-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m22 8-6 4 6 4V8Z"></path>
               <rect width="14" height="12" x="2" y="6" rx="2"></rect>
             </svg>
-            <svg class="camera-icon--off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="camera-icon--off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.248-3.062A.5.5 0 0 1 22 7.87v8.196"></path>
               <path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"></path>
               <line x1="2" x2="22" y1="2" y2="22"></line>
@@ -31800,7 +31835,7 @@
             <span class="camera-label">Camera</span>
           </button>
           <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
               <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
               <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
@@ -31808,7 +31843,7 @@
             <span class="audio-settings-label">Route</span>
           </button>
           <button id="screenShare" class="btn btn--ghost" type="button" aria-label="Share screen" title="Share screen" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m9 10 3-3 3 3"></path>
               <path d="M12 13V7"></path>
               <rect width="20" height="14" x="2" y="3" rx="2"></rect>
@@ -31818,10 +31853,10 @@
             <span class="share-label">Share screen</span>
           </button>
           <button id="consentToggle" class="btn btn--ghost consent-toggle" type="button" aria-label="Microphone data choices" aria-expanded="false" title="Microphone data choices" hidden disabled>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>
           </button>
           <button id="roomChatToggle" class="btn btn--ghost room-chat-toggle" type="button" aria-label="Open room chat" aria-pressed="false" title="Room chat" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="room-chat-toggle__label">Chat</span>
@@ -31834,7 +31869,7 @@
           <!-- member-only in-call invite — guests never see it (is-guest CSS)
                and the server 401s the mint endpoint for guest sessions -->
           <button id="inviteToggle" class="btn btn--ghost" type="button" aria-label="Invite" title="Invite" aria-haspopup="dialog" aria-expanded="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
               <circle cx="9" cy="7" r="4"></circle>
               <line x1="19" x2="19" y1="8" y2="14"></line>
@@ -31847,7 +31882,7 @@
             <span class="room-scout-quick__label">Add Scout</span>
           </button>
           <button id="archiveMeeting" class="btn btn--primary" type="button" aria-label="Send notes" title="Send notes" disabled>
-            <svg class="archive-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="archive-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m22 2-7 20-4-9-9-4Z"></path>
               <path d="M22 2 11 13"></path>
             </svg>
@@ -31876,7 +31911,7 @@
           </div>
           <span class="controls__divider" aria-hidden="true"></span>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" title="Leave the room" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
             </svg>
           </button>
@@ -32089,12 +32124,12 @@
       <div id="pipTiles" class="pip-meeting__tiles"></div>
       <div class="pip-meeting__controls">
         <button id="pipMute" class="pip-control" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
             <path d="M12 19v3"></path>
           </svg>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="2" y1="2" x2="22" y2="22"></line>
             <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
             <path d="M5 10v2a7 7 0 0 0 12 4.14"></path>
@@ -32104,11 +32139,11 @@
           </svg>
         </button>
         <button id="pipCamera" class="pip-control" type="button" aria-label="Turn camera off" aria-pressed="false" title="Turn camera off">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
             <rect x="3" y="6" width="12" height="12" rx="2"></rect>
           </svg>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.25-3.06a.5.5 0 0 1 .75.43V16"></path>
             <path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"></path>
             <line x1="2" y1="2" x2="22" y2="22"></line>
@@ -40078,7 +40113,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           case 'chat':
             return chatThreadIsChannel(selectedScoutChatThread())
               ? 'public channel · everyone in the office'
-              : 'private · only you and Scout'
+              : 'private'
           case 'artifacts':
             return 'the company brain, visible'
           case 'board': {
@@ -40557,7 +40592,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const share = bfEl('button', 'artifact-stage__hero-btn')
           share.type = 'button'
           share.setAttribute('aria-label', 'Share link')
-          share.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
+          share.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
           share.addEventListener('click', () => manifestMintShareLink(String(ctx.shareArtifactId)))
           actions.appendChild(share)
         }
@@ -40588,7 +40623,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const summary = document.createElement('summary')
           summary.className = 'artifact-stage__run-summary'
           const chev = bfEl('span', 'artifact-stage__run-chev')
-          chev.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
+          chev.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
           summary.append(chev, bfEl('span', null, 'run details'))
           details.appendChild(summary)
           const runBody = bfEl('div', 'artifact-stage__run-body')
@@ -40674,7 +40709,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const close = bfEl('button', 'artifact-stage__close')
         close.type = 'button'
         close.setAttribute('aria-label', 'Close')
-        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
         close.addEventListener('click', () => closeArtifactStage())
         const headActions = bfEl('div', 'artifact-stage__actions')
         head.append(headings, headActions, escape, close)
@@ -42741,7 +42776,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         link.target = '_blank'
         link.rel = 'noreferrer noopener'
         link.innerHTML = `
-          <span class="research-source__icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"></path></svg></span>
+          <span class="research-source__icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"></path></svg></span>
           <span class="research-source__id">
             <span class="research-source__name"></span>
             <span class="research-source__url"></span>
@@ -45596,7 +45631,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           handle = document.createElement('button')
           handle.className = 'video-reorder-handle'
           handle.type = 'button'
-          handle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>'
+          handle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>'
           handle.addEventListener('click', event => event.preventDefault())
           tile.appendChild(handle)
         }
@@ -54897,7 +54932,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          remove.className = 'scout-chat-pending-file__remove'
 	          remove.setAttribute('aria-label', `Remove ${file.name || 'file'}`)
 	          remove.title = 'remove'
-	          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+	          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
 	          remove.addEventListener('click', onRemove)
 	          chip.append(body, remove)
 	          return chip
@@ -55303,7 +55338,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             <div class="palette__handle" data-palette-close aria-hidden="true"></div>
             <div class="palette__search-row">
               <span class="palette__search-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
               </span>
               <input class="palette__search" type="text" autocomplete="off" spellcheck="false" placeholder="build a market map for the fintech thesis…" aria-label="Search tools">
               <button class="palette__esc" type="button" data-palette-close>esc</button>
@@ -55642,7 +55677,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const back = bfEl('button', 'palette__back', '')
         back.type = 'button'
         back.setAttribute('aria-label', 'Back to tools')
-        back.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>'
+        back.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>'
         back.addEventListener('click', () => {
           palettePinnedTool = null
           if (paletteSearchRowEl) paletteSearchRowEl.hidden = paletteMode === 'inline'
@@ -58934,7 +58969,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        } else {
 	          clearScoutChatThreadNodes()
 	          ensureScoutChatEmptyState()
-	          updateChatThreadItem('scout names it after your first message', '')
+	          updateChatThreadItem('', '')
 	          if (ws?.readyState === WebSocket.OPEN && appShell.classList.contains('is-in-room')) {
 	            ws.send(JSON.stringify({ event: 'scout_chat_reset', data: '{}' }))
 	          }
@@ -59021,18 +59056,42 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          .trim()
 	      }
 
+	      // Status crumbs that should never appear in preview — skip these and walk to real content
+	      const PREVIEW_STATUS_CRUMBS = new Set([
+	        'blocked', 'in progress', 'draft', 'delivered', 'needs approval', 'needs attention',
+	        'work needs attention', 'scout is working', 'presentation in progress', 'research delivered',
+	        'approved', 'queued', 'running', 'complete', 'completed', 'working', 'waiting for approval'
+	      ])
+
 	      function chatThreadDisplayPreview(thread) {
-	        // Private thread list rows show artifact name/status when one exists,
-	        // not the first-prompt leftover ("Outline a 5-slide…", "new thread").
-	        if (!chatThreadIsChannel(thread)) {
-	          const artifactPreview = chatThreadArtifactPreview(thread)
-	          if (artifactPreview) return artifactPreview
+	        // Walk messages newest-first to find the last spoken human or Scout line
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        for (let i = messages.length - 1; i >= 0; i--) {
+	          const msg = messages[i]
+	          const role = String(msg?.role || '').toLowerCase()
+	          // Skip work cards, system messages, and non-text content
+	          if (msg?.thread || msg?.work || msg?.proposal || msg?.choices || msg?.manifest) continue
+	          if (String(msg?.kind || 'message') !== 'message') continue
+	          const text = chatPreviewPlainText(msg?.text)
+	          if (!text) continue
+	          // Skip if it's just a status crumb
+	          const lower = text.toLowerCase().replace(/[…·.]/g, '').trim()
+	          if (PREVIEW_STATUS_CRUMBS.has(lower)) continue
+	          // Skip status-like patterns
+	          if (/^(research|presentation|design|document|work)\s+(delivered|in progress|complete)/i.test(lower)) continue
+	          if (/^(scout is|approved|queued|waiting|needs)/i.test(lower)) continue
+	          return text
 	        }
+	        // Fallback to thread.preview if messages don't have suitable content
 	        const preview = chatPreviewPlainText(thread?.preview)
-	        if (!chatThreadIsChannel(thread) && (!preview || preview === 'new chat thread')) {
-	          return 'scout names it after your first message'
+	        if (preview) {
+	          const lower = preview.toLowerCase().replace(/[…·.]/g, '').trim()
+	          if (!PREVIEW_STATUS_CRUMBS.has(lower) && !/^(research|presentation|design|document|work)\s+(delivered|in progress|complete)/i.test(lower)) {
+	            return preview
+	          }
 	        }
-	        return preview || (chatThreadIsChannel(thread) ? 'new team channel' : 'new chat thread')
+	        // Empty fallback — no lecture
+	        return ''
 	      }
 
 	      // Shared helper: find latest artifact info from thread (same source as chatThreadActiveWork)
@@ -59065,9 +59124,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function chatThreadArtifactPreview(thread) {
-	        // Status on preview line (title moved to title row via chatThreadLatestArtifactInfo)
-	        const info = chatThreadLatestArtifactInfo(thread)
-	        return info ? info.statusLabel : ''
+	        // Status labels no longer shown in preview — return empty to let message content show
+	        return ''
 	      }
 
 	      // sidebar timestamps — design grammar: now · HH:MM · tue · jun 30
@@ -59282,8 +59340,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        icon.className = 'chat-thread-item__icon'
 	        icon.setAttribute('aria-hidden', 'true')
 	        icon.innerHTML = isChannel
-	          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"></path><path d="M4 15h16"></path><path d="M10 3 8 21"></path><path d="M16 3l-2 18"></path></svg>'
-	          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
+	          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"></path><path d="M4 15h16"></path><path d="M10 3 8 21"></path><path d="M16 3l-2 18"></path></svg>'
+	          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
 
 	        const body = document.createElement('span')
 	        body.className = 'chat-thread-item__body'
@@ -59320,7 +59378,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // preview can intentionally retain the prior terminal card until the
 	        // follow-up itself reaches a terminal postimage; never pair that stale
 	        // copy with a live timer.
-	        previewEl.textContent = activeWork ? 'Scout is working' : preview
+	        previewEl.textContent = preview
 	        body.append(row, previewEl)
 
 	        item.append(icon, body)
@@ -59336,7 +59394,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          archive.className = 'chat-thread-item__archive'
 	          archive.setAttribute('aria-label', `Archive ${title}`)
 	          archive.title = 'archive'
-	          archive.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"></rect><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>'
+	          archive.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"></rect><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>'
 	          archive.addEventListener('click', event => {
 	            event.stopPropagation()
 	            archiveScoutChatThread(thread.id)
@@ -59485,7 +59543,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? `your riff · #${thread.riff.sourceTitle || 'channel'}`
 	            : isChannel
 	            ? (isTeam ? 'public · everyone in the office' : 'project · members only')
-	            : `private · only you and ${privateTarget}`
+	            : 'private'
 	        }
 	        if (chatConvoContext) {
 	          const isTeam = chatThreadIsTeam(thread)
@@ -60178,7 +60236,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const close = bfEl('button', 'artifact-stage__close')
 	        close.type = 'button'
 	        close.setAttribute('aria-label', 'Close')
-	        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+	        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
 	        close.addEventListener('click', closeArtifactStage)
 	        head.append(headings, close)
 
@@ -60885,21 +60943,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function privateRiffMark() {
+        // Riff mark: a simple aside/quote indicator — two offset horizontal lines
+        // Not a guitar, not a branch, not a music note. Reads at 16px and 24px.
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
         svg.classList.add('stride-riff-mark')
         svg.setAttribute('viewBox', '0 0 24 24')
         svg.setAttribute('aria-hidden', 'true')
-        const pathData = ['M7 4v16', 'M7 12c5 0 7 3 7 8']
+        // Two short horizontal bars offset like a margin aside
+        const pathData = ['M6 8h8', 'M10 16h8']
         pathData.forEach(value => {
           const path = document.createElementNS(svg.namespaceURI, 'path')
           path.setAttribute('d', value)
           svg.appendChild(path)
         })
-        const dot = document.createElementNS(svg.namespaceURI, 'circle')
-        dot.setAttribute('cx', '14')
-        dot.setAttribute('cy', '20')
-        dot.setAttribute('r', '2')
-        svg.appendChild(dot)
         return svg
       }
 
@@ -60935,10 +60991,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const divider = bfEl('div', 'private-riff-episode')
 	        divider.dataset.episodeId = episodeId
 	        const label = bfEl('span', 'private-riff-episode__label')
-	        label.append(
-	          privateRiffGuitarIcon(),
-	          bfEl('span', '', active ? `Current pass · ${privateRiffPacificTimestamp(message?.createdAt)}` : `Earlier pass ${ordinal} · ${privateRiffPacificTimestamp(message?.createdAt)}`)
-	        )
+	        // Simplified — just the mark, no pass number lecture
+	        label.appendChild(privateRiffGuitarIcon())
 	        divider.appendChild(label)
 	        return divider
 	      }
@@ -60978,15 +61032,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function privateRiffMessageCard(thread, message) {
 	        const card = desktopContextMessageCard(thread, message, { readOnly: true })
 	        const content = card.querySelector('.chat-context-card__content')
-	        const activity = message?.activity
-	        if (content && activity?.status === 'completed') {
-	          const details = document.createElement('details')
-	          details.className = 'private-riff-activity'
-	          const summary = bfEl('summary', 'private-riff-activity__summary', `Worked ${privateRiffElapsedLabel(activity.elapsedMs)} · considered ${Number(activity.sourceCount || 0)} channel messages`)
-	          const rationale = String(activity.rationale || 'Answered from the frozen channel checkpoint. Hidden chain-of-thought is not shown.')
-	          details.append(summary, bfEl('p', 'private-riff-activity__body', rationale))
-	          content.appendChild(details)
-	        }
+	        // Cut "Worked Xs · considered X channel messages" lecture — keep the riff content only
 	        if (content && privateRiffReplyIsShareable(message, thread)) content.appendChild(privateRiffShareTriggerNode(thread, message))
 	        return card
 	      }
@@ -60994,32 +61040,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function privateRiffCheckpointNode(thread) {
 	        const riff = thread?.riff || {}
 	        const viewingEarlier = privateRiffViewingEarlier(thread)
-	        const messageCount = Math.max(0, Number(riff.messageCount || 0))
-	        const sourceThread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(riff.sourceThreadId || ''))
-	        const sourceMessages = Array.isArray(sourceThread?.messages) ? sourceThread.messages : []
-	        const throughIndex = sourceMessages.findIndex(message => String(message?.id || '') === String(riff.throughMessageId || ''))
-	        const locallyObservedNewCount = throughIndex >= 0 ? Math.max(0, sourceMessages.length - throughIndex - 1) : 0
-	        const newMessageCount = Math.max(Number(riff.newMessageCount || 0), locallyObservedNewCount)
 	        const checkpoint = bfEl('section', 'private-riff-checkpoint')
-	        const privacy = bfEl('span', 'private-riff-checkpoint__eyebrow')
-	        privacy.append(privateRiffGuitarIcon(), bfEl('span', '', 'Private Riff · only you and Scout'))
-	        const episodeCount = Math.max(1, Number(riff.episodeCount || 1))
-	        const checkpointNumber = Math.max(1, Number(riff.contextRevision || 1))
+	        // Simplified eyebrow — just the mark and channel name, no lecture
+	        const eyebrow = bfEl('span', 'private-riff-checkpoint__eyebrow')
+	        eyebrow.append(privateRiffGuitarIcon())
 	        checkpoint.append(
-	          privacy,
-	          bfEl('strong', 'private-riff-checkpoint__title', viewingEarlier ? `Earlier pass in #${riff.sourceTitle || 'channel'}` : `Your Riff for #${riff.sourceTitle || 'channel'}`),
-	          bfEl('p', 'private-riff-checkpoint__meta', `${viewingEarlier ? 'Read-only pass' : 'Current pass'} grounded through ${privateRiffPacificTimestamp(riff.throughCreatedAt)} · ${messageCount} message${messageCount === 1 ? '' : 's'} · checkpoint ${checkpointNumber}`),
-	          bfEl('p', 'private-riff-checkpoint__meta', `Pass ${episodeCount}${riff.brainCapturedAt ? ` · company context captured ${privateRiffPacificTimestamp(riff.brainCapturedAt)}` : ''}`)
+	          eyebrow,
+	          bfEl('strong', 'private-riff-checkpoint__title', viewingEarlier ? `Earlier pass in #${riff.sourceTitle || 'channel'}` : `Your Riff for #${riff.sourceTitle || 'channel'}`)
 	        )
-	        const freshness = bfEl('p', 'private-riff-checkpoint__freshness', viewingEarlier
-	          ? 'This earlier pass stays frozen until you explicitly resume it'
-	          : riff.sourceAvailable === false
-	          ? (riff.unavailableReason || 'Source access is unavailable')
-	          : newMessageCount
-	            ? `${newMessageCount} new in the channel will be included when you send`
-	            : 'Channel and company context refresh automatically when you send')
-	        freshness.dataset.state = riff.sourceAvailable === false ? 'unavailable' : viewingEarlier || newMessageCount ? 'waiting' : 'current'
-	        checkpoint.appendChild(freshness)
+	        // Cut lecture meta: "grounded through", "checkpoint N", "Pass N", "context refresh"
 	        const actions = bfEl('div', 'private-riff-checkpoint__actions')
 	        const source = bfEl('button', 'private-riff-action', 'Open source')
 	        source.type = 'button'
@@ -61028,7 +61057,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        realtime.type = 'button'
 	        realtime.disabled = viewingEarlier || !privateRealtimeVoiceSurfaceAvailable()
 	        realtime.setAttribute('aria-label', 'Continue this exact Private Riff in Realtime voice')
-	        realtime.title = realtime.disabled ? 'Private Realtime voice is not available yet' : 'Talk with Scout in this Private Riff'
+	        realtime.title = realtime.disabled ? 'Realtime voice is not available yet' : 'Talk with Scout in this Riff'
 	        realtime.addEventListener('click', () => void startPrivateRiffRealtime(thread, realtime))
 	        actions.append(source)
 	        if (viewingEarlier) {
@@ -63806,7 +63835,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const icon = document.createElement('span')
           icon.className = 'scout-chat-file__icon'
           icon.setAttribute('aria-hidden', 'true')
-          icon.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
+          icon.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
 
           const body = document.createElement('span')
           body.className = 'scout-chat-file__body'
@@ -64128,14 +64157,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function scoutResearchTerminalPreview(status, artifact) {
-        const value = String(status || '').toLowerCase()
-        if (value === 'complete') {
-          const sourceSummary = researchArtifactCurrentSourceSummary(artifact).preview
-          return sourceSummary ? `Research delivered · ${sourceSummary}` : 'Research delivered'
-        }
-        if (value === 'error') {
-          return 'Needs attention'
-        }
+        // Status labels no longer written to preview — let message content show instead
         return ''
       }
 
@@ -66028,7 +66050,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           button.setAttribute('aria-label', `Pin ${name} full screen`)
           button.setAttribute('aria-pressed', 'false')
           button.title = 'pin full screen'
-          button.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v6"></path><path d="M5 8h14l-2 6H7L5 8Z"></path><path d="M12 14v8"></path></svg>'
+          button.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v6"></path><path d="M5 8h14l-2 6H7L5 8Z"></path><path d="M12 14v8"></path></svg>'
           button.addEventListener('click', event => {
             event.stopPropagation()
             togglePinnedSpeaker(tile.dataset.participant || name)
@@ -66107,7 +66129,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const flag = document.createElement('span')
           flag.className = `media-flag media-flag--${kind}`
           flag.title = label
-          flag.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MEDIA_FLAG_ICON_PATHS[kind]}</svg>`
+          flag.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MEDIA_FLAG_ICON_PATHS[kind]}</svg>`
           flags.appendChild(flag)
         }
         return flags
@@ -68140,7 +68162,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const chev = document.createElement('span')
         chev.className = 'intel-decision__chev'
         chev.setAttribute('aria-hidden', 'true')
-        chev.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>'
+        chev.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>'
         item.append(mark, body, chev)
         item.addEventListener('click', () => {
           expandedIntelDecisionId = open ? '' : id
@@ -69929,18 +69951,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // markdown reports, Lucide presentation for html decks
         if (file?.origin === 'deliverable') {
           if (String(file?.mime || '') === 'text/html') {
-            return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h20"></path><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"></path><path d="m7 21 5-5 5 5"></path></svg>'
+            return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h20"></path><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"></path><path d="m7 21 5-5 5 5"></path></svg>'
           }
-          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path><path d="M10 9H8"></path></svg>'
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path><path d="M10 9H8"></path></svg>'
         }
         const mime = String(file?.mime || '')
         if (mime.startsWith('image/')) {
-          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"></path></svg>'
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"></path></svg>'
         }
         if (mime === 'application/pdf') {
-          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M10 13h4"></path><path d="M10 17h4"></path></svg>'
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M10 13h4"></path><path d="M10 17h4"></path></svg>'
         }
-        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
       }
 
       function fileBrainBadgeNode(file) {
@@ -70450,7 +70472,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           kebab.className = 'files-folder-chip__kebab'
           kebab.setAttribute('aria-label', 'folder options')
           kebab.setAttribute('aria-haspopup', 'menu')
-          kebab.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
+          kebab.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
           kebab.addEventListener('click', event => {
             event.stopPropagation()
             filesFolderMenuFor = filesFolderMenuFor === id ? '' : id
@@ -70580,7 +70602,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	    kebab.setAttribute('aria-label', 'file options')
         kebab.setAttribute('aria-haspopup', 'menu')
         kebab.title = 'Move to…'
-        kebab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
+        kebab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
         kebab.addEventListener('click', event => {
           event.stopPropagation()
           filesRowMenuFor = filesRowMenuFor === fileId ? '' : fileId
@@ -70836,6 +70858,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ? `${scoped.length} of ${inScope.length} ${inScope.length === 1 ? 'file' : 'files'}`
             : `${inScope.length} ${inScope.length === 1 ? 'file' : 'files'}`
           filesStats.hidden = !filesEntries.length
+        }
+        // Collapse dropzone when files exist — not a permanent billboard
+        if (filesUploadButton) {
+          filesUploadButton.hidden = filesEntries.length > 0
         }
 
         if (!matches.length) {
@@ -71435,7 +71461,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         meta.textContent = memoryMeetingMeta(meeting, bucket)
         const chevron = document.createElement('span')
         chevron.className = 'memory-card__chevron'
-        chevron.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>'
+        chevron.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>'
         head.append(title, spacer, meta, chevron)
         head.addEventListener('click', () => {
           // accordion — opening one closes the other; reopening toggles shut
@@ -72466,7 +72492,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         closeButton.type = 'button'
         closeButton.setAttribute('aria-label', 'Close card editor')
         // CD3 — Lucide X, not a typographic glyph, per the icon law
-        closeButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+        closeButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
         closeButton.addEventListener('click', closeCardDetail)
         headerActions.appendChild(closeButton)
 
@@ -73793,9 +73819,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'home-continuity__row pressable'
-        const eyebrowText = stripMarkdownBold(item?.eyebrow || '')
-        const titleText = stripMarkdownBold(item?.title || '')
-        const detailText = stripMarkdownBold(item?.detail || '')
+        // Strip lecture prefixes from continuity copy
+        const stripLecturePrefixes = (text) => String(text || '')
+          .replace(/^Riff insight:\s*/i, '')
+          .replace(/^Open to resolve the next step\.?\s*/i, '')
+          .trim()
+        const eyebrowText = stripMarkdownBold(stripLecturePrefixes(item?.eyebrow))
+        const titleText = stripMarkdownBold(stripLecturePrefixes(item?.title))
+        const detailText = stripMarkdownBold(stripLecturePrefixes(item?.detail))
         button.setAttribute('aria-label', `${eyebrowText}. ${titleText}. ${detailText}`)
         const copy = document.createElement('span')
         copy.className = 'home-continuity__copy'
@@ -73832,9 +73863,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function setHomeRefreshFailed(failed) {
         if (!homeRefreshRetry) return
         homeRefreshRetry.hidden = !failed
-        homeRefreshRetry.setAttribute('aria-label', failed
-          ? 'Home could not refresh. Retry without retaining prior private context.'
-          : 'Retry Home')
+        homeRefreshRetry.setAttribute('aria-label', 'Retry loading home')
       }
 
       async function loadHomeSnapshot(refreshAfterCurrent = false) {
@@ -75467,7 +75496,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function homeLiveChevron() {
-        return '<svg class="home-live__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
+        return '<svg class="home-live__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
       }
 
       async function setRoomPasscodeFromList(room, passcode) {
@@ -75819,7 +75848,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           top.className = 'office-agent-card__top'
           const icon = document.createElement('span')
           icon.className = 'office-agent-card__icon'
-          icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${lane.icon}</svg>`
+          icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${lane.icon}</svg>`
           const pill = document.createElement('span')
           pill.className = agentStatusClass(statusValue)
           pill.style.flex = 'none'
