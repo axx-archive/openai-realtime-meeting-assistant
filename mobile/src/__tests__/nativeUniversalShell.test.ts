@@ -21,8 +21,9 @@ const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...
 test('the universal IA is exact and ordered', () => {
   assert.deepEqual(nativeShellDestinations.map(({ id, label }) => ({ id, label })), [
     { id: 'home', label: 'Home' },
-    { id: 'video', label: 'Video' },
+    { id: 'meet', label: 'Meet' },
     { id: 'chat', label: 'Chat' },
+    { id: 'files', label: 'Files' },
     { id: 'work', label: 'Work' },
     { id: 'network', label: 'Network' },
     { id: 'work-search', label: 'Work Search' },
@@ -44,8 +45,9 @@ test('available width, including orientation and split view resizing, selects co
 
 test('selection feedback is deterministic and bounded', () => {
   assert.equal(nativeShellSelectionAnnouncement('home'), 'Home selected');
-  assert.equal(nativeShellSelectionAnnouncement('video'), 'Video selected');
+  assert.equal(nativeShellSelectionAnnouncement('meet'), 'Meet selected');
   assert.equal(nativeShellSelectionAnnouncement('chat'), 'Chat selected');
+  assert.equal(nativeShellSelectionAnnouncement('files'), 'Files selected');
   assert.equal(nativeShellSelectionAnnouncement('work-search'), 'Work Search selected');
 });
 
@@ -127,8 +129,8 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(requestedRoute, 'Deck');
   assert.deepEqual(requestedParams, { segment: 'threads' });
 
-  const videoPressable = renderer!.root.findByProps({ accessibilityLabel: 'Video' });
-  await act(async () => { videoPressable.props.onPress(); });
+  const meetPressable = renderer!.root.findByProps({ accessibilityLabel: 'Meet' });
+  await act(async () => { meetPressable.props.onPress(); });
   assert.equal(requestedRoute, 'Deck');
   assert.deepEqual(requestedParams, { segment: 'rooms' });
 
@@ -138,10 +140,11 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.deepEqual(renderer!.root.findByProps({ accessibilityLabel: 'Work' }).props.accessibilityState, { selected: true });
 
   await act(async () => { renderer!.update(shell('home', true, 'core')); });
-  assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tab' }).length, 3);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tab' }).length, 4);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Home' }).length, 1);
-  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Video' }).length, 1);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Meet' }).length, 1);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Chat' }).length, 1);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Files' }).length, 1);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Work' }).length, 0);
 
   await act(async () => { renderer!.update(shell('home', true)); });
@@ -178,9 +181,10 @@ test('deep destinations preserve their owning top-level context', () => {
   assert.equal(nativeShellDestinationForRoute('Board'), 'work');
   assert.equal(nativeShellDestinationForRoute('Deck'), 'chat');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
-  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'meet');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');
   assert.equal(nativeShellDestinationForRoute('Meetings'), 'work');
+  assert.equal(nativeShellDestinationForRoute('Files'), 'files');
   assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'network');
   assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'work-search');
   assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'you');
