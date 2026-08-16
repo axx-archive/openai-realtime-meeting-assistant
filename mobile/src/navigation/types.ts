@@ -1,13 +1,15 @@
 /**
- * Voice-first shell (design §4). There is no tab navigator: the Canvas is the
- * root, and everything else is pulled over it as the Deck — a native form sheet
- * whose three segments (Threads / Rooms / Work) answer three different questions
- * about the same company.
+ * Voice-first shell (design §4). The Canvas is the root. Meet and Chat are
+ * proper card destinations that fill the content area (with the rail visible
+ * on phone, sidebar on tablet ≥744). The Deck remains available for Work
+ * segments but Meet and Chat are no longer formSheet overlays over Home.
  */
 export type DeckSegment = 'threads' | 'rooms' | 'work';
 
 export type RootStackParamList = {
   Canvas: undefined;
+  Meet: undefined;
+  Chat: undefined;
   WorkHome: undefined;
   NetworkHome: undefined;
   WorkSearchHome: undefined;

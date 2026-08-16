@@ -36,6 +36,13 @@ test('Work exposes a real native private-chat and channel creation route', () =>
   assert.match(client, /operationId\?: string/);
 });
 
+test('Chat destination exposes New conversation directly (not only from Work)', () => {
+  const chat = source('src', 'screens', 'ChatScreen.tsx');
+  assert.match(chat, /accessibilityLabel="New conversation"/);
+  assert.match(chat, /navigation\.navigate\('NewConversation'\)/);
+  assert.match(chat, /<ChannelList/);
+});
+
 test('creation attempts normalize, replay exactly, and separate private from public', () => {
   let sequence = 0;
   const create = () => `operation-${++sequence}`;
