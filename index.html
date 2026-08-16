@@ -10350,25 +10350,6 @@
         letter-spacing: var(--track-text);
       }
 
-      /* card 082: the "Feed the brain" door under the private empty state */
-      .scout-chat-brain-chip {
-        display: block;
-        margin: 18px auto 0;
-        padding: 8px 12px;
-        border: 0;
-        border-radius: var(--r-md);
-        background: transparent;
-        color: var(--text-3);
-        font: 500 12.5px/1.35 var(--font-sans);
-        letter-spacing: var(--track-text);
-        cursor: pointer;
-        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-      }
-      .scout-chat-brain-chip:hover {
-        color: var(--text-1);
-        background: var(--surface-2);
-      }
-
       @media (max-width: 720px) {
         .scout-chat-empty { padding-inline: 20px; }
         .scout-chat-empty__title { font-size: 28px; }
@@ -14193,7 +14174,6 @@
         }
 
 	        #chatTool .scout-starter,
-	        #chatTool .scout-chat-brain-chip,
 	        #chatTool .scout-followup-chip,
 	        #chatTool .scout-followup-chip__clear,
 	        #chatTool .scout-chat-pending-file__remove,
@@ -14210,7 +14190,6 @@
         #chatTool .scout-chat-msg__expand:active,
         #chatTool .scout-chat-msg__delete:active,
 	        #chatTool .scout-starter:active,
-	        #chatTool .scout-chat-brain-chip:active,
 	        #chatTool .scout-followup-chip__clear:active,
 	        #chatTool .scout-chat-pending-file__remove:active,
         #chatTool .desktop-chat-actions button:active,
@@ -54873,11 +54852,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // composer copy, design verbatim (§7.2)
 	        const thread = selectedScoutChatThread()
 	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
-	        // card 082: a Feed-the-brain thread coaches the composer — answer,
-	        // attach, or skip — so the guided flow reads as a guided flow
-	        if (String(thread?.intake || '').toLowerCase() === 'brain') {
-	          return isPhone ? 'answer, attach, or skip' : 'answer, attach files, or say "skip"'
-	        }
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        if (privateRiffThread(thread)) return isPhone ? 'riff with Scout…' : `riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
 	        return chatThreadIsChannel(thread)
@@ -58884,30 +58858,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        renderActiveScoutThread()
 	      }
 
-	      // card 082: open a seeded "Feed the brain" thread — the server returns
-	      // it welcome + privacy disclosure + step 1 already posted, so we just
-	      // land the user in the guided conversation
-	      async function startBrainIntake() {
-	        if (!authedUser) {
-	          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to feed the brain', new Date().toISOString()))
-	          return
-	        }
-	        try {
-	          const result = await postAuthJSON('/assistant/chat-threads', { title: 'Feed the brain', intake: 'brain' })
-	          if (!result.ok) {
-	            throw new Error(result.data?.error || 'could not start the brain intake')
-	          }
-	          const thread = upsertScoutChatThread(result.data.thread)
-	          selectScoutChatThread(thread.id)
-	          setMobileChatView('convo')
-	          if (scoutChatInput && !scoutChatInput.disabled) {
-	            scoutChatInput.focus()
-	          }
-	        } catch (error) {
-	          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not start the brain intake', new Date().toISOString()))
-	        }
-	      }
-
 	      async function startNewScoutThread() {
 	        hideScoutChatThinking()
 	        scoutOfficeChatTurns = []
@@ -59620,20 +59570,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          : 'Ask anything, or describe the outcome you want. Scout can answer, start private work, or ask for approval when it actually matters.')
 	        inner.append(eyebrow, title, body)
 	        empty.append(inner)
-	        const existingBrain = scoutChatThread.querySelector('.scout-chat-brain-chip')
-	        if ((isChannel || isRiff) && existingBrain) {
-	          existingBrain.remove()
-	        } else if (!isChannel && !isRiff && authedUser && !existingBrain) {
-	          // card 082: the deliberate door to the guided "Feed the brain"
-	          // intake, private threads only — a channel is the wrong audience
-	          const brain = document.createElement('button')
-	          brain.type = 'button'
-	          brain.className = 'scout-chat-brain-chip'
-	          brain.textContent = 'Feed the brain'
-	          brain.title = 'teach Scout your history, decks, and clients'
-	          brain.addEventListener('click', startBrainIntake)
-	          empty.insertAdjacentElement('afterend', brain)
-	        }
 	        // Discovery: seed tappable run starters under the PRIVATE empty state so
 	        // a blank thread teaches what can be run. Idempotent; never on channels.
 	        const hasStarters = Boolean(scoutChatThread.querySelector('.scout-starters'))
@@ -59792,7 +59728,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          updateChatThreadItem(chatThreadDisplayPreview(thread), thread?.updatedAt || '')
 	          return
 	        }
-	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-chat-brain-chip, .scout-starters').forEach(function (n) { n.remove() })
+	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        let unreadBoundaryMounted = false
 	        let renderedRiffEpisodeId = ''
