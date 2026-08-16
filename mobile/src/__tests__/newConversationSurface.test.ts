@@ -32,7 +32,7 @@ test('Work exposes a real native private-chat and channel creation route', () =>
   assert.match(root, /name="NewConversation"[\s\S]*presentation: 'formSheet'/);
   assert.match(screen, /'Private chat'[\s\S]*'Channel'/);
   assert.match(screen, /api\.createScoutThread\(sessionToken, newConversationBody\(attempt\)\)/);
-  assert.match(screen, /navigation\.navigate\('Thread'/);
+  assert.match(screen, /navigation\.replace\('Thread'/);
   assert.match(client, /operationId\?: string/);
 });
 
@@ -41,6 +41,23 @@ test('Chat destination exposes New conversation directly (not only from Work)', 
   assert.match(chat, /accessibilityLabel="New conversation"/);
   assert.match(chat, /navigation\.navigate\('NewConversation'\)/);
   assert.match(chat, /<ChannelList/);
+});
+
+test('list-open from ChannelList navigates (stacks Thread on Chat)', () => {
+  const channelList = source('src', 'messaging', 'ChannelList.tsx');
+  // ChannelList opens existing threads with navigate so they stack on Chat.
+  // Back from Thread returns to Chat (the list), not Home.
+  assert.match(channelList, /navigation\.navigate\('Thread',\s*\{/);
+  assert.doesNotMatch(channelList, /navigation\.replace\('Thread'/);
+});
+
+test('new conversation create replaces the sheet (dismisses before Thread)', () => {
+  const screen = source('src', 'screens', 'NewConversationScreen.tsx');
+  // NewConversation is a formSheet. After creating, replace dismisses the sheet
+  // so the stack is Chat → Thread. Back from Thread returns to Chat, not a
+  // spent form. This matches CreateRoomScreen's pattern.
+  assert.match(screen, /navigation\.replace\('Thread',\s*\{/);
+  assert.doesNotMatch(screen, /navigation\.navigate\('Thread'/);
 });
 
 test('creation attempts normalize, replay exactly, and separate private from public', () => {
