@@ -63,7 +63,7 @@ func TestIndexSVGSanitizerStripsAllEventHandlers(t *testing.T) {
 	}
 }
 
-// The CSS must style the rendered SVG container.
+// The CSS must style the rendered SVG container with minimum dimensions.
 func TestIndexSVGRenderStyles(t *testing.T) {
 	html := readIndexForSVGRender(t)
 	for _, want := range []string{
@@ -71,6 +71,9 @@ func TestIndexSVGRenderStyles(t *testing.T) {
 		".chat-rich__svg svg {",
 		"max-width: 100%",
 		"max-height: 320px",
+		// Must have minimum dimensions so SVG isn't a tiny dot
+		"min-width: 64px",
+		"min-height: 64px",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing SVG render style: %q", want)
@@ -88,6 +91,56 @@ func TestIndexSVGParseErrorFallback(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing SVG parse-error fallback: %q", want)
+		}
+	}
+}
+
+// Namespace URLs (w3.org/2000/svg) must NOT be linked as clickable URLs.
+// The xmlns attribute should appear as plain text, not a "source chip".
+func TestIndexSVGNamespaceURLNotLinked(t *testing.T) {
+	html := readIndexForSVGRender(t)
+	for _, want := range []string{
+		// The URL filter for namespace URLs
+		`www.w3.org`,
+		`2000/svg`,
+		`1999/xlink`,
+		// Must skip linking and output as plain text
+		`target.appendChild(document.createTextNode(raw))`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing namespace URL filter: %q", want)
+		}
+	}
+}
+
+// SVG dimensions must be set from viewBox when width/height are missing.
+func TestIndexSVGDimensionsFromViewBox(t *testing.T) {
+	html := readIndexForSVGRender(t)
+	for _, want := range []string{
+		// Check for viewBox parsing and dimension setting
+		`getAttribute('viewBox')`,
+		`hasAttribute('width')`,
+		`hasAttribute('height')`,
+		`setAttribute('width'`,
+		`setAttribute('height'`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing viewBox dimension logic: %q", want)
+		}
+	}
+}
+
+// Thread list preview must strip raw SVG content, showing "[image]" instead.
+func TestIndexSVGPreviewStripped(t *testing.T) {
+	html := readIndexForSVGRender(t)
+	for _, want := range []string{
+		// SVG stripping in preview - regex pattern with \s\S
+		`<svg[\s\S]*?<\/svg>`,
+		`[image]`,
+		"chatPreviewPlainText",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing SVG preview stripping: %q", want)
 		}
 	}
 }
