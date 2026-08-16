@@ -33322,6 +33322,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const homeSuggestions = document.getElementById('homeSuggestions')
       const homeContinuity = document.getElementById('homeContinuity')
       let homeScoutOpeningAttempt = null
+      let homeScoutLastSubmitAt = 0
       const HOME_CATEGORY_SHELLS = Object.freeze([
         { id: 'continue', label: 'Continue', detail: '', suggestions: [] },
         { id: 'explore', label: 'Explore', detail: '', suggestions: [] },
@@ -33771,7 +33772,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
         authedUser = nextUser || null
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         syncPD1NavigationAccess()
-        updateScoutChatAvailability()
         if (authedUser) {
           loadClientConfig().then(syncPrivateRealtimeVoiceQualification).catch(() => {
             syncPrivateRealtimeVoiceQualification(null)
@@ -53750,9 +53750,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       async function submitHomeScoutOpening(event) {
         event?.preventDefault?.()
-        if (!authedUser || !homeScoutInput || homeScoutComposer?.dataset.submitting === 'true') return
+        // Set submitting flag IMMEDIATELY to prevent double-fire race condition.
+        // The guard and flag must be adjacent with no async gap. Additionally,
+        // block rapid resubmissions within 2 seconds of the last successful submit.
+        const now = Date.now()
+        if (!authedUser || !homeScoutInput || homeScoutComposer?.dataset.submitting === 'true' || (now - homeScoutLastSubmitAt) < 2000) return
+        homeScoutComposer.dataset.submitting = 'true'
         const text = homeScoutInput.value.trim()
         if (!text) {
+          homeScoutComposer.dataset.submitting = 'false'
           homeScoutInput.focus()
           return
         }
@@ -53764,7 +53770,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  homeScoutOpeningAttempt = { text, threadId: continuationThreadId, projectContextToken, key: nextHomeScoutOpeningKey() }
         }
         const attempt = homeScoutOpeningAttempt
-        homeScoutComposer.dataset.submitting = 'true'
         homeScoutComposer.setAttribute('aria-busy', 'true')
         homeScoutInput.disabled = true
         homeScoutSend.disabled = true
@@ -53791,6 +53796,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const thread = upsertScoutChatThread(payload.thread)
           homeScoutOpeningAttempt = null
+          homeScoutLastSubmitAt = Date.now()
 		  selectedHomeSuggestionDestination = null
 		  homeProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null }
 		  renderHomeProjectContext()
