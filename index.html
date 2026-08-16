@@ -12087,42 +12087,481 @@
         border-bottom: none;
       }
 
-      /* inline chat deck viewer — sandboxed iframe with Present button */
+      /* inline chat deck viewer — first-class cover appearance (not a cheap card).
+         The thumbnail IS the cover of the package: a 16:9 hero showing the first
+         slide, with title and controls overlaid as glass chrome. */
       .chat-deck {
+        position: relative;
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        background: var(--surface-3);
-        border-radius: var(--r-md);
-        overflow: hidden;
-      }
-      .chat-deck__cover {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 16px;
-        background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface-3) 100%);
-        border-bottom: 1px solid var(--line-1);
-      }
-      .chat-deck__title {
-        margin: 0;
-        font-size: 1rem;
-        font-weight: 600;
-        color: var(--text-1);
-      }
-      .chat-deck__present {
-        flex-shrink: 0;
-      }
-      .chat-deck__frame {
         width: 100%;
-        height: 320px;
+        max-width: 480px;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        box-shadow:
+          0 2px 4px rgba(0, 0, 0, 0.04),
+          0 8px 24px rgba(0, 0, 0, 0.08),
+          0 1px 2px rgba(0, 0, 0, 0.06);
+        transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .chat-deck:hover {
+        box-shadow:
+          0 4px 8px rgba(0, 0, 0, 0.06),
+          0 16px 40px rgba(0, 0, 0, 0.12),
+          0 2px 4px rgba(0, 0, 0, 0.08);
+        transform: translateY(-2px);
+      }
+      /* The iframe fills the entire cover — it IS the hero */
+      .chat-deck__frame {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
         border: none;
-        background: #fff;
+        background: #000;
+        z-index: 0;
       }
       .chat-deck__frame:fullscreen {
         width: 100vw;
         height: 100vh;
         background: #000;
+        border-radius: 0;
+      }
+      /* Glass chrome overlay at bottom — title + controls */
+      .chat-deck__chrome {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 16px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.48) 60%, transparent 100%);
+        z-index: 1;
+        pointer-events: none;
+      }
+      .chat-deck__chrome > * {
+        pointer-events: auto;
+      }
+      .chat-deck__title {
+        margin: 0;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: #fff;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .chat-deck__actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      /* Pill buttons on the cover — glass style */
+      .chat-deck__btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 32px;
+        padding: 0 14px;
+        border: none;
+        border-radius: 16px;
+        font: var(--type-body-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .chat-deck__btn:active {
+        transform: scale(var(--press-scale));
+      }
+      .chat-deck__btn--primary {
+        background: rgba(255, 255, 255, 0.95);
+        color: #1a1a1a;
+      }
+      .chat-deck__btn--primary:hover {
+        background: #fff;
+      }
+      .chat-deck__btn--secondary {
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .chat-deck__btn--secondary:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      /* Icon for buttons */
+      .chat-deck__btn svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+      }
+      /* Legacy cover class (if any code still uses it) — map to chrome */
+      .chat-deck__cover {
+        display: none;
+      }
+      .chat-deck__present {
+        display: none;
+      }
+
+      /* Dark theme adjustments for deck cover */
+      [data-theme="dark"] .chat-deck {
+        box-shadow:
+          0 2px 4px rgba(0, 0, 0, 0.12),
+          0 8px 24px rgba(0, 0, 0, 0.24),
+          0 1px 2px rgba(0, 0, 0, 0.16),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      }
+      [data-theme="dark"] .chat-deck:hover {
+        box-shadow:
+          0 4px 8px rgba(0, 0, 0, 0.16),
+          0 16px 40px rgba(0, 0, 0, 0.32),
+          0 2px 4px rgba(0, 0, 0, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      /* ---------- Deck Editor — Keynote/PowerPoint-class controls ----------
+         Edit mode lives alongside Present mode on the same deck. Provides:
+         - Move and resize text boxes
+         - Drop images
+         - Z-order controls (front/back)
+         - Standard object selection and transformation */
+      .deck-editor {
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-app);
+        animation: deck-editor-in var(--dur-slow) var(--ease);
+      }
+      @keyframes deck-editor-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .deck-editor[hidden] { display: none; }
+      .deck-editor__toolbar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: var(--surface-1);
+        border-bottom: 1px solid var(--line-1);
+      }
+      .deck-editor__toolbar-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .deck-editor__toolbar-center {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+      .deck-editor__toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .deck-editor__title {
+        margin: 0 12px 0 4px;
+        font: var(--type-body);
+        font-weight: 600;
+        color: var(--text-1);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 240px;
+      }
+      .deck-editor__divider {
+        width: 1px;
+        height: 24px;
+        background: var(--line-1);
+        margin: 0 4px;
+      }
+      .deck-editor__btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        font: var(--type-body-sm);
+        color: var(--text-2);
+        cursor: pointer;
+        transition: all var(--dur-fast) var(--ease);
+      }
+      .deck-editor__btn:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+        border-color: var(--line-2);
+      }
+      .deck-editor__btn:active { transform: scale(var(--press-scale)); }
+      .deck-editor__btn--icon {
+        width: 34px;
+        padding: 0;
+      }
+      .deck-editor__btn--primary {
+        background: var(--ember);
+        border-color: var(--ember);
+        color: var(--on-ember);
+      }
+      .deck-editor__btn--primary:hover {
+        background: var(--ember-hover);
+        border-color: var(--ember-hover);
+        color: var(--on-ember);
+      }
+      .deck-editor__btn svg {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+      .deck-editor__btn[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Slide navigation in toolbar */
+      .deck-editor__slide-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font: var(--type-body-sm);
+        color: var(--text-2);
+      }
+      .deck-editor__slide-nav button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        color: var(--text-2);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all var(--dur-fast) var(--ease);
+      }
+      .deck-editor__slide-nav button:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+      }
+      .deck-editor__slide-nav button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .deck-editor__slide-nav svg { width: 14px; height: 14px; }
+      /* Main editing area */
+      .deck-editor__main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+        overflow: hidden;
+      }
+      /* Slide thumbnails sidebar */
+      .deck-editor__sidebar {
+        flex: none;
+        width: 180px;
+        background: var(--surface-2);
+        border-right: 1px solid var(--line-1);
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .deck-editor__thumb {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--r-sm);
+        overflow: hidden;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+      .deck-editor__thumb:hover {
+        border-color: var(--line-2);
+      }
+      .deck-editor__thumb[aria-selected="true"] {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+      .deck-editor__thumb-num {
+        position: absolute;
+        bottom: 4px;
+        left: 4px;
+        padding: 2px 6px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font: var(--type-caption);
+        border-radius: 4px;
+      }
+      .deck-editor__thumb iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        pointer-events: none;
+        transform-origin: top left;
+      }
+      /* Canvas area */
+      .deck-editor__canvas-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--surface-3);
+        overflow: hidden;
+      }
+      .deck-editor__canvas {
+        position: relative;
+        width: 960px;
+        height: 540px;
+        background: #fff;
+        border-radius: var(--r-md);
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+        overflow: hidden;
+      }
+      .deck-editor__canvas iframe {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        border: none;
+        transform: scale(0.5);
+        transform-origin: top left;
+        pointer-events: none;
+      }
+      /* Selection overlay for editable elements */
+      .deck-editor__overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .deck-editor__element {
+        position: absolute;
+        pointer-events: auto;
+        cursor: move;
+        border: 2px solid transparent;
+        border-radius: 2px;
+        transition: border-color var(--dur-fast) var(--ease);
+      }
+      .deck-editor__element:hover {
+        border-color: rgba(66, 133, 244, 0.5);
+      }
+      .deck-editor__element[data-selected="true"] {
+        border-color: #4285f4;
+      }
+      /* Resize handles */
+      .deck-editor__handle {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #fff;
+        border: 2px solid #4285f4;
+        border-radius: 2px;
+        pointer-events: auto;
+      }
+      .deck-editor__handle--nw { top: -5px; left: -5px; cursor: nwse-resize; }
+      .deck-editor__handle--ne { top: -5px; right: -5px; cursor: nesw-resize; }
+      .deck-editor__handle--sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+      .deck-editor__handle--se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+      .deck-editor__handle--n { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+      .deck-editor__handle--s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+      .deck-editor__handle--w { top: 50%; left: -5px; transform: translateY(-50%); cursor: ew-resize; }
+      .deck-editor__handle--e { top: 50%; right: -5px; transform: translateY(-50%); cursor: ew-resize; }
+      /* Element-specific editors */
+      .deck-editor__text-input {
+        position: absolute;
+        background: transparent;
+        border: none;
+        outline: none;
+        resize: none;
+        font: inherit;
+        color: inherit;
+        padding: 4px;
+        width: 100%;
+        height: 100%;
+      }
+      /* Properties panel (right side) */
+      .deck-editor__props {
+        flex: none;
+        width: 240px;
+        background: var(--surface-1);
+        border-left: 1px solid var(--line-1);
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .deck-editor__props[hidden] { display: none; }
+      .deck-editor__prop-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .deck-editor__prop-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-transform: uppercase;
+      }
+      .deck-editor__prop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .deck-editor__prop-input {
+        flex: 1;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        font: var(--type-body-sm);
+        color: var(--text-1);
+      }
+      .deck-editor__prop-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      /* Z-order buttons */
+      .deck-editor__zorder {
+        display: flex;
+        gap: 4px;
+      }
+      .deck-editor__zorder button {
+        flex: 1;
+        height: 32px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-body-sm);
+        cursor: pointer;
+        transition: all var(--dur-fast) var(--ease);
+      }
+      .deck-editor__zorder button:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+      /* Dark theme overrides for deck editor */
+      [data-theme="dark"] .deck-editor__canvas {
+        background: #1a1a1a;
       }
 
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
@@ -28761,6 +29200,7 @@
         text-wrap: initial;
       }
       .artifact-stage__body--deck { padding: 0; }
+      .artifact-stage__body--deck .chat-deck,
       .artifact-stage__body--deck .artifact-deck {
         flex: 1;
         min-height: 0;
@@ -28768,13 +29208,39 @@
         flex-direction: column;
         gap: 8px;
         padding: 12px 16px 16px;
+        aspect-ratio: unset;
+        border-radius: 0;
+        box-shadow: none;
       }
+      .artifact-stage__body--deck .chat-deck__frame,
       .artifact-stage__body--deck .artifact-deck__frame {
         flex: 1;
         width: 100%;
         height: 100%;
         min-height: 0;
         border: 0;
+        position: relative;
+        border-radius: 0;
+      }
+      .artifact-stage__body--deck .chat-deck__chrome {
+        position: relative;
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        padding: 8px 0 0;
+      }
+      .artifact-stage__body--deck .chat-deck__title {
+        color: var(--text-1);
+      }
+      .artifact-stage__body--deck .chat-deck__btn--secondary {
+        background: var(--surface-2);
+        color: var(--text-1);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+      .artifact-stage__body--deck .chat-deck__btn--primary {
+        background: var(--brand);
+        color: #fff;
       }
 
       /* ---------- §7b the deck hero (DD-1) ----------
@@ -33978,6 +34444,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // generation, including a same-email session replacement. Late product
         // responses from the prior cookie/session can never render afterward.
         authedUser = nextUser || null
+        window.currentUserEmail = nextIdentity || ''
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         syncPD1NavigationAccess()
         if (authedUser) {
@@ -41553,10 +42020,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // ---- inline chat deck viewer (worker-unavailable fallback) ----
       // Renders an HTML deck directly in the chat thread without storing an
       // artifact. Uses srcdoc for the sandboxed iframe (no server round-trip).
-      // Visual parity with artifact decks: sandboxed iframe, Present button, cover.
+      // First-class cover: the thumbnail IS the package cover — 16:9 hero with
+      // the first slide visible, title and controls overlaid as glass chrome.
       function renderInlineChatDeck(container, htmlContent) {
         const deck = document.createElement('section')
         deck.className = 'chat-deck'
+        deck.setAttribute('data-deck-inline', 'true')
 
         // Extract title from <title> tag or first h1
         let title = 'Presentation'
@@ -41567,37 +42036,607 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (h1Match) title = h1Match[1].trim()
         }
 
-        // Cover/header with title and Present button
-        const cover = document.createElement('div')
-        cover.className = 'chat-deck__cover'
-        const titleEl = document.createElement('h3')
-        titleEl.className = 'chat-deck__title'
-        titleEl.textContent = title
-        // Sandboxed iframe preview (allow-scripts only, null origin)
+        // Sandboxed iframe — fills the entire cover as the hero visual
         const frame = document.createElement('iframe')
         frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
         frame.setAttribute('allowfullscreen', '')
-        frame.title = 'sandboxed deck preview'
+        frame.title = 'deck preview'
         frame.srcdoc = htmlContent
 
-        const present = document.createElement('button')
-        present.type = 'button'
-        present.className = 'btn btn--outline chat-deck__present'
-        present.textContent = 'Present'
-        // Fullscreen the sandboxed iframe — maintains null origin security.
-        // Never document.write model HTML into a same-origin window.
-        present.addEventListener('click', () => {
+        // Glass chrome overlay at bottom — title + action buttons
+        const chrome = document.createElement('div')
+        chrome.className = 'chat-deck__chrome'
+
+        const titleEl = document.createElement('h3')
+        titleEl.className = 'chat-deck__title'
+        titleEl.textContent = title
+
+        const actions = document.createElement('div')
+        actions.className = 'chat-deck__actions'
+
+        // Edit button (opens Edit mode in drawer/modal)
+        const editBtn = document.createElement('button')
+        editBtn.type = 'button'
+        editBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
+        editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit`
+        editBtn.addEventListener('click', () => {
+          openDeckEditor(htmlContent, title, { inline: true, source: deck })
+        })
+
+        // Present button — fullscreens the sandboxed iframe
+        const presentBtn = document.createElement('button')
+        presentBtn.type = 'button'
+        presentBtn.className = 'chat-deck__btn chat-deck__btn--primary'
+        presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
+        presentBtn.addEventListener('click', () => {
           if (frame.requestFullscreen) {
             frame.requestFullscreen().catch(() => {})
           } else if (frame.webkitRequestFullscreen) {
             frame.webkitRequestFullscreen()
           }
         })
-        cover.append(titleEl, present)
 
-        deck.append(cover, frame)
+        actions.append(editBtn, presentBtn)
+        chrome.append(titleEl, actions)
+        deck.append(frame, chrome)
         container.appendChild(deck)
+      }
+
+      // ---- Deck Editor — Keynote/PowerPoint-class controls ----
+      // Edit mode lives alongside Present mode. Provides move/resize text,
+      // drop images, z-order (front/back), and standard object controls.
+      // REAL editing of slide content — not just overlay stickers.
+      let activeDeckEditor = null
+
+      function openDeckEditor(htmlContent, title, options = {}) {
+        if (activeDeckEditor) {
+          closeDeckEditor()
+        }
+
+        // Parse the full HTML document
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(htmlContent, 'text/html')
+
+        // Extract styles for the editor canvas
+        const styleBlocks = Array.from(doc.querySelectorAll('style')).map(s => s.outerHTML).join('\n')
+
+        // Find slides (support both .pg and .slide patterns)
+        let slideEls = Array.from(doc.querySelectorAll('.pg, .slide, section'))
+        if (slideEls.length === 0) slideEls = [doc.body]
+
+        // Parse each slide into editable elements
+        const slides = slideEls.map((slideEl, slideIndex) => {
+          const elements = []
+          // Find all text elements (h1, h2, h3, p, li, div with text)
+          const textEls = slideEl.querySelectorAll('h1, h2, h3, h4, p, li, span, div')
+          textEls.forEach((el, i) => {
+            const text = el.textContent?.trim()
+            if (!text || text.length === 0) return
+            // Skip if this is a container with nested text elements
+            if (el.querySelector('h1, h2, h3, p, li')) return
+            const rect = { x: 80, y: 80 + i * 60, width: 800, height: 60 }
+            const style = el.getAttribute('style') || ''
+            const fontSize = parseInt(getComputedStyleValue(el, 'font-size')) || 32
+            elements.push({
+              type: 'text',
+              tag: el.tagName.toLowerCase(),
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              content: text,
+              fontSize,
+              originalEl: el,
+              style
+            })
+          })
+          // Find images
+          const imgEls = slideEl.querySelectorAll('img, [style*="background-image"]')
+          imgEls.forEach((el, i) => {
+            let src = el.getAttribute('src') || ''
+            if (!src) {
+              const bgMatch = (el.getAttribute('style') || '').match(/url\(['"]?([^'")\s]+)['"]?\)/)
+              if (bgMatch) src = bgMatch[1]
+            }
+            if (!src) return
+            elements.push({
+              type: 'image',
+              x: 100,
+              y: 100 + i * 100,
+              width: 300,
+              height: 200,
+              src,
+              originalEl: el
+            })
+          })
+          return {
+            index: slideIndex,
+            originalEl: slideEl,
+            outerHTML: slideEl.outerHTML,
+            className: slideEl.className,
+            elements
+          }
+        })
+
+        function getComputedStyleValue(el, prop) {
+          try { return window.getComputedStyle(el)[prop] } catch { return '' }
+        }
+
+        // Build editor UI
+        const editor = document.createElement('div')
+        editor.className = 'deck-editor'
+        editor.innerHTML = `
+          <div class="deck-editor__toolbar">
+            <div class="deck-editor__toolbar-left">
+              <button type="button" class="deck-editor__btn" data-action="close">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4L4 12M4 4l8 8"/></svg>
+              </button>
+              <h2 class="deck-editor__title">${escapeHtml(title || 'Untitled Deck')}</h2>
+            </div>
+            <div class="deck-editor__toolbar-center">
+              <div class="deck-editor__slide-nav">
+                <button type="button" data-action="prev-slide" disabled>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 12L6 8l4-4"/></svg>
+                </button>
+                <span data-slide-indicator>1 / ${slides.length}</span>
+                <button type="button" data-action="next-slide" ${slides.length <= 1 ? 'disabled' : ''}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 4l4 4-4 4"/></svg>
+                </button>
+              </div>
+              <div class="deck-editor__divider"></div>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="add-text" title="Add text box">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M8 4v9M5 13h6"/></svg>
+              </button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="add-image" title="Add image">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="5.5" cy="6.5" r="1.5"/><path d="M14 13l-3-4-2 2.5-2-2L2 13"/></svg>
+              </button>
+              <div class="deck-editor__divider"></div>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="bring-front" title="Bring to front">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="5" width="7" height="7"/><rect x="8" y="4" width="7" height="7" fill="var(--surface-1)"/></svg>
+              </button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="send-back" title="Send to back">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="4" width="7" height="7"/><rect x="1" y="5" width="7" height="7" fill="var(--surface-1)"/></svg>
+              </button>
+            </div>
+            <div class="deck-editor__toolbar-right">
+              <button type="button" class="deck-editor__btn" data-action="present">
+                <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>
+                Present
+              </button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="save">
+                Save
+              </button>
+            </div>
+          </div>
+          <div class="deck-editor__main">
+            <div class="deck-editor__sidebar" data-slide-list></div>
+            <div class="deck-editor__canvas-wrap">
+              <div class="deck-editor__canvas" data-canvas></div>
+            </div>
+            <div class="deck-editor__props" hidden>
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Position</span>
+                <div class="deck-editor__prop-row">
+                  <span style="width:20px;color:var(--text-3)">X</span>
+                  <input type="number" class="deck-editor__prop-input" data-prop="x" />
+                  <span style="width:20px;color:var(--text-3)">Y</span>
+                  <input type="number" class="deck-editor__prop-input" data-prop="y" />
+                </div>
+              </div>
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Size</span>
+                <div class="deck-editor__prop-row">
+                  <span style="width:20px;color:var(--text-3)">W</span>
+                  <input type="number" class="deck-editor__prop-input" data-prop="width" />
+                  <span style="width:20px;color:var(--text-3)">H</span>
+                  <input type="number" class="deck-editor__prop-input" data-prop="height" />
+                </div>
+              </div>
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Layer</span>
+                <div class="deck-editor__zorder">
+                  <button type="button" data-action="send-back">Back</button>
+                  <button type="button" data-action="bring-front">Front</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `
+
+        // State
+        const state = {
+          slides,
+          currentSlide: 0,
+          selectedElement: null,
+          originalHtml: htmlContent,
+          styleBlocks,
+          title,
+          options,
+          dirty: false
+        }
+
+        // DOM refs
+        const canvas = editor.querySelector('[data-canvas]')
+        const slideList = editor.querySelector('[data-slide-list]')
+        const slideIndicator = editor.querySelector('[data-slide-indicator]')
+        const propsPanel = editor.querySelector('.deck-editor__props')
+
+        // Render slide thumbnails
+        function renderThumbs() {
+          slideList.innerHTML = ''
+          state.slides.forEach((slide, i) => {
+            const thumb = document.createElement('div')
+            thumb.className = 'deck-editor__thumb'
+            thumb.setAttribute('aria-selected', i === state.currentSlide ? 'true' : 'false')
+            thumb.innerHTML = `<span class="deck-editor__thumb-num">${i + 1}</span>`
+            thumb.style.background = '#111'
+            thumb.addEventListener('click', () => goToSlide(i))
+            slideList.appendChild(thumb)
+          })
+        }
+
+        // Render current slide with editable elements
+        function renderCanvas() {
+          const slide = state.slides[state.currentSlide]
+          if (!slide) return
+          canvas.innerHTML = ''
+          canvas.style.background = '#111'
+
+          // Render each element as an editable box
+          slide.elements.forEach((el, i) => {
+            const box = document.createElement('div')
+            box.className = 'deck-editor__element'
+            box.dataset.elementIndex = String(i)
+            box.style.cssText = `
+              position:absolute;
+              left:${el.x * 0.5}px;
+              top:${el.y * 0.5}px;
+              width:${el.width * 0.5}px;
+              min-height:${el.height * 0.5}px;
+              z-index:${el.zIndex || i + 1};
+              cursor:move;
+            `
+            if (state.selectedElement === i) {
+              box.dataset.selected = 'true'
+            }
+
+            if (el.type === 'text') {
+              const textDiv = document.createElement('div')
+              textDiv.contentEditable = 'true'
+              textDiv.style.cssText = `
+                width:100%;height:100%;padding:4px;
+                color:#fff;font-size:${(el.fontSize || 32) * 0.5}px;
+                font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
+                outline:none;overflow:hidden;
+              `
+              textDiv.textContent = el.content
+              textDiv.addEventListener('input', () => {
+                el.content = textDiv.textContent
+                state.dirty = true
+              })
+              textDiv.addEventListener('mousedown', e => e.stopPropagation())
+              box.appendChild(textDiv)
+            } else if (el.type === 'image' && el.src) {
+              const img = document.createElement('img')
+              img.src = el.src
+              img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none'
+              box.appendChild(img)
+            }
+
+            // Selection handles for selected element
+            if (state.selectedElement === i) {
+              const handles = ['nw', 'ne', 'sw', 'se']
+              handles.forEach(pos => {
+                const handle = document.createElement('div')
+                handle.className = `deck-editor__handle deck-editor__handle--${pos}`
+                handle.dataset.handle = pos
+                box.appendChild(handle)
+              })
+            }
+
+            box.addEventListener('mousedown', e => startDragOrResize(i, e))
+            canvas.appendChild(box)
+          })
+        }
+
+        // Drag and resize
+        function startDragOrResize(index, e) {
+          e.preventDefault()
+          const handle = e.target.dataset?.handle
+          const slide = state.slides[state.currentSlide]
+          const el = slide?.elements[index]
+          if (!el) return
+
+          // Select element
+          state.selectedElement = index
+          propsPanel.hidden = false
+          updatePropsPanel()
+          renderCanvas()
+
+          const startX = e.clientX
+          const startY = e.clientY
+          const origX = el.x
+          const origY = el.y
+          const origW = el.width
+          const origH = el.height
+
+          const onMove = (ev) => {
+            const dx = (ev.clientX - startX) * 2  // Scale back to 1920x1080
+            const dy = (ev.clientY - startY) * 2
+            if (handle) {
+              // Resize
+              if (handle.includes('e')) el.width = Math.max(50, origW + dx)
+              if (handle.includes('w')) { el.x = origX + dx; el.width = Math.max(50, origW - dx) }
+              if (handle.includes('s')) el.height = Math.max(30, origH + dy)
+              if (handle.includes('n')) { el.y = origY + dy; el.height = Math.max(30, origH - dy) }
+            } else {
+              // Move
+              el.x = origX + dx
+              el.y = origY + dy
+            }
+            state.dirty = true
+            renderCanvas()
+            updatePropsPanel()
+          }
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove)
+            document.removeEventListener('mouseup', onUp)
+          }
+          document.addEventListener('mousemove', onMove)
+          document.addEventListener('mouseup', onUp)
+        }
+
+        function updatePropsPanel() {
+          if (state.selectedElement === null) return
+          const slide = state.slides[state.currentSlide]
+          const el = slide?.elements[state.selectedElement]
+          if (!el) return
+          propsPanel.querySelector('[data-prop="x"]').value = Math.round(el.x)
+          propsPanel.querySelector('[data-prop="y"]').value = Math.round(el.y)
+          propsPanel.querySelector('[data-prop="width"]').value = Math.round(el.width)
+          propsPanel.querySelector('[data-prop="height"]').value = Math.round(el.height)
+        }
+
+        function goToSlide(index) {
+          if (index < 0 || index >= state.slides.length) return
+          state.currentSlide = index
+          state.selectedElement = null
+          propsPanel.hidden = true
+          renderCanvas()
+          renderThumbs()
+          slideIndicator.textContent = `${index + 1} / ${state.slides.length}`
+          editor.querySelector('[data-action="prev-slide"]').disabled = index === 0
+          editor.querySelector('[data-action="next-slide"]').disabled = index === state.slides.length - 1
+        }
+
+        // Add new elements
+        function addTextBox() {
+          const slide = state.slides[state.currentSlide]
+          slide.elements.push({
+            type: 'text', tag: 'p',
+            x: 200, y: 200, width: 400, height: 60,
+            content: 'New text', fontSize: 32, zIndex: slide.elements.length + 1
+          })
+          state.selectedElement = slide.elements.length - 1
+          state.dirty = true
+          propsPanel.hidden = false
+          renderCanvas()
+          updatePropsPanel()
+        }
+
+        function addImage() {
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.accept = 'image/*'
+          input.onchange = () => {
+            const file = input.files?.[0]
+            if (!file) return
+            const reader = new FileReader()
+            reader.onload = () => {
+              const slide = state.slides[state.currentSlide]
+              slide.elements.push({
+                type: 'image',
+                x: 200, y: 200, width: 400, height: 300,
+                src: reader.result, zIndex: slide.elements.length + 1
+              })
+              state.selectedElement = slide.elements.length - 1
+              state.dirty = true
+              propsPanel.hidden = false
+              renderCanvas()
+              updatePropsPanel()
+            }
+            reader.readAsDataURL(file)
+          }
+          input.click()
+        }
+
+        // Z-order
+        function bringToFront() {
+          if (state.selectedElement === null) return
+          const slide = state.slides[state.currentSlide]
+          const maxZ = Math.max(...slide.elements.map(e => e.zIndex || 0), 0)
+          slide.elements[state.selectedElement].zIndex = maxZ + 1
+          state.dirty = true
+          renderCanvas()
+        }
+
+        function sendToBack() {
+          if (state.selectedElement === null) return
+          const slide = state.slides[state.currentSlide]
+          slide.elements.forEach(e => { e.zIndex = (e.zIndex || 0) + 1 })
+          slide.elements[state.selectedElement].zIndex = 0
+          state.dirty = true
+          renderCanvas()
+        }
+
+        // Build updated HTML from edited state
+        function buildUpdatedHtml() {
+          const newDoc = parser.parseFromString(state.originalHtml, 'text/html')
+          const newSlides = Array.from(newDoc.querySelectorAll('.pg, .slide, section'))
+
+          state.slides.forEach((slide, slideIdx) => {
+            if (!newSlides[slideIdx]) return
+            const slideEl = newSlides[slideIdx]
+            // Clear existing content and rebuild from elements
+            // For simplicity, we rebuild the inner content
+            let newContent = ''
+            slide.elements.forEach(el => {
+              if (el.type === 'text') {
+                const tag = el.tag || 'p'
+                const style = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;font-size:${el.fontSize}px;`
+                newContent += `<${tag} style="${style}">${escapeHtml(el.content)}</${tag}>\n`
+              } else if (el.type === 'image' && el.src) {
+                const style = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;object-fit:cover;`
+                newContent += `<img src="${el.src}" style="${style}" />\n`
+              }
+            })
+            slideEl.innerHTML = newContent
+          })
+          return '<!doctype html>\n' + newDoc.documentElement.outerHTML
+        }
+
+        // Save — writes the modified HTML back
+        function saveDeck() {
+          const updatedHtml = buildUpdatedHtml()
+          // Update the source element if this is an inline deck
+          if (options.source && options.inline) {
+            const frame = options.source.querySelector('iframe')
+            if (frame) {
+              frame.srcdoc = updatedHtml
+            }
+          }
+          // Store in options for retrieval
+          state.savedHtml = updatedHtml
+          state.dirty = false
+          showToast({ text: 'Deck saved', kind: 'done' })
+          closeDeckEditor()
+        }
+
+        // Present — fullscreen the existing inline iframe if available
+        function enterPresent() {
+          if (options.source && options.inline) {
+            const frame = options.source.querySelector('iframe')
+            if (frame) {
+              frame.requestFullscreen?.()?.catch(() => {})
+              return
+            }
+          }
+          // Fallback: create new fullscreen frame
+          const updatedHtml = state.dirty ? buildUpdatedHtml() : state.originalHtml
+          const wrap = document.createElement('div')
+          wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000'
+          const frame = document.createElement('iframe')
+          frame.style.cssText = 'width:100%;height:100%;border:none'
+          frame.srcdoc = updatedHtml
+          frame.setAttribute('sandbox', 'allow-scripts')
+          frame.setAttribute('allowfullscreen', '')
+          wrap.appendChild(frame)
+          document.body.appendChild(wrap)
+          wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove() })
+          frame.requestFullscreen?.()?.catch(() => {})
+        }
+
+        // Event delegation
+        editor.addEventListener('click', e => {
+          const action = e.target.closest('[data-action]')?.dataset?.action
+          if (action === 'close') closeDeckEditor()
+          else if (action === 'prev-slide') goToSlide(state.currentSlide - 1)
+          else if (action === 'next-slide') goToSlide(state.currentSlide + 1)
+          else if (action === 'add-text') addTextBox()
+          else if (action === 'add-image') addImage()
+          else if (action === 'bring-front') bringToFront()
+          else if (action === 'send-back') sendToBack()
+          else if (action === 'present') enterPresent()
+          else if (action === 'save') saveDeck()
+        })
+
+        // Props panel input
+        propsPanel.addEventListener('input', e => {
+          const prop = e.target.dataset.prop
+          if (!prop || state.selectedElement === null) return
+          const slide = state.slides[state.currentSlide]
+          const el = slide?.elements[state.selectedElement]
+          if (!el) return
+          el[prop] = parseFloat(e.target.value) || 0
+          state.dirty = true
+          renderCanvas()
+        })
+
+        // Deselect on canvas background click
+        canvas.addEventListener('click', e => {
+          if (e.target === canvas) {
+            state.selectedElement = null
+            propsPanel.hidden = true
+            renderCanvas()
+          }
+        })
+
+        // Keyboard
+        const handleKey = e => {
+          if (e.key === 'Escape') closeDeckEditor()
+          if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedElement !== null && !e.target.isContentEditable) {
+            const slide = state.slides[state.currentSlide]
+            slide.elements.splice(state.selectedElement, 1)
+            state.selectedElement = null
+            state.dirty = true
+            propsPanel.hidden = true
+            renderCanvas()
+          }
+        }
+        document.addEventListener('keydown', handleKey)
+
+        activeDeckEditor = {
+          element: editor,
+          cleanup: () => document.removeEventListener('keydown', handleKey),
+          getHtml: () => state.dirty ? buildUpdatedHtml() : state.originalHtml
+        }
+
+        document.body.appendChild(editor)
+        renderThumbs()
+        renderCanvas()
+      }
+
+      function closeDeckEditor() {
+        if (!activeDeckEditor) return
+        activeDeckEditor.cleanup?.()
+        activeDeckEditor.element?.remove()
+        activeDeckEditor = null
+      }
+
+      function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      }
+
+      // Check if an artifact is in Files or shared to a channel (access control for Edit/Present)
+      // Anyone can enter Edit/Present if the deck is in Files or shared to a channel.
+      function artifactInFilesOrChannelShared(entry) {
+        if (!entry) return false
+        const metadata = entry.metadata || {}
+        // Check if saved to Files (has folder or drive indicator)
+        if (metadata.folderId || metadata.driveId || metadata.savedToFiles === 'true') {
+          return true
+        }
+        // Check if shared to a channel (has channel sharing metadata)
+        if (metadata.channelId || metadata.sharedToChannel === 'true' || metadata.channelShared === 'true') {
+          return true
+        }
+        // Check visibility — team/organization artifacts are accessible
+        if (metadata.visibility === 'team' || metadata.visibility === 'organization') {
+          return true
+        }
+        // Check if artifact is attached to a package (packages are shared)
+        if (metadata.packageId) {
+          return true
+        }
+        // Check if user owns the artifact (always can edit own content)
+        const ownerEmail = String(metadata.ownerEmail || metadata.createdBy || '').toLowerCase()
+        const currentUserEmail = String(window.currentUserEmail || '').toLowerCase()
+        if (ownerEmail && currentUserEmail && ownerEmail === currentUserEmail) {
+          return true
+        }
+        // Private artifacts without Files/channel sharing cannot be edited by others
+        return false
       }
 
       // ---- sandboxed HTML deck viewer (packaging OS §4 item 1, Wave 2 item 9) ----
@@ -41618,31 +42657,85 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // /artifacts/render-token neighbor. The iframe sandbox IS the security
       // model: allow-scripts ONLY — never an inline document (that would run
       // the deck same-origin with the OS) and never a same-origin grant.
+      //
+      // First-class cover: the thumbnail IS the cover of the package — a 16:9
+      // hero showing the first slide, with title and controls overlaid as
+      // glass chrome. Same styling as renderInlineChatDeck (not the old card).
+      //
+      // Edit + Present modes: Anyone can enter Edit/Present if deck is in Files
+      // or shared to a channel. Access control is checked at edit time.
       function renderArtifactDeck(container, entry, options = {}) {
+        // Extract title from entry metadata
+        const title = String(entry?.metadata?.title || entry?.title || 'Presentation').trim()
+
+        // First-class cover structure — matches renderInlineChatDeck
         const deck = document.createElement('section')
-        deck.className = 'artifact-deck'
-        // no label band: the stage header's kicker already says "deck", and a
-        // second chrome row read as clutter at the pixel gate. Present lives
-        // in the stage header when hosted there (options.presentSlot), else in
-        // a minimal head row.
-        const present = bfEl('button', 'btn btn--outline artifact-deck__present', 'present')
-        present.type = 'button'
-        present.disabled = true
-        let head = null
-        if (options.presentSlot && typeof options.presentSlot.appendChild === 'function') {
-          options.presentSlot.appendChild(present)
-        } else {
-          head = bfEl('div', 'artifact-deck__head')
-          head.appendChild(present)
-        }
+        deck.className = 'chat-deck'
+        deck.setAttribute('data-deck-artifact', 'true')
+
+        // Sandboxed iframe — fills the entire cover as the hero visual
         const frame = document.createElement('iframe')
-        frame.className = 'artifact-deck__frame'
+        frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
-        frame.title = 'sandboxed deck preview'
-        const note = bfEl('p', 'artifact-deck__note', 'minting a render token…')
-        if (head) deck.append(head)
-        deck.append(frame, note)
+        frame.setAttribute('allowfullscreen', '')
+        frame.title = 'deck preview'
+
+        // Glass chrome overlay at bottom — title + action buttons
+        const chrome = document.createElement('div')
+        chrome.className = 'chat-deck__chrome'
+
+        const titleEl = document.createElement('h3')
+        titleEl.className = 'chat-deck__title'
+        titleEl.textContent = title
+
+        const actions = document.createElement('div')
+        actions.className = 'chat-deck__actions'
+
+        // Edit button (opens Edit mode)
+        const editBtn = document.createElement('button')
+        editBtn.type = 'button'
+        editBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
+        editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit`
+        editBtn.disabled = true
+
+        // Present button — fullscreens the sandboxed iframe
+        const presentBtn = document.createElement('button')
+        presentBtn.type = 'button'
+        presentBtn.className = 'chat-deck__btn chat-deck__btn--primary'
+        presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
+        presentBtn.disabled = true
+
+        actions.append(editBtn, presentBtn)
+        chrome.append(titleEl, actions)
+        deck.append(frame, chrome)
+
+        // If there's a presentSlot (stage header), also add buttons there
+        if (options.presentSlot && typeof options.presentSlot.appendChild === 'function') {
+          const stageEditBtn = editBtn.cloneNode(true)
+          const stagePresentBtn = presentBtn.cloneNode(true)
+          stageEditBtn.className = 'btn btn--outline'
+          stagePresentBtn.className = 'btn btn--outline'
+          stageEditBtn.style.marginRight = '8px'
+          options.presentSlot.appendChild(stageEditBtn)
+          options.presentSlot.appendChild(stagePresentBtn)
+          // Sync state with main buttons
+          const syncButtons = () => {
+            stageEditBtn.disabled = editBtn.disabled
+            stagePresentBtn.disabled = presentBtn.disabled
+          }
+          // Wire up stage buttons
+          stageEditBtn.addEventListener('click', () => editBtn.click())
+          stagePresentBtn.addEventListener('click', () => presentBtn.click())
+          // Observer to sync disabled state
+          const observer = new MutationObserver(syncButtons)
+          observer.observe(editBtn, { attributes: true, attributeFilter: ['disabled'] })
+          observer.observe(presentBtn, { attributes: true, attributeFilter: ['disabled'] })
+        }
+
         container.appendChild(deck)
+
+        // Store deck content for edit mode
+        let deckContent = null
 
         const artifactId = String(entry?.id || '').trim()
         ;(async () => {
@@ -41654,17 +42747,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             if (!deck.isConnected) return // the pane moved on while we minted
             frame.src = payload.url
-            note.textContent = 'sandboxed preview — Present goes full screen'
-            present.disabled = false
+            presentBtn.disabled = false
+
+            // Fetch deck content for edit mode (requires Files or channel-shared access)
+            const canEdit = artifactInFilesOrChannelShared(entry)
+            editBtn.disabled = !canEdit
+            if (canEdit) {
+              try {
+                const contentResponse = await fetch(payload.url)
+                deckContent = await contentResponse.text()
+              } catch {
+                editBtn.disabled = true
+              }
+            }
+
+            // Edit opens the deck editor with full Keynote-class controls
+            editBtn.addEventListener('click', () => {
+              if (!deckContent) {
+                showToast({ text: 'Deck content not available', kind: 'error' })
+                return
+              }
+              openDeckEditor(deckContent, title, { artifactId, entry, source: deck })
+            })
+
             // Present fullscreens the SAME sandboxed iframe — never a
             // top-level navigation to the render URL, which would run the
-            // deck outside the iframe sandbox. (The server-side CSP sandbox
-            // directive also opaque-origins top-level opens as a backstop.)
-            present.addEventListener('click', () => frame.requestFullscreen?.())
-            // the manifest's present pill: go straight to presenter mode on
-            // the SAME sandboxed frame; a browser that refuses (transient
-            // activation expired while the token minted) leaves the stage
-            // open with Present a tap away — never an error
+            // deck outside the iframe sandbox.
+            presentBtn.addEventListener('click', () => {
+              if (frame.requestFullscreen) {
+                frame.requestFullscreen().catch(() => {})
+              } else if (frame.webkitRequestFullscreen) {
+                frame.webkitRequestFullscreen()
+              }
+            })
+
+            // Auto-present if requested (stage manifest pill)
             if (options.autoPresent) frame.requestFullscreen?.()?.catch?.(() => {})
           } catch {
             // No token (signed out, artifact gone, server refused): fall back

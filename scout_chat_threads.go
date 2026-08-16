@@ -3641,7 +3641,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// When the worker is unavailable and the user is asking for a deck in a
 	// private thread, generate an HTML deck directly instead of a markdown outline.
 	// This produces a presentable in-thread deck viewer, not a work card.
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && !scoutAgentWorkerAvailable() && scoutChatDeckRequestDetected(text) {
+	// Also route confirmations after a direction pass to generate the deck.
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && !scoutAgentWorkerAvailable() && (scoutChatDeckRequestDetected(text) || scoutChatDeckConfirmationDetected(text, history)) {
 		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
 		if deckErr != nil {
 			unavailableMessage := scoutChatMessageRecord{

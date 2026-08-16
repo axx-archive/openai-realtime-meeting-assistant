@@ -263,6 +263,110 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 
 // --- Inline deck generation tests --------------------------------------------
 
+// TestDeckDirectionEstablished tests the direction pass logic.
+func TestDeckDirectionEstablished(t *testing.T) {
+	cases := []struct {
+		name    string
+		query   string
+		history []scoutChatTurn
+		want    bool
+	}{
+		// User provides explicit direction in query
+		{"dark theme in query", "make a deck with dark theme", nil, true},
+		{"minimal style in query", "minimal presentation about AI", nil, true},
+		{"corporate style in query", "corporate pitch deck", nil, true},
+
+		// User confirms after direction pass (realistic wording without "direction/aesthetic/visual/style")
+		{"yes confirmation after corporate/startup question", "yes", []scoutChatTurn{
+			{role: "user", text: "make a deck about our product"},
+			{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy?"},
+		}, true},
+		{"looks good after full-bleed question", "looks good", []scoutChatTurn{
+			{role: "user", text: "make a presentation"},
+			{role: "scout", text: "Full-bleed imagery to set the mood, or clean typographic slides?"},
+		}, true},
+		{"proceed after design question", "proceed", []scoutChatTurn{
+			{role: "user", text: "build a pitch deck"},
+			{role: "scout", text: "Are you presenting to investors or a creative team?"},
+		}, true},
+
+		// Direction in history
+		{"direction in previous user message", "build it", []scoutChatTurn{
+			{role: "user", text: "I want a dark, modern look"},
+		}, true},
+
+		// Scout asked direction questions with explicit keywords
+		{"scout asked about visual direction", "ok", []scoutChatTurn{
+			{role: "user", text: "make a deck"},
+			{role: "scout", text: "What visual direction would you like?"},
+		}, true},
+
+		// No direction - should return false
+		{"plain deck request no history", "make a 5-slide deck", nil, false},
+		{"plain deck request with unrelated history", "make a 5-slide deck", []scoutChatTurn{
+			{role: "user", text: "hello"},
+			{role: "scout", text: "hi there"},
+		}, false},
+		// Confirmation without a deck request in history should NOT trigger
+		{"yes without deck request", "yes", []scoutChatTurn{
+			{role: "user", text: "hello"},
+			{role: "scout", text: "Should this feel corporate?"},
+		}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deckDirectionEstablished(tc.query, tc.history)
+			if got != tc.want {
+				t.Errorf("deckDirectionEstablished(%q, history) = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeckDirectionPassReturnsDirectionQuestions tests that a fresh deck request
+// triggers a direction pass (2-3 questions or proposed direction), not immediate deck generation.
+func TestDeckDirectionPassReturnsDirectionQuestions(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM to return direction questions
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Check if this is a direction pass prompt
+		if strings.Contains(request.Input, "aesthetic direction pass") || strings.Contains(request.Input, "visual direction") {
+			return "Should this feel corporate and buttoned-up, or more startup energy? Also, are you thinking full-bleed images or clean typographic slides?", nil
+		}
+		// For deck generation, return HTML
+		return `<!doctype html><html><head><title>Test</title></head><body></body></html>`, nil
+	})
+
+	// First call with no history should return direction pass, not HTML deck
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should be a regular message (not a thread card)
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+
+	// Should NOT be HTML - should be direction questions
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("First deck request should return direction pass, not HTML deck. Got HTML content.")
+	}
+}
+
+// TestInlineDeckReplyProducesHTMLDeck tests that when direction is established,
+// the deck request produces an actual HTML deck.
 func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 	// Force the agent runner to stub (unavailable)
 	clearAgentRunnerEnv(t)
@@ -293,7 +397,8 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 </html>`, nil
 	})
 
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
+	// Include direction in the request to skip direction pass
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI with dark theme", nil)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
 	}
@@ -308,6 +413,218 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 	// Verify the text content is HTML
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
 		t.Errorf("reply.Text does not start with <!doctype html: %q", reply.Text[:min(50, len(reply.Text))])
+	}
+}
+
+// TestInlineDeckAfterDirectionConfirmation tests that saying "yes" or "looks good"
+// after a direction pass produces the actual deck.
+func TestInlineDeckAfterDirectionConfirmation(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM response to return HTML deck content
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		return `<!doctype html>
+<html lang="en">
+<head><title>Test Deck</title></head>
+<body><section class="pg on"><h1>Test</h1></section></body>
+</html>`, nil
+	})
+
+	// Simulate conversation where Scout asked direction questions (realistic wording)
+	// This tests the live path: "Should this feel corporate or startup? Full-bleed or typographic?"
+	history := []scoutChatTurn{
+		{role: "user", text: "make a deck about our product"},
+		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Are you thinking full-bleed imagery or clean typographic slides?"},
+	}
+
+	// User confirms with just "yes"
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should produce HTML deck after confirmation
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("After direction confirmation, should get HTML deck. Got: %q", reply.Text[:min(100, len(reply.Text))])
+	}
+}
+
+// TestInlineDeckConfirmationVariants tests various confirmation phrases after direction pass.
+func TestInlineDeckConfirmationVariants(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		return `<!doctype html><html><head><title>Test</title></head><body></body></html>`, nil
+	})
+
+	// Realistic direction pass that doesn't contain "direction/aesthetic/visual/style"
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Full-bleed imagery to set the mood, or clean typographic slides?"},
+	}
+
+	confirmations := []string{"yes", "looks good", "proceed", "perfect", "great", "sure", "ok"}
+
+	for _, confirm := range confirmations {
+		t.Run(confirm, func(t *testing.T) {
+			reply, err := app.resolveInlineDeckReply(context.Background(), user, confirm, history)
+			if err != nil {
+				t.Fatalf("resolveInlineDeckReply(%q): %v", confirm, err)
+			}
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+				t.Errorf("Confirmation %q after direction pass should generate deck, got: %q", confirm, reply.Text[:min(80, len(reply.Text))])
+			}
+		})
+	}
+}
+
+// TestDeckConfirmationDetectedRoutesCorrectly tests that scoutChatDeckConfirmationDetected
+// properly gates confirmations to the inline deck path. This tests the actual routing gate,
+// not just resolveInlineDeckReply.
+func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
+	cases := []struct {
+		name    string
+		text    string
+		history []scoutChatTurn
+		want    bool
+	}{
+		// Should route to deck generation
+		{
+			name: "yes after direction pass with deck request",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy?"},
+			},
+			want: true,
+		},
+		{
+			name: "looks good after direction pass",
+			text: "looks good",
+			history: []scoutChatTurn{
+				{role: "user", text: "create a presentation about our product"},
+				{role: "scout", text: "Are you presenting to investors or a creative team? Full-bleed imagery or clean typographic slides?"},
+			},
+			want: true,
+		},
+		{
+			name: "proceed after direction pass",
+			text: "proceed",
+			history: []scoutChatTurn{
+				{role: "user", text: "build a pitch deck"},
+				{role: "scout", text: "Should this feel professional and polished, or more startup energy?"},
+			},
+			want: true,
+		},
+		// Should NOT route (missing deck request in history)
+		{
+			name: "yes without deck request",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "hello"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		// Should NOT route (no direction pass from Scout)
+		{
+			name: "yes after unrelated scout message",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "I'll help you with that."},
+			},
+			want: false,
+		},
+		// Should NOT route (not a confirmation phrase)
+		{
+			name: "non-confirmation after direction pass",
+			text: "I want something different",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		// Empty/edge cases
+		{
+			name: "empty text",
+			text: "",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		{
+			name: "empty history",
+			text: "yes",
+			history: nil,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scoutChatDeckConfirmationDetected(tc.text, tc.history)
+			if got != tc.want {
+				t.Errorf("scoutChatDeckConfirmationDetected(%q, history) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLooksLikeDirectionPass tests the direction pass detection function.
+func TestLooksLikeDirectionPass(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		// Direct keywords
+		{"what visual direction would you like?", true},
+		{"what's your aesthetic preference?", true},
+		{"what style are you going for?", true},
+		{"what's the design theme?", true},
+		// Question patterns with design choices
+		{"should this feel corporate or startup?", true},
+		{"full-bleed imagery or typographic slides?", true},
+		{"are you presenting to investors?", true},
+		{"do you want something minimal or bold?", true},
+		// Not direction passes
+		{"i'll create that deck for you", false},
+		{"here's your presentation", false},
+		{"let me help with that", false},
+		{"", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.text, func(t *testing.T) {
+			got := scoutChatLooksLikeDirectionPass(tc.text)
+			if got != tc.want {
+				t.Errorf("scoutChatLooksLikeDirectionPass(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
 	}
 }
 
