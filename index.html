@@ -11927,6 +11927,48 @@
         color: var(--text-2);
       }
 
+      /* SVG/image rendered from code blocks — scaled to fit the bubble */
+      .chat-rich__image {
+        margin: 0;
+        display: block;
+      }
+      .chat-rich__svg {
+        display: flex;
+        justify-content: center;
+        padding: 8px;
+        background: var(--surface-3);
+        border-radius: var(--r-md);
+        overflow: hidden;
+      }
+      .chat-rich__svg svg {
+        max-width: 100%;
+        max-height: 320px;
+        height: auto;
+      }
+
+      /* markdown tables — clean grid layout */
+      .chat-rich__table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92em;
+        background: var(--surface-3);
+        border-radius: var(--r-md);
+        overflow: hidden;
+      }
+      .chat-rich__table th,
+      .chat-rich__table td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .chat-rich__table th {
+        font-weight: 600;
+        background: var(--surface-2);
+      }
+      .chat-rich__table tr:last-child td {
+        border-bottom: none;
+      }
+
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
          hairline, 18/18/18/6; follow-ups tuck the joined corner to 6px */
       .scout-chat-msg--user .scout-chat-text {
@@ -33536,6 +33578,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatThreadsLoading = false
 	      let chatThreadsRequest = null
 	      let chatThreadsRefreshQueued = false
+	      // Skip loadScoutChatThreads when navigating to chat right after a Home
+	      // submit — the thread was already added locally, and fetching the list
+	      // can race with the local state causing duplicate render cycles.
+	      let homeScoutOpeningJustCompleted = false
 	      let chatThreadsGeneration = 0
 	      const scoutChatThreadRequests = new Map()
 	      const scoutChatHydrationRetries = new Map()
@@ -33725,6 +33771,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         authedUser = nextUser || null
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         syncPD1NavigationAccess()
+        updateScoutChatAvailability()
         if (authedUser) {
           loadClientConfig().then(syncPrivateRealtimeVoiceQualification).catch(() => {
             syncPrivateRealtimeVoiceQualification(null)
@@ -39998,8 +40045,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // repair missed chat_thread events (e.g. a channel created while
           // this tab's socket blinked) — the 12s poll skips its fetch while
           // the office socket is live, so opening the tool re-syncs instead
-          // of trusting an at-most-once broadcast
-          loadScoutChatThreads({ onlyIfChanged: true })
+          // of trusting an at-most-once broadcast. Skip when arriving directly
+          // from a Home submit — the thread is already local and a fetch can
+          // race, triggering duplicate render cycles.
+          if (homeScoutOpeningJustCompleted) {
+            homeScoutOpeningJustCompleted = false
+          } else {
+            loadScoutChatThreads({ onlyIfChanged: true })
+          }
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
         } else if (tool === 'memory') {
           // Reads work without joining the call; the room websocket keeps
@@ -53745,6 +53798,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  renderHomeProjectContext()
           if (homeContextChip) homeContextChip.hidden = true
           homeScoutInput.value = ''
+          // Skip the loadScoutChatThreads call that applyToolState('chat')
+          // triggers — the thread is already local from upsertScoutChatThread.
+          // The flag is consumed by applyToolState or cleared after 500ms.
+          homeScoutOpeningJustCompleted = true
+          window.setTimeout(() => { homeScoutOpeningJustCompleted = false }, 500)
           setScoutTab('private')
           selectScoutChatThread(thread.id)
           setMobileChatView('convo')
@@ -63316,6 +63374,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
           // fenced code — ``` opens a literal block; everything to the
           // closing fence (or EOF) stays verbatim in the machine voice
+          // Exception: SVG content is rendered as an image, not a code block
           const fence = /^\s*```[\w-]*\s*$/.exec(line)
           if (fence) {
             flushParagraph()
@@ -63326,10 +63385,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               index += 1
             }
             index += 1
+            const codeContent = codeLines.join('\n').trim()
+            // Detect SVG content and render as image instead of code block
+            if (/^\s*<svg[\s>]/i.test(codeContent) && /<\/svg>\s*$/i.test(codeContent)) {
+              const figure = document.createElement('figure')
+              figure.className = 'chat-rich__image'
+              const svgContainer = document.createElement('div')
+              svgContainer.className = 'chat-rich__svg'
+              // Sanitize: only allow SVG elements and safe attributes
+              const parser = new DOMParser()
+              const doc = parser.parseFromString(codeContent, 'image/svg+xml')
+              const svgEl = doc.querySelector('svg')
+              if (svgEl && !doc.querySelector('parsererror')) {
+                // Remove potentially dangerous elements/attributes
+                svgEl.querySelectorAll('script, foreignObject').forEach(el => el.remove())
+                svgEl.querySelectorAll('[onclick], [onload], [onerror]').forEach(el => {
+                  el.removeAttribute('onclick')
+                  el.removeAttribute('onload')
+                  el.removeAttribute('onerror')
+                })
+                svgContainer.appendChild(svgEl)
+                figure.appendChild(svgContainer)
+                container.appendChild(figure)
+              } else {
+                // Parse error — fall back to code block
+                const pre = document.createElement('pre')
+                pre.className = 'chat-rich__code'
+                const codeEl = document.createElement('code')
+                codeEl.textContent = codeContent
+                pre.appendChild(codeEl)
+                container.appendChild(pre)
+              }
+              continue
+            }
             const pre = document.createElement('pre')
             pre.className = 'chat-rich__code'
             const codeEl = document.createElement('code')
-            codeEl.textContent = codeLines.join('\n')
+            codeEl.textContent = codeContent
             pre.appendChild(codeEl)
             container.appendChild(pre)
             continue
@@ -63354,6 +63446,56 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             container.appendChild(rule)
             index += 1
             continue
+          }
+
+          // markdown table — rows starting and containing pipes
+          // Format: | col1 | col2 | col3 | with optional header separator |---|---|---|
+          if (/^\s*\|.*\|\s*$/.test(line)) {
+            flushParagraph()
+            const tableRows = []
+            while (index < lines.length && /^\s*\|.*\|\s*$/.test(lines[index])) {
+              tableRows.push(lines[index])
+              index += 1
+            }
+            if (tableRows.length >= 1) {
+              const table = document.createElement('table')
+              table.className = 'chat-rich__table'
+              let hasHeader = false
+              let headerRowIndex = -1
+              // Check if second row is a separator (|---|---|)
+              if (tableRows.length >= 2 && /^\s*\|[\s:-]+\|[\s|:-]*$/.test(tableRows[1])) {
+                hasHeader = true
+                headerRowIndex = 0
+              }
+              tableRows.forEach((row, rowIndex) => {
+                // Skip separator rows
+                if (/^\s*\|[\s:-]+\|[\s|:-]*$/.test(row)) return
+                const tr = document.createElement('tr')
+                const cells = row.split('|').slice(1, -1) // Remove empty first/last from split
+                cells.forEach(cell => {
+                  const cellEl = document.createElement(hasHeader && rowIndex === headerRowIndex ? 'th' : 'td')
+                  appendChatInlineNodes(cellEl, cell.trim())
+                  tr.appendChild(cellEl)
+                })
+                if (hasHeader && rowIndex === headerRowIndex) {
+                  let thead = table.querySelector('thead')
+                  if (!thead) {
+                    thead = document.createElement('thead')
+                    table.appendChild(thead)
+                  }
+                  thead.appendChild(tr)
+                } else {
+                  let tbody = table.querySelector('tbody')
+                  if (!tbody) {
+                    tbody = document.createElement('tbody')
+                    table.appendChild(tbody)
+                  }
+                  tbody.appendChild(tr)
+                }
+              })
+              container.appendChild(table)
+              continue
+            }
           }
 
           const listMatch = chatMarkdownListMatch(line)

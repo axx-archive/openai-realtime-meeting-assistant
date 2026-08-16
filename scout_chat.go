@@ -467,8 +467,8 @@ func scoutRouterSystemPrompt() string {
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
-		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> Tier 0 conversational_reply. Answer directly with the slide content in chat. No tool, no workstream, no agent thread.",
-		"- heavier pitch outline work that mentions review, gates, or multi-step packaging ('run the deck outline with review', 'full deck outline process') -> propose_tool_run deck_outline.",
+		"- presentation/deck/outline asks ('make a 5-slide outline', 'create a deck', 'presentation for this pitch', 'outline the pitch') -> propose_tool_run deck_outline. The deck_outline tool produces a real in-thread deck with slides the user can see.",
+		"- full packaging studio run ('run the deck outline with review and full packaging', 'complete package with deck') -> propose_tool_run packaging_studio.",
 		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
 		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
 		"- full end-to-end packaging ('package this end to end', 'the full packaging run', 'take it from 0 to 100') -> propose_tool_run packaging_studio.",
@@ -913,12 +913,14 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
-	// Simple in-thread outline/presentation guard: forces conversational_reply
-	// BEFORE the deterministic guard or router model runs. These asks must be
-	// answered directly in chat without any agent thread, workstream, or goal.
-	if scoutChatSimpleOutlineRequestDetected(intentText) {
+	// Simple in-thread outline/presentation guard: when the agent worker is
+	// unavailable, these asks fall back to conversational_reply so the user gets
+	// a useful inline answer instead of a failed work proposal. When the worker
+	// IS available, let the request route to the deck_outline tool which can
+	// produce a real in-thread deck.
+	if !scoutAgentWorkerAvailable() && scoutChatSimpleOutlineRequestDetected(intentText) {
 		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
-		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline"})
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline", "degraded": "agent_worker_unavailable"})
 		return decision
 	}
 	// Deterministic pre-router guard: exact registry names + the reviewed
