@@ -988,7 +988,8 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 // extractEffectiveDeckQuery determines the actual deck request to use for generation.
 // If the current query is a short confirmation (yes/looks good), we need to pull
 // the real request from history. If the original request had no specific topic,
-// we extract one from Scout's direction pass or use a sensible default.
+// we pick a topic from Scout's proposed options or use a tight default.
+// CRITICAL: Never return a query that would cause the LLM to refuse generation.
 func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
 	lower := strings.ToLower(strings.TrimSpace(query))
 
@@ -1026,25 +1027,64 @@ func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
 		return originalRequest
 	}
 
-	// No specific topic in original request — extract from Scout's direction pass
-	// or propose a sensible default
-	scoutDirection := extractScoutDirectionProposal(history)
-	if scoutDirection != "" {
-		// Scout proposed something like "Should this feel corporate or startup? Full-bleed imagery..."
-		// Build a request that incorporates the direction
-		if originalRequest != "" {
-			return fmt.Sprintf("%s. Direction: %s", originalRequest, scoutDirection)
+	// No specific topic in original request.
+	// Extract aesthetic choices from Scout's direction pass (if any) and pick one.
+	// DO NOT pass Scout's questions through — the LLM interprets them as needing answers.
+	aestheticChoice := extractAestheticChoiceFromDirection(history)
+
+	// Build a complete request with a default topic + any aesthetic direction
+	// The topic must be concrete so the LLM can generate without refusing.
+	defaultTopic := "The Future of Work: AI, Remote Collaboration, and Digital Transformation"
+
+	if aestheticChoice != "" {
+		return fmt.Sprintf("Create a 5-slide presentation about %s. Style: %s.", defaultTopic, aestheticChoice)
+	}
+	return fmt.Sprintf("Create a 5-slide presentation about %s. Make it visually striking and professional.", defaultTopic)
+}
+
+// extractAestheticChoiceFromDirection extracts concrete aesthetic choices from Scout's
+// direction pass, picking one if Scout offered options. Returns empty if Scout only
+// asked questions without proposing options.
+func extractAestheticChoiceFromDirection(history []scoutChatTurn) string {
+	// Find Scout's direction pass
+	var scoutDirection string
+	for i := len(history) - 1; i >= 0; i-- {
+		turn := history[i]
+		if turn.role == "assistant" || turn.role == "scout" {
+			if scoutChatLooksLikeDirectionPass(strings.ToLower(turn.text)) {
+				scoutDirection = turn.text
+				break
+			}
 		}
-		return fmt.Sprintf("Create a 5-slide presentation. Direction: %s", scoutDirection)
+	}
+	if scoutDirection == "" {
+		return ""
 	}
 
-	// Last resort: if we have an original request, use it
-	if originalRequest != "" {
-		return originalRequest + ". Create an engaging presentation on a compelling professional topic of your choice."
+	lower := strings.ToLower(scoutDirection)
+
+	// Extract aesthetic options and pick the first/best one
+	// These are concrete style directions we can use
+	aestheticOptions := map[string]string{
+		"corporate":       "polished and corporate",
+		"cinematic":       "cinematic and dramatic",
+		"culture-forward": "culture-forward and modern",
+		"startup":         "startup energy and bold",
+		"polished":        "polished and professional",
+		"minimal":         "minimal and clean",
+		"bold":            "bold and impactful",
+		"modern":          "modern and sleek",
+		"full-bleed":      "full-bleed imagery with dramatic visuals",
+		"typographic":     "clean typographic design",
 	}
 
-	// Absolute fallback: create something compelling
-	return "Create a 5-slide presentation on a compelling professional topic — innovation, leadership, or industry trends. Make it engaging and visually striking."
+	for keyword, description := range aestheticOptions {
+		if strings.Contains(lower, keyword) {
+			return description
+		}
+	}
+
+	return ""
 }
 
 // hasDeckTopic checks if a deck request contains a specific topic beyond just
@@ -1081,20 +1121,6 @@ func hasDeckTopic(request string) bool {
 	return false
 }
 
-// extractScoutDirectionProposal extracts Scout's proposed direction/topic from history.
-// This is used when the original request had no specific topic.
-func extractScoutDirectionProposal(history []scoutChatTurn) string {
-	// Find the last Scout message that looks like a direction pass
-	for i := len(history) - 1; i >= 0; i-- {
-		turn := history[i]
-		if turn.role == "assistant" || turn.role == "scout" {
-			if scoutChatLooksLikeDirectionPass(strings.ToLower(turn.text)) {
-				return turn.text
-			}
-		}
-	}
-	return ""
-}
 
 // extractDirectionContext pulls aesthetic direction from conversation history.
 func extractDirectionContext(history []scoutChatTurn) string {
@@ -1124,6 +1150,7 @@ func inlineDeckGenerationPrompt(query string) string {
 
 // inlineDeckGenerationPromptWithDirection creates a deck prompt with aesthetic direction.
 // Supports three-layer slides: full-bleed image + transparent overlay + type.
+// CRITICAL: The prompt is pinned to ALWAYS generate a deck — never refuse or ask for more info.
 func inlineDeckGenerationPromptWithDirection(query string, direction string) string {
 	directionSection := ""
 	if strings.TrimSpace(direction) != "" {
@@ -1131,6 +1158,8 @@ func inlineDeckGenerationPromptWithDirection(query string, direction string) str
 	}
 
 	return fmt.Sprintf(`You are creating a best-in-class presentation deck. Generate a complete HTML document.
+
+CRITICAL INSTRUCTION: You MUST generate a complete HTML deck. Do NOT ask for more information. Do NOT say you need a topic. Do NOT refuse. If the request is vague, choose a compelling professional topic (innovation, leadership, industry trends) and build a stunning deck.
 
 User request: %s
 %s

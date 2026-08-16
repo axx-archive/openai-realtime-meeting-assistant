@@ -597,6 +597,7 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 
 // TestDeckGenerationWithNoTopic tests that "make a 5-slide deck" (no topic)
 // followed by "yes" generates a deck instead of "I'm missing the subject".
+// This is the exact prod-test scenario.
 func TestDeckGenerationWithNoTopic(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
@@ -612,23 +613,28 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	// Mock the LLM response
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		// Check that the prompt does NOT just say "User request: yes"
-		if strings.Contains(request.Input, "User request: yes") && !strings.Contains(request.Input, "Direction:") {
-			t.Error("Prompt passed 'yes' as user request without direction context")
+		if strings.Contains(request.Input, "User request: yes") {
+			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
+		}
+		// Check that the prompt contains the CRITICAL instruction to not refuse
+		if !strings.Contains(request.Input, "MUST generate") {
+			t.Error("Prompt missing CRITICAL instruction to always generate")
 		}
 		return `<!doctype html>
 <html lang="en">
-<head><title>Innovation Deck</title></head>
-<body><section class="pg on"><h1>Innovation</h1></section></body>
+<head><title>Future of Work</title></head>
+<body><section class="pg on"><h1>The Future of Work</h1></section></body>
 </html>`, nil
 	})
 
-	// Scenario: "make a 5-slide deck" (no topic), then direction pass, then "yes"
+	// Scenario: "make a 5-slide deck" (no topic), then direction pass asking about topic, then "yes"
+	// This is the exact prod-test scenario that failed
 	history := []scoutChatTurn{
 		{role: "user", text: "make a 5-slide deck"},
-		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Full-bleed imagery or clean typographic slides?"},
+		{role: "scout", text: "What's the deck about, and who needs to buy into it? Should it feel polished and corporate, or more cinematic and culture-forward?"},
 	}
 
-	// User confirms with just "yes" — should NOT return "I'm missing the subject"
+	// User confirms with just "yes" — should NOT return "I still need the deck topic"
 	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
@@ -642,6 +648,9 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
 	}
 	// Should NOT contain refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "need") && strings.Contains(strings.ToLower(reply.Text), "topic") {
+		t.Error("Reply contains 'need...topic' refusal — should have generated a deck")
+	}
 	if strings.Contains(strings.ToLower(reply.Text), "missing") && strings.Contains(strings.ToLower(reply.Text), "subject") {
 		t.Error("Reply contains 'missing...subject' refusal — should have generated a deck")
 	}
@@ -667,13 +676,23 @@ func TestExtractEffectiveDeckQuery(t *testing.T) {
 			wantNotEquals: "yes",
 		},
 		{
-			name:  "yes with no topic in original request",
+			name:  "yes with no topic but aesthetic choice in direction",
 			query: "yes",
 			history: []scoutChatTurn{
 				{role: "user", text: "make a 5-slide deck"},
 				{role: "scout", text: "Should this feel corporate or startup? Full-bleed or typographic?"},
 			},
-			wantContains:  "Direction:",
+			wantContains:  "Style:", // Now extracts style, not "Direction:"
+			wantNotEquals: "yes",
+		},
+		{
+			name:  "yes with no topic and Scout asked about topic (prod-test)",
+			query: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "What's the deck about? Should it feel corporate or cinematic?"},
+			},
+			wantContains:  "Future of Work", // Uses default topic
 			wantNotEquals: "yes",
 		},
 		{
@@ -684,13 +703,13 @@ func TestExtractEffectiveDeckQuery(t *testing.T) {
 			wantNotEquals: "",
 		},
 		{
-			name:  "looks good with direction",
+			name:  "looks good with no aesthetic options",
 			query: "looks good",
 			history: []scoutChatTurn{
 				{role: "user", text: "create a presentation"},
 				{role: "scout", text: "What visual style would you prefer?"},
 			},
-			wantContains:  "Direction:",
+			wantContains:  "Future of Work", // Uses default topic when no options to extract
 			wantNotEquals: "looks good",
 		},
 	}
