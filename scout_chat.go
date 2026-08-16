@@ -467,10 +467,11 @@ func scoutRouterSystemPrompt() string {
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
-		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> Tier 0 conversational_reply. Answer directly with the slide content in chat. No tool, no workstream, no agent thread.",
-		"- heavier pitch outline work that mentions review, gates, or multi-step packaging ('run the deck outline with review', 'full deck outline process') -> propose_tool_run deck_outline.",
+		"- presentation/deck asks ('create a deck', 'make a 5-slide deck', 'presentation for this pitch', 'build the pitch deck') -> propose_tool_run packaging_studio. The packaging_studio workflow produces an html_deck artifact with the sandboxed viewer, Present button, and cover hero.",
+		"- outline-only asks ('make an outline', 'outline the pitch', 'give me the slide outline', 'just the deck structure') -> propose_tool_run deck_outline. This produces a structured text outline, not a presentable deck.",
+		"- full packaging studio run ('run the full packaging process', 'complete package with deck') -> propose_tool_run packaging_studio.",
 		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
-		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
+		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want just an outline or the full built deck, offer_choices between deck_outline (outline only) and packaging_studio (real deck).",
 		"- full end-to-end packaging ('package this end to end', 'the full packaging run', 'take it from 0 to 100') -> propose_tool_run packaging_studio.",
 		"- package_assembly is ONLY 'compile the artifacts we already made into the send-ready binder'; any end-to-end / full-run / from-scratch language is packaging_studio, even when the thread was already discussing an existing package; genuinely torn between the two -> offer_choices ('compile what we have' [package_assembly] / 'the full staged run' [packaging_studio]).",
 		"- economics / business model / unit economics / projections / 'does the deal work' -> propose_tool_run economics_waterfall.",
@@ -720,6 +721,44 @@ var scoutRouterSimpleOutlinePhrases = []string{
 	"in thread outline",
 }
 
+// scoutChatDeckRequestDetected returns true when the message is asking for a
+// real presentation/deck (not just an outline). This is used to trigger HTML
+// deck generation when the agent worker is unavailable.
+func scoutChatDeckRequestDetected(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	// Must mention deck or presentation or slides
+	hasDeckWord := strings.Contains(lower, "deck") || strings.Contains(lower, "presentation") || strings.Contains(lower, "slides")
+	if !hasDeckWord {
+		return false
+	}
+	// Exclude outline-only asks
+	outlineOnly := []string{"outline only", "just the outline", "just an outline", "only the outline", "give me the outline", "slide outline"}
+	for _, phrase := range outlineOnly {
+		if strings.Contains(lower, phrase) {
+			return false
+		}
+	}
+	// Match deck/presentation creation phrases
+	deckPhrases := []string{
+		"make a deck", "create a deck", "build a deck", "make me a deck",
+		"make a presentation", "create a presentation", "build a presentation",
+		"make me a presentation", "create me a presentation", "build me a presentation",
+		"presentation for", "deck for", "slides for",
+		"slide deck", "pitch deck", "5-slide", "5 slide", "five-slide", "five slide",
+		"10-slide", "10 slide", "ten-slide", "ten slide",
+		"make slides", "create slides", "build slides", "make me slides",
+	}
+	for _, phrase := range deckPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // scoutChatSimpleOutlineRequestDetected returns true when the message matches
 // the reviewed phrase list for simple in-thread outline/presentation asks.
 // These are forced to conversational_reply (Tier 0) BEFORE the deterministic
@@ -913,12 +952,14 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
-	// Simple in-thread outline/presentation guard: forces conversational_reply
-	// BEFORE the deterministic guard or router model runs. These asks must be
-	// answered directly in chat without any agent thread, workstream, or goal.
-	if scoutChatSimpleOutlineRequestDetected(intentText) {
+	// Simple in-thread outline/presentation guard: when the agent worker is
+	// unavailable, these asks fall back to conversational_reply so the user gets
+	// a useful inline answer instead of a failed work proposal. When the worker
+	// IS available, let the request route to packaging_studio (for decks) or
+	// deck_outline (for outlines) which can produce real artifacts.
+	if !scoutAgentWorkerAvailable() && scoutChatSimpleOutlineRequestDetected(intentText) {
 		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
-		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline"})
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline", "degraded": "agent_worker_unavailable"})
 		return decision
 	}
 	// Deterministic pre-router guard: exact registry names + the reviewed

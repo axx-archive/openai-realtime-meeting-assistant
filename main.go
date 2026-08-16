@@ -3600,7 +3600,9 @@ func nativeRoomClientConfig() map[string]any {
 }
 
 func privateRealtimeVoiceQualified() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("PRIVATE_REALTIME_VOICE_QUALIFIED")), "true")
+	// Voice is qualified for any authenticated session by default.
+	// Set PRIVATE_REALTIME_VOICE_QUALIFIED=false to explicitly disable.
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("PRIVATE_REALTIME_VOICE_QUALIFIED")), "false")
 }
 
 func nativeRosterParticipants() []map[string]string {

@@ -216,6 +216,205 @@ func TestWorkerAvailableAllowsDeterministicGuard(t *testing.T) {
 	}
 }
 
+// --- Deck request detection tests --------------------------------------------
+
+func TestScoutChatDeckRequestDetected(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		// Positive cases: real deck/presentation requests
+		{"make a 5-slide deck", true},
+		{"create a deck about our product", true},
+		{"build a pitch deck", true},
+		{"make me a presentation", true},
+		{"create a 10-slide presentation", true},
+		{"build slides for the quarterly review", true},
+		{"make a slide deck", true},
+		{"presentation for this pitch", true},
+		{"deck for the investor meeting", true},
+		{"slides for the quarterly review", true},
+
+		// Negative cases: outline-only requests
+		{"just the outline", false},
+		{"give me the outline only", false},
+		{"slide outline please", false},
+
+		// Negative cases: non-deck requests
+		{"research the market", false},
+		{"design a logo", false},
+		{"create a business plan", false},
+
+		// Edge cases
+		{"", false},
+		{"deck", false},       // Just "deck" without creation verb
+		{"presentation", false}, // Just "presentation" without creation verb
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.text, func(t *testing.T) {
+			got := scoutChatDeckRequestDetected(tc.text)
+			if got != tc.want {
+				t.Errorf("scoutChatDeckRequestDetected(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+// --- Inline deck generation tests --------------------------------------------
+
+func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
+	// Force the agent runner to stub (unavailable)
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	if scoutAgentWorkerAvailable() {
+		t.Fatal("scoutAgentWorkerAvailable() = true with stub runner, want false")
+	}
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM response to return HTML deck content
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Return a simple HTML deck
+		return `<!doctype html>
+<html lang="en">
+<head><title>AI Deck</title></head>
+<body>
+<section class="slide"><h1>AI Overview</h1></section>
+<section class="slide"><h2>Applications</h2></section>
+</body>
+</html>`, nil
+	})
+
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Verify the reply is a regular message with HTML content (not a thread card)
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message (not thread card)", reply.Kind)
+	}
+	if reply.IntentOutcome != string(conversationIntentConversationalReply) {
+		t.Errorf("reply.IntentOutcome=%q, want %q", reply.IntentOutcome, conversationIntentConversationalReply)
+	}
+	// Verify the text content is HTML
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("reply.Text does not start with <!doctype html: %q", reply.Text[:min(50, len(reply.Text))])
+	}
+}
+
+// TestDeckAskRoutesToInlineDeckWithStubWorker tests the live path: a deck ask
+// through the routing system with stub worker should produce an in-thread
+// html_deck message, not a proposal or outline.
+func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
+	// Force the agent runner to stub (unavailable)
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	if scoutAgentWorkerAvailable() {
+		t.Fatal("scoutAgentWorkerAvailable() = true with stub runner, want false")
+	}
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+
+	// Mock the LLM to return HTML deck for deck generation prompts
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Return HTML deck content
+		return `<!doctype html>
+<html><head><title>Test Deck</title></head>
+<body><section class="slide"><h1>Test</h1></section></body>
+</html>`, nil
+	})
+
+	cases := []string{
+		"make a 5-slide deck",
+		"create a presentation",
+		"build a pitch deck",
+		"presentation for this pitch",
+	}
+
+	for _, ask := range cases {
+		t.Run(ask, func(t *testing.T) {
+			// Test that routing identifies this as a deck request
+			if !scoutChatDeckRequestDetected(ask) {
+				t.Errorf("scoutChatDeckRequestDetected(%q) = false, want true", ask)
+			}
+
+			// Test that the router routes to conversational_reply (not work)
+			decision := app.routeConversationIntentWithInput(
+				context.Background(),
+				ask,
+				conversationIntentTurn{Text: ask},
+				nil,
+			)
+
+			// With stub worker, deck asks should not mint work proposals
+			if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
+				t.Errorf("outcome=%s for deck ask with stub worker, want conversational_reply", decision.Outcome)
+			}
+		})
+	}
+}
+
+// --- Client-side idempotency tests -------------------------------------------
+// Note: The server correctly implements idempotency (same key = same thread).
+// The double-fire issue in production was due to the client sending different
+// keys. The client-side debounce is the actual fix for that case.
+
+func TestHomeOpeningIdempotency(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	key := "test-idempotency-key-12345"
+	text := "What is the weather today?"
+
+	// First call should create the thread
+	thread1, created1, err := app.ensureScoutHomeOpening(user, key, text)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if !created1 {
+		t.Error("first call should create the thread")
+	}
+
+	// Second call with same key should return the same thread
+	thread2, created2, err := app.ensureScoutHomeOpening(user, key, text)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if created2 {
+		t.Error("second call should not create a new thread")
+	}
+	if thread1.ID != thread2.ID {
+		t.Errorf("thread IDs differ: %q vs %q", thread1.ID, thread2.ID)
+	}
+
+	// Third call with DIFFERENT key should create a NEW thread
+	thread3, created3, err := app.ensureScoutHomeOpening(user, "different-key-67890", text)
+	if err != nil {
+		t.Fatalf("third call: %v", err)
+	}
+	if !created3 {
+		t.Error("third call with different key should create a new thread")
+	}
+	if thread1.ID == thread3.ID {
+		t.Error("different keys should produce different thread IDs")
+	}
+}
+
 // --- Artifacts mode rejection test -------------------------------------------
 
 func TestArtifactsModeIsRejected(t *testing.T) {

@@ -605,8 +605,9 @@ func TestClientConfigEndpointRequiresSession(t *testing.T) {
 	if payload.NativeHints["mediaReadyEvent"] != "media_ready" {
 		t.Fatalf("nativeHints=%v, want media_ready hint", payload.NativeHints)
 	}
-	if payload.PrivateRealtimeVoiceQualified {
-		t.Fatal("private Realtime voice must default to visibly unqualified")
+	// Voice is qualified by default for authenticated users (no fake qualification wall)
+	if !payload.PrivateRealtimeVoiceQualified {
+		t.Fatal("private Realtime voice must default to qualified for authenticated users")
 	}
 }
 
