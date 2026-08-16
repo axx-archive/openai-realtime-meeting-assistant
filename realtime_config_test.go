@@ -116,8 +116,10 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	if create := turnDetection["create_response"]; create != true {
 		t.Fatalf("private turn_detection.create_response=%v, want true", create)
 	}
-	if effort := session["reasoning"].(map[string]any)["effort"]; effort != "high" {
-		t.Fatalf("private reasoning effort=%v, want high", effort)
+	// Conversational voice uses medium effort for tight latency. High effort
+	// causes perceivable "thinking" delay that breaks conversational flow.
+	if effort := session["reasoning"].(map[string]any)["effort"]; effort != "medium" {
+		t.Fatalf("private reasoning effort=%v, want medium for conversational latency", effort)
 	}
 
 	tools, ok := session["tools"].([]map[string]any)
@@ -146,8 +148,10 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
-	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
-		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)
+	// Conversational voice defaults to tool_choice=none so the model speaks
+	// first without routing/thinking delay.
+	if toolChoice := session["tool_choice"]; toolChoice != "none" {
+		t.Fatalf("tool_choice=%v, want none for conversational voice latency", toolChoice)
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{

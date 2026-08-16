@@ -1625,13 +1625,18 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
-	session["tool_choice"] = "auto"
+	// Conversational voice defaults to tool_choice=none so the model speaks
+	// first without routing/thinking delay. Tools remain available for explicit
+	// user actions; the server's route_conversation_turn handles those cases.
+	session["tool_choice"] = "none"
 	// Private Scout is a direct one-to-one conversation, so provider-side VAD
 	// can create responses immediately. Shared rooms deliberately wait for the
 	// server's deterministic Scout-invocation gate before response.create.
 	setRealtimeSessionCreateResponse(session, true)
 	if usesAdvancedCommandProfile(model) {
-		session["reasoning"] = map[string]any{"effort": realtimeReasoningEffort()}
+		// Voice lane uses medium effort for conversational latency. High effort
+		// causes perceivable "thinking" delay that breaks conversational flow.
+		session["reasoning"] = map[string]any{"effort": privateRealtimeVoiceReasoningEffort()}
 	}
 	return session
 }
@@ -1924,6 +1929,15 @@ func realtimeReasoningEffort() string {
 }
 
 func realtimeRoomReasoningEffort() string {
+	return "medium"
+}
+
+// privateRealtimeVoiceReasoningEffort returns the reasoning effort for private
+// conversational voice. Unlike the text chat path (which benefits from high
+// reasoning for complex queries), voice must feel conversational: tight back-
+// and-forth with minimal perceivable delay. Medium effort balances quality and
+// latency for the 1:1 voice lane.
+func privateRealtimeVoiceReasoningEffort() string {
 	return "medium"
 }
 

@@ -44061,7 +44061,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         } else if (type.includes('speech_started')) {
           setVoiceIslandState('hearing', 'listening…')
         } else if (type.includes('speech_stopped')) {
-          setVoiceIslandState('thinking', 'thinking…')
+          // Conversational voice: do NOT flip to thinking on speech_stopped.
+          // Stay in listening/hearing state until first_audio arrives, so the
+          // user doesn't see a "thinking" beat before every response. The model
+          // should speak first without a visible routing/thinking delay.
         } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
           postPrivateRealtimeMilestone('first_audio')
           setVoiceIslandState('talking', 'answering…')
