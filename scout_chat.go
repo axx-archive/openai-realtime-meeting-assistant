@@ -467,7 +467,7 @@ func scoutRouterSystemPrompt() string {
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
-		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> propose_workstream mode=artifacts tool_template=deck_outline. These bypass the goal loop and answer directly like design mode.",
+		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> Tier 0 conversational_reply. Answer directly with the slide content in chat. No tool, no workstream, no agent thread.",
 		"- heavier pitch outline work that mentions review, gates, or multi-step packaging ('run the deck outline with review', 'full deck outline process') -> propose_tool_run deck_outline.",
 		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
 		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
@@ -536,13 +536,12 @@ func scoutRouterTools() []anthropicTool {
 		},
 		{
 			Name:        "propose_workstream",
-			Description: "Propose a quick single-pass workstream (research / design / grill / workflow / artifacts) for the user to confirm. Return Scout's polished execution prompt, not the user's raw wording. Use mode=artifacts with tool_template for simple in-thread presentation/outline asks.",
+			Description: "Propose a quick single-pass workstream (research / design / grill / workflow) for the user to confirm. Return Scout's polished execution prompt, not the user's raw wording.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"mode":          map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow", "artifacts"}},
-					"objective":     map[string]any{"type": "string", "description": "Scout's execution-ready prompt: intended outcome, key constraints, evidence or inputs to use, and the decision or deliverable to return; no @mention or conversational preamble"},
-					"tool_template": map[string]any{"type": "string", "enum": ids, "description": "optional tool template for artifacts mode — applies the tool's output contract and prompt without the goal loop overhead"},
+					"mode":      map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow"}},
+					"objective": map[string]any{"type": "string", "description": "Scout's execution-ready prompt: intended outcome, key constraints, evidence or inputs to use, and the decision or deliverable to return; no @mention or conversational preamble"},
 				},
 				"required": []string{"mode", "objective"},
 			},
@@ -1153,10 +1152,9 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		return proposal
 	case "propose_workstream":
 		args := struct {
-			Mode         string `json:"mode"`
-			Objective    string `json:"objective"`
-			Query        string `json:"query"`        // backward-compatible provider fixture
-			ToolTemplate string `json:"tool_template"` // optional tool template for artifacts mode
+			Mode      string `json:"mode"`
+			Objective string `json:"objective"`
+			Query     string `json:"query"` // backward-compatible provider fixture
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_workstream input undecodable: %v", err)
@@ -1164,39 +1162,21 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			return nil
 		}
 		mode := strings.ToLower(strings.TrimSpace(args.Mode))
-		toolTemplate := strings.TrimSpace(args.ToolTemplate)
 		switch mode {
-		case "research", "design", "grill", "workflow", "artifacts":
+		case "research", "design", "grill", "workflow":
 		default:
 			log.Errorf("Scout router proposed unknown workstream mode %q", args.Mode)
 			return nil
 		}
-		// Validate tool template if provided
-		var toolName string
-		if toolTemplate != "" {
-			if tool, ok := toolByID(toolTemplate); ok {
-				toolTemplate = tool.ID
-				toolName = tool.Name
-			} else {
-				log.Errorf("Scout router proposed unknown tool_template %q", args.ToolTemplate)
-				toolTemplate = ""
-			}
-		}
 		objective := polishedWorkstreamObjective(firstNonBlank(strings.TrimSpace(args.Objective), firstNonBlank(strings.TrimSpace(args.Query), strings.TrimSpace(query))))
-		summary := "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once."
-		if toolName != "" {
-			summary = "Scout prepared a " + toolName + " outline. Review or edit it before this runs — no goal loop, no gates, direct in-thread output."
-		}
 		return &scoutRouterProposal{
 			Kind:        scoutRouterProposalKindWorkstream,
 			Mode:        mode,
-			ToolID:      toolTemplate, // carry tool template for artifacts workstream
-			ToolName:    toolName,
 			Objective:   objective,
 			Query:       strings.TrimSpace(query),
-			Lane:        scoutProposalLane(mode, toolTemplate, ""),
+			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
-			Summary:     summary,
+			Summary:     "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
 		}
 	case "propose_goal":
 		args := struct {
