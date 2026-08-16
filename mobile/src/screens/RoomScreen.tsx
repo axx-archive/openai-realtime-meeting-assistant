@@ -231,7 +231,7 @@ const CallVideoTile = memo(function CallVideoTile({
       </View>
       {participant.screenSharing && !compact ? (
         <View accessible accessibilityLabel={`${name} is sharing their screen`} style={styles.screenShareBadge}>
-          <SymbolView name="rectangle.on.rectangle" tintColor="#30D158" size={12} />
+          <SymbolView name="rectangle.on.rectangle" tintColor={colors.ember} size={12} />
           <Text style={styles.screenShareBadgeText}>PRESENTING</Text>
         </View>
       ) : null}
@@ -1608,7 +1608,7 @@ export function RoomScreen({ route, navigation }: Props) {
         <View style={[styles.joinCard, shadow[1]]}>
           <View style={styles.joinHeading}>
             <View style={[styles.joinOrb, room?.live && styles.orbLive]}>
-              <SymbolView name={room?.live ? 'waveform.circle.fill' : 'person.2.fill'} tintColor={room?.live ? colors.live : colors.text1} size={28} />
+              <SymbolView name={room?.live ? 'waveform.circle.fill' : 'person.2.fill'} tintColor={room?.live ? colors.ember : colors.text1} size={28} />
             </View>
             <View style={styles.joinCopy}>
               <Text style={styles.joinTitle}>{room?.live ? `${room.participantCount} here now` : 'Start the conversation'}</Text>
@@ -1664,7 +1664,7 @@ const styles = StyleSheet.create({
   joinHeading: { flexDirection: 'row', alignItems: 'center', gap: space[3], marginBottom: space[4] },
   joinOrb: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface3 },
   joinCopy: { flex: 1 },
-  orbLive: { backgroundColor: colors.liveSoft },
+  orbLive: { backgroundColor: colors.emberSoft },
   joinTitle: { ...type.headline, color: colors.text1 },
   joinBody: { ...type.caption, color: colors.text2, marginTop: 3 },
   join: { minHeight: 48, width: '100%', borderRadius: radius.lg, backgroundColor: colors.accent, paddingHorizontal: space[5], flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
@@ -1829,7 +1829,7 @@ const styles = StyleSheet.create({
   callVideoLabelMeasuring: { opacity: 0 },
   callVideoLabelText: { ...type.captionMedium, flexShrink: 1, color: '#FFFFFF' },
   callVideoLabelTextCompact: { fontSize: 10, lineHeight: 13 },
-  speakerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#30D158' },
+  speakerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ember },
   screenShareBadge: {
     position: 'absolute',
     top: space[3],
@@ -1844,7 +1844,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(48,209,88,0.36)',
     backgroundColor: 'rgba(5,5,7,0.76)',
   },
-  screenShareBadgeText: { fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.75, color: '#30D158' },
+  screenShareBadgeText: { fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.75, color: colors.ember },
   localPreview: {
     ...shadow.mark,
     position: 'absolute',
@@ -1961,7 +1961,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
     backgroundColor: 'rgba(7,7,8,0.76)',
   },
-  callStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#30D158' },
+  callStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ember },
   callStatusDotWarning: { backgroundColor: '#FF9F0A' },
   callStatusDotCritical: { backgroundColor: '#FF6B63' },
   callStatusText: { flexShrink: 1, color: '#FFFFFF', fontSize: 11, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 14 },

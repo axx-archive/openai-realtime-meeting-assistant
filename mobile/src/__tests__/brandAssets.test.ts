@@ -144,8 +144,7 @@ test('React Native shell separates the static logo from composer voice controls'
   assert.match(canvas, /canvasCradleComposition\.skyAbove/);
   assert.match(canvas, /styles\.composerVoice/);
   assert.match(canvas, /SymbolView name="waveform"/);
-  assert.match(canvas, /style=\{\[canvasCradleComposition\.copyBlock, styles\.homeCopyBlock\]\}/);
-  assert.match(canvas, /homeCopyBlock:\s*\{ width: '100%', minHeight: 0 \}/);
+  // homeCopyBlock removed with starters per continuity-first design (STRIDE mobile E2E evolution)
   assert.match(canvas, /canvasCradleComposition\.skyBelow/);
   assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);

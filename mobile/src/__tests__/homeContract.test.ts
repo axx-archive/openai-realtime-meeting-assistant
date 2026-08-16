@@ -35,27 +35,23 @@ test('native Home consumes one server-owned snapshot and does not rebuild client
   assert.doesNotMatch(screen, /const HOME_STARTER_IDS|Tell me what you want to pick back up|Help me explore the most important/u);
 });
 
-test('native Home always renders server categories and expands an accessible suggestion surface', () => {
-  assert.match(screen, /\{home\.starters\.length > 0 && !activeStarter \? \(/u);
-  assert.match(screen, /home\.starters\.map\(\(starter\) =>/u);
-  assert.match(screen, /onPress=\{\(\) => setActiveStarterID\(starter\.id\)\}/u);
-  assert.match(screen, /disabled=\{!home\.startersReady\}/u);
-  assert.match(screen, /accessibilityState=\{\{ disabled: !home\.startersReady, expanded: activeStarterID === starter\.id \}\}/u);
-  assert.match(screen, /\{activeStarter \? \(/u);
-  assert.match(screen, /accessibilityLabel=\{`\$\{activeStarter\.label\} suggestions`\}/u);
-  assert.match(screen, /accessibilityLabel="Back to starter categories"/u);
+test('native Home is continuity-focused without starter categories (STRIDE mobile E2E evolution)', () => {
+  // Starters (Continue/Explore/Create/Challenge Canvas) removed per continuity-first design
+  assert.doesNotMatch(screen, /starters\.map/u);
+  assert.doesNotMatch(screen, /activeStarter/u);
+  assert.doesNotMatch(screen, /setActiveStarterID/u);
+  assert.doesNotMatch(screen, /startersReady/u);
   assert.doesNotMatch(screen, /composerFocused|showHomeStarters|width >= 700/u);
+  // Continuity list remains the focus
+  assert.match(screen, /home\.continuity/u);
 });
 
-test('native Home suggestions only seed the editable ordinary composer', () => {
-  const starterStart = screen.indexOf('const useStarterSuggestion');
-  const starterBody = screen.slice(starterStart, screen.indexOf('\n  return (', starterStart));
-  assert.match(starterBody, /setDraft\(suggestion\.text\)/u);
-  assert.match(starterBody, /setDraftDestination\(suggestion\.destination\)/u);
-  assert.match(starterBody, /inputRef\.current\?\.focus/u);
-  assert.doesNotMatch(starterBody, /api\.|sendOpening|navigate|tool|mode/u);
-  assert.match(screen, /Nothing is sent until you press Send\./u);
-  assert.match(screen, /onPress=\{\(\) => useStarterSuggestion\(suggestion\)\}/u);
+test('native Home composer is direct without starter suggestions (STRIDE mobile E2E evolution)', () => {
+  // useStarterSuggestion removed with starters
+  assert.doesNotMatch(screen, /useStarterSuggestion/u);
+  // Direct input to Scout remains
+  assert.match(screen, /setDraft\(/u);
+  assert.match(screen, /inputRef\.current/u);
 });
 
 test('Continue sends into the exact destination thread while arbitrary text opens a new private thread', () => {
@@ -89,18 +85,15 @@ test('native Home shows a compact room jump only while a meeting is live', () =>
   assert.doesNotMatch(screen, /all quiet|No active rooms|rooms are quiet/iu);
 });
 
-test('native Home expands truthful context and suggestions for accessibility text sizes', () => {
-  assert.match(screen, /const \{ fontScale \} = useWindowDimensions\(\)/u);
-  assert.match(screen, /const largeHomeType = fontScale >= 1\.5/u);
-  assert.match(screen, /largeHomeType && styles\.starterLargeType/u);
-  assert.match(screen, /homeCopyBlock: \{ width: '100%', minHeight: 0 \}/u);
-  assert.match(screen, /maxWidth: '100%',[\s\S]*flexShrink: 1,[\s\S]*marginBottom/u);
+test('native Home keyboard handling works with continuity-focused layout', () => {
+  // Starters and largeHomeType removed per continuity-first design
+  assert.doesNotMatch(screen, /largeHomeType/u);
+  assert.doesNotMatch(screen, /starterLargeType/u);
+  // Keyboard handling remains for composer
   assert.match(screen, /keyboardVisible && styles\.keyboardSky/u);
   assert.match(screen, /Keyboard\.addListener\('keyboardDidShow'/u);
   assert.match(screen, /Keyboard\.addListener\('keyboardDidHide'/u);
-  assert.match(screen, /accessibilityLabel=\{starter\.label\}/u);
-  assert.doesNotMatch(screen, /style=\{styles\.starterText\}>\{starter\.detail\}/u);
-  assert.match(screen, /accessibilityHint=\{home\.startersReady \? 'Shows editable message suggestions\.' : 'Suggestions are loading\.'\}/u);
+  // Continuity display is flexible
   assert.doesNotMatch(screen, /numberOfLines=\{1\} style=\{styles\.continuity(?:Eyebrow|Title)\}/u);
   assert.doesNotMatch(screen, /numberOfLines=\{2\} style=\{styles\.continuityDetail\}/u);
 });
@@ -118,7 +111,7 @@ test('native Home has no permanent voice-policy or legacy live-line copy', () =>
   assert.match(screen, /const voiceNotice = realtime\.error \|\| \(\(\) => \{/u);
   assert.match(screen, /case 'connecting': return 'Connecting to Scout…'/u);
   assert.match(screen, /case 'listening':[\s\S]*case 'hearing': return 'Scout is listening'/u);
-  assert.match(screen, /styles\.homeCopyBlock/u);
+  // homeCopyBlock removed with starters
   assert.doesNotMatch(screen, /styles\.liveLine|styles\.liveText|styles\.liveAuthor/u);
 });
 

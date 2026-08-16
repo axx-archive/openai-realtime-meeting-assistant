@@ -115,5 +115,6 @@ test('live recap and transcript open the permanent record and retain an exact re
   assert.match(sheet, /transcriptOffsetRef/u);
   assert.match(sheet, /recapOffsetRef/u);
   assert.match(sheet, /setAccessibilityFocus/u);
-  assert.match(shell, /Meetings: 'work'/u);
+  // Meetings routes to 'home' per 4-destination model (STRIDE mobile E2E evolution)
+  assert.match(shell, /Meetings: 'home'/u);
 });

@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ink, radius, space, type } from '../theme/tokens';
+import { colors, ink, radius, space, type } from '../theme/tokens';
 
 export type RoomParticipantRow = {
   key: string;
@@ -44,7 +44,7 @@ function endpointLabel(participant: RoomParticipantRow, duplicateIndex: number):
 function Status({ icon, label, live = false }: { icon: SFSymbol; label: string; live?: boolean }) {
   return (
     <View style={[styles.status, live && styles.statusLive]}>
-      <SymbolView name={icon} tintColor={live ? '#30D158' : 'rgba(255,255,255,0.50)'} size={11} />
+      <SymbolView name={icon} tintColor={live ? colors.ember : 'rgba(255,255,255,0.50)'} size={11} />
       <Text style={[styles.statusText, live && styles.statusTextLive]}>{label}</Text>
     </View>
   );
@@ -156,16 +156,16 @@ const styles = StyleSheet.create({
   avatar: { position: 'relative', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[700] },
   avatarActive: { borderColor: 'rgba(48,209,88,0.58)' },
   avatarText: { color: '#FFFFFF', fontSize: 18, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
-  activeDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: ink[850], backgroundColor: '#30D158' },
+  activeDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: ink[850], backgroundColor: colors.ember },
   participantCopy: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   participantName: { ...type.bodyMedium, flexShrink: 1, color: '#FFFFFF' },
-  sharingLabel: { fontSize: 8, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.7, color: '#30D158' },
+  sharingLabel: { fontSize: 8, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.7, color: colors.ember },
   deviceLabel: { ...type.caption, marginBottom: 5, color: 'rgba(255,255,255,0.43)' },
   statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   status: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.07)' },
   statusLive: { backgroundColor: 'rgba(48,209,88,0.12)' },
   statusText: { fontSize: 9, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 12, color: 'rgba(255,255,255,0.50)' },
-  statusTextLive: { color: '#30D158' },
+  statusTextLive: { color: colors.ember },
   pressed: { opacity: 0.76, transform: [{ scale: 0.98 }] },
 });

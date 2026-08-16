@@ -1,20 +1,27 @@
 import type { RootStackParamList } from './types';
 
-export type NativeShellDestination = 'home' | 'video' | 'chat' | 'files' | 'work' | 'network' | 'work-search' | 'you';
+export type NativeShellDestination = 'home' | 'video' | 'chat' | 'files';
 export type NativeShellLayout = 'compact' | 'sidebar';
 
 export const NATIVE_SHELL_SIDEBAR_MIN_WIDTH = 744;
 export const NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE = 1.35;
 
+/**
+ * Four destinations only — Home / Meet / Chat / Files.
+ *
+ * This is the product bar for both iPhone and iPad. Work, Network, Work Search,
+ * and You are NOT shown in the nav, regardless of shellAccess. Meet dest stays
+ * 'video'. Icons use custom stroke marks matching the live web stroke family
+ * (approved on 45e2f7c1 / live 93275a40):
+ *   • Chat = 'chat-bubble' (speech bubble, rounded rect + lower-left tail)
+ *   • Files = 'stacked-sheets' (two overlapping rectangles)
+ * NOT SF bubble.left.and.bubble.right.fill, NOT folder.fill.
+ */
 export const nativeShellDestinations = [
-  { id: 'home', label: 'Home', route: 'Canvas', icon: 'house.fill' },
-  { id: 'video', label: 'Meet', route: 'Meet', icon: 'video.fill' },
-  { id: 'chat', label: 'Chat', route: 'Chat', icon: 'bubble.left.and.bubble.right.fill' },
-  { id: 'files', label: 'Files', route: 'Files', icon: 'folder.fill' },
-  { id: 'work', label: 'Work', route: 'WorkHome', icon: 'rectangle.3.group.fill' },
-  { id: 'network', label: 'Network', route: 'NetworkHome', icon: 'point.3.connected.trianglepath.dotted' },
-  { id: 'work-search', label: 'Work Search', route: 'WorkSearchHome', icon: 'magnifyingglass' },
-  { id: 'you', label: 'You', route: 'YouHome', icon: 'person.crop.circle.fill' },
+  { id: 'home', label: 'Home', route: 'Canvas', icon: 'home-mark' },
+  { id: 'video', label: 'Meet', route: 'Meet', icon: 'meet-mark' },
+  { id: 'chat', label: 'Chat', route: 'Chat', icon: 'chat-bubble' },
+  { id: 'files', label: 'Files', route: 'Files', icon: 'stacked-sheets' },
 ] as const satisfies ReadonlyArray<{
   id: NativeShellDestination;
   label: string;
@@ -25,51 +32,51 @@ export const nativeShellDestinations = [
 
 export type NativeShellAccess = 'core' | 'full';
 
-const coreShellDestinationIDs = new Set<NativeShellDestination>(['home', 'video', 'chat', 'files']);
-
-export function nativeShellDestinationsForAccess(access: unknown) {
-  return access === 'full'
-    ? nativeShellDestinations
-    : nativeShellDestinations.filter(({ id }) => coreShellDestinationIDs.has(id));
+export function nativeShellDestinationsForAccess(_access: unknown) {
+  return nativeShellDestinations;
 }
 
-export function nativeShellDestinationAllowed(destination: NativeShellDestination, access: unknown): boolean {
-  return access === 'full' || coreShellDestinationIDs.has(destination);
+export function nativeShellDestinationAllowed(destination: NativeShellDestination, _access: unknown): boolean {
+  return ['home', 'video', 'chat', 'files'].includes(destination);
 }
 
+/**
+ * Route → destination mapping. Routes not in the four-dest nav (Work, Network,
+ * etc.) resolve to Home so the shell stays on a valid destination. The full
+ * screens remain accessible via deep links and in-app navigation; they just
+ * don't appear in the product bar.
+ */
 const destinationRoutes: Partial<Record<keyof RootStackParamList, NativeShellDestination>> = {
   Canvas: 'home',
   Meet: 'video',
   Chat: 'chat',
-  Deck: 'work',
-  // Permanent governed records belong to Work. Video remains the distinct
-  // live-room discovery/delivery surface.
-  Meetings: 'work',
-  WorkHome: 'work',
-  Board: 'work',
   Files: 'files',
-  AgentTeam: 'work',
-  Memory: 'work',
-  Intelligence: 'work',
-  NetworkHome: 'network',
-  NetworkDraft: 'network',
-  NetworkPreview: 'network',
-  NetworkRecruiterView: 'network',
-  NetworkBlocks: 'network',
-  WorkSearchHome: 'work-search',
-  NetworkSearch: 'work-search',
-  ContactInbox: 'work-search',
-  YouHome: 'you',
-  Profile: 'you',
-  WorkRecord: 'you',
-  Organizations: 'you',
-  OrganizationPeople: 'you',
-  CoworkerProfile: 'you',
-  OrganizationRequests: 'you',
-  OrganizationRecruiting: 'you',
-  ContributionApprovals: 'you',
-  Settings: 'you',
-  Alerts: 'you',
+  Deck: 'home',
+  Meetings: 'home',
+  WorkHome: 'home',
+  Board: 'home',
+  AgentTeam: 'home',
+  Memory: 'home',
+  Intelligence: 'home',
+  NetworkHome: 'home',
+  NetworkDraft: 'home',
+  NetworkPreview: 'home',
+  NetworkRecruiterView: 'home',
+  NetworkBlocks: 'home',
+  WorkSearchHome: 'home',
+  NetworkSearch: 'home',
+  ContactInbox: 'home',
+  YouHome: 'home',
+  Profile: 'home',
+  WorkRecord: 'home',
+  Organizations: 'home',
+  OrganizationPeople: 'home',
+  CoworkerProfile: 'home',
+  OrganizationRequests: 'home',
+  OrganizationRecruiting: 'home',
+  ContributionApprovals: 'home',
+  Settings: 'home',
+  Alerts: 'home',
 };
 
 const focusedRoutes = new Set<keyof RootStackParamList>([
@@ -97,7 +104,7 @@ export function nativeShellDestinationForRoute(
   route: keyof RootStackParamList | undefined,
   params?: unknown,
 ): NativeShellDestination {
-  // Legacy Deck segment handling for backward compatibility
+  // Legacy Deck segment handling: rooms → Meet, threads → Chat
   if (route === 'Deck' && params && typeof params === 'object') {
     const segment = (params as { segment?: unknown }).segment;
     if (segment === 'rooms') return 'video';
@@ -125,7 +132,8 @@ export function createNativeShellSelectionCoordinator(
       destination: (typeof nativeShellDestinations)[number],
       navigate: (route: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => void,
     ) {
-      navigate(destination.route, 'params' in destination ? destination.params : undefined);
+      const params = 'params' in destination ? destination.params as RootStackParamList[keyof RootStackParamList] | undefined : undefined;
+      navigate(destination.route, params);
     },
     commit(route: keyof RootStackParamList | undefined, params?: unknown) {
       // Full-screen and otherwise unmapped routes belong to the destination

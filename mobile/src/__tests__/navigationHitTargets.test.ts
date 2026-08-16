@@ -26,5 +26,6 @@ test('Canvas has no duplicate shortcut band competing with the universal shell',
   assert.match(shell, /compactItem: \{[\s\S]*minHeight: 48/);
   assert.match(shell, /bottomRail: \{[\s\S]*minHeight: 58/);
   assert.match(shell, /compactItemSelected: \{ backgroundColor: colors\.accentSoft \}/);
-  assert.match(shell, /!compact \? \([\s\S]*destination\.label/);
+  // Slim rail design: icon-only marks without labels (STRIDE mobile E2E evolution)
+  assert.match(shell, /DestMark/);
 });

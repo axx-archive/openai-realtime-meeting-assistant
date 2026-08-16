@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
@@ -30,7 +29,7 @@ import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext'
 import { runPersonalRealtimeTap } from '../realtime/personalRealtimeTap';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { explicitProjectAttachmentEnabled, safeProjectContextFromResponse } from '../messaging/projectContextPreflight';
-import type { HomeStarterDestination, HomeStarterSuggestion } from '../api/types';
+import type { HomeStarterDestination } from '../api/types';
 import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -38,55 +37,25 @@ import { colors, radius, space, type } from '../theme/tokens';
 type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
- * The Canvas — design §4 and §9.
+ * The Canvas — design §4 and §9 (STRIDE mobile E2E evolution).
  *
- * The root of the app is a conversation, not a dashboard. Realtime voice and
- * one ordinary text field are two inputs to the same private Scout contract.
- * Work remains the place to browse or create named chats and channels; Home
- * never asks the person to choose a tool or deliverable before speaking.
+ * Home is continuity: last work and threads to resume. The greeting and
+ * starter cards (Continue / Explore / Create / Challenge Canvas) are gone.
+ * The root is a conversation, not a dashboard. Realtime voice and one ordinary
+ * text field are two inputs to the same private Scout contract.
  *
  * Nothing here blocks first paint: the compact voice control renders before
  * current context resolves, then the server-owned snapshot fills in beneath
  * the composer without changing what the primary input means.
  */
 
-/**
- * The greeting carries no name — matching the web canon, whose
- * `officeLaunchGreeting` is simply "good morning."
- *
- * A name in a 36pt headline cannot be made robust. "Good afternoon,
- * Christopher." wraps; a display name stored as "Dr. May" greets you by your
- * title; initials, single names, and non-Latin scripts each break differently.
- * Every fix is another heuristic that is wrong for somebody, and a headline
- * that is occasionally wrong is worse than one that is never personal.
- *
- * Personal context belongs in the bounded continuation rows below the composer,
- * where every item resolves to an exact server-owned destination.
- */
-function greeting(): string {
-  const hour = new Date().getHours();
-  const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  return `Good ${part}.`;
-}
-
-function starterPresentation(id: 'continue' | 'explore' | 'create' | 'challenge') {
-  switch (id) {
-    case 'continue': return { icon: 'arrow.clockwise' as const, color: colors.success };
-    case 'explore': return { icon: 'scope' as const, color: colors.info };
-    case 'create': return { icon: 'sparkles' as const, color: '#A78BFA' };
-    case 'challenge': return { icon: 'diamond' as const, color: colors.ember };
-  }
-}
-
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
-  const { fontScale } = useWindowDimensions();
   const { sessionToken } = useAuth();
   const home = useHomeCanvas();
   const realtime = usePersonalRealtimeContext();
   const listening = realtime.active;
   const [draft, setDraft] = useState('');
-  const [activeStarterID, setActiveStarterID] = useState<string | null>(null);
   const [draftDestination, setDraftDestination] = useState<HomeStarterDestination | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sending, setSending] = useState(false);
@@ -99,8 +68,6 @@ export function CanvasScreen() {
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [projectError, setProjectError] = useState('');
   const [projectFocusGeneration, setProjectFocusGeneration] = useState(0);
-  const largeHomeType = fontScale >= 1.5;
-  const activeStarter = home.starters.find((starter) => starter.id === activeStarterID);
   const inputRef = useRef<TextInput>(null);
   const draftRef = useRef(draft);
   const draftDestinationRef = useRef<HomeStarterDestination | null>(draftDestination);
@@ -338,24 +305,6 @@ export function CanvasScreen() {
     });
   }, [home.continuity, navigation]);
 
-  const useStarterSuggestion = useCallback((suggestion: HomeStarterSuggestion) => {
-    projectRequestGenerationRef.current += 1;
-    setDraft(suggestion.text);
-    setDraftDestination(suggestion.destination);
-    openingAttemptRef.current = null;
-    threadAttemptRef.current = null;
-    setSendError('');
-    setProjectChoices([]);
-    setSelectedProject(null);
-    setProjectChooserOpen(false);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setNativeProps({
-        selection: { start: suggestion.text.length, end: suggestion.text.length },
-      });
-    });
-  }, []);
-
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
@@ -366,22 +315,20 @@ export function CanvasScreen() {
       >
           <View style={[canvasCradleComposition.skyAbove, keyboardVisible && styles.keyboardSky]} />
 
-          <View style={[canvasCradleComposition.copyBlock, styles.homeCopyBlock]}>
-            <Text maxFontSizeMultiplier={1.35} style={styles.greeting}>{greeting()}</Text>
-            {liveMeeting ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${liveMeeting.title} is live. ${liveMeeting.detail}. Open meeting.`}
-                onPress={() => openContinuity(liveMeeting)}
-                style={({ pressed }) => [styles.liveMeetingJump, pressed && styles.liveMeetingJumpPressed]}
-              >
-                <View accessibilityElementsHidden style={styles.liveMeetingDot} />
-                <Text maxFontSizeMultiplier={1.5} numberOfLines={1} style={styles.liveMeetingTitle}>{liveMeeting.title}</Text>
-                <Text maxFontSizeMultiplier={1.5} numberOfLines={1} style={styles.liveMeetingDetail}>{liveMeeting.detail}</Text>
-                <SymbolView name="chevron.right" size={12} tintColor={colors.text3} />
-              </Pressable>
-            ) : null}
-          </View>
+          {/* Home is continuity — no greeting, no starters. Just live meeting + composer. */}
+          {liveMeeting ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${liveMeeting.title} is live. ${liveMeeting.detail}. Open meeting.`}
+              onPress={() => openContinuity(liveMeeting)}
+              style={({ pressed }) => [styles.liveMeetingJump, pressed && styles.liveMeetingJumpPressed]}
+            >
+              <View accessibilityElementsHidden style={styles.liveMeetingDot} />
+              <Text maxFontSizeMultiplier={1.5} numberOfLines={1} style={styles.liveMeetingTitle}>{liveMeeting.title}</Text>
+              <Text maxFontSizeMultiplier={1.5} numberOfLines={1} style={styles.liveMeetingDetail}>{liveMeeting.detail}</Text>
+              <SymbolView name="chevron.right" size={12} tintColor={colors.text3} />
+            </Pressable>
+          ) : null}
 
           <View style={styles.composerBlock}>
             <View style={styles.composer}>
@@ -509,62 +456,7 @@ export function CanvasScreen() {
             {sendError ? <Text accessibilityRole="alert" maxFontSizeMultiplier={1.8} style={styles.sendError}>{sendError}</Text> : null}
           </View>
 
-          {home.starters.length > 0 && !activeStarter ? (
-            <View accessibilityLabel="Ways to start" style={styles.starters}>
-              {home.starters.map((starter) => (
-                <Pressable
-                  key={starter.id}
-                  disabled={!home.startersReady}
-                  accessibilityRole="button"
-                  accessibilityLabel={starter.label}
-                  accessibilityHint={home.startersReady ? 'Shows editable message suggestions.' : 'Suggestions are loading.'}
-                  accessibilityState={{ disabled: !home.startersReady, expanded: activeStarterID === starter.id }}
-                  onPress={() => setActiveStarterID(starter.id)}
-                  style={({ pressed }) => [
-                    styles.starter,
-                    largeHomeType && styles.starterLargeType,
-                    activeStarterID === starter.id && styles.starterSelected,
-                    pressed && styles.starterPressed,
-                  ]}
-                >
-                  <View style={styles.starterHeading}>
-                    <SymbolView name={starterPresentation(starter.id).icon} size={14} tintColor={starterPresentation(starter.id).color} />
-                    <Text maxFontSizeMultiplier={1.6} style={styles.starterLabel}>{starter.label}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          {activeStarter ? (
-            <View accessibilityLabel={`${activeStarter.label} suggestions`} style={styles.suggestionSurface}>
-              <Pressable
-                accessibilityLabel="Back to starter categories"
-                accessibilityRole="button"
-                onPress={() => setActiveStarterID(null)}
-                style={({ pressed }) => [styles.suggestionHeadingControl, pressed && styles.starterPressed]}
-              >
-                <SymbolView name="chevron.left" size={13} tintColor={colors.text3} />
-                <Text maxFontSizeMultiplier={1.6} style={styles.suggestionHeading}>{activeStarter.label}</Text>
-              </Pressable>
-              {activeStarter.suggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={suggestion.text}
-                  accessibilityHint={`${suggestion.whyThis} Fills the editable message field. Nothing is sent until you press Send.`}
-                  onPress={() => useStarterSuggestion(suggestion)}
-                  style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
-                >
-                  <View style={styles.suggestionCopy}>
-                    <Text maxFontSizeMultiplier={1.8} style={styles.suggestionText}>{suggestion.text}</Text>
-                    <Text maxFontSizeMultiplier={1.8} style={styles.suggestionWhy}>{suggestion.whyThis}</Text>
-                  </View>
-                  <Text accessibilityElementsHidden maxFontSizeMultiplier={1} style={styles.suggestionArrow}>›</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
+          {/* Starters (Continue/Explore/Create/Challenge) removed — Home is continuity only. */}
 
           {voiceNotice ? (
             <Text accessibilityRole={realtime.error ? 'alert' : 'text'} maxFontSizeMultiplier={1.35} style={[styles.voiceNotice, realtime.error && styles.voiceError]}>{voiceNotice}</Text>
@@ -590,7 +482,7 @@ export function CanvasScreen() {
               ))}
             </View>
           ) : null}
-          {home.freshness === 'loading' && home.continuity.length === 0 && home.starters.length === 0 ? (
+          {home.freshness === 'loading' && home.continuity.length === 0 ? (
             <ActivityIndicator accessibilityLabel="Loading your current context" color={colors.text3} size="small" style={styles.homeLoading} />
           ) : null}
           {home.refreshError ? (
@@ -684,98 +576,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface3,
   },
   voiceMicLive: { backgroundColor: colors.ember },
-  greeting: {
-    // The only sentence on the page, so it carries the page rather than sharing
-    // weight with the live line. Tracking tightens as size grows — at 36pt the
-    // default spacing reads loose and juvenile.
-    fontSize: 32,
-    fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600',
-    letterSpacing: -1,
-    lineHeight: 38,
-    color: colors.text1,
-    textAlign: 'center',
-    maxWidth: '100%',
-    flexShrink: 1,
-    // Bound to the greeting so the two read as one unit, not two stacked items.
-    marginBottom: space[2],
-  },
-  homeCopyBlock: { width: '100%', minHeight: 0 },
   // When the software keyboard owns the lower half of the screen, elastic sky
   // would preserve empty space at the expense of the editable suggestions.
   // Collapse only that ornament; the composer and every available action keep
   // their stable order and remain reachable without a hidden first scroll.
   keyboardSky: { flex: 0, height: space[2] },
-  starters: {
-    width: '100%',
-    maxWidth: 560,
-    marginTop: space[3],
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: space[2],
-  },
-  starter: {
-    minWidth: 148,
-    minHeight: 72,
-    flexGrow: 1,
-    flexBasis: '47%',
-    justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: radius.lg,
-    borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line1,
-    backgroundColor: colors.surface1,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-  },
-  starterLargeType: {
-    flexBasis: '100%',
-    minHeight: 0,
-  },
-  starterSelected: {
-    borderColor: colors.line2,
-    backgroundColor: colors.surface2,
-  },
+  // starterPressed retained for project change buttons
   starterPressed: { opacity: 0.62 },
-  starterHeading: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  starterLabel: { ...type.captionMedium, color: colors.text1 },
-  suggestionSurface: {
-    width: '100%',
-    maxWidth: 560,
-    marginTop: space[4],
-    gap: 2,
-  },
-  suggestionHeadingControl: {
-    minHeight: 40,
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: space[2],
-  },
-  suggestionHeading: {
-    ...type.label,
-    color: colors.text3,
-  },
-  suggestionRow: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[2],
-    paddingHorizontal: space[2],
-    paddingVertical: space[2],
-    borderRadius: radius.md,
-    borderCurve: 'continuous',
-  },
-  suggestionRowPressed: { backgroundColor: colors.surface2, transform: [{ scale: 0.96 }] },
-  suggestionCopy: { minWidth: 0, flex: 1, gap: 2 },
-  suggestionText: { ...type.caption, color: colors.text2 },
-  suggestionWhy: { ...type.label, color: colors.text3 },
-  suggestionArrow: { fontSize: 19, lineHeight: 22, color: colors.text3 },
   composerBlock: {
     width: '100%',
     maxWidth: 560,
@@ -796,7 +603,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface1,
   },
   liveMeetingJumpPressed: { transform: [{ scale: 0.98 }], opacity: 0.86 },
-  liveMeetingDot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.success },
+  liveMeetingDot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.ember },
   liveMeetingTitle: { ...type.caption, flexShrink: 1, fontWeight: '600', color: colors.text1 },
   liveMeetingDetail: { ...type.caption, flexShrink: 1, color: colors.text3 },
   composer: {
