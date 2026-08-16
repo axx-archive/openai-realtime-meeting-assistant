@@ -1013,9 +1013,10 @@
       }
 
       /* Wordmark hidden from content chrome — brand identity is the mark on the
-         rail; workspace identity (Bonfire) lives in the header as before. */
+         rail; workspace identity (Bonfire) lives in the header as before.
+         !important wins over the later .wordmark { display: inline-block }. */
       .topbar__brand-wordmark {
-        display: none;
+        display: none !important;
         width: 68px;
         height: 17px;
         color: var(--wordmark);
@@ -5620,7 +5621,10 @@
         min-width: 0;
       }
 
+      /* Wordmark hidden from settings chrome — brand identity is the mark on the
+         rail only; !important wins over the later .wordmark rule. */
       .settings-header__wordmark {
+        display: none !important;
         width: 76px;
         height: 20px;
         flex: 0 0 auto;
