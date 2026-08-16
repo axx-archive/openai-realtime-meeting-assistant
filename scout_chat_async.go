@@ -648,7 +648,8 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 	}
 	// When the worker is unavailable and the user is asking for a deck, generate
 	// an HTML deck directly instead of falling through to a markdown outline.
-	if !scoutAgentWorkerAvailable() && scoutChatDeckRequestDetected(query) {
+	// Also route confirmations after a direction pass to generate the deck.
+	if !scoutAgentWorkerAvailable() && (scoutChatDeckRequestDetected(query) || scoutChatDeckConfirmationDetected(query, history)) {
 		return app.resolveInlineDeckReply(ctx, user, query, history)
 	}
 	query = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
@@ -869,7 +870,7 @@ func deckDirectionEstablished(query string, history []scoutChatTurn) bool {
 	for _, turn := range history {
 		text := strings.ToLower(turn.text)
 		// Scout asked direction questions — only counts if there's a deck request in context
-		if hasDeckContext && (turn.role == "assistant" || turn.role == "scout") && looksLikeDirectionPass(text) {
+		if hasDeckContext && (turn.role == "assistant" || turn.role == "scout") && scoutChatLooksLikeDirectionPass(text) {
 			return true
 		}
 		// User provided direction in a previous message
@@ -900,54 +901,9 @@ func hasDeckRequestInHistory(history []scoutChatTurn) bool {
 func lastScoutMessageIsDirectionPass(history []scoutChatTurn) bool {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].role == "assistant" || history[i].role == "scout" {
-			return looksLikeDirectionPass(strings.ToLower(history[i].text))
+			return scoutChatLooksLikeDirectionPass(strings.ToLower(history[i].text))
 		}
 	}
-	return false
-}
-
-// looksLikeDirectionPass detects if text appears to be asking about design direction.
-// This is broader than just checking for "direction/aesthetic/visual/style" keywords —
-// a real direction pass might ask "Should this feel corporate or startup? Full-bleed or typographic?"
-func looksLikeDirectionPass(text string) bool {
-	// Direct keywords
-	directKeywords := []string{
-		"direction", "aesthetic", "visual", "style", "look and feel",
-		"design", "theme", "color", "vibe", "mood", "tone",
-	}
-	for _, kw := range directKeywords {
-		if strings.Contains(text, kw) {
-			return true
-		}
-	}
-
-	// Question patterns about design choices
-	designChoicePatterns := []string{
-		"corporate", "startup", "professional", "playful", "modern", "classic",
-		"full-bleed", "typographic", "minimal", "bold", "clean", "colorful",
-		"images", "photo", "buttoned-up", "energy", "feel", "investor",
-		"audience", "presenting to",
-	}
-	// If text contains a question mark AND any design choice pattern, it's likely direction
-	if strings.Contains(text, "?") {
-		for _, pattern := range designChoicePatterns {
-			if strings.Contains(text, pattern) {
-				return true
-			}
-		}
-	}
-
-	// Common direction pass question starters
-	questionStarters := []string{
-		"should this", "would you like", "what kind of", "how should",
-		"do you want", "are you thinking", "prefer",
-	}
-	for _, starter := range questionStarters {
-		if strings.Contains(text, starter) && strings.Contains(text, "?") {
-			return true
-		}
-	}
-
 	return false
 }
 

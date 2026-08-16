@@ -499,6 +499,135 @@ func TestInlineDeckConfirmationVariants(t *testing.T) {
 	}
 }
 
+// TestDeckConfirmationDetectedRoutesCorrectly tests that scoutChatDeckConfirmationDetected
+// properly gates confirmations to the inline deck path. This tests the actual routing gate,
+// not just resolveInlineDeckReply.
+func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
+	cases := []struct {
+		name    string
+		text    string
+		history []scoutChatTurn
+		want    bool
+	}{
+		// Should route to deck generation
+		{
+			name: "yes after direction pass with deck request",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy?"},
+			},
+			want: true,
+		},
+		{
+			name: "looks good after direction pass",
+			text: "looks good",
+			history: []scoutChatTurn{
+				{role: "user", text: "create a presentation about our product"},
+				{role: "scout", text: "Are you presenting to investors or a creative team? Full-bleed imagery or clean typographic slides?"},
+			},
+			want: true,
+		},
+		{
+			name: "proceed after direction pass",
+			text: "proceed",
+			history: []scoutChatTurn{
+				{role: "user", text: "build a pitch deck"},
+				{role: "scout", text: "Should this feel professional and polished, or more startup energy?"},
+			},
+			want: true,
+		},
+		// Should NOT route (missing deck request in history)
+		{
+			name: "yes without deck request",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "hello"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		// Should NOT route (no direction pass from Scout)
+		{
+			name: "yes after unrelated scout message",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "I'll help you with that."},
+			},
+			want: false,
+		},
+		// Should NOT route (not a confirmation phrase)
+		{
+			name: "non-confirmation after direction pass",
+			text: "I want something different",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		// Empty/edge cases
+		{
+			name: "empty text",
+			text: "",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel corporate?"},
+			},
+			want: false,
+		},
+		{
+			name: "empty history",
+			text: "yes",
+			history: nil,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scoutChatDeckConfirmationDetected(tc.text, tc.history)
+			if got != tc.want {
+				t.Errorf("scoutChatDeckConfirmationDetected(%q, history) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLooksLikeDirectionPass tests the direction pass detection function.
+func TestLooksLikeDirectionPass(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		// Direct keywords
+		{"what visual direction would you like?", true},
+		{"what's your aesthetic preference?", true},
+		{"what style are you going for?", true},
+		{"what's the design theme?", true},
+		// Question patterns with design choices
+		{"should this feel corporate or startup?", true},
+		{"full-bleed imagery or typographic slides?", true},
+		{"are you presenting to investors?", true},
+		{"do you want something minimal or bold?", true},
+		// Not direction passes
+		{"i'll create that deck for you", false},
+		{"here's your presentation", false},
+		{"let me help with that", false},
+		{"", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.text, func(t *testing.T) {
+			got := scoutChatLooksLikeDirectionPass(tc.text)
+			if got != tc.want {
+				t.Errorf("scoutChatLooksLikeDirectionPass(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDeckAskRoutesToInlineDeckWithStubWorker tests the live path: a deck ask
 // through the routing system with stub worker should produce an in-thread
 // html_deck message, not a proposal or outline.

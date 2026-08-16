@@ -759,6 +759,95 @@ func scoutChatDeckRequestDetected(text string) bool {
 	return false
 }
 
+// scoutChatDeckConfirmationDetected returns true when the message is a short
+// confirmation (like "yes", "looks good", "proceed") AND there's a deck request
+// earlier in history AND the last Scout message was a direction pass.
+// This allows the deck generation to proceed after a direction pass without
+// requiring the user to repeat "deck" keywords.
+func scoutChatDeckConfirmationDetected(text string, history []scoutChatTurn) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	// Check if this is a short confirmation phrase
+	confirmPhrases := []string{
+		"just make it", "make it", "proceed", "go ahead", "looks good",
+		"that works", "perfect", "do it", "yes", "yep", "sure", "ok", "okay",
+		"sounds good", "i like it", "great", "let's go", "build it",
+		"let's do it", "go for it", "yes please", "please", "thanks",
+	}
+	isConfirmation := false
+	for _, phrase := range confirmPhrases {
+		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
+			isConfirmation = true
+			break
+		}
+	}
+	if !isConfirmation {
+		return false
+	}
+	// Must have a deck request earlier in history
+	hasDeckRequest := false
+	for _, turn := range history {
+		if turn.role == "user" && scoutChatDeckRequestDetected(turn.text) {
+			hasDeckRequest = true
+			break
+		}
+	}
+	if !hasDeckRequest {
+		return false
+	}
+	// Last Scout message must be a direction pass
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].role == "assistant" || history[i].role == "scout" {
+			return scoutChatLooksLikeDirectionPass(strings.ToLower(history[i].text))
+		}
+	}
+	return false
+}
+
+// scoutChatLooksLikeDirectionPass detects if text appears to be asking about
+// design/aesthetic direction. Used to recognize when Scout has issued a direction
+// pass so that a subsequent confirmation can trigger deck generation.
+func scoutChatLooksLikeDirectionPass(text string) bool {
+	// Direct keywords
+	directKeywords := []string{
+		"direction", "aesthetic", "visual", "style", "look and feel",
+		"design", "theme", "color", "vibe", "mood", "tone",
+	}
+	for _, kw := range directKeywords {
+		if strings.Contains(text, kw) {
+			return true
+		}
+	}
+	// Question patterns about design choices
+	designChoicePatterns := []string{
+		"corporate", "startup", "professional", "playful", "modern", "classic",
+		"full-bleed", "typographic", "minimal", "bold", "clean", "colorful",
+		"images", "photo", "buttoned-up", "energy", "feel", "investor",
+		"audience", "presenting to",
+	}
+	// If text contains a question mark AND any design choice pattern, it's likely direction
+	if strings.Contains(text, "?") {
+		for _, pattern := range designChoicePatterns {
+			if strings.Contains(text, pattern) {
+				return true
+			}
+		}
+	}
+	// Common direction pass question starters
+	questionStarters := []string{
+		"should this", "would you like", "what kind of", "how should",
+		"do you want", "are you thinking", "prefer",
+	}
+	for _, starter := range questionStarters {
+		if strings.Contains(text, starter) && strings.Contains(text, "?") {
+			return true
+		}
+	}
+	return false
+}
+
 // scoutChatSimpleOutlineRequestDetected returns true when the message matches
 // the reviewed phrase list for simple in-thread outline/presentation asks.
 // These are forced to conversational_reply (Tier 0) BEFORE the deterministic
