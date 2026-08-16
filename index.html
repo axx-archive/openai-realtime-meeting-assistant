@@ -15246,6 +15246,17 @@
           transform: translateY(0);
         }
 
+        /* For left-aligned messages (Scout and peer), anchor the hover chip
+           from the left so it extends rightward into available space. Short
+           bubbles with a wide chip would otherwise clip the left cap against
+           the thread's overflow-x boundary. User messages stay right-anchored
+           since they're right-aligned. */
+        #chatTool .scout-chat-msg--scout .desktop-chat-actions,
+        #chatTool .scout-chat-msg--peer .desktop-chat-actions {
+          right: auto;
+          left: 0;
+        }
+
         /* Desktop ownership actions live in the same Slack-like More menu as
            reactions. The legacy standalone delete stays only for touch/mobile. */
         #chatTool .scout-chat-msg > .scout-chat-msg__delete {
