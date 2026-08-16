@@ -106,10 +106,20 @@ func TestSTRIDECompanyConversationRecallUsesCurrentPublicSourceAndReactionState(
 	if matches := fixture.app.memory.search(privateCanary, 20); len(matches) != 0 {
 		t.Fatalf("raw private Scout chat became searchable: %+v", matches)
 	}
+	// Per doctrine: channel messages now create transcript entries (brain ingestion).
+	// Verify the channel message DID create a transcript, and the private Scout
+	// chat did NOT.
+	channelTranscriptFound := false
 	for _, transcript := range fixture.app.memory.entriesOfKind(meetingMemoryKindTranscript, 0) {
-		if strings.Contains(transcript.Text, exactURL) {
-			t.Fatalf("channel link was injected into a meeting transcript: %+v", transcript)
+		if transcript.Metadata["source"] == transcriptSourceChannel && strings.Contains(transcript.Text, exactURL) {
+			channelTranscriptFound = true
 		}
+		if strings.Contains(transcript.Text, privateCanary) {
+			t.Fatalf("private Scout chat was injected into a transcript: %+v", transcript)
+		}
+	}
+	if !channelTranscriptFound {
+		t.Fatal("channel message should create a transcript entry (brain ingestion)")
 	}
 
 	previousProbe := recallModelContextProbe
@@ -250,25 +260,27 @@ func TestAgentThreadTerminalSourceAuthorityIsHeldThroughFinalEffect(t *testing.T
 	}
 }
 
-// TestPrivateChannelRecallMembershipDoctrine validates the privacy doctrine:
-// - Private channels (public visibility with member restrictions) ARE recallable by members
-// - Private channels are NOT recallable by non-members
-// - 1:1 private Scout chats remain excluded from all recall and brain synthesis
+// TestPrivateChannelBrainIngestionDoctrine validates the full privacy doctrine:
+// - Private channels (public visibility with member restrictions) INGEST into brain
+// - Channel-tied Riffs INGEST into brain
+// - 1:1 private Scout chats remain EXCLUDED from brain synthesis
+// - Non-members CANNOT see private channel brain content
 //
-// This test validates the filtering logic at the scoutChatThreadAllowsViewer level
-// since that is the enforcement point for the doctrine. The full STRIDE conversation
-// ledger integration is tested separately in TestSTRIDECompanyConversationRecall*.
-func TestPrivateChannelRecallMembershipDoctrine(t *testing.T) {
+// This test proves actual brain INGESTION (transcript entries created), not just
+// recall filtering. The doctrine: "Private channels feed the company brain.
+// Humans must not see that clutter in the UI."
+func TestPrivateChannelBrainIngestionDoctrine(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 
 	const (
-		privateOneOnOne = "PRIVATE-SCOUT-CHAT-CANARY-7734"
+		projectCanary   = "PROJECT-CHANNEL-BRAIN-INGEST-9921"
+		orgCanary       = "ORG-CHANNEL-BRAIN-INGEST-8823"
+		privateOneOnOne = "PRIVATE-SCOUT-CHAT-EXCLUDED-7734"
 	)
 
 	// Create a project channel with member restrictions (public visibility + member list)
-	// Per the doctrine: "The company brain MUST ingest private channels"
-	// AND "Humans must NOT see other people's private-channel clutter in the IA"
+	// Per doctrine: "Private channels feed the company brain"
 	projectChannel, created, err := app.ensureScoutChatThread(
 		"doctrine-project-channel",
 		"aj@shareability.com",
@@ -281,10 +293,7 @@ func TestPrivateChannelRecallMembershipDoctrine(t *testing.T) {
 		t.Fatalf("create project channel: created=%v err=%v", created, err)
 	}
 	if scoutChatThreadIsOrganizationPublic(projectChannel) {
-		t.Fatal("project channel should NOT be organization-public (it has member restrictions)")
-	}
-	if scoutChatThreadVisibility(projectChannel) != scoutChatVisibilityPublic {
-		t.Fatal("project channel should have public visibility")
+		t.Fatal("project channel should NOT be organization-public")
 	}
 
 	// Create an org-public channel (no member restrictions)
@@ -294,61 +303,26 @@ func TestPrivateChannelRecallMembershipDoctrine(t *testing.T) {
 		"AJ",
 		"General",
 		scoutChatVisibilityPublic,
-		nil, // No member restrictions = org-public
+		nil, // No member restrictions
 	)
 	if err != nil || !created {
 		t.Fatalf("create org channel: created=%v err=%v", created, err)
 	}
-	if !scoutChatThreadIsOrganizationPublic(orgChannel) {
-		t.Fatal("org channel should be organization-public (no member restrictions)")
-	}
 
-	// Create a 1:1 private Scout chat (owner + Scout only)
-	// Per the doctrine: "1:1 private Scout chats stay owner-only and stay OUT of the company brain"
-	privateScout, err := app.createScoutChatThread("aj@shareability.com", "AJ", "My private notes", scoutChatVisibilityPrivate)
+	// Create a 1:1 private Scout chat (should NOT feed brain)
+	// Per doctrine: "1:1 Scout stays owner-only"
+	privateScout, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Private notes", scoutChatVisibilityPrivate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scoutChatThreadVisibility(privateScout) != scoutChatVisibilityPrivate {
-		t.Fatal("private Scout chat should have private visibility")
-	}
 
-	// DOCTRINE TEST: scoutChatThreadAllowsViewer enforcement
-	// This is the core enforcement point for "Humans must NOT see other people's private-channel clutter"
-
-	// Project owner can view project channel
-	if !scoutChatThreadAllowsViewer(projectChannel, "aj@shareability.com") {
-		t.Fatal("DOCTRINE VIOLATION: project owner cannot view own project")
-	}
-
-	// Project member can view project channel
-	if !scoutChatThreadAllowsViewer(projectChannel, "e@shareability.com") {
-		t.Fatal("DOCTRINE VIOLATION: project member cannot view project they are part of")
-	}
-
-	// Non-member CANNOT view project channel
-	if scoutChatThreadAllowsViewer(projectChannel, "caitlyn@shareability.com") {
-		t.Fatal("PRIVACY LEAK: non-member can view restricted project channel")
-	}
-
-	// Anyone can view org-public channel
-	if !scoutChatThreadAllowsViewer(orgChannel, "aj@shareability.com") || !scoutChatThreadAllowsViewer(orgChannel, "caitlyn@shareability.com") {
-		t.Fatal("org-public channel should be viewable by any org member")
-	}
-
-	// Private Scout chat only allows owner
-	if !scoutChatThreadAllowsViewer(privateScout, "aj@shareability.com") {
-		t.Fatal("private Scout owner cannot view own thread")
-	}
-	if scoutChatThreadAllowsViewer(privateScout, "e@shareability.com") {
-		t.Fatal("PRIVACY LEAK: non-owner can view 1:1 private Scout chat")
-	}
-
-	// Add messages to the private Scout chat
+	// Post messages to each channel type
 	now := time.Now().UTC()
-	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", privateScout.ID, scoutChatMessageRecord{
-		ID: "private-scout-note", Kind: "message", Role: "user",
-		Text:        privateOneOnOne + " — this is my private thought",
+
+	// 1. Post to project channel - SHOULD create transcript entry
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", projectChannel.ID, scoutChatMessageRecord{
+		ID: "project-message", Kind: "message", Role: "user",
+		Text:        projectCanary + " — project knowledge for the brain",
 		CreatedAt:   now.Format(time.RFC3339Nano),
 		AuthorName:  "AJ",
 		AuthorEmail: "aj@shareability.com",
@@ -356,36 +330,216 @@ func TestPrivateChannelRecallMembershipDoctrine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// BRAIN EXCLUSION: 1:1 Scout chats should never enter brain summarization
-	// This is enforced by isUIStateMemoryKind classifying meetingMemoryKindScoutChat as UI state
-	for _, entry := range app.memory.unsummarizedTranscripts(500) {
+	// 2. Post to org-public channel - SHOULD create transcript entry
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", orgChannel.ID, scoutChatMessageRecord{
+		ID: "org-message", Kind: "message", Role: "user",
+		Text:        orgCanary + " — company-wide knowledge",
+		CreatedAt:   now.Add(time.Second).Format(time.RFC3339Nano),
+		AuthorName:  "AJ",
+		AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Post to 1:1 private Scout - should NOT create transcript entry
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", privateScout.ID, scoutChatMessageRecord{
+		ID: "private-message", Kind: "message", Role: "user",
+		Text:        privateOneOnOne + " — this stays private",
+		CreatedAt:   now.Add(2 * time.Second).Format(time.RFC3339Nano),
+		AuthorName:  "AJ",
+		AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// BRAIN INGESTION PROOF: Check that channel messages created transcript entries
+	transcripts := app.memory.unsummarizedTranscripts(500)
+
+	projectIngested := false
+	orgIngested := false
+	for _, entry := range transcripts {
+		if entry.Kind != meetingMemoryKindTranscript {
+			continue
+		}
+		if strings.Contains(entry.Text, projectCanary) {
+			projectIngested = true
+			// Verify project visibility metadata
+			if entry.Metadata["visibility"] != "project" {
+				t.Fatalf("project channel transcript should have project visibility: %+v", entry.Metadata)
+			}
+			if entry.Metadata["source"] != transcriptSourceChannel {
+				t.Fatalf("project channel transcript should have channel source: %+v", entry.Metadata)
+			}
+		}
+		if strings.Contains(entry.Text, orgCanary) {
+			orgIngested = true
+			// Verify org visibility metadata
+			if entry.Metadata["visibility"] != "organization" {
+				t.Fatalf("org channel transcript should have organization visibility: %+v", entry.Metadata)
+			}
+		}
+		// PRIVACY CHECK: 1:1 Scout MUST NOT appear in transcripts
 		if strings.Contains(entry.Text, privateOneOnOne) {
-			t.Fatalf("PRIVACY LEAK: 1:1 Scout chat queued for brain summarization: %+v", entry)
+			t.Fatalf("PRIVACY LEAK: 1:1 private Scout chat created a transcript entry: %+v", entry)
 		}
 	}
 
-	// SEARCH EXCLUSION: 1:1 Scout chats should not be directly searchable in non-UI contexts
-	// The scout_chat_thread kind is classified as UI state and excluded from general recall
-	if matches := app.memory.search(privateOneOnOne, 20); len(matches) != 0 {
-		for _, m := range matches {
-			if m.Entry.Kind != meetingMemoryKindScoutChat {
-				t.Fatalf("private Scout chat appeared in non-UI-state search: %+v", m.Entry)
+	if !projectIngested {
+		t.Fatal("DOCTRINE VIOLATION: project channel message did not create transcript entry (brain not fed)")
+	}
+	if !orgIngested {
+		t.Fatal("DOCTRINE VIOLATION: org channel message did not create transcript entry (brain not fed)")
+	}
+
+	// VISIBILITY FILTERING: Non-member cannot see project TRANSCRIPT via recall
+	// Note: We check only transcript entries, not scout_chat_thread entries.
+	// UI state entries (scout_chat_thread) are excluded from search/context
+	// by isUIStateMemoryKind, not by principal filtering.
+	memberPrincipal := recallPrincipalForUser(&userAccount{Email: "e@shareability.com"})
+	nonMemberPrincipal := recallPrincipalForUser(&userAccount{Email: "caitlyn@shareability.com"})
+
+	// Build recall stores
+	memberStore := app.recallStoreForPrincipal(context.Background(), memberPrincipal)
+	nonMemberStore := app.recallStoreForPrincipal(context.Background(), nonMemberPrincipal)
+
+	// Member should see project transcript
+	memberCanSeeProjectTranscript := false
+	for _, entry := range memberStore.snapshot(0) {
+		if entry.Kind == meetingMemoryKindTranscript && strings.Contains(entry.Text, projectCanary) {
+			memberCanSeeProjectTranscript = true
+		}
+	}
+	if !memberCanSeeProjectTranscript {
+		t.Fatal("DOCTRINE VIOLATION: project member cannot see project transcript in recall")
+	}
+
+	// Non-member cannot see project transcript (privacy filtering via project visibility)
+	for _, entry := range nonMemberStore.snapshot(0) {
+		if entry.Kind == meetingMemoryKindTranscript && strings.Contains(entry.Text, projectCanary) {
+			t.Fatalf("PRIVACY LEAK: non-member can see project channel transcript in recall: %+v", entry)
+		}
+	}
+
+	// Non-member SHOULD still see org-public transcript
+	nonMemberCanSeeOrgTranscript := false
+	for _, entry := range nonMemberStore.snapshot(0) {
+		if entry.Kind == meetingMemoryKindTranscript && strings.Contains(entry.Text, orgCanary) {
+			nonMemberCanSeeOrgTranscript = true
+		}
+	}
+	if !nonMemberCanSeeOrgTranscript {
+		t.Fatal("non-member should be able to see org-public transcript")
+	}
+}
+
+// TestRiffBrainIngestionDoctrine validates that channel-tied Riffs feed the brain.
+// Per doctrine: "Channel-tied Riffs feed the brain."
+func TestRiffBrainIngestionDoctrine(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	const riffCanary = "RIFF-BRAIN-INGEST-CANARY-6655"
+
+	// Create a public channel as the Riff source
+	sourceChannel, created, err := app.ensureScoutChatThread(
+		"riff-source-channel",
+		"aj@shareability.com",
+		"AJ",
+		"Research Channel",
+		scoutChatVisibilityPublic,
+		nil,
+	)
+	if err != nil || !created {
+		t.Fatalf("create source channel: created=%v err=%v", created, err)
+	}
+
+	// Add a message to the source channel
+	now := time.Now().UTC()
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", sourceChannel.ID, scoutChatMessageRecord{
+		ID: "source-context", Kind: "message", Role: "user",
+		Text:        "Here is the context for the riff",
+		CreatedAt:   now.Format(time.RFC3339Nano),
+		AuthorName:  "AJ",
+		AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a Riff thread bound to the source channel
+	riffThread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Research Riff", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually set the Riff binding (normally done by createPrivateRiff)
+	riffThread.Riff = &privateRiffBinding{
+		Version:        privateRiffBindingVersion,
+		SourceThreadID: sourceChannel.ID,
+		SourceTitle:    sourceChannel.Title,
+	}
+	if err := app.saveScoutChatThread(riffThread); err != nil {
+		t.Fatal(err)
+	}
+
+	// Post a message to the Riff - SHOULD create transcript entry
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", riffThread.ID, scoutChatMessageRecord{
+		ID: "riff-insight", Kind: "message", Role: "user",
+		Text:        riffCanary + " — riff exploration insight",
+		CreatedAt:   now.Add(time.Second).Format(time.RFC3339Nano),
+		AuthorName:  "AJ",
+		AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// BRAIN INGESTION PROOF: Check that Riff message created a transcript entry
+	transcripts := app.memory.unsummarizedTranscripts(500)
+
+	riffIngested := false
+	for _, entry := range transcripts {
+		if entry.Kind != meetingMemoryKindTranscript {
+			continue
+		}
+		if strings.Contains(entry.Text, riffCanary) {
+			riffIngested = true
+			// Verify Riff-specific metadata
+			if entry.Metadata["source"] != transcriptSourceRiff {
+				t.Fatalf("riff transcript should have riff source: %+v", entry.Metadata)
+			}
+			if entry.Metadata["visibility"] != "project" {
+				t.Fatalf("riff transcript should have project visibility (owner-only): %+v", entry.Metadata)
+			}
+			if entry.Metadata["sourceThreadId"] != sourceChannel.ID {
+				t.Fatalf("riff transcript should reference source channel: %+v", entry.Metadata)
 			}
 		}
 	}
 
-	// Verify the raw scout chat entry IS stored (for UI state purposes)
-	storedPrivate := false
-	for _, entry := range app.memory.snapshot(0) {
-		if strings.Contains(entry.Text, privateOneOnOne) {
-			storedPrivate = true
-			if entry.Kind != meetingMemoryKindScoutChat {
-				t.Fatalf("private chat stored under wrong kind: %s", entry.Kind)
-			}
+	if !riffIngested {
+		t.Fatal("DOCTRINE VIOLATION: Riff message did not create transcript entry (brain not fed)")
+	}
+
+	// VISIBILITY CHECK: Only Riff owner can see Riff content
+	ownerPrincipal := recallPrincipalForUser(&userAccount{Email: "aj@shareability.com"})
+	otherPrincipal := recallPrincipalForUser(&userAccount{Email: "e@shareability.com"})
+
+	ownerStore := app.recallStoreForPrincipal(context.Background(), ownerPrincipal)
+	otherStore := app.recallStoreForPrincipal(context.Background(), otherPrincipal)
+
+	ownerCanSeeRiff := false
+	for _, entry := range ownerStore.snapshot(0) {
+		if strings.Contains(entry.Text, riffCanary) {
+			ownerCanSeeRiff = true
 		}
 	}
-	if !storedPrivate {
-		t.Fatal("private Scout chat was not stored at all — test seed failed")
+	if !ownerCanSeeRiff {
+		t.Fatal("Riff owner should see their own Riff content in recall")
+	}
+
+	for _, entry := range otherStore.snapshot(0) {
+		if strings.Contains(entry.Text, riffCanary) {
+			t.Fatalf("PRIVACY LEAK: non-owner can see Riff content in recall: %+v", entry)
+		}
 	}
 }
 

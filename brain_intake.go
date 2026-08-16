@@ -110,18 +110,17 @@ func brainIntakeIsDone(text string) bool {
 	return false
 }
 
-// startBrainIntakeThread creates a private Feed-the-brain thread and seeds the
-// welcome + privacy disclosure + step-1 prompt. The intake flag routes every
-// subsequent message through handleBrainIntakeMessage instead of the router.
+// startBrainIntakeThread is DEPRECATED. The seven-step guided intake flow
+// has been replaced by automatic channel and Riff brain ingestion.
+//
+// Channels and Riffs are now the primary intake paths for company knowledge:
+// - Messages posted to channels automatically feed the brain
+// - Riff exploration and analysis feeds the brain
+// - Non-members cannot see private channel content in the IA
+//
+// This function returns an error directing users to use channels instead.
 func (app *kanbanBoardApp) startBrainIntakeThread(user *userAccount) (scoutChatThreadRecord, error) {
-	if user == nil {
-		return scoutChatThreadRecord{}, fmt.Errorf("sign in to feed the brain")
-	}
-	thread, err := app.createScoutChatThread(user.Email, user.Name, "Feed the brain", scoutChatVisibilityPrivate)
-	if err != nil {
-		return scoutChatThreadRecord{}, err
-	}
-	return app.seedBrainIntake(thread.OwnerEmail, thread.ID)
+	return scoutChatThreadRecord{}, fmt.Errorf("brain intake has been replaced by channel brain ingestion; post to a channel to feed the brain")
 }
 
 // seedBrainIntake stamps the intake flag and appends the welcome message under
