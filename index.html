@@ -39896,8 +39896,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function syncPD1DestinationForTool(tool) {
         clearPD1DestinationSurface()
+        const pathDestination = pd1DestinationForPath(location.pathname)
+        // The path is authoritative: '/' must stay Home regardless of the
+        // tool argument. This prevents idle refreshes, session restores, or
+        // stale tool state from bouncing Home visitors to another destination.
+        if (pathDestination) {
+          syncPD1Destination(pathDestination)
+          return
+        }
         const toolDestination = tool === 'office' ? 'Home' : (tool === 'room' ? 'Video' : (tool === 'chat' ? 'Chat' : (tool === 'files' ? 'Files' : 'Work')))
-        syncPD1Destination(pd1DestinationForPath(location.pathname) || toolDestination)
+        syncPD1Destination(toolDestination)
       }
 
       window.addEventListener('popstate', () => {
@@ -40166,6 +40174,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // guests own exactly one surface: the room. No rail, no office,
           // no back-stack pushState — the OS shell does not exist here.
           applyToolState('room')
+          return
+        }
+        // The URL path is authoritative over any tool request. If the user is
+        // on Home (/), they must stay on the office tool regardless of what
+        // idle refreshes, session restores, or stale state might request.
+        // Intentional navigation to another tool pushes a new path first via
+        // selectPD1Destination, so the path check alone protects Home.
+        if (location.pathname === '/' && tool !== 'office') {
           return
         }
         // navigating tools dismisses the floating notifications window so it

@@ -418,3 +418,26 @@ func TestDesktopHomeHasNoPermanentToolOrDeliverablePicker(t *testing.T) {
 		}
 	}
 }
+
+func TestDesktopHomeStaysHomeAfterIdleAndRestore(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	// The fix prevents setActiveTool from switching away from Home when pathname is '/'.
+	// This guard ensures idle refreshes, session restores, and stale tool state cannot
+	// bounce Home visitors to another destination (like /chat).
+	for _, want := range []string{
+		// Guard in setActiveTool: path is authoritative
+		`if (location.pathname === '/' && tool !== 'office') {`,
+		`return`,
+		// Guard in syncPD1DestinationForTool: path destination takes precedence
+		`if (pathDestination) {`,
+		`syncPD1Destination(pathDestination)`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("Home-stays-Home guard missing %q", want)
+		}
+	}
+}
