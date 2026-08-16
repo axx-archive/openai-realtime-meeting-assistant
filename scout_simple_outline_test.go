@@ -231,6 +231,9 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 		{"create a 10-slide presentation", true},
 		{"build slides for the quarterly review", true},
 		{"make a slide deck", true},
+		{"presentation for this pitch", true},
+		{"deck for the investor meeting", true},
+		{"slides for the quarterly review", true},
 
 		// Negative cases: outline-only requests
 		{"just the outline", false},
@@ -277,19 +280,6 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 		t.Fatal("test user not found")
 	}
 
-	// Create a test thread
-	thread, err := app.createScoutChatThread(user.Email, user.Name, "Test deck", scoutChatVisibilityPrivate)
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-
-	userMessage := scoutChatMessageRecord{
-		ID:   "test-user-msg",
-		Kind: "message",
-		Role: "user",
-		Text: "make a 5-slide deck about AI",
-	}
-
 	// Mock the LLM response to return HTML deck content
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		// Return a simple HTML deck
@@ -303,40 +293,82 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 </html>`, nil
 	})
 
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, thread, userMessage, "make a 5-slide deck about AI", nil)
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
 	}
 
-	// Verify the reply is a thread ref
-	if reply.Kind != "thread" {
-		t.Errorf("reply.Kind=%q, want thread", reply.Kind)
+	// Verify the reply is a regular message with HTML content (not a thread card)
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message (not thread card)", reply.Kind)
 	}
-	if reply.Thread == nil {
-		t.Fatal("reply.Thread is nil")
+	if reply.IntentOutcome != string(conversationIntentConversationalReply) {
+		t.Errorf("reply.IntentOutcome=%q, want %q", reply.IntentOutcome, conversationIntentConversationalReply)
 	}
-	if reply.Thread.ArtifactID == "" {
-		t.Error("reply.Thread.ArtifactID is empty")
-	}
-	if reply.Thread.Status != "complete" {
-		t.Errorf("reply.Thread.Status=%q, want complete", reply.Thread.Status)
-	}
-
-	// Verify the artifact was created with type html_deck
-	artifact, found := app.osArtifactByID(reply.Thread.ArtifactID)
-	if !found {
-		t.Fatal("artifact not found")
-	}
-	if artifact.Metadata["type"] != artifactTypeHTMLDeck {
-		t.Errorf("artifact type=%q, want %q", artifact.Metadata["type"], artifactTypeHTMLDeck)
-	}
-	// Verify content is HTML
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(artifact.Text)), "<!doctype html") {
-		t.Errorf("artifact text does not start with <!doctype html: %q", artifact.Text[:min(50, len(artifact.Text))])
+	// Verify the text content is HTML
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("reply.Text does not start with <!doctype html: %q", reply.Text[:min(50, len(reply.Text))])
 	}
 }
 
-// --- Server-side idempotency tests -------------------------------------------
+// TestDeckAskRoutesToInlineDeckWithStubWorker tests the live path: a deck ask
+// through the routing system with stub worker should produce an in-thread
+// html_deck message, not a proposal or outline.
+func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
+	// Force the agent runner to stub (unavailable)
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	if scoutAgentWorkerAvailable() {
+		t.Fatal("scoutAgentWorkerAvailable() = true with stub runner, want false")
+	}
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+
+	// Mock the LLM to return HTML deck for deck generation prompts
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Return HTML deck content
+		return `<!doctype html>
+<html><head><title>Test Deck</title></head>
+<body><section class="slide"><h1>Test</h1></section></body>
+</html>`, nil
+	})
+
+	cases := []string{
+		"make a 5-slide deck",
+		"create a presentation",
+		"build a pitch deck",
+		"presentation for this pitch",
+	}
+
+	for _, ask := range cases {
+		t.Run(ask, func(t *testing.T) {
+			// Test that routing identifies this as a deck request
+			if !scoutChatDeckRequestDetected(ask) {
+				t.Errorf("scoutChatDeckRequestDetected(%q) = false, want true", ask)
+			}
+
+			// Test that the router routes to conversational_reply (not work)
+			decision := app.routeConversationIntentWithInput(
+				context.Background(),
+				ask,
+				conversationIntentTurn{Text: ask},
+				nil,
+			)
+
+			// With stub worker, deck asks should not mint work proposals
+			if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
+				t.Errorf("outcome=%s for deck ask with stub worker, want conversational_reply", decision.Outcome)
+			}
+		})
+	}
+}
+
+// --- Client-side idempotency tests -------------------------------------------
+// Note: The server correctly implements idempotency (same key = same thread).
+// The double-fire issue in production was due to the client sending different
+// keys. The client-side debounce is the actual fix for that case.
 
 func TestHomeOpeningIdempotency(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)

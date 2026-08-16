@@ -3638,6 +3638,42 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			answerContext = withAssistantBoardShortcutDisabled(answerContext)
 		}
 	}
+	// When the worker is unavailable and the user is asking for a deck in a
+	// private thread, generate an HTML deck directly instead of a markdown outline.
+	// This produces a presentable in-thread deck viewer, not a work card.
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && !scoutAgentWorkerAvailable() && scoutChatDeckRequestDetected(text) {
+		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
+		if deckErr != nil {
+			unavailableMessage := scoutChatMessageRecord{
+				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:          "message",
+				Role:          "scout",
+				AuthorName:    visibleWorkerName,
+				IntentOutcome: string(conversationIntentUnavailable),
+				Text:          "I couldn't build that deck right now. Your message is saved.",
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailableMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			return response, nil
+		}
+		deckReply.ID = fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+		deckReply.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		deckReply.AuthorName = visibleWorkerName
+		saved, commitErr := commitUserMessage(userMessage, deckReply)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = deckReply
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentConversationalReply)
+		return response, nil
+	}
 	result, err := app.resolveAssistantQueryContextForUserWithAttachments(answerContext, user.Email, modelQuery, history, openAIAttachments)
 	if err != nil {
 		unavailableMessage := scoutChatMessageRecord{

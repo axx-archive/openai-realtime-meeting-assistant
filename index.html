@@ -11969,6 +11969,39 @@
         border-bottom: none;
       }
 
+      /* inline chat deck viewer — sandboxed iframe with Present button */
+      .chat-deck {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        background: var(--surface-3);
+        border-radius: var(--r-md);
+        overflow: hidden;
+      }
+      .chat-deck__cover {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface-3) 100%);
+        border-bottom: 1px solid var(--line-1);
+      }
+      .chat-deck__title {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-1);
+      }
+      .chat-deck__present {
+        flex-shrink: 0;
+      }
+      .chat-deck__frame {
+        width: 100%;
+        height: 320px;
+        border: none;
+        background: #fff;
+      }
+
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
          hairline, 18/18/18/6; follow-ups tuck the joined corner to 6px */
       .scout-chat-msg--user .scout-chat-text {
@@ -41293,6 +41326,54 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return worker ? worker.replace(/_/g, ' ') : 'Scout'
       }
 
+      // ---- inline chat deck viewer (worker-unavailable fallback) ----
+      // Renders an HTML deck directly in the chat thread without storing an
+      // artifact. Uses srcdoc for the sandboxed iframe (no server round-trip).
+      // Visual parity with artifact decks: sandboxed iframe, Present button, cover.
+      function renderInlineChatDeck(container, htmlContent) {
+        const deck = document.createElement('section')
+        deck.className = 'chat-deck'
+
+        // Extract title from <title> tag or first h1
+        let title = 'Presentation'
+        const titleMatch = htmlContent.match(/<title[^>]*>([^<]+)<\/title>/i)
+        if (titleMatch) title = titleMatch[1].trim()
+        else {
+          const h1Match = htmlContent.match(/<h1[^>]*>([^<]+)<\/h1>/i)
+          if (h1Match) title = h1Match[1].trim()
+        }
+
+        // Cover/header with title and Present button
+        const cover = document.createElement('div')
+        cover.className = 'chat-deck__cover'
+        const titleEl = document.createElement('h3')
+        titleEl.className = 'chat-deck__title'
+        titleEl.textContent = title
+        const present = document.createElement('button')
+        present.type = 'button'
+        present.className = 'btn btn--outline chat-deck__present'
+        present.textContent = 'Present'
+        present.addEventListener('click', () => {
+          const win = window.open('', '_blank', 'width=1280,height=720')
+          if (win) {
+            win.document.open()
+            win.document.write(htmlContent)
+            win.document.close()
+          }
+        })
+        cover.append(titleEl, present)
+
+        // Sandboxed iframe preview (allow-scripts only, null origin)
+        const frame = document.createElement('iframe')
+        frame.className = 'chat-deck__frame'
+        frame.setAttribute('sandbox', 'allow-scripts')
+        frame.title = 'sandboxed deck preview'
+        frame.srcdoc = htmlContent
+
+        deck.append(cover, frame)
+        container.appendChild(deck)
+      }
+
       // ---- sandboxed HTML deck viewer (packaging OS §4 item 1, Wave 2 item 9) ----
       // Mirrors the server's artifactIsHTMLDocument sniff (artifact_render.go):
       // declared metadata type=html_deck, or a body that starts as an HTML
@@ -63352,6 +63433,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const text = String(rawText || '').replace(/\r\n?/g, '\n').trim()
         container.replaceChildren()
         if (!text) {
+          return
+        }
+
+        // Detect HTML deck content and render with the in-thread deck viewer
+        // (sandboxed iframe, Present button, cover hero) — same visual as
+        // artifact decks but without requiring a stored artifact.
+        const lower = text.toLowerCase()
+        if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
+          renderInlineChatDeck(container, text)
           return
         }
 

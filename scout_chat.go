@@ -746,6 +746,7 @@ func scoutChatDeckRequestDetected(text string) bool {
 		"make a deck", "create a deck", "build a deck", "make me a deck",
 		"make a presentation", "create a presentation", "build a presentation",
 		"make me a presentation", "create me a presentation", "build me a presentation",
+		"presentation for", "deck for", "slides for",
 		"slide deck", "pitch deck", "5-slide", "5 slide", "five-slide", "five slide",
 		"10-slide", "10 slide", "ten-slide", "ten slide",
 		"make slides", "create slides", "build slides", "make me slides",

@@ -649,7 +649,7 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 	// When the worker is unavailable and the user is asking for a deck, generate
 	// an HTML deck directly instead of falling through to a markdown outline.
 	if !scoutAgentWorkerAvailable() && scoutChatDeckRequestDetected(query) {
-		return app.resolveInlineDeckReply(ctx, user, thread, userMessage, query, history)
+		return app.resolveInlineDeckReply(ctx, user, query, history)
 	}
 	query = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)))
@@ -808,9 +808,9 @@ func (app *kanbanBoardApp) retryScoutOpeningReply(viewerEmail string, threadID s
 }
 
 // resolveInlineDeckReply generates an HTML deck directly when the agent worker
-// is unavailable. This produces a real html_deck artifact instead of falling
-// back to a markdown outline via conversational_reply.
-func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *userAccount, thread scoutChatThreadRecord, userMessage scoutChatMessageRecord, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
+// is unavailable. Returns the deck as a regular message (conversational_reply)
+// with HTML content that the frontend renders with the in-thread deck viewer.
+func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
 	// Generate HTML deck content via the LLM
 	deckPrompt := inlineDeckGenerationPrompt(query)
 	answerContext := withAssistantModelSuccessRequired(ctx)
@@ -823,44 +823,15 @@ func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *use
 		// Fallback: wrap the answer in minimal HTML deck structure
 		deckHTML = wrapInHTMLDeck(query, result.answer)
 	}
-	// Create the html_deck artifact
-	title := extractDeckTitle(query)
-	artifact, appended, err := app.createOSArtifactWithMetadata(
-		"workflow",
-		title,
-		deckHTML,
-		scoutParticipantName,
-		map[string]string{
-			"type":             artifactTypeHTMLDeck,
-			"source":          "inline_deck",
-			"status":          "complete",
-			"threadStatus":    "complete",
-			"requestedBy":     normalizeAccountEmail(user.Email),
-			"createdBy":       normalizeAccountEmail(user.Email),
-			"visibility":      "private",
-			"originKind":      agentThreadOriginPrivateThread,
-			"originId":        thread.ID,
-			"sourceMessageId": userMessage.ID,
-		},
-	)
-	if err != nil || !appended {
-		return scoutChatMessageRecord{}, fmt.Errorf("could not create deck artifact: %v", err)
-	}
-	// Return a thread ref message pointing to the artifact
+	// Return as a regular conversational message with HTML deck content.
+	// The frontend detects HTML deck content and renders with the in-thread
+	// sandboxed viewer (Present button, cover hero) — no work card, no Approve & run.
 	return scoutChatMessageRecord{
-		Kind:              "thread",
-		Role:              "scout",
-		AuthorName:        scoutParticipantName,
-		Text:              title + " — ready to present",
-		IntentOutcome:     string(conversationIntentStartPrivateWork),
-		CausedByMessageID: userMessage.ID,
-		Thread: &scoutChatThreadRef{
-			ID:         "inline-deck-" + artifact.ID[:min(16, len(artifact.ID))],
-			Mode:       "workflow",
-			Query:      title,
-			Status:     "complete",
-			ArtifactID: artifact.ID,
-		},
+		Kind:          "message",
+		Role:          "scout",
+		AuthorName:    scoutParticipantName,
+		Text:          deckHTML,
+		IntentOutcome: string(conversationIntentConversationalReply),
 	}, nil
 }
 
