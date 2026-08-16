@@ -4379,51 +4379,19 @@ func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript 
 		return true
 	}
 	// Short confirmation ("yes", "ok", etc.) only routes if there's a pending
-	// direction pass in the thread. A direction pass is either:
-	// - A choices card (scoutChatClarificationAlreadyAsked)
-	// - Scout's last message ending with "?" (prose question)
+	// clarification in the thread. A real direction pass is a choices card with
+	// IntentOutcome=clarify_once — NOT any Scout message ending in "?".
+	// "How's the week going?" + "yes" must stay false.
+	// A router clarify_once choices card + "yes" must route.
 	text := strings.TrimSpace(transcript)
 	if threadLoaded && privateRealtimeVoiceIsConfirmation(text) {
-		return scoutChatDirectionPassPending(thread)
+		return scoutChatClarificationAlreadyAsked(thread)
 	}
 	// Named studio asks via tight detection (deck, image only)
 	// Deliberately NOT using scoutTurnAppearsWorkShaped — it's too broad and
 	// matches ordinary conversation like "does that make sense?" / "let me write
 	// that down" / "I'll send it later".
 	return privateRealtimeVoiceTranscriptIndicatesAction(text)
-}
-
-// scoutChatDirectionPassPending returns true when Scout's last turn in the
-// thread was asking for direction — either a formal choices card OR a prose
-// message ending with "?". This is the gate for confirmations like "yes" to
-// trigger route.
-func scoutChatDirectionPassPending(thread scoutChatThreadRecord) bool {
-	// Walk backwards from the end looking for Scout's last message
-	for index := len(thread.Messages) - 1; index >= 0; index-- {
-		message := thread.Messages[index]
-		// User message means no pending Scout direction
-		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
-			return false
-		}
-		// Formal choices card (clarify_once outcome)
-		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
-			return true
-		}
-		// Scout prose message — check if it ends with a question
-		if message.Kind == "message" {
-			author := strings.TrimSpace(message.AuthorName)
-			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
-			if isScout {
-				text := strings.TrimSpace(message.Text)
-				return strings.HasSuffix(text, "?")
-			}
-		}
-		// Other kinds (proposal, thread) don't count as direction passes
-		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
-			return false
-		}
-	}
-	return false
 }
 
 // privateRealtimeVoiceIsConfirmation returns true for short affirmative replies
