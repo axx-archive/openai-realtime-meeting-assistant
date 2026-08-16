@@ -12001,6 +12001,11 @@
         border: none;
         background: #fff;
       }
+      .chat-deck__frame:fullscreen {
+        width: 100vw;
+        height: 100vh;
+        background: #000;
+      }
 
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
          hairline, 18/18/18/6; follow-ups tuck the joined corner to 6px */
@@ -41349,26 +41354,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const titleEl = document.createElement('h3')
         titleEl.className = 'chat-deck__title'
         titleEl.textContent = title
-        const present = document.createElement('button')
-        present.type = 'button'
-        present.className = 'btn btn--outline chat-deck__present'
-        present.textContent = 'Present'
-        present.addEventListener('click', () => {
-          const win = window.open('', '_blank', 'width=1280,height=720')
-          if (win) {
-            win.document.open()
-            win.document.write(htmlContent)
-            win.document.close()
-          }
-        })
-        cover.append(titleEl, present)
-
         // Sandboxed iframe preview (allow-scripts only, null origin)
         const frame = document.createElement('iframe')
         frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
+        frame.setAttribute('allowfullscreen', '')
         frame.title = 'sandboxed deck preview'
         frame.srcdoc = htmlContent
+
+        const present = document.createElement('button')
+        present.type = 'button'
+        present.className = 'btn btn--outline chat-deck__present'
+        present.textContent = 'Present'
+        // Fullscreen the sandboxed iframe — maintains null origin security.
+        // Never document.write model HTML into a same-origin window.
+        present.addEventListener('click', () => {
+          if (frame.requestFullscreen) {
+            frame.requestFullscreen().catch(() => {})
+          } else if (frame.webkitRequestFullscreen) {
+            frame.webkitRequestFullscreen()
+          }
+        })
+        cover.append(titleEl, present)
 
         deck.append(cover, frame)
         container.appendChild(deck)
