@@ -13989,19 +13989,25 @@
           margin: 0;
         }
 
-	        #chatTool .chat-context-reply__composer {
-	          display: grid;
-	          grid-template-columns: 44px minmax(0, 1fr) 44px;
+        #chatTool .chat-context-reply__composer {
+          display: grid;
+          grid-template-columns: 44px minmax(0, 1fr) 44px;
           align-items: end;
           gap: 8px;
           padding: 7px 8px 7px 12px;
-          border-radius: 18px;
+          border-radius: 22px;
+          border: 1px solid var(--line-1);
           background: var(--surface-3);
-          box-shadow: 0 0 0 1px var(--line-1), 0 8px 22px rgba(0, 0, 0, 0.08);
+          transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
         }
 
-	        #chatTool .chat-context-reply textarea {
-	          min-height: 44px;
+        #chatTool .chat-context-reply__composer:focus-within {
+          border-color: var(--line-2);
+          box-shadow: 0 0 0 3px var(--ring);
+        }
+
+        #chatTool .chat-context-reply textarea {
+          min-height: 44px;
           max-height: 128px;
           resize: none;
           overflow-y: auto;
@@ -14011,6 +14017,13 @@
           background: transparent;
           color: var(--text-1);
           font: 400 14px/1.45 var(--font-sans);
+        }
+
+        /* The composer pill owns the focus signal. Suppress the textarea's own
+           focus ring so it does not draw an inner box inside the pill. */
+        #chatTool .chat-context-reply textarea:focus-visible {
+          outline: none;
+          box-shadow: none;
         }
 
 	        #chatTool .chat-context-reply__composer > button {
