@@ -5620,7 +5620,10 @@
         min-width: 0;
       }
 
+      /* Wordmark hidden from settings chrome — brand identity is the mark on the
+         rail only. */
       .settings-header__wordmark {
+        display: none;
         width: 76px;
         height: 20px;
         flex: 0 0 auto;
@@ -30329,11 +30332,11 @@
             <span>Meet</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-label="Chat" aria-current="false" tabindex="-1">
-            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9c0-3 3.5-5 8-5s8 2 8 5"/><path d="M4 15c0 3 3.5 5 8 5s8-2 8-5"/><circle cx="12" cy="12" r="2.5"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"/></svg>
             <span>Chat</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Files" aria-label="Files" aria-current="false" tabindex="-1">
-            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7c0-1.5 3.5-3 8-3s8 1.5 8 3"/><path d="M4 12c0-1.5 3.5-3 8-3s8 1.5 8 3"/><path d="M4 17c0-1.5 3.5-3 8-3s8 1.5 8 3"/><circle cx="12" cy="12" r="1.5"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8c1.1 0 2 .9 2 2v1"/><path d="M5 6h10c1.1 0 2 .9 2 2v1"/><path d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"/></svg>
             <span>Files</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
@@ -30358,7 +30361,7 @@
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="office" aria-label="Stride home" aria-pressed="true" aria-checked="true">
             <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/><path d="M12 20v-4.5a1.5 1.5 0 0 0-3 0"/></svg>
-            <span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>
+            <span class="tool-rail__label">stride home</span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -30370,7 +30373,7 @@
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="chat" aria-label="Conversations" aria-pressed="false" aria-checked="false">
-            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 0 1 0 18c-1.5 0-2.9-.35-4.1-1L3 21.5l1.5-4.5A9 9 0 0 1 12 3Z"/></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"/></svg>
             <span class="tool-rail__label">conversations</span>
           </button>
         </span>
@@ -30406,7 +30409,7 @@
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="files" aria-label="Files" aria-pressed="false" aria-checked="false">
-            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4.5l2 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8c1.1 0 2 .9 2 2v1"/><path d="M5 6h10c1.1 0 2 .9 2 2v1"/><path d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"/></svg>
             <span class="tool-rail__label">files</span>
           </button>
         </span>
@@ -30475,7 +30478,7 @@
           <svg class="stride-mark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 17-5-5 5-5"/></svg>
         </button>
         <div class="topbar__brand-lockup" aria-label="Stride · organization workspace">
-          <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
+          <span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>
           <span class="topbar__identity-divider" aria-hidden="true"></span>
           <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Choose organization" aria-haspopup="menu" aria-expanded="false">
             <strong id="topbarOrganizationName" class="topbar__organization-name">Organizations</strong>
@@ -30634,7 +30637,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow wordmark" role="img" aria-label="Stride"></span>
+                <span class="bsheet__eyebrow" aria-hidden="true"></span>
                 <h2 class="bsheet__title" id="briefGreeting">Morning Brief</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-brief aria-label="Close">
@@ -30650,7 +30653,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow wordmark" role="img" aria-label="Stride"></span>
+                <span class="bsheet__eyebrow" aria-hidden="true"></span>
                 <h2 class="bsheet__title">Portfolio Health</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-portfolio aria-label="Close">
@@ -32244,7 +32247,7 @@
         </div>
         <header class="settings-header">
           <div class="settings-header__brand">
-            <span class="wordmark settings-header__wordmark" role="img" aria-label="Stride"></span>
+            <span class="settings-header__wordmark" role="img" aria-label="Stride"></span>
             <span class="settings-header__divider" aria-hidden="true"></span>
             <span class="settings-header__copy">
               <h2 id="settingsTitle">Settings</h2>
