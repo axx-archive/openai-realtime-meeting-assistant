@@ -59051,23 +59051,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !title || title === 'Scout' || title === 'New Scout thread'
 	      }
 
-	      function chatThreadDisplayTitle(thread) {
-	        if (!thread) {
-	          return 'new thread'
-	        }
-	        if (chatThreadIsChannel(thread)) {
-	          if (chatThreadIsTeam(thread)) {
-	            return 'Bonfire Chat'
-	          }
-	          return String(thread.title || 'team channel')
-	        }
-	        // Private thread: show artifact name when one exists (not first-prompt leftover)
-	        const artifactInfo = chatThreadLatestArtifactInfo(thread)
-	        if (artifactInfo?.title) {
-	          return artifactInfo.title
-	        }
-	        return chatThreadTitleIsPlaceholder(thread) ? 'new thread' : String(thread.title)
-	      }
+      function chatThreadDisplayTitle(thread) {
+        if (!thread) {
+          return 'new thread'
+        }
+        if (chatThreadIsChannel(thread)) {
+          if (chatThreadIsTeam(thread)) {
+            return 'Bonfire Chat'
+          }
+          return String(thread.title || 'team channel')
+        }
+        // Private thread: use desktopWorkTitle logic — never show raw prompt
+        // 1. Try artifact info (uses desktopWorkTitle internally)
+        const artifactInfo = chatThreadLatestArtifactInfo(thread)
+        if (artifactInfo?.title) {
+          return artifactInfo.title
+        }
+        // 2. No artifact yet — scan Scout responses for first heading
+        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msg = messages[i]
+          const role = String(msg?.role || '').toLowerCase()
+          if (role === 'assistant' || role === 'scout') {
+            const text = String(msg?.text || '')
+            const headingMatch = text.match(/^#{1,3}\s+(.{3,90})$/m)
+            if (headingMatch) {
+              return headingMatch[1].trim()
+            }
+          }
+        }
+        // 3. Fall back to family based on thread query — never the raw prompt
+        if (chatThreadTitleIsPlaceholder(thread)) {
+          return 'new thread'
+        }
+        const threadQuery = String(thread.title || '').trim()
+        if (!threadQuery) {
+          return 'new thread'
+        }
+        // Use family from desktopWorkFamily — the thread.title IS the query here
+        const family = desktopWorkFamily({ query: threadQuery }, null)
+        return family
+      }
 
 	      /* previews are one line of PLAIN text — markdown that renders in the
 	         feed reads as syntax garbage in the rail ("**Pro Shop sees…"), so
