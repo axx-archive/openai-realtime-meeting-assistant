@@ -42152,6 +42152,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const ordered = /^\s*\d+[.)]/.test(line)
             const list = document.createElement(ordered ? 'ol' : 'ul')
             list.className = 'artifact-read__list'
+            if (ordered) {
+              const startMatch = /^\s*(\d+)[.)]\s+/.exec(line)
+              if (startMatch) {
+                const startNum = parseInt(startMatch[1], 10)
+                if (startNum !== 1) list.setAttribute('start', String(startNum))
+              }
+            }
             while (index < lines.length) {
               const next = lines[index]
               const match = listPattern.exec(next)
@@ -61701,7 +61708,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (/\b(code|implementation|repository|pull request|execution handoff|deployment handoff)\b/.test(description)) return 'Build'
 	        if (/\b(project plan|task board|operating plan|roadmap|work breakdown)\b/.test(description)) return 'Project plan'
 	        if (/\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/.test(description)) return 'Financial model'
-	        if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/.test(description)) return 'Presentation'
+	        if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/.test(description)) {
+          const artifactType = String(artifact?.metadata?.type || '').trim()
+          return artifactType === 'html_deck' ? 'Presentation' : 'Outline'
+        }
 	        if (/\b(image|images|design|visual|logo|brand|mockup|illustration|render|creative)\b/.test(description)) return 'Design'
 	        if (/\b(research|investigate|compare|market scan|sources?|due diligence)\b/.test(description)) return 'Research'
 	        if (/\b(document|memo|brief|one-pager|report)\b/.test(description)) return 'Document'
@@ -63403,6 +63413,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             flushParagraph()
             const ordered = /^\s*\d+[.)]\s+/.test(line)
             const list = document.createElement(ordered ? 'ol' : 'ul')
+            if (ordered) {
+              const startMatch = /^\s*(\d+)[.)]\s+/.exec(line)
+              if (startMatch) {
+                const startNum = parseInt(startMatch[1], 10)
+                if (startNum !== 1) list.setAttribute('start', String(startNum))
+              }
+            }
             while (index < lines.length) {
               const next = lines[index]
               const match = chatMarkdownListMatch(next)
