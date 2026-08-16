@@ -95,17 +95,19 @@ func TestIndexSVGParseErrorFallback(t *testing.T) {
 	}
 }
 
-// Namespace URLs (w3.org/2000/svg) must NOT be linked as clickable URLs.
-// The xmlns attribute should appear as plain text, not a "source chip".
+// Namespace URLs (w3.org/2000/svg) must NOT become link preview cards.
+// The xmlns attribute is not a real web page — desktopChatFirstURL must skip it.
 func TestIndexSVGNamespaceURLNotLinked(t *testing.T) {
 	html := readIndexForSVGRender(t)
 	for _, want := range []string{
-		// The URL filter for namespace URLs
+		// The namespace URL filter constant
+		`XML_NAMESPACE_URLS`,
 		`www.w3.org`,
 		`2000/svg`,
 		`1999/xlink`,
-		// Must skip linking and output as plain text
-		`target.appendChild(document.createTextNode(raw))`,
+		// desktopChatFirstURL must skip namespace URLs
+		`desktopChatFirstURL`,
+		`XML_NAMESPACE_URLS.test(url)`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing namespace URL filter: %q", want)
