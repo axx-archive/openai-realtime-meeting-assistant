@@ -248,6 +248,15 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
+ // Home must stay on Home (tool=office, destination=Home, path=/). Verify no redirect to Chat.
+ const homeRouting=await page.evaluate(()=>({
+   path:location.pathname,
+   tool:document.getElementById('appShell').dataset.tool,
+   destination:document.getElementById('appShell').dataset.pd1Destination
+ }));
+ assert.equal(homeRouting.path,'/','visiting / does not redirect away');
+ assert.equal(homeRouting.tool,'office','Home tool is office, not chat');
+ assert.equal(homeRouting.destination,'Home','Home destination stays Home');
  // Real work items (continuity) are now the primary surface; starters are hidden
  // when continuity items exist.
  await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
@@ -281,16 +290,29 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
 	homeAvailable=true;
 	await page.evaluate(()=>document.getElementById('homeRefreshRetry').click());
 	await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3&&document.getElementById('homeRefreshRetry').hidden);
- await page.fill('#homeScoutInput','');
- const renderDir=String(process.env.HOME_RENDER_DIR||'').trim();
+ // Verify Home stays on Home after retry - no auto-redirect to Chat
+ const afterRetry=await page.evaluate(()=>({
+   path:location.pathname,
+   tool:document.getElementById('appShell').dataset.tool,
+   destination:document.getElementById('appShell').dataset.pd1Destination
+ }));
+ assert.equal(afterRetry.path,'/','retry does not redirect away from Home');
+ assert.equal(afterRetry.tool,'office','retry keeps tool on office');
+ assert.equal(afterRetry.destination,'Home','retry keeps destination on Home');
+await page.fill('#homeScoutInput','');
+// Let input/blur handlers settle before capture - ensure continuity items persist
+await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
+const renderDir=String(process.env.HOME_RENDER_DIR||'').trim();
  if(renderDir)fs.mkdirSync(renderDir,{recursive:true});
- const capture=async(name,theme)=>{
-   await page.evaluate(next=>renderTheme(next),theme);
-   await page.mouse.move(2,2);await page.waitForTimeout(180);
-   const geometry=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,continuity:document.querySelectorAll('#homeContinuity .home-continuity__row').length,privacyFooter:document.querySelectorAll('.office-launch__hint,#officeLaunchHint').length}));
-   assert.deepEqual(geometry,{fits:true,continuity:3,privacyFooter:0});
-   if(renderDir)await page.screenshot({path:path.join(renderDir,name+'-'+theme+'.png')});
- };
+// captureWithContinuity allows specifying expected continuity (3 for normal, 0 for empty state)
+const captureWithContinuity=async(name,theme,expectedContinuity)=>{
+  await page.evaluate(next=>renderTheme(next),theme);
+  await page.mouse.move(2,2);await page.waitForTimeout(180);
+  const geometry=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,continuity:document.querySelectorAll('#homeContinuity .home-continuity__row').length,privacyFooter:document.querySelectorAll('.office-launch__hint,#officeLaunchHint').length}));
+  assert.deepEqual(geometry,{fits:true,continuity:expectedContinuity,privacyFooter:0});
+  if(renderDir)await page.screenshot({path:path.join(renderDir,name+'-'+theme+'.png')});
+};
+const capture=async(name,theme)=>captureWithContinuity(name,theme,3);
  for(const theme of ['dark','light'])await capture('desktop-home',theme);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
@@ -329,12 +351,19 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  assert.equal(focusedComposer.inputBackground,'rgba(0, 0, 0, 0)');
  assert.equal(focusedComposer.inputOutline,'none');
  await page.fill('#homeScoutInput','');
- // Test live meeting rendering with empty Home
- await page.evaluate(async()=>{renderHomeStarters();document.activeElement?.blur();await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();});
- for(const theme of ['dark','light'])await capture('desktop-home-live-meeting',theme);
+ // Test live meeting rendering with empty Home (continuity=0)
+ // Re-confirm empty state and setup live meeting
+ await page.evaluate(async()=>{
+   homeSnapshot.items=[];renderHomeSnapshot();
+   renderHomeStarters();document.activeElement?.blur();
+   await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();
+ });
+ // Allow any async operations to settle before capture
+ await page.waitForTimeout(50);
+ for(const theme of ['dark','light'])await captureWithContinuity('desktop-home-live-meeting',theme,0);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
- for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme);
+ for(const theme of ['dark','light'])await captureWithContinuity('phone-home-live-meeting',theme,0);
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,startersHidden:document.getElementById('homeStarters').hidden,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
  assert.equal(phone.fits,true);assert.equal(phone.startersHidden,true,'starters always hidden');assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
  await page.evaluate(async()=>{
