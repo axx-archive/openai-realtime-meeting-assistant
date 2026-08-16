@@ -24,7 +24,7 @@ func TestDesktopShellNamesProductAndOrganization(t *testing.T) {
 		`<span>Create organization</span>`,
 		`min-height: 40px`,
 		`--shell-topbar-height: 60px`,
-		`padding-left: 72px`,
+		`padding-left: 56px`,
 		`#appShell.is-authed .tool-rail > .topbar__mark`,
 		`topbarBrandLockupEl?.classList.add('is-listening')`,
 		`topbarBrandLockupEl?.classList.add('is-wake')`,

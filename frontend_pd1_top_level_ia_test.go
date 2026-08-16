@@ -36,7 +36,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
 	re := regexp.MustCompile(`data-pd1-destination="([^"]+)"`)
 	matches := re.FindAllStringSubmatch(nav, -1)
-	want := []string{"Home", "Video", "Chat", "Work", "Network", "Work Search", "You"}
+	want := []string{"Home", "Video", "Chat", "Files", "Work", "Network", "Work Search", "You"}
 	if len(matches) != len(want) {
 		t.Fatalf("primary destination count=%d, want %d: %v", len(matches), len(want), matches)
 	}
@@ -49,7 +49,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 		`aria-label="Primary"`,
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
 		`data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
-		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Work', 'Network', 'Work Search', 'You'])`,
+		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files', 'Work', 'Network', 'Work Search', 'You'])`,
 		`aria-label="Application navigation"`,
 		`id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces"`,
 		`role="menuitemradio" tabindex="-1" data-tool="chat"`,
@@ -245,7 +245,7 @@ func TestPD1KeyboardFocusResponsiveAndMotionContracts(t *testing.T) {
 			t.Errorf("PD1 interaction/polish contract missing %q", marker)
 		}
 	}
-	css := pd1Slice(t, html, `/* PD1 shell: one global rail owns the product grammar.`, `@media (prefers-reduced-motion: reduce)`)
+	css := pd1Slice(t, html, `/* PD1 shell: slim icon-only rail, no labels.`, `@media (prefers-reduced-motion: reduce)`)
 	if strings.Contains(css, "transition: all") || strings.Contains(css, "will-change") {
 		t.Fatal("PD1 shell uses prohibited broad transition/compositing hint")
 	}

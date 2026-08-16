@@ -928,12 +928,12 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		".tool-rail__tool:focus-visible .tool-rail__label {",
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
-		"padding-left: 72px;",
+		"padding-left: 56px;",
 		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
 		`<span class="tool-rail__label">meetings</span>`,
 		`<span class="tool-rail__label">conversations</span>`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
-		`class="tool-rail__account-icon"`,
+		`class="tool-rail__account-icon stride-mark"`,
 		`aria-haspopup="dialog"`,
 		`role="dialog" aria-label="Account menu"`,
 		"accountMenuButton.addEventListener('click'",
@@ -1032,12 +1032,12 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	for _, want := range []string{
 		"#appShell.is-authed {",
 		"--shell-topbar-height: 60px;",
-		"padding-left: 72px;",
+		"padding-left: 56px;",
 		"#appShell.is-authed .topbar {",
 		"display: flex;",
 	} {
 		if !strings.Contains(desktopShellBlock, want) {
-			t.Fatalf("desktop shell must clear the 72px rail and show the 60px header; missing %q in the min-width 641px block", want)
+			t.Fatalf("desktop shell must clear the 56px rail and show the 60px header; missing %q in the min-width 641px block", want)
 		}
 	}
 

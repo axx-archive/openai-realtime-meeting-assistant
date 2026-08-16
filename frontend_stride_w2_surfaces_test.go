@@ -64,7 +64,7 @@ func TestStrideW2UsesTheMainProductShellAndDirectNetworkNavigation(t *testing.T)
 	for _, marker := range []string{
 		`data-tool="network"`, `aria-label="Work network"`, `network: 'Network'`,
 		`verified work · person-controlled visibility`, `applyToolState('network')`,
-		`window.closeStrideContributionSurface`, `inset: 60px 0 0 72px`,
+		`window.closeStrideContributionSurface`, `inset: 60px 0 0 56px`,
 		`Find people by the work they have chosen to show`, `Private by default`,
 	} {
 		if !strings.Contains(html, marker) {
