@@ -16950,8 +16950,13 @@
 
       .notification-bell__unread {
         position: absolute;
-        top: 3px;
-        right: 3px;
+        top: -1px;
+        right: -1px;
+        min-width: 0;
+        width: 10px;
+        height: 10px;
+        padding: 0;
+        font-size: 0;
         margin-top: 0;
         letter-spacing: 0;
       }
@@ -16966,6 +16971,17 @@
       .notification-bell__unread,
       .topbar__bell-badge {
         box-shadow: 0 0 0 1.5px var(--bg-app);
+      }
+
+      .topbar__bell-badge {
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        min-width: 0;
+        width: 10px;
+        height: 10px;
+        padding: 0;
+        font-size: 0;
       }
       .notification-bell__unread.is-arriving,
       .topbar__bell-badge.is-arriving {
@@ -17248,7 +17264,8 @@
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
+        word-break: normal;
         color: var(--text-2);
         font: var(--type-body-sm);
         text-wrap: pretty;
@@ -59328,10 +59345,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // and the board-dock menu (PV-1)
           setAccountMenuOpen(false)
           closeBoardDockMenu()
-          // Opening is observation only. The unread state changes when a row
-          // opens or the user chooses one of the explicit read controls.
           positionNotificationPanel()
-          loadNotifications().then(positionNotificationPanel)
+          // Opening the tray clears unread (Slack/iMessage pattern): you saw
+          // the list, so the badge goes. Proposal nudges stay sticky until
+          // acted on — markAllNotificationsRead skips them.
+          loadNotifications().then(() => {
+            positionNotificationPanel()
+            markAllNotificationsRead()
+          })
         } else if (options.restoreFocus) {
           notificationPanelTrigger?.focus?.({ preventScroll: true })
         }
