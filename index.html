@@ -7280,22 +7280,26 @@
         display: grid;
         place-items: center;
         border: 1px solid var(--line-1);
-        background: transparent;
-        color: var(--text-2);
+        background: var(--surface-2);
+        color: var(--text-1);
         cursor: pointer;
         transition:
           transform var(--dur-fast) var(--ease),
           background var(--dur-fast) var(--ease),
           color var(--dur-fast) var(--ease),
-          border-color var(--dur-fast) var(--ease);
+          border-color var(--dur-fast) var(--ease),
+          opacity var(--dur-fast) var(--ease);
       }
 
       .home-realtime-voice:hover:not([disabled]) {
-        background: var(--surface-2);
+        background: var(--surface-3);
         border-color: var(--line-2);
-        color: var(--text-1);
       }
       .home-realtime-voice:active:not([disabled]) { transform: scale(0.95); }
+      .home-realtime-voice[disabled] {
+        opacity: 0.4;
+        cursor: default;
+      }
       .office-launch.is-listening .home-realtime-voice {
         background: var(--ember);
         border-color: var(--ember);
@@ -53283,6 +53287,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const available = joined || Boolean(authedUser)
 	        if (homeScoutInput) homeScoutInput.disabled = !Boolean(authedUser)
 	        if (homeScoutSend) homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput?.value.trim()
+	        // Home voice button: enable when authenticated and voice surface is available
+	        const homeVoice = document.getElementById('homeRealtimeVoice')
+	        if (homeVoice) homeVoice.disabled = !Boolean(authedUser) || !privateRealtimeVoiceSurfaceAvailable()
 	        scoutChatInput.disabled = !available
 	        scoutChatSend.disabled = !available
 	        if (scoutChatAttach) {
@@ -54942,11 +54949,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // composer copy (design §7.2) — matches the thread context, not a generic LLM box
 	        const thread = selectedScoutChatThread()
 	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
-	        const directAgent = scoutChatDirectAgentName(thread)
+	        // Channel check first — "message the channel" matches the room language
+	        if (chatThreadIsChannel(thread)) {
+	          const title = chatThreadDisplayTitle(thread)
+	          return isPhone ? 'message…' : (title && title !== 'new thread' ? `message #${title}` : 'message the channel')
+	        }
+	        // Riff thread
 	        if (privateRiffThread(thread)) return isPhone ? 'riff with Scout…' : `riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
-	        if (chatThreadIsChannel(thread)) return isPhone ? 'message…' : 'message the channel'
-	        // Private thread: work-oriented, not generic LLM copy
+	        // Direct agent thread
+	        const directAgent = scoutChatDirectAgentName(thread)
 	        if (directAgent) return isPhone ? `message ${directAgent}…` : `message ${directAgent}`
+	        // Private thread: work-oriented, not generic LLM copy
 	        return isPhone ? 'start work…' : 'describe the work'
 	      }
 
