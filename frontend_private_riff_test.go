@@ -29,7 +29,7 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"Share this reply to source",
 		"Your Riff · private to you",
 		"Channel and company context refresh automatically when you send",
-		`data-icon="guitar"`,
+		`data-icon="riff"`,
 		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
 		`.chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"]))`,
 		"Hidden chain-of-thought is not shown.",
@@ -172,8 +172,8 @@ func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.
 		`height: 44px;`,
 		`transition-property: background-color, box-shadow, transform;`,
 		`.chat-convo-head__riff:active { transform: scale(0.96); }`,
-		`<span>Your Riff</span>`,
-		`data-icon="guitar"`,
+		`<span>Riff</span>`,
+		`data-icon="riff"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("compact Private Riff header entry missing %q", want)

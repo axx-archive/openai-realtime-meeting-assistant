@@ -664,6 +664,24 @@
         width: 17px;
         height: 17px;
       }
+
+      /* Stride mark system — custom icons replacing Lucide stroke glyphs.
+         stroke-width 1.6, round caps/joins, currentColor for theming. */
+      .stride-mark {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .stride-riff-mark {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
       /* label chips — per-button glass flyouts beside the rail; no rail
          width change, no layout shift. Hover/focus reveals after a beat. */
       .tool-rail__label {
@@ -13243,7 +13261,7 @@
 	          font-variant-numeric: tabular-nums;
 	        }
 	        #chatTool .private-riff-checkpoint__eyebrow { display: inline-flex; align-items: center; gap: 7px; }
-	        #chatTool .private-riff-guitar { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+	        #chatTool .stride-riff-mark { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 		#chatTool button.private-riff-provenance { align-self: flex-start; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
 		#chatTool button.private-riff-provenance:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -30171,104 +30189,104 @@
         </span>
         <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/><path d="M12 20v-4.5a1.5 1.5 0 0 0-3 0"/></svg>
             <span>Home</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-label="Meet" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="3"></rect><path d="m16 10 4-2v8l-4-2"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="2.5"/><circle cx="9" cy="12" r="2.5"/><path d="M15 9.5 20 7v10l-5-2.5"/></svg>
             <span>Meet</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-label="Chat" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 0 1 0 18c-1.5 0-2.9-.35-4.1-1L3 21.5l1.5-4.5A9 9 0 0 1 12 3Z"/></svg>
             <span>Chat</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Files" aria-label="Files" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4.5l2 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
             <span>Files</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 5V3h8v2M3 10h18"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
             <span>Work</span>
-            <svg class="pd1-primary-nav__disclosure" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 3 3-3 3"></path></svg>
+            <svg class="pd1-primary-nav__disclosure stride-mark" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 3 3-3 3"/></svg>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-label="Network" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="7" r="2"></circle><circle cx="19" cy="7" r="2"></circle><circle cx="5" cy="18" r="2"></circle><circle cx="19" cy="18" r="2"></circle><path d="m7 8 3 2M17 8l-3 2M7 17l3-3M17 17l-3-3"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="17" r="2.5"/><path d="M10.2 6.8 6.8 14.5M13.8 6.8l3.4 7.7M7.5 17h9"/></svg>
             <span>Network</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-label="Work Search" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/></svg>
             <span>Work Search</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-label="You" aria-current="false" tabindex="-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
+            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20.5c0-4 3.1-7 7-7s7 3 7 7"/></svg>
             <span>You</span>
           </button>
         </nav>
         <div id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces" hidden>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="office" aria-label="Stride home" aria-pressed="true" aria-checked="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/><path d="M12 20v-4.5a1.5 1.5 0 0 0-3 0"/></svg>
             <span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="room" aria-label="Meet" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="2.5"/><circle cx="9" cy="12" r="2.5"/><path d="M15 9.5 20 7v10l-5-2.5"/></svg>
             <span class="tool-rail__label">meet</span>
           </button>
           <span id="roomRailUnread" class="tool-rail__unread" aria-hidden="true" hidden>0</span>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="chat" aria-label="Conversations" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 0 1 0 18c-1.5 0-2.9-.35-4.1-1L3 21.5l1.5-4.5A9 9 0 0 1 12 3Z"/></svg>
             <span class="tool-rail__label">conversations</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="artifacts" aria-label="Work library" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4"/><path d="m8 10-4 2 4 2 4-2-4-2Z"/><path d="m16 10 4 2-4 2-4-2 4-2Z"/><path d="m8 16-4 2 4 2 4-2-4-2Z"/><path d="m16 16 4 2-4 2-4-2 4-2Z"/></svg>
             <span class="tool-rail__label">work library</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="research" aria-label="Research" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="design" aria-label="Design" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M17.5 3.5a2 2 0 0 1 2.8 2.8L8 18.5 4 20l1.5-4L17.5 3.5Z"/></svg>
             <span class="tool-rail__label">design</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="grill" aria-label="Grill mode" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M5 8h14"/><path d="M6 16h12"/><path d="M8 3l-2 5"/><path d="M16 3l2 5"/></svg>
             <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Meetings" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>
             <span class="tool-rail__label">meetings</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="files" aria-label="Files" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4.5l2 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
             <span class="tool-rail__label">files</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="network" aria-label="Work network" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="6" r="3"></circle><circle cx="5" cy="17" r="3"></circle><circle cx="19" cy="17" r="3"></circle><path d="m10.4 8.6-3.8 5.8"></path><path d="m13.6 8.6 3.8 5.8"></path><path d="M8 17h8"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="17" r="2.5"/><path d="M10.2 6.8 6.8 14.5M13.8 6.8l3.4 7.7M7.5 17h9"/></svg>
             <span class="tool-rail__label">network</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="team" aria-label="Agent team" aria-pressed="false" aria-checked="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19v-1.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V19"></path><circle cx="17.5" cy="9" r="2.5"></circle><path d="M15.5 14.4A4 4 0 0 1 21 18v1"></path></svg>
+            <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M4 19v-1a5 5 0 0 1 5-5h.5"/><circle cx="17" cy="9" r="2.5"/><path d="M14 18.5c0-2.5 1.3-4.5 3-4.5s3 2 3 4.5"/></svg>
             <span class="tool-rail__label">team</span>
           </button>
         </span>
@@ -30276,18 +30294,18 @@
         <span class="tool-rail__spacer" aria-hidden="true"></span>
         <div class="tool-rail__utilities" aria-label="Account and display controls">
         <button id="notificationBell" class="tool-rail__tool tool-rail__bell" type="button" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+          <svg class="stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8H3.5S6 15 6 9"/><path d="M10.5 21a2 2 0 0 0 3 0"/></svg>
           <span class="tool-rail__label">Notifications</span>
           <span id="notificationBadge" class="chat-thread-item__unread notification-bell__unread" hidden>0</span>
         </button>
         <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false">
-          <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
-          <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+          <svg class="tool-rail__icon--moon stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg class="tool-rail__icon--sun stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
           <span class="tool-rail__label">Appearance</span>
         </button>
         <span id="topbarAccount" class="tool-rail__slot tool-rail__account" hidden>
           <button id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings">
-            <svg class="tool-rail__account-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 19.79 6.2l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
+            <svg class="tool-rail__account-icon stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.9 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.9l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.9-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.9l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
             <span class="topbar__avatar" aria-hidden="true">
               <img id="topbarAvatarImage" alt="" hidden>
               <span id="topbarAvatarInitials">TC</span>
@@ -30308,11 +30326,11 @@
             <span class="account-menu__divider" aria-hidden="true"></span>
             <div class="account-menu__actions">
               <button id="accountMenuSettings" class="account-menu__link" type="button">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 19.79 6.2l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.9 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.9l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.9-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.9l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
                 settings
               </button>
               <button id="accountMenuSignOut" class="account-menu__link" type="button">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
                 sign out
               </button>
             </div>
@@ -30322,7 +30340,7 @@
       </aside>
       <header class="topbar mount-stagger">
         <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to Stride">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+          <svg class="stride-mark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 17-5-5 5-5"/></svg>
         </button>
         <div class="topbar__brand-lockup" aria-label="Stride · organization workspace">
           <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
@@ -30366,7 +30384,7 @@
           </button>
         </span>
         <button id="topbarBell" class="topbar__bell" type="button" aria-label="Notifications" aria-haspopup="dialog">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+          <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8H3.5S6 15 6 9"/><path d="M10.5 21a2 2 0 0 0 3 0"/></svg>
           <span id="topbarBellBadge" class="chat-thread-item__unread topbar__bell-badge" hidden>0</span>
         </button>
         <button id="topbarMobileAccount" class="topbar__mobile-account" type="button" aria-label="Settings">
@@ -30452,7 +30470,7 @@
                   </span>
                 </button>
                 <button id="homeScoutSend" class="home-scout-composer__send" type="submit" aria-label="Send message to a new private Scout thread" disabled>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>
+                  <svg class="stride-mark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
                 </button>
               </form>
               <p id="homeScoutComposerStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
@@ -30513,8 +30531,8 @@
 
         <section id="accessPanel" class="access-panel" aria-label="Sign in">
           <button id="loginThemeToggle" class="login-theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
-            <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
-            <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+            <svg class="tool-rail__icon--moon stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            <svg class="tool-rail__icon--sun stride-mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
           </button>
           <header class="login-head login-rise">
             <span class="login-lockup">
@@ -30582,7 +30600,7 @@
               <span class="login-divider__line"></span>
             </div>
             <button id="passkeySignIn" class="login-passkey" type="button" disabled title="sign in with your password once first.">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path></svg>
+              <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>
               Use Face ID
             </button>
             <!-- RW2 guest gate: member sign-in demoted to a quiet text link —
@@ -30619,9 +30637,8 @@
             <header class="scout-panel__header">
               <div class="scout-panel__title">
                 <span class="scout-panel__mark" aria-hidden="true">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
-                    <path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path>
+                  <svg class="stride-mark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v4"/><path d="m8 10-4 2 4 2 4-2-4-2Z"/><path d="m16 10 4 2-4 2-4-2 4-2Z"/><path d="m8 16-4 2 4 2 4-2-4-2Z"/><path d="m16 16 4 2-4 2-4-2 4-2Z"/>
                   </svg>
                 </span>
                 <h2>Scout</h2>
@@ -30641,7 +30658,7 @@
               <details class="scout-activity" open>
                 <summary>
                   <span class="scout-activity__label">chat <span id="scoutActivityCount" class="scout-activity__count" hidden>0</span></span>
-                  <svg class="scout-activity__chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+                  <svg class="scout-activity__chev stride-mark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
                 </summary>
                 <div id="assistantFeed" class="assistant-feed">
                   <article class="assistant-message assistant-message--status">
@@ -30652,9 +30669,8 @@
               </details>
               <form id="assistantForm" class="assistant-form scout-ask">
                 <span class="scout-ask__icon" aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <path d="M21 21l-4.35-4.35"></path>
+                  <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
                   </svg>
                 </span>
                 <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask the room…">
@@ -30668,14 +30684,14 @@
             <header class="room-chat__header">
               <div class="room-chat__title">
                 <span class="room-chat__mark" aria-hidden="true">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <svg class="stride-mark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3a9 9 0 0 1 0 18c-1.5 0-2.9-.35-4.1-1L3 21.5l1.5-4.5A9 9 0 0 1 12 3Z"/>
                   </svg>
                 </span>
                 <h2>Meeting</h2>
               </div>
               <button id="roomChatClose" class="room-chat__close" type="button" aria-label="Close room chat" title="Close room chat">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </header>
             <div class="room-meeting-tabs" role="tablist" aria-label="Meeting view">
@@ -30695,9 +30711,8 @@
               <form id="roomChatForm" class="scout-chat-form room-chat__form">
                 <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room or @Scout…" aria-label="Message the room or mention Scout" disabled></textarea>
                 <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 19V5"></path>
-                    <path d="m5 12 7-7 7 7"></path>
+                  <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>
                   </svg>
                 </button>
               </form>
@@ -30913,27 +30928,24 @@
             <!-- card 070: no scope toggle — channels and private threads are two
                  always-visible labeled sections, each with its own create + -->
             <div class="chat-threads__search">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="11" cy="11" r="7"></circle>
-                <path d="m21 21-4.3-4.3"></path>
+              <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
               </svg>
               <input id="chatThreadSearch" class="chat-threads__search-input" type="search" autocomplete="off" placeholder="search threads…" aria-label="Search threads">
             </div>
             <div class="chat-threads__section-head">
               <span id="chatChannelsLabel" class="chat-threads__label">channels · whole office</span>
               <button id="chatNewChannel" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new channel" title="new channel">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 5v14"></path>
-                  <path d="M5 12h14"></path>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
                 </svg>
               </button>
             </div>
             <form id="chatChannelCreate" class="chat-channel-create" hidden>
               <input id="chatChannelName" class="chat-channel-create__input" type="text" maxlength="80" autocomplete="off" placeholder="channel name…" aria-label="New channel name">
               <button class="chat-channel-create__go" type="submit" aria-label="Create channel" title="create channel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M5 12h14"></path>
-                  <path d="m12 5 7 7-7 7"></path>
+                <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
                 </svg>
               </button>
             </form>
@@ -30942,17 +30954,16 @@
             <div class="chat-threads__section-head">
               <span id="chatPrivateLabel" class="chat-threads__label">private · you + Scout</span>
               <button id="chatNewThread" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new thread" title="new thread">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"></path>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/>
                 </svg>
               </button>
             </div>
             <button id="chatDefaultThread" class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
-                  <path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path>
+                <svg class="stride-mark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v4"/><path d="m8 10-4 2 4 2 4-2-4-2Z"/><path d="m16 10 4 2-4 2-4-2 4-2Z"/><path d="m8 16-4 2 4 2 4-2-4-2Z"/><path d="m16 16 4 2-4 2-4-2 4-2Z"/>
                 </svg>
               </span>
               <span class="chat-thread-item__body">
@@ -30969,22 +30980,21 @@
           <div id="scoutPrivatePane" class="chat-conversation">
             <div class="chat-convo-head">
               <button id="chatConvoBack" class="chat-convo-head__back" type="button" aria-label="Back to threads">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+                <svg class="stride-mark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 17-5-5 5-5"/></svg>
               </button>
               <span id="chatConvoTitle" class="chat-convo-head__title">new thread</span>
               <input id="chatConvoRenameInput" class="chat-convo-head__input" type="text" maxlength="72" autocomplete="off" aria-label="Thread name" hidden>
               <button id="chatConvoRename" class="chat-convo-head__rename" type="button" aria-label="rename thread" title="rename" hidden>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                <svg class="stride-mark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M17.5 3.5a2.5 2.5 0 0 1 3.5 3.5L8.5 19.5 3 21l1.5-5.5Z"/>
                 </svg>
               </button>
 	              <button id="chatConvoRiff" class="chat-convo-head__riff" type="button" aria-label="Open your private Riff for this channel" hidden>
-	                <svg data-icon="guitar" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-	                  <path d="m14.5 5.5 4-4"></path><path d="m18 2 4 4"></path><path d="m19.5 4.5-6.2 6.2"></path>
-	                  <path d="M14.2 9.8c-1.9-1.5-4.4-1.6-5.8-.2l-1.1 1.1c-.7.7-.9 1.8-.5 2.7l-3.7 3.7a2.7 2.7 0 0 0 3.8 3.8l3.7-3.7c.9.4 2 .2 2.7-.5l1.1-1.1c1.4-1.4 1.3-3.9-.2-5.8Z"></path><circle cx="6.4" cy="17.6" r="1.2"></circle>
-	                </svg>
-	                <span>Riff</span>
-	              </button>
+                <svg class="stride-mark stride-riff-mark" data-icon="riff" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M7 4v16"/><path d="M7 12c5 0 7 3 7 8"/><circle cx="14" cy="20" r="2"/>
+                </svg>
+                <span>Riff</span>
+              </button>
               <span id="chatConvoMeta" class="chat-convo-head__meta">private · only you and Scout</span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
                 <span id="chatConvoScope" class="desktop-chat-context__scope">private</span>
@@ -30995,8 +31005,8 @@
             <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
               <div class="scout-chat-empty"></div>
               <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
-                <svg class="scout-chat-thinking__flame" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
+                <svg class="scout-chat-thinking__flame stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
                 </svg>
                 <span id="scoutChatThinkingText">thinking</span>
                 <span class="scout-chat-thinking__dots" aria-hidden="true">
@@ -31026,20 +31036,19 @@
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path>
+                <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"/>
                 </svg>
               </button>
               <button id="scoutChatDeliverables" class="scout-chat-attach" type="button" aria-label="Attach a deliverable for feedback" aria-haspopup="listbox" title="Attach a deliverable for feedback" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
+                <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 7a2 2 0 0 1 2-2h4.5l2 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>
                 </svg>
               </button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="Message" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 19V5"></path>
-                  <path d="m5 12 7-7 7 7"></path>
+                <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>
                 </svg>
               </button>
             </form>
@@ -31080,7 +31089,7 @@
                 <p id="chatContextMeta" class="chat-context-rail__meta"></p>
               </div>
               <button id="chatContextClose" class="chat-context-rail__close" type="button" aria-label="Close context panel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </header>
             <div id="chatContextParent" class="chat-context-rail__parent" hidden></div>
@@ -31100,11 +31109,11 @@
               <div class="chat-context-reply__composer">
                 <input id="chatContextReplyFileInput" type="file" multiple hidden>
                 <button id="chatContextReplyAttach" class="chat-context-reply__attach" type="button" aria-label="Attach files to reply" title="Attach files">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg>
+                  <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"/></svg>
                 </button>
                 <textarea id="chatContextReplyInput" rows="1" maxlength="12000" placeholder="Message the thread…" aria-label="Message the thread"></textarea>
                 <button id="chatContextReplySend" type="submit" aria-label="Send threaded reply">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                  <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
                 </button>
               </div>
             </form>
@@ -31215,9 +31224,8 @@
                 <button class="btn btn--ghost artifacts-sidebar__new" type="button" data-open-assistant-mode="artifacts">New artifact</button>
               </header>
               <label class="artifacts-search" aria-label="Search artifacts">
-                <svg class="artifacts-search__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7"></circle>
-                  <path d="m21 21-4.3-4.3"></path>
+                <svg class="artifacts-search__icon stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
                 </svg>
                 <input id="artifactSearch" class="artifacts-search__input" type="search" autocomplete="off" placeholder="search artifacts…" aria-label="Search artifacts">
               </label>
@@ -31292,9 +31300,8 @@
                   <span id="researchArtifactCount" class="research-library__count">0</span>
                 </div>
                 <label class="research-library__search" aria-label="Search research jobs">
-                  <svg class="research-library__search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="11" cy="11" r="7"></circle>
-                    <path d="m21 21-4.3-4.3"></path>
+                  <svg class="research-library__search-icon stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
                   </svg>
                   <input id="researchArtifactSearch" class="research-library__search-input" type="search" autocomplete="off" placeholder="search research…" aria-label="Search research jobs">
                 </label>
@@ -31518,7 +31525,7 @@
           <div class="memory-tool__inner">
             <div class="memory-tool__search">
               <span class="memory-tool__search-icon" aria-hidden="true">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/></svg>
               </span>
               <input id="memorySearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="search everything the office remembers" aria-label="search everything the office remembers">
             </div>
@@ -31562,7 +31569,7 @@
               <div class="files-head">
                 <div class="memory-tool__search">
                 <span class="memory-tool__search-icon" aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                  <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/></svg>
                 </span>
                   <input id="filesSearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="Search Drive" aria-label="Search Drive">
                 </div>
@@ -31573,7 +31580,7 @@
               </div>
               <button id="filesUploadButton" class="files-upload" type="button">
                 <span class="files-upload__icon" aria-hidden="true">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                  <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
                 </span>
                 <span class="files-upload__text"><b>Drop files here</b><small>or choose files · up to 64MB each</small></span>
               </button>
@@ -31601,11 +31608,8 @@
               <span id="boardPreviewState" class="board-rail__subtitle">platform · <span id="boardRailCount">0 cards</span></span>
             </div>
             <button id="expandBoard" class="board-expand" type="button" aria-expanded="false" disabled>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <polyline points="9 21 3 21 3 15"></polyline>
-                <line x1="21" y1="3" x2="14" y2="10"></line>
-                <line x1="3" y1="21" x2="10" y2="14"></line>
+              <svg class="stride-mark" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>
               </svg>
               expand
             </button>
@@ -31644,11 +31648,8 @@
             </div>
             <div id="boardHuddle" class="board-huddle presence" aria-label="Room huddle"></div>
             <button id="collapseBoard" class="board-collapse board-back" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="4 14 10 14 10 20"></polyline>
-                <polyline points="20 10 14 10 14 4"></polyline>
-                <line x1="14" y1="10" x2="21" y2="3"></line>
-                <line x1="3" y1="21" x2="10" y2="14"></line>
+              <svg class="stride-mark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/>
               </svg>
               back to room
             </button>
@@ -31918,7 +31919,7 @@
             </div>
           </div>
           <button id="osAssistantClose" class="os-assistant__close" type="button" aria-label="Close assistant" title="Close assistant">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </header>
         <div class="os-assistant__modes" role="group" aria-label="Assistant mode">
@@ -32048,11 +32049,8 @@
         <span id="pipTitle" class="pip-meeting__title">room</span>
         <span id="pipUnread" class="pip-meeting__unread" aria-label="unread room chat" hidden>0</span>
         <button id="pipExpand" class="pip-meeting__expand" type="button" aria-label="Return to the room" title="Return to the room">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M15 3h6v6"></path>
-            <path d="M9 21H3v-6"></path>
-            <path d="m21 3-7 7"></path>
-            <path d="m3 21 7-7"></path>
+          <svg class="stride-mark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>
           </svg>
         </button>
       </div>
@@ -32123,26 +32121,25 @@
             </span>
           </div>
           <button id="settingsClose" class="btn btn--ghost settings-close" type="button" aria-label="Close settings" title="close">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
+            <svg class="stride-mark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
             </svg>
           </button>
         </header>
         <div class="settings-layout">
           <nav class="settings-nav" aria-label="Settings sections">
             <span class="settings-nav__group">You</span>
-            <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg><span>Profile</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 9h10M7 13h6"></path></svg><span>Account &amp; security</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="scout-memory" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v1a3 3 0 0 0 0 6v1a3.5 3.5 0 0 0 3.5 3.5M14.5 4.5A3.5 3.5 0 0 1 18 8v1a3 3 0 0 1 0 6v1a3.5 3.5 0 0 1-3.5 3.5M12 3v18"></path></svg><span>Memory</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="personal-context" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8.1 8 9 4.6-.9 8-4 8-9V7l-8-4Z"></path><path d="M9 12l2 2 4-4"></path></svg><span>Personal context</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20.5c0-4 3.1-7 7-7s7 3 7 7"/></svg><span>Profile</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 9h10M7 13h6"/></svg><span>Account &amp; security</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="scout-memory" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v1a3 3 0 0 0 0 6v1a3.5 3.5 0 0 0 3.5 3.5M14.5 4.5A3.5 3.5 0 0 1 18 8v1a3 3 0 0 1 0 6v1a3.5 3.5 0 0 1-3.5 3.5M12 3v18"/></svg><span>Memory</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="personal-context" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8.1 8 9 4.6-.9 8-4 8-9V7l-8-4Z"/><path d="M9 12l2 2 4-4"/></svg><span>Personal context</span></button>
             <span class="settings-nav__group">Experience</span>
-            <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3"></path></svg><span>Audio &amp; video</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notifications</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.1-.9-2-2-2h-2.2a2 2 0 0 1-1.8-2.8l.7-1.6A1.8 1.8 0 0 0 14 3.1 9 9 0 0 0 12 3Z"></path><circle cx="7.5" cy="11.5" r=".8" fill="currentColor" stroke="none"></circle><circle cx="10" cy="7.5" r=".8" fill="currentColor" stroke="none"></circle></svg><span>Appearance</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3"/></svg><span>Audio &amp; video</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8H3.5S6 15 6 9"/><path d="M10.5 21a2 2 0 0 0 3 0"/></svg><span>Notifications</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.1-.9-2-2-2h-2.2a2 2 0 0 1-1.8-2.8l.7-1.6A1.8 1.8 0 0 0 14 3.1 9 9 0 0 0 12 3Z"/><circle cx="7.5" cy="11.5" r=".8" fill="currentColor" stroke="none"/><circle cx="10" cy="7.5" r=".8" fill="currentColor" stroke="none"/></svg><span>Appearance</span></button>
             <span class="settings-nav__group">Organization</span>
-            <button type="button" class="settings-nav__item" data-settings-section="organizations" data-stride-w2-settings-surface="organizations" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 20V7l8-4 8 4v13M8 20v-5h8v5M8 9h.01M12 9h.01M16 9h.01"></path></svg><span>Organizations</span></button>
-            <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16v13H4zM8 7V4h8v3M4 11h16"></path></svg><span>Deal rooms</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="organizations" data-stride-w2-settings-surface="organizations" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 20V7l8-4 8 4v13M8 20v-5h8v5M8 9h.01M12 9h.01M16 9h.01"/></svg><span>Organizations</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false"><svg class="settings-nav__icon stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg><span>Deal rooms</span></button>
           </nav>
           <div class="settings-body">
             <section data-settings-section="profile" aria-label="Profile">
@@ -60781,29 +60778,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }).format(at)
 	      }
 
-	      function privateRiffGuitarIcon() {
-	        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-	        svg.classList.add('private-riff-guitar')
-	        svg.setAttribute('viewBox', '0 0 24 24')
-	        svg.setAttribute('aria-hidden', 'true')
-	        const pathData = [
-	          'm14.5 5.5 4-4',
-	          'm18 2 4 4',
-	          'm19.5 4.5-6.2 6.2',
-	          'M14.2 9.8c-1.9-1.5-4.4-1.6-5.8-.2l-1.1 1.1c-.7.7-.9 1.8-.5 2.7l-3.7 3.7a2.7 2.7 0 0 0 3.8 3.8l3.7-3.7c.9.4 2 .2 2.7-.5l1.1-1.1c1.4-1.4 1.3-3.9-.2-5.8Z'
-	        ]
-	        pathData.forEach(value => {
-	          const path = document.createElementNS(svg.namespaceURI, 'path')
-	          path.setAttribute('d', value)
-	          svg.appendChild(path)
-	        })
-	        const soundHole = document.createElementNS(svg.namespaceURI, 'circle')
-	        soundHole.setAttribute('cx', '6.4')
-	        soundHole.setAttribute('cy', '17.6')
-	        soundHole.setAttribute('r', '1.2')
-	        svg.appendChild(soundHole)
-	        return svg
-	      }
+	      function privateRiffMark() {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        svg.classList.add('stride-riff-mark')
+        svg.setAttribute('viewBox', '0 0 24 24')
+        svg.setAttribute('aria-hidden', 'true')
+        const pathData = ['M7 4v16', 'M7 12c5 0 7 3 7 8']
+        pathData.forEach(value => {
+          const path = document.createElementNS(svg.namespaceURI, 'path')
+          path.setAttribute('d', value)
+          svg.appendChild(path)
+        })
+        const dot = document.createElementNS(svg.namespaceURI, 'circle')
+        dot.setAttribute('cx', '14')
+        dot.setAttribute('cy', '20')
+        dot.setAttribute('r', '2')
+        svg.appendChild(dot)
+        return svg
+      }
+
+      function privateRiffGuitarIcon() {
+        return privateRiffMark()
+      }
 
 	      function privateRiffReplyIsShareable(message, thread) {
 	        if (!message?.id || String(message?.kind || 'message') !== 'message' || !String(message?.text || '').trim() ||
