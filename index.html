@@ -61691,13 +61691,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
 	          worklog.appendChild(sourceList)
 	        }
-	        const governance = document.createElement('details')
-	        governance.className = 'chat-context-card'
-	        const governanceTitle = document.createElement('summary')
-	        governanceTitle.className = 'chat-context-card__author'
-	        governanceTitle.textContent = 'Governance and provenance'
-	        governance.append(governanceTitle, bfEl('p', 'chat-context-card__body', `${agentName} is the visible worker. STRIDE keeps routing, authority and output contracts server-managed while this private workstream remains durable and auditable.`))
-	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null, governance].filter(Boolean))
+	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null].filter(Boolean))
 	      }
 
 	      function openDesktopWorkContext(message, trigger) {
@@ -62223,7 +62217,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const pct = hasKnownProgress ? Math.max(0, Math.min(100, pctValue)) : 0
 	        const isStalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
 	        const isComplete = ['complete', 'completed', 'published'].includes(status)
-	        const showProgressBar = hasKnownProgress && !isStalled && !isComplete
+	        const showProgressBar = hasKnownProgress && !isComplete
 	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
 	        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
 	        const phase = desktopWorkPhase(artifact, status, ref)
@@ -62275,15 +62269,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          bfEl('strong', '', `${agent} · ${family}`),
 	          bfEl('span', '', hasKnownProgress ? `${phase.label} · ${Math.round(pct)}% complete` : phase.label)
 	        )
-	        if (['complete', 'completed', 'published'].includes(status) && artifact?.id) {
+	        if (artifact?.id) {
 	          const compactActions = bfEl('div', 'chat-context-actions scout-chat-work-card__actions')
-	          const view = bfEl('button', 'chat-context-action', 'Open')
+	          const view = bfEl('button', 'chat-context-action', isComplete ? 'Open' : 'Inspect draft')
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          compactActions.appendChild(view)
-	          const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
-	          if (save) compactActions.appendChild(save)
-	          const regenerate = bfEl('button', 'chat-context-action', 'Regenerate')
+	          if (isComplete) {
+	            const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
+	            if (save) compactActions.appendChild(save)
+	          }
+	          const regenerate = bfEl('button', 'chat-context-action', isStalled ? 'Retry' : 'Regenerate')
 	          regenerate.type = 'button'
 	          regenerate.addEventListener('click', () => {
 	            armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })

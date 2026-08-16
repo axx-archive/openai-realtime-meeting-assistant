@@ -626,7 +626,6 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		"researchArtifactSources(artifact)",
 		"desktopWorkFamily",
 		"desktopSafeWorkNote",
-		"Governance and provenance",
 		"desktopSaveToDriveControl(artifact)",
 		"artifactPdfControl(artifact",
 		"'Regenerate'",

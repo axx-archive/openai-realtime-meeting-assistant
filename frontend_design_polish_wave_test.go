@@ -243,7 +243,7 @@ func TestPD1RecurringWorkUsesOnePremiumPresentationGrammar(t *testing.T) {
 		t.Fatal("desktop progress sanitizer still relies on a bypassable runtime-token denylist")
 	}
 	context := functionBody(html, "function renderDesktopWorkContext(")
-	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "Governance and provenance", "routing, authority and output contracts server-managed"} {
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote"} {
 		if !strings.Contains(context, want) {
 			t.Errorf("desktop work inspector missing %q", want)
 		}
