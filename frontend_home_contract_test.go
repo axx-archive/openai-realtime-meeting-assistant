@@ -18,7 +18,7 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`fetch('/assistant/home', { cache: 'no-store' })`,
 		`homeSnapshot.items.filter(item => item?.kind !== 'live-meeting')`,
 		`selectedHomeCategoryId === category?.id`,
-		`homeContinuity.hidden = Boolean(categories.length) || !availableContext`,
+		`homeContinuity.hidden = !availableContext`,
 		`homeScoutInput.value = String(suggestion.text)`,
 		`selectedHomeSuggestionDestination = suggestion?.destination || null`,
 		`attempt.threadId`,
@@ -38,7 +38,6 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`aria-busy="true"`,
 		`button.disabled = !suggestionsReady`,
 		`const categories = !guestMode`,
-		`Why this: ${whyThis}`,
 		`homeStarters.dataset.hydrated = String(suggestionsReady)`,
 		`homeSnapshotRequest?.audienceKey === audienceKey`,
 		`if (refreshAfterCurrent) homeSnapshotRefreshQueued = true`,
@@ -152,8 +151,11 @@ func TestDesktopHomeCategoryShellsExistBeforeJavaScriptHydration(t *testing.T) {
 		t.Fatal("static Home category shell boundary missing")
 	}
 	shell := html[start:end]
-	if strings.Contains(strings.SplitN(shell, ">", 2)[0], " hidden") {
-		t.Fatal("static Home category shells are hidden until JavaScript runs")
+	// Real work items (homeContinuity) are the primary surface now; the generic
+	// Continue/Explore/Create/Challenge starters start hidden and only appear
+	// when no continuity items exist.
+	if !strings.Contains(strings.SplitN(shell, ">", 2)[0], " hidden") {
+		t.Fatal("static Home category shells should be hidden initially (real work is primary)")
 	}
 	if got := strings.Count(shell, `class="home-starter pressable"`); got != 4 {
 		t.Fatalf("static Home category count=%d, want 4 before JavaScript hydration", got)
@@ -247,22 +249,20 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.waitForFunction(()=>document.querySelectorAll('#homeStarters .home-starter').length===4);
+ // Real work items (continuity) are now the primary surface; starters are hidden
+ // when continuity items exist.
+ await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
  const immediate=await page.evaluate(()=>({
-   starters:document.querySelectorAll('#homeStarters .home-starter').length,
-   disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
-   hydrated:document.getElementById('homeStarters').dataset.hydrated,
+   continuity:document.querySelectorAll('#homeContinuity .home-continuity__row').length,
+   startersHidden:document.getElementById('homeStarters').hidden,
    composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,
    greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),
-   startersBox:document.getElementById('homeStarters').getBoundingClientRect().toJSON(),
    wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()
  }));
- assert.equal(immediate.starters,4,'four stable Home shells paint before recommendations');
- assert.equal(immediate.disabled,4,'unhydrated Home shells are non-actionable');
- assert.equal(immediate.hydrated,'false','Home shells disclose their unhydrated state');
- await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
+ assert.equal(immediate.continuity,3,'three real work items paint as primary surface');
+ assert.equal(immediate.startersHidden,true,'generic starters are hidden when real work exists');
  assert.equal(homeRequestCount,1,'startup auth and room hydration coalesce into one Home request');
- const hydratedGeometry=await page.evaluate(()=>({composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),startersBox:document.getElementById('homeStarters').getBoundingClientRect().toJSON(),wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()}));
+ const hydratedGeometry=await page.evaluate(()=>({composerTop:document.getElementById('homeScoutComposer').getBoundingClientRect().top,greeting:document.getElementById('officeLaunchGreeting').getBoundingClientRect().toJSON(),wrap:document.querySelector('.office-launch__wrap').getBoundingClientRect().toJSON()}));
 	 // Chromium can settle the centered svh flex container by one fractional
 	 // device-pixel row after first paint. Keep the bound within five CSS pixels;
 	 // card/composer dimensions remain identical and no late content is inserted.
@@ -273,11 +273,12 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  await page.waitForFunction(()=>!document.getElementById('homeRefreshRetry').hidden);
  const failed=await page.evaluate(()=>({
    continuity:document.querySelectorAll('#homeContinuity .home-continuity__row').length,
-   starters:document.querySelectorAll('#homeStarters .home-starter').length,
+   startersHidden:document.getElementById('homeStarters').hidden,
    draft:document.getElementById('homeScoutInput').value,
    retry:document.getElementById('homeRefreshRetry').textContent.trim()
  }));
-	assert.deepEqual(failed,{continuity:0,starters:4,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
+ // When refresh fails and clears items, starters become visible as fallback
+	assert.deepEqual(failed,{continuity:0,startersHidden:false,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
 	homeAvailable=true;
 	await page.evaluate(()=>document.getElementById('homeRefreshRetry').click());
 	await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3&&document.getElementById('homeRefreshRetry').hidden);
@@ -310,8 +311,10 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  for(const theme of ['dark','light'])await capture('phone-home-voice-live',theme);
  await page.evaluate(()=>{setRealtimeVoiceMode('idle');setVoiceIslandState('idle');});
  await page.setViewportSize({width:1440,height:900});
+ // Test the fallback scenario: clear items so starters become visible
+ await page.evaluate(()=>{homeSnapshot.items=[];renderHomeSnapshot();});
+ await page.waitForFunction(()=>!document.getElementById('homeStarters').hidden && document.getElementById('homeContinuity').hidden);
  await page.focus('#homeScoutInput');
- await page.waitForFunction(()=>document.querySelectorAll('#homeStarters .home-starter').length===4 && document.getElementById('homeContinuity').hidden);
  await page.click('#homeStarters .home-starter:nth-child(2)');
  assert.equal(await page.locator('#homeScoutInput').inputValue(),'');
  assert.equal(await page.locator('#homeSuggestions .home-suggestion').count(),2);
@@ -349,14 +352,15 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  await page.fill('#homeScoutInput','Whatever else I want to ask');
  assert.equal(await page.locator('#homeScoutInput').inputValue(),'Whatever else I want to ask');
  await page.fill('#homeScoutInput','');
- await page.waitForFunction(()=>document.querySelectorAll('#homeStarters .home-starter').length===4);
+ // With items cleared, starters remain visible
+ await page.waitForFunction(()=>!document.getElementById('homeStarters').hidden);
  await page.evaluate(async()=>{selectedHomeCategoryId='';renderHomeStarters();document.activeElement?.blur();await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();});
  for(const theme of ['dark','light'])await capture('desktop-home-live-meeting',theme);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
  for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme);
- const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,starterCount:document.querySelectorAll('#homeStarters .home-starter').length,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
- assert.equal(phone.fits,true);assert.equal(phone.starterCount,4);assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
+ const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,startersHidden:document.getElementById('homeStarters').hidden,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
+ assert.equal(phone.fits,true);assert.equal(phone.startersHidden,false,'starters visible when no items');assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
  await page.evaluate(async()=>{
 	   homeScoutInput.value='Country Golf';
    homeScoutInput.dispatchEvent(new Event('input',{bubbles:true}));
@@ -368,15 +372,16 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  });
  const switched=await page.evaluate(()=>({
    oldCopy:document.querySelector('.office-launch').textContent.includes('Country Golf'),
-   disabled:document.querySelectorAll('#homeStarters .home-starter:disabled').length,
    hydrated:document.getElementById('homeStarters').dataset.hydrated,
    destination:selectedHomeSuggestionDestination,
    chipHidden:document.getElementById('homeContextChip').hidden,
 	   projectChipPresent:Boolean(document.getElementById('homeProjectChip')),
    chooserOpen:document.getElementById('homeProjectChooser').open
  }));
-	 assert.deepEqual(switched,{oldCopy:false,disabled:4,hydrated:'false',destination:null,chipHidden:true,projectChipPresent:false,chooserOpen:false},'A context survived the A to B authority boundary');
- await page.waitForFunction(()=>document.getElementById('homeStarters').dataset.hydrated==='true');
+ // During account switch, old context must be cleared; starters are in loading state
+	 assert.deepEqual(switched,{oldCopy:false,hydrated:'false',destination:null,chipHidden:true,projectChipPresent:false,chooserOpen:false},'A context survived the A to B authority boundary');
+ // Wait for B's home to hydrate - continuity items will be primary, starters hidden
+ await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3);
  await page.waitForTimeout(1100);
  assert.equal(await page.locator('.office-launch').textContent().then(value=>value.includes('Country Golf')),false,'late A Project context rendered for B');
 	await page.goto(base+'/chat',{waitUntil:'domcontentloaded'});
