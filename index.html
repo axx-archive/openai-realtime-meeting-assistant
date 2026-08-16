@@ -33674,6 +33674,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceAudio
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
+      // Conversational voice: track user's input transcription to detect action
+      // requests. When an action is detected but tool_choice=none prevented the
+      // model from calling route_conversation_turn, we flip to auto and retry.
+      let privateRealtimeVoicePendingUserTranscript = ''
       let privateRealtimeVoiceSessionToken = 0
       let privateRealtimeVoiceID = ''
       let privateRealtimeVoiceThreadID = ''
@@ -43225,6 +43229,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
           privateRealtimeVoicePeer = peer
           privateRealtimeVoiceHandledCalls = new Set()
+          privateRealtimeVoicePendingUserTranscript = ''
           peer.ontrack = event => {
             if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
             postPrivateRealtimeMilestone('remote_track')
@@ -44012,6 +44017,26 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }, { once: true })
       }
 
+      // Conversational voice: detect if user's utterance requests an action that
+      // needs route_conversation_turn. Session defaults to tool_choice=none for
+      // conversational latency; this check enables tools only for action requests.
+      function privateRealtimeUserRequestedAction(transcript) {
+        const text = String(transcript || '').toLowerCase()
+        if (!text) return false
+        // Action verbs that indicate work/approval/unavailable intent
+        const actionPatterns = [
+          /\b(start|launch|begin|kick off|initiate)\b.*\b(work|task|project|riff)\b/,
+          /\b(do|make|create|build|write|draft|prepare)\b.*\b(for|this|that|it|the)\b/,
+          /\b(send|share|post|publish|submit)\b/,
+          /\b(approve|reject|confirm|accept|decline)\b/,
+          /\b(mark|set|go)\b.*\b(unavailable|away|offline|busy)\b/,
+          /\b(i need to|i have to|i'm going to)\b.*\b(leave|go|step away)\b/,
+          /\bstart\s+(a\s+)?riff\b/,
+          /\blaunch\b/,
+        ]
+        return actionPatterns.some(pattern => pattern.test(text))
+      }
+
       function handlePrivateRealtimeVoiceEvent(raw, sessionToken, peer) {
         if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
         let event
@@ -44023,6 +44048,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const type = String(event?.type || '')
         if (!type) {
           return
+        }
+        // Capture user's input transcription for action detection. The event name
+        // is "conversation.item.input_audio_transcription.completed".
+        if (type.includes('input_audio_transcription') && type.includes('completed')) {
+          privateRealtimeVoicePendingUserTranscript = String(event.transcript || '').trim()
         }
         // During Act II only, feed Scout's own spoken lines into the struck-
         // question ritual (Act I is pitch capture — her "pitch me" prompt is not
@@ -44045,7 +44075,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // active". Wait for the exact terminal response before continuing.
           const toolCalls = interrupted ? [] : (event.response?.output || [])
             .filter(item => item?.type === 'function_call')
-          if (toolCalls.length) void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
+          if (toolCalls.length) {
+            void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
+          } else if (!interrupted && privateRealtimeUserRequestedAction(privateRealtimeVoicePendingUserTranscript)) {
+            // Conversational voice: tool_choice=none blocked the tool call, but
+            // user requested an action. Flip to auto and create a follow-up
+            // response so the model can call route_conversation_turn.
+            void enablePrivateRealtimeToolsForAction(sessionToken, peer)
+          }
+          // Clear pending transcript after processing
+          privateRealtimeVoicePendingUserTranscript = ''
           // W0 usage beacon: the private voice peer is browser-owned, so this
           // page is the only place its usage exists — post each response.done
           // usage object to the server ledger (seat voice_private).
@@ -44060,6 +44099,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         } else if (type.includes('speech_started')) {
           setVoiceIslandState('hearing', 'listening…')
+          // New utterance — clear stale transcript
+          privateRealtimeVoicePendingUserTranscript = ''
         } else if (type.includes('speech_stopped')) {
           // Conversational voice: do NOT flip to thinking on speech_stopped.
           // Stay in listening/hearing state until first_audio arrives, so the
@@ -44073,6 +44114,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('listening', 'listening…')
           }
         }
+      }
+
+      // Conversational voice: flip tool_choice to auto and create a follow-up
+      // response so the model can call route_conversation_turn for action requests.
+      // The model's first response (with tool_choice=none) already spoke; this
+      // follow-up lets it complete the action.
+      async function enablePrivateRealtimeToolsForAction(sessionToken, peer) {
+        if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+        if (!privateRealtimeVoiceActive()) return
+        // Flip tool_choice to auto so model can call route_conversation_turn
+        sendPrivateRealtimeEvent({
+          type: 'session.update',
+          session: { tool_choice: 'auto' }
+        })
+        // Create follow-up response — the model sees the conversation history
+        // and will call route_conversation_turn for the pending action request.
+        // Use tool_choice=auto for this response only; continuePrivateRealtimeToolCalls
+        // will reset to none after the tool call completes.
+        sendPrivateRealtimeEvent({
+          type: 'response.create',
+          response: {
+            tool_choice: 'auto'
+          }
+        })
       }
 
       // W0 private-voice usage beacon (model-routing plan, founder decision 3):
@@ -44418,6 +44483,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (sessionToken !== privateRealtimeVoiceSessionToken
           || privateRealtimeVoicePeer !== peer
           || !privateRealtimeVoiceActive()) return
+        // Reset session tool_choice to none so subsequent VAD-triggered responses
+        // speak first without route HTTP. Action requests will flip to auto again.
+        sendPrivateRealtimeEvent({
+          type: 'session.update',
+          session: { tool_choice: 'none' }
+        })
         sendPrivateRealtimeEvent({
           type: 'response.create',
           response: {
@@ -44571,6 +44642,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
+        privateRealtimeVoicePendingUserTranscript = ''
         privateRealtimeVoiceID = ''
         privateRealtimeVoiceThreadID = ''
         privateRealtimeVoiceTransportRevision = 0

@@ -148,12 +148,11 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
-	// Conversational voice uses tool_choice=auto so the model CAN call tools
-	// when the user explicitly asks for an action. The instructions guide when:
-	// ordinary talk speaks directly (no tool); work/approval/unavailable calls
-	// route_conversation_turn.
-	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
-		t.Fatalf("tool_choice=%v, want auto so route_conversation_turn is reachable for actions", toolChoice)
+	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
+	// on the first response with no route HTTP. The client flips to auto via
+	// session.update only when the user's transcription indicates an action.
+	if toolChoice := session["tool_choice"]; toolChoice != "none" {
+		t.Fatalf("tool_choice=%v, want none so ordinary talk speaks first without route HTTP", toolChoice)
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{
@@ -161,8 +160,8 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"outside the video room",
 		"You are NOT the room's shared voice",
 		"speak your answer directly",
-		"Call route_conversation_turn only when",
-		"work/approval/unavailable outcomes",
+		"For explicit action requests",
+		"call route_conversation_turn with the user's exact words",
 		"never choose a tool, deliverable template, model, provider",
 		"The Kanban Board is retired",
 		"Current Work and Project context is server-resolved",

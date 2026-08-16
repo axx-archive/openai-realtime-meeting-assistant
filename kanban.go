@@ -1625,12 +1625,11 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
-	// Conversational voice uses tool_choice=auto so the model CAN call tools
-	// when the user explicitly asks for an action. The instructions guide when:
-	// ordinary talk speaks directly (no tool); work/approval/unavailable calls
-	// route_conversation_turn. This is "default none unless the user asked for
-	// an action" enforced by instruction, not by blocking tools at the session.
-	session["tool_choice"] = "auto"
+	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
+	// on the first response with no route HTTP. The client flips to auto via
+	// session.update only when the user's transcription indicates an action
+	// request (work/approval/unavailable), then resets to none after the tool call.
+	session["tool_choice"] = "none"
 	// Private Scout is a direct one-to-one conversation, so provider-side VAD
 	// can create responses immediately. Shared rooms deliberately wait for the
 	// server's deterministic Scout-invocation gate before response.create.
@@ -1663,7 +1662,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfigForThread(model, use
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime conversation outside the video room.",
-		"# Conversational voice contract\nFor ordinary conversation, questions, and chat, speak your answer directly — do not call a tool first. Call route_conversation_turn only when the user explicitly asks for an action that requires server work: starting a task, launching work, sending something, or when you need server-resolved context for work/approval/unavailable outcomes. Use do_nothing only for silence, noise, or an abandoned fragment.",
+		"# Conversational voice contract\nFor ordinary conversation, questions, and chat, speak your answer directly. For explicit action requests (starting work, launching something, sending, approving, or marking unavailable), call route_conversation_turn with the user's exact words. Use do_nothing only for silence, noise, or an abandoned fragment.",
 		"# Authority boundary\nYou never choose a tool, deliverable template, model, provider, reasoning effort, budget, authority, channel, audience, or effect. route_conversation_turn accepts natural language only. The server may start safe private work, hold a governed effect for approval, ask one clarification, or report a capability unavailable. Never claim work started, changed, sent, published, deleted, or saved unless the returned server result says so.",
 		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. The Kanban Board is retired. Direct artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
