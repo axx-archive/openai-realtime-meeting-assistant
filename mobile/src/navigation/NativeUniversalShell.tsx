@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
-import Svg, { Path, Rect, Circle } from 'react-native-svg';
+import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
 import { colors, radius, space } from '../theme/tokens';
@@ -28,54 +28,79 @@ type Props = {
 };
 
 /**
- * Custom destination marks matching the live web stroke family (45e2f7c1).
- *   • home-mark: house glyph
- *   • meet-mark: video camera
+ * Destination marks copied from the live web stroke family (45e2f7c1 / thebonfire.xyz).
+ * Stroke width 1.8 matching the web dest marks. viewBox 0 0 24 24.
+ *   • home-mark: hearth (flame shape with inner circle)
+ *   • meet-mark: two faces (overlapping ellipses with pupils)
  *   • chat-bubble: one speech bubble (rounded rect + lower-left tail)
- *   • stacked-sheets: two overlapping rectangles
- * NOT SF bubble.left.and.bubble.right.fill, NOT folder.fill, NOT the old lens/wifi.
+ *   • stacked-sheets: three stacked rectangles with depth
+ * NOT house, NOT camera, NOT SF Symbols, NOT Lucide, NOT Expo stock.
  */
 function DestMark({ icon, size, color }: { icon: string; size: number; color: string }) {
-  const strokeWidth = 1.5;
+  const strokeWidth = 1.8;
   switch (icon) {
     case 'home-mark':
+      // Hearth: flame shape with inner circle (live web line 30958)
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
-            d="M3 10.5L12 3L21 10.5V20C21 20.5523 20.5523 21 20 21H15V15C15 14.4477 14.5523 14 14 14H10C9.44772 14 9 14.4477 9 15V21H4C3.44772 21 3 20.5523 3 20V10.5Z"
+            d="M12 4c-5.5 3-8 6.5-8 10a8 8 0 0 0 16 0c0-3.5-2.5-7-8-10Z"
             stroke={color}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
+          />
+          <Circle
+            cx="12"
+            cy="14"
+            r="2.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
           />
         </Svg>
       );
     case 'meet-mark':
+      // Two faces: overlapping ellipses with pupils (live web line 30962)
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Rect
-            x="2"
-            y="6"
-            width="13"
-            height="12"
-            rx="2"
+          <Ellipse
+            cx="8"
+            cy="12"
+            rx="5"
+            ry="6"
             stroke={color}
             strokeWidth={strokeWidth}
           />
-          <Path
-            d="M15 10L21 7V17L15 14"
+          <Ellipse
+            cx="16"
+            cy="12"
+            rx="5"
+            ry="6"
             stroke={color}
             strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          />
+          <Circle
+            cx="8"
+            cy="12"
+            r="1.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+          <Circle
+            cx="16"
+            cy="12"
+            r="1.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
           />
         </Svg>
       );
     case 'chat-bubble':
+      // One speech bubble with lower-left tail (live web line 30966)
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
-            d="M4 5C4 4.44772 4.44772 4 5 4H19C19.5523 4 20 4.44772 20 5V15C20 15.5523 19.5523 16 19 16H8L4 20V5Z"
+            d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"
             stroke={color}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
@@ -84,22 +109,29 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: st
         </Svg>
       );
     case 'stacked-sheets':
+      // Three stacked rectangles with depth (live web line 30970)
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Rect
-            x="6"
-            y="2"
-            width="14"
-            height="16"
-            rx="2"
-            stroke={color}
-            strokeWidth={strokeWidth}
-          />
           <Path
-            d="M4 6V20C4 21.1046 4.89543 22 6 22H16"
+            d="M7 3h8c1.1 0 2 .9 2 2v1"
             stroke={color}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M5 6h10c1.1 0 2 .9 2 2v1"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
         </Svg>
       );
