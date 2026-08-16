@@ -929,6 +929,64 @@ func privateVoiceUsageWithinBounds(usage *kanbanRealtimeUsage) bool {
 }
 
 // ---------------------------------------------------------------------------
+// Conversational voice action detection (tool_choice flip)
+// ---------------------------------------------------------------------------
+
+// assistantRealtimeShouldRouteHandler returns whether the client should flip
+// tool_choice from none to auto for this user utterance. Session default is
+// none for conversational latency; this decides when to enable tools.
+func assistantRealtimeShouldRouteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		VoiceSessionID    string `json:"voiceSessionId"`
+		ThreadID          string `json:"threadId"`
+		Transcript        string `json:"transcript"`
+		LeaseToken        string `json:"leaseToken"`
+		LeaseGeneration   int    `json:"leaseGeneration"`
+		TransportRevision int    `json:"transportRevision"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read should-route request")
+		return
+	}
+	if strings.TrimSpace(payload.VoiceSessionID) == "" || strings.TrimSpace(payload.ThreadID) == "" {
+		writeAuthError(w, http.StatusBadRequest, "voiceSessionId and threadId are required")
+		return
+	}
+
+	// Validate lease if provided (lightweight auth — actual tool calls still check fully)
+	if payload.LeaseToken != "" && payload.LeaseGeneration > 0 && payload.TransportRevision > 0 {
+		sessionHash := strideE10SessionHashFromRequest(r)
+		if err := kanbanApp.authorizePrivateRealtimeVoiceLease(user.Email, sessionHash, payload.VoiceSessionID, payload.ThreadID, payload.LeaseToken, payload.LeaseGeneration, payload.TransportRevision, time.Now().UTC()); err != nil {
+			// Lease invalid — don't enable route
+			writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "shouldRoute": false})
+			return
+		}
+	}
+
+	// Check if session is Riff-bound (always needs route)
+	shouldRoute := kanbanApp.privateRealtimeVoiceShouldRoute(payload.ThreadID, payload.Transcript)
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "shouldRoute": shouldRoute})
+}
+
+// ---------------------------------------------------------------------------
 // healthz telemetry block (W0-9 surfacing)
 // ---------------------------------------------------------------------------
 

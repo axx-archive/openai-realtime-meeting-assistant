@@ -4356,6 +4356,73 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 	}
 }
 
+// privateRealtimeVoiceShouldRoute returns whether the client should flip
+// tool_choice from none to auto for this utterance. Session default is none
+// for conversational latency; this enables tools only when needed.
+func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript string) bool {
+	// Riff-bound sessions always need route (every utterance routes through server)
+	if thread, _, err := app.scoutChatThreadByID("", threadID); err == nil && thread.Riff != nil {
+		return true
+	}
+	// Analyze transcript for action intent (server-side, not client regex)
+	return privateRealtimeVoiceTranscriptIndicatesAction(transcript)
+}
+
+// privateRealtimeVoiceTranscriptIndicatesAction detects if the user's words
+// suggest an action that needs route_conversation_turn. This is the server-
+// side classifier for conversational voice tool_choice flipping.
+func privateRealtimeVoiceTranscriptIndicatesAction(transcript string) bool {
+	text := strings.ToLower(strings.TrimSpace(transcript))
+	if text == "" {
+		return false
+	}
+	// Studio-level asks that require server work
+	studioPatterns := []string{
+		"make a", "make me", "create a", "create me", "build a", "build me",
+		"write a", "write me", "draft a", "draft me", "prepare a", "prepare me",
+		"deck", "slide", "presentation", "document", "report", "summary",
+		"research", "look up", "look into", "find out", "investigate",
+		"image", "picture", "visual", "diagram", "chart", "graph",
+		"ideation", "brainstorm", "ideas for", "options for",
+	}
+	// Explicit action verbs
+	actionVerbs := []string{
+		"start work", "start a task", "start the task", "start this",
+		"launch", "kick off", "initiate", "begin work",
+		"send ", "share ", "post ", "publish ", "submit ",
+		"approve", "reject", "confirm this", "accept this", "decline",
+		"mark unavailable", "mark me unavailable", "set unavailable",
+		"go unavailable", "going unavailable", "i'm unavailable",
+		"i need to leave", "i have to leave", "stepping away",
+		"start a riff", "start riff", "new riff",
+	}
+	// Direction confirmation (after a model proposal)
+	confirmations := []string{
+		"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead",
+		"do it", "sounds good", "let's do it", "please do",
+		"that works", "perfect", "great", "proceed",
+	}
+	for _, pattern := range studioPatterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	for _, pattern := range actionVerbs {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	// Confirmations only trigger if the utterance is very short (likely a response)
+	if len(text) <= 30 {
+		for _, pattern := range confirmations {
+			if strings.HasPrefix(text, pattern) || text == pattern {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // privateRealtimeVoiceServerActionAllowed retains the pre-E10 executors only
 // for server-owned compatibility adapters and focused historical tests. These
 // names are absent from the Realtime session and the public Realtime-tool HTTP
