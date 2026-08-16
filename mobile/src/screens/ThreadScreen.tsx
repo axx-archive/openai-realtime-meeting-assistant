@@ -1270,9 +1270,9 @@ export function ThreadScreen({ route, navigation }: Props) {
         if (String(action.type ?? "").trim() !== "open_tool") continue;
         const tool = String(action.tool ?? "").trim();
         if (tool === "chat")
-          navigation.navigate("Deck", { segment: "threads" });
+          navigation.navigate("Chat");
         else if (["workflow", "research", "design", "grill"].includes(tool))
-          navigation.navigate("Deck", { segment: "work" });
+          navigation.navigate("WorkHome");
         else if (tool === "board") navigation.navigate("WorkHome");
         else if (tool === "artifacts" || tool === "files")
           navigation.navigate("Files");

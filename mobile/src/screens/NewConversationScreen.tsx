@@ -58,7 +58,7 @@ export function NewConversationScreen({ navigation }: Props) {
       const threadId = String(response.thread?.id ?? '').trim();
       if (!threadId) throw new Error('The conversation was not created.');
       attemptRef.current = null;
-      navigation.replace('Thread', {
+      navigation.navigate('Thread', {
         threadId,
         title: attempt.kind === 'channel' ? `#${attempt.title.replace(/^#/, '')}` : attempt.title,
       });
