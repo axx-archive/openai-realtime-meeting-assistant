@@ -59045,8 +59045,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const ref = message.thread
 	          const artifactId = String(ref.artifactId || '')
 	          const artifact = artifactId ? artifactEntries.find(entry => String(entry?.id || '') === artifactId) : null
-	          const title = String(artifact?.metadata?.title || ref.query || '').trim()
-	          if (!title) continue
+	          // Title must be artifact metadata title or family label — NEVER ref.query (the prompt)
+	          const metadataTitle = String(artifact?.metadata?.title || '').trim()
+	          const familyLabel = desktopWorkFamily(ref, artifact)
+	          const title = metadataTitle || familyLabel
 	          const status = String(artifact?.metadata?.status || artifactStatusValue(artifact) || ref.status || '').toLowerCase()
 	          const statusLabel = status === 'complete' || status === 'completed' || status === 'published'
 	            ? 'delivered'
@@ -59057,7 +59059,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            : status === 'running' || status === 'queued'
 	            ? 'in progress'
 	            : 'draft'
-	          return { title, status, statusLabel, artifact, message }
+	          return { title, status, statusLabel, artifact, message, family: familyLabel }
 	        }
 	        return null
 	      }
