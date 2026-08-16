@@ -11973,8 +11973,12 @@
         overflow: hidden;
       }
       .chat-rich__svg svg {
+        display: block;
+        min-width: 64px;
+        min-height: 64px;
         max-width: 100%;
         max-height: 320px;
+        width: auto;
         height: auto;
       }
 
@@ -59311,6 +59315,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	         the tokens are scrubbed, never rendered */
 	      function chatPreviewPlainText(value) {
 	        return String(value || '')
+	          // Strip raw SVG content (multiline) — replace with "[image]" indicator
+	          .replace(/<svg[\s\S]*?<\/svg>/gi, '[image]')
 	          .replace(/```[\w-]*\n?/g, '')
 	          .replace(/`([^`\n]+)`/g, '$1')
 	          .replace(/\*\*([^*\n]+)\*\*/g, '$1')
@@ -62423,9 +62429,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+	      // Well-known XML/SVG namespace URLs that should never become link previews.
+	      // These appear in SVG xmlns attributes but are not real web pages.
+	      const XML_NAMESPACE_URLS = /^https?:\/\/www\.w3\.org\/(?:2000\/svg|1999\/xlink|1998\/Math|2000\/xmlns)$/i
+
 	      function desktopChatFirstURL(text) {
-	        const match = /https?:\/\/[^\s<>]+/i.exec(String(text || ''))
-	        return match ? match[0].replace(/[.,;:!?'"\)\]]+$/, '') : ''
+	        const value = String(text || '')
+	        // Find the first URL that is NOT a namespace URL
+	        for (const match of value.matchAll(/https?:\/\/[^\s<>]+/gi)) {
+	          const url = match[0].replace(/[.,;:!?'"\)\]]+$/, '')
+	          if (!XML_NAMESPACE_URLS.test(url)) {
+	            return url
+	          }
+	        }
+	        return ''
 	      }
 
 	      function mountDesktopChatLinkPreview(stack, text) {
@@ -63645,6 +63662,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               svgEl.removeAttribute(attr.name)
             }
           })
+          // Ensure SVG has explicit dimensions if it only has viewBox
+          // This prevents tiny rendering when width/height are omitted
+          const viewBox = svgEl.getAttribute('viewBox')
+          const hasWidth = svgEl.hasAttribute('width')
+          const hasHeight = svgEl.hasAttribute('height')
+          if (viewBox && (!hasWidth || !hasHeight)) {
+            const parts = viewBox.split(/[\s,]+/).map(Number)
+            if (parts.length >= 4) {
+              const [, , vbWidth, vbHeight] = parts
+              // Scale to reasonable display size (max 200px, min 64px)
+              const maxDim = Math.max(vbWidth, vbHeight)
+              const scale = maxDim > 200 ? 200 / maxDim : maxDim < 64 ? 64 / maxDim : 1
+              if (!hasWidth) svgEl.setAttribute('width', Math.round(vbWidth * scale))
+              if (!hasHeight) svgEl.setAttribute('height', Math.round(vbHeight * scale))
+            }
+          }
           svgContainer.appendChild(svgEl)
           figure.appendChild(svgContainer)
           container.appendChild(figure)
@@ -63924,10 +63957,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       // appendChatUrlNodes lands one matched bare URL: trailing sentence
-      // punctuation peels back into prose, the rest becomes the anchor
+      // punctuation peels back into prose, the rest becomes the anchor.
+      // Namespace URLs (w3.org/2000/svg, w3.org/1999/xlink, etc.) are NOT
+      // linked — they appear in SVG/XML contexts and linking them is noise.
       function appendChatUrlNodes(target, raw) {
         const trail = /[.,;:!?'")\]]+$/.exec(raw)
         const href = trail ? raw.slice(0, -trail[0].length) : raw
+        // Skip linking well-known XML/SVG namespace URLs
+        if (/^https?:\/\/www\.w3\.org\/(?:2000\/svg|1999\/xlink|1998\/Math|2000\/xmlns)$/i.test(href)) {
+          target.appendChild(document.createTextNode(raw))
+          return
+        }
         target.appendChild(chatLinkNode(href))
         if (trail) {
           target.appendChild(document.createTextNode(trail[0]))
