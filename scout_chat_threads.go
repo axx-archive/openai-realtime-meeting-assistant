@@ -5306,6 +5306,9 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessagesWithContext(ctx context.
 		deliverScoutChatThreadUpdateWithContext(ctx, thread, message)
 	}
 	app.rebuildPrivateConversationContinuity(thread, "message")
+	// Channel brain ingestion: file channel and Riff messages as transcripts
+	// so the brain worker can synthesize them into company knowledge.
+	app.fileChannelMessagesAsBrainTranscripts(thread, messages)
 	return thread, nil
 }
 

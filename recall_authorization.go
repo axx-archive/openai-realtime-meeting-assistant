@@ -126,6 +126,35 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 		if sittingID != "" && strings.TrimSpace(principal.SittingID) != sittingID {
 			return false
 		}
+	case "project":
+		// Project visibility: only listed members (plus owner) can recall.
+		// This enables private channel content to feed the brain while
+		// keeping it invisible to non-members in the IA.
+		if principal.Audience == "shared_room" {
+			// Shared-room Scout (no specific user) cannot access project content.
+			return false
+		}
+		viewer := ""
+		if principal.User != nil {
+			viewer = normalizeAccountEmail(principal.User.Email)
+		}
+		if viewer == "" {
+			return false
+		}
+		owner := normalizeAccountEmail(metadata["ownerEmail"])
+		if viewer == owner {
+			return true
+		}
+		rawMembers := strings.TrimSpace(metadata["memberEmails"])
+		if rawMembers == "" {
+			return false
+		}
+		for _, member := range strings.Split(rawMembers, ",") {
+			if normalizeAccountEmail(member) == viewer {
+				return true
+			}
+		}
+		return false
 	default:
 		// A new visibility value must acquire an explicit policy before recall.
 		return false

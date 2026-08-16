@@ -40,7 +40,7 @@ type brainIntakeStep struct {
 var brainIntakeSteps = []brainIntakeStep{
 	{
 		key:    "company_history",
-		prompt: "First, the origin story. How did Shareability start — who founded it, what did the earliest days look like, and what were the pivot moments? Type as much as you have: dates, names, the turns that mattered.",
+		prompt: "First, the origin story. How did your company start — who founded it, what did the earliest days look like, and what were the pivot moments? Type as much as you have: dates, names, the turns that mattered.",
 	},
 	{
 		key:    "hero_stories",
@@ -52,7 +52,7 @@ var brainIntakeSteps = []brainIntakeStep{
 	},
 	{
 		key:    "brand",
-		prompt: "Your visual identity. Attach brand guidelines, logos, or key imagery — or type a few lines on how Shareability looks and sounds. Say \"skip\" if you don't have files handy.",
+		prompt: "Your visual identity. Attach brand guidelines, logos, or key imagery — or type a few lines on how your company looks and sounds. Say \"skip\" if you don't have files handy.",
 	},
 	{
 		key:    "docs",
@@ -60,7 +60,7 @@ var brainIntakeSteps = []brainIntakeStep{
 	},
 	{
 		key:    "comms_style",
-		prompt: "How does Shareability talk? Paste a few real examples — an outreach email, a proposal intro, a LinkedIn post — anything that shows the house voice.",
+		prompt: "How does your company talk? Paste a few real examples — an outreach email, a proposal intro, a LinkedIn post — anything that shows the house voice.",
 	},
 	{
 		key:    "clients_deals",
@@ -75,7 +75,7 @@ const brainIntakeCompletionMessage = "That's everything — thank you. I'm synth
 // (the consent surface — pinned by a test), and poses step 1 in one message.
 func brainIntakeWelcome() string {
 	return strings.Join([]string{
-		"Let's feed the brain. Over the next few minutes I'll ask about Shareability's history, hero stories, decks, brand, docs, comms style, and clients. Answer in your own words, attach files, or say \"skip\" to move on — say \"done\" anytime to wrap up.",
+		"Let's feed the brain. Over the next few minutes I'll ask about your company's history, hero stories, decks, brand, docs, comms style, and clients. Answer in your own words, attach files, or say \"skip\" to move on — say \"done\" anytime to wrap up.",
 		"Heads up on privacy: this thread is private to you, but everything you share here becomes part of the shared room brain so Scout can recall it for the whole team. Don't paste anything you wouldn't want the office to know.",
 		brainIntakeSteps[0].prompt,
 	}, "\n\n")
@@ -110,18 +110,17 @@ func brainIntakeIsDone(text string) bool {
 	return false
 }
 
-// startBrainIntakeThread creates a private Feed-the-brain thread and seeds the
-// welcome + privacy disclosure + step-1 prompt. The intake flag routes every
-// subsequent message through handleBrainIntakeMessage instead of the router.
+// startBrainIntakeThread is DEPRECATED. The seven-step guided intake flow
+// has been replaced by automatic channel and Riff brain ingestion.
+//
+// Channels and Riffs are now the primary intake paths for company knowledge:
+// - Messages posted to channels automatically feed the brain
+// - Riff exploration and analysis feeds the brain
+// - Non-members cannot see private channel content in the IA
+//
+// This function returns an error directing users to use channels instead.
 func (app *kanbanBoardApp) startBrainIntakeThread(user *userAccount) (scoutChatThreadRecord, error) {
-	if user == nil {
-		return scoutChatThreadRecord{}, fmt.Errorf("sign in to feed the brain")
-	}
-	thread, err := app.createScoutChatThread(user.Email, user.Name, "Feed the brain", scoutChatVisibilityPrivate)
-	if err != nil {
-		return scoutChatThreadRecord{}, err
-	}
-	return app.seedBrainIntake(thread.OwnerEmail, thread.ID)
+	return scoutChatThreadRecord{}, fmt.Errorf("brain intake has been replaced by channel brain ingestion; post to a channel to feed the brain")
 }
 
 // seedBrainIntake stamps the intake flag and appends the welcome message under
