@@ -595,6 +595,119 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 	}
 }
 
+// TestDeckGenerationWithNoTopic tests that "make a 5-slide deck" (no topic)
+// followed by "yes" generates a deck instead of "I'm missing the subject".
+func TestDeckGenerationWithNoTopic(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM response
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Check that the prompt does NOT just say "User request: yes"
+		if strings.Contains(request.Input, "User request: yes") && !strings.Contains(request.Input, "Direction:") {
+			t.Error("Prompt passed 'yes' as user request without direction context")
+		}
+		return `<!doctype html>
+<html lang="en">
+<head><title>Innovation Deck</title></head>
+<body><section class="pg on"><h1>Innovation</h1></section></body>
+</html>`, nil
+	})
+
+	// Scenario: "make a 5-slide deck" (no topic), then direction pass, then "yes"
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Full-bleed imagery or clean typographic slides?"},
+	}
+
+	// User confirms with just "yes" — should NOT return "I'm missing the subject"
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should produce HTML deck, not a refusal
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
+	}
+	// Should NOT contain refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "missing") && strings.Contains(strings.ToLower(reply.Text), "subject") {
+		t.Error("Reply contains 'missing...subject' refusal — should have generated a deck")
+	}
+}
+
+// TestExtractEffectiveDeckQuery tests the query extraction for confirmations.
+func TestExtractEffectiveDeckQuery(t *testing.T) {
+	cases := []struct {
+		name           string
+		query          string
+		history        []scoutChatTurn
+		wantContains   string // effective query should contain this
+		wantNotEquals  string // effective query should NOT be exactly this
+	}{
+		{
+			name:  "yes with topic in original request",
+			query: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck about our Q4 strategy"},
+				{role: "scout", text: "Should this feel corporate or startup?"},
+			},
+			wantContains:  "Q4 strategy",
+			wantNotEquals: "yes",
+		},
+		{
+			name:  "yes with no topic in original request",
+			query: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "Should this feel corporate or startup? Full-bleed or typographic?"},
+			},
+			wantContains:  "Direction:",
+			wantNotEquals: "yes",
+		},
+		{
+			name:          "explicit request not a confirmation",
+			query:         "make a deck about AI trends",
+			history:       nil,
+			wantContains:  "AI trends",
+			wantNotEquals: "",
+		},
+		{
+			name:  "looks good with direction",
+			query: "looks good",
+			history: []scoutChatTurn{
+				{role: "user", text: "create a presentation"},
+				{role: "scout", text: "What visual style would you prefer?"},
+			},
+			wantContains:  "Direction:",
+			wantNotEquals: "looks good",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractEffectiveDeckQuery(tc.query, tc.history)
+			if tc.wantContains != "" && !strings.Contains(result, tc.wantContains) {
+				t.Errorf("extractEffectiveDeckQuery(%q) = %q, want to contain %q", tc.query, result, tc.wantContains)
+			}
+			if tc.wantNotEquals != "" && result == tc.wantNotEquals {
+				t.Errorf("extractEffectiveDeckQuery(%q) = %q, should not equal %q", tc.query, result, tc.wantNotEquals)
+			}
+		})
+	}
+}
+
 // TestLooksLikeDirectionPass tests the direction pass detection function.
 func TestLooksLikeDirectionPass(t *testing.T) {
 	cases := []struct {
