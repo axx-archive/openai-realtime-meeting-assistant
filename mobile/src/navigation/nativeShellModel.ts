@@ -1,6 +1,6 @@
 import type { RootStackParamList } from './types';
 
-export type NativeShellDestination = 'home' | 'video' | 'chat' | 'work' | 'network' | 'work-search' | 'you';
+export type NativeShellDestination = 'home' | 'video' | 'chat' | 'files' | 'work' | 'network' | 'work-search' | 'you';
 export type NativeShellLayout = 'compact' | 'sidebar';
 
 export const NATIVE_SHELL_SIDEBAR_MIN_WIDTH = 744;
@@ -8,8 +8,9 @@ export const NATIVE_SHELL_SIDEBAR_MAX_FONT_SCALE = 1.35;
 
 export const nativeShellDestinations = [
   { id: 'home', label: 'Home', route: 'Canvas', icon: 'house.fill' },
-  { id: 'video', label: 'Video', route: 'Deck', params: { segment: 'rooms' }, icon: 'video.fill' },
+  { id: 'video', label: 'Meet', route: 'Deck', params: { segment: 'rooms' }, icon: 'video.fill' },
   { id: 'chat', label: 'Chat', route: 'Deck', params: { segment: 'threads' }, icon: 'bubble.left.and.bubble.right.fill' },
+  { id: 'files', label: 'Files', route: 'Files', icon: 'folder.fill' },
   { id: 'work', label: 'Work', route: 'WorkHome', icon: 'rectangle.3.group.fill' },
   { id: 'network', label: 'Network', route: 'NetworkHome', icon: 'point.3.connected.trianglepath.dotted' },
   { id: 'work-search', label: 'Work Search', route: 'WorkSearchHome', icon: 'magnifyingglass' },
@@ -24,7 +25,7 @@ export const nativeShellDestinations = [
 
 export type NativeShellAccess = 'core' | 'full';
 
-const coreShellDestinationIDs = new Set<NativeShellDestination>(['home', 'video', 'chat']);
+const coreShellDestinationIDs = new Set<NativeShellDestination>(['home', 'video', 'chat', 'files']);
 
 export function nativeShellDestinationsForAccess(access: unknown) {
   return access === 'full'
@@ -44,7 +45,7 @@ const destinationRoutes: Partial<Record<keyof RootStackParamList, NativeShellDes
   Meetings: 'work',
   WorkHome: 'work',
   Board: 'work',
-  Files: 'work',
+  Files: 'files',
   AgentTeam: 'work',
   Memory: 'work',
   Intelligence: 'work',
