@@ -29073,6 +29073,7 @@
         text-wrap: initial;
       }
       .artifact-stage__body--deck { padding: 0; }
+      .artifact-stage__body--deck .chat-deck,
       .artifact-stage__body--deck .artifact-deck {
         flex: 1;
         min-height: 0;
@@ -29080,13 +29081,39 @@
         flex-direction: column;
         gap: 8px;
         padding: 12px 16px 16px;
+        aspect-ratio: unset;
+        border-radius: 0;
+        box-shadow: none;
       }
+      .artifact-stage__body--deck .chat-deck__frame,
       .artifact-stage__body--deck .artifact-deck__frame {
         flex: 1;
         width: 100%;
         height: 100%;
         min-height: 0;
         border: 0;
+        position: relative;
+        border-radius: 0;
+      }
+      .artifact-stage__body--deck .chat-deck__chrome {
+        position: relative;
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        padding: 8px 0 0;
+      }
+      .artifact-stage__body--deck .chat-deck__title {
+        color: var(--text-1);
+      }
+      .artifact-stage__body--deck .chat-deck__btn--secondary {
+        background: var(--surface-2);
+        color: var(--text-1);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+      .artifact-stage__body--deck .chat-deck__btn--primary {
+        background: var(--brand);
+        color: #fff;
       }
 
       /* ---------- §7b the deck hero (DD-1) ----------
@@ -42468,41 +42495,80 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // model: allow-scripts ONLY — never an inline document (that would run
       // the deck same-origin with the OS) and never a same-origin grant.
       //
+      // First-class cover: the thumbnail IS the cover of the package — a 16:9
+      // hero showing the first slide, with title and controls overlaid as
+      // glass chrome. Same styling as renderInlineChatDeck (not the old card).
+      //
       // Edit + Present modes: Anyone can enter Edit/Present if deck is in Files
       // or shared to a channel. Access control is checked at edit time.
       function renderArtifactDeck(container, entry, options = {}) {
+        // Extract title from entry metadata
+        const title = String(entry?.metadata?.title || entry?.title || 'Presentation').trim()
+
+        // First-class cover structure — matches renderInlineChatDeck
         const deck = document.createElement('section')
-        deck.className = 'artifact-deck'
-        // no label band: the stage header's kicker already says "deck", and a
-        // second chrome row read as clutter at the pixel gate. Present lives
-        // in the stage header when hosted there (options.presentSlot), else in
-        // a minimal head row.
+        deck.className = 'chat-deck'
+        deck.setAttribute('data-deck-artifact', 'true')
 
-        // Edit button — access requires Files or channel-shared
-        const edit = bfEl('button', 'btn btn--outline artifact-deck__edit', 'edit')
-        edit.type = 'button'
-        edit.disabled = true
-        edit.style.marginRight = '8px'
-
-        const present = bfEl('button', 'btn btn--outline artifact-deck__present', 'present')
-        present.type = 'button'
-        present.disabled = true
-        let head = null
-        if (options.presentSlot && typeof options.presentSlot.appendChild === 'function') {
-          options.presentSlot.appendChild(edit)
-          options.presentSlot.appendChild(present)
-        } else {
-          head = bfEl('div', 'artifact-deck__head')
-          head.appendChild(edit)
-          head.appendChild(present)
-        }
+        // Sandboxed iframe — fills the entire cover as the hero visual
         const frame = document.createElement('iframe')
-        frame.className = 'artifact-deck__frame'
+        frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
-        frame.title = 'sandboxed deck preview'
-        const note = bfEl('p', 'artifact-deck__note', 'minting a render token…')
-        if (head) deck.append(head)
-        deck.append(frame, note)
+        frame.setAttribute('allowfullscreen', '')
+        frame.title = 'deck preview'
+
+        // Glass chrome overlay at bottom — title + action buttons
+        const chrome = document.createElement('div')
+        chrome.className = 'chat-deck__chrome'
+
+        const titleEl = document.createElement('h3')
+        titleEl.className = 'chat-deck__title'
+        titleEl.textContent = title
+
+        const actions = document.createElement('div')
+        actions.className = 'chat-deck__actions'
+
+        // Edit button (opens Edit mode)
+        const editBtn = document.createElement('button')
+        editBtn.type = 'button'
+        editBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
+        editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit`
+        editBtn.disabled = true
+
+        // Present button — fullscreens the sandboxed iframe
+        const presentBtn = document.createElement('button')
+        presentBtn.type = 'button'
+        presentBtn.className = 'chat-deck__btn chat-deck__btn--primary'
+        presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
+        presentBtn.disabled = true
+
+        actions.append(editBtn, presentBtn)
+        chrome.append(titleEl, actions)
+        deck.append(frame, chrome)
+
+        // If there's a presentSlot (stage header), also add buttons there
+        if (options.presentSlot && typeof options.presentSlot.appendChild === 'function') {
+          const stageEditBtn = editBtn.cloneNode(true)
+          const stagePresentBtn = presentBtn.cloneNode(true)
+          stageEditBtn.className = 'btn btn--outline'
+          stagePresentBtn.className = 'btn btn--outline'
+          stageEditBtn.style.marginRight = '8px'
+          options.presentSlot.appendChild(stageEditBtn)
+          options.presentSlot.appendChild(stagePresentBtn)
+          // Sync state with main buttons
+          const syncButtons = () => {
+            stageEditBtn.disabled = editBtn.disabled
+            stagePresentBtn.disabled = presentBtn.disabled
+          }
+          // Wire up stage buttons
+          stageEditBtn.addEventListener('click', () => editBtn.click())
+          stagePresentBtn.addEventListener('click', () => presentBtn.click())
+          // Observer to sync disabled state
+          const observer = new MutationObserver(syncButtons)
+          observer.observe(editBtn, { attributes: true, attributeFilter: ['disabled'] })
+          observer.observe(presentBtn, { attributes: true, attributeFilter: ['disabled'] })
+        }
+
         container.appendChild(deck)
 
         // Store deck content for edit mode
@@ -42518,42 +42584,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             if (!deck.isConnected) return // the pane moved on while we minted
             frame.src = payload.url
-            note.textContent = 'sandboxed preview — Edit or Present'
-            present.disabled = false
+            presentBtn.disabled = false
 
             // Fetch deck content for edit mode (requires Files or channel-shared access)
-            // Access check: deck must be in Files or shared to a channel
             const canEdit = artifactInFilesOrChannelShared(entry)
-            edit.disabled = !canEdit
+            editBtn.disabled = !canEdit
             if (canEdit) {
-              // Fetch full deck content for editing
               try {
                 const contentResponse = await fetch(payload.url)
                 deckContent = await contentResponse.text()
               } catch {
-                edit.disabled = true
+                editBtn.disabled = true
               }
             }
 
             // Edit opens the deck editor with full Keynote-class controls
-            edit.addEventListener('click', () => {
+            editBtn.addEventListener('click', () => {
               if (!deckContent) {
                 showToast({ text: 'Deck content not available', kind: 'error' })
                 return
               }
-              const title = String(entry?.metadata?.title || entry?.title || 'Untitled Deck').trim()
-              openDeckEditor(deckContent, title, { artifactId, entry })
+              openDeckEditor(deckContent, title, { artifactId, entry, source: deck })
             })
 
             // Present fullscreens the SAME sandboxed iframe — never a
             // top-level navigation to the render URL, which would run the
-            // deck outside the iframe sandbox. (The server-side CSP sandbox
-            // directive also opaque-origins top-level opens as a backstop.)
-            present.addEventListener('click', () => frame.requestFullscreen?.())
-            // the manifest's present pill: go straight to presenter mode on
-            // the SAME sandboxed frame; a browser that refuses (transient
-            // activation expired while the token minted) leaves the stage
-            // open with Present a tap away — never an error
+            // deck outside the iframe sandbox.
+            presentBtn.addEventListener('click', () => {
+              if (frame.requestFullscreen) {
+                frame.requestFullscreen().catch(() => {})
+              } else if (frame.webkitRequestFullscreen) {
+                frame.webkitRequestFullscreen()
+              }
+            })
+
+            // Auto-present if requested (stage manifest pill)
             if (options.autoPresent) frame.requestFullscreen?.()?.catch?.(() => {})
           } catch {
             // No token (signed out, artifact gone, server refused): fall back
