@@ -16589,34 +16589,27 @@
 
       .notification-panel__empty {
         margin: 0;
-        padding: 42px 18px 46px;
+        padding: 32px 18px 36px;
         text-align: center;
         color: var(--text-2);
       }
 
       .notification-panel__empty-mark {
-        width: 38px;
-        height: 38px;
+        width: 32px;
+        height: 32px;
         display: grid;
         place-items: center;
-        margin: 0 auto 12px;
-        border-radius: 13px;
+        margin: 0 auto 10px;
+        border-radius: 10px;
         background: var(--surface-3);
-        color: var(--text-2);
+        color: var(--text-3);
         box-shadow: inset 0 0 0 1px var(--line-1);
       }
 
       .notification-panel__empty-title {
         display: block;
-        color: var(--text-1);
-        font: 600 14px/1.35 var(--font-sans);
-      }
-
-      .notification-panel__empty-copy {
-        display: block;
-        margin-top: 4px;
-        color: var(--text-3);
-        font: var(--type-caption);
+        color: var(--text-2);
+        font: 500 13px/1.35 var(--font-sans);
       }
 
       .notification-panel__empty[hidden] {
@@ -32173,10 +32166,9 @@
       <div id="notificationList" class="notification-panel__list" role="list"></div>
       <p id="notificationEmpty" class="notification-panel__empty">
         <span class="notification-panel__empty-mark" aria-hidden="true">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
         </span>
-        <span class="notification-panel__empty-title">You’re all caught up</span>
-        <span class="notification-panel__empty-copy">New activity will show up here.</span>
+        <span class="notification-panel__empty-title">All caught up</span>
       </p>
     </section>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
