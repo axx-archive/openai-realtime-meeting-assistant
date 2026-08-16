@@ -613,7 +613,7 @@ func TestIndexNotificationPolishAndIndividualControls(t *testing.T) {
 	for _, want := range []string{
 		`aria-label="Mark all notifications read"`,
 		`aria-label="Clear all notifications"`,
-		`class="notification-panel__empty-title">You’re all caught up`,
+		`class="notification-panel__empty-title">All caught up`,
 		"function positionNotificationPanel()",
 		"notificationPanelTrigger = trigger",
 		"trigger.getBoundingClientRect()",
