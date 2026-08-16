@@ -59051,6 +59051,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !title || title === 'Scout' || title === 'New Scout thread'
 	      }
 
+      // Family labels that should not be used as titles when better options exist
+      const FAMILY_LABELS = new Set([
+        'work', 'outline', 'research', 'presentation', 'document', 'design',
+        'build', 'revision', 'meeting recap', 'data visualization', 'project plan',
+        'financial model', 'mixed package', 'scheduled work'
+      ])
+
       function chatThreadDisplayTitle(thread) {
         if (!thread) {
           return 'new thread'
@@ -59061,30 +59068,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           return String(thread.title || 'team channel')
         }
-        // Private thread: use desktopWorkTitle logic — never show raw prompt
-        // 1. Try artifact info (uses desktopWorkTitle internally)
+        // Private thread title resolution — never show raw prompt
+        // Order: real work name > heading > preview sentence > family
         const artifactInfo = chatThreadLatestArtifactInfo(thread)
-        if (artifactInfo?.title) {
-          return artifactInfo.title
+        const artifactTitle = artifactInfo?.title || ''
+        const isFamilyLabel = FAMILY_LABELS.has(artifactTitle.toLowerCase())
+
+        // 1. Real work name: metadata.title when ≠ query (not just a family label)
+        if (artifactTitle && !isFamilyLabel) {
+          return artifactTitle
         }
-        // 2. Extract heading from thread.preview (the same content shown in preview line)
-        const preview = String(thread?.preview || '').trim()
-        if (preview) {
-          // Preview might start with the work name heading (already markdown-stripped)
-          // Extract first sentence or first line as title candidate
-          const firstLine = preview.split(/[.\n]/)[0]?.trim()
-          if (firstLine && firstLine.length >= 3 && firstLine.length <= 90) {
-            // Only skip if it's a pure status crumb, not a real work name
-            const lower = firstLine.toLowerCase()
-            const isStatusCrumb = PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) ||
-              /^(scout is|approved\s*·|queued\s*·|waiting for|needs approval|needs attention)/.test(lower) ||
-              /^(research|presentation|design|document|work|outline)\s+(delivered|in progress|complete|draft)/i.test(lower)
-            if (!isStatusCrumb) {
-              return firstLine
-            }
-          }
-        }
-        // 3. Scan Scout responses for markdown heading
+
+        // 2. First heading / named title in artifact body or Scout messages
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
@@ -59097,17 +59092,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             }
           }
         }
-        // 4. Fall back to family based on thread query — never the raw prompt
+
+        // 3. First sentence of thread.preview if not status crumb and not family label
+        const preview = String(thread?.preview || '').trim()
+        if (preview) {
+          const firstLine = preview.split(/[.\n]/)[0]?.trim()
+          if (firstLine && firstLine.length >= 3 && firstLine.length <= 90) {
+            const lower = firstLine.toLowerCase()
+            const isStatusCrumb = PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) ||
+              /^(scout is|approved\s*·|queued\s*·|waiting for|needs approval|needs attention)/.test(lower) ||
+              /^(research|presentation|design|document|work|outline)\s+(delivered|in progress|complete|draft)/i.test(lower)
+            const isJustFamily = FAMILY_LABELS.has(lower)
+            if (!isStatusCrumb && !isJustFamily) {
+              return firstLine
+            }
+          }
+        }
+
+        // 4. Family (Work / Outline / Research) ONLY if none of the above
         if (chatThreadTitleIsPlaceholder(thread)) {
           return 'new thread'
+        }
+        // Use artifact family if available, else compute from thread query
+        if (artifactTitle && isFamilyLabel) {
+          return artifactTitle
         }
         const threadQuery = String(thread.title || '').trim()
         if (!threadQuery) {
           return 'new thread'
         }
-        // Use family from desktopWorkFamily — the thread.title IS the query here
-        const family = desktopWorkFamily({ query: threadQuery }, null)
-        return family
+        return desktopWorkFamily({ query: threadQuery }, null)
       }
 
 	      /* previews are one line of PLAIN text — markdown that renders in the
