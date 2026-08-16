@@ -4361,30 +4361,80 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 // for conversational latency; this enables tools only when needed.
 //
 // Unlike the text chat router (which uses a model call), this is a lightweight
-// deterministic classifier that reuses the existing detection functions. It
-// must not false-positive on ordinary conversation.
+// deterministic classifier that uses only tight studio detectors. It must not
+// false-positive on ordinary conversation like "does that make sense?" or
+// "I'll send it later".
 func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript string) bool {
+	// Load the thread to check Riff-bound sessions and direction passes.
+	// Use a direct entry lookup since we don't have the user email in this context.
+	var thread scoutChatThreadRecord
+	var threadLoaded bool
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, strings.TrimSpace(threadID))
+	if ok {
+		thread, threadLoaded = decodeScoutChatThreadEntry(entry)
+	}
+
 	// Riff-bound sessions always need route (every utterance routes through server)
-	thread, _, err := app.scoutChatThreadByID("", threadID)
-	if err == nil && thread.Riff != nil {
+	if threadLoaded && thread.Riff != nil {
 		return true
 	}
 	// Short confirmation ("yes", "ok", etc.) only routes if there's a pending
-	// clarification in the thread — same as the text path. Without a pending
-	// direction pass, "yes" is ordinary talk.
+	// direction pass in the thread. A direction pass is either:
+	// - A choices card (scoutChatClarificationAlreadyAsked)
+	// - Scout's last message ending with "?" (prose question)
 	text := strings.TrimSpace(transcript)
-	if err == nil && privateRealtimeVoiceIsConfirmation(text) {
-		return scoutChatClarificationAlreadyAsked(thread)
+	if threadLoaded && privateRealtimeVoiceIsConfirmation(text) {
+		return scoutChatDirectionPassPending(thread)
 	}
-	// Named studio asks via existing detection (deck, image, work-shaped turns)
+	// Named studio asks via tight detection (deck, image only)
+	// Deliberately NOT using scoutTurnAppearsWorkShaped — it's too broad and
+	// matches ordinary conversation like "does that make sense?" / "let me write
+	// that down" / "I'll send it later".
 	return privateRealtimeVoiceTranscriptIndicatesAction(text)
 }
 
+// scoutChatDirectionPassPending returns true when Scout's last turn in the
+// thread was asking for direction — either a formal choices card OR a prose
+// message ending with "?". This is the gate for confirmations like "yes" to
+// trigger route.
+func scoutChatDirectionPassPending(thread scoutChatThreadRecord) bool {
+	// Walk backwards from the end looking for Scout's last message
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		// User message means no pending Scout direction
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return false
+		}
+		// Formal choices card (clarify_once outcome)
+		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
+			return true
+		}
+		// Scout prose message — check if it ends with a question
+		if message.Kind == "message" {
+			author := strings.TrimSpace(message.AuthorName)
+			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
+			if isScout {
+				text := strings.TrimSpace(message.Text)
+				return strings.HasSuffix(text, "?")
+			}
+		}
+		// Other kinds (proposal, thread) don't count as direction passes
+		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+			return false
+		}
+	}
+	return false
+}
+
 // privateRealtimeVoiceIsConfirmation returns true for short affirmative replies
-// that could confirm a pending direction pass.
+// that could confirm a pending direction pass. Strips ASR punctuation so
+// "Yes." and "Yes!" also match.
 func privateRealtimeVoiceIsConfirmation(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" || len(lower) > 40 {
+	// Strip common ASR punctuation
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	normalized = strings.TrimRight(normalized, ".!?,;:")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" || len(normalized) > 40 {
 		return false
 	}
 	// Only match if the entire utterance is a short confirmation
@@ -4395,7 +4445,7 @@ func privateRealtimeVoiceIsConfirmation(text string) bool {
 		"go for it", "let's go", "do that", "yes do it",
 	}
 	for _, c := range confirmations {
-		if lower == c {
+		if normalized == c {
 			return true
 		}
 	}
@@ -4403,38 +4453,26 @@ func privateRealtimeVoiceIsConfirmation(text string) bool {
 }
 
 // privateRealtimeVoiceTranscriptIndicatesAction detects if the user's words
-// suggest an action that needs route_conversation_turn. Reuses existing
-// server-side detectors to avoid false positives on ordinary conversation.
+// suggest an action that needs route_conversation_turn. Uses only TIGHT studio
+// detectors to avoid false positives on ordinary conversation.
 func privateRealtimeVoiceTranscriptIndicatesAction(transcript string) bool {
 	text := strings.TrimSpace(transcript)
 	if text == "" {
 		return false
 	}
-	// Deck/presentation request (uses existing studio detector)
+	// Deck/presentation request (tight detector that requires "deck"/"slides"/
+	// "presentation" with a creation verb)
 	if scoutChatDeckRequestDetected(text) {
 		return true
 	}
-	// Image generation request (uses existing image detector)
+	// Image generation request (tight detector that requires explicit image ask)
 	if scoutChatImageRequestDetected(text) {
 		return true
 	}
-	// General work-shaped turn (research, create, build, draft, etc.)
-	if scoutTurnAppearsWorkShaped(text) {
-		return true
-	}
-	// Explicit unavailable markers (narrow, not "share your thoughts")
-	lower := strings.ToLower(text)
-	unavailablePatterns := []string{
-		"mark me unavailable", "mark unavailable", "set unavailable",
-		"go unavailable", "going unavailable", "i'm unavailable",
-		"i need to leave", "i have to leave", "stepping away",
-		"mark me as away", "going away",
-	}
-	for _, pattern := range unavailablePatterns {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
-	}
+	// No other patterns — deliberately avoiding:
+	// - scoutTurnAppearsWorkShaped (matches "does that make sense?", "I'll send it")
+	// - Unavailable Contains (matches "I have to leave for lunch")
+	// The text router handles ambiguous cases; voice defaults to conversational.
 	return false
 }
 
