@@ -1125,7 +1125,16 @@
         display: none;
       }
 
-      /* live pill — the meeting rides along on every other tab; tap → room */
+      /* live chip — the meeting rides along on every other tab */
+      .topbar-live-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex: none;
+      }
+      .topbar-live-group[hidden] {
+        display: none;
+      }
       .topbar-live {
         display: inline-flex;
         align-items: center;
@@ -1151,9 +1160,6 @@
       .topbar-live:active {
         transform: scale(var(--press-scale));
       }
-      .topbar-live[hidden] {
-        display: none;
-      }
       .topbar-live__dot {
         width: 7px;
         height: 7px;
@@ -1161,6 +1167,28 @@
         background: var(--live);
         flex: none;
         animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+      .topbar-live-leave {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .topbar-live-leave:hover {
+          background: var(--danger-soft);
+          color: var(--danger);
+        }
+      }
+      .topbar-live-leave:active {
+        transform: scale(var(--press-scale));
       }
 
       .topbar__meta {
@@ -17232,8 +17260,8 @@
         padding: 0 13px;
         border-radius: var(--r-full);
         color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        font: 500 11px/1.2 var(--font-sans);
+        letter-spacing: 0.02em;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
@@ -29749,9 +29777,18 @@
       .pd1-primary-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
       .pd1-primary-nav__item:active { transform: scale(var(--press-scale)); }
       .pd1-primary-nav__item[aria-current="page"] {
-        background: var(--surface-3);
-        border-color: var(--line-1);
         color: var(--text-1);
+      }
+      .pd1-primary-nav__item[aria-current="page"]::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 3px;
+        height: 16px;
+        border-radius: 2px;
+        background: var(--accent);
       }
 
       .work-tool-menu {
@@ -30319,10 +30356,15 @@
           <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
         <span class="topbar__spacer" aria-hidden="true"></span>
-        <button id="topbarLivePill" class="topbar-live" type="button" hidden aria-label="Return to the live room">
-          <span class="topbar-live__dot" aria-hidden="true"></span>
-          <span id="topbarLiveText">live</span>
-        </button>
+        <span id="topbarLiveGroup" class="topbar-live-group" hidden>
+          <button id="topbarLivePill" class="topbar-live" type="button" aria-label="Return to the live room">
+            <span class="topbar-live__dot" aria-hidden="true"></span>
+            <span id="topbarLiveText">live</span>
+          </button>
+          <button id="topbarLiveLeave" class="topbar-live-leave" type="button" aria-label="Leave room" title="Leave room">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          </button>
+        </span>
         <button id="topbarBell" class="topbar__bell" type="button" aria-label="Notifications" aria-haspopup="dialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
           <span id="topbarBellBadge" class="chat-thread-item__unread topbar__bell-badge" hidden>0</span>
@@ -30342,22 +30384,20 @@
       <section id="pd1DestinationSurface" class="pd1-destination-surface" aria-live="polite" aria-label="Primary destination status">
         <article class="pd1-destination-state" data-pd1-state="network-off">
           <span class="pd1-destination-state__eyebrow">Network</span>
-          <h2 tabindex="-1">The public network is off.</h2>
-          <p>Public workspaces, profiles, workstreams, moderation, and consensus stay unavailable until their parent policies and protections are activated.</p>
-          <span class="pd1-destination-state__status">Feature off · no public projection loaded</span>
+          <h2 tabindex="-1">Coming soon</h2>
+          <p>The Network feature is not yet available.</p>
         </article>
         <article class="pd1-destination-state" data-pd1-state="work-search-off">
           <span class="pd1-destination-state__eyebrow">Work Search</span>
-          <h2 tabindex="-1">Work Search is off.</h2>
-          <p>No query, interpretation, result, or contact projection is requested while qualification and search policy remain inactive.</p>
-          <span class="pd1-destination-state__status">Feature off · no search performed</span>
+          <h2 tabindex="-1">Coming soon</h2>
+          <p>Work Search is not yet available.</p>
         </article>
         <article class="pd1-destination-state" data-pd1-state="you">
           <span class="pd1-destination-state__eyebrow">You</span>
-          <h2 tabindex="-1">Your private account controls.</h2>
-          <p>Open the existing private profile and account settings. Public-presence and MyMind children remain outside this destination while their parents are off.</p>
+          <h2 tabindex="-1">Account settings</h2>
+          <p>Manage your profile and account.</p>
           <div class="pd1-destination-state__actions">
-            <button id="pd1OpenProfileSettings" class="pd1-destination-state__action" type="button">Open profile settings</button>
+            <button id="pd1OpenProfileSettings" class="pd1-destination-state__action" type="button">Open settings</button>
           </div>
         </article>
       </section>
@@ -30995,7 +31035,7 @@
                   <path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
                 </svg>
               </button>
-              <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout about any meeting" aria-label="Message Scout privately" disabled></textarea>
+              <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="Message" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 19V5"></path>
@@ -33136,8 +33176,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const topbarProjectEl = document.getElementById('topbarProject')
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarSubtitleEl = document.getElementById('topbarSubtitle')
+      const topbarLiveGroup = document.getElementById('topbarLiveGroup')
       const topbarLivePill = document.getElementById('topbarLivePill')
       const topbarLiveText = document.getElementById('topbarLiveText')
+      const topbarLiveLeave = document.getElementById('topbarLiveLeave')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
       // header board subtitle — stamped whenever a board snapshot lands
       let boardLastUpdatedAt = 0
@@ -34755,8 +34797,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
       expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
-      // header live pill → back to the room
+      // header live chip: pill → room, leave → exit
       topbarLivePill?.addEventListener('click', () => setActiveTool('room'))
+      topbarLiveLeave?.addEventListener('click', () => leaveRoom())
       // mobile header (design §1): back chevron leaves the intel sub-screen,
       // the bell opens notifications, the avatar opens the settings sheet
       topbarBackButton?.addEventListener('click', () => setActiveTool('office'))
@@ -39772,29 +39815,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
          expand/collapse path syncs the rail through applyToolState. */
       function pd1DestinationForPath(path) {
         const exact = Object.entries(PD1_PATHS).find(([, candidate]) => candidate === path)
-        if (exact) return exact[0]
-        if (path === '/me' || path === '/work-record' || path.startsWith('/people/') || path.startsWith('/org/')) return 'You'
-        if (path === '/network/search' || path === '/network/contact') return 'Work Search'
-        if (path.startsWith('/network/')) return 'Network'
+        if (exact && PD1_CORE_DESTINATIONS.includes(exact[0])) return exact[0]
         return ''
       }
 
       function pd1DestinationAllowed(destination) {
-        return PD1_DESTINATIONS.includes(destination)
-          && (authedUser?.shellAccess === 'full' || PD1_CORE_DESTINATIONS.includes(destination))
+        return PD1_CORE_DESTINATIONS.includes(destination)
       }
 
       function syncPD1NavigationAccess() {
-        const full = authedUser?.shellAccess === 'full'
         pd1DestinationButtons.forEach(button => {
-          const allowed = full || PD1_CORE_DESTINATIONS.includes(button.dataset.pd1Destination)
+          const allowed = PD1_CORE_DESTINATIONS.includes(button.dataset.pd1Destination)
           button.hidden = !allowed
           button.disabled = !allowed
           button.inert = !allowed
           button.setAttribute('aria-hidden', allowed ? 'false' : 'true')
           if (!allowed) button.tabIndex = -1
         })
-        if (!full) setWorkToolMenuOpen(false)
+        setWorkToolMenuOpen(false)
       }
 
       function syncPD1Destination(destination) {
@@ -39875,22 +39913,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination('Files')
           return true
         }
-        if (destination === 'Work') {
-          clearPD1DestinationSurface()
-          setActiveTool('artifacts', { history: false })
-          syncPD1Destination('Work')
-          return true
-        }
-        if (destination === 'Network') {
-          showPD1DestinationSurface('network-off', destination, options.focus !== false)
-          return true
-        }
-        if (destination === 'Work Search') {
-          showPD1DestinationSurface('work-search-off', destination, options.focus !== false)
-          return true
-        }
-        showPD1DestinationSurface('you', 'You', options.focus !== false)
-        return true
+        return false
       }
       window.selectPD1Destination = selectPD1Destination
 
@@ -40052,25 +40075,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       }
 
-      /* live pill — shows whenever you are in the room behind another tab */
+      /* live chip — shows whenever you are in the room behind another tab */
       function syncHeaderLivePill() {
-        if (!topbarLivePill) {
+        if (!topbarLiveGroup) {
           return
         }
         const tool = appShell.dataset.tool || 'office'
         const live = appShell.classList.contains('is-in-room')
         const show = Boolean(authedUser) && live && tool !== 'room'
-        topbarLivePill.hidden = !show
+        topbarLiveGroup.hidden = !show
         if (!show) {
           return
         }
         const name = (topbarProjectEl?.textContent || '').trim().toLowerCase() || 'the room'
         const elapsed = topbarElapsedEl?.dataset.started === 'true' ? topbarElapsedEl.textContent : ''
-        // phones: the pill is the PiP replacement — just the breathing dot
-        // and the timer (design mobile §1)
-        topbarLiveText.textContent = phoneLayoutQuery.matches
-          ? (elapsed || 'live')
-          : (elapsed ? `${name} · ${elapsed}` : name)
+        topbarLiveText.textContent = elapsed ? `${name} · ${elapsed}` : name
       }
 
       /* phones speak the mobile header dialect (design mobile §1): office is
@@ -45087,16 +45106,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          join auxiliaryVideoPlaybackTargets() so the existing repair machinery
          keeps them alive. The Board tool keeps its own dock strip instead. */
       function pipMeetingActive() {
-        // D12: mobile has NO PiP — the header live-timer pill covers it. The
-        // gate lives in JS (not just display:none) so [hidden] stays true and
-        // the :has(#pipMeeting:not([hidden])) clearance rules never fire on
-        // phones (the chat composer keeps its full width).
-        if (phoneLayoutQuery.matches) {
-          return false
-        }
-        // D12: the meeting follows you onto every non-room tab, board included
-        const tool = appShell.dataset.tool || 'room'
-        return roomMediaActive() && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || tool === 'board' || agentToolIds.includes(tool) || tool === 'memory' || tool === 'files')
+        return false
       }
 
       // Live <video> elements should not be detached and reinserted on a timer.
@@ -55071,12 +55081,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const list = bfEl('div', 'scout-deliverables__list')
 	        list.setAttribute('role', 'listbox')
 	        list.setAttribute('aria-label', 'Deliverables')
-	        sheet.appendChild(bfEl('div', 'scout-deliverables__header', 'drop a deliverable — your next message gives it feedback'))
+	        sheet.appendChild(bfEl('div', 'scout-deliverables__header', 'Attach a deliverable'))
 	        sheet.appendChild(list)
 	        scoutDeliverablesPopover.replaceChildren(sheet)
 	        const entries = deliverableDrawerEntries()
 	        if (!entries.length) {
-	          list.appendChild(bfEl('div', 'scout-deliverables__empty', 'no deliverables yet — ship a run and it lands here'))
+	          list.appendChild(bfEl('div', 'scout-deliverables__empty', 'No deliverables yet'))
 	          return
 	        }
 	        for (const entry of entries) {
@@ -59572,28 +59582,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          empty.className = 'scout-chat-empty'
 	          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
 	        }
-	        // A single feed node is reused while people move between channels and
-	        // private Scout threads, so copy and privacy affordances must be
-	        // reconciled on every render rather than only on first creation.
 	        empty.replaceChildren()
 	        const inner = bfEl('div', 'scout-chat-empty__inner')
-	        const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', isChannel ? 'shared channel' : isRiff ? 'private riff' : 'private work with Scout')
-	        const title = bfEl('h2', 'scout-chat-empty__title', isChannel ? 'Start the conversation' : isRiff ? 'Riff from this checkpoint' : 'What do you want to accomplish?')
-	        const body = bfEl('p', 'scout-chat-empty__body', isChannel
-	          ? 'Message the team. Mention @Scout when you want help.'
-	          : isRiff
-	            ? 'Ask Scout to explore, pressure-test, or rewrite something without adding the private exchange to the channel.'
-	          : 'Ask anything, or describe the outcome you want. Scout can answer, start private work, or ask for approval when it actually matters.')
-	        inner.append(eyebrow, title, body)
-	        empty.append(inner)
-	        // Discovery: seed tappable run starters under the PRIVATE empty state so
-	        // a blank thread teaches what can be run. Idempotent; never on channels.
-	        const hasStarters = Boolean(scoutChatThread.querySelector('.scout-starters'))
-	        if (!isChannel && !isRiff && !hasStarters) {
-	          empty.after(buildScoutStarterRow())
-	        } else if ((isChannel || isRiff) && hasStarters) {
-	          scoutChatThread.querySelector('.scout-starters').remove()
+	        if (isChannel) {
+	          const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', 'shared channel')
+	          const title = bfEl('h2', 'scout-chat-empty__title', 'Start the conversation')
+	          const body = bfEl('p', 'scout-chat-empty__body', 'Message the team. Mention @Scout when you want help.')
+	          inner.append(eyebrow, title, body)
+	        } else if (isRiff) {
+	          const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', 'private riff')
+	          const title = bfEl('h2', 'scout-chat-empty__title', 'Riff from this checkpoint')
+	          inner.append(eyebrow, title)
 	        }
+	        if (inner.children.length) {
+	          empty.append(inner)
+	        }
+	        scoutChatThread.querySelector('.scout-starters')?.remove()
 	        if (isRiff) {
 	          const checkpoint = scoutChatThread.querySelector('.private-riff-checkpoint--conversation')
 	          if (checkpoint && scoutChatThread.firstChild !== checkpoint) scoutChatThread.insertBefore(checkpoint, scoutChatThread.firstChild)
@@ -73698,22 +73702,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      function stripMarkdownBold(text) {
+        return String(text || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1')
+      }
+
       function homeContinuityNode(item) {
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'home-continuity__row pressable'
-        button.setAttribute('aria-label', `${String(item?.eyebrow || '')}. ${String(item?.title || '')}. ${String(item?.detail || '')}`)
+        const eyebrowText = stripMarkdownBold(item?.eyebrow || '')
+        const titleText = stripMarkdownBold(item?.title || '')
+        const detailText = stripMarkdownBold(item?.detail || '')
+        button.setAttribute('aria-label', `${eyebrowText}. ${titleText}. ${detailText}`)
         const copy = document.createElement('span')
         copy.className = 'home-continuity__copy'
         const eyebrow = document.createElement('span')
         eyebrow.className = 'home-continuity__eyebrow'
-        eyebrow.textContent = String(item?.eyebrow || '')
+        eyebrow.textContent = eyebrowText
         const title = document.createElement('span')
         title.className = 'home-continuity__title'
-        title.textContent = String(item?.title || '')
+        title.textContent = titleText
         const detail = document.createElement('span')
         detail.className = 'home-continuity__detail'
-        detail.textContent = String(item?.detail || '')
+        detail.textContent = detailText
         copy.append(eyebrow, title, detail)
         const arrow = document.createElement('span')
         arrow.className = 'home-continuity__arrow'
@@ -75793,7 +75804,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return {
           title: 'Scout',
           meta: 'private',
-          preview: 'ask Scout about any meeting — only you can see this.',
+          preview: 'Private conversation',
           onOpen: () => openOfficeTool('chat')
         }
       }
