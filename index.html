@@ -1268,7 +1268,13 @@
 
       .topbar > .pill {
         flex: none;
-        max-width: 100%;
+        max-width: min(180px, 30vw);
+        overflow: hidden;
+      }
+      #statusText {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* The room carries connection and recording state in its meeting dock.
@@ -4002,16 +4008,21 @@
         width: 8px;
         height: 8px;
         border-radius: var(--r-full);
-        background: var(--live);
-        box-shadow: 0 0 0 4px var(--live-soft);
+        background: var(--danger);
+        box-shadow: 0 0 0 4px var(--danger-soft);
         flex: none;
+      }
+
+      .btn--recording.is-recording .record-dot,
+      .board-dock-icon.recording-toggle.is-recording .record-dot {
+        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
       }
 
       .btn--recording.is-recording,
       .board-dock-icon.recording-toggle.is-recording {
         border-color: transparent;
-        background: var(--live-soft);
-        color: var(--live);
+        background: var(--danger-soft);
+        color: var(--danger);
       }
 
       .btn--recording.is-paused,
@@ -4025,8 +4036,8 @@
       .controls .btn--recording.is-recording,
       .controls .btn--recording.is-recording:hover:not([disabled]) {
         border-color: transparent;
-        background: rgba(48, 209, 88, 0.18);
-        color: #30D158;
+        background: rgba(255, 69, 58, 0.25);
+        color: var(--danger);
       }
 
       .controls .btn--recording.is-paused,
@@ -4040,6 +4051,7 @@
       .board-dock-icon.recording-toggle.is-paused .record-dot {
         background: var(--danger);
         box-shadow: none;
+        animation: none;
       }
 
       /* the glanceable Scout line in the mobile dock — desktop has the rail */
@@ -11400,6 +11412,58 @@
 
       .manifest-card__foot-link:hover {
         color: var(--text-1);
+      }
+
+      .manifest-card__more {
+        position: relative;
+        display: inline-flex;
+      }
+      .manifest-card__more-trigger {
+        background: none;
+        border: 0;
+        padding: 0 4px;
+        font: var(--type-label);
+        letter-spacing: 0.08em;
+        color: var(--text-3);
+        cursor: pointer;
+      }
+      .manifest-card__more-trigger:hover {
+        color: var(--text-1);
+      }
+      .manifest-card__more-menu {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 0;
+        z-index: 8;
+        min-width: 120px;
+        display: grid;
+        gap: 2px;
+        padding: 5px;
+        border-radius: 11px;
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        box-shadow: 0 0 0 1px var(--glass-border), 0 12px 28px rgba(0, 0, 0, 0.18);
+      }
+      .manifest-card__more-menu[hidden] {
+        display: none;
+      }
+      .manifest-card__more-item {
+        width: 100%;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 0 11px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-caption);
+        cursor: pointer;
+      }
+      .manifest-card__more-item:hover {
+        background: var(--surface-3);
       }
 
       /* sheet 2h mobile: the actions wrap under the row, aligned past the
@@ -18997,7 +19061,52 @@
 
       .package-row__actions {
         display: flex;
+        gap: 8px;
         justify-content: flex-end;
+      }
+
+      .package-row__more {
+        position: relative;
+        display: inline-flex;
+      }
+      .package-row__more-trigger {
+        min-width: 40px;
+        letter-spacing: 0.06em;
+      }
+      .package-row__more-menu {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        right: 0;
+        z-index: 8;
+        min-width: 160px;
+        display: grid;
+        gap: 2px;
+        padding: 5px;
+        border-radius: 11px;
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        box-shadow: 0 0 0 1px var(--glass-border), 0 12px 28px rgba(0, 0, 0, 0.18);
+      }
+      .package-row__more-menu[hidden] {
+        display: none;
+      }
+      .package-row__more-item {
+        width: 100%;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-caption);
+        cursor: pointer;
+      }
+      .package-row__more-item:hover {
+        background: var(--surface-3);
       }
 
       .intel-empty {
@@ -28780,6 +28889,38 @@
       }
       .artifact-stage__hero-btn:hover { color: #fff; border-color: rgba(255, 255, 255, 0.34); }
       .artifact-stage__hero-btn:active { transform: scale(var(--press-scale)); }
+      .artifact-stage__hero-more { position: relative; display: inline-flex; }
+      .artifact-stage__hero-menu {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        z-index: 8;
+        min-width: 140px;
+        display: grid;
+        gap: 2px;
+        padding: 5px;
+        border-radius: 11px;
+        background: rgba(20, 20, 22, 0.94);
+        backdrop-filter: blur(16px) saturate(1.25);
+        -webkit-backdrop-filter: blur(16px) saturate(1.25);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 12px 32px rgba(0, 0, 0, 0.4);
+      }
+      .artifact-stage__hero-menu[hidden] { display: none; }
+      .artifact-stage__hero-menu-item {
+        width: 100%;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 0 11px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-caption);
+        cursor: pointer;
+      }
+      .artifact-stage__hero-menu-item:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
       /* present is the one earned ember on this surface — the crown-jewel action */
       .artifact-stage__hero-btn--primary {
         padding: 0 18px;
@@ -40315,16 +40456,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function applyStatusPillForTool() {
         const tool = appShell.dataset.tool || 'office'
         const toolPage = osToolIds.includes(tool)
+        let label
         if (toolPage && ws?.readyState === WebSocket.OPEN) {
           statusPillEl.className = 'pill pill--idle'
-          statusTextEl.textContent = 'memory ready'
+          label = 'memory ready'
         } else if (toolPage && authedUser) {
           statusPillEl.className = 'pill pill--idle'
-          statusTextEl.textContent = 'ready'
+          label = 'ready'
         } else {
           statusPillEl.className = `pill pill--${lastConnectionState}`
-          statusTextEl.textContent = lastConnectionLabel
+          label = lastConnectionLabel
         }
+        statusTextEl.textContent = label
+        statusPillEl.title = label
       }
 
       function setActiveTool(tool, options = {}) {
@@ -40664,12 +40808,58 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         const actions = bfEl('div', 'artifact-stage__hero-actions')
         if (ctx.shareArtifactId) {
-          const share = bfEl('button', 'artifact-stage__hero-btn')
-          share.type = 'button'
-          share.setAttribute('aria-label', 'Share link')
-          share.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
-          share.addEventListener('click', () => manifestMintShareLink(String(ctx.shareArtifactId)))
-          actions.appendChild(share)
+          const moreWrap = bfEl('span', 'artifact-stage__hero-more')
+          const moreTrigger = bfEl('button', 'artifact-stage__hero-btn')
+          moreTrigger.type = 'button'
+          moreTrigger.setAttribute('aria-label', 'More actions')
+          moreTrigger.setAttribute('aria-haspopup', 'menu')
+          moreTrigger.setAttribute('aria-expanded', 'false')
+          moreTrigger.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
+          const moreMenu = bfEl('span', 'artifact-stage__hero-menu')
+          moreMenu.setAttribute('role', 'menu')
+          moreMenu.hidden = true
+          let outsideBound = false
+          const onOutsidePointerDown = () => {
+            outsideBound = false
+            moreMenu.hidden = true
+            moreTrigger.setAttribute('aria-expanded', 'false')
+          }
+          moreTrigger.addEventListener('click', event => {
+            event.stopPropagation()
+            if (moreMenu.hidden) {
+              moreMenu.hidden = false
+              moreTrigger.setAttribute('aria-expanded', 'true')
+              if (!outsideBound) {
+                outsideBound = true
+                window.setTimeout(() => {
+                  if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
+                }, 0)
+              }
+            } else {
+              moreMenu.hidden = true
+              moreTrigger.setAttribute('aria-expanded', 'false')
+              if (outsideBound) {
+                document.removeEventListener('pointerdown', onOutsidePointerDown)
+                outsideBound = false
+              }
+            }
+          })
+          moreWrap.addEventListener('pointerdown', event => event.stopPropagation())
+          const shareItem = bfEl('button', 'artifact-stage__hero-menu-item', 'Share link')
+          shareItem.type = 'button'
+          shareItem.setAttribute('role', 'menuitem')
+          shareItem.addEventListener('click', () => {
+            moreMenu.hidden = true
+            moreTrigger.setAttribute('aria-expanded', 'false')
+            if (outsideBound) {
+              document.removeEventListener('pointerdown', onOutsidePointerDown)
+              outsideBound = false
+            }
+            manifestMintShareLink(String(ctx.shareArtifactId))
+          })
+          moreMenu.appendChild(shareItem)
+          moreWrap.append(moreTrigger, moreMenu)
+          actions.appendChild(moreWrap)
         }
         if (/^[0-9a-f]{64}$/.test(String(ctx.pdfRef || ''))) {
           const pdf = document.createElement('a')
@@ -61245,29 +61435,89 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function privateRiffShareTriggerNode(thread, message) {
-	        const wrap = bfEl('div', 'private-riff-share-control')
-	        const trigger = bfEl('button', 'private-riff-action', 'Share')
+	      function privateRiffOverflowMenu(thread, message) {
+	        const wrap = bfEl('span', 'desktop-chat-more')
+	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
 	        trigger.type = 'button'
+	        trigger.setAttribute('aria-label', 'More actions')
+	        trigger.setAttribute('aria-haspopup', 'menu')
 	        trigger.setAttribute('aria-expanded', 'false')
-	        const panel = renderPrivateRiffShare(thread, message)
-	        panel.hidden = true
-	        trigger.setAttribute('aria-controls', panel.id)
-	        trigger.addEventListener('click', () => {
-	          panel.hidden = !panel.hidden
-	          trigger.setAttribute('aria-expanded', String(!panel.hidden))
-	          trigger.textContent = panel.hidden ? 'Share' : 'Hide share options'
-	          if (!panel.hidden) panel.querySelector('button')?.focus()
+	        const menu = bfEl('span', 'desktop-chat-more__menu')
+	        menu.setAttribute('role', 'menu')
+	        menu.hidden = true
+	        let outsideBound = false
+	        const onOutsidePointerDown = () => {
+	          outsideBound = false
+	          close()
+	        }
+	        const close = ({ restoreFocus = false } = {}) => {
+	          menu.hidden = true
+	          trigger.setAttribute('aria-expanded', 'false')
+	          if (outsideBound) {
+	            document.removeEventListener('pointerdown', onOutsidePointerDown)
+	            outsideBound = false
+	          }
+	          if (restoreFocus) trigger.focus({ preventScroll: true })
+	        }
+	        const open = () => {
+	          menu.hidden = false
+	          trigger.setAttribute('aria-expanded', 'true')
+	          if (!outsideBound) {
+	            outsideBound = true
+	            window.setTimeout(() => {
+	              if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
+	            }, 0)
+	          }
+	          window.requestAnimationFrame(() => menu.querySelector('button')?.focus({ preventScroll: true }))
+	        }
+	        trigger.addEventListener('click', event => {
+	          event.stopPropagation()
+	          if (menu.hidden) open()
+	          else close()
 	        })
-	        wrap.append(trigger, panel)
+	        wrap.addEventListener('pointerdown', event => event.stopPropagation())
+
+	        if (privateRiffReplyIsShareable(message, thread)) {
+	          const shareAll = bfEl('button', '', 'Share all to source')
+	          shareAll.type = 'button'
+	          shareAll.setAttribute('role', 'menuitem')
+	          shareAll.disabled = thread?.riff?.sourceAvailable === false
+	          shareAll.addEventListener('click', () => {
+	            close()
+	            void publishPrivateRiffConversation(thread, message, wrap, 'all')
+	          })
+	          menu.appendChild(shareAll)
+
+	          const shareReply = bfEl('button', '', 'Share this reply')
+	          shareReply.type = 'button'
+	          shareReply.setAttribute('role', 'menuitem')
+	          shareReply.disabled = thread?.riff?.sourceAvailable === false
+	          shareReply.addEventListener('click', () => {
+	            close()
+	            void publishPrivateRiffConversation(thread, message, wrap, 'reply')
+	          })
+	          menu.appendChild(shareReply)
+	        }
+
+	        menu.addEventListener('keydown', event => {
+	          if (event.key === 'Escape') {
+	            event.preventDefault()
+	            close({ restoreFocus: true })
+	          }
+	        })
+	        wrap.append(trigger, menu)
 	        return wrap
 	      }
 
 	      function privateRiffMessageCard(thread, message) {
 	        const card = desktopContextMessageCard(thread, message, { readOnly: true })
 	        const content = card.querySelector('.chat-context-card__content')
-	        // Cut "Worked Xs · considered X channel messages" lecture — keep the riff content only
-	        if (content && privateRiffReplyIsShareable(message, thread)) content.appendChild(privateRiffShareTriggerNode(thread, message))
+	        if (content && privateRiffReplyIsShareable(message, thread)) {
+	          const actions = bfEl('span', 'chat-context-card__message-actions')
+	          actions.setAttribute('aria-label', 'Reply actions')
+	          actions.appendChild(privateRiffOverflowMenu(thread, message))
+	          card.appendChild(actions)
+	        }
 	        return card
 	      }
 
@@ -63403,7 +63653,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          card.appendChild(list)
 	        }
 
-	        // footer: attached to · share link · see how it was attacked
+	        // footer: attached to · overflow (share link) · see how it was attacked
 	        // (held: "release requires <who>", share stays dark)
 	        const foot = bfEl('div', 'manifest-card__foot')
 	        if (held) {
@@ -63414,10 +63664,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          foot.appendChild(attached)
 	        }
 	        if (!held && manifest.shareArtifactId) {
-	          const share = bfEl('button', 'manifest-card__foot-link', 'share link')
-	          share.type = 'button'
-	          share.addEventListener('click', () => manifestMintShareLink(String(manifest.shareArtifactId)))
-	          foot.appendChild(share)
+	          const moreWrap = bfEl('span', 'manifest-card__more')
+	          const moreTrigger = bfEl('button', 'manifest-card__more-trigger', '•••')
+	          moreTrigger.type = 'button'
+	          moreTrigger.setAttribute('aria-label', 'More actions')
+	          moreTrigger.setAttribute('aria-haspopup', 'menu')
+	          moreTrigger.setAttribute('aria-expanded', 'false')
+	          const moreMenu = bfEl('span', 'manifest-card__more-menu')
+	          moreMenu.setAttribute('role', 'menu')
+	          moreMenu.hidden = true
+	          let outsideBound = false
+	          const onOutsidePointerDown = () => {
+	            outsideBound = false
+	            moreMenu.hidden = true
+	            moreTrigger.setAttribute('aria-expanded', 'false')
+	          }
+	          moreTrigger.addEventListener('click', event => {
+	            event.stopPropagation()
+	            if (moreMenu.hidden) {
+	              moreMenu.hidden = false
+	              moreTrigger.setAttribute('aria-expanded', 'true')
+	              if (!outsideBound) {
+	                outsideBound = true
+	                window.setTimeout(() => {
+	                  if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
+	                }, 0)
+	              }
+	            } else {
+	              moreMenu.hidden = true
+	              moreTrigger.setAttribute('aria-expanded', 'false')
+	              if (outsideBound) {
+	                document.removeEventListener('pointerdown', onOutsidePointerDown)
+	                outsideBound = false
+	              }
+	            }
+	          })
+	          moreWrap.addEventListener('pointerdown', event => event.stopPropagation())
+	          const shareItem = bfEl('button', 'manifest-card__more-item', 'Share link')
+	          shareItem.type = 'button'
+	          shareItem.setAttribute('role', 'menuitem')
+	          shareItem.addEventListener('click', () => {
+	            moreMenu.hidden = true
+	            moreTrigger.setAttribute('aria-expanded', 'false')
+	            if (outsideBound) {
+	              document.removeEventListener('pointerdown', onOutsidePointerDown)
+	              outsideBound = false
+	            }
+	            manifestMintShareLink(String(manifest.shareArtifactId))
+	          })
+	          moreMenu.appendChild(shareItem)
+	          moreWrap.append(moreTrigger, moreMenu)
+	          foot.appendChild(moreWrap)
 	        }
 	        if (manifest.findingsArtifactId) {
 	          const attacked = bfEl('button', 'manifest-card__foot-link', 'see how it was attacked')
@@ -68961,14 +69258,65 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         actions.append(advance)
         // Deal Room (Wave 14 capstone): once a package is assembled, its binder can
         // be shared as a read-only external data room — behind the external-write
-        // admin approval, requested here at the share surface.
+        // admin approval, requested here at the overflow surface.
         if (terminal) {
-          const share = document.createElement('button')
-          share.type = 'button'
-          share.className = 'btn btn--ghost'
-          share.textContent = 'Share as Deal Room'
-          share.addEventListener('click', () => requestDealRoomShare(String(record?.id || ''), share))
-          actions.append(share)
+          const moreWrap = document.createElement('span')
+          moreWrap.className = 'package-row__more'
+          const moreTrigger = document.createElement('button')
+          moreTrigger.type = 'button'
+          moreTrigger.className = 'btn btn--ghost package-row__more-trigger'
+          moreTrigger.setAttribute('aria-label', 'More actions')
+          moreTrigger.setAttribute('aria-haspopup', 'menu')
+          moreTrigger.setAttribute('aria-expanded', 'false')
+          moreTrigger.textContent = '•••'
+          const moreMenu = document.createElement('span')
+          moreMenu.className = 'package-row__more-menu'
+          moreMenu.setAttribute('role', 'menu')
+          moreMenu.hidden = true
+          let outsideBound = false
+          const onOutsidePointerDown = () => {
+            outsideBound = false
+            moreMenu.hidden = true
+            moreTrigger.setAttribute('aria-expanded', 'false')
+          }
+          moreTrigger.addEventListener('click', event => {
+            event.stopPropagation()
+            if (moreMenu.hidden) {
+              moreMenu.hidden = false
+              moreTrigger.setAttribute('aria-expanded', 'true')
+              if (!outsideBound) {
+                outsideBound = true
+                window.setTimeout(() => {
+                  if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
+                }, 0)
+              }
+            } else {
+              moreMenu.hidden = true
+              moreTrigger.setAttribute('aria-expanded', 'false')
+              if (outsideBound) {
+                document.removeEventListener('pointerdown', onOutsidePointerDown)
+                outsideBound = false
+              }
+            }
+          })
+          moreWrap.addEventListener('pointerdown', event => event.stopPropagation())
+          const shareItem = document.createElement('button')
+          shareItem.type = 'button'
+          shareItem.className = 'package-row__more-item'
+          shareItem.setAttribute('role', 'menuitem')
+          shareItem.textContent = 'Share as Deal Room'
+          shareItem.addEventListener('click', () => {
+            moreMenu.hidden = true
+            moreTrigger.setAttribute('aria-expanded', 'false')
+            if (outsideBound) {
+              document.removeEventListener('pointerdown', onOutsidePointerDown)
+              outsideBound = false
+            }
+            requestDealRoomShare(String(record?.id || ''), shareItem)
+          })
+          moreMenu.appendChild(shareItem)
+          moreWrap.append(moreTrigger, moreMenu)
+          actions.append(moreWrap)
         }
         details.append(actions)
         return details
