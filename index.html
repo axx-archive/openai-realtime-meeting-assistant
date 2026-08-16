@@ -59051,6 +59051,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !title || title === 'Scout' || title === 'New Scout thread'
 	      }
 
+      // Family labels that should not be used as titles when better options exist
+      const FAMILY_LABELS = new Set([
+        'work', 'outline', 'research', 'presentation', 'document', 'design',
+        'build', 'revision', 'meeting recap', 'data visualization', 'project plan',
+        'financial model', 'mixed package', 'scheduled work'
+      ])
+
       function chatThreadDisplayTitle(thread) {
         if (!thread) {
           return 'new thread'
@@ -59061,13 +59068,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           return String(thread.title || 'team channel')
         }
-        // Private thread: use desktopWorkTitle logic — never show raw prompt
-        // 1. Try artifact info (uses desktopWorkTitle internally)
+        // Private thread title resolution — never show raw prompt
+        // Order: real work name > markdown heading > em-dash title > family
         const artifactInfo = chatThreadLatestArtifactInfo(thread)
-        if (artifactInfo?.title) {
-          return artifactInfo.title
+        const artifactTitle = artifactInfo?.title || ''
+        const isFamilyLabel = FAMILY_LABELS.has(artifactTitle.toLowerCase())
+
+        // 1. Real work name: metadata.title when ≠ query (not just a family label)
+        if (artifactTitle && !isFamilyLabel) {
+          return artifactTitle
         }
-        // 2. No artifact yet — scan Scout responses for first heading
+
+        // 2. First markdown heading (# / ## / ###) in Scout messages
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
@@ -59080,17 +59092,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             }
           }
         }
-        // 3. Fall back to family based on thread query — never the raw prompt
+
+        // 3. Em-dash title pattern in preview (e.g., "STRIDE Brain Privacy — 5-Slide Outline")
+        // Do NOT take first sentence of preview — that's the last spoken line, not a heading
+        const preview = String(thread?.preview || '').trim()
+        if (preview) {
+          // Match "Title — Subtitle" or "Title – Subtitle" or "Title - Subtitle" pattern
+          const emDashMatch = preview.match(/^([A-Z][^—–\-\n]{2,60})\s*[—–-]\s*\S/i)
+          if (emDashMatch) {
+            const title = emDashMatch[1].trim()
+            const lower = title.toLowerCase()
+            if (!FAMILY_LABELS.has(lower) && !PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim())) {
+              return title
+            }
+          }
+        }
+
+        // 4. Family (Work / Outline / Research) ONLY if none of the above
         if (chatThreadTitleIsPlaceholder(thread)) {
           return 'new thread'
+        }
+        // Use artifact family if available, else compute from thread query
+        if (artifactTitle && isFamilyLabel) {
+          return artifactTitle
         }
         const threadQuery = String(thread.title || '').trim()
         if (!threadQuery) {
           return 'new thread'
         }
-        // Use family from desktopWorkFamily — the thread.title IS the query here
-        const family = desktopWorkFamily({ query: threadQuery }, null)
-        return family
+        return desktopWorkFamily({ query: threadQuery }, null)
       }
 
 	      /* previews are one line of PLAIN text — markdown that renders in the
