@@ -13791,6 +13791,13 @@
           color: var(--danger);
         }
 
+        #chatTool .desktop-chat-more__divider {
+          display: block;
+          height: 1px;
+          margin: 4px 6px;
+          background: var(--line-1);
+        }
+
         #chatTool .chat-context-card__message-action[data-armed="1"] {
           color: var(--danger);
           background: color-mix(in srgb, var(--danger) 10%, transparent);
@@ -61044,6 +61051,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          remove.addEventListener('click', () => onDelete(remove, close))
 	          menu.appendChild(remove)
 	        }
+	        if (onShareAll || onShareReply) {
+	          if (menu.childNodes.length) {
+	            const divider = bfEl('span', 'desktop-chat-more__divider')
+	            divider.setAttribute('role', 'separator')
+	            menu.appendChild(divider)
+	          }
+	          if (onShareAll) {
+	            const shareAll = bfEl('button', '', 'Share all to source')
+	            shareAll.type = 'button'
+	            shareAll.setAttribute('role', 'menuitem')
+	            shareAll.addEventListener('click', () => {
+	              close()
+	              onShareAll()
+	            })
+	            menu.appendChild(shareAll)
+	          }
+	          if (onShareReply) {
+	            const shareReply = bfEl('button', '', 'Share this reply')
+	            shareReply.type = 'button'
+	            shareReply.setAttribute('role', 'menuitem')
+	            shareReply.addEventListener('click', () => {
+	              close()
+	              onShareReply()
+	            })
+	            menu.appendChild(shareReply)
+	          }
+	        }
 	        menu.addEventListener('keydown', event => {
 	          if (event.key === 'Escape') {
 	            event.preventDefault()
@@ -61263,11 +61297,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        reply.addEventListener('click', () => chatContextReplyInput?.focus())
 	        messageActions.appendChild(reply)
 	        let moreControl = null
-	        if (desktopChatMessageIsOwn(thread, message)) {
+	        const isOwn = desktopChatMessageIsOwn(thread, message)
+	        const hasShare = options.onShareAll || options.onShareReply
+	        if (isOwn || hasShare) {
 	          moreControl = desktopChatMoreMenuControl({
 	            label: 'More reply actions',
-	            onEdit: () => beginDesktopContextMessageEdit(thread, message, card),
-	            onDelete: remove => deleteDesktopContextMessage(thread, message, remove)
+	            onEdit: isOwn ? () => beginDesktopContextMessageEdit(thread, message, card) : null,
+	            onDelete: isOwn ? remove => deleteDesktopContextMessage(thread, message, remove) : null,
+	            onShareAll: options.onShareAll,
+	            onShareReply: options.onShareReply
 	          })
 	          messageActions.appendChild(moreControl.node)
 	        }
@@ -61435,89 +61473,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function privateRiffOverflowMenu(thread, message) {
-	        const wrap = bfEl('span', 'desktop-chat-more')
-	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
-	        trigger.type = 'button'
-	        trigger.setAttribute('aria-label', 'More actions')
-	        trigger.setAttribute('aria-haspopup', 'menu')
-	        trigger.setAttribute('aria-expanded', 'false')
-	        const menu = bfEl('span', 'desktop-chat-more__menu')
-	        menu.setAttribute('role', 'menu')
-	        menu.hidden = true
-	        let outsideBound = false
-	        const onOutsidePointerDown = () => {
-	          outsideBound = false
-	          close()
-	        }
-	        const close = ({ restoreFocus = false } = {}) => {
-	          menu.hidden = true
-	          trigger.setAttribute('aria-expanded', 'false')
-	          if (outsideBound) {
-	            document.removeEventListener('pointerdown', onOutsidePointerDown)
-	            outsideBound = false
-	          }
-	          if (restoreFocus) trigger.focus({ preventScroll: true })
-	        }
-	        const open = () => {
-	          menu.hidden = false
-	          trigger.setAttribute('aria-expanded', 'true')
-	          if (!outsideBound) {
-	            outsideBound = true
-	            window.setTimeout(() => {
-	              if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
-	            }, 0)
-	          }
-	          window.requestAnimationFrame(() => menu.querySelector('button')?.focus({ preventScroll: true }))
-	        }
-	        trigger.addEventListener('click', event => {
-	          event.stopPropagation()
-	          if (menu.hidden) open()
-	          else close()
-	        })
-	        wrap.addEventListener('pointerdown', event => event.stopPropagation())
-
-	        if (privateRiffReplyIsShareable(message, thread)) {
-	          const shareAll = bfEl('button', '', 'Share all to source')
-	          shareAll.type = 'button'
-	          shareAll.setAttribute('role', 'menuitem')
-	          shareAll.disabled = thread?.riff?.sourceAvailable === false
-	          shareAll.addEventListener('click', () => {
-	            close()
-	            void publishPrivateRiffConversation(thread, message, wrap, 'all')
-	          })
-	          menu.appendChild(shareAll)
-
-	          const shareReply = bfEl('button', '', 'Share this reply')
-	          shareReply.type = 'button'
-	          shareReply.setAttribute('role', 'menuitem')
-	          shareReply.disabled = thread?.riff?.sourceAvailable === false
-	          shareReply.addEventListener('click', () => {
-	            close()
-	            void publishPrivateRiffConversation(thread, message, wrap, 'reply')
-	          })
-	          menu.appendChild(shareReply)
-	        }
-
-	        menu.addEventListener('keydown', event => {
-	          if (event.key === 'Escape') {
-	            event.preventDefault()
-	            close({ restoreFocus: true })
-	          }
-	        })
-	        wrap.append(trigger, menu)
-	        return wrap
-	      }
-
 	      function privateRiffMessageCard(thread, message) {
-	        const card = desktopContextMessageCard(thread, message, { readOnly: true })
-	        const content = card.querySelector('.chat-context-card__content')
-	        if (content && privateRiffReplyIsShareable(message, thread)) {
-	          const actions = bfEl('span', 'chat-context-card__message-actions')
-	          actions.setAttribute('aria-label', 'Reply actions')
-	          actions.appendChild(privateRiffOverflowMenu(thread, message))
-	          card.appendChild(actions)
-	        }
+	        const shareable = privateRiffReplyIsShareable(message, thread)
+	        const shareOptions = shareable ? {
+	          onShareAll: thread?.riff?.sourceAvailable !== false
+	            ? () => void publishPrivateRiffConversation(thread, message, null, 'all')
+	            : null,
+	          onShareReply: thread?.riff?.sourceAvailable !== false
+	            ? () => void publishPrivateRiffConversation(thread, message, null, 'reply')
+	            : null
+	        } : {}
+	        const card = desktopContextMessageCard(thread, message, { readOnly: !shareable, ...shareOptions })
 	        return card
 	      }
 
