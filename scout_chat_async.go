@@ -810,9 +810,143 @@ func (app *kanbanBoardApp) retryScoutOpeningReply(viewerEmail string, threadID s
 // resolveInlineDeckReply generates an HTML deck directly when the agent worker
 // is unavailable. Returns the deck as a regular message (conversational_reply)
 // with HTML content that the frontend renders with the in-thread deck viewer.
+//
+// Scout creation flow (product bar 2026-08-16):
+//   1. Direction pass: 2-3 sharp aesthetic questions OR a proposed direction
+//   2. Once direction is established (via history), generate best-in-class deck
+//   NOT a 12-question form. NOT a work card. NOT Approve & run.
 func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
-	// Generate HTML deck content via the LLM
-	deckPrompt := inlineDeckGenerationPrompt(query)
+	// Check if direction context already exists in history
+	hasDirection := deckDirectionEstablished(query, history)
+
+	if !hasDirection {
+		// Run direction pass: 2-3 sharp questions OR propose a direction
+		return app.resolveDeckDirectionPass(ctx, user, query, history)
+	}
+
+	// Direction established — generate the best-in-class deck
+	return app.resolveDeckGeneration(ctx, user, query, history)
+}
+
+// deckDirectionEstablished checks if the conversation has enough aesthetic
+// direction context to proceed directly to deck generation. Returns true when:
+//   - User explicitly provided visual/aesthetic preferences
+//   - Previous Scout direction pass was answered
+//   - User said "just make it" / "proceed" / "looks good" type confirmations
+func deckDirectionEstablished(query string, history []scoutChatTurn) bool {
+	lower := strings.ToLower(query)
+
+	// Direct confirmation phrases skip direction pass
+	confirmPhrases := []string{
+		"just make it", "make it", "proceed", "go ahead", "looks good",
+		"that works", "perfect", "do it", "yes", "yep", "sure", "ok",
+		"sounds good", "i like it", "great", "let's go", "build it",
+	}
+	for _, phrase := range confirmPhrases {
+		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
+			// Check if previous message was a direction pass
+			if len(history) > 0 {
+				lastScout := ""
+				for i := len(history) - 1; i >= 0; i-- {
+					if history[i].role == "assistant" || history[i].role == "scout" {
+						lastScout = strings.ToLower(history[i].text)
+						break
+					}
+				}
+				if strings.Contains(lastScout, "direction") || strings.Contains(lastScout, "aesthetic") ||
+					strings.Contains(lastScout, "visual") || strings.Contains(lastScout, "style") {
+					return true
+				}
+			}
+		}
+	}
+
+	// User provided explicit aesthetic/visual direction in the query
+	directionIndicators := []string{
+		"dark theme", "light theme", "minimal", "bold", "corporate", "modern",
+		"playful", "professional", "startup", "enterprise", "clean", "colorful",
+		"blue", "red", "green", "orange", "purple", "gradient", "flat",
+		"with images", "typographic", "photo-heavy", "simple", "elegant",
+	}
+	for _, indicator := range directionIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+
+	// Check history for previous direction exchanges
+	for _, turn := range history {
+		text := strings.ToLower(turn.text)
+		// Scout asked direction questions
+		if (turn.role == "assistant" || turn.role == "scout") &&
+			(strings.Contains(text, "direction") || strings.Contains(text, "aesthetic") ||
+				strings.Contains(text, "visual style") || strings.Contains(text, "look and feel")) {
+			return true
+		}
+		// User provided direction in a previous message
+		if turn.role == "user" {
+			for _, indicator := range directionIndicators {
+				if strings.Contains(text, indicator) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// resolveDeckDirectionPass generates a short aesthetic direction pass.
+// Either 2-3 sharp questions OR a proposed direction the user can riff on.
+// This is NOT a 12-question form — it's a quick, intelligent design conversation.
+func (app *kanbanBoardApp) resolveDeckDirectionPass(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
+	directionPrompt := fmt.Sprintf(`You are a creative director helping someone create a presentation deck. Based on their request, provide a SHORT aesthetic direction pass.
+
+User request: %s
+
+Choose ONE approach (whichever fits better):
+
+APPROACH A - If you can confidently propose a direction:
+Propose a specific visual direction in 2-3 sentences. Be concrete: name colors, mood, whether to use images or go typographic. End with "Want me to build this, or should we adjust?"
+
+APPROACH B - If you need input:
+Ask exactly 2-3 sharp questions about look and feel. Not a form — just the 2-3 decisions that matter most for THIS deck. Keep questions conversational and specific.
+
+Example of good questions:
+- "Should this feel corporate and buttoned-up, or more startup energy?"
+- "Are you presenting to investors (credibility-first) or a creative team (energy-first)?"
+- "Full-bleed imagery to set mood, or clean typographic slides that let the data speak?"
+
+DO NOT:
+- Ask more than 3 questions
+- Be generic or formulaic
+- Use bullet points for questions
+- Create a form-like experience
+
+Respond naturally as if you're a design collaborator having a quick conversation.`, query)
+
+	answerContext := withAssistantModelSuccessRequired(ctx)
+	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, directionPrompt, history)
+	if err != nil {
+		// On error, fall through to direct generation
+		return app.resolveDeckGeneration(ctx, user, query, history)
+	}
+
+	return scoutChatMessageRecord{
+		Kind:          "message",
+		Role:          "scout",
+		AuthorName:    scoutParticipantName,
+		Text:          strings.TrimSpace(result.answer),
+		IntentOutcome: string(conversationIntentConversationalReply),
+	}, nil
+}
+
+// resolveDeckGeneration creates the actual HTML deck with direction context.
+func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
+	// Collect direction context from history
+	directionContext := extractDirectionContext(history)
+
+	deckPrompt := inlineDeckGenerationPromptWithDirection(query, directionContext)
 	answerContext := withAssistantModelSuccessRequired(ctx)
 	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, history)
 	if err != nil {
@@ -835,22 +969,87 @@ func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *use
 	}, nil
 }
 
+// extractDirectionContext pulls aesthetic direction from conversation history.
+func extractDirectionContext(history []scoutChatTurn) string {
+	var context strings.Builder
+	for _, turn := range history {
+		text := strings.ToLower(turn.text)
+		// Look for direction-related content
+		if strings.Contains(text, "dark") || strings.Contains(text, "light") ||
+			strings.Contains(text, "minimal") || strings.Contains(text, "bold") ||
+			strings.Contains(text, "corporate") || strings.Contains(text, "modern") ||
+			strings.Contains(text, "color") || strings.Contains(text, "style") ||
+			strings.Contains(text, "image") || strings.Contains(text, "typographic") ||
+			strings.Contains(text, "photo") || strings.Contains(text, "clean") {
+			if context.Len() > 0 {
+				context.WriteString(" ")
+			}
+			context.WriteString(turn.text)
+		}
+	}
+	return context.String()
+}
+
 // inlineDeckGenerationPrompt creates the prompt for generating an HTML deck.
 func inlineDeckGenerationPrompt(query string) string {
-	return fmt.Sprintf(`You are creating a presentation deck. Generate a complete HTML document that can be displayed as slides.
+	return inlineDeckGenerationPromptWithDirection(query, "")
+}
+
+// inlineDeckGenerationPromptWithDirection creates a deck prompt with aesthetic direction.
+// Supports three-layer slides: full-bleed image + transparent overlay + type.
+func inlineDeckGenerationPromptWithDirection(query string, direction string) string {
+	directionSection := ""
+	if strings.TrimSpace(direction) != "" {
+		directionSection = fmt.Sprintf("\nAesthetic direction from conversation:\n%s\n", direction)
+	}
+
+	return fmt.Sprintf(`You are creating a best-in-class presentation deck. Generate a complete HTML document.
 
 User request: %s
+%s
+SLIDE ARCHITECTURE:
+Each slide uses the .pg class and can be one of three types:
 
-Requirements:
-1. Start with <!doctype html> and include proper HTML structure
-2. Include embedded CSS for slide styling (each slide should be a <section class="slide">)
-3. Use clean, professional styling with good typography
-4. Create 5-10 slides based on the request
-5. Each slide should have a clear title and concise content
-6. Use bullet points, not paragraphs for content
-7. Include a title slide and a closing slide
+1. TYPE-ONLY SLIDE (for data, lists, key points):
+<section class="pg"><div class="content"><h2>Title</h2><ul>...</ul></div></section>
 
-Generate ONLY the HTML document, no explanation. The deck should be immediately presentable.`, query)
+2. THREE-LAYER BLEED SLIDE (for emotional beats, openings, transitions):
+<section class="pg pg--bleed">
+  <div class="bleed-bg" style="background-image:url('data:image/svg+xml,...')"></div>
+  <div class="bleed-overlay"></div>
+  <div class="bleed-content"><h1>Big Statement</h1></div>
+</section>
+
+Use bleed slides sparingly (2-3 max) for moments that deserve visual drama.
+The overlay ensures text readability over any image.
+
+REQUIRED CSS (embed in <head>):
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#000;color:#fff}
+#stage{position:fixed;inset:0;width:1920px;height:1080px;margin:auto}
+.pg{position:absolute;inset:0;display:none;overflow:hidden;background:#111;padding:80px}
+.pg.on{display:flex;flex-direction:column;justify-content:center}
+.pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px}
+.pg h2{font-size:56px;font-weight:600;line-height:1.2;margin-bottom:24px}
+.pg p{font-size:32px;line-height:1.6;opacity:0.9}
+.pg ul{font-size:28px;line-height:1.8;padding-left:48px}
+.pg li{margin-bottom:16px}
+.pg--bleed{padding:0}
+.pg--bleed .bleed-bg{position:absolute;inset:0;background-size:cover;background-position:center}
+.pg--bleed .bleed-overlay{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,0.3) 0%%,rgba(0,0,0,0.7) 100%%)}
+.pg--bleed .bleed-content{position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%%;text-align:center;padding:80px}
+.content{max-width:1600px}
+@media print{.pg{position:relative;display:block;break-after:page}}
+</style>
+
+DECK STRUCTURE:
+1. First slide gets class="pg on" (visible by default)
+2. All slides inside <div id="stage">
+3. Add simple keyboard navigation script at end
+
+Generate ONLY the HTML document. Make it presentation-ready.`, query, directionSection)
 }
 
 // extractHTMLDeckContent extracts HTML deck content from LLM response.

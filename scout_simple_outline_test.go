@@ -263,6 +263,96 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 
 // --- Inline deck generation tests --------------------------------------------
 
+// TestDeckDirectionEstablished tests the direction pass logic.
+func TestDeckDirectionEstablished(t *testing.T) {
+	cases := []struct {
+		name    string
+		query   string
+		history []scoutChatTurn
+		want    bool
+	}{
+		// User provides explicit direction in query
+		{"dark theme in query", "make a deck with dark theme", nil, true},
+		{"minimal style in query", "minimal presentation about AI", nil, true},
+		{"corporate style in query", "corporate pitch deck", nil, true},
+
+		// User confirms after direction pass
+		{"yes confirmation after direction", "yes", []scoutChatTurn{
+			{role: "scout", text: "What visual direction would you like?"},
+		}, true},
+		{"looks good confirmation", "looks good", []scoutChatTurn{
+			{role: "scout", text: "I'm thinking a dark, minimal aesthetic"},
+		}, true},
+		{"proceed confirmation", "proceed", []scoutChatTurn{
+			{role: "scout", text: "What visual style would you prefer?"},
+		}, true},
+
+		// Direction in history
+		{"direction in previous user message", "build it", []scoutChatTurn{
+			{role: "user", text: "I want a dark, modern look"},
+		}, true},
+
+		// No direction - should return false
+		{"plain deck request no history", "make a 5-slide deck", nil, false},
+		{"plain deck request with unrelated history", "make a 5-slide deck", []scoutChatTurn{
+			{role: "user", text: "hello"},
+			{role: "scout", text: "hi there"},
+		}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deckDirectionEstablished(tc.query, tc.history)
+			if got != tc.want {
+				t.Errorf("deckDirectionEstablished(%q, history) = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeckDirectionPassReturnsDirectionQuestions tests that a fresh deck request
+// triggers a direction pass (2-3 questions or proposed direction), not immediate deck generation.
+func TestDeckDirectionPassReturnsDirectionQuestions(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM to return direction questions
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Check if this is a direction pass prompt
+		if strings.Contains(request.Input, "aesthetic direction pass") || strings.Contains(request.Input, "visual direction") {
+			return "Should this feel corporate and buttoned-up, or more startup energy? Also, are you thinking full-bleed images or clean typographic slides?", nil
+		}
+		// For deck generation, return HTML
+		return `<!doctype html><html><head><title>Test</title></head><body></body></html>`, nil
+	})
+
+	// First call with no history should return direction pass, not HTML deck
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should be a regular message (not a thread card)
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+
+	// Should NOT be HTML - should be direction questions
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("First deck request should return direction pass, not HTML deck. Got HTML content.")
+	}
+}
+
+// TestInlineDeckReplyProducesHTMLDeck tests that when direction is established,
+// the deck request produces an actual HTML deck.
 func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 	// Force the agent runner to stub (unavailable)
 	clearAgentRunnerEnv(t)
@@ -293,7 +383,8 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 </html>`, nil
 	})
 
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI", nil)
+	// Include direction in the request to skip direction pass
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "make a 5-slide deck about AI with dark theme", nil)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
 	}
@@ -308,6 +399,50 @@ func TestInlineDeckReplyProducesHTMLDeck(t *testing.T) {
 	// Verify the text content is HTML
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
 		t.Errorf("reply.Text does not start with <!doctype html: %q", reply.Text[:min(50, len(reply.Text))])
+	}
+}
+
+// TestInlineDeckAfterDirectionConfirmation tests that saying "yes" or "looks good"
+// after a direction pass produces the actual deck.
+func TestInlineDeckAfterDirectionConfirmation(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock the LLM response to return HTML deck content
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		return `<!doctype html>
+<html lang="en">
+<head><title>Test Deck</title></head>
+<body><section class="pg on"><h1>Test</h1></section></body>
+</html>`, nil
+	})
+
+	// Simulate conversation where Scout asked direction questions
+	history := []scoutChatTurn{
+		{role: "user", text: "make a deck about our product"},
+		{role: "scout", text: "What visual direction would you like? Corporate and polished, or startup energy?"},
+	}
+
+	// User confirms with "looks good"
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "looks good, build it", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should produce HTML deck after confirmation
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("After direction confirmation, should get HTML deck. Got: %q", reply.Text[:min(100, len(reply.Text))])
 	}
 }
 
