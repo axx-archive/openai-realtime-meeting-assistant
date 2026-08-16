@@ -14,7 +14,7 @@ func TestDesktopShellNamesProductAndOrganization(t *testing.T) {
 	source := string(raw)
 	for _, marker := range []string{
 		`class="topbar__brand-lockup"`,
-		`class="wordmark topbar__brand-wordmark"`,
+		`class="topbar__brand-wordmark"`,
 		`id="topbarOrganizationSwitcher" class="topbar__organization"`,
 		`aria-label="Choose organization" aria-haspopup="menu" aria-expanded="false"`,
 		`id="topbarOrganizationName" class="topbar__organization-name">Organizations`,

@@ -5620,7 +5620,10 @@
         min-width: 0;
       }
 
+      /* Wordmark hidden from settings chrome — brand identity is the mark on the
+         rail only. */
       .settings-header__wordmark {
+        display: none;
         width: 76px;
         height: 20px;
         flex: 0 0 auto;
@@ -30475,7 +30478,7 @@
           <svg class="stride-mark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 17-5-5 5-5"/></svg>
         </button>
         <div class="topbar__brand-lockup" aria-label="Stride · organization workspace">
-          <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
+          <span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>
           <span class="topbar__identity-divider" aria-hidden="true"></span>
           <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Choose organization" aria-haspopup="menu" aria-expanded="false">
             <strong id="topbarOrganizationName" class="topbar__organization-name">Organizations</strong>
@@ -32244,7 +32247,7 @@
         </div>
         <header class="settings-header">
           <div class="settings-header__brand">
-            <span class="wordmark settings-header__wordmark" role="img" aria-label="Stride"></span>
+            <span class="settings-header__wordmark" role="img" aria-label="Stride"></span>
             <span class="settings-header__divider" aria-hidden="true"></span>
             <span class="settings-header__copy">
               <h2 id="settingsTitle">Settings</h2>
