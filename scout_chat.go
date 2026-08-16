@@ -467,7 +467,7 @@ func scoutRouterSystemPrompt() string {
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
-		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> propose_workstream mode=artifacts tool_template=deck_outline. These bypass the goal loop and answer directly like design mode.",
+		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'presentation outline keep in thread', 'outline the pitch, do not email') -> Tier 0 conversational_reply. Answer directly with the slide content in chat. No tool, no workstream, no agent thread.",
 		"- heavier pitch outline work that mentions review, gates, or multi-step packaging ('run the deck outline with review', 'full deck outline process') -> propose_tool_run deck_outline.",
 		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
 		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
@@ -536,13 +536,12 @@ func scoutRouterTools() []anthropicTool {
 		},
 		{
 			Name:        "propose_workstream",
-			Description: "Propose a quick single-pass workstream (research / design / grill / workflow / artifacts) for the user to confirm. Return Scout's polished execution prompt, not the user's raw wording. Use mode=artifacts with tool_template for simple in-thread presentation/outline asks.",
+			Description: "Propose a quick single-pass workstream (research / design / grill / workflow) for the user to confirm. Return Scout's polished execution prompt, not the user's raw wording.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"mode":          map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow", "artifacts"}},
-					"objective":     map[string]any{"type": "string", "description": "Scout's execution-ready prompt: intended outcome, key constraints, evidence or inputs to use, and the decision or deliverable to return; no @mention or conversational preamble"},
-					"tool_template": map[string]any{"type": "string", "enum": ids, "description": "optional tool template for artifacts mode — applies the tool's output contract and prompt without the goal loop overhead"},
+					"mode":      map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow"}},
+					"objective": map[string]any{"type": "string", "description": "Scout's execution-ready prompt: intended outcome, key constraints, evidence or inputs to use, and the decision or deliverable to return; no @mention or conversational preamble"},
 				},
 				"required": []string{"mode", "objective"},
 			},
@@ -692,6 +691,68 @@ func scoutChatImageRequestDetected(text string) bool {
 		}
 	}
 	return false
+}
+
+// scoutRouterSimpleOutlinePhrases is the reviewed phrase list that forces
+// simple in-thread outline/presentation asks to conversational_reply (Tier 0).
+// These asks should be answered directly in chat without any agent thread,
+// workstream, or goal loop. Heavier asks that mention "review", "process",
+// "full deck outline", etc. are NOT matched and can still route to tool_run.
+var scoutRouterSimpleOutlinePhrases = []string{
+	"slide outline",
+	"5-slide outline",
+	"5 slide outline",
+	"five-slide outline",
+	"five slide outline",
+	"quick outline",
+	"simple outline",
+	"outline in this thread",
+	"outline in-thread",
+	"outline, keep in-thread",
+	"outline keep in-thread",
+	"outline, keep in thread",
+	"outline keep in thread",
+	"keep in-thread",
+	"keep in thread",
+	"do not email",
+	"don't email",
+	"in-thread outline",
+	"in thread outline",
+}
+
+// scoutChatSimpleOutlineRequestDetected returns true when the message matches
+// the reviewed phrase list for simple in-thread outline/presentation asks.
+// These are forced to conversational_reply (Tier 0) BEFORE the deterministic
+// guard or router model runs, so they can never be routed to workstream/tool/goal.
+func scoutChatSimpleOutlineRequestDetected(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	// Must contain "outline" or "presentation" to be an outline ask
+	if !strings.Contains(lower, "outline") && !strings.Contains(lower, "presentation") {
+		return false
+	}
+	// Heavier asks that mention review/process/full should NOT be short-circuited
+	for _, heavy := range []string{"with review", "full process", "deck outline process", "run the deck outline", "full deck outline"} {
+		if strings.Contains(lower, heavy) {
+			return false
+		}
+	}
+	// Check for simple outline phrases
+	for _, phrase := range scoutRouterSimpleOutlinePhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoutAgentWorkerAvailable returns true when the agent runner is configured
+// and ready to execute work. When false, no work proposals (workstream, tool_run,
+// or goal) should be minted — fall through to inline answer instead.
+func scoutAgentWorkerAvailable() bool {
+	return selectedAgentRunnerName() != agentRunnerStub
 }
 
 // scoutGuardEligibleMessage returns true when a message is work-shaped enough
@@ -852,12 +913,22 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
+	// Simple in-thread outline/presentation guard: forces conversational_reply
+	// BEFORE the deterministic guard or router model runs. These asks must be
+	// answered directly in chat without any agent thread, workstream, or goal.
+	if scoutChatSimpleOutlineRequestDetected(intentText) {
+		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline"})
+		return decision
+	}
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
 	// so thread-context gravity can never drag the literal words off the flagship
 	// again. Image asks deliberately skip this guard: they need the router's
 	// informed prompt interpretation before the app starts generation.
-	if !imageRequest {
+	// When the agent worker is not available, skip the guard entirely to avoid
+	// minting proposals that would fail with "agent worker is not configured."
+	if !imageRequest && scoutAgentWorkerAvailable() {
 		if verdict := deterministicRouterGuard(intentText); verdict != nil {
 			work, err := conversationWorkFromScoutProposal(verdict.proposal)
 			if err != nil {
@@ -938,6 +1009,16 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 	// conservative prompt fallback; a stray action/proposal must not steal it.
 	if imageRequest && (decision.Outcome != conversationIntentStartPrivateWork || decision.Work == nil || decision.Work.Kind != conversationWorkImage) {
 		decision = conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkImage, Objective: intentText}, Source: proposalSourceDeterministicGuard}
+	}
+	// Agent worker guard: if the agent runner is not available (stub), don't
+	// mint work proposals — fall through to inline answer. Image asks are
+	// exempt because they use a different execution path (image generation).
+	if !scoutAgentWorkerAvailable() && !imageRequest {
+		if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
+			decision = conversationalReplyDecision(proposalSourceChatRouter)
+			recordConversationIntentOutcome(decision, map[string]any{"degraded": "agent_worker_unavailable"})
+			return decision
+		}
 	}
 	recordConversationIntentOutcome(decision, nil)
 	return decision
@@ -1153,10 +1234,9 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		return proposal
 	case "propose_workstream":
 		args := struct {
-			Mode         string `json:"mode"`
-			Objective    string `json:"objective"`
-			Query        string `json:"query"`        // backward-compatible provider fixture
-			ToolTemplate string `json:"tool_template"` // optional tool template for artifacts mode
+			Mode      string `json:"mode"`
+			Objective string `json:"objective"`
+			Query     string `json:"query"` // backward-compatible provider fixture
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_workstream input undecodable: %v", err)
@@ -1164,39 +1244,21 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			return nil
 		}
 		mode := strings.ToLower(strings.TrimSpace(args.Mode))
-		toolTemplate := strings.TrimSpace(args.ToolTemplate)
 		switch mode {
-		case "research", "design", "grill", "workflow", "artifacts":
+		case "research", "design", "grill", "workflow":
 		default:
 			log.Errorf("Scout router proposed unknown workstream mode %q", args.Mode)
 			return nil
 		}
-		// Validate tool template if provided
-		var toolName string
-		if toolTemplate != "" {
-			if tool, ok := toolByID(toolTemplate); ok {
-				toolTemplate = tool.ID
-				toolName = tool.Name
-			} else {
-				log.Errorf("Scout router proposed unknown tool_template %q", args.ToolTemplate)
-				toolTemplate = ""
-			}
-		}
 		objective := polishedWorkstreamObjective(firstNonBlank(strings.TrimSpace(args.Objective), firstNonBlank(strings.TrimSpace(args.Query), strings.TrimSpace(query))))
-		summary := "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once."
-		if toolName != "" {
-			summary = "Scout prepared a " + toolName + " outline. Review or edit it before this runs — no goal loop, no gates, direct in-thread output."
-		}
 		return &scoutRouterProposal{
 			Kind:        scoutRouterProposalKindWorkstream,
 			Mode:        mode,
-			ToolID:      toolTemplate, // carry tool template for artifacts workstream
-			ToolName:    toolName,
 			Objective:   objective,
 			Query:       strings.TrimSpace(query),
-			Lane:        scoutProposalLane(mode, toolTemplate, ""),
+			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
-			Summary:     summary,
+			Summary:     "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
 		}
 	case "propose_goal":
 		args := struct {

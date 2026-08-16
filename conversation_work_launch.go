@@ -166,17 +166,6 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 			Authority: work.Authority, Visibility: scoutChatVisibilityPrivate,
 			Launch: launchFunnelLineage{Source: source, ProposalID: work.ApprovedProposalID, Path: launchPath, Proposer: normalizeAccountEmail(user.Email)},
 		}
-		// Handle tool template for simple in-thread artifact creation (bypasses goal loop)
-		if work.Mode == "artifacts" && strings.TrimSpace(work.ToolID) != "" {
-			if tool, ok := toolByID(work.ToolID); ok {
-				spec.ToolTemplate = tool.ID
-				spec.OutputContract = tool.Contract
-				if strings.TrimSpace(spec.Authority) == "" {
-					spec.Authority = tool.Authority
-				}
-				label = tool.Name
-			}
-		}
 		if work.Mode == "research" && userMessage.Project != nil {
 			projectBinding, bindingErr := app.projectWorkBindingForLaunch(ctx, currentSourceThread, userMessage)
 			if bindingErr != nil {

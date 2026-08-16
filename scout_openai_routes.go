@@ -101,7 +101,7 @@ func scoutRouterJSONSchema() *openAIJSONSchema {
 				"outcome":        map[string]any{"type": "string", "enum": []string{string(conversationIntentConversationalReply), string(conversationIntentClarifyOnce), string(conversationIntentStartPrivateWork), string(conversationIntentApprovalRequired), string(conversationIntentUnavailable)}},
 				"route":          map[string]any{"type": "string", "enum": []string{"", "app_action", "tool_run", "workstream", "goal_run", "image"}},
 				"tool_id":        stringField(),
-				"mode":           map[string]any{"type": "string", "enum": []string{"", "research", "design", "grill", "workflow", "artifacts"}},
+				"mode":           map[string]any{"type": "string", "enum": []string{"", "research", "design", "grill", "workflow"}},
 				"objective":      stringField(),
 				"package_id":     stringField(),
 				"authority_hint": map[string]any{"type": "string", "enum": []string{"", toolAuthorityReadOnly, toolAuthorityWorkspaceWrite}},
@@ -157,7 +157,7 @@ func scoutRouterInstructions() string {
 		strings.Join(registry, "\n"),
 		"",
 		"Intent map:",
-		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'outline the pitch, keep in-thread') -> workstream mode=artifacts, tool_id=deck_outline. These bypass the goal loop and answer directly.",
+		"- simple in-thread presentation/outline asks ('make a 5-slide outline', 'quick outline in this thread', 'outline the pitch, keep in-thread') -> conversational_reply. Answer directly with the slide content in chat. No tool, no workstream.",
 		"- heavier pitch outline work with review/gates ('run the full deck outline process', 'deck outline with review') -> tool_run deck_outline.",
 		"- design identity / brand direction / visual system -> tool_run brand_design_brief.",
 		"- build a deck from an existing outline -> tool_run packaging_studio; clarify_once only when outline revision versus full deck is genuinely ambiguous.",
@@ -165,7 +165,7 @@ func scoutRouterInstructions() string {
 		"- compile only already-finished artifacts -> tool_run package_assembly.",
 		"- ground truth / market digging -> deep_research; sale comps/pricing -> comps_precedent; landscape/whitespace -> market_map; hostile-room prep -> grill_pressure_test; economics/projections -> economics_waterfall.",
 		"",
-		"Internal route grammar: app_action for one native operation; tool_run for one registry contract; workstream for a bounded research/design/grill/workflow/artifacts pass (mode=artifacts with tool_id for simple in-thread artifact creation); goal_run for a multi-step objective; image for one private concept render.",
+		"Internal route grammar: app_action for one native operation; tool_run for one registry contract; workstream for a bounded research/design/grill/workflow pass; goal_run for a multi-step objective; image for one private concept render.",
 		"For start_private_work and approval_required, write an execution-ready objective preserving the user's intent and constraints. For app_action, use only allowed named fields. For tool_run, use only registry-declared fields.",
 		"Never classify ordinary source analysis as durable work unless the user asks for a report, artifact, action, or other durable output.",
 		"Return the strict JSON object, not prose or a function call. Empty strings and empty arrays represent unused fields. Exactly one outcome and at most one internal route are allowed.",
@@ -337,15 +337,6 @@ func conversationWorkFromOpenAIScoutRoute(output openAIScoutRouterOutput, query 
 		// server contract. First-wave research/design/grill/workflow carriers are
 		// private and read-only; no provider output can widen that boundary.
 		work := conversationWorkDecision{Kind: conversationWorkWorkstream, Mode: mode, Objective: objective, Authority: toolAuthorityReadOnly}
-		// For artifacts mode, tool_id carries the tool_template for in-thread artifact creation
-		if mode == "artifacts" && strings.TrimSpace(output.ToolID) != "" {
-			if tool, ok := toolByID(output.ToolID); ok {
-				work.ToolID = tool.ID
-				if strings.TrimSpace(work.Authority) == "" {
-					work.Authority = tool.Authority
-				}
-			}
-		}
 		if err := work.validatePrivate(); err != nil {
 			return conversationWorkDecision{}, err
 		}

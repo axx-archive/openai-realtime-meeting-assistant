@@ -331,7 +331,7 @@ func (work conversationWorkDecision) validateRoute() error {
 		}
 	case conversationWorkWorkstream:
 		switch strings.ToLower(strings.TrimSpace(work.Mode)) {
-		case "research", "design", "grill", "workflow", "artifacts":
+		case "research", "design", "grill", "workflow":
 		default:
 			return fmt.Errorf("unknown private workstream mode %q", work.Mode)
 		}
