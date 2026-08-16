@@ -25761,8 +25761,8 @@
         .controls .btn--recording.is-recording,
         .controls .btn--recording.is-recording:hover:not([disabled]) {
           border-color: transparent;
-          background: var(--live-soft);
-          color: var(--live);
+          background: var(--danger-soft);
+          color: var(--danger);
         }
 
         .controls .btn--recording.is-paused,
@@ -61738,10 +61738,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        node.dataset.messageId = String(message?.id || '')
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
-	        const activeThread = selectedScoutChatThread()
-	        if (!desktopChatLayoutQuery.matches && activeThread?.riff && privateRiffReplyIsShareable(message, activeThread)) {
-	          node.querySelector('.scout-chat-msg__stack')?.appendChild(privateRiffShareTriggerNode(activeThread, message))
-	        }
 	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
 		        const projectTitle = String(message?.project?.title || '').trim()
 		        if (projectTitle) {
@@ -62113,7 +62109,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !chatThreadIsChannel(thread)
 	      }
 
-	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {}) {
+	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate, onShareAll, onShareReply } = {}) {
 	        const wrap = bfEl('span', 'desktop-chat-more')
 	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
 	        trigger.type = 'button'
@@ -62883,7 +62879,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      async function publishPrivateRiffConversation(thread, message, panel, scope) {
 	        if (!thread?.id || !['all', 'reply'].includes(scope) || (scope === 'reply' && !message?.id)) return
-	        const buttons = Array.from(panel.querySelectorAll('button'))
+	        const buttons = panel ? Array.from(panel.querySelectorAll('button')) : []
 	        buttons.forEach(button => { button.disabled = true })
 	        const episodeId = String(message?.riffEpisodeId || thread?.riff?.activeEpisodeId || '')
 	        const key = JSON.stringify({ threadId: thread.id, episodeId, scope, messageId: scope === 'reply' ? message.id : '' })
@@ -62894,7 +62890,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/riff-publish`, body)
 	          if (!result.ok) throw new Error(result.data?.error || 'Private Riff could not be shared')
 	          privateRiffPublishAttempts.delete(key)
-	          panel.dataset.publishedScope = scope
+	          if (panel) panel.dataset.publishedScope = scope
 	          const replayed = result.data?.replayed === true
 	          const label = scope === 'all' ? 'This Riff pass' : 'This reply'
 	          buttons.forEach((button, index) => {
