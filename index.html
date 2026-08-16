@@ -10342,6 +10342,38 @@
         letter-spacing: var(--track-text);
       }
 
+      /* Private Chat continuity row — one honest link to the last real company
+         work you can continue. Not a void, not a lecture, not a starter pack. */
+      .chat-continuity-row {
+        width: 100%;
+        max-width: 460px;
+        min-height: 64px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+        transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .chat-continuity-row:hover {
+        background: var(--surface-2);
+        border-color: var(--line-2);
+      }
+      .chat-continuity-row:hover .chat-continuity-row__title { color: var(--ember-text); }
+      .chat-continuity-row__copy { min-width: 0; display: grid; gap: 2px; }
+      .chat-continuity-row__eyebrow { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+      .chat-continuity-row__title,
+      .chat-continuity-row__detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chat-continuity-row__title { font: 600 14px var(--font-sans); letter-spacing: -0.01em; transition: color var(--dur-fast) var(--ease); }
+      .chat-continuity-row__detail { color: var(--text-2); font: var(--type-caption); }
+      .chat-continuity-row__arrow { color: var(--text-3); font-size: 18px; }
+
       /* Natural-language examples, never capability selectors. They teach the
          conversation contract while the server retains tool/output authority. */
       .scout-starters {
@@ -54872,14 +54904,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function scoutChatDefaultPlaceholder() {
-	        // composer copy, design verbatim (§7.2)
+	        // composer copy (design §7.2) — matches the thread context, not a generic LLM box
 	        const thread = selectedScoutChatThread()
 	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        if (privateRiffThread(thread)) return isPhone ? 'riff with Scout…' : `riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
-	        return chatThreadIsChannel(thread)
-	          ? (isPhone ? 'message…' : 'message the channel')
-	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'} anything`)
+	        if (chatThreadIsChannel(thread)) return isPhone ? 'message…' : 'message the channel'
+	        // Private thread: work-oriented, not generic LLM copy
+	        if (directAgent) return isPhone ? `message ${directAgent}…` : `message ${directAgent}`
+	        return isPhone ? 'start work…' : 'describe the work'
 	      }
 
 	      function scoutChatDirectAgentName(thread) {
@@ -58984,11 +59017,42 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function chatThreadDisplayPreview(thread) {
+	        // Private thread list rows show artifact name/status when one exists,
+	        // not the first-prompt leftover ("Outline a 5-slide…", "new thread").
+	        if (!chatThreadIsChannel(thread)) {
+	          const artifactPreview = chatThreadArtifactPreview(thread)
+	          if (artifactPreview) return artifactPreview
+	        }
 	        const preview = chatPreviewPlainText(thread?.preview)
 	        if (!chatThreadIsChannel(thread) && (!preview || preview === 'new chat thread')) {
 	          return 'scout names it after your first message'
 	        }
 	        return preview || (chatThreadIsChannel(thread) ? 'new team channel' : 'new chat thread')
+	      }
+
+	      function chatThreadArtifactPreview(thread) {
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        for (let index = messages.length - 1; index >= 0; index -= 1) {
+	          const message = messages[index]
+	          if (String(message?.kind || '') !== 'thread' || !message?.thread) continue
+	          const ref = message.thread
+	          const artifactId = String(ref.artifactId || '')
+	          const artifact = artifactId ? artifactEntries.find(entry => String(entry?.id || '') === artifactId) : null
+	          const title = String(artifact?.metadata?.title || ref.query || '').trim()
+	          if (!title) continue
+	          const status = String(artifact?.metadata?.status || artifactStatusValue(artifact) || ref.status || '').toLowerCase()
+	          const statusLabel = status === 'complete' || status === 'completed' || status === 'published'
+	            ? 'delivered'
+	            : status === 'error' || status === 'failed' || status === 'needs_attention' || status === 'rejected'
+	            ? 'blocked'
+	            : status === 'approval_required'
+	            ? 'needs approval'
+	            : status === 'running' || status === 'queued'
+	            ? 'in progress'
+	            : 'draft'
+	          return `${title} · ${statusLabel}`
+	        }
+	        return ''
 	      }
 
 	      // sidebar timestamps — design grammar: now · HH:MM · tue · jun 30
@@ -59590,6 +59654,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', 'private riff')
 	          const title = bfEl('h2', 'scout-chat-empty__title', 'Riff from this checkpoint')
 	          inner.append(eyebrow, title)
+	        } else {
+	          // Private thread: one continuity row of last real work (not void, not lecture)
+	          const continuityItem = homeSnapshot?.items?.find(item => item?.kind !== 'live-meeting')
+	          if (continuityItem) {
+	            const continuityRow = privateChatContinuityNode(continuityItem)
+	            inner.appendChild(continuityRow)
+	          }
 	        }
 	        if (inner.children.length) {
 	          empty.append(inner)
@@ -59599,6 +59670,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const checkpoint = scoutChatThread.querySelector('.private-riff-checkpoint--conversation')
 	          if (checkpoint && scoutChatThread.firstChild !== checkpoint) scoutChatThread.insertBefore(checkpoint, scoutChatThread.firstChild)
 	        }
+	      }
+
+	      function privateChatContinuityNode(item) {
+	        const row = document.createElement('button')
+	        row.type = 'button'
+	        row.className = 'chat-continuity-row pressable'
+	        const eyebrowText = stripMarkdownBold(item?.eyebrow || 'continue')
+	        const titleText = stripMarkdownBold(item?.title || '')
+	        const detailText = stripMarkdownBold(item?.detail || '')
+	        row.setAttribute('aria-label', `${eyebrowText}. ${titleText}. ${detailText}`)
+	        const copy = bfEl('span', 'chat-continuity-row__copy')
+	        const eyebrow = bfEl('span', 'chat-continuity-row__eyebrow', eyebrowText)
+	        const title = bfEl('span', 'chat-continuity-row__title', titleText)
+	        const detail = bfEl('span', 'chat-continuity-row__detail', detailText)
+	        copy.append(eyebrow, title, detail)
+	        const arrow = bfEl('span', 'chat-continuity-row__arrow', '›')
+	        arrow.setAttribute('aria-hidden', 'true')
+	        row.append(copy, arrow)
+	        row.addEventListener('click', () => openHomeDestination(item?.destination))
+	        return row
 	      }
 
 	      // Discovery starters are ordinary example prompts, never capability
@@ -62218,26 +62309,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const status = artifactWins
 	          ? (artifactStatus || artifactStatusValue(artifact) || 'running')
 	          : String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
-	        const rawPct = artifactWins
-	          ? artifact?.metadata?.progressPercent
-	          : (ref.progressPercent ?? artifact?.metadata?.progressPercent)
-	        const pctValue = rawPct != null ? Number(rawPct) : null
-	        const hasKnownProgress = pctValue != null && Number.isFinite(pctValue) && pctValue > 0
-	        const pct = hasKnownProgress ? Math.max(0, Math.min(100, pctValue)) : 0
 	        const isStalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
 	        const isComplete = ['complete', 'completed', 'published'].includes(status)
-	        const showProgressBar = hasKnownProgress && !isComplete
 	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
 	        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
 	        const phase = desktopWorkPhase(artifact, status, ref)
 	        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
+	        // One status: Draft is the thing, Blocked stays blocked, no fake percents
 	        const state = status === 'approval_required'
 	          ? 'Needs approval'
 	          : isComplete
 	            ? 'Delivered'
 	            : isStalled
-	              ? 'Needs attention'
-	              : 'In progress'
+	              ? 'Blocked'
+	              : artifactHasDraft
+	                ? 'Draft'
+	                : 'In progress'
 	        const step = progress || phase.label
 	        const workCardID = desktopWorkCardIdentity(ref, artifact)
 	        const expandedWorkDetails = scoutInlineWorkDetailsExpanded || (scoutInlineWorkDetailsExpanded = new Set())
@@ -62256,51 +62343,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', query))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
 	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
-	        if (showProgressBar) {
-	          const progressBar = bfEl('span', 'scout-chat-work-card__progress')
-	          progressBar.setAttribute('role', 'progressbar')
-	          progressBar.setAttribute('aria-label', `${state} ${Math.round(pct)} percent`)
-	          progressBar.setAttribute('aria-valuemin', '0')
-	          progressBar.setAttribute('aria-valuemax', '100')
-	          progressBar.setAttribute('aria-valuenow', String(Math.round(pct)))
-	          progressBar.style.setProperty('--work-progress', `${pct}%`)
-	          progressBar.appendChild(document.createElement('span'))
-	          copy.appendChild(progressBar)
-	        }
+	        // No progress bar with fake percents — one status is the product
 	        const open = bfEl('button', 'scout-chat-work-card__open', 'View activity')
 	        open.type = 'button'
-	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}${hasKnownProgress ? `, ${Math.round(pct)}% complete` : ''}`)
+	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}`)
 	        const details = bfEl('div', 'scout-chat-work-card__details')
 	        details.hidden = !expandedWorkDetails.has(workCardID)
 	        open.textContent = details.hidden ? 'View activity' : 'Hide activity'
 	        open.setAttribute('aria-expanded', String(!details.hidden))
 	        details.append(
 	          bfEl('strong', '', `${agent} · ${family}`),
-	          bfEl('span', '', hasKnownProgress ? `${phase.label} · ${Math.round(pct)}% complete` : phase.label)
+	          bfEl('span', '', phase.label)
 	        )
+	        // Simplified actions — draft is the thing, no CTA zoo
 	        if (artifact?.id) {
 	          const compactActions = bfEl('div', 'chat-context-actions scout-chat-work-card__actions')
-	          const view = bfEl('button', 'chat-context-action', isComplete ? 'Open' : 'Inspect draft')
+	          const primaryLabel = isComplete ? 'Open' : artifactHasDraft ? 'Open draft' : 'View'
+	          const view = bfEl('button', 'chat-context-action', primaryLabel)
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          compactActions.appendChild(view)
-	          if (isComplete) {
-	            const save = desktopSaveToDriveControl(artifact, 'chat-context-action')
-	            if (save) compactActions.appendChild(save)
+	          // Blocked keeps retry; others don't need a CTA zoo
+	          if (isStalled) {
+	            const retry = bfEl('button', 'chat-context-action', 'Retry')
+	            retry.type = 'button'
+	            retry.addEventListener('click', () => {
+	              armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })
+	              scoutChatInput?.focus()
+	            })
+	            compactActions.appendChild(retry)
 	          }
-	          const regenerate = bfEl('button', 'chat-context-action', isStalled ? 'Retry' : 'Regenerate')
-	          regenerate.type = 'button'
-	          regenerate.addEventListener('click', () => {
-	            armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })
-	            scoutChatInput?.focus()
-	          })
-	          compactActions.appendChild(regenerate)
-	          const correctProject = bfEl('button', 'chat-context-action', projectTitle ? 'Change project' : 'Set project')
-	          correctProject.type = 'button'
-	          correctProject.dataset.workProjectCorrection = 'true'
-	          correctProject.setAttribute('aria-label', `${projectTitle ? 'Change' : 'Set'} project for this Work`)
-	          correctProject.addEventListener('click', () => openWorkResultProjectCorrection(artifact, correctProject))
-	          compactActions.appendChild(correctProject)
 	          details.appendChild(compactActions)
 	        }
 	        open.addEventListener('click', () => {
