@@ -63403,12 +63403,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               const doc = parser.parseFromString(codeContent, 'image/svg+xml')
               const svgEl = doc.querySelector('svg')
               if (svgEl && !doc.querySelector('parsererror')) {
-                // Remove potentially dangerous elements/attributes
-                svgEl.querySelectorAll('script, foreignObject').forEach(el => el.remove())
-                svgEl.querySelectorAll('[onclick], [onload], [onerror]').forEach(el => {
-                  el.removeAttribute('onclick')
-                  el.removeAttribute('onload')
-                  el.removeAttribute('onerror')
+                // Remove dangerous elements
+                svgEl.querySelectorAll('script, foreignObject, use[href^="data:"], use[xlink\\:href^="data:"]').forEach(el => el.remove())
+                // Remove ALL on* event handler attributes from all elements
+                const allElements = svgEl.querySelectorAll('*')
+                allElements.forEach(el => {
+                  const attrs = Array.from(el.attributes)
+                  attrs.forEach(attr => {
+                    const name = attr.name.toLowerCase()
+                    // Remove all on* event handlers
+                    if (name.startsWith('on')) {
+                      el.removeAttribute(attr.name)
+                    }
+                    // Remove javascript: and data: from href/xlink:href attributes
+                    if (name === 'href' || name === 'xlink:href') {
+                      const value = (attr.value || '').trim().toLowerCase()
+                      if (value.startsWith('javascript:') || value.startsWith('data:')) {
+                        el.removeAttribute(attr.name)
+                      }
+                    }
+                  })
+                })
+                // Also sanitize the root svg element
+                const svgAttrs = Array.from(svgEl.attributes)
+                svgAttrs.forEach(attr => {
+                  if (attr.name.toLowerCase().startsWith('on')) {
+                    svgEl.removeAttribute(attr.name)
+                  }
                 })
                 svgContainer.appendChild(svgEl)
                 figure.appendChild(svgContainer)

@@ -721,6 +721,43 @@ var scoutRouterSimpleOutlinePhrases = []string{
 	"in thread outline",
 }
 
+// scoutChatDeckRequestDetected returns true when the message is asking for a
+// real presentation/deck (not just an outline). This is used to trigger HTML
+// deck generation when the agent worker is unavailable.
+func scoutChatDeckRequestDetected(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	// Must mention deck or presentation or slides
+	hasDeckWord := strings.Contains(lower, "deck") || strings.Contains(lower, "presentation") || strings.Contains(lower, "slides")
+	if !hasDeckWord {
+		return false
+	}
+	// Exclude outline-only asks
+	outlineOnly := []string{"outline only", "just the outline", "just an outline", "only the outline", "give me the outline", "slide outline"}
+	for _, phrase := range outlineOnly {
+		if strings.Contains(lower, phrase) {
+			return false
+		}
+	}
+	// Match deck/presentation creation phrases
+	deckPhrases := []string{
+		"make a deck", "create a deck", "build a deck", "make me a deck",
+		"make a presentation", "create a presentation", "build a presentation",
+		"make me a presentation", "create me a presentation", "build me a presentation",
+		"slide deck", "pitch deck", "5-slide", "5 slide", "five-slide", "five slide",
+		"10-slide", "10 slide", "ten-slide", "ten slide",
+		"make slides", "create slides", "build slides", "make me slides",
+	}
+	for _, phrase := range deckPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // scoutChatSimpleOutlineRequestDetected returns true when the message matches
 // the reviewed phrase list for simple in-thread outline/presentation asks.
 // These are forced to conversational_reply (Tier 0) BEFORE the deterministic

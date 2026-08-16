@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strings"
 	"time"
@@ -645,6 +646,11 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 			return scoutChatMessageRecord{Kind: scoutChatMessageKindChoices, Role: "scout", Text: choices.Question, Choices: choices}, nil
 		}
 	}
+	// When the worker is unavailable and the user is asking for a deck, generate
+	// an HTML deck directly instead of falling through to a markdown outline.
+	if !scoutAgentWorkerAvailable() && scoutChatDeckRequestDetected(query) {
+		return app.resolveInlineDeckReply(ctx, user, thread, userMessage, query, history)
+	}
 	query = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)))
 	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, query, history)
@@ -799,4 +805,269 @@ func (app *kanbanBoardApp) retryScoutOpeningReply(viewerEmail string, threadID s
 	app.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, message)
 	app.queueScoutOpeningReply(thread.ID)
 	return thread, message, nil
+}
+
+// resolveInlineDeckReply generates an HTML deck directly when the agent worker
+// is unavailable. This produces a real html_deck artifact instead of falling
+// back to a markdown outline via conversational_reply.
+func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *userAccount, thread scoutChatThreadRecord, userMessage scoutChatMessageRecord, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
+	// Generate HTML deck content via the LLM
+	deckPrompt := inlineDeckGenerationPrompt(query)
+	answerContext := withAssistantModelSuccessRequired(ctx)
+	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, history)
+	if err != nil {
+		return scoutChatMessageRecord{}, err
+	}
+	deckHTML := extractHTMLDeckContent(result.answer)
+	if deckHTML == "" {
+		// Fallback: wrap the answer in minimal HTML deck structure
+		deckHTML = wrapInHTMLDeck(query, result.answer)
+	}
+	// Create the html_deck artifact
+	title := extractDeckTitle(query)
+	artifact, appended, err := app.createOSArtifactWithMetadata(
+		"workflow",
+		title,
+		deckHTML,
+		scoutParticipantName,
+		map[string]string{
+			"type":             artifactTypeHTMLDeck,
+			"source":          "inline_deck",
+			"status":          "complete",
+			"threadStatus":    "complete",
+			"requestedBy":     normalizeAccountEmail(user.Email),
+			"createdBy":       normalizeAccountEmail(user.Email),
+			"visibility":      "private",
+			"originKind":      agentThreadOriginPrivateThread,
+			"originId":        thread.ID,
+			"sourceMessageId": userMessage.ID,
+		},
+	)
+	if err != nil || !appended {
+		return scoutChatMessageRecord{}, fmt.Errorf("could not create deck artifact: %v", err)
+	}
+	// Return a thread ref message pointing to the artifact
+	return scoutChatMessageRecord{
+		Kind:              "thread",
+		Role:              "scout",
+		AuthorName:        scoutParticipantName,
+		Text:              title + " — ready to present",
+		IntentOutcome:     string(conversationIntentStartPrivateWork),
+		CausedByMessageID: userMessage.ID,
+		Thread: &scoutChatThreadRef{
+			ID:         "inline-deck-" + artifact.ID[:min(16, len(artifact.ID))],
+			Mode:       "workflow",
+			Query:      title,
+			Status:     "complete",
+			ArtifactID: artifact.ID,
+		},
+	}, nil
+}
+
+// inlineDeckGenerationPrompt creates the prompt for generating an HTML deck.
+func inlineDeckGenerationPrompt(query string) string {
+	return fmt.Sprintf(`You are creating a presentation deck. Generate a complete HTML document that can be displayed as slides.
+
+User request: %s
+
+Requirements:
+1. Start with <!doctype html> and include proper HTML structure
+2. Include embedded CSS for slide styling (each slide should be a <section class="slide">)
+3. Use clean, professional styling with good typography
+4. Create 5-10 slides based on the request
+5. Each slide should have a clear title and concise content
+6. Use bullet points, not paragraphs for content
+7. Include a title slide and a closing slide
+
+Generate ONLY the HTML document, no explanation. The deck should be immediately presentable.`, query)
+}
+
+// extractHTMLDeckContent extracts HTML deck content from LLM response.
+func extractHTMLDeckContent(response string) string {
+	response = strings.TrimSpace(response)
+	// Check if response starts with valid HTML
+	lower := strings.ToLower(response)
+	if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
+		return response
+	}
+	// Try to extract HTML from markdown code blocks
+	if idx := strings.Index(response, "```html"); idx >= 0 {
+		start := idx + 7
+		if end := strings.Index(response[start:], "```"); end > 0 {
+			extracted := strings.TrimSpace(response[start : start+end])
+			lower := strings.ToLower(extracted)
+			if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
+				return extracted
+			}
+		}
+	}
+	if idx := strings.Index(response, "```"); idx >= 0 {
+		start := idx + 3
+		// Skip language identifier if present
+		if newline := strings.Index(response[start:], "\n"); newline >= 0 {
+			start += newline + 1
+		}
+		if end := strings.Index(response[start:], "```"); end > 0 {
+			extracted := strings.TrimSpace(response[start : start+end])
+			lower := strings.ToLower(extracted)
+			if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
+				return extracted
+			}
+		}
+	}
+	return ""
+}
+
+// wrapInHTMLDeck wraps content in a minimal HTML deck structure.
+func wrapInHTMLDeck(title string, content string) string {
+	// Parse content as slides - split by headings or numbered items
+	lines := strings.Split(content, "\n")
+	var slides []string
+	var currentSlide strings.Builder
+	var slideTitle string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Detect slide boundaries: headings or numbered items like "1." "2."
+		isHeading := strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "**")
+		isNumbered := len(trimmed) > 2 && trimmed[0] >= '1' && trimmed[0] <= '9' && trimmed[1] == '.'
+
+		if (isHeading || isNumbered) && currentSlide.Len() > 0 {
+			slides = append(slides, formatSlide(slideTitle, currentSlide.String()))
+			currentSlide.Reset()
+			slideTitle = cleanSlideTitle(trimmed)
+		} else if isHeading || isNumbered {
+			slideTitle = cleanSlideTitle(trimmed)
+		} else if trimmed != "" {
+			currentSlide.WriteString(trimmed + "\n")
+		}
+	}
+	if currentSlide.Len() > 0 || slideTitle != "" {
+		slides = append(slides, formatSlide(slideTitle, currentSlide.String()))
+	}
+
+	// If no slides were parsed, create a single slide with all content
+	if len(slides) == 0 {
+		slides = append(slides, formatSlide("Presentation", content))
+	}
+
+	// Build the HTML document
+	var html strings.Builder
+	html.WriteString(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>` + template.HTMLEscapeString(extractDeckTitle(title)) + `</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+.slide { min-height: 100vh; padding: 4rem; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+.slide h1 { font-size: 3rem; margin-bottom: 2rem; color: #fff; }
+.slide h2 { font-size: 2.5rem; margin-bottom: 1.5rem; color: #fff; }
+.slide ul { font-size: 1.5rem; line-height: 2; padding-left: 2rem; }
+.slide li { margin-bottom: 0.5rem; }
+.slide p { font-size: 1.5rem; line-height: 1.8; }
+.slide.title-slide { text-align: center; justify-content: center; }
+.slide.title-slide h1 { font-size: 4rem; }
+</style>
+</head>
+<body>
+`)
+	for i, slide := range slides {
+		if i == 0 {
+			html.WriteString(`<section class="slide title-slide">`)
+		} else {
+			html.WriteString(`<section class="slide">`)
+		}
+		html.WriteString(slide)
+		html.WriteString("</section>\n")
+	}
+	html.WriteString(`</body>
+</html>`)
+	return html.String()
+}
+
+func formatSlide(title, content string) string {
+	var slide strings.Builder
+	if title != "" {
+		slide.WriteString("<h2>" + template.HTMLEscapeString(title) + "</h2>\n")
+	}
+	content = strings.TrimSpace(content)
+	if content != "" {
+		// Convert bullet points to list
+		lines := strings.Split(content, "\n")
+		hasListItems := false
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") || strings.HasPrefix(trimmed, "•") {
+				hasListItems = true
+				break
+			}
+		}
+		if hasListItems {
+			slide.WriteString("<ul>\n")
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "" {
+					continue
+				}
+				trimmed = strings.TrimPrefix(trimmed, "-")
+				trimmed = strings.TrimPrefix(trimmed, "*")
+				trimmed = strings.TrimPrefix(trimmed, "•")
+				trimmed = strings.TrimSpace(trimmed)
+				slide.WriteString("<li>" + template.HTMLEscapeString(trimmed) + "</li>\n")
+			}
+			slide.WriteString("</ul>\n")
+		} else {
+			slide.WriteString("<p>" + template.HTMLEscapeString(content) + "</p>\n")
+		}
+	}
+	return slide.String()
+}
+
+func cleanSlideTitle(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "#")
+	line = strings.TrimPrefix(line, "#")
+	line = strings.TrimPrefix(line, "#")
+	line = strings.Trim(line, "*")
+	// Remove numbered prefix like "1. " "2. "
+	if len(line) > 2 && line[0] >= '1' && line[0] <= '9' && line[1] == '.' {
+		line = strings.TrimSpace(line[2:])
+	}
+	return strings.TrimSpace(line)
+}
+
+func extractDeckTitle(query string) string {
+	query = strings.TrimSpace(query)
+	// Try to extract a meaningful title from the query
+	lower := strings.ToLower(query)
+	// Remove common prefixes
+	for _, prefix := range []string{"make a ", "create a ", "build a ", "make me a ", "give me a ", "can you ", "please "} {
+		if strings.HasPrefix(lower, prefix) {
+			query = query[len(prefix):]
+			lower = strings.ToLower(query)
+		}
+	}
+	// Remove common suffixes
+	for _, suffix := range []string{" deck", " presentation", " slides", " for me", " please"} {
+		if strings.HasSuffix(lower, suffix) {
+			query = query[:len(query)-len(suffix)]
+			lower = strings.ToLower(query)
+		}
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "Presentation"
+	}
+	// Capitalize first letter
+	if len(query) > 0 {
+		query = strings.ToUpper(query[:1]) + query[1:]
+	}
+	// Truncate if too long
+	if len(query) > 60 {
+		query = query[:57] + "..."
+	}
+	return query
 }
