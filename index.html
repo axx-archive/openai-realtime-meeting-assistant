@@ -53292,12 +53292,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function updateScoutChatAvailability() {
 	        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
 	        const available = joined || Boolean(authedUser)
-	        if (homeScoutInput) homeScoutInput.disabled = !Boolean(authedUser)
-	        if (homeScoutSend) homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput?.value.trim()
-	        // Home voice button: enable when authenticated and voice surface is available
-	        const homeVoice = document.getElementById('homeRealtimeVoice')
-	        if (homeVoice) homeVoice.disabled = !Boolean(authedUser) || !privateRealtimeVoiceSurfaceAvailable()
-	        scoutChatInput.disabled = !available
+        if (homeScoutInput) homeScoutInput.disabled = !Boolean(authedUser)
+        if (homeScoutSend) homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput?.value.trim()
+        scoutChatInput.disabled = !available
 	        scoutChatSend.disabled = !available
 	        if (scoutChatAttach) {
 	          scoutChatAttach.disabled = !Boolean(authedUser)
@@ -59124,10 +59121,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const ref = message.thread
 	          const artifactId = String(ref.artifactId || '')
 	          const artifact = artifactId ? artifactEntries.find(entry => String(entry?.id || '') === artifactId) : null
-	          // Title must be artifact metadata title or family label — NEVER ref.query (the prompt)
-	          const metadataTitle = String(artifact?.metadata?.title || '').trim()
-	          const familyLabel = desktopWorkFamily(ref, artifact)
-	          const title = metadataTitle || familyLabel
+          // Title must be artifact metadata title or family label — NEVER ref.query (the prompt)
+          // Use family when metadata.title equals the query (prompt echo)
+          const query = String(ref?.query || artifact?.metadata?.threadQuery || '').trim()
+          const metadataTitle = String(artifact?.metadata?.title || '').trim()
+          const familyLabel = desktopWorkFamily(ref, artifact)
+          const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : familyLabel
 	          const status = String(artifact?.metadata?.status || artifactStatusValue(artifact) || ref.status || '').toLowerCase()
 	          const statusLabel = status === 'complete' || status === 'completed' || status === 'published'
 	            ? 'delivered'
@@ -61791,9 +61790,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
 	            : desktopSafeWorkNote(artifact?.metadata?.progressNote || ref.progressNote, `${agentName} is ${phase.label.toLowerCase()}.`)
-	        const sources = artifact ? researchArtifactSources(artifact) : []
-	        chatContextKicker.textContent = `${agentName} · ${family}`
-	        chatContextTitle.textContent = String(ref.query || artifact?.metadata?.threadQuery || message?.text || `${family} workstream`)
+        const sources = artifact ? researchArtifactSources(artifact) : []
+        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
+        const query = String(ref.query || artifact?.metadata?.threadQuery || '').trim()
+        const metadataTitle = String(artifact?.metadata?.title || '').trim()
+        const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : family
+        chatContextKicker.textContent = `${agentName} · ${family}`
+        chatContextTitle.textContent = title || `${family} workstream`
 	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
 	        const summary = document.createElement('section')
 	        summary.className = 'chat-context-event'
@@ -61949,7 +61952,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const family = desktopWorkFamily(message.thread, artifact)
 	        const pct = Number(artifact?.metadata?.progressPercent)
 	        const update = desktopSafeWorkNote(artifact?.metadata?.progressNote || message.thread.progressNote, phase.label)
-	        const title = compactArtifactPreview(String(artifact?.metadata?.title || message.thread.query || 'Completed work'))
+	        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
+        const metaTitleRaw = String(artifact?.metadata?.title || '').trim()
+        const queryRaw = String(message.thread.query || '').trim()
+        const title = compactArtifactPreview(metaTitleRaw && metaTitleRaw.toLowerCase() !== queryRaw.toLowerCase() ? metaTitleRaw : (family || 'Completed work'))
 	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
 	        chatWorkIndicatorText.textContent = complete
 	          ? `${agent} delivered ${family.toLowerCase()} · ${event}`
@@ -62364,50 +62370,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(ref?.id || ref?.artifactId || artifact?.id || '')
 	      }
 
-	      function scoutDesktopGoalWorkCardNode(message, artifact) {
-	        const ref = message?.thread || {}
-	        const query = String(ref.query || message?.text || 'Work in progress').trim()
-	        const family = desktopWorkFamily(ref, artifact)
-	        // Artifact wins when it has a blocked/terminal status or a saved draft
-	        const artifactStatus = String(artifact?.metadata?.threadStatus || artifact?.metadata?.status || '').toLowerCase()
-	        const artifactBlocked = ['error', 'failed', 'needs_attention', 'rejected'].includes(artifactStatus)
-	        const artifactHasDraft = Boolean(artifact?.text)
-	        const artifactWins = artifactBlocked || artifactHasDraft
-	        const status = artifactWins
-	          ? (artifactStatus || artifactStatusValue(artifact) || 'running')
-	          : String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
-	        const isStalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
-	        const isComplete = ['complete', 'completed', 'published'].includes(status)
-	        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
-	        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
-	        const phase = desktopWorkPhase(artifact, status, ref)
-	        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
-	        // One status: Draft is the thing, Blocked stays blocked, no fake percents
-	        const state = status === 'approval_required'
-	          ? 'Needs approval'
-	          : isComplete
-	            ? 'Delivered'
-	            : isStalled
-	              ? 'Blocked'
-	              : artifactHasDraft
-	                ? 'Draft'
-	                : 'In progress'
-	        const step = progress || phase.label
-	        const workCardID = desktopWorkCardIdentity(ref, artifact)
-	        const expandedWorkDetails = scoutInlineWorkDetailsExpanded || (scoutInlineWorkDetailsExpanded = new Set())
+      function scoutDesktopGoalWorkCardNode(message, artifact) {
+        const ref = message?.thread || {}
+        const query = String(ref.query || message?.text || 'Work in progress').trim()
+        const family = desktopWorkFamily(ref, artifact)
+        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
+        const metadataTitle = String(artifact?.metadata?.title || '').trim()
+        const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : family
+        // Artifact wins when it has a blocked/terminal status or a saved draft
+        const artifactStatus = String(artifact?.metadata?.threadStatus || artifact?.metadata?.status || '').toLowerCase()
+        const artifactBlocked = ['error', 'failed', 'needs_attention', 'rejected'].includes(artifactStatus)
+        const artifactHasDraft = Boolean(artifact?.text)
+        const artifactWins = artifactBlocked || artifactHasDraft
+        const status = artifactWins
+          ? (artifactStatus || artifactStatusValue(artifact) || 'running')
+          : String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
+        const isStalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
+        const isComplete = ['complete', 'completed', 'published'].includes(status)
+        const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
+        const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
+        const phase = desktopWorkPhase(artifact, status, ref)
+        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
+        // One status: Draft is the thing, Blocked stays blocked, no fake percents
+        const state = status === 'approval_required'
+          ? 'Needs approval'
+          : isComplete
+            ? 'Delivered'
+            : isStalled
+              ? 'Blocked'
+              : artifactHasDraft
+                ? 'Draft'
+                : 'In progress'
+        const step = progress || phase.label
+        const workCardID = desktopWorkCardIdentity(ref, artifact)
+        const expandedWorkDetails = scoutInlineWorkDetailsExpanded || (scoutInlineWorkDetailsExpanded = new Set())
 
-	        const card = document.createElement('article')
-	        card.className = 'scout-chat-work-card'
-	        card.dataset.state = status
-	        card.dataset.workArtifactId = workCardID
-	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${query}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
-	        const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
-	        mark.setAttribute('aria-hidden', 'true')
-	        const copy = bfEl('span', 'scout-chat-work-card__copy')
-	        const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
-	        eyebrow.setAttribute('aria-live', 'polite')
-	        eyebrow.setAttribute('aria-atomic', 'true')
-	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', query))
+        const card = document.createElement('article')
+        card.className = 'scout-chat-work-card'
+        card.dataset.state = status
+        card.dataset.workArtifactId = workCardID
+        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
+        const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
+        mark.setAttribute('aria-hidden', 'true')
+        const copy = bfEl('span', 'scout-chat-work-card__copy')
+        const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
+        eyebrow.setAttribute('aria-live', 'polite')
+        eyebrow.setAttribute('aria-atomic', 'true')
+        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
 	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
 	        // No progress bar with fake percents — one status is the product
