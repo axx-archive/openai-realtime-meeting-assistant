@@ -676,6 +676,14 @@
         stroke-linecap: round;
         stroke-linejoin: round;
       }
+      /* Destination marks — first-class icons for the primary nav */
+      .stride-dest-mark {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
       .stride-riff-mark {
         fill: none;
         stroke: currentColor;
@@ -951,11 +959,15 @@
         overflow: visible;
         transition: opacity var(--dur-med) var(--ease);
       }
-      .topbar__mark-icon {
-        width: 22px;
-        height: 22px;
-        background: var(--wordmark-image) no-repeat center / contain;
+      /* The stride signal mark (lens/aperture) — the symbol, not the wordmark */
+      .topbar__mark-signal {
+        width: 24px;
+        height: 24px;
+        color: var(--text-1);
         transition: transform var(--dur-med) var(--ease);
+      }
+      .topbar__mark-signal path {
+        fill: currentColor;
       }
       .topbar__wordmark {
         display: none;
@@ -1000,8 +1012,10 @@
         flex: 0 0 auto;
       }
 
+      /* Wordmark hidden from content chrome — brand identity is the mark on the
+         rail; workspace identity (Bonfire) lives in the header as before. */
       .topbar__brand-wordmark {
-        display: block;
+        display: none;
         width: 68px;
         height: 17px;
         color: var(--wordmark);
@@ -30310,23 +30324,23 @@
     <main id="appShell" data-tool="office" data-pd1-destination="Home">
       <aside id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden>
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
-          <span class="topbar__mark-icon" aria-hidden="true"></span>
+          <svg class="topbar__mark-signal" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c0-.4.1-.7.2-1 .6-1.2 2.4-2 4.8-2.4 1.8-.3 3.8-.4 5-.4s3.2.1 5 .4c2.4.4 4.2 1.2 4.8 2.4.1.3.2.6.2 1s-.1.7-.2 1c-.6 1.2-2.4 2-4.8 2.4-1.8.3-3.8.4-5 .4s-3.2-.1-5-.4c-2.4-.4-4.2-1.2-4.8-2.4-.1-.3-.2-.6-.2-1Z"/></svg>
         </span>
         <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0">
-            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v10a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9"/><path d="M10 20.5v-5a2 2 0 1 1 4 0v5"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4c-5.5 3-8 6.5-8 10a8 8 0 0 0 16 0c0-3.5-2.5-7-8-10Z"/><circle cx="12" cy="14" r="2.5"/></svg>
             <span>Home</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-label="Meet" aria-current="false" tabindex="-1">
-            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5.5" width="13" height="13" rx="3"/><circle cx="9" cy="12" r="3"/><path d="M15.5 9 21 6v12l-5.5-3"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="8" cy="12" rx="5" ry="6"/><ellipse cx="16" cy="12" rx="5" ry="6"/><circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/></svg>
             <span>Meet</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Chat" aria-label="Chat" aria-current="false" tabindex="-1">
-            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c5 0 9 3.6 9 8s-4 8-9 8c-1.4 0-2.8-.3-4-.8L3.5 20l1.8-4.2C4 14.2 3 12.2 3 11c0-4.4 4-8 9-8Z"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12c0-4.4 3.6-8 8-8s8 3.6 8 8-3.6 8-8 8c-1.2 0-2.4-.3-3.4-.7L4 20l1.2-3.6c-.8-1.3-1.2-2.8-1.2-4.4Z"/><path d="M9 12h.01M12 12h.01M15 12h.01"/></svg>
             <span>Chat</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Files" aria-label="Files" aria-current="false" tabindex="-1">
-            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5a2.5 2.5 0 0 1 2.5-2.5h4l2.5 3h7.5a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5h-14A2.5 2.5 0 0 1 3 18.5v-11Z"/></svg>
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8c0-1.1.9-2 2-2h3.5l2 2.5H18c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V8Z"/><path d="M4 11h16"/></svg>
             <span>Files</span>
           </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
