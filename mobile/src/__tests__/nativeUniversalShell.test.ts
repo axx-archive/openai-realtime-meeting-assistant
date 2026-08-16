@@ -21,7 +21,7 @@ const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...
 test('the universal IA is exact and ordered', () => {
   assert.deepEqual(nativeShellDestinations.map(({ id, label }) => ({ id, label })), [
     { id: 'home', label: 'Home' },
-    { id: 'meet', label: 'Meet' },
+    { id: 'video', label: 'Meet' },
     { id: 'chat', label: 'Chat' },
     { id: 'files', label: 'Files' },
     { id: 'work', label: 'Work' },
@@ -45,7 +45,7 @@ test('available width, including orientation and split view resizing, selects co
 
 test('selection feedback is deterministic and bounded', () => {
   assert.equal(nativeShellSelectionAnnouncement('home'), 'Home selected');
-  assert.equal(nativeShellSelectionAnnouncement('meet'), 'Meet selected');
+  assert.equal(nativeShellSelectionAnnouncement('video'), 'Meet selected');
   assert.equal(nativeShellSelectionAnnouncement('chat'), 'Chat selected');
   assert.equal(nativeShellSelectionAnnouncement('files'), 'Files selected');
   assert.equal(nativeShellSelectionAnnouncement('work-search'), 'Work Search selected');
@@ -129,8 +129,8 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(requestedRoute, 'Deck');
   assert.deepEqual(requestedParams, { segment: 'threads' });
 
-  const meetPressable = renderer!.root.findByProps({ accessibilityLabel: 'Meet' });
-  await act(async () => { meetPressable.props.onPress(); });
+  const videoPressable = renderer!.root.findByProps({ accessibilityLabel: 'Meet' });
+  await act(async () => { videoPressable.props.onPress(); });
   assert.equal(requestedRoute, 'Deck');
   assert.deepEqual(requestedParams, { segment: 'rooms' });
 
@@ -181,7 +181,7 @@ test('deep destinations preserve their owning top-level context', () => {
   assert.equal(nativeShellDestinationForRoute('Board'), 'work');
   assert.equal(nativeShellDestinationForRoute('Deck'), 'chat');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
-  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'meet');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');
   assert.equal(nativeShellDestinationForRoute('Meetings'), 'work');
   assert.equal(nativeShellDestinationForRoute('Files'), 'files');
