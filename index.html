@@ -59210,6 +59210,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         'financial model', 'mixed package', 'scheduled work'
       ])
 
+      // Check if a title looks like inappropriate content (markdown, last spoken line, etc.)
+      function isInappropriateTitle(title) {
+        if (!title) return true
+        // Contains markdown syntax
+        if (/\*\*|\*[^*]|`[^`]|~~|__|^\s*[-*+]\s/.test(title)) return true
+        // Looks like a sentence (ends with punctuation, very long without structure)
+        if (/[.!?]$/.test(title) && title.length > 50) return true
+        // Starts with lowercase (likely a sentence fragment)
+        if (/^[a-z]/.test(title) && title.length > 30) return true
+        // Contains raw code or URLs
+        if (/https?:\/\/|<[a-z]|&[a-z]+;/.test(title)) return true
+        return false
+      }
+
       function chatThreadDisplayTitle(thread) {
         if (!thread) {
           return 'new thread'
@@ -59226,35 +59240,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const artifactTitle = artifactInfo?.title || ''
         const isFamilyLabel = FAMILY_LABELS.has(artifactTitle.toLowerCase())
 
-        // 1. Real work name: metadata.title when ≠ query (not just a family label)
-        if (artifactTitle && !isFamilyLabel) {
+        // 1. Real work name: metadata.title when ≠ query (not family label, not inappropriate)
+        if (artifactTitle && !isFamilyLabel && !isInappropriateTitle(artifactTitle)) {
           return artifactTitle
         }
 
-        // 2. First markdown heading (# / ## / ###) in Scout messages
+        // 2. First markdown heading (# / ## / ###) in Scout messages — but skip if inappropriate
         const messages = Array.isArray(thread?.messages) ? thread.messages : []
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i]
           const role = String(msg?.role || '').toLowerCase()
           if (role === 'assistant' || role === 'scout') {
             const text = String(msg?.text || '')
-            const headingMatch = text.match(/^#{1,3}\s+(.{3,90})$/m)
+            const headingMatch = text.match(/^#{1,3}\s+([^\n]{3,90})/m)
             if (headingMatch) {
-              return headingMatch[1].trim()
+              const heading = headingMatch[1].trim()
+              if (!isInappropriateTitle(heading)) {
+                return heading
+              }
             }
           }
         }
 
         // 3. Em-dash title pattern in preview (e.g., "STRIDE Brain Privacy — 5-Slide Outline")
-        // Do NOT take first sentence of preview — that's the last spoken line, not a heading
-        const preview = String(thread?.preview || '').trim()
-        if (preview) {
+        // Check both stored preview AND computed preview
+        const storedPreview = String(thread?.preview || '').trim()
+        const computedPreview = chatThreadDisplayPreview(thread)
+        const previewsToCheck = [storedPreview, computedPreview].filter(Boolean)
+        
+        for (const preview of previewsToCheck) {
           // Match "Title — Subtitle" or "Title – Subtitle" or "Title - Subtitle" pattern
-          const emDashMatch = preview.match(/^([A-Z][^—–\-\n]{2,60})\s*[—–-]\s*\S/i)
+          const emDashMatch = preview.match(/^([^—–\-\n]{3,60})\s*[—–-]\s*\S/)
           if (emDashMatch) {
             const title = emDashMatch[1].trim()
             const lower = title.toLowerCase()
-            if (!FAMILY_LABELS.has(lower) && !PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim())) {
+            if (!FAMILY_LABELS.has(lower) && !PREVIEW_STATUS_CRUMBS.has(lower.replace(/[…·.]/g, '').trim()) && !isInappropriateTitle(title)) {
               return title
             }
           }
