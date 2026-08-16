@@ -59134,12 +59134,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const ref = message.thread
 	          const artifactId = String(ref.artifactId || '')
 	          const artifact = artifactId ? artifactEntries.find(entry => String(entry?.id || '') === artifactId) : null
-          // Title must be artifact metadata title or family label — NEVER ref.query (the prompt)
-          // Use family when metadata.title equals the query (prompt echo)
-          const query = String(ref?.query || artifact?.metadata?.threadQuery || '').trim()
-          const metadataTitle = String(artifact?.metadata?.title || '').trim()
           const familyLabel = desktopWorkFamily(ref, artifact)
-          const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : familyLabel
+          const title = desktopWorkTitle(ref, artifact, familyLabel)
 	          const status = String(artifact?.metadata?.status || artifactStatusValue(artifact) || ref.status || '').toLowerCase()
 	          const statusLabel = status === 'complete' || status === 'completed' || status === 'published'
 	            ? 'delivered'
@@ -61730,11 +61726,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return 'Work'
 	      }
 
-	      function desktopWorkFamilyGlyph(family) {
-	        return ({ Presentation: '▤', Research: '⌕', Design: '◈', 'Financial model': '▦', Document: '▧', Revision: '↻', 'Meeting recap': '✓', 'Data visualization': '⌁', 'Project plan': '☷', 'Mixed package': '◫', 'Scheduled work': '◷', Build: '⌘' })[String(family || '')] || '✦'
-	      }
+      function desktopWorkFamilyGlyph(family) {
+        return ({ Presentation: '▤', Research: '⌕', Design: '◈', 'Financial model': '▦', Document: '▧', Revision: '↻', 'Meeting recap': '✓', 'Data visualization': '⌁', 'Project plan': '☷', 'Mixed package': '◫', 'Scheduled work': '◷', Build: '⌘' })[String(family || '')] || '✦'
+      }
 
-	      function desktopSafeWorkNote(note, fallback) {
+      // Title logic for work cards, list titles, and in-thread headers:
+      // 1. metadata.title if it exists AND it is not equal to the query
+      // 2. else a real work name from the artifact body (first heading)
+      // 3. else family (Outline / Research / Work) as last resort
+      // 4. never ref.query / the raw prompt
+      function desktopWorkTitle(ref, artifact, family) {
+        const query = String(ref?.query || artifact?.metadata?.threadQuery || '').trim()
+        const metadataTitle = String(artifact?.metadata?.title || '').trim()
+        // 1. Use metadata.title if it exists and is not the query echo
+        if (metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase()) {
+          return metadataTitle
+        }
+        // 2. Extract first heading from artifact body as a real work name
+        const body = String(artifact?.text || '')
+        const headingMatch = body.match(/^#{1,3}\s+(.{3,90})$/m)
+        if (headingMatch) {
+          return headingMatch[1].trim()
+        }
+        // 3. Fall back to family
+        return family || 'Work'
+      }
+
+      function desktopSafeWorkNote(note, fallback) {
 	        const value = String(note || '').trim()
 	        if (!value) return fallback
 	        // Progress notes cross a model/runtime boundary. Only server-reviewed
@@ -61804,10 +61822,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
 	            : desktopSafeWorkNote(artifact?.metadata?.progressNote || ref.progressNote, `${agentName} is ${phase.label.toLowerCase()}.`)
         const sources = artifact ? researchArtifactSources(artifact) : []
-        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
-        const query = String(ref.query || artifact?.metadata?.threadQuery || '').trim()
-        const metadataTitle = String(artifact?.metadata?.title || '').trim()
-        const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : family
+        const title = desktopWorkTitle(ref, artifact, family)
         chatContextKicker.textContent = `${agentName} · ${family}`
         chatContextTitle.textContent = title || `${family} workstream`
 	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
@@ -61965,10 +61980,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const family = desktopWorkFamily(message.thread, artifact)
 	        const pct = Number(artifact?.metadata?.progressPercent)
 	        const update = desktopSafeWorkNote(artifact?.metadata?.progressNote || message.thread.progressNote, phase.label)
-	        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
-        const metaTitleRaw = String(artifact?.metadata?.title || '').trim()
-        const queryRaw = String(message.thread.query || '').trim()
-        const title = compactArtifactPreview(metaTitleRaw && metaTitleRaw.toLowerCase() !== queryRaw.toLowerCase() ? metaTitleRaw : (family || 'Completed work'))
+	        const title = compactArtifactPreview(desktopWorkTitle(message.thread, artifact, family))
 	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
 	        chatWorkIndicatorText.textContent = complete
 	          ? `${agent} delivered ${family.toLowerCase()} · ${event}`
@@ -62385,11 +62397,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function scoutDesktopGoalWorkCardNode(message, artifact) {
         const ref = message?.thread || {}
-        const query = String(ref.query || message?.text || 'Work in progress').trim()
         const family = desktopWorkFamily(ref, artifact)
-        // Title: use metadata.title unless it equals the query (prompt echo) — then use family
-        const metadataTitle = String(artifact?.metadata?.title || '').trim()
-        const title = metadataTitle && metadataTitle.toLowerCase() !== query.toLowerCase() ? metadataTitle : family
+        const title = desktopWorkTitle(ref, artifact, family)
         // Artifact wins when it has a blocked/terminal status or a saved draft
         const artifactStatus = String(artifact?.metadata?.threadStatus || artifact?.metadata?.status || '').toLowerCase()
         const artifactBlocked = ['error', 'failed', 'needs_attention', 'rejected'].includes(artifactStatus)
