@@ -3325,12 +3325,16 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}
 	}
 	// Work requested from a public/channel surface is never silently converted
-	// into a private launch. Workstreams (research, design, grill, workflow) start
-	// immediately when Scout has enough info. Other work kinds still hold at the
+	// into a private launch. Workstreams (research, design, grill, workflow) and
+	// images start immediately when Scout has enough info (router success). Other
+	// work kinds, or images from router failure fallback, still hold at the
 	// audience-expansion confirmation boundary.
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
 		work := *routedIntent.Work
-		if work.Kind != conversationWorkWorkstream {
+		// Workstreams always bypass approval. Images bypass only when the router
+		// successfully routed them (not on deterministic_guard fallback).
+		imageRouterSuccess := work.Kind == conversationWorkImage && routedIntent.Source == proposalSourceChatRouter
+		if work.Kind != conversationWorkWorkstream && !imageRouterSuccess {
 			routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
 				EffectClass: "expanded_audience",
 				Summary:     "This channel request needs approval before Scout starts the held work.",
@@ -7399,6 +7403,7 @@ type scoutChatContextAttachment struct {
 	Mime           string `json:"mime,omitempty"`
 	SourceID       string `json:"source_id,omitempty"`
 	SourceRevision string `json:"source_revision,omitempty"`
+	Prompt         string `json:"prompt,omitempty"` // for generated_image attachments
 }
 
 type scoutChatContextSource struct {
@@ -7459,6 +7464,19 @@ func scoutChatContextTurnFromMessage(thread scoutChatThreadRecord, message scout
 			Mime:           trimForStorage(strings.ToLower(file.Mime), 160),
 			SourceID:       trimForStorage(file.SourceID, 240),
 			SourceRevision: trimForStorage(file.SourceRevision, 240),
+		})
+	}
+	// Include generated images in the context so Scout knows what it has already made.
+	if message.Image != nil {
+		imageName := strings.TrimSpace(message.Image.Name)
+		if imageName == "" {
+			imageName = "concept-render.png"
+		}
+		turn.Attachments = append(turn.Attachments, scoutChatContextAttachment{
+			Name:   imageName,
+			Kind:   "generated_image",
+			Mime:   trimForStorage(strings.ToLower(message.Image.Mime), 160),
+			Prompt: trimForStorage(message.Image.Prompt, 500),
 		})
 	}
 	for _, source := range message.Sources {
@@ -7558,9 +7576,31 @@ func (app *kanbanBoardApp) scoutChatHistoryForViewer(viewerEmail string, thread 
 
 func scoutChatMessageModelText(message scoutChatMessageRecord) string {
 	text := strings.TrimSpace(message.Text)
-	parts := make([]string, 0, len(message.Files)+1)
+	parts := make([]string, 0, len(message.Files)+2)
 	if text != "" {
 		parts = append(parts, text)
+	}
+	// Include generated images so Scout knows what it has already made.
+	if message.Image != nil {
+		imageName := strings.TrimSpace(message.Image.Name)
+		if imageName == "" {
+			imageName = "concept-render.png"
+		}
+		imagePrompt := strings.TrimSpace(message.Image.Prompt)
+		if imagePrompt != "" {
+			parts = append(parts, fmt.Sprintf("[I generated an image: %s (prompt: %q)]", imageName, imagePrompt))
+		} else {
+			parts = append(parts, fmt.Sprintf("[I generated an image: %s]", imageName))
+		}
+	}
+	// Include pending image generation so Scout knows an image is in progress.
+	if message.ImageGeneration != nil && strings.TrimSpace(message.ImageGeneration.Status) == scoutChatImageGenerationStatusGenerating {
+		pendingPrompt := strings.TrimSpace(message.ImageGeneration.Prompt)
+		if pendingPrompt != "" {
+			parts = append(parts, fmt.Sprintf("[I am currently generating an image (prompt: %q)]", pendingPrompt))
+		} else {
+			parts = append(parts, "[I am currently generating an image]")
+		}
 	}
 	for _, file := range message.Files {
 		label := strings.TrimSpace(file.Name)
