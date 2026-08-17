@@ -684,10 +684,10 @@ func TestGrillContractRequiresReadinessLine(t *testing.T) {
 	}
 }
 
-// A free-standing grill is still tool-dependent and must stay unavailable
-// until the secure function-tool carrier is wired. It cannot smuggle a writer
-// lane by claiming to be an unverified goal deliverable.
-func TestRunAgentThreadKeepsToolDependentGrillUnavailable(t *testing.T) {
+// Grill is a first-class workstream mode that runs directly on the OpenAI text
+// runner (like research, design, and workflow). It no longer requires the
+// function-tool carrier.
+func TestRunAgentThreadGrillRunsDirectly(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
 
@@ -710,8 +710,8 @@ func TestRunAgentThreadKeepsToolDependentGrillUnavailable(t *testing.T) {
 	app.runAgentThread(thread)
 
 	stored, _ := app.osArtifactByID(thread.Artifact.ID)
-	if providerCalls != 0 || stored.Metadata["readinessScore"] != "" || agentThreadStatusValue(stored) != "error" {
-		t.Fatalf("tool-dependent grill widened admission: providerCalls=%d status=%q readiness=%q", providerCalls, agentThreadStatusValue(stored), stored.Metadata["readinessScore"])
+	if providerCalls != 1 || stored.Metadata["readinessScore"] != "6.5" || agentThreadStatusValue(stored) != "complete" {
+		t.Fatalf("grill did not run directly: providerCalls=%d status=%q readiness=%q", providerCalls, agentThreadStatusValue(stored), stored.Metadata["readinessScore"])
 	}
 }
 

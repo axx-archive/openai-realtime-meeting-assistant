@@ -91,9 +91,11 @@ func TestOpenAITextRunnerFailsClosedWithoutToolIndependence(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerOpenAIText)
 	app := newIsolatedKanbanBoardApp(t)
+	// Workstream modes (research, design, grill, workflow) are tool-independent
+	// and run directly via the openAI text runner without requiring special metadata.
 	ordinary := app.newAgentJob(scoutAgentThread{Mode: "design", Artifact: meetingMemoryEntry{Metadata: map[string]string{}}})
-	if runner := app.selectAgentRunner(ordinary, nil); runner.Name() != agentRunnerStub {
-		t.Fatalf("ordinary tool-dependent runner=%q, want explicit unavailable stub", runner.Name())
+	if runner := app.selectAgentRunner(ordinary, nil); runner.Name() != agentRunnerOpenAIText {
+		t.Fatalf("workstream design mode runner=%q, want openai_text for direct launch", runner.Name())
 	}
 	processWriter := app.newAgentJob(scoutAgentThread{Mode: "design", Artifact: meetingMemoryEntry{Metadata: map[string]string{
 		"goalParentId": "goal-1", "goalSubtaskId": "writer", "goalDeliverable": "true",

@@ -3325,15 +3325,22 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}
 	}
 	// Work requested from a public/channel surface is never silently converted
-	// into a private launch. Preserve channel mention policy and hold the exact
-	// server-minted work at an audience-expansion confirmation boundary.
+	// into a private launch. Workstreams (research, design, grill, workflow) and
+	// images start immediately when Scout has enough info (router success). Other
+	// work kinds, or images from router failure fallback, still hold at the
+	// audience-expansion confirmation boundary.
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
 		work := *routedIntent.Work
-		routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
-			EffectClass: "expanded_audience",
-			Summary:     "This channel request needs approval before Scout starts the held work.",
-			Work:        &work,
-		}, Source: routedIntent.Source}
+		// Workstreams always bypass approval. Images bypass only when the router
+		// successfully routed them (not on deterministic_guard fallback).
+		imageRouterSuccess := work.Kind == conversationWorkImage && routedIntent.Source == proposalSourceChatRouter
+		if work.Kind != conversationWorkWorkstream && !imageRouterSuccess {
+			routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
+				EffectClass: "expanded_audience",
+				Summary:     "This channel request needs approval before Scout starts the held work.",
+				Work:        &work,
+			}, Source: routedIntent.Source}
+		}
 	}
 	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
 	// Private Riff v1 is a source-bound analysis conversation. Starting work or
@@ -3541,11 +3548,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
-	// Public-channel workstream keywords are deterministic routing signals, not
-	// launch authority. They persist the same proposal card the private router
-	// uses; the card's accept route remains the one workstream launch door.
-	// Private threads NEVER keyword-route: their model router below owns the
-	// propose-confirm turn.
+	// Public-channel workstream keywords are deterministic routing signals. When
+	// Scout has enough to run the work (mode detected, objective clear), start the
+	// workstream immediately without requiring an approval tap. Private threads
+	// NEVER keyword-route: their model router below owns the propose-confirm turn.
+	//
+	// Agent-targeted work (@Colton, @hired-agent) still uses proposal cards for
+	// eligibility checks and explicit confirmation. Only @Scout workstreams bypass
+	// the approval card.
 	mode := ""
 	if targetedAgentWork {
 		mode = targetedAgentMode
@@ -3556,15 +3566,15 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		mode = scoutChatThreadModeForChannelText(text)
 	}
 	// An explicit source-backed review is real work even when the user speaks
-	// naturally instead of typing "research:". It still creates only a proposal;
-	// the persisted confirm remains the single launch door.
+	// naturally instead of typing "research:". Start it directly (unless agent-targeted).
 	if mode == "" && sourceNeed.Required && sourceNeed.Work && len(sourceNeed.ContextRefs) > 0 {
 		mode = "research"
 	}
-	if mode != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+	// Agent-targeted work preserves the proposal card flow for eligibility checks.
+	if targetedAgentWork && mode != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		requestText := strings.TrimSpace(text)
 		objective := polishedWorkstreamObjective(requestText)
-		if targetedAgentWork && replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
+		if replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
 			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
 		}
 		proposal := &scoutRouterProposal{
@@ -3579,10 +3589,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			ContextRefs:   encodeAssistantContextRefs(sourceNeed.ContextRefs),
 			Lane:          scoutProposalLane(mode, "", ""),
 			WeightLabel:   scoutProposalWeightQuickPass,
-			Summary:       "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
-		}
-		if targetedAgentWork {
-			proposal.Summary = "Scout prepared a bounded prompt for " + targetedAgent.DisplayName + ". Review or edit it before this runs once."
+			Summary:       "Scout prepared a bounded prompt for " + targetedAgent.DisplayName + ". Review or edit it before this runs once.",
 		}
 		proposalMessage := scoutChatMessageRecord{
 			ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -3592,6 +3599,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			Text:          proposal.Summary,
 			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 			Proposal:      proposal,
+			ReplyTo:       replyTo,
 		}
 		saved, err := commitUserMessage(userMessage, proposalMessage)
 		if err != nil {
@@ -3609,6 +3617,33 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["approvalRequired"] = true
 		response["providerCalls"] = 0
 		response["intentOutcome"] = string(conversationIntentApprovalRequired)
+		return response, nil
+	}
+	// @Scout workstreams (no specific agent targeted) start directly.
+	if !targetedAgentWork && mode != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		requestText := strings.TrimSpace(text)
+		objective := polishedWorkstreamObjective(requestText)
+		if replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
+			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
+		}
+		result, launchErr := app.startDirectPublicScoutWorkstream(
+			ctx, user, thread, userMessage, mode, objective,
+			encodeAssistantContextRefs(sourceNeed.ContextRefs),
+			"", "", replyTo, commitUserMessage,
+		)
+		if launchErr != nil {
+			return nil, launchErr
+		}
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict": routerVerdictDeterministicGuard,
+		})
+		response["answer"] = result["answer"]
+		response["thread"] = result["thread"]
+		response["agentThread"] = result["agentThread"]
+		response["artifact"] = result["artifact"]
+		response["actions"] = result["actions"]
+		response["providerCalls"] = 0
+		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
 		return response, nil
 	}
 
@@ -3651,6 +3686,50 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// returns modelQuery byte-for-byte unchanged.
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		modelQuery = app.prepareSTRIDECoworkerModelQuery(user, thread, userMessage, modelQuery)
+	}
+
+	// Public channel workstreams start immediately when the router returns
+	// start_private_work with a workstream kind, unless agent-targeted (which
+	// preserves the proposal flow for eligibility checks).
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
+		routedIntent.Outcome == conversationIntentStartPrivateWork &&
+		routedIntent.Work != nil && routedIntent.Work.Kind == conversationWorkWorkstream &&
+		!addressedAgentResolved {
+		work := *routedIntent.Work
+		objective := strings.TrimSpace(work.Objective)
+		if replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(objective, strings.TrimSpace(replyTo.Text)) {
+			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
+		}
+		result, launchErr := app.startDirectPublicScoutWorkstream(
+			ctx, user, thread, userMessage, work.Mode, objective,
+			encodeAssistantContextRefs(sourceNeed.ContextRefs),
+			"", "", replyTo, commitUserMessage,
+		)
+		if launchErr != nil {
+			unavailable := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+				Text:      "I couldn't start that work safely: " + launchErr.Error() + ". Nothing else was launched.",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailable)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailable
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			response["unavailable"] = map[string]any{"code": "launch_unavailable", "message": unavailable.Text}
+			return response, nil
+		}
+		response["answer"] = result["answer"]
+		response["thread"] = result["thread"]
+		response["agentThread"] = result["agentThread"]
+		response["artifact"] = result["artifact"]
+		response["actions"] = result["actions"]
+		response["providerCalls"] = providerCallCounter.Calls
+		response["intentOutcome"] = string(conversationIntentStartPrivateWork)
+		return response, nil
 	}
 
 	// The shared router has already returned exactly one outcome. Safe private
@@ -7324,6 +7403,7 @@ type scoutChatContextAttachment struct {
 	Mime           string `json:"mime,omitempty"`
 	SourceID       string `json:"source_id,omitempty"`
 	SourceRevision string `json:"source_revision,omitempty"`
+	Prompt         string `json:"prompt,omitempty"` // for generated_image attachments
 }
 
 type scoutChatContextSource struct {
@@ -7384,6 +7464,19 @@ func scoutChatContextTurnFromMessage(thread scoutChatThreadRecord, message scout
 			Mime:           trimForStorage(strings.ToLower(file.Mime), 160),
 			SourceID:       trimForStorage(file.SourceID, 240),
 			SourceRevision: trimForStorage(file.SourceRevision, 240),
+		})
+	}
+	// Include generated images in the context so Scout knows what it has already made.
+	if message.Image != nil {
+		imageName := strings.TrimSpace(message.Image.Name)
+		if imageName == "" {
+			imageName = "concept-render.png"
+		}
+		turn.Attachments = append(turn.Attachments, scoutChatContextAttachment{
+			Name:   imageName,
+			Kind:   "generated_image",
+			Mime:   trimForStorage(strings.ToLower(message.Image.Mime), 160),
+			Prompt: trimForStorage(message.Image.Prompt, 500),
 		})
 	}
 	for _, source := range message.Sources {
@@ -7483,9 +7576,31 @@ func (app *kanbanBoardApp) scoutChatHistoryForViewer(viewerEmail string, thread 
 
 func scoutChatMessageModelText(message scoutChatMessageRecord) string {
 	text := strings.TrimSpace(message.Text)
-	parts := make([]string, 0, len(message.Files)+1)
+	parts := make([]string, 0, len(message.Files)+2)
 	if text != "" {
 		parts = append(parts, text)
+	}
+	// Include generated images so Scout knows what it has already made.
+	if message.Image != nil {
+		imageName := strings.TrimSpace(message.Image.Name)
+		if imageName == "" {
+			imageName = "concept-render.png"
+		}
+		imagePrompt := strings.TrimSpace(message.Image.Prompt)
+		if imagePrompt != "" {
+			parts = append(parts, fmt.Sprintf("[I generated an image: %s (prompt: %q)]", imageName, imagePrompt))
+		} else {
+			parts = append(parts, fmt.Sprintf("[I generated an image: %s]", imageName))
+		}
+	}
+	// Include pending image generation so Scout knows an image is in progress.
+	if message.ImageGeneration != nil && strings.TrimSpace(message.ImageGeneration.Status) == scoutChatImageGenerationStatusGenerating {
+		pendingPrompt := strings.TrimSpace(message.ImageGeneration.Prompt)
+		if pendingPrompt != "" {
+			parts = append(parts, fmt.Sprintf("[I am currently generating an image (prompt: %q)]", pendingPrompt))
+		} else {
+			parts = append(parts, "[I am currently generating an image]")
+		}
 	}
 	for _, file := range message.Files {
 		label := strings.TrimSpace(file.Name)
