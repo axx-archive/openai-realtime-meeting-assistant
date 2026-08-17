@@ -807,10 +807,11 @@ func scoutChatDeckConfirmationDetected(text string, history []scoutChatTurn) boo
 }
 
 // scoutChatLooksLikeDirectionPass detects if text appears to be asking about
-// design/aesthetic direction. Used to recognize when Scout has issued a direction
-// pass so that a subsequent confirmation can trigger deck generation.
+// design/aesthetic direction OR topic clarification for a deck. Used to recognize
+// when Scout has issued a direction pass so that a subsequent confirmation can
+// trigger deck generation.
 func scoutChatLooksLikeDirectionPass(text string) bool {
-	// Direct keywords
+	// Direct keywords for aesthetic direction
 	directKeywords := []string{
 		"direction", "aesthetic", "visual", "style", "look and feel",
 		"design", "theme", "color", "vibe", "mood", "tone",
@@ -820,6 +821,32 @@ func scoutChatLooksLikeDirectionPass(text string) bool {
 			return true
 		}
 	}
+
+	// Topic clarification questions for decks — the choices card asks "What should
+	// the 5-slide deck be about?" which is a form of direction pass. A "yes" after
+	// this must generate a default deck, never "I still need the subject".
+	if strings.Contains(text, "?") {
+		deckWords := []string{"deck", "presentation", "slides", "slide"}
+		topicWords := []string{"about", "topic", "subject", "cover", "focus"}
+		hasDeckWord := false
+		hasTopicWord := false
+		for _, dw := range deckWords {
+			if strings.Contains(text, dw) {
+				hasDeckWord = true
+				break
+			}
+		}
+		for _, tw := range topicWords {
+			if strings.Contains(text, tw) {
+				hasTopicWord = true
+				break
+			}
+		}
+		if hasDeckWord && hasTopicWord {
+			return true
+		}
+	}
+
 	// Question patterns about design choices
 	designChoicePatterns := []string{
 		"corporate", "startup", "professional", "playful", "modern", "classic",
