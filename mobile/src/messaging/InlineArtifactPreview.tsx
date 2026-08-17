@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
 import { api } from '../api/client';
@@ -41,8 +41,10 @@ const kindIcon: Record<InlineArtifactKind, string> = {
 /**
  * Inline 16:9 glass artifact preview — Scout finishes in-thread.
  *
- * For html_deck: renders the REAL deck HTML in a WebView (first slide view).
- * For other kinds: displays text preview via ScoutRichText.
+ * For html_deck: the 16:9 IS the first slide. WebView fills the glass.
+ * Artifact HTML is THE document (not nested). No ScoutRichText fallback.
+ *
+ * For other kinds: displays text preview via ScoutRichText with badge/title.
  * Does NOT dump to LongMessageSheet. Includes Edit/Present actions.
  */
 export function InlineArtifactPreview({
@@ -57,13 +59,16 @@ export function InlineArtifactPreview({
   onPresent,
   onExpand,
 }: Props) {
+  const { width: screenWidth } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const [deckHtml, setDeckHtml] = useState<string | null>(null);
   const [deckLoading, setDeckLoading] = useState(false);
   const [deckError, setDeckError] = useState(false);
   const isPresentable = kind === 'html_deck';
-  const previewLines = text.split('\n').slice(0, expanded ? undefined : 12);
-  const hasMore = text.split('\n').length > 12;
+
+  // Explicit 16:9 dimensions - not flex leftover
+  const containerWidth = Math.min(screenWidth - 48, 440);
+  const containerHeight = containerWidth * (9 / 16);
 
   // Fetch actual deck HTML for real in-thread deck view
   useEffect(() => {
@@ -79,7 +84,7 @@ export function InlineArtifactPreview({
         if (!active) return;
         const artifact = response.artifacts?.[0];
         const html = String(artifact?.text ?? '').trim();
-        if (html && (html.includes('<') || html.includes('slide'))) {
+        if (html && html.includes('<')) {
           setDeckHtml(html);
         } else {
           setDeckError(true);
@@ -94,21 +99,109 @@ export function InlineArtifactPreview({
     return () => { active = false; };
   }, [kind, artifactId, sessionToken, loading]);
 
-  if (loading || (isPresentable && deckLoading && artifactId)) {
-    return (
-      <Glass radius={radius.lg} style={styles.container}>
-        <View style={styles.loadingBody}>
-          <ActivityIndicator color={colors.emberText} size="small" />
-          <Text style={styles.loadingText}>
-            {loading ? `Creating ${kindLabel[kind].toLowerCase()}…` : 'Loading deck…'}
-          </Text>
+  // html_deck: the 16:9 IS the slide
+  if (isPresentable) {
+    // Loading state during creation
+    if (loading) {
+      return (
+        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+          <Glass radius={radius.lg} style={styles.deckGlass}>
+            <View style={styles.deckLoadingCenter}>
+              <ActivityIndicator color={colors.emberText} size="large" />
+              <Text style={styles.deckLoadingText}>Creating presentation…</Text>
+            </View>
+          </Glass>
         </View>
-      </Glass>
+      );
+    }
+
+    // Loading deck HTML
+    if (deckLoading && artifactId) {
+      return (
+        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+          <Glass radius={radius.lg} style={styles.deckGlass}>
+            <View style={styles.deckLoadingCenter}>
+              <ActivityIndicator color={colors.emberText} size="large" />
+              <Text style={styles.deckLoadingText}>Loading deck…</Text>
+            </View>
+          </Glass>
+        </View>
+      );
+    }
+
+    // Error or missing content - no ScoutRichText fallback
+    if (deckError || !deckHtml) {
+      return (
+        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+          <Glass radius={radius.lg} style={styles.deckGlass}>
+            <View style={styles.deckLoadingCenter}>
+              <SymbolView name="exclamationmark.triangle" size={32} tintColor={colors.text3} />
+              <Text style={styles.deckErrorText}>Could not load deck</Text>
+              {onPresent ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open in browser"
+                  onPress={onPresent}
+                  style={({ pressed }) => [styles.deckRetryButton, pressed && styles.deckRetryPressed]}
+                >
+                  <Text style={styles.deckRetryText}>Open in browser</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </Glass>
+        </View>
+      );
+    }
+
+    // Real deck: WebView fills the glass, artifact HTML is THE document
+    return (
+      <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+        <View style={styles.deckWebViewWrapper}>
+          <WebView
+            source={{ html: deckHtml }}
+            style={styles.deckWebViewFill}
+            scrollEnabled={false}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            domStorageEnabled
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            injectedJavaScript={DECK_FIRST_SLIDE_JS}
+            onMessage={() => {}}
+          />
+        </View>
+        {/* Floating actions over the slide */}
+        <View style={styles.deckOverlayActions}>
+          {onEdit ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit presentation"
+              onPress={onEdit}
+              style={({ pressed }) => [styles.deckActionButton, pressed && styles.deckActionPressed]}
+            >
+              <SymbolView name="pencil" size={14} tintColor={colors.onAccent} />
+              <Text style={styles.deckActionText}>Edit</Text>
+            </Pressable>
+          ) : null}
+          {onPresent ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Present"
+              onPress={onPresent}
+              style={({ pressed }) => [styles.deckActionButton, styles.deckActionPrimary, pressed && styles.deckActionPressed]}
+            >
+              <SymbolView name="play.fill" size={14} tintColor={colors.onAccent} />
+              <Text style={styles.deckActionText}>Present</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
     );
   }
 
-  // For html_deck with actual HTML content, render in WebView
-  const showDeckWebView = isPresentable && deckHtml && !deckError;
+  // Non-deck kinds: badge + title + text preview
+  const previewLines = text.split('\n').slice(0, expanded ? undefined : 12);
+  const hasMore = text.split('\n').length > 12;
 
   return (
     <Glass radius={radius.lg} style={styles.container}>
@@ -120,74 +213,32 @@ export function InlineArtifactPreview({
           </View>
           <Text style={styles.byline}>{agentName} · delivered</Text>
         </View>
-        {isPresentable ? (
-          <View style={styles.actions}>
-            {onEdit ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Edit presentation"
-                onPress={onEdit}
-                style={({ pressed }) => [styles.actionButton, pressed && styles.actionPressed]}
-              >
-                <SymbolView name="pencil" size={14} tintColor={colors.emberText} />
-                <Text style={styles.actionText}>Edit</Text>
-              </Pressable>
-            ) : null}
-            {onPresent ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Present"
-                onPress={onPresent}
-                style={({ pressed }) => [styles.actionButton, styles.actionPrimary, pressed && styles.actionPressed]}
-              >
-                <SymbolView name="play.fill" size={14} tintColor={colors.onAccent} />
-                <Text style={styles.actionPrimaryText}>Present</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
       </View>
 
-      {!showDeckWebView ? (
-        <Text
-          accessibilityRole="header"
-          style={styles.title}
-          numberOfLines={2}
-        >
-          {title}
-        </Text>
-      ) : null}
+      <Text
+        accessibilityRole="header"
+        style={styles.title}
+        numberOfLines={2}
+      >
+        {title}
+      </Text>
 
       <View style={styles.previewContainer}>
-        {showDeckWebView ? (
-          <WebView
-            source={{ html: wrapDeckHtml(deckHtml) }}
-            style={styles.deckWebView}
-            scrollEnabled={false}
-            scalesPageToFit
-            originWhitelist={['*']}
-            javaScriptEnabled
-            domStorageEnabled
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-          />
-        ) : (
-          <ScrollView
-            style={styles.preview}
-            contentContainerStyle={styles.previewContent}
-            scrollEnabled={expanded}
-            showsVerticalScrollIndicator={false}
-          >
-            <ScoutRichText text={previewLines.join('\n')} maxCharacters={expanded ? undefined : 800} />
-          </ScrollView>
-        )}
+        <ScrollView
+          style={styles.preview}
+          contentContainerStyle={styles.previewContent}
+          scrollEnabled={expanded}
+          showsVerticalScrollIndicator={false}
+        >
+          <ScoutRichText text={previewLines.join('\n')} maxCharacters={expanded ? undefined : 800} />
+        </ScrollView>
 
-        {!showDeckWebView && hasMore && !expanded ? (
+        {hasMore && !expanded ? (
           <View style={styles.fadeOverlay} pointerEvents="none" />
         ) : null}
       </View>
 
-      {!showDeckWebView && hasMore ? (
+      {hasMore ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={expanded ? 'Show less' : 'Show more'}
@@ -219,54 +270,102 @@ export function InlineArtifactPreview({
 }
 
 /**
- * Wrap deck HTML for inline WebView display.
- * Shows first slide scaled to fit the 16:9 container.
+ * JS injected into WebView to show only the first slide.
+ * Runs after document load to hide subsequent slides.
  */
-function wrapDeckHtml(html: string): string {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: transparent;
-      font-family: -apple-system, system-ui, sans-serif;
-    }
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .deck-container {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    .slide {
-      transform-origin: center center;
-      max-width: 100%;
-      max-height: 100%;
-    }
-    /* Hide all slides except the first */
-    .slide:not(:first-child), section:not(:first-child) { display: none; }
-  </style>
-</head>
-<body>
-  <div class="deck-container">
-    ${html}
-  </div>
-</body>
-</html>`;
-}
+const DECK_FIRST_SLIDE_JS = `
+(function() {
+  var slides = document.querySelectorAll('.slide, section, [class*="slide"]');
+  for (var i = 1; i < slides.length; i++) {
+    slides[i].style.display = 'none';
+  }
+  document.body.style.overflow = 'hidden';
+  true;
+})();
+`;
 
 const styles = StyleSheet.create({
+  // Deck-specific styles (16:9 IS the slide)
+  deckContainer: {
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.surface1,
+  },
+  deckGlass: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  deckWebViewWrapper: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  deckWebViewFill: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
+  },
+  deckLoadingCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[3],
+  },
+  deckLoadingText: {
+    ...type.body,
+    color: colors.emberText,
+  },
+  deckErrorText: {
+    ...type.body,
+    color: colors.text3,
+  },
+  deckRetryButton: {
+    marginTop: space[2],
+    paddingHorizontal: space[4],
+    paddingVertical: space[2],
+    borderRadius: radius.full,
+    backgroundColor: colors.surface3,
+  },
+  deckRetryPressed: {
+    opacity: 0.7,
+  },
+  deckRetryText: {
+    ...type.captionMedium,
+    color: colors.text1,
+  },
+  deckOverlayActions: {
+    position: 'absolute',
+    bottom: space[3],
+    right: space[3],
+    flexDirection: 'row',
+    gap: space[2],
+  },
+  deckActionButton: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  deckActionPrimary: {
+    backgroundColor: colors.accent,
+  },
+  deckActionPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
+  },
+  deckActionText: {
+    ...type.captionMedium,
+    color: colors.onAccent,
+  },
+
+  // Non-deck styles (badge + title + text)
   container: {
     width: '100%',
     maxWidth: 440,
@@ -274,16 +373,6 @@ const styles = StyleSheet.create({
     minHeight: 200,
     padding: space[4],
     gap: space[3],
-  },
-  loadingBody: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[2],
-  },
-  loadingText: {
-    ...type.captionMedium,
-    color: colors.emberText,
   },
   header: {
     flexDirection: 'row',
@@ -317,33 +406,9 @@ const styles = StyleSheet.create({
     color: colors.text3,
     flex: 1,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: space[2],
-  },
-  actionButton: {
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: space[3],
-    borderRadius: radius.full,
-    backgroundColor: colors.surface3,
-  },
-  actionPrimary: {
-    backgroundColor: colors.accent,
-  },
   actionPressed: {
     opacity: 0.76,
     transform: [{ scale: 0.98 }],
-  },
-  actionText: {
-    ...type.captionMedium,
-    color: colors.emberText,
-  },
-  actionPrimaryText: {
-    ...type.captionMedium,
-    color: colors.onAccent,
   },
   title: {
     ...type.title2,
@@ -358,11 +423,6 @@ const styles = StyleSheet.create({
   },
   preview: {
     flex: 1,
-  },
-  deckWebView: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    borderRadius: radius.md,
   },
   previewContent: {
     paddingRight: space[2],
