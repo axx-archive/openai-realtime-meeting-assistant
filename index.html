@@ -12143,6 +12143,7 @@
         border: none;
         background: #000;
         z-index: 0;
+        overflow: hidden;
       }
       .chat-deck__frame:fullscreen {
         width: 100vw;
@@ -42099,10 +42100,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // Pure JS approach - sets inline styles with !important which override CSS
         // Runs on DOMContentLoaded + multiple delays to win any race with LLM deck scripts
         // NOTE: Escape script end tag to avoid breaking the HTML parser
-        const scalingInject = '<script>' +
+        const scalingInject = '<style>html,body{overflow:hidden!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important}</style>' +
+          '<script>' +
           '(function(){' +
+          'var inited=false;' +
           'function fix(){' +
-          'var s=document.getElementById("stage");if(!s)return;' +
+          'var s=document.getElementById("stage");' +
+          'if(!s){s=document.querySelector(".pg, .slide, section");if(s)s=s.parentElement||document.body;}' +
+          'if(!s)return;' +
           's.style.setProperty("position","fixed","important");' +
           's.style.setProperty("top","0","important");' +
           's.style.setProperty("left","0","important");' +
@@ -42113,7 +42118,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           's.style.setProperty("transform-origin","top left","important");' +
           'var w=innerWidth||480,h=innerHeight||270;' +
           's.style.setProperty("transform","scale("+Math.min(w/1920,h/1080)+")","important");' +
-          'var pg=s.querySelector(".pg");if(pg)pg.style.setProperty("display","flex","important");' +
+          'if(!inited){inited=true;' +
+          'var on=s.querySelector(".pg.on");' +
+          'if(!on){var first=s.querySelector(".pg");if(first)first.classList.add("on");}' +
+          '}' +
           '}' +
           'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",fix);}else{fix();}' +
           'window.addEventListener("resize",fix);' +
@@ -42133,6 +42141,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
         frame.setAttribute('allowfullscreen', '')
+        frame.setAttribute('scrolling', 'no')
         frame.title = 'deck preview'
         frame.srcdoc = enhancedHtml
 
@@ -42354,15 +42363,37 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const slideIndicator = editor.querySelector('[data-slide-indicator]')
         const propsPanel = editor.querySelector('.deck-editor__props')
 
-        // Render slide thumbnails
+        // Build a self-contained HTML document for a single slide
+        function buildSlidePreviewHtml(slide) {
+          const slideHtml = slide.outerHTML || '<section class="pg on"></section>'
+          return '<!doctype html><html><head><meta charset="utf-8">' + state.styleBlocks +
+            '<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;overflow:hidden}' +
+            '#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}' +
+            '.pg{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;' +
+            'overflow:hidden;background:#111;padding:80px}</style></head>' +
+            '<body><div id="stage">' + slideHtml.replace(/class="pg[^"]*"/, 'class="pg on"') +
+            '</div><script>(function(){var s=document.getElementById("stage");if(s){' +
+            'var scale=Math.min(innerWidth/1920,innerHeight/1080);' +
+            's.style.transform="scale("+scale+")";}}());<\/script></body></html>'
+        }
+
+        // Render slide thumbnails with real content
         function renderThumbs() {
           slideList.innerHTML = ''
           state.slides.forEach((slide, i) => {
             const thumb = document.createElement('div')
             thumb.className = 'deck-editor__thumb'
             thumb.setAttribute('aria-selected', i === state.currentSlide ? 'true' : 'false')
-            thumb.innerHTML = `<span class="deck-editor__thumb-num">${i + 1}</span>`
-            thumb.style.background = '#111'
+            // Render actual slide in a mini iframe
+            const iframe = document.createElement('iframe')
+            iframe.className = 'deck-editor__thumb-frame'
+            iframe.setAttribute('sandbox', 'allow-scripts')
+            iframe.srcdoc = buildSlidePreviewHtml(slide)
+            iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none'
+            const num = document.createElement('span')
+            num.className = 'deck-editor__thumb-num'
+            num.textContent = String(i + 1)
+            thumb.append(iframe, num)
             thumb.addEventListener('click', () => goToSlide(i))
             slideList.appendChild(thumb)
           })
@@ -42373,9 +42404,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const slide = state.slides[state.currentSlide]
           if (!slide) return
           canvas.innerHTML = ''
-          canvas.style.background = '#111'
+          
+          // Render actual slide as backdrop iframe (scaled to fit)
+          const backdrop = document.createElement('iframe')
+          backdrop.className = 'deck-editor__canvas-backdrop'
+          backdrop.setAttribute('sandbox', 'allow-scripts')
+          backdrop.srcdoc = buildSlidePreviewHtml(slide)
+          backdrop.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;z-index:0'
+          canvas.appendChild(backdrop)
+          
+          // Overlay container for editable elements
+          const overlay = document.createElement('div')
+          overlay.className = 'deck-editor__canvas-overlay'
+          overlay.style.cssText = 'position:absolute;inset:0;z-index:1'
+          canvas.appendChild(overlay)
 
-          // Render each element as an editable box
+          // Render each element as an editable box on the overlay
           slide.elements.forEach((el, i) => {
             const box = document.createElement('div')
             box.className = 'deck-editor__element'
@@ -42428,7 +42472,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
 
             box.addEventListener('mousedown', e => startDragOrResize(i, e))
-            canvas.appendChild(box)
+            overlay.appendChild(box)
           })
         }
 
@@ -60798,7 +60842,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	         feed reads as syntax garbage in the rail ("**Pro Shop sees…"), so
 	         the tokens are scrubbed, never rendered */
 	      function chatPreviewPlainText(value) {
-	        return String(value || '')
+	        const str = String(value || '')
+	        // Detect HTML deck documents — extract title or first heading for preview
+	        const lower = str.slice(0, 100).toLowerCase()
+	        if (lower.includes('<!doctype html') || lower.startsWith('<html')) {
+	          // Try <title> first
+	          const titleMatch = str.match(/<title[^>]*>([^<]+)<\/title>/i)
+	          if (titleMatch) return titleMatch[1].trim()
+	          // Try first <h1>
+	          const h1Match = str.match(/<h1[^>]*>([^<]+)<\/h1>/i)
+	          if (h1Match) return h1Match[1].trim()
+	          // Try first <h2>
+	          const h2Match = str.match(/<h2[^>]*>([^<]+)<\/h2>/i)
+	          if (h2Match) return h2Match[1].trim()
+	          // Fallback: "Presentation"
+	          return 'Presentation'
+	        }
+	        return str
 	          // Strip raw SVG content (multiline) — replace with "[image]" indicator
 	          .replace(/<svg[\s\S]*?<\/svg>/gi, '[image]')
 	          .replace(/```[\w-]*\n?/g, '')
