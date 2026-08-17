@@ -507,15 +507,16 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : null}
             </View>
-          ) : workThread && workThread.complete && detectInlineArtifactKind(message) ? (
+          ) : workThread && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
             <InlineArtifactPreview
-              kind={detectInlineArtifactKind(message)!}
+              kind={detectInlineArtifactKind(message) ?? 'html_deck'}
               title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
               text={String(workThread.ref.resultPreview ?? '')}
               agentName={workThread.agentName}
-              onEdit={workThread.governedRecord ? undefined : () => onRegenerateWorkArtifact?.(message)}
-              onPresent={detectInlineArtifactKind(message) === 'html_deck' ? () => onViewArtifactFullscreen?.(message) : undefined}
-              onExpand={() => onViewArtifactFullscreen?.(message)}
+              loading={!workThread.complete}
+              onEdit={workThread.complete && !workThread.governedRecord ? () => onRegenerateWorkArtifact?.(message) : undefined}
+              onPresent={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
+              onExpand={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
             />
           ) : workThread ? (
             <View style={styles.workCard}>
@@ -573,7 +574,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               {String(workThread.ref.provenance ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={2} style={styles.workProvenance}>{String(workThread.ref.provenance)}</Text> : null}
               {workThread.complete ? (
                 <View style={styles.workResultActions}>
-                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>
@@ -592,7 +593,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : workThread.failed ? (
                 <View style={styles.workResultActions}>
-                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel={`View ${workThread.family.toLowerCase()} failure details`} onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel={`View ${workThread.family.toLowerCase()} failure details`} onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="info.circle.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>View details</Text>
                   </Pressable>
@@ -602,16 +603,10 @@ export const MessageBubble = React.memo(function MessageBubble({
                   </Pressable>
                 </View>
               ) : (
-                <Pressable
-                  ref={workDetailsTriggerRef}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open live work details. ${workThread.phase}${workThread.progressPercent > 0 ? `, ${workThread.progressPercent}% complete` : ''}`}
-                  onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)}
-                  style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
-                >
+                <View style={styles.workFoot}>
                   <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`}</Text>
-                  <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
-                </Pressable>
+                  <ActivityIndicator color={colors.emberText} size="small" />
+                </View>
               )}
             </View>
           ) : null}
