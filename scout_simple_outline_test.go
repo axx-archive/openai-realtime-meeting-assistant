@@ -690,137 +690,200 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	}
 }
 
-// TestDeckGenerationAfterApproachBProse tests the exact prod-test scenario at d8a2fe28bb:
-// the router issues Approach B prose ("What's the deck about, and who's in the room?...")
-// and the user types "yes". This must generate a deck, not refuse.
+// TestDeckGenerationAfterApproachBProse tests the exact prod-test scenario at d8a2fe28bb
+// using the REAL append path (appendScoutChatThreadMessage), not stubbed resolveInlineDeckReply.
+// The router issues Approach B prose ("What's the deck about, and who's in the room?...")
+// and the user types "yes". This must generate a deck, not a second clarify_once refuse.
 func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+	setupAuthTestEnv(t)
 
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-api-key"
-	setupAuthTestEnv(t)
-	user := accountStore().findUser("aj@shareability.com")
-	if user == nil {
-		t.Fatal("test user not found")
-	}
 
+	liveApproachBProse := "What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?"
+
+	routerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		// The prompt should NOT just say "User request: yes"
-		if strings.Contains(request.Input, "User request: yes") {
-			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
-		}
-		// The prompt should contain the CRITICAL instruction
-		if !strings.Contains(request.Input, "MUST generate") {
-			t.Error("Prompt missing CRITICAL instruction to always generate")
-		}
-		return `<!doctype html>
+		switch request.Workflow {
+		case "scout_route":
+			routerCalls++
+			if routerCalls == 1 {
+				// First call: "make a 5-slide deck" → router returns Approach B clarify_once prose
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+					Outcome: string(conversationIntentClarifyOnce),
+					Message: liveApproachBProse,
+				}), nil
+			}
+			// Second call: "yes" → router should be told clarification already asked
+			// It should return conversational_reply so the deck gate is reached
+			if !strings.Contains(request.Input, "One clarification has already been asked") {
+				t.Error("Router was not told clarification already asked — scoutChatClarificationAlreadyAsked failed")
+			}
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Outcome: string(conversationIntentConversationalReply),
+			}), nil
+		case "scout_chat":
+			// Inline deck generation — return HTML
+			return `<!doctype html>
 <html lang="en">
 <head><title>Future of Work</title></head>
 <body><section class="pg on"><h1>The Future of Work</h1></section></body>
 </html>`, nil
+		default:
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+			return "", nil
+		}
 	})
 
-	// This is the exact prod-test scenario from d8a2fe28bb:
-	// 1. User: "make a 5-slide deck"
-	// 2. Scout (Approach B prose): "What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?"
-	// 3. User: "yes"
-	// The Approach B prose must be recognized as a direction pass (contains "mood").
-	liveApproachBProse := "What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?"
-	history := []scoutChatTurn{
-		{role: "user", text: "make a 5-slide deck"},
-		{role: "scout", text: liveApproachBProse},
-	}
-
-	// First verify the detection works for the live Approach B prose
-	if !scoutChatLooksLikeDirectionPass(strings.ToLower(liveApproachBProse)) {
-		t.Fatal("scoutChatLooksLikeDirectionPass should return true for live Approach B prose")
-	}
-	if !scoutChatDeckConfirmationDetected("yes", history) {
-		t.Fatal("scoutChatDeckConfirmationDetected should return true for 'yes' after Approach B prose")
-	}
-
-	// Now test the full generation flow
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Approach B test", scoutChatVisibilityPrivate)
 	if err != nil {
-		t.Fatalf("resolveInlineDeckReply: %v", err)
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+
+	// 1. First message: "make a 5-slide deck" → Approach B clarify_once
+	first, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "make a 5-slide deck", nil, "")
+	if err != nil {
+		t.Fatalf("first message: %v", err)
+	}
+	if first["intentOutcome"] != string(conversationIntentClarifyOnce) {
+		t.Fatalf("first outcome=%v, want clarify_once", first["intentOutcome"])
+	}
+	firstAnswer, ok := first["answer"].(scoutChatMessageRecord)
+	if !ok || firstAnswer.Text != liveApproachBProse || firstAnswer.IntentOutcome != string(conversationIntentClarifyOnce) {
+		t.Fatalf("first answer=%+v, want Approach B prose with clarify_once", firstAnswer)
 	}
 
-	// Should produce HTML deck
-	if reply.Kind != "message" {
-		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	// 2. Second message: "yes" → must reach deck generation, not another clarify_once
+	second, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "yes", nil, "")
+	if err != nil {
+		t.Fatalf("second message: %v", err)
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
-		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
+	// Should be conversational_reply (deck generated), NOT clarify_once or unavailable
+	if second["intentOutcome"] == string(conversationIntentClarifyOnce) {
+		t.Fatal("second message got clarify_once — scoutChatClarificationAlreadyAsked did not mark Approach B as clarification")
+	}
+	if second["intentOutcome"] == string(conversationIntentUnavailable) {
+		t.Fatalf("second message got unavailable — deck generation failed: %+v", second["answer"])
+	}
+	if second["intentOutcome"] != string(conversationIntentConversationalReply) {
+		t.Fatalf("second outcome=%v, want conversational_reply", second["intentOutcome"])
+	}
+	secondAnswer, ok := second["answer"].(scoutChatMessageRecord)
+	if !ok {
+		t.Fatalf("second answer missing: %+v", second)
+	}
+	// Should produce HTML deck
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(secondAnswer.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", secondAnswer.Text[:min(150, len(secondAnswer.Text))])
 	}
 	// Should NOT contain refusal text
-	if strings.Contains(strings.ToLower(reply.Text), "i need the deck's subject") {
-		t.Error("Reply contains exact prod-test refusal — should have generated a deck")
+	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") {
+		t.Error("Reply contains refusal — should have generated a deck")
+	}
+	if routerCalls != 2 {
+		t.Fatalf("router calls=%d, want 2", routerCalls)
 	}
 }
 
-// TestDeckGenerationAfterChoicesCard tests the exact prod-test scenario where
+// TestDeckGenerationAfterChoicesCard tests the prod-test scenario where
 // the router issues a clarify_once choices card ("What should the 5-slide deck be about?")
-// and the user types "yes". This must generate a deck, not refuse.
+// and the user types "yes". Uses the REAL append path, not stubbed resolveInlineDeckReply.
 func TestDeckGenerationAfterChoicesCard(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+	setupAuthTestEnv(t)
 
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-api-key"
-	setupAuthTestEnv(t)
-	user := accountStore().findUser("aj@shareability.com")
-	if user == nil {
-		t.Fatal("test user not found")
-	}
 
+	routerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		// The prompt should NOT just say "User request: yes"
-		if strings.Contains(request.Input, "User request: yes") {
-			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
-		}
-		// The prompt should contain the CRITICAL instruction
-		if !strings.Contains(request.Input, "MUST generate") {
-			t.Error("Prompt missing CRITICAL instruction to always generate")
-		}
-		return `<!doctype html>
+		switch request.Workflow {
+		case "scout_route":
+			routerCalls++
+			if routerCalls == 1 {
+				// First call: "make a 5-slide deck" → choices card clarify_once
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+					Outcome:  string(conversationIntentClarifyOnce),
+					Question: "What should the 5-slide deck be about?",
+					Options: []openAIScoutRouterOption{
+						{Label: "A venture or product", Reply: "A venture or product"},
+						{Label: "A film or creative project", Reply: "A film or creative project"},
+						{Label: "Something else", Reply: "Something else"},
+					},
+				}), nil
+			}
+			// Second call: "yes" → router should be told clarification already asked
+			if !strings.Contains(request.Input, "One clarification has already been asked") {
+				t.Error("Router was not told clarification already asked — scoutChatClarificationAlreadyAsked failed")
+			}
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Outcome: string(conversationIntentConversationalReply),
+			}), nil
+		case "scout_chat":
+			// Inline deck generation — return HTML
+			return `<!doctype html>
 <html lang="en">
 <head><title>Future of Work</title></head>
 <body><section class="pg on"><h1>The Future of Work</h1></section></body>
 </html>`, nil
+		default:
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+			return "", nil
+		}
 	})
 
-	// This is the exact prod-test scenario from bc21cf77:
-	// 1. User: "make a 5-slide deck"
-	// 2. Scout (choices card): "What should the 5-slide deck be about?"
-	// 3. User: "yes"
-	// The choices card question must be recognized as a direction pass.
-	history := []scoutChatTurn{
-		{role: "user", text: "make a 5-slide deck"},
-		{role: "scout", text: "What should the 5-slide deck be about?"},
-	}
-
-	// First verify the detection works
-	if !scoutChatDeckConfirmationDetected("yes", history) {
-		t.Fatal("scoutChatDeckConfirmationDetected should return true for 'yes' after choices card")
-	}
-
-	// Now test the full generation flow
-	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Choices card test", scoutChatVisibilityPrivate)
 	if err != nil {
-		t.Fatalf("resolveInlineDeckReply: %v", err)
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+
+	// 1. First message: "make a 5-slide deck" → choices card clarify_once
+	first, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "make a 5-slide deck", nil, "")
+	if err != nil {
+		t.Fatalf("first message: %v", err)
+	}
+	if first["intentOutcome"] != string(conversationIntentClarifyOnce) {
+		t.Fatalf("first outcome=%v, want clarify_once", first["intentOutcome"])
+	}
+	firstAnswer, ok := first["answer"].(scoutChatMessageRecord)
+	if !ok || firstAnswer.Kind != scoutChatMessageKindChoices || firstAnswer.Choices == nil {
+		t.Fatalf("first answer=%+v, want choices card", firstAnswer)
 	}
 
-	// Should produce HTML deck
-	if reply.Kind != "message" {
-		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	// 2. Second message: "yes" → must reach deck generation, not another clarify_once
+	second, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "yes", nil, "")
+	if err != nil {
+		t.Fatalf("second message: %v", err)
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
-		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
+	// Should be conversational_reply (deck generated), NOT clarify_once or unavailable
+	if second["intentOutcome"] == string(conversationIntentClarifyOnce) {
+		t.Fatal("second message got clarify_once — should have been marked as clarification already asked")
+	}
+	if second["intentOutcome"] == string(conversationIntentUnavailable) {
+		t.Fatalf("second message got unavailable — deck generation failed: %+v", second["answer"])
+	}
+	if second["intentOutcome"] != string(conversationIntentConversationalReply) {
+		t.Fatalf("second outcome=%v, want conversational_reply", second["intentOutcome"])
+	}
+	secondAnswer, ok := second["answer"].(scoutChatMessageRecord)
+	if !ok {
+		t.Fatalf("second answer missing: %+v", second)
+	}
+	// Should produce HTML deck
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(secondAnswer.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", secondAnswer.Text[:min(150, len(secondAnswer.Text))])
 	}
 	// Should NOT contain refusal text
-	if strings.Contains(strings.ToLower(reply.Text), "i still need the deck's subject") {
-		t.Error("Reply contains exact prod-test refusal — should have generated a deck")
+	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") {
+		t.Error("Reply contains refusal — should have generated a deck")
+	}
+	if routerCalls != 2 {
+		t.Fatalf("router calls=%d, want 2", routerCalls)
 	}
 }
 
@@ -1071,6 +1134,69 @@ func TestLooksLikeDirectionPass(t *testing.T) {
 			got := scoutChatLooksLikeDirectionPass(tc.text)
 			if got != tc.want {
 				t.Errorf("scoutChatLooksLikeDirectionPass(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClarificationAlreadyAskedRecognizesApproachB tests that scoutChatClarificationAlreadyAsked
+// returns true for Approach B prose (Kind=message + IntentOutcome=clarify_once).
+// This is the fix for prod-test FAIL at SHA 753adc71.
+func TestClarificationAlreadyAskedRecognizesApproachB(t *testing.T) {
+	cases := []struct {
+		name     string
+		messages []scoutChatMessageRecord
+		want     bool
+	}{
+		{
+			name: "choices card is clarification",
+			messages: []scoutChatMessageRecord{
+				{Role: "user", Text: "make a 5-slide deck"},
+				{Role: "scout", Kind: scoutChatMessageKindChoices, IntentOutcome: string(conversationIntentClarifyOnce),
+					Choices: &scoutChatChoices{Question: "What should the deck be about?"}},
+			},
+			want: true,
+		},
+		{
+			name: "Approach B prose is clarification",
+			messages: []scoutChatMessageRecord{
+				{Role: "user", Text: "make a 5-slide deck"},
+				{Role: "scout", Kind: "message", IntentOutcome: string(conversationIntentClarifyOnce),
+					Text: "What's the deck about, and who's in the room?"},
+			},
+			want: true,
+		},
+		{
+			name: "conversational_reply is NOT clarification",
+			messages: []scoutChatMessageRecord{
+				{Role: "user", Text: "make a 5-slide deck"},
+				{Role: "scout", Kind: "message", IntentOutcome: string(conversationIntentConversationalReply),
+					Text: "I'd be happy to help!"},
+			},
+			want: false,
+		},
+		{
+			name: "user message after Scout stops search",
+			messages: []scoutChatMessageRecord{
+				{Role: "scout", Kind: "message", IntentOutcome: string(conversationIntentClarifyOnce),
+					Text: "What's the deck about?"},
+				{Role: "user", Text: "yes"},
+			},
+			want: false,
+		},
+		{
+			name:     "empty thread",
+			messages: nil,
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			thread := scoutChatThreadRecord{Messages: tc.messages}
+			got := scoutChatClarificationAlreadyAsked(thread)
+			if got != tc.want {
+				t.Errorf("scoutChatClarificationAlreadyAsked = %v, want %v", got, tc.want)
 			}
 		})
 	}

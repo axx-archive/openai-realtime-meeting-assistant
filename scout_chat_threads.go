@@ -2148,10 +2148,25 @@ func scoutChatClarificationAlreadyAsked(thread scoutChatThreadRecord) bool {
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			return false
 		}
+		// Formal choices card (clarify_once outcome)
 		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
 			return true
 		}
-		if message.Kind == "message" || message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+		// Approach B prose direction pass: Kind=message with IntentOutcome=clarify_once
+		// This ensures the router knows a clarification was already asked, preventing
+		// a second clarify_once that would emit "I need the deck's subject" prose.
+		if message.Kind == "message" {
+			author := strings.TrimSpace(message.AuthorName)
+			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
+			if isScout && message.IntentOutcome == string(conversationIntentClarifyOnce) {
+				return true
+			}
+			// Any other Scout message is not a clarification
+			if isScout {
+				return false
+			}
+		}
+		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
 			return false
 		}
 	}
