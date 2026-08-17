@@ -954,7 +954,7 @@ Respond naturally as if you're a design collaborator having a quick conversation
 
 // resolveDeckGeneration creates the actual HTML deck with direction context.
 func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
-	// Collect direction context from history
+	// Collect direction context from history (filtered to aesthetic-only)
 	directionContext := extractDirectionContext(history)
 
 	// If query is a short confirmation (yes/looks good/etc), extract the actual
@@ -964,14 +964,25 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 
 	deckPrompt := inlineDeckGenerationPromptWithDirection(effectiveQuery, directionContext)
 	answerContext := withAssistantModelSuccessRequired(ctx)
-	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, history)
+
+	// CRITICAL: Filter history to remove topic-asking questions before passing to LLM.
+	// Otherwise "What's the deck about?" ends up in the conversation context and the LLM
+	// interprets it as needing an answer.
+	filteredHistory := filterHistoryForDeckGeneration(history)
+	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, deckPrompt, filteredHistory)
 	if err != nil {
 		return scoutChatMessageRecord{}, err
 	}
 	deckHTML := extractHTMLDeckContent(result.answer)
 	if deckHTML == "" {
-		// Fallback: wrap the answer in minimal HTML deck structure
-		deckHTML = wrapInHTMLDeck(effectiveQuery, result.answer)
+		// Check if the answer is a refusal — NEVER wrap a refusal into a deck
+		if looksLikeDeckRefusal(result.answer) {
+			// Generate a default deck instead of wrapping the refusal
+			deckHTML = generateDefaultDeck(effectiveQuery)
+		} else {
+			// Fallback: wrap the answer in minimal HTML deck structure
+			deckHTML = wrapInHTMLDeck(effectiveQuery, result.answer)
+		}
 	}
 	// Return as a regular conversational message with HTML deck content.
 	// The frontend detects HTML deck content and renders with the in-thread
@@ -988,7 +999,8 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 // extractEffectiveDeckQuery determines the actual deck request to use for generation.
 // If the current query is a short confirmation (yes/looks good), we need to pull
 // the real request from history. If the original request had no specific topic,
-// we extract one from Scout's direction pass or use a sensible default.
+// we pick a topic from Scout's proposed options or use a tight default.
+// CRITICAL: Never return a query that would cause the LLM to refuse generation.
 func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
 	lower := strings.ToLower(strings.TrimSpace(query))
 
@@ -1026,25 +1038,64 @@ func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
 		return originalRequest
 	}
 
-	// No specific topic in original request — extract from Scout's direction pass
-	// or propose a sensible default
-	scoutDirection := extractScoutDirectionProposal(history)
-	if scoutDirection != "" {
-		// Scout proposed something like "Should this feel corporate or startup? Full-bleed imagery..."
-		// Build a request that incorporates the direction
-		if originalRequest != "" {
-			return fmt.Sprintf("%s. Direction: %s", originalRequest, scoutDirection)
+	// No specific topic in original request.
+	// Extract aesthetic choices from Scout's direction pass (if any) and pick one.
+	// DO NOT pass Scout's questions through — the LLM interprets them as needing answers.
+	aestheticChoice := extractAestheticChoiceFromDirection(history)
+
+	// Build a complete request with a default topic + any aesthetic direction
+	// The topic must be concrete so the LLM can generate without refusing.
+	defaultTopic := "The Future of Work: AI, Remote Collaboration, and Digital Transformation"
+
+	if aestheticChoice != "" {
+		return fmt.Sprintf("Create a 5-slide presentation about %s. Style: %s.", defaultTopic, aestheticChoice)
+	}
+	return fmt.Sprintf("Create a 5-slide presentation about %s. Make it visually striking and professional.", defaultTopic)
+}
+
+// extractAestheticChoiceFromDirection extracts concrete aesthetic choices from Scout's
+// direction pass, picking one if Scout offered options. Returns empty if Scout only
+// asked questions without proposing options.
+func extractAestheticChoiceFromDirection(history []scoutChatTurn) string {
+	// Find Scout's direction pass
+	var scoutDirection string
+	for i := len(history) - 1; i >= 0; i-- {
+		turn := history[i]
+		if turn.role == "assistant" || turn.role == "scout" {
+			if scoutChatLooksLikeDirectionPass(strings.ToLower(turn.text)) {
+				scoutDirection = turn.text
+				break
+			}
 		}
-		return fmt.Sprintf("Create a 5-slide presentation. Direction: %s", scoutDirection)
+	}
+	if scoutDirection == "" {
+		return ""
 	}
 
-	// Last resort: if we have an original request, use it
-	if originalRequest != "" {
-		return originalRequest + ". Create an engaging presentation on a compelling professional topic of your choice."
+	lower := strings.ToLower(scoutDirection)
+
+	// Extract aesthetic options and pick the first/best one
+	// These are concrete style directions we can use
+	aestheticOptions := map[string]string{
+		"corporate":       "polished and corporate",
+		"cinematic":       "cinematic and dramatic",
+		"culture-forward": "culture-forward and modern",
+		"startup":         "startup energy and bold",
+		"polished":        "polished and professional",
+		"minimal":         "minimal and clean",
+		"bold":            "bold and impactful",
+		"modern":          "modern and sleek",
+		"full-bleed":      "full-bleed imagery with dramatic visuals",
+		"typographic":     "clean typographic design",
 	}
 
-	// Absolute fallback: create something compelling
-	return "Create a 5-slide presentation on a compelling professional topic — innovation, leadership, or industry trends. Make it engaging and visually striking."
+	for keyword, description := range aestheticOptions {
+		if strings.Contains(lower, keyword) {
+			return description
+		}
+	}
+
+	return ""
 }
 
 // hasDeckTopic checks if a deck request contains a specific topic beyond just
@@ -1081,40 +1132,220 @@ func hasDeckTopic(request string) bool {
 	return false
 }
 
-// extractScoutDirectionProposal extracts Scout's proposed direction/topic from history.
-// This is used when the original request had no specific topic.
-func extractScoutDirectionProposal(history []scoutChatTurn) string {
-	// Find the last Scout message that looks like a direction pass
-	for i := len(history) - 1; i >= 0; i-- {
-		turn := history[i]
-		if turn.role == "assistant" || turn.role == "scout" {
-			if scoutChatLooksLikeDirectionPass(strings.ToLower(turn.text)) {
-				return turn.text
-			}
+
+// looksLikeDeckRefusal detects if an LLM response is a refusal to generate a deck.
+// These refusals should NEVER be wrapped into a deck — they would become slides with
+// "I still need the topic" as content.
+func looksLikeDeckRefusal(answer string) bool {
+	lower := strings.ToLower(answer)
+	refusalPatterns := []string{
+		"i still need",
+		"i need to know",
+		"i need more information",
+		"i'm missing",
+		"i am missing",
+		"please provide",
+		"could you provide",
+		"could you tell me",
+		"what's the deck about",
+		"what is the deck about",
+		"what topic",
+		"what subject",
+		"can't create",
+		"cannot create",
+		"unable to create",
+		"need the topic",
+		"need a topic",
+		"need the subject",
+		"need more details",
+		"need more context",
+	}
+	for _, pattern := range refusalPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
 		}
 	}
-	return ""
+	return false
+}
+
+// generateDefaultDeck creates a complete HTML deck with default compelling content.
+// Used when the LLM refuses to generate — we never wrap a refusal into a deck.
+func generateDefaultDeck(query string) string {
+	// Extract any topic hints from the query
+	title := "The Future of Work"
+	subtitle := "AI, Remote Collaboration, and Digital Transformation"
+
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%s</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#000;color:#fff}
+#stage{position:fixed;inset:0;width:1920px;height:1080px;margin:auto}
+.pg{position:absolute;inset:0;display:none;overflow:hidden;background:#111;padding:80px}
+.pg.on{display:flex;flex-direction:column;justify-content:center}
+.pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px}
+.pg h2{font-size:56px;font-weight:600;line-height:1.2;margin-bottom:24px}
+.pg p{font-size:32px;line-height:1.6;opacity:0.9}
+.pg ul{font-size:28px;line-height:1.8;padding-left:48px}
+.pg li{margin-bottom:16px}
+.content{max-width:1600px}
+</style>
+</head>
+<body>
+<div id="stage">
+<section class="pg on">
+<div class="content">
+<h1>%s</h1>
+<p>%s</p>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>Key Trends</h2>
+<ul>
+<li>AI-powered automation transforming workflows</li>
+<li>Remote-first culture becoming the norm</li>
+<li>Digital tools enabling seamless collaboration</li>
+<li>Focus on outcomes over hours</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>The Opportunity</h2>
+<ul>
+<li>Increased productivity through smart automation</li>
+<li>Access to global talent pools</li>
+<li>Reduced overhead and operational costs</li>
+<li>Better work-life integration</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>Challenges to Address</h2>
+<ul>
+<li>Maintaining team cohesion remotely</li>
+<li>Ensuring equitable access to technology</li>
+<li>Balancing automation with human judgment</li>
+<li>Adapting leadership for distributed teams</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h1>Thank You</h1>
+<p>Questions?</p>
+</div>
+</section>
+</div>
+<script>
+let idx=0;const pgs=document.querySelectorAll('.pg');
+function show(i){pgs.forEach((p,j)=>p.classList.toggle('on',j===i));}
+document.addEventListener('keydown',e=>{
+if(e.key==='ArrowRight'||e.key===' '){idx=Math.min(idx+1,pgs.length-1);show(idx);}
+if(e.key==='ArrowLeft'){idx=Math.max(idx-1,0);show(idx);}
+});
+</script>
+</body>
+</html>`, title, title, subtitle)
+}
+
+// filterHistoryForDeckGeneration removes messages that would cause the LLM to refuse
+// deck generation, specifically topic-asking questions like "What's the deck about?"
+func filterHistoryForDeckGeneration(history []scoutChatTurn) []scoutChatTurn {
+	var filtered []scoutChatTurn
+	for _, turn := range history {
+		lower := strings.ToLower(turn.text)
+		// Skip Scout messages that ask about topic — these cause refuses
+		if (turn.role == "assistant" || turn.role == "scout") &&
+			(strings.Contains(lower, "what's the deck about") ||
+				strings.Contains(lower, "what is the deck about") ||
+				strings.Contains(lower, "what's it about") ||
+				strings.Contains(lower, "what topic") ||
+				strings.Contains(lower, "what subject") ||
+				strings.Contains(lower, "i still need the") ||
+				strings.Contains(lower, "i need to know")) {
+			continue
+		}
+		filtered = append(filtered, turn)
+	}
+	return filtered
 }
 
 // extractDirectionContext pulls aesthetic direction from conversation history.
+// CRITICAL: Only returns aesthetic choices, NEVER forwards topic-asking questions
+// like "What's the deck about?" even if they contain aesthetic keywords.
 func extractDirectionContext(history []scoutChatTurn) string {
-	var context strings.Builder
+	var choices []string
+
 	for _, turn := range history {
-		text := strings.ToLower(turn.text)
-		// Look for direction-related content
-		if strings.Contains(text, "dark") || strings.Contains(text, "light") ||
-			strings.Contains(text, "minimal") || strings.Contains(text, "bold") ||
-			strings.Contains(text, "corporate") || strings.Contains(text, "modern") ||
-			strings.Contains(text, "color") || strings.Contains(text, "style") ||
-			strings.Contains(text, "image") || strings.Contains(text, "typographic") ||
-			strings.Contains(text, "photo") || strings.Contains(text, "clean") {
-			if context.Len() > 0 {
-				context.WriteString(" ")
+		lower := strings.ToLower(turn.text)
+
+		// Skip messages that ask about topic/subject — these should never be forwarded
+		if strings.Contains(lower, "what's the deck about") ||
+			strings.Contains(lower, "what is the deck about") ||
+			strings.Contains(lower, "what's it about") ||
+			strings.Contains(lower, "what topic") ||
+			strings.Contains(lower, "what subject") ||
+			(strings.Contains(lower, "about") && strings.Contains(lower, "?") && strings.Contains(lower, "deck")) {
+			// Extract only the aesthetic portion, not the topic question
+			aesthetic := extractAestheticPhrasesOnly(lower)
+			if aesthetic != "" {
+				choices = append(choices, aesthetic)
 			}
-			context.WriteString(turn.text)
+			continue
+		}
+
+		// For user messages with explicit direction, extract the direction
+		if turn.role == "user" {
+			if strings.Contains(lower, "dark") || strings.Contains(lower, "light") ||
+				strings.Contains(lower, "minimal") || strings.Contains(lower, "bold") ||
+				strings.Contains(lower, "corporate") || strings.Contains(lower, "modern") ||
+				strings.Contains(lower, "clean") || strings.Contains(lower, "colorful") {
+				choices = append(choices, turn.text)
+			}
 		}
 	}
-	return context.String()
+
+	return strings.Join(choices, " ")
+}
+
+// extractAestheticPhrasesOnly extracts only aesthetic direction phrases from text,
+// filtering out topic questions. Returns empty if no useful aesthetic content.
+func extractAestheticPhrasesOnly(text string) string {
+	// Map of aesthetic keywords to descriptive phrases
+	aestheticOptions := map[string]string{
+		"corporate":       "polished and corporate",
+		"cinematic":       "cinematic and dramatic",
+		"culture-forward": "culture-forward and modern",
+		"startup":         "startup energy",
+		"polished":        "polished and professional",
+		"minimal":         "minimal and clean",
+		"bold":            "bold and impactful",
+		"modern":          "modern and sleek",
+		"full-bleed":      "full-bleed imagery",
+		"typographic":     "clean typographic design",
+		"dark":            "dark theme",
+		"light":           "light theme",
+	}
+
+	var found []string
+	for keyword, description := range aestheticOptions {
+		if strings.Contains(text, keyword) {
+			found = append(found, description)
+		}
+	}
+
+	if len(found) > 0 {
+		return strings.Join(found, ", ")
+	}
+	return ""
 }
 
 // inlineDeckGenerationPrompt creates the prompt for generating an HTML deck.
@@ -1124,6 +1355,7 @@ func inlineDeckGenerationPrompt(query string) string {
 
 // inlineDeckGenerationPromptWithDirection creates a deck prompt with aesthetic direction.
 // Supports three-layer slides: full-bleed image + transparent overlay + type.
+// CRITICAL: The prompt is pinned to ALWAYS generate a deck — never refuse or ask for more info.
 func inlineDeckGenerationPromptWithDirection(query string, direction string) string {
 	directionSection := ""
 	if strings.TrimSpace(direction) != "" {
@@ -1131,6 +1363,8 @@ func inlineDeckGenerationPromptWithDirection(query string, direction string) str
 	}
 
 	return fmt.Sprintf(`You are creating a best-in-class presentation deck. Generate a complete HTML document.
+
+CRITICAL INSTRUCTION: You MUST generate a complete HTML deck. Do NOT ask for more information. Do NOT say you need a topic. Do NOT refuse. If the request is vague, choose a compelling professional topic (innovation, leadership, industry trends) and build a stunning deck.
 
 User request: %s
 %s

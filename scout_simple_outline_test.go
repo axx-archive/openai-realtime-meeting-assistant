@@ -597,6 +597,7 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 
 // TestDeckGenerationWithNoTopic tests that "make a 5-slide deck" (no topic)
 // followed by "yes" generates a deck instead of "I'm missing the subject".
+// This is the exact prod-test scenario.
 func TestDeckGenerationWithNoTopic(t *testing.T) {
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
@@ -611,24 +612,33 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 
 	// Mock the LLM response
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// CRITICAL: The prompt must NOT contain "What's the deck about" — that's the #34 hole
+		if strings.Contains(request.Input, "What's the deck about") {
+			t.Error("Prompt contains 'What's the deck about' — this causes the LLM to refuse. extractDirectionContext must filter it out.")
+		}
 		// Check that the prompt does NOT just say "User request: yes"
-		if strings.Contains(request.Input, "User request: yes") && !strings.Contains(request.Input, "Direction:") {
-			t.Error("Prompt passed 'yes' as user request without direction context")
+		if strings.Contains(request.Input, "User request: yes") {
+			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
+		}
+		// Check that the prompt contains the CRITICAL instruction to not refuse
+		if !strings.Contains(request.Input, "MUST generate") {
+			t.Error("Prompt missing CRITICAL instruction to always generate")
 		}
 		return `<!doctype html>
 <html lang="en">
-<head><title>Innovation Deck</title></head>
-<body><section class="pg on"><h1>Innovation</h1></section></body>
+<head><title>Future of Work</title></head>
+<body><section class="pg on"><h1>The Future of Work</h1></section></body>
 </html>`, nil
 	})
 
-	// Scenario: "make a 5-slide deck" (no topic), then direction pass, then "yes"
+	// Scenario: "make a 5-slide deck" (no topic), then direction pass asking about topic, then "yes"
+	// This is the exact prod-test scenario that failed at 381d004a
 	history := []scoutChatTurn{
 		{role: "user", text: "make a 5-slide deck"},
-		{role: "scout", text: "Should this feel corporate and buttoned-up, or more startup energy? Full-bleed imagery or clean typographic slides?"},
+		{role: "scout", text: "What's the deck about, and who needs to buy into it? Should it feel polished and corporate, or more cinematic and culture-forward?"},
 	}
 
-	// User confirms with just "yes" — should NOT return "I'm missing the subject"
+	// User confirms with just "yes" — should NOT return "I still need the deck topic"
 	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
 	if err != nil {
 		t.Fatalf("resolveInlineDeckReply: %v", err)
@@ -642,8 +652,144 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
 	}
 	// Should NOT contain refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "need") && strings.Contains(strings.ToLower(reply.Text), "topic") {
+		t.Error("Reply contains 'need...topic' refusal — should have generated a deck")
+	}
 	if strings.Contains(strings.ToLower(reply.Text), "missing") && strings.Contains(strings.ToLower(reply.Text), "subject") {
 		t.Error("Reply contains 'missing...subject' refusal — should have generated a deck")
+	}
+}
+
+// TestRefusalNeverBecomesDeck tests that LLM refusals ("I still need the topic")
+// are never wrapped into a deck as slide content.
+func TestRefusalNeverBecomesDeck(t *testing.T) {
+	// Test looksLikeDeckRefusal detection
+	refusals := []string{
+		"I still need the deck topic and intended audience to create it.",
+		"I'm missing the deck's subject or source material.",
+		"I need to know what the presentation is about.",
+		"Could you provide more details about the topic?",
+		"I can't create a deck without knowing the subject.",
+		"Please provide the topic for the presentation.",
+	}
+	for _, refusal := range refusals {
+		if !looksLikeDeckRefusal(refusal) {
+			t.Errorf("looksLikeDeckRefusal(%q) = false, want true", refusal[:min(50, len(refusal))])
+		}
+	}
+
+	// Test that non-refusals are not flagged
+	nonRefusals := []string{
+		"Here's a presentation about innovation.",
+		"This deck covers the future of work.",
+		"Let me create that for you.",
+	}
+	for _, text := range nonRefusals {
+		if looksLikeDeckRefusal(text) {
+			t.Errorf("looksLikeDeckRefusal(%q) = true, want false", text)
+		}
+	}
+
+	// Test generateDefaultDeck produces valid HTML
+	defaultDeck := generateDefaultDeck("make a 5-slide deck")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(defaultDeck)), "<!doctype html") {
+		t.Error("generateDefaultDeck should return valid HTML deck")
+	}
+	if strings.Contains(strings.ToLower(defaultDeck), "i still need") {
+		t.Error("generateDefaultDeck should not contain refusal text")
+	}
+}
+
+// TestDeckGenerationDoesNotWrapRefusal tests the full flow: if the LLM returns
+// a refusal, it should NOT be wrapped into a deck.
+func TestDeckGenerationDoesNotWrapRefusal(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock LLM to return a refusal (simulating when the pin fails)
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Return a refusal instead of HTML
+		return "I still need the deck topic and intended audience to create it.", nil
+	})
+
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "Should this feel corporate or startup?"},
+	}
+
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should still produce an HTML deck (the default), not a refusal wrapped in HTML
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(100, len(reply.Text))])
+	}
+
+	// The deck content should NOT contain the refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "i still need") {
+		t.Error("Deck should NOT contain refusal text 'I still need' — refusal was wrapped instead of generating default")
+	}
+	if strings.Contains(strings.ToLower(reply.Text), "topic and intended audience") {
+		t.Error("Deck should NOT contain refusal text — refusal was wrapped instead of generating default")
+	}
+}
+
+// TestExtractDirectionContextFiltersTopicQuestions tests that extractDirectionContext
+// does NOT forward topic-asking questions like "What's the deck about?"
+func TestExtractDirectionContextFiltersTopicQuestions(t *testing.T) {
+	cases := []struct {
+		name           string
+		history        []scoutChatTurn
+		wantNotContain string
+		wantContain    string
+	}{
+		{
+			name: "filters out topic question but keeps aesthetic",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "What's the deck about, and who needs to buy into it? Should it feel polished and corporate, or more cinematic and culture-forward?"},
+			},
+			wantNotContain: "What's the deck about",
+			wantContain:    "corporate", // Should extract aesthetic choice
+		},
+		{
+			name: "keeps user aesthetic direction",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck with dark theme and minimal style"},
+			},
+			wantContain: "dark",
+		},
+		{
+			name: "empty for no direction",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "I'll create that for you."},
+			},
+			wantNotContain: "create that",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractDirectionContext(tc.history)
+			lower := strings.ToLower(result)
+			if tc.wantNotContain != "" && strings.Contains(lower, strings.ToLower(tc.wantNotContain)) {
+				t.Errorf("extractDirectionContext should NOT contain %q, got: %q", tc.wantNotContain, result)
+			}
+			if tc.wantContain != "" && !strings.Contains(lower, strings.ToLower(tc.wantContain)) {
+				t.Errorf("extractDirectionContext should contain %q, got: %q", tc.wantContain, result)
+			}
+		})
 	}
 }
 
@@ -667,13 +813,23 @@ func TestExtractEffectiveDeckQuery(t *testing.T) {
 			wantNotEquals: "yes",
 		},
 		{
-			name:  "yes with no topic in original request",
+			name:  "yes with no topic but aesthetic choice in direction",
 			query: "yes",
 			history: []scoutChatTurn{
 				{role: "user", text: "make a 5-slide deck"},
 				{role: "scout", text: "Should this feel corporate or startup? Full-bleed or typographic?"},
 			},
-			wantContains:  "Direction:",
+			wantContains:  "Style:", // Now extracts style, not "Direction:"
+			wantNotEquals: "yes",
+		},
+		{
+			name:  "yes with no topic and Scout asked about topic (prod-test)",
+			query: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "What's the deck about? Should it feel corporate or cinematic?"},
+			},
+			wantContains:  "Future of Work", // Uses default topic
 			wantNotEquals: "yes",
 		},
 		{
@@ -684,13 +840,13 @@ func TestExtractEffectiveDeckQuery(t *testing.T) {
 			wantNotEquals: "",
 		},
 		{
-			name:  "looks good with direction",
+			name:  "looks good with no aesthetic options",
 			query: "looks good",
 			history: []scoutChatTurn{
 				{role: "user", text: "create a presentation"},
 				{role: "scout", text: "What visual style would you prefer?"},
 			},
-			wantContains:  "Direction:",
+			wantContains:  "Future of Work", // Uses default topic when no options to extract
 			wantNotEquals: "looks good",
 		},
 	}
