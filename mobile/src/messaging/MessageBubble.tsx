@@ -333,7 +333,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   const publication = message.publication;
   const [activityExpanded, setActivityExpanded] = useState(false);
   const sources = Array.isArray(message.sources) ? message.sources : [];
-  const longMessage = body.length > 700 || body.split('\n').length > 12;
+  // Live html_deck: Scout's deliverable path — not a long message, not a text bubble
+  const isLiveHtmlDeck = scout && isHtmlDeckBody(body);
+  // html_deck bodies are always >700 chars, but they render as 16:9 deck, not long message
+  const longMessage = !isLiveHtmlDeck && (body.length > 700 || body.split('\n').length > 12);
   // A work-reference row is authored by the durable coworker named on the
   // server-owned ref. `delegatedBy` describes the handoff; it never relabels
   // Colton/Marvin's output as a generic Scout response.
