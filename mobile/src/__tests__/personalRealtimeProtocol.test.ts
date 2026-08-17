@@ -57,6 +57,14 @@ test('provider events preserve text-primary turns and honest voice state', () =>
   assert.equal(realtimeStatusForEvent('response.done', 'talking'), 'listening');
 });
 
+test('speech_stopped does not force thinking state for conversational latency', () => {
+  // Conversational voice: speech_stopped must NOT flip to thinking. The island
+  // stays in listening/hearing until first_audio arrives so there's no visible
+  // "thinking" beat before every response. This keeps voice tight back-and-forth.
+  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'hearing'), 'hearing');
+  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'listening'), 'listening');
+});
+
 test('metering reads bounded live audio levels without decorative motion', () => {
   assert.equal(audioLevelFromStats(new Map([
     ['mic', { type: 'media-source', kind: 'audio', audioLevel: 0.42 }],

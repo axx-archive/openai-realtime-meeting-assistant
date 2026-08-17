@@ -3364,6 +3364,28 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 
 	if routedIntent.Outcome == conversationIntentClarifyOnce {
+		// Two shapes: formal choices card (Question + Options) or prose direction pass (Message only)
+		if strings.TrimSpace(routedIntent.Message) != "" {
+			// Approach B: prose direction pass — Kind=message with IntentOutcome=clarify_once
+			directionPassMessage := scoutChatMessageRecord{
+				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:          "message",
+				Role:          "scout",
+				AuthorName:    visibleWorkerName,
+				IntentOutcome: string(conversationIntentClarifyOnce),
+				Text:          routedIntent.Message,
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, directionPassMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = directionPassMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentClarifyOnce)
+			return response, nil
+		}
+		// Formal choices card
 		choices := &scoutChatChoices{Question: routedIntent.Question, Options: routedIntent.Options, Query: intentQuery}
 		choicesMessage := scoutChatMessageRecord{
 			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindChoices, Role: "scout",

@@ -1625,13 +1625,19 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
-	session["tool_choice"] = "auto"
+	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
+	// on the first response with no route HTTP. The client flips to auto via
+	// session.update only when the user's transcription indicates an action
+	// request (work/approval/unavailable), then resets to none after the tool call.
+	session["tool_choice"] = "none"
 	// Private Scout is a direct one-to-one conversation, so provider-side VAD
 	// can create responses immediately. Shared rooms deliberately wait for the
 	// server's deterministic Scout-invocation gate before response.create.
 	setRealtimeSessionCreateResponse(session, true)
 	if usesAdvancedCommandProfile(model) {
-		session["reasoning"] = map[string]any{"effort": realtimeReasoningEffort()}
+		// Voice lane uses medium effort for conversational latency. High effort
+		// causes perceivable "thinking" delay that breaks conversational flow.
+		session["reasoning"] = map[string]any{"effort": privateRealtimeVoiceReasoningEffort()}
 	}
 	return session
 }
@@ -1656,11 +1662,11 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfigForThread(model, use
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime conversation outside the video room.",
-		"# One conversation contract\nFor every completed, meaningful user utterance, call route_conversation_turn exactly once with the user's exact words before answering or acting. The server returns exactly one outcome: conversational_reply, clarify_once, start_private_work, approval_required, or unavailable. Speak that result plainly. Use do_nothing only for silence, noise, or an abandoned fragment.",
+		"# Conversational voice contract\nFor ordinary conversation, questions, and chat, speak your answer directly. For explicit action requests (starting work, launching something, sending, approving, or marking unavailable), call route_conversation_turn with the user's exact words. Use do_nothing only for silence, noise, or an abandoned fragment.",
 		"# Authority boundary\nYou never choose a tool, deliverable template, model, provider, reasoning effort, budget, authority, channel, audience, or effect. route_conversation_turn accepts natural language only. The server may start safe private work, hold a governed effect for approval, ask one clarification, or report a capability unavailable. Never claim work started, changed, sent, published, deleted, or saved unless the returned server result says so.",
 		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. The Kanban Board is retired. Direct artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly after the server outcome. Current Work and Project context is server-resolved from authorized conversations, Meeting Records, files, and artifacts. If that context is unavailable or ambiguous, say so instead of guessing.",
+		"# Behavior\nAnswer directly and briefly. Current Work and Project context is server-resolved from authorized conversations, Meeting Records, files, and artifacts. If that context is unavailable or ambiguous, say so instead of guessing.",
 	}, "\n\n")
 }
 
@@ -1924,6 +1930,15 @@ func realtimeReasoningEffort() string {
 }
 
 func realtimeRoomReasoningEffort() string {
+	return "medium"
+}
+
+// privateRealtimeVoiceReasoningEffort returns the reasoning effort for private
+// conversational voice. Unlike the text chat path (which benefits from high
+// reasoning for complex queries), voice must feel conversational: tight back-
+// and-forth with minimal perceivable delay. Medium effort balances quality and
+// latency for the 1:1 voice lane.
+func privateRealtimeVoiceReasoningEffort() string {
 	return "medium"
 }
 
@@ -4339,6 +4354,132 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 	default:
 		return false
 	}
+}
+
+// privateRealtimeVoiceShouldRoute returns whether the client should flip
+// tool_choice from none to auto for this utterance. Session default is none
+// for conversational latency; this enables tools only when needed.
+//
+// Unlike the text chat router (which uses a model call), this is a lightweight
+// deterministic classifier that uses only tight studio detectors. It must not
+// false-positive on ordinary conversation like "does that make sense?" or
+// "I'll send it later".
+func (app *kanbanBoardApp) privateRealtimeVoiceShouldRoute(threadID, transcript string) bool {
+	// Load the thread to check Riff-bound sessions and direction passes.
+	// Use a direct entry lookup since we don't have the user email in this context.
+	var thread scoutChatThreadRecord
+	var threadLoaded bool
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, strings.TrimSpace(threadID))
+	if ok {
+		thread, threadLoaded = decodeScoutChatThreadEntry(entry)
+	}
+
+	// Riff-bound sessions always need route (every utterance routes through server)
+	if threadLoaded && thread.Riff != nil {
+		return true
+	}
+	// Short confirmation ("yes", "ok", etc.) only routes if there's a pending
+	// direction pass in the thread. A direction pass is:
+	// 1. Kind=choices with IntentOutcome=clarify_once (scoutChatClarificationAlreadyAsked)
+	// 2. Kind=message with IntentOutcome=clarify_once (Approach B prose direction pass)
+	// "How's the week going?" (IntentOutcome=conversational_reply) + "yes" stays false.
+	// "What's the deck about..." (IntentOutcome=clarify_once) + "yes" routes.
+	text := strings.TrimSpace(transcript)
+	if threadLoaded && privateRealtimeVoiceIsConfirmation(text) {
+		return scoutChatDirectionPassPending(thread)
+	}
+	// Named studio asks via tight detection (deck, image only)
+	// Deliberately NOT using scoutTurnAppearsWorkShaped — it's too broad and
+	// matches ordinary conversation like "does that make sense?" / "let me write
+	// that down" / "I'll send it later".
+	return privateRealtimeVoiceTranscriptIndicatesAction(text)
+}
+
+// scoutChatDirectionPassPending returns true when Scout's last turn was a
+// direction pass — asking for direction about work. A direction pass is:
+// 1. Kind=choices with Choices != nil (formal clarify_once choices card)
+// 2. Kind=message with IntentOutcome=clarify_once (Approach B prose question)
+// Ordinary questions like "How's the week going?" have IntentOutcome=conversational_reply
+// and do NOT count as direction passes.
+func scoutChatDirectionPassPending(thread scoutChatThreadRecord) bool {
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		message := thread.Messages[index]
+		// User message means no pending Scout direction
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return false
+		}
+		// Formal choices card (clarify_once outcome)
+		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
+			return true
+		}
+		// Approach B prose direction pass: kind=message with IntentOutcome=clarify_once
+		if message.Kind == "message" {
+			author := strings.TrimSpace(message.AuthorName)
+			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
+			if isScout && message.IntentOutcome == string(conversationIntentClarifyOnce) {
+				return true
+			}
+			// Any other Scout message (including conversational_reply) is not a direction pass
+			if isScout {
+				return false
+			}
+		}
+		// Other kinds (proposal, thread) don't count as direction passes
+		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+			return false
+		}
+	}
+	return false
+}
+
+// privateRealtimeVoiceIsConfirmation returns true for short affirmative replies
+// that could confirm a pending direction pass. Strips ASR punctuation so
+// "Yes." and "Yes!" also match.
+func privateRealtimeVoiceIsConfirmation(text string) bool {
+	// Strip common ASR punctuation
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	normalized = strings.TrimRight(normalized, ".!?,;:")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" || len(normalized) > 40 {
+		return false
+	}
+	// Only match if the entire utterance is a short confirmation
+	confirmations := []string{
+		"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead",
+		"do it", "sounds good", "let's do it", "please do",
+		"that works", "perfect", "great", "proceed", "yes please",
+		"go for it", "let's go", "do that", "yes do it",
+	}
+	for _, c := range confirmations {
+		if normalized == c {
+			return true
+		}
+	}
+	return false
+}
+
+// privateRealtimeVoiceTranscriptIndicatesAction detects if the user's words
+// suggest an action that needs route_conversation_turn. Uses only TIGHT studio
+// detectors to avoid false positives on ordinary conversation.
+func privateRealtimeVoiceTranscriptIndicatesAction(transcript string) bool {
+	text := strings.TrimSpace(transcript)
+	if text == "" {
+		return false
+	}
+	// Deck/presentation request (tight detector that requires "deck"/"slides"/
+	// "presentation" with a creation verb)
+	if scoutChatDeckRequestDetected(text) {
+		return true
+	}
+	// Image generation request (tight detector that requires explicit image ask)
+	if scoutChatImageRequestDetected(text) {
+		return true
+	}
+	// No other patterns — deliberately avoiding:
+	// - scoutTurnAppearsWorkShaped (matches "does that make sense?", "I'll send it")
+	// - Unavailable Contains (matches "I have to leave for lunch")
+	// The text router handles ambiguous cases; voice defaults to conversational.
+	return false
 }
 
 // privateRealtimeVoiceServerActionAllowed retains the pre-E10 executors only

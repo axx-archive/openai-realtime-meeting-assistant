@@ -116,8 +116,10 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	if create := turnDetection["create_response"]; create != true {
 		t.Fatalf("private turn_detection.create_response=%v, want true", create)
 	}
-	if effort := session["reasoning"].(map[string]any)["effort"]; effort != "high" {
-		t.Fatalf("private reasoning effort=%v, want high", effort)
+	// Conversational voice uses medium effort for tight latency. High effort
+	// causes perceivable "thinking" delay that breaks conversational flow.
+	if effort := session["reasoning"].(map[string]any)["effort"]; effort != "medium" {
+		t.Fatalf("private reasoning effort=%v, want medium for conversational latency", effort)
 	}
 
 	tools, ok := session["tools"].([]map[string]any)
@@ -146,16 +148,20 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
-	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
-		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)
+	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
+	// on the first response with no route HTTP. The client flips to auto via
+	// session.update only when the user's transcription indicates an action.
+	if toolChoice := session["tool_choice"]; toolChoice != "none" {
+		t.Fatalf("tool_choice=%v, want none so ordinary talk speaks first without route HTTP", toolChoice)
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{
 		"private Stride voice assistant",
 		"outside the video room",
 		"You are NOT the room's shared voice",
-		"call route_conversation_turn exactly once",
-		"conversational_reply, clarify_once, start_private_work, approval_required, or unavailable",
+		"speak your answer directly",
+		"For explicit action requests",
+		"call route_conversation_turn with the user's exact words",
 		"never choose a tool, deliverable template, model, provider",
 		"The Kanban Board is retired",
 		"Current Work and Project context is server-resolved",
@@ -164,6 +170,195 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
 		}
+	}
+}
+
+func TestPrivateRealtimeVoiceShouldRouteOrdinaryTalkStaysFalse(t *testing.T) {
+	// Ordinary conversation should NOT trigger shouldRoute
+	ordinaryTalk := []string{
+		"does that make sense",
+		"Does that make sense?",
+		"let me write that down",
+		"I'll send it later",
+		"share your thoughts",
+		"I like that picture",
+		"going away for lunch",
+		"I have to leave for the meeting",
+		"stepping away from my desk",
+	}
+	for _, text := range ordinaryTalk {
+		if privateRealtimeVoiceTranscriptIndicatesAction(text) {
+			t.Errorf("privateRealtimeVoiceTranscriptIndicatesAction(%q) = true, want false", text)
+		}
+	}
+	// Bare confirmations should NOT be detected as actions
+	bareConfirmations := []string{"ok", "great", "yes", "Yes.", "Yes!"}
+	for _, text := range bareConfirmations {
+		if privateRealtimeVoiceTranscriptIndicatesAction(text) {
+			t.Errorf("privateRealtimeVoiceTranscriptIndicatesAction(%q) = true, want false (confirmations need direction pass)", text)
+		}
+	}
+}
+
+func TestPrivateRealtimeVoiceShouldRouteStudioAsksWork(t *testing.T) {
+	// Named studio asks should trigger shouldRoute
+	studioAsks := []string{
+		"make a 5-slide deck",
+		"create a deck about our product",
+		"build a pitch deck",
+		"make me a presentation",
+		"generate an image of a sunset",
+		"create a picture of a logo",
+	}
+	for _, text := range studioAsks {
+		if !privateRealtimeVoiceTranscriptIndicatesAction(text) {
+			t.Errorf("privateRealtimeVoiceTranscriptIndicatesAction(%q) = false, want true", text)
+		}
+	}
+}
+
+func TestPrivateRealtimeVoiceConfirmationStripsPunctuation(t *testing.T) {
+	// ASR punctuation should be stripped
+	confirmationsWithPunctuation := []string{
+		"Yes.",
+		"Yes!",
+		"yes,",
+		"Ok.",
+		"OK!",
+		"Sure!",
+		"Go ahead.",
+		"Perfect!",
+	}
+	for _, text := range confirmationsWithPunctuation {
+		if !privateRealtimeVoiceIsConfirmation(text) {
+			t.Errorf("privateRealtimeVoiceIsConfirmation(%q) = false, want true (should strip punctuation)", text)
+		}
+	}
+}
+
+func TestPrivateRealtimeVoiceOrdinaryQuestionPlusYesStaysFalse(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	user := &userAccount{Email: "test@example.com", Name: "Test"}
+
+	// Create a thread where Scout asked an ordinary conversational question
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Add Scout message with an ordinary question — this is NOT a direction pass
+	// because IntentOutcome=conversational_reply, not clarify_once
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID:            "scout-msg-1",
+		Kind:          "message",
+		Role:          "assistant",
+		AuthorName:    "Scout",
+		IntentOutcome: string(conversationIntentConversationalReply),
+		Text:          "How's the week going?",
+		CreatedAt:     "2024-01-01T00:00:00Z",
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	// "yes" should NOT route — ordinary question is not a direction pass
+	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
+		t.Error("shouldRoute('yes') = true after ordinary question 'How's the week going?', want false")
+	}
+	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yeah") {
+		t.Error("shouldRoute('yeah') = true after ordinary question, want false")
+	}
+}
+
+func TestPrivateRealtimeVoiceProseDirectionPassPlusYesRoutes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	user := &userAccount{Email: "test@example.com", Name: "Test"}
+
+	// Create a thread where Scout asked an Approach B prose direction pass
+	// (Kind=message but IntentOutcome=clarify_once)
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Add a prose direction pass — Kind=message with IntentOutcome=clarify_once
+	// This is Approach B: Scout asks about work direction in a regular message
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID:            "scout-msg-1",
+		Kind:          "message",
+		Role:          "assistant",
+		AuthorName:    "Scout",
+		IntentOutcome: string(conversationIntentClarifyOnce),
+		Text:          "What's the deck about — a tight typographic deck?",
+		CreatedAt:     "2024-01-01T00:00:00Z",
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	// "yes" should route — prose direction pass is pending
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
+		t.Error("shouldRoute('yes') = false after prose direction pass 'What's the deck about...', want true")
+	}
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "Yes.") {
+		t.Error("shouldRoute('Yes.') = false after prose direction pass, want true")
+	}
+
+	// Add user response - direction pass should clear
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID:        "user-msg-1",
+		Kind:      "message",
+		Role:      "user",
+		Text:      "Company overview",
+		CreatedAt: "2024-01-01T00:00:01Z",
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	// "yes" should NOT route without pending direction pass
+	if app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
+		t.Error("shouldRoute('yes') = true after user response cleared direction pass, want false")
+	}
+}
+
+func TestPrivateRealtimeVoiceChoicesCardPlusYesRoutes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	user := &userAccount{Email: "test@example.com", Name: "Test"}
+
+	// Create a thread where Scout asked a formal choices card direction pass
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Add a formal choices card — Kind=choices with IntentOutcome=clarify_once
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID:            "scout-choices-1",
+		Kind:          scoutChatMessageKindChoices,
+		Role:          "assistant",
+		AuthorName:    "Scout",
+		IntentOutcome: string(conversationIntentClarifyOnce),
+		Text:          "What topic should the deck cover?",
+		CreatedAt:     "2024-01-01T00:00:00Z",
+		Choices: &scoutChatChoices{
+			Question: "What topic should the deck cover?",
+			Options: []scoutChatChoiceOption{
+				{ID: "1", Label: "Company overview"},
+				{ID: "2", Label: "Product launch"},
+			},
+		},
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	// "yes" should route — choices card direction pass is pending
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "yes") {
+		t.Error("shouldRoute('yes') = false after choices card, want true")
+	}
+	if !app.privateRealtimeVoiceShouldRoute(thread.ID, "Yeah!") {
+		t.Error("shouldRoute('Yeah!') = false after choices card, want true")
 	}
 }
 

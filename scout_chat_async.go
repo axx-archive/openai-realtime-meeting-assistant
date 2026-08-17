@@ -645,6 +645,16 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 		if choices := verdict.choices; choices != nil {
 			return scoutChatMessageRecord{Kind: scoutChatMessageKindChoices, Role: "scout", Text: choices.Question, Choices: choices}, nil
 		}
+		if directionPass := verdict.directionPass; directionPass != "" {
+			// Approach B: prose direction pass — Kind=message with IntentOutcome=clarify_once
+			return scoutChatMessageRecord{
+				Kind:          "message",
+				Role:          "scout",
+				AuthorName:    scoutParticipantName,
+				Text:          directionPass,
+				IntentOutcome: string(conversationIntentClarifyOnce),
+			}, nil
+		}
 	}
 	// When the worker is unavailable and the user is asking for a deck, generate
 	// an HTML deck directly instead of falling through to a markdown outline.

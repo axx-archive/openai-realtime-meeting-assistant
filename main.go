@@ -1186,6 +1186,9 @@ func main() {
 	// here and the server ledgers it under seat voice_private.
 	http.HandleFunc("/assistant/realtime/usage", assistantRealtimeUsageHandler)
 	http.HandleFunc("/assistant/realtime/milestone", assistantRealtimeMilestoneHandler)
+	// Conversational voice: client asks whether to enable tools for an action turn.
+	// Session default is tool_choice=none; this endpoint decides when to flip.
+	http.HandleFunc("/assistant/realtime/should-route", assistantRealtimeShouldRouteHandler)
 	// W0-9: signed-in JSON twin of the living Spend & Health artifact.
 	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
 	http.HandleFunc("/api/consent", consentHandler)

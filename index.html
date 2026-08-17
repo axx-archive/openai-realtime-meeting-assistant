@@ -34319,6 +34319,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceAudio
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
+      // Conversational voice: track pending action classification for tool_choice
+      // flip. Session default is none; server decides when to flip to auto.
+      // Timing: transcription may arrive before or after response.done.
+      let privateRealtimeVoicePendingRouteCheck = null // { shouldRoute, resolved }
+      let privateRealtimeVoiceResponseDoneWithoutTool = false
       let privateRealtimeVoiceSessionToken = 0
       let privateRealtimeVoiceID = ''
       let privateRealtimeVoiceThreadID = ''
@@ -44570,6 +44575,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
           privateRealtimeVoicePeer = peer
           privateRealtimeVoiceHandledCalls = new Set()
+          privateRealtimeVoicePendingRouteCheck = null
+          privateRealtimeVoiceResponseDoneWithoutTool = false
           peer.ontrack = event => {
             if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
             postPrivateRealtimeMilestone('remote_track')
@@ -45357,6 +45364,40 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }, { once: true })
       }
 
+      // Conversational voice: check server to see if we should flip tool_choice
+      // from none to auto for this utterance. Server decides based on:
+      // - Riff-bound sessions (always need route)
+      // - Transcript content (action keywords, studio asks, confirmations)
+      async function checkPrivateRealtimeShouldRoute(transcript, sessionToken, peer) {
+        if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+        if (!privateRealtimeVoiceActive()) return
+        try {
+          const response = await postAuthJSON('/assistant/realtime/should-route', {
+            voiceSessionId: privateRealtimeVoiceID,
+            threadId: privateRealtimeVoiceThreadID,
+            transcript: transcript || '',
+            leaseToken: privateRealtimeVoiceLeaseToken,
+            leaseGeneration: privateRealtimeVoiceLeaseGeneration,
+            transportRevision: privateRealtimeVoiceTransportRevision
+          })
+          if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+          if (!privateRealtimeVoiceActive()) return
+          const shouldRoute = Boolean(response.data?.shouldRoute)
+          // Store result for when response.done arrives (or fire now if it already did)
+          if (privateRealtimeVoicePendingRouteCheck) {
+            privateRealtimeVoicePendingRouteCheck.shouldRoute = shouldRoute
+            privateRealtimeVoicePendingRouteCheck.resolved = true
+          }
+          // If response.done already happened without tools, flip now
+          if (shouldRoute && privateRealtimeVoiceResponseDoneWithoutTool) {
+            privateRealtimeVoiceResponseDoneWithoutTool = false
+            enablePrivateRealtimeToolsForAction(sessionToken, peer)
+          }
+        } catch {
+          // Classification failed — don't flip (ordinary talk continues)
+        }
+      }
+
       function handlePrivateRealtimeVoiceEvent(raw, sessionToken, peer) {
         if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
         let event
@@ -45368,6 +45409,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const type = String(event?.type || '')
         if (!type) {
           return
+        }
+        // Capture user's input transcription for action detection (server-side).
+        // Transcription may arrive before or after response.done.
+        if (type.includes('input_audio_transcription') && type.includes('completed')) {
+          const transcript = String(event.transcript || '').trim()
+          // Initialize pending check state
+          privateRealtimeVoicePendingRouteCheck = { shouldRoute: false, resolved: false }
+          // Ask server if we should route (async — may complete after response.done)
+          void checkPrivateRealtimeShouldRoute(transcript, sessionToken, peer)
         }
         // During Act II only, feed Scout's own spoken lines into the struck-
         // question ritual (Act I is pitch capture — her "pitch me" prompt is not
@@ -45390,7 +45440,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // active". Wait for the exact terminal response before continuing.
           const toolCalls = interrupted ? [] : (event.response?.output || [])
             .filter(item => item?.type === 'function_call')
-          if (toolCalls.length) void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
+          if (toolCalls.length) {
+            // Tool calls present — process them, don't flip
+            privateRealtimeVoiceResponseDoneWithoutTool = false
+            privateRealtimeVoicePendingRouteCheck = null
+            void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
+          } else if (!interrupted) {
+            // No tool calls — check if we should flip for action
+            if (privateRealtimeVoicePendingRouteCheck?.resolved && privateRealtimeVoicePendingRouteCheck?.shouldRoute) {
+              // Classification already done and says route — flip now
+              privateRealtimeVoicePendingRouteCheck = null
+              privateRealtimeVoiceResponseDoneWithoutTool = false
+              enablePrivateRealtimeToolsForAction(sessionToken, peer)
+            } else if (privateRealtimeVoicePendingRouteCheck && !privateRealtimeVoicePendingRouteCheck.resolved) {
+              // Classification still pending (late ASR) — mark that response is done
+              // When classification completes, it will check this flag and flip
+              privateRealtimeVoiceResponseDoneWithoutTool = true
+            } else {
+              // No pending check (no transcription) — ordinary talk, done
+              privateRealtimeVoiceResponseDoneWithoutTool = false
+            }
+          }
           // W0 usage beacon: the private voice peer is browser-owned, so this
           // page is the only place its usage exists — post each response.done
           // usage object to the server ledger (seat voice_private).
@@ -45405,8 +45475,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         } else if (type.includes('speech_started')) {
           setVoiceIslandState('hearing', 'listening…')
+          // New utterance — clear stale state
+          privateRealtimeVoicePendingRouteCheck = null
+          privateRealtimeVoiceResponseDoneWithoutTool = false
         } else if (type.includes('speech_stopped')) {
-          setVoiceIslandState('thinking', 'thinking…')
+          // Conversational voice: do NOT flip to thinking on speech_stopped.
+          // Stay in listening/hearing state until first_audio arrives, so the
+          // user doesn't see a "thinking" beat before every response. The model
+          // should speak first without a visible routing/thinking delay.
         } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
           postPrivateRealtimeMilestone('first_audio')
           setVoiceIslandState('talking', 'answering…')
@@ -45415,6 +45491,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('listening', 'listening…')
           }
         }
+      }
+
+      // Conversational voice: flip tool_choice to auto and create a follow-up
+      // response so the model can call route_conversation_turn for action requests.
+      // The model's first response (with tool_choice=none) already spoke; this
+      // follow-up lets it complete the action.
+      function enablePrivateRealtimeToolsForAction(sessionToken, peer) {
+        if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+        if (!privateRealtimeVoiceActive()) return
+        // Flip tool_choice to auto so model can call route_conversation_turn
+        sendPrivateRealtimeEvent({
+          type: 'session.update',
+          session: { tool_choice: 'auto' }
+        })
+        // Create follow-up response — the model sees the conversation history
+        // and will call route_conversation_turn for the pending action request.
+        // Use tool_choice=auto for this response only; continuePrivateRealtimeToolCalls
+        // will reset to none after the tool call completes.
+        sendPrivateRealtimeEvent({
+          type: 'response.create',
+          response: {
+            tool_choice: 'auto'
+          }
+        })
       }
 
       // W0 private-voice usage beacon (model-routing plan, founder decision 3):
@@ -45760,6 +45860,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (sessionToken !== privateRealtimeVoiceSessionToken
           || privateRealtimeVoicePeer !== peer
           || !privateRealtimeVoiceActive()) return
+        // Reset session tool_choice to none so subsequent VAD-triggered responses
+        // speak first without route HTTP. Action requests will flip to auto again.
+        sendPrivateRealtimeEvent({
+          type: 'session.update',
+          session: { tool_choice: 'none' }
+        })
         sendPrivateRealtimeEvent({
           type: 'response.create',
           response: {
@@ -45784,9 +45890,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         privateRealtimeVoiceHandledCalls.add(callId)
         // announce beat: posting-as-user pauses on a consent-signalling
         // hand-raised state; every other action shows the ember "acting" state
-        // with the live verb. do_nothing stays quiet.
-        if (name === 'do_nothing') {
-          setVoiceIslandState('thinking', 'thinking…')
+        // with the live verb. do_nothing and route_conversation_turn stay quiet
+        // — conversational voice must not show an "acting" beat or toast before
+        // audio arrives (tight back-and-forth like talking to a person).
+        if (name === 'do_nothing' || name === 'route_conversation_turn') {
+          // Stay in current state — no acting/thinking beat for conversational turns
         } else if (name === 'start_chat_as_user') {
           setVoiceIslandState('hand-raised', scoutActionVerb(name, 'announce'))
         } else {
@@ -45850,9 +45958,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           // confirm beat: on a successful mutating action, record the ledger
           // line, drop a durable toast receipt, and show the confirm verb. Pure
-          // reads (read_thread_aloud, answer_memory_question, do_nothing) and the
-          // grill ritual (its own stage IS the feedback) don't earn a receipt.
-          const mutating = name !== 'do_nothing' && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
+          // reads (read_thread_aloud, answer_memory_question, do_nothing),
+          // route_conversation_turn (conversation router, not a visible mutation),
+          // and the grill ritual (its own stage IS the feedback) don't earn a receipt.
+          const mutating = name !== 'do_nothing' && name !== 'route_conversation_turn'
+            && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
             && name !== 'start_private_grill' && name !== 'end_private_grill'
           if (output?.ok !== false && mutating) {
             recordScoutAction(name, output)
@@ -45860,7 +45970,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
           } else if (output?.ok === false && output?.error) {
             setVoiceIslandState('error', String(output.error))
-          } else {
+          } else if (name !== 'do_nothing' && name !== 'route_conversation_turn') {
+            // Non-mutating tools that aren't quiet (do_nothing/route) still show acting
             setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
           }
         } catch (error) {
@@ -45908,6 +46019,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
+        privateRealtimeVoicePendingRouteCheck = null
+        privateRealtimeVoiceResponseDoneWithoutTool = false
         privateRealtimeVoiceID = ''
         privateRealtimeVoiceThreadID = ''
         privateRealtimeVoiceTransportRevision = 0

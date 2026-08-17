@@ -26,7 +26,8 @@ export function realtimeStatusForEvent(
 ): PersonalRealtimeStatus {
   if (type === 'error') return 'error';
   if (type.includes('speech_started')) return 'hearing';
-  if (type.includes('speech_stopped')) return 'thinking';
+  // Conversational voice: do NOT flip to thinking on speech_stopped. Stay in
+  // listening/hearing until first_audio so there's no visible "thinking" beat.
   if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) return 'talking';
   if (type.includes('response.done') || type.includes('output_audio_buffer.stopped')) return 'listening';
   return current;
