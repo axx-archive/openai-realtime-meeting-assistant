@@ -42458,49 +42458,98 @@ Wrap the entire export in one code block. After the code block, say whether the 
               slideHtml = slideHtml.replace(/class\s*=\s*'([^']*)'/, "class='$1 on'")
             }
           }
-          // JS for scaling + making text editable + syncing changes
+          // JS for scaling + making text editable/draggable + syncing changes
           const editScript = '<script>(function(){' +
             'var s=document.getElementById("stage");if(!s)return;' +
+            'var scale=1;' +
             // Scaling
             'function fit(){' +
             'var w=innerWidth,h=innerHeight;' +
             'if(w<1||h<1)return;' +
-            'var scale=Math.min(w/1920,h/1080);' +
+            'scale=Math.min(w/1920,h/1080);' +
             's.style.transform="scale("+scale+")";' +
             '}' +
             'fit();setTimeout(fit,0);setTimeout(fit,16);setTimeout(fit,100);setTimeout(fit,300);' +
             'window.onresize=fit;window.onload=fit;' +
-            // Make text elements editable
-            'var textEls=s.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,li,td,th,figcaption,blockquote,label");' +
+            // Track active element and drag state
             'var activeEl=null;' +
+            'var dragState=null;' +
+            // Parse existing transform translate values
+            'function getTranslate(el){' +
+            'var t=el.style.transform||"";' +
+            'var m=t.match(/translate\\(([^,]+),([^)]+)\\)/);' +
+            'if(m)return{x:parseFloat(m[1])||0,y:parseFloat(m[2])||0};' +
+            'return{x:0,y:0};' +
+            '}' +
+            // Set transform translate (preserves other transforms)
+            'function setTranslate(el,x,y){' +
+            'var t=el.style.transform||"";' +
+            't=t.replace(/translate\\([^)]+\\)/g,"").trim();' +
+            'el.style.transform="translate("+x+"px,"+y+"px) "+t;' +
+            '}' +
+            // Make text elements editable and draggable
+            'var textEls=s.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,li,td,th,figcaption,blockquote,label,img");' +
             'textEls.forEach(function(el){' +
-            // Skip elements that only contain other elements (no direct text)
+            // Skip elements that only contain other elements (no direct text) unless it is an img
+            'var isImg=el.tagName==="IMG";' +
+            'if(!isImg){' +
             'var hasDirectText=false;' +
             'for(var i=0;i<el.childNodes.length;i++){' +
             'if(el.childNodes[i].nodeType===3&&el.childNodes[i].textContent.trim()){hasDirectText=true;break;}' +
             '}' +
             'if(!hasDirectText&&!el.innerText.trim())return;' +
+            '}' +
             // Add hover effect
-            'el.style.cursor="text";' +
+            'el.style.cursor="move";' +
             'el.addEventListener("mouseenter",function(){' +
             'if(activeEl!==el)el.style.outline="2px solid rgba(255,140,0,0.5)";' +
             '});' +
             'el.addEventListener("mouseleave",function(){' +
-            'if(activeEl!==el)el.style.outline="none";' +
+            'if(activeEl!==el&&!dragState)el.style.outline="none";' +
             '});' +
-            // Click to edit
-            'el.addEventListener("click",function(e){' +
-            'e.stopPropagation();' +
-            'if(activeEl&&activeEl!==el){activeEl.contentEditable="false";activeEl.style.outline="none";}' +
-            'activeEl=el;' +
-            'el.contentEditable="true";' +
+            // Mousedown - start potential drag
+            'el.addEventListener("mousedown",function(e){' +
+            'if(el.contentEditable==="true")return;' +
+            'e.preventDefault();e.stopPropagation();' +
+            'var tr=getTranslate(el);' +
+            'dragState={el:el,startX:e.clientX,startY:e.clientY,origX:tr.x,origY:tr.y,moved:false};' +
             'el.style.outline="2px solid #ff8c00";' +
-            'el.focus();' +
             '});' +
             // Input handler - notify parent
             'el.addEventListener("input",function(){' +
             'parent.postMessage({type:"slideEdit",html:s.innerHTML},"*");' +
             '});' +
+            '});' +
+            // Global mousemove for dragging
+            'document.addEventListener("mousemove",function(e){' +
+            'if(!dragState)return;' +
+            'var dx=(e.clientX-dragState.startX)/scale;' +
+            'var dy=(e.clientY-dragState.startY)/scale;' +
+            'if(Math.abs(dx)>3||Math.abs(dy)>3)dragState.moved=true;' +
+            'if(dragState.moved){' +
+            'setTranslate(dragState.el,dragState.origX+dx,dragState.origY+dy);' +
+            '}' +
+            '});' +
+            // Global mouseup - end drag or activate edit
+            'document.addEventListener("mouseup",function(e){' +
+            'if(!dragState)return;' +
+            'var el=dragState.el;' +
+            'var wasMoved=dragState.moved;' +
+            'dragState=null;' +
+            'if(wasMoved){' +
+            // Was a drag - sync position
+            'parent.postMessage({type:"slideEdit",html:s.innerHTML},"*");' +
+            'el.style.outline="2px solid rgba(255,140,0,0.5)";' +
+            '}else{' +
+            // Was a click - enable editing (for text elements)
+            'if(el.tagName!=="IMG"){' +
+            'if(activeEl&&activeEl!==el){activeEl.contentEditable="false";activeEl.style.outline="none";}' +
+            'activeEl=el;' +
+            'el.contentEditable="true";' +
+            'el.style.outline="2px solid #ff8c00";' +
+            'el.focus();' +
+            '}' +
+            '}' +
             '});' +
             // Click on stage background deselects
             's.addEventListener("click",function(e){' +
@@ -42508,10 +42557,53 @@ Wrap the entire export in one code block. After the code block, say whether the 
             'if(activeEl){activeEl.contentEditable="false";activeEl.style.outline="none";activeEl=null;}' +
             '}' +
             '});' +
+            // Touch support for iPad
+            'var touchDrag=null;' +
+            'document.addEventListener("touchstart",function(e){' +
+            'var t=e.touches[0];if(!t)return;' +
+            'var el=document.elementFromPoint(t.clientX,t.clientY);' +
+            'if(!el||!el.style)return;' +
+            'var found=null;' +
+            'textEls.forEach(function(te){if(te===el||te.contains(el))found=te;});' +
+            'if(!found||found.contentEditable==="true")return;' +
+            'e.preventDefault();' +
+            'var tr=getTranslate(found);' +
+            'touchDrag={el:found,startX:t.clientX,startY:t.clientY,origX:tr.x,origY:tr.y,moved:false};' +
+            'found.style.outline="2px solid #ff8c00";' +
+            '},{passive:false});' +
+            'document.addEventListener("touchmove",function(e){' +
+            'if(!touchDrag)return;' +
+            'var t=e.touches[0];if(!t)return;' +
+            'e.preventDefault();' +
+            'var dx=(t.clientX-touchDrag.startX)/scale;' +
+            'var dy=(t.clientY-touchDrag.startY)/scale;' +
+            'if(Math.abs(dx)>3||Math.abs(dy)>3)touchDrag.moved=true;' +
+            'if(touchDrag.moved){' +
+            'setTranslate(touchDrag.el,touchDrag.origX+dx,touchDrag.origY+dy);' +
+            '}' +
+            '},{passive:false});' +
+            'document.addEventListener("touchend",function(e){' +
+            'if(!touchDrag)return;' +
+            'var el=touchDrag.el;' +
+            'var wasMoved=touchDrag.moved;' +
+            'touchDrag=null;' +
+            'if(wasMoved){' +
+            'parent.postMessage({type:"slideEdit",html:s.innerHTML},"*");' +
+            'el.style.outline="2px solid rgba(255,140,0,0.5)";' +
+            '}else{' +
+            'if(el.tagName!=="IMG"){' +
+            'if(activeEl&&activeEl!==el){activeEl.contentEditable="false";activeEl.style.outline="none";}' +
+            'activeEl=el;' +
+            'el.contentEditable="true";' +
+            'el.style.outline="2px solid #ff8c00";' +
+            'el.focus();' +
+            '}' +
+            '}' +
+            '});' +
             '})();<\/script>'
           const slideVisibility = '.pg,.slide,section{display:none!important}' +
             '.pg.on,.slide.on,section.on{display:flex!important}'
-          const editStyles = '[contenteditable="true"]{outline:2px solid #ff8c00!important;outline-offset:2px;min-width:20px;min-height:1em;}'
+          const editStyles = '[contenteditable="true"]{outline:2px solid #ff8c00!important;outline-offset:2px;min-width:20px;min-height:1em;cursor:text!important;}'
           return '<!doctype html><html><head><meta charset="utf-8">' +
             state.styleBlocks +
             '<style>' +
