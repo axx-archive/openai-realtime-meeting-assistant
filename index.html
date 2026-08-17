@@ -12279,11 +12279,14 @@
         padding: 10px 16px;
         background: var(--surface-1);
         border-bottom: 1px solid var(--line-1);
+        overflow: visible;
       }
       .deck-editor__toolbar-left {
+        flex: none;
         display: flex;
         align-items: center;
         gap: 8px;
+        min-width: 0;
       }
       .deck-editor__toolbar-center {
         flex: 1;
@@ -12291,8 +12294,11 @@
         align-items: center;
         justify-content: center;
         gap: 4px;
+        min-width: 0;
+        overflow: hidden;
       }
       .deck-editor__toolbar-right {
+        flex: none;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -12303,6 +12309,8 @@
         font-weight: 600;
         color: var(--text-1);
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 240px;
@@ -12645,9 +12653,14 @@
           padding: 12px;
         }
         .deck-editor__title {
-          max-width: 120px;
+          max-width: 100px;
         }
         .deck-editor__btn--icon span {
+          display: none;
+        }
+        /* Hide some center toolbar items on smaller screens */
+        .deck-editor__toolbar-center [data-action="add-text"],
+        .deck-editor__toolbar-center [data-action="add-image"] {
           display: none;
         }
       }
@@ -12665,6 +12678,20 @@
         }
         .deck-editor__canvas iframe {
           --canvas-scale: calc((100vw - 100px) / 1920);
+        }
+        .deck-editor__title {
+          max-width: 80px;
+        }
+        /* Hide center tools on phone, keep only slide nav */
+        .deck-editor__toolbar-center [data-action="add-text"],
+        .deck-editor__toolbar-center [data-action="add-image"],
+        .deck-editor__toolbar-center [data-action="bring-front"],
+        .deck-editor__toolbar-center [data-action="send-back"] {
+          display: none;
+        }
+        /* Compact Present button on phone */
+        .deck-editor__toolbar-right [data-action="present"] span {
+          display: none;
         }
       }
 
