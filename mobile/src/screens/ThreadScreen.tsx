@@ -258,6 +258,7 @@ type ThreadMessageRowProps = {
   onSaveWorkArtifact: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact: (message: ScoutMessage) => void;
+  onViewArtifactFullscreen: (message: ScoutMessage) => void;
   onSaveImage: (message: ScoutMessage) => void;
   onRegenerateImage: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
@@ -293,6 +294,7 @@ const ThreadMessageRow = React.memo(
     onSaveWorkArtifact,
     onOpenSavedWorkArtifact,
     onRegenerateWorkArtifact,
+    onViewArtifactFullscreen,
     onSaveImage,
     onRegenerateImage,
     onOpenCatchUp,
@@ -360,6 +362,7 @@ const ThreadMessageRow = React.memo(
           onSaveWorkArtifact={onSaveWorkArtifact}
           onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}
           onRegenerateWorkArtifact={onRegenerateWorkArtifact}
+          onViewArtifactFullscreen={onViewArtifactFullscreen}
           onSaveImage={onSaveImage}
           onRegenerateImage={onRegenerateImage}
           resolvingProposal={resolvingProposal}
@@ -403,6 +406,7 @@ const ThreadMessageRow = React.memo(
     previous.onSaveWorkArtifact === next.onSaveWorkArtifact &&
     previous.onOpenSavedWorkArtifact === next.onOpenSavedWorkArtifact &&
     previous.onRegenerateWorkArtifact === next.onRegenerateWorkArtifact &&
+    previous.onViewArtifactFullscreen === next.onViewArtifactFullscreen &&
     previous.onSaveImage === next.onSaveImage &&
     previous.onRegenerateImage === next.onRegenerateImage &&
     previous.onOpenCatchUp === next.onOpenCatchUp &&
@@ -2818,6 +2822,29 @@ export function ThreadScreen({ route, navigation }: Props) {
     [navigation],
   );
 
+  const viewArtifactFullscreen = useCallback(
+    (message: ScoutMessage) => {
+      const artifactId = String(message.thread?.artifactId ?? "").trim();
+      const mode = String(message.thread?.mode ?? "").toLowerCase();
+      const title = String(message.thread?.resultTitle ?? "Deliverable").trim();
+      
+      if (!artifactId) {
+        setError("This deliverable is not ready to view yet.");
+        return;
+      }
+      
+      // Open in web viewer via OSWeb - proper fullscreen deck/artifact view
+      // This does NOT dump to LongMessageSheet
+      const isDeck = /^(html_deck|deck|presentation|slides?)$/u.test(mode);
+      const path = isDeck
+        ? `/artifact/${artifactId}?present=true`
+        : `/artifact/${artifactId}`;
+      
+      navigation.navigate("OSWeb", { path, title });
+    },
+    [navigation],
+  );
+
   const beginSaveChatAttachment = useCallback(() => {
     const target = actionMessage?.attachment;
     if (!target) return;
@@ -3021,6 +3048,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onSaveWorkArtifact={beginSaveWorkArtifact}
         onOpenSavedWorkArtifact={openSavedWorkArtifact}
         onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
+        onViewArtifactFullscreen={viewArtifactFullscreen}
         onSaveImage={saveGeneratedImage}
         onRegenerateImage={regenerateGeneratedImage}
         onOpenCatchUp={openCatchUp}
@@ -3044,6 +3072,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       openWorkstreamCorrection,
       openSavedWorkArtifact,
       openThreadContext,
+      viewArtifactFullscreen,
       regenerateGeneratedImage,
       regeneratingImageID,
       regeneratingWorkID,

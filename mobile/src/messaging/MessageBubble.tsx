@@ -30,46 +30,39 @@ import {
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
- * Returns null if the artifact kind cannot be determined or is not supported.
+ *
+ * Checks message.thread.mode (live path) first, then message.work.
+ * Does NOT infer kind from title/summary keywords alone — mode must be explicit.
  */
 function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
+  // Live path: kind=thread uses message.thread.mode
+  const threadMode = String(message.thread?.mode ?? '').toLowerCase();
+  if (threadMode) {
+    if (/^(html_deck|deck|presentation|slides?)$/u.test(threadMode)) return 'html_deck';
+    if (/^(table|data_table|spreadsheet)$/u.test(threadMode)) return 'table';
+    if (/^(ideation|ideas|brainstorm)$/u.test(threadMode)) return 'ideation';
+    if (/^(research|deep_research|report|analysis)$/u.test(threadMode)) return 'research';
+    if (/^(document|doc|memo|brief)$/u.test(threadMode)) return 'document';
+  }
+
+  // Governed work path: check explicit artifact kind fields
   const work = message.work;
-  if (!work) return null;
+  if (work) {
+    const kind = String(
+      (work as Record<string, unknown>).artifactKind ??
+      (work as Record<string, unknown>).workKind ??
+      (work as Record<string, unknown>).outputKind ??
+      ''
+    ).toLowerCase();
 
-  // Check for explicit artifact kind from various possible field names
-  const kind = String(
-    (work as Record<string, unknown>).artifactKind ??
-    (work as Record<string, unknown>).workKind ??
-    (work as Record<string, unknown>).outputKind ??
-    ''
-  ).toLowerCase();
-
-  if (kind === 'html_deck' || kind === 'presentation' || kind === 'deck' || kind === 'slides') {
-    return 'html_deck';
-  }
-  if (kind === 'table' || kind === 'data_table' || kind === 'spreadsheet') {
-    return 'table';
-  }
-  if (kind === 'ideation' || kind === 'ideas' || kind === 'brainstorm') {
-    return 'ideation';
-  }
-  if (kind === 'research' || kind === 'report' || kind === 'analysis') {
-    return 'research';
-  }
-  if (kind === 'document' || kind === 'doc' || kind === 'text') {
-    return 'document';
+    if (/^(html_deck|deck|presentation|slides?)$/u.test(kind)) return 'html_deck';
+    if (/^(table|data_table|spreadsheet)$/u.test(kind)) return 'table';
+    if (/^(ideation|ideas|brainstorm)$/u.test(kind)) return 'ideation';
+    if (/^(research|deep_research|report|analysis)$/u.test(kind)) return 'research';
+    if (/^(document|doc|memo|brief)$/u.test(kind)) return 'document';
   }
 
-  // Fallback: try to infer from the work family label or summary keywords
-  const title = String(work.title ?? '').toLowerCase();
-  const summary = String(work.summary ?? '').toLowerCase();
-  const combined = `${title} ${summary}`;
-
-  if (/presentation|slides?|deck/iu.test(combined)) return 'html_deck';
-  if (/table|data|spreadsheet|csv/iu.test(combined)) return 'table';
-  if (/ideation|brainstorm|ideas/iu.test(combined)) return 'ideation';
-  if (/research|report|analysis|findings/iu.test(combined)) return 'research';
-
+  // Do NOT infer from title/summary keywords — mode must be explicit
   return null;
 }
 
@@ -107,6 +100,7 @@ export type MessageBubbleProps = {
   onSaveWorkArtifact?: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact?: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact?: (message: ScoutMessage) => void;
+  onViewArtifactFullscreen?: (message: ScoutMessage) => void;
   onSaveImage?: (message: ScoutMessage) => void;
   onRegenerateImage?: (message: ScoutMessage) => void;
   resolvingProposal?: boolean;
@@ -270,6 +264,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onSaveWorkArtifact,
   onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
+  onViewArtifactFullscreen,
   onSaveImage,
   onRegenerateImage,
   resolvingProposal = false,
@@ -519,8 +514,8 @@ export const MessageBubble = React.memo(function MessageBubble({
               text={String(workThread.ref.resultPreview ?? '')}
               agentName={workThread.agentName}
               onEdit={workThread.governedRecord ? undefined : () => onRegenerateWorkArtifact?.(message)}
-              onPresent={detectInlineArtifactKind(message) === 'html_deck' ? () => onOpenWorkArtifact?.(message) : undefined}
-              onExpand={() => onOpenWorkArtifact?.(message)}
+              onPresent={detectInlineArtifactKind(message) === 'html_deck' ? () => onViewArtifactFullscreen?.(message) : undefined}
+              onExpand={() => onViewArtifactFullscreen?.(message)}
             />
           ) : workThread ? (
             <View style={styles.workCard}>
