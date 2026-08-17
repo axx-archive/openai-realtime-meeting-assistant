@@ -21,6 +21,14 @@ type ChatNav = NativeStackNavigationProp<RootStackParamList>;
 const SPLIT_VIEW_MIN_WIDTH = 744;
 
 /**
+ * iPad workstation threshold — New conversation uses card presentation, not sheet.
+ *
+ * ≥1024pt (iPad Pro 11" landscape, iPad Pro 12.9" portrait): workstation surface.
+ * <1024pt: phone sheet. Chat split at ≥744 still holds separately.
+ */
+const WORKSTATION_MIN_WIDTH = 1024;
+
+/**
  * The Chat destination — list/thread split on iPad portrait.
  *
  * Phone: fills the content area with the list; tapping opens Thread full-screen.
@@ -35,6 +43,7 @@ export function ChatScreen() {
   const { width } = useWindowDimensions();
   const isIPad = Platform.OS === 'ios' && Platform.isPad;
   const showSplit = isIPad && width >= SPLIT_VIEW_MIN_WIDTH;
+  const useWorkstation = isIPad && width >= WORKSTATION_MIN_WIDTH;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
 
   const handleOpenThread = useCallback((thread: { id: string; title?: string }) => {
@@ -65,7 +74,7 @@ export function ChatScreen() {
                 <Pressable
                   accessibilityLabel="New conversation"
                   accessibilityRole="button"
-                  onPress={() => navigation.navigate('NewConversation')}
+                  onPress={() => navigation.navigate('NewConversation', { displayMode: useWorkstation ? 'workstation' : 'sheet' })}
                   style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
                 >
                   <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
@@ -108,7 +117,7 @@ export function ChatScreen() {
               <Pressable
                 accessibilityLabel="New conversation"
                 accessibilityRole="button"
-                onPress={() => navigation.navigate('NewConversation')}
+                onPress={() => navigation.navigate('NewConversation', { displayMode: useWorkstation ? 'workstation' : 'sheet' })}
                 style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
               >
                 <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />

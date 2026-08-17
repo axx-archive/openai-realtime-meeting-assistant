@@ -35,8 +35,10 @@ const kinds: Array<{
   { id: 'channel', label: 'Channel', detail: 'Visible to everyone in Bonfire', icon: 'number' },
 ];
 
-export function NewConversationScreen({ navigation }: Props) {
+export function NewConversationScreen({ navigation, route }: Props) {
   const { sessionToken } = useAuth();
+  const displayMode = route.params?.displayMode ?? 'sheet';
+  const isWorkstation = displayMode === 'workstation';
   const [kind, setKind] = useState<NewConversationKind>('private');
   const [title, setTitle] = useState('');
   const [saving, setSaving] = useState(false);
@@ -77,6 +79,117 @@ export function NewConversationScreen({ navigation }: Props) {
   }, [kind, saving]);
 
   const valid = Boolean(title.replace(/\s+/g, ' ').trim()) && title.replace(/\s+/g, ' ').trim().length <= 80;
+
+  // Workstation mode: web-class layout with rail visible, no phone chrome
+  if (isWorkstation) {
+    return (
+      <SafeAreaView style={styles.workstationSafe} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.workstationKeyboard}>
+          {/* Workstation header: back arrow + title, no Cancel text */}
+          <View style={styles.workstationHeader}>
+            <Pressable
+              accessibilityLabel="Back"
+              accessibilityRole="button"
+              onPress={() => navigation.goBack()}
+              style={({ pressed }) => [styles.workstationBack, pressed && styles.pressed]}
+            >
+              <SymbolView name="chevron.left" size={20} tintColor={colors.text1} />
+            </Pressable>
+            <Text accessibilityRole="header" style={styles.workstationTitle}>New conversation</Text>
+          </View>
+
+          <View style={styles.workstationContent}>
+            {/* Segmented control for kind selection (web-class tabs) */}
+            <View accessibilityRole="tablist" style={styles.workstationTabs}>
+              {kinds.map((item) => {
+                const selected = kind === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    accessibilityLabel={item.label}
+                    accessibilityHint={item.detail}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected }}
+                    onPress={() => selectKind(item.id)}
+                    style={({ pressed }) => [
+                      styles.workstationTab,
+                      selected && styles.workstationTabSelected,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <SymbolView name={item.icon} size={16} tintColor={selected ? colors.onAccent : colors.text2} />
+                    <Text style={[styles.workstationTabLabel, selected && styles.workstationTabLabelSelected]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Field in a card */}
+            <View style={styles.workstationCard}>
+              <Text style={styles.workstationFieldLabel}>
+                {kind === 'channel' ? 'Channel name' : 'Chat name'}
+              </Text>
+              <View style={styles.workstationField}>
+                {kind === 'channel' ? <Text style={styles.workstationPrefix}>#</Text> : null}
+                <TextInput
+                  accessibilityLabel={kind === 'channel' ? 'Channel name' : 'Private chat name'}
+                  autoCapitalize="sentences"
+                  autoCorrect
+                  autoFocus
+                  editable={!saving}
+                  enterKeyHint="done"
+                  maxLength={80}
+                  onChangeText={(value) => {
+                    setTitle(value);
+                    if (attemptRef.current?.title !== value.replace(/\s+/g, ' ').trim()) attemptRef.current = null;
+                    if (error) setError(null);
+                  }}
+                  onSubmitEditing={() => { void create(); }}
+                  placeholder={kind === 'channel' ? 'venture-review' : 'Investor research'}
+                  placeholderTextColor={colors.text3}
+                  returnKeyType="done"
+                  style={styles.workstationInput}
+                  value={title}
+                />
+              </View>
+              <Text style={styles.workstationHelp}>
+                {kind === 'channel'
+                  ? 'Everyone on the platform can find and join this channel.'
+                  : 'This stays private to your account and Scout.'}
+              </Text>
+            </View>
+
+            {error ? <Text accessibilityRole="alert" style={styles.workstationError}>{error}</Text> : null}
+
+            <Pressable
+              accessibilityLabel={kind === 'channel' ? 'Create channel' : 'Create private chat'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !valid || saving }}
+              disabled={!valid || saving}
+              onPress={() => { void create(); }}
+              style={({ pressed }) => [
+                styles.workstationCreate,
+                (!valid || saving) && styles.workstationCreateDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator color={colors.onAccent} />
+              ) : (
+                <Text style={styles.workstationCreateLabel}>
+                  {kind === 'channel' ? 'Create channel' : 'Start private chat'}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // Phone/sheet mode: original layout
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboard}>
@@ -165,6 +278,7 @@ export function NewConversationScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // Phone/sheet mode styles
   safe: { flex: 1, backgroundColor: colors.bgApp },
   keyboard: { flex: 1 },
   header: { minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space[3] },
@@ -192,4 +306,85 @@ const styles = StyleSheet.create({
   createDisabled: { opacity: 0.34 },
   createLabel: { ...type.button, color: colors.onAccent },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+
+  // Workstation mode styles (iPad ≥1024, rail visible, web-class layout)
+  workstationSafe: { flex: 1, backgroundColor: colors.bgApp },
+  workstationKeyboard: { flex: 1 },
+  workstationHeader: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space[5],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line1,
+  },
+  workstationBack: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+  },
+  workstationTitle: { ...type.title2, color: colors.text1 },
+  workstationContent: {
+    flex: 1,
+    maxWidth: 480,
+    alignSelf: 'center',
+    width: '100%',
+    padding: space[6],
+    gap: space[5],
+  },
+  workstationTabs: {
+    flexDirection: 'row',
+    gap: space[2],
+    padding: space[1],
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface2,
+  },
+  workstationTab: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    borderRadius: radius.md,
+  },
+  workstationTabSelected: {
+    backgroundColor: colors.accent,
+  },
+  workstationTabLabel: { ...type.bodyMedium, color: colors.text2 },
+  workstationTabLabelSelected: { color: colors.onAccent },
+  workstationCard: {
+    gap: space[3],
+    padding: space[5],
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  workstationFieldLabel: { ...type.label, color: colors.text2, textTransform: 'uppercase' },
+  workstationField: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+    paddingHorizontal: space[4],
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface2,
+  },
+  workstationPrefix: { ...type.title2, color: colors.text3 },
+  workstationInput: { ...type.body, flex: 1, minWidth: 0, minHeight: 50, color: colors.text1 },
+  workstationHelp: { ...type.bodySm, color: colors.text2 },
+  workstationError: { ...type.bodySm, color: colors.danger, textAlign: 'center' },
+  workstationCreate: {
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
+  },
+  workstationCreateDisabled: { opacity: 0.34 },
+  workstationCreateLabel: { ...type.button, color: colors.onAccent },
 });

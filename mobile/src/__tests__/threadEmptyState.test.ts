@@ -47,7 +47,11 @@ test("iPad keeps destination, conversation, and selected thread context together
   assert.match(screen, /selectedThreadId=\{privateRiff\?\.sourceThreadId \?\? route\.params\.sourceThreadId \?\? route\.params\.threadId\}/);
   assert.match(screen, /navigation\.replace\("Thread"/);
   assert.match(channelList, /accessibilityState=\{\{ selected: selectedThreadId === threadID \}\}/);
-  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(activeRoute === 'Thread' \|\| activeRoute === 'ChannelRiff'\)\)\}/);
+  // iPad workstation: Thread/ChannelRiff always keep sidebar, NewConversation/CreateRoom keep at ≥1024
+  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(/);
+  assert.match(rootNavigator, /activeRoute === 'Thread'/);
+  assert.match(rootNavigator, /activeRoute === 'ChannelRiff'/);
+  assert.match(rootNavigator, /isWorkstationWidth && \(activeRoute === 'NewConversation' \|\| activeRoute === 'CreateRoom'\)/);
   assert.match(rootNavigator, /presentation: 'card'/);
   assert.doesNotMatch(rootNavigator, /presentation: 'fullScreenModal'/);
 });
@@ -60,6 +64,8 @@ test("Chat thread opening stacks on Chat, same pattern Meet uses for Room", () =
 test("empty Chat shows a CTA for starting first conversation", () => {
   assert.match(channelList, /No conversations yet/);
   assert.match(channelList, /Start your first conversation/);
-  assert.match(channelList, /navigation\.navigate\('NewConversation'\)/);
+  // ChannelList passes displayMode for iPad workstation support
+  assert.match(channelList, /navigation\.navigate\('NewConversation', \{ displayMode: useWorkstation \? 'workstation' : 'sheet' \}\)/);
+  assert.match(channelList, /WORKSTATION_MIN_WIDTH = 1024/);
   assert.match(channelList, /emptyAction/);
 });

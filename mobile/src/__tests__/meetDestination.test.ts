@@ -21,9 +21,10 @@ test('Meet is a card destination with loading, error, retry, and Create room', (
   assert.match(meet, /onPress=\{.*void load\(\)/);
   assert.match(meet, /Could not load rooms/);
 
-  // Meet screen has Create room action
+  // Meet screen has Create room action with iPad workstation support
   assert.match(meet, /accessibilityLabel="Create room"/);
-  assert.match(meet, /navigation\.navigate\('CreateRoom'\)/);
+  assert.match(meet, /navigation\.navigate\('CreateRoom', \{ displayMode: useWorkstation \? 'workstation' : 'sheet' \}\)/);
+  assert.match(meet, /WORKSTATION_MIN_WIDTH = 1024/);
 
   // Meet screen has honest empty state
   assert.match(meet, /No rooms yet/);

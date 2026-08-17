@@ -194,7 +194,12 @@ test('focused flows hide compact chrome while iPad threads may retain only the s
   assert.equal(nativeShellVisibleForRoute('Canvas'), true);
   assert.equal(nativeShellVisibleForRoute('NetworkHome'), true);
   const root = source('src', 'navigation', 'RootNavigator.tsx');
-  assert.match(root, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(activeRoute === 'Thread' \|\| activeRoute === 'ChannelRiff'\)\)\}/);
+  // iPad workstation: Thread/ChannelRiff always keep sidebar, NewConversation/CreateRoom keep at ≥1024
+  assert.match(root, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(/);
+  assert.match(root, /activeRoute === 'Thread'/);
+  assert.match(root, /activeRoute === 'ChannelRiff'/);
+  assert.match(root, /isWorkstationWidth && \(activeRoute === 'NewConversation' \|\| activeRoute === 'CreateRoom'\)/);
+  assert.match(root, /WORKSTATION_MIN_WIDTH = 1024/);
   assert.match(root, /presentation: 'card'/);
   assert.doesNotMatch(root, /presentation: 'fullScreenModal'/);
 });

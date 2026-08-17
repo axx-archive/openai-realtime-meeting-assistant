@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, StyleSheet, View, useColorScheme } from 'react-native';
+import { AccessibilityInfo, Animated, Platform, StyleSheet, View, useColorScheme, useWindowDimensions } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -92,11 +92,17 @@ function pushAccountKey(email: string | undefined, sessionToken: string | null):
   return normalized && sessionToken ? normalized : null;
 }
 
+/** iPad workstation threshold — rail stays visible for New/CreateRoom at ≥1024. */
+const WORKSTATION_MIN_WIDTH = 1024;
+
 export function RootNavigator() {
   const { user, bootstrapping, sessionToken } = useAuth();
   const accountKey = pushAccountKey(user?.email, sessionToken);
   const dark = useColorScheme() === 'dark';
   const reduceMotion = useReduceMotion();
+  const { width } = useWindowDimensions();
+  const isIPad = Platform.OS === 'ios' && Platform.isPad;
+  const isWorkstationWidth = isIPad && width >= WORKSTATION_MIN_WIDTH;
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const [launchVisible, setLaunchVisible] = useState(true);
   const pendingPushTargetRef = useRef<PendingPushTarget | null>(null);
@@ -256,7 +262,11 @@ export function RootNavigator() {
         <NativeUniversalShell
           active={activeShellDestination}
           access={user?.shellAccess}
-          keepSidebarForFocusedRoute={Boolean(user && sessionToken && (activeRoute === 'Thread' || activeRoute === 'ChannelRiff'))}
+          keepSidebarForFocusedRoute={Boolean(user && sessionToken && (
+            activeRoute === 'Thread'
+            || activeRoute === 'ChannelRiff'
+            || (isWorkstationWidth && (activeRoute === 'NewConversation' || activeRoute === 'CreateRoom'))
+          ))}
           personalRealtimeVisible={Boolean(user && sessionToken && activeRoute !== 'Room')}
           visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
           onOpenPersonalRealtimeThread={openPersonalRealtimeThread}
@@ -325,12 +335,16 @@ export function RootNavigator() {
             <Stack.Screen
               name="CreateRoom"
               component={CreateRoomScreen}
-              options={{ presentation: 'formSheet' }}
+              options={({ route }) => route.params?.displayMode === 'workstation'
+                ? { presentation: 'card', animation: 'simple_push' }
+                : { presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
             />
             <Stack.Screen
               name="NewConversation"
               component={NewConversationScreen}
-              options={{ presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
+              options={({ route }) => route.params?.displayMode === 'workstation'
+                ? { presentation: 'card', animation: 'simple_push' }
+                : { presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
             />
             <Stack.Screen
               name="OSWeb"

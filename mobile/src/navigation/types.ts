@@ -18,8 +18,8 @@ export type RootStackParamList = {
   Login: undefined;
   OSWeb: { path?: string; title?: string } | undefined;
   Room: { roomId: string; title: string };
-  CreateRoom: undefined;
-  NewConversation: undefined;
+  CreateRoom: { displayMode?: 'sheet' | 'workstation' } | undefined;
+  NewConversation: { displayMode?: 'sheet' | 'workstation' } | undefined;
   Thread: {
     threadId: string;
     title: string;
