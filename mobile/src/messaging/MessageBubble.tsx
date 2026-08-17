@@ -366,13 +366,13 @@ export const MessageBubble = React.memo(function MessageBubble({
           accessible={!(workProposal || workThread)}
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
-          accessibilityHint={workThread ? 'Opens live work details or the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
+          accessibilityHint={longMessage && !workThread ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
           accessibilityActions={[{ name: 'longpress', label: 'Show message actions' }]}
           delayLongPress={messageLongPressDelayMs}
           onAccessibilityAction={(event) => {
             if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
           }}
-          onPress={workThread && !workThread.complete ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
+          onPress={longMessage && !workThread ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
             styles.bubble,
