@@ -18,7 +18,10 @@ import (
 func TestConversationIntentContractAcceptsExactlyFiveExclusiveShapes(t *testing.T) {
 	valid := []conversationIntentDecision{
 		{Outcome: conversationIntentConversationalReply},
+		// clarify_once with formal choices card (Question + Options)
 		{Outcome: conversationIntentClarifyOnce, Question: "Who is this for?", Options: []scoutChatChoiceOption{{ID: "opt-1", Label: "Investors"}, {ID: "opt-2", Label: "The team"}}},
+		// clarify_once with prose direction pass (Message only - Approach B)
+		{Outcome: conversationIntentClarifyOnce, Message: "What's the deck about, and who needs to buy into it?"},
 		{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkWorkstream, Mode: "research", Objective: "Research the market"}},
 		{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{EffectClass: "external_send", Summary: "Send this to the channel?", Work: &conversationWorkDecision{Kind: conversationWorkNativeAction, ToolID: "post_to_channel", Objective: "Post the update", Fields: map[string]string{"channel": "team", "text": "Update"}}}},
 		{Outcome: conversationIntentUnavailable, Unavailable: &conversationUnavailableDecision{Code: "source_missing", Message: "Attach the source first."}},
@@ -31,10 +34,19 @@ func TestConversationIntentContractAcceptsExactlyFiveExclusiveShapes(t *testing.
 
 	invalid := []conversationIntentDecision{
 		{Outcome: conversationIntentConversationalReply, Work: &conversationWorkDecision{Kind: conversationWorkGoal, Objective: "hidden work"}},
+		// conversational_reply cannot have a Message field
+		{Outcome: conversationIntentConversationalReply, Message: "This should fail"},
+		// clarify_once cannot have both choices AND prose message
+		{Outcome: conversationIntentClarifyOnce, Question: "Which?", Options: []scoutChatChoiceOption{{Label: "Deck"}, {Label: "Memo"}}, Message: "Cannot have both"},
+		// clarify_once options cannot have tool_id
 		{Outcome: conversationIntentClarifyOnce, Question: "Which?", Options: []scoutChatChoiceOption{{Label: "Deck", ToolID: "deck_outline"}, {Label: "Memo"}}},
+		// clarify_once without either choices or message is invalid
+		{Outcome: conversationIntentClarifyOnce, Question: "Only a question with no options?"},
 		{Outcome: conversationIntentStartPrivateWork, Work: &conversationWorkDecision{Kind: conversationWorkGoal, Objective: "Deploy it", Authority: codexJobAuthorityExternalWrite}},
 		{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{EffectClass: "deletion", Summary: "Delete?"}},
 		{Outcome: conversationIntentUnavailable},
+		// start_private_work cannot have a Message field
+		{Outcome: conversationIntentStartPrivateWork, Message: "This should fail", Work: &conversationWorkDecision{Kind: conversationWorkWorkstream, Mode: "research", Objective: "Research the market"}},
 	}
 	for index, decision := range invalid {
 		if err := decision.validate(); err == nil {
@@ -106,6 +118,54 @@ func TestConversationIntentOpenAIOutputEnforcesOutcomeAndApprovalBoundary(t *tes
 	}, "push the reviewed change")
 	if err != nil || governed.Outcome != conversationIntentApprovalRequired || governed.Approval == nil || governed.Approval.EffectClass != "repository_mutation" {
 		t.Fatalf("server-upgraded governed work=%+v err=%v", governed, err)
+	}
+}
+
+func TestConversationIntentClarifyOnceProseDirectionPass(t *testing.T) {
+	// Formal choices card: Question + Options
+	choicesDecision, err := scoutConversationIntentFromOpenAI(openAIScoutRouterOutput{
+		Outcome:  string(conversationIntentClarifyOnce),
+		Question: "Who is the deck for?",
+		Options: []openAIScoutRouterOption{
+			{Label: "Investors", Reply: "Focus on market opportunity"},
+			{Label: "The team", Reply: "Focus on execution plan"},
+		},
+	}, "make a deck")
+	if err != nil {
+		t.Fatalf("choices decision err=%v", err)
+	}
+	if choicesDecision.Outcome != conversationIntentClarifyOnce || choicesDecision.Question == "" || len(choicesDecision.Options) != 2 || choicesDecision.Message != "" {
+		t.Fatalf("expected formal choices card, got=%+v", choicesDecision)
+	}
+
+	// Prose direction pass: Message only (Approach B)
+	proseDecision, err := scoutConversationIntentFromOpenAI(openAIScoutRouterOutput{
+		Outcome: string(conversationIntentClarifyOnce),
+		Message: "What's the deck about, and who needs to buy into it?",
+	}, "make a deck")
+	if err != nil {
+		t.Fatalf("prose decision err=%v", err)
+	}
+	if proseDecision.Outcome != conversationIntentClarifyOnce || proseDecision.Message == "" || len(proseDecision.Options) != 0 {
+		t.Fatalf("expected prose direction pass, got=%+v", proseDecision)
+	}
+
+	// Verdict from prose direction pass should have directionPass, not choices
+	proseVerdict, err := scoutRouterVerdictFromConversationIntent(proseDecision, "make a deck")
+	if err != nil {
+		t.Fatalf("prose verdict err=%v", err)
+	}
+	if proseVerdict == nil || proseVerdict.directionPass == "" || proseVerdict.choices != nil {
+		t.Fatalf("expected directionPass verdict, got=%+v", proseVerdict)
+	}
+
+	// Verdict from choices should have choices, not directionPass
+	choicesVerdict, err := scoutRouterVerdictFromConversationIntent(choicesDecision, "make a deck")
+	if err != nil {
+		t.Fatalf("choices verdict err=%v", err)
+	}
+	if choicesVerdict == nil || choicesVerdict.choices == nil || choicesVerdict.directionPass != "" {
+		t.Fatalf("expected choices verdict, got=%+v", choicesVerdict)
 	}
 }
 

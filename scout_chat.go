@@ -442,6 +442,11 @@ type scoutChatChoices struct {
 type scoutRouterVerdict struct {
 	proposal *scoutRouterProposal
 	choices  *scoutChatChoices
+	// directionPass is a prose clarifying question about work direction
+	// (Approach B). Unlike choices, it has no formal options — the user
+	// responds conversationally. Results in Kind=message with
+	// IntentOutcome=clarify_once.
+	directionPass string
 	// action is a native, principal-bound Stride operation. It executes before
 	// any work proposal is considered and can never launch an agent thread.
 	action *scoutNativeAction

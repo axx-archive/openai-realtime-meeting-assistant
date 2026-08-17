@@ -247,13 +247,18 @@ type conversationUnavailableDecision struct {
 }
 
 // conversationIntentDecision has exactly one valid shape per outcome.
-// Question/Options belong only to clarify_once, Work only to
+// Question/Options OR Message belong only to clarify_once, Work only to
 // start_private_work, Approval only to approval_required, and Unavailable only
 // to unavailable. conversational_reply carries none of them.
+//
+// clarify_once has two valid shapes:
+//   - Question + 2-4 Options: formal choices card (Kind=choices)
+//   - Message only: prose direction pass (Kind=message with IntentOutcome=clarify_once)
 type conversationIntentDecision struct {
 	Outcome     conversationIntentOutcome
 	Question    string
 	Options     []scoutChatChoiceOption
+	Message     string // prose direction pass for clarify_once (mutually exclusive with Question/Options)
 	Work        *conversationWorkDecision
 	Approval    *conversationApprovalDecision
 	Unavailable *conversationUnavailableDecision
@@ -264,34 +269,52 @@ func (decision conversationIntentDecision) validate() error {
 	question := strings.TrimSpace(decision.Question)
 	switch decision.Outcome {
 	case conversationIntentConversationalReply:
-		if question != "" || len(decision.Options) != 0 || decision.Work != nil || decision.Approval != nil || decision.Unavailable != nil {
+		if question != "" || len(decision.Options) != 0 || strings.TrimSpace(decision.Message) != "" || decision.Work != nil || decision.Approval != nil || decision.Unavailable != nil {
 			return fmt.Errorf("conversational_reply contains a second outcome")
 		}
 	case conversationIntentClarifyOnce:
-		if question == "" || len(decision.Options) < 2 || len(decision.Options) > 4 || decision.Work != nil || decision.Approval != nil || decision.Unavailable != nil {
-			return fmt.Errorf("clarify_once requires one question and two to four plain replies")
+		message := strings.TrimSpace(decision.Message)
+		hasChoices := question != "" && len(decision.Options) >= 2
+		hasMessage := message != ""
+		// clarify_once has two valid shapes:
+		// 1. Question + 2-4 Options (formal choices card)
+		// 2. Message only (prose direction pass - Approach B)
+		// These are mutually exclusive.
+		if decision.Work != nil || decision.Approval != nil || decision.Unavailable != nil {
+			return fmt.Errorf("clarify_once cannot contain work, approval, or unavailable")
 		}
-		seen := map[string]bool{}
-		for _, option := range decision.Options {
-			label := strings.TrimSpace(option.Label)
-			if label == "" || strings.TrimSpace(option.ToolID) != "" {
-				return fmt.Errorf("clarify_once options are conversational replies, not tool selectors")
+		if hasChoices && hasMessage {
+			return fmt.Errorf("clarify_once cannot have both choices and a prose message")
+		}
+		if !hasChoices && !hasMessage {
+			return fmt.Errorf("clarify_once requires either (question + 2-4 options) or a prose message")
+		}
+		if hasChoices {
+			if len(decision.Options) > 4 {
+				return fmt.Errorf("clarify_once requires two to four plain replies")
 			}
-			key := strings.ToLower(label)
-			if seen[key] {
-				return fmt.Errorf("clarify_once contains duplicate options")
+			seen := map[string]bool{}
+			for _, option := range decision.Options {
+				label := strings.TrimSpace(option.Label)
+				if label == "" || strings.TrimSpace(option.ToolID) != "" {
+					return fmt.Errorf("clarify_once options are conversational replies, not tool selectors")
+				}
+				key := strings.ToLower(label)
+				if seen[key] {
+					return fmt.Errorf("clarify_once contains duplicate options")
+				}
+				seen[key] = true
 			}
-			seen[key] = true
 		}
 	case conversationIntentStartPrivateWork:
-		if question != "" || len(decision.Options) != 0 || decision.Work == nil || decision.Approval != nil || decision.Unavailable != nil {
+		if question != "" || len(decision.Options) != 0 || strings.TrimSpace(decision.Message) != "" || decision.Work == nil || decision.Approval != nil || decision.Unavailable != nil {
 			return fmt.Errorf("start_private_work requires exactly one work decision")
 		}
 		if err := decision.Work.validatePrivate(); err != nil {
 			return err
 		}
 	case conversationIntentApprovalRequired:
-		if question != "" || len(decision.Options) != 0 || decision.Work != nil || decision.Approval == nil || decision.Unavailable != nil {
+		if question != "" || len(decision.Options) != 0 || strings.TrimSpace(decision.Message) != "" || decision.Work != nil || decision.Approval == nil || decision.Unavailable != nil {
 			return fmt.Errorf("approval_required requires exactly one approval decision")
 		}
 		if strings.TrimSpace(decision.Approval.EffectClass) == "" || strings.TrimSpace(decision.Approval.Summary) == "" || decision.Approval.Work == nil {
@@ -301,7 +324,7 @@ func (decision conversationIntentDecision) validate() error {
 			return err
 		}
 	case conversationIntentUnavailable:
-		if question != "" || len(decision.Options) != 0 || decision.Work != nil || decision.Approval != nil || decision.Unavailable == nil || strings.TrimSpace(decision.Unavailable.Code) == "" || strings.TrimSpace(decision.Unavailable.Message) == "" {
+		if question != "" || len(decision.Options) != 0 || strings.TrimSpace(decision.Message) != "" || decision.Work != nil || decision.Approval != nil || decision.Unavailable == nil || strings.TrimSpace(decision.Unavailable.Code) == "" || strings.TrimSpace(decision.Unavailable.Message) == "" {
 			return fmt.Errorf("unavailable requires exactly one reason")
 		}
 	default:
