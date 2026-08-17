@@ -30531,11 +30531,16 @@
           background: transparent;
           border-right-color: var(--line-1);
         }
+        /* Mark + wordmark stack: 24×24 mark + 44×12 wordmark.
+           AJ override 2026-08-16: wordmark is back on the rail. */
         #appShell.is-authed .tool-rail > .topbar__mark {
           display: inline-flex;
-          width: 40px;
-          height: 40px;
-          margin: 0 0 8px;
+          flex-direction: column;
+          align-items: center;
+          width: 56px;
+          height: auto;
+          padding: 8px 0;
+          margin: 0 0 4px;
         }
         #appShell.is-authed .tool-rail__utilities {
           display: flex;
