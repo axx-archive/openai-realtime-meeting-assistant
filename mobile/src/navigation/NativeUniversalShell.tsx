@@ -1,9 +1,9 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { SymbolView, type SFSymbol } from 'expo-symbols';
+import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
-import { colors, radius, space, type } from '../theme/tokens';
+import { colors, radius, space } from '../theme/tokens';
 import { PersonalRealtimeFloatingControl } from '../realtime/PersonalRealtimeFloatingControl';
 import { useOptionalPersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import {
@@ -21,9 +21,128 @@ type Props = {
   keepSidebarForFocusedRoute?: boolean;
   personalRealtimeVisible?: boolean;
   visible: boolean;
+  /** Notification badges: which dests have unread activity */
+  unreadBadges?: Partial<Record<NativeShellDestination, boolean>>;
   onOpenPersonalRealtimeThread?: (threadId: string) => void;
   onSelect: (destination: (typeof nativeShellDestinations)[number]) => void;
 };
+
+/**
+ * Destination marks copied from the live web stroke family (45e2f7c1 / thebonfire.xyz).
+ * Stroke width 1.8 matching the web dest marks. viewBox 0 0 24 24.
+ *   • home-mark: hearth (flame shape with inner circle)
+ *   • meet-mark: two faces (overlapping ellipses with pupils)
+ *   • chat-bubble: one speech bubble (rounded rect + lower-left tail)
+ *   • stacked-sheets: three stacked rectangles with depth
+ * NOT house, NOT camera, NOT SF Symbols, NOT Lucide, NOT Expo stock.
+ */
+function DestMark({ icon, size, color }: { icon: string; size: number; color: string }) {
+  const strokeWidth = 1.8;
+  switch (icon) {
+    case 'home-mark':
+      // Hearth: flame shape with inner circle (live web line 30958)
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="M12 4c-5.5 3-8 6.5-8 10a8 8 0 0 0 16 0c0-3.5-2.5-7-8-10Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Circle
+            cx="12"
+            cy="14"
+            r="2.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+        </Svg>
+      );
+    case 'meet-mark':
+      // Two faces: overlapping ellipses with pupils (live web line 30962)
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Ellipse
+            cx="8"
+            cy="12"
+            rx="5"
+            ry="6"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+          <Ellipse
+            cx="16"
+            cy="12"
+            rx="5"
+            ry="6"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+          <Circle
+            cx="8"
+            cy="12"
+            r="1.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+          <Circle
+            cx="16"
+            cy="12"
+            r="1.5"
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+        </Svg>
+      );
+    case 'chat-bubble':
+      // One speech bubble with lower-left tail (live web line 30966)
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </Svg>
+      );
+    case 'stacked-sheets':
+      // Three stacked rectangles with depth (live web line 30970)
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="M7 3h8c1.1 0 2 .9 2 2v1"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M5 6h10c1.1 0 2 .9 2 2v1"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </Svg>
+      );
+    default:
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Circle cx="12" cy="12" r="8" stroke={color} strokeWidth={strokeWidth} />
+        </Svg>
+      );
+  }
+}
 
 export function NativeUniversalShell({
   active,
@@ -32,6 +151,7 @@ export function NativeUniversalShell({
   keepSidebarForFocusedRoute = false,
   personalRealtimeVisible = false,
   visible,
+  unreadBadges = {},
   onOpenPersonalRealtimeThread,
   onSelect,
 }: Props) {
@@ -60,11 +180,17 @@ export function NativeUniversalShell({
           accessibilityRole="tablist"
           style={[styles.sidebar, { paddingTop: Math.max(insets.top, space[4]), paddingBottom: Math.max(insets.bottom, space[4]) }]}
         >
-          <Text accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.sidebarBrand}>STRIDE</Text>
-          <Text maxFontSizeMultiplier={2} style={styles.sidebarContext}>The network where work happens</Text>
+          {/* No wordmark or tagline — mark only. Slim rail like web. */}
           <View style={styles.sidebarItems}>
             {visibleDestinations.map((destination) => (
-              <ShellItem key={destination.id} compact={false} destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
+              <ShellItem
+                key={destination.id}
+                compact={false}
+                destination={destination}
+                selected={active === destination.id}
+                hasUnread={Boolean(unreadBadges[destination.id])}
+                onPress={() => onSelect(destination)}
+              />
             ))}
           </View>
         </View>
@@ -78,7 +204,15 @@ export function NativeUniversalShell({
           style={[styles.bottomRail, { bottom: Math.max(insets.bottom, space[2]) }]}
         >
           {visibleDestinations.map((destination) => (
-            <ShellItem key={destination.id} compact compactWidth={compactItemWidth} destination={destination} selected={active === destination.id} onPress={() => onSelect(destination)} />
+            <ShellItem
+              key={destination.id}
+              compact
+              compactWidth={compactItemWidth}
+              destination={destination}
+              selected={active === destination.id}
+              hasUnread={Boolean(unreadBadges[destination.id])}
+              onPress={() => onSelect(destination)}
+            />
           ))}
         </Glass>
       ) : null}
@@ -108,17 +242,19 @@ function ShellItem({
   compactWidth,
   destination,
   selected,
+  hasUnread = false,
   onPress,
 }: {
   compact: boolean;
   compactWidth?: number;
   destination: (typeof nativeShellDestinations)[number];
   selected: boolean;
+  hasUnread?: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      accessibilityLabel={destination.label}
+      accessibilityLabel={`${destination.label}${hasUnread ? ', unread notifications' : ''}`}
       accessibilityRole="tab"
       accessibilityState={{ selected }}
       hitSlop={4}
@@ -130,53 +266,50 @@ function ShellItem({
         pressed && styles.pressed,
       ]}
     >
-      <SymbolView
-        name={destination.icon as SFSymbol}
-        size={compact ? 19 : 18}
-        tintColor={selected ? colors.ember : colors.text2}
-      />
-      {!compact ? (
-        <Text
-          maxFontSizeMultiplier={2}
-          numberOfLines={1}
-          style={[styles.sidebarLabel, selected && styles.selectedLabel]}
-        >
-          {destination.label}
-        </Text>
-      ) : null}
+      <View style={styles.iconWrap}>
+        <DestMark
+          icon={destination.icon}
+          size={compact ? 20 : 20}
+          color={String(selected ? colors.ember : colors.text2)}
+        />
+        {hasUnread ? <View style={styles.unreadDot} /> : null}
+      </View>
     </Pressable>
   );
 }
 
+/**
+ * Slim rail width for iPad sidebar — matches live web narrow rail.
+ * No wordmark, no tagline, just the four dest marks.
+ */
+const SIDEBAR_WIDTH = 68;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bgApp },
   content: { flex: 1, minWidth: 0, minHeight: 0 },
-  contentSidebar: { marginLeft: 248 },
+  contentSidebar: { marginLeft: SIDEBAR_WIDTH },
   contentCompact: { marginBottom: 84 },
   sidebar: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
-    width: 248,
-    paddingHorizontal: space[4],
+    width: SIDEBAR_WIDTH,
+    paddingHorizontal: space[2],
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: colors.border,
     backgroundColor: colors.surface1,
-  },
-  sidebarBrand: { ...type.title2, color: colors.text1, letterSpacing: -0.4 },
-  sidebarContext: { ...type.caption, color: colors.text2, marginTop: space[1], maxWidth: 190 },
-  sidebarItems: { gap: space[1], marginTop: space[6] },
-  sidebarItem: {
-    minHeight: 48,
-    paddingHorizontal: space[3],
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: space[3],
+  },
+  sidebarItems: { gap: space[2], marginTop: space[4], alignItems: 'center' },
+  sidebarItem: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: radius.md,
   },
   sidebarItemSelected: { backgroundColor: colors.accentSoft },
-  sidebarLabel: { ...type.bodyMedium, color: colors.text2, flexShrink: 1 },
   bottomRail: {
     position: 'absolute',
     alignSelf: 'center',
@@ -201,6 +334,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   compactItemSelected: { backgroundColor: colors.accentSoft },
-  selectedLabel: { color: colors.emberText },
+  iconWrap: { position: 'relative' },
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.ember,
+  },
   pressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
 });

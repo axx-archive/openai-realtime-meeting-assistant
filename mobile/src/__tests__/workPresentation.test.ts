@@ -7,20 +7,30 @@ import {
   workPhaseLabel,
 } from '../messaging/workPresentation';
 
-test('recurring work families are described by deliverable instead of internal mode', () => {
-  assert.equal(workFamilyLabel({ query: 'Create a polished 10-slide pitch deck', mode: 'goal' }), 'Presentation');
-  assert.equal(workFamilyLabel({ query: 'Build a five-year financial model', mode: 'goal' }), 'Financial model');
-  assert.equal(workFamilyLabel({ query: 'Design a new hero image', mode: 'tool_run' }), 'Design');
-  assert.equal(workFamilyLabel({ query: 'Research the market and cite sources', mode: 'deep_research' }), 'Research');
-  assert.equal(workFamilyLabel({ query: 'Draft an investor memo', mode: 'goal' }), 'Document');
-  assert.equal(workFamilyLabel({ query: 'Turn the meeting into a recap and decision log', mode: 'goal' }), 'Meeting recap');
-  assert.equal(workFamilyLabel({ query: 'Revise this pitch deck with a stronger opening', mode: 'goal' }), 'Revision');
-  assert.equal(workFamilyLabel({ query: 'Schedule a weekly market brief', mode: 'goal' }), 'Scheduled work');
-  assert.equal(workFamilyLabel({ query: 'Prepare a repository implementation handoff', mode: 'goal' }), 'Build');
-  assert.equal(workFamilyLabel({ query: 'Assemble an investor package with a deck and financial model', mode: 'goal' }), 'Mixed package');
-  assert.equal(workFamilyLabel({ query: 'Build a source-bound market share chart', mode: 'goal' }), 'Data visualization');
-  assert.equal(workFamilyLabel({ query: 'Create a launch project plan and task board', mode: 'goal' }), 'Project plan');
+/**
+ * Work families come from mode, NOT inferred from query (the prompt).
+ *
+ * The locked plan says: "Family is not inferred from the query." This prevents
+ * showing user's prompt as a family label ("Presentation" when user asked for slides).
+ * Mode-based labeling is stable and doesn't leak prompt content into titles.
+ */
+test('work families come from mode, not inferred from query (locked plan)', () => {
+  // Mode-based labeling — the family comes from the server-provided mode
+  assert.equal(workFamilyLabel({ query: 'Create a polished 10-slide pitch deck', mode: 'deck' }), 'Presentation');
+  assert.equal(workFamilyLabel({ query: 'Build a five-year financial model', mode: 'spreadsheet' }), 'Financial model');
+  assert.equal(workFamilyLabel({ query: 'Design a new hero image', mode: 'design' }), 'Design');
+  assert.equal(workFamilyLabel({ query: 'Research the market and cite sources', mode: 'research' }), 'Research');
+  assert.equal(workFamilyLabel({ query: 'Draft an investor memo', mode: 'document' }), 'Document');
+  assert.equal(workFamilyLabel({ query: 'Turn the meeting into a recap and decision log', mode: 'recap' }), 'Meeting recap');
+  assert.equal(workFamilyLabel({ query: 'Revise this pitch deck with a stronger opening', mode: 'revision' }), 'Revision');
+  assert.equal(workFamilyLabel({ query: 'Schedule a weekly market brief', mode: 'scheduled' }), 'Scheduled work');
+  assert.equal(workFamilyLabel({ query: 'Prepare a repository implementation handoff', mode: 'build' }), 'Build');
+  assert.equal(workFamilyLabel({ query: 'Assemble an investor package with a deck and financial model', mode: 'package' }), 'Mixed package');
+  assert.equal(workFamilyLabel({ query: 'Build a source-bound market share chart', mode: 'chart' }), 'Data visualization');
+  assert.equal(workFamilyLabel({ query: 'Create a launch project plan and task board', mode: 'plan' }), 'Project plan');
+  // Generic mode='goal' returns stable 'Work', NOT query-inferred family
   assert.equal(workFamilyLabel({ query: 'Help me think this through', mode: 'goal' }), 'Work');
+  assert.equal(workFamilyLabel({ query: 'Create a polished pitch deck', mode: 'goal' }), 'Work');
 });
 
 test('work phases translate server stages into a small stable product grammar', () => {

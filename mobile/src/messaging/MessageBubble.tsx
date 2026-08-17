@@ -23,6 +23,55 @@ import {
   workFamilyLabel,
   workPhaseLabel,
 } from './workPresentation';
+import {
+  InlineArtifactPreview,
+  type InlineArtifactKind,
+} from './InlineArtifactPreview';
+
+/**
+ * Detect the artifact kind from a work message for inline rendering.
+ * Returns null if the artifact kind cannot be determined or is not supported.
+ */
+function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
+  const work = message.work;
+  if (!work) return null;
+
+  // Check for explicit artifact kind from various possible field names
+  const kind = String(
+    (work as Record<string, unknown>).artifactKind ??
+    (work as Record<string, unknown>).workKind ??
+    (work as Record<string, unknown>).outputKind ??
+    ''
+  ).toLowerCase();
+
+  if (kind === 'html_deck' || kind === 'presentation' || kind === 'deck' || kind === 'slides') {
+    return 'html_deck';
+  }
+  if (kind === 'table' || kind === 'data_table' || kind === 'spreadsheet') {
+    return 'table';
+  }
+  if (kind === 'ideation' || kind === 'ideas' || kind === 'brainstorm') {
+    return 'ideation';
+  }
+  if (kind === 'research' || kind === 'report' || kind === 'analysis') {
+    return 'research';
+  }
+  if (kind === 'document' || kind === 'doc' || kind === 'text') {
+    return 'document';
+  }
+
+  // Fallback: try to infer from the work family label or summary keywords
+  const title = String(work.title ?? '').toLowerCase();
+  const summary = String(work.summary ?? '').toLowerCase();
+  const combined = `${title} ${summary}`;
+
+  if (/presentation|slides?|deck/iu.test(combined)) return 'html_deck';
+  if (/table|data|spreadsheet|csv/iu.test(combined)) return 'table';
+  if (/ideation|brainstorm|ideas/iu.test(combined)) return 'ideation';
+  if (/research|report|analysis|findings/iu.test(combined)) return 'research';
+
+  return null;
+}
 
 // Work cards carry dense state and controls. Preserve substantial Dynamic Type
 // growth without letting the largest accessibility categories collapse a
@@ -463,6 +512,16 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : null}
             </View>
+          ) : workThread && workThread.complete && detectInlineArtifactKind(message) ? (
+            <InlineArtifactPreview
+              kind={detectInlineArtifactKind(message)!}
+              title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
+              text={String(workThread.ref.resultPreview ?? '')}
+              agentName={workThread.agentName}
+              onEdit={workThread.governedRecord ? undefined : () => onRegenerateWorkArtifact?.(message)}
+              onPresent={detectInlineArtifactKind(message) === 'html_deck' ? () => onOpenWorkArtifact?.(message) : undefined}
+              onExpand={() => onOpenWorkArtifact?.(message)}
+            />
           ) : workThread ? (
             <View style={styles.workCard}>
               <View style={styles.workHead}>
@@ -497,7 +556,7 @@ export const MessageBubble = React.memo(function MessageBubble({
 				  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
-              <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || workThread.query}</Text>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workQuery}>{String(workThread.ref.resultTitle ?? '').trim() || 'Work'}</Text>
               {String(workThread.ref.projectTitle ?? '').trim() ? (
                 <View accessible accessibilityLabel={`Project: ${String(workThread.ref.projectTitle).trim()}`} style={styles.workProjectChip}>
                   <SymbolView name="folder.fill" tintColor={colors.emberText} size={12} />

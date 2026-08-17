@@ -21,7 +21,7 @@ import {
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Waveform } from './Waveform';
-import { hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
+import { colors, hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { parseMentions } from '../messaging/mentions';
 import {
@@ -768,7 +768,7 @@ const styles = StyleSheet.create({
 	workCard: { minWidth: 230, gap: 7, marginTop: space[3], padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.35)', backgroundColor: 'rgba(9,9,11,0.48)' },
 	workCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
 	workCardFamily: { ...type.captionMedium, flex: 1, color: 'rgba(255,255,255,0.62)' },
-	workCardStatus: { ...type.captionMedium, color: '#30D158' },
+	workCardStatus: { ...type.captionMedium, color: colors.ember },
 	workCardStatusAttention: { color: '#FF9F0A' },
 	workCardTitle: { ...type.body, color: '#FFFFFF' },
 	workProgressTrack: { height: 3, overflow: 'hidden', borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)' },
@@ -780,14 +780,14 @@ const styles = StyleSheet.create({
   deleteMessage: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
   transcriptEntry: { gap: 6, padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.09)', backgroundColor: ink[850] },
   transcriptMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  transcriptLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#30D158' },
+  transcriptLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ember },
   transcriptSpeaker: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
   transcriptTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
   transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
   recapContent: { flexGrow: 1, gap: space[4], paddingHorizontal: space[4], paddingTop: space[2] },
   recapStatusCard: { gap: 5, padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
   recapStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-  recapStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#30D158' },
+  recapStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ember },
   recapStatusDotWarning: { backgroundColor: '#FF9F0A' },
   recapStatusText: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
   recapCoverage: { ...type.caption, color: 'rgba(255,255,255,0.48)' },

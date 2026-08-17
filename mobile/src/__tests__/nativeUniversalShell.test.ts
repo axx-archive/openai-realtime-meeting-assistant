@@ -24,10 +24,6 @@ test('the universal IA is exact and ordered', () => {
     { id: 'video', label: 'Meet' },
     { id: 'chat', label: 'Chat' },
     { id: 'files', label: 'Files' },
-    { id: 'work', label: 'Work' },
-    { id: 'network', label: 'Network' },
-    { id: 'work-search', label: 'Work Search' },
-    { id: 'you', label: 'You' },
   ]);
 });
 
@@ -48,7 +44,6 @@ test('selection feedback is deterministic and bounded', () => {
   assert.equal(nativeShellSelectionAnnouncement('video'), 'Meet selected');
   assert.equal(nativeShellSelectionAnnouncement('chat'), 'Chat selected');
   assert.equal(nativeShellSelectionAnnouncement('files'), 'Files selected');
-  assert.equal(nativeShellSelectionAnnouncement('work-search'), 'Work Search selected');
 });
 
 test('mounted shell press preserves its navigator child through destination, full-screen, and width changes', async () => {
@@ -116,18 +111,15 @@ test('mounted shell press preserves its navigator child through destination, ful
   await act(async () => { renderer = create(shell('home', true)); });
   const mountedNavigator = renderer!.root.findByProps({ testID: 'root-navigation' });
   const mountID = mountedNavigator.props.mountID;
-  const workPressable = renderer!.root.findByProps({ accessibilityLabel: 'Work' });
-  await act(async () => { workPressable.props.onPress(); });
-  assert.equal(requestedRoute, 'WorkHome');
-  assert.deepEqual(testGlobal.__nativeShellAnnouncements, [], 'selection announced before navigation committed');
-  const selected = coordinator.commit('WorkHome');
-  assert.equal(selected, 'work');
-  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Work selected']);
 
+  // Test Chat navigation (replaces Work test since Work is no longer a destination)
   const chatPressable = renderer!.root.findByProps({ accessibilityLabel: 'Chat' });
   await act(async () => { chatPressable.props.onPress(); });
   assert.equal(requestedRoute, 'Chat');
-  assert.equal(requestedParams, undefined);
+  assert.deepEqual(testGlobal.__nativeShellAnnouncements, [], 'selection announced before navigation committed');
+  const selected = coordinator.commit('Chat');
+  assert.equal(selected, 'chat');
+  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Chat selected']);
 
   const videoPressable = renderer!.root.findByProps({ accessibilityLabel: 'Meet' });
   await act(async () => { videoPressable.props.onPress(); });
@@ -137,15 +129,15 @@ test('mounted shell press preserves its navigator child through destination, ful
   await act(async () => { renderer!.update(shell(selected, true)); });
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.mountID, mountID);
-  assert.deepEqual(renderer!.root.findByProps({ accessibilityLabel: 'Work' }).props.accessibilityState, { selected: true });
+  assert.deepEqual(renderer!.root.findByProps({ accessibilityLabel: 'Chat' }).props.accessibilityState, { selected: true });
 
+  // With 4-destination model, both core and full access show exactly 4 tabs
   await act(async () => { renderer!.update(shell('home', true, 'core')); });
   assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tab' }).length, 4);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Home' }).length, 1);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Meet' }).length, 1);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Chat' }).length, 1);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Files' }).length, 1);
-  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Work' }).length, 0);
 
   await act(async () => { renderer!.update(shell('home', true)); });
 
@@ -156,8 +148,8 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.stack, 'Canvas,Thread');
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.threadDraft, 'reply in progress');
   await act(async () => { renderer!.update(shell(coordinator.commit('Thread'), false)); });
-  assert.equal(coordinator.current(), 'work', 'full-screen route lost its owning destination');
-  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Work selected'], 'hidden full-screen route emitted a false destination announcement');
+  assert.equal(coordinator.current(), 'chat', 'full-screen route lost its owning destination');
+  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Chat selected'], 'hidden full-screen route emitted a false destination announcement');
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.mountID, mountID);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.stack, 'Canvas,Thread');
@@ -165,31 +157,34 @@ test('mounted shell press preserves its navigator child through destination, ful
   assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tablist' }).length, 0);
 
   testGlobal.__nativeShellWidth = 1024;
-  await act(async () => { renderer!.update(shell(coordinator.commit('WorkHome'), true)); });
+  await act(async () => { renderer!.update(shell(coordinator.commit('Chat'), true)); });
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }), mountedNavigator);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.mountID, mountID);
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.stack, 'Canvas,Thread');
   assert.equal(renderer!.root.findByProps({ testID: 'root-navigation' }).props.threadDraft, 'reply in progress');
   assert.equal(renderer!.root.findAllByProps({ accessibilityRole: 'tablist' }).length, 1, 'sidebar tablist did not mount after resize');
-  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Work selected'], 'resize or owner restore announced a false destination');
+  assert.deepEqual(testGlobal.__nativeShellAnnouncements, ['Chat selected'], 'resize or owner restore announced a false destination');
   await act(async () => { renderer!.unmount(); });
 });
 
 test('deep destinations preserve their owning top-level context', () => {
-  const coordinator = createNativeShellSelectionCoordinator(() => {}, 'work');
-  assert.equal(coordinator.commit('Thread'), 'work');
-  assert.equal(nativeShellDestinationForRoute('Board'), 'work');
+  // With the 4-destination model, legacy destinations like 'work' now route to 'home'
+  const coordinator = createNativeShellSelectionCoordinator(() => {}, 'home');
+  assert.equal(coordinator.commit('Thread'), 'home');
+  // Legacy Work, Network, WorkSearch, You routes now resolve to 'home'
+  assert.equal(nativeShellDestinationForRoute('Board'), 'home');
   assert.equal(nativeShellDestinationForRoute('Meet'), 'video');
   assert.equal(nativeShellDestinationForRoute('Chat'), 'chat');
-  assert.equal(nativeShellDestinationForRoute('Deck'), 'work');
+  assert.equal(nativeShellDestinationForRoute('Deck'), 'home');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'threads' }), 'chat');
   assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'rooms' }), 'video');
-  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'work');
-  assert.equal(nativeShellDestinationForRoute('Meetings'), 'work');
+  assert.equal(nativeShellDestinationForRoute('Deck', { segment: 'work' }), 'home');
+  assert.equal(nativeShellDestinationForRoute('Meetings'), 'home');
   assert.equal(nativeShellDestinationForRoute('Files'), 'files');
-  assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'network');
-  assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'work-search');
-  assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'you');
+  // Legacy network/work-search/you destinations now route to 'home'
+  assert.equal(nativeShellDestinationForRoute('NetworkPreview'), 'home');
+  assert.equal(nativeShellDestinationForRoute('ContactInbox'), 'home');
+  assert.equal(nativeShellDestinationForRoute('WorkRecord'), 'home');
 });
 
 test('focused flows hide compact chrome while iPad threads may retain only the sidebar', () => {
@@ -214,7 +209,7 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.match(shell, /minHeight: 48/);
   assert.match(shell, /minHeight: 58/);
   assert.match(shell, /transform: \[\{ scale: 0\.96 \}\]/);
-  assert.match(shell, /!compact \? \([\s\S]*maxFontSizeMultiplier=\{2\}/);
+  // Slim rail design uses icon-only marks without labels, no text scaling needed
   assert.doesNotMatch(shell, /Animated\.|LayoutAnimation|setTimeout/);
   assert.equal((shell.match(/\{children\}/g) ?? []).length, 1);
   assert.doesNotMatch(shell, /if \(!visible\) return/);

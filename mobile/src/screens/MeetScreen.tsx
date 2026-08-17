@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface2,
     marginBottom: space[2],
   },
-  emptyTitle: { ...type.title3, color: colors.text1 },
+  emptyTitle: { ...type.title2, color: colors.text1 },
   emptyBody: {
     ...type.body,
     color: colors.text2,
@@ -259,19 +259,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.surface3,
   },
-  roomIconLive: { backgroundColor: colors.live },
+  roomIconLive: { backgroundColor: colors.ember },
   rowText: { flex: 1, gap: 2 },
   rowTitle: { ...type.bodyMedium, color: colors.text1 },
   liveLabel: {
     ...type.label,
-    color: colors.live,
+    color: colors.emberText,
     textTransform: 'uppercase',
   },
   liveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.live,
+    backgroundColor: colors.ember,
   },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });
