@@ -325,12 +325,16 @@ export function RootNavigator() {
             <Stack.Screen
               name="CreateRoom"
               component={CreateRoomScreen}
-              options={{ presentation: 'formSheet' }}
+              options={({ route }) => route.params?.displayMode === 'workstation'
+                ? { presentation: 'card', animation: 'simple_push' }
+                : { presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
             />
             <Stack.Screen
               name="NewConversation"
               component={NewConversationScreen}
-              options={{ presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
+              options={({ route }) => route.params?.displayMode === 'workstation'
+                ? { presentation: 'card', animation: 'simple_push' }
+                : { presentation: 'formSheet', sheetAllowedDetents: [0.72, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true, sheetCornerRadius: 28 }}
             />
             <Stack.Screen
               name="OSWeb"

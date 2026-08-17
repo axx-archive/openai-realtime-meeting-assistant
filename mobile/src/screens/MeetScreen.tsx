@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 import { useNavigation } from '@react-navigation/native';
@@ -10,6 +10,14 @@ import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
+
+/**
+ * iPad workstation threshold — Create room uses card presentation, not sheet.
+ *
+ * ≥1024pt (iPad Pro 11" landscape, iPad Pro 12.9" portrait): workstation surface.
+ * <1024pt: phone sheet. Chat split at ≥744 still holds separately.
+ */
+const WORKSTATION_MIN_WIDTH = 1024;
 
 type MeetNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -26,6 +34,9 @@ export function MeetScreen() {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const navigation = useNavigation<MeetNav>();
+  const { width } = useWindowDimensions();
+  const isIPad = Platform.OS === 'ios' && Platform.isPad;
+  const useWorkstation = isIPad && width >= WORKSTATION_MIN_WIDTH;
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +70,7 @@ export function MeetScreen() {
         <Pressable
           accessibilityLabel="Create room"
           accessibilityRole="button"
-          onPress={() => navigation.navigate('CreateRoom')}
+          onPress={() => navigation.navigate('CreateRoom', { displayMode: useWorkstation ? 'workstation' : 'sheet' })}
           style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
         >
           <SymbolView name="plus" size={16} tintColor={colors.onAccent} />
@@ -108,7 +119,7 @@ export function MeetScreen() {
             <Pressable
               accessibilityLabel="Create your first room"
               accessibilityRole="button"
-              onPress={() => navigation.navigate('CreateRoom')}
+              onPress={() => navigation.navigate('CreateRoom', { displayMode: useWorkstation ? 'workstation' : 'sheet' })}
               style={({ pressed }) => [styles.emptyAction, pressed && styles.pressed]}
             >
               <Text style={styles.emptyActionText}>Create your first room</Text>

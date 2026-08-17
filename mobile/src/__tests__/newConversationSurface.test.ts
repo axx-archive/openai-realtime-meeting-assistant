@@ -29,7 +29,10 @@ test('Work exposes a real native private-chat and channel creation route', () =>
   const screen = source('src', 'screens', 'NewConversationScreen.tsx');
   const client = source('src', 'api', 'client.ts');
   assert.match(shell, /route: 'NewConversation'[^\n]*label: 'New conversation'/);
+  // NewConversation uses formSheet on phone, card on iPad ≥1024 (workstation mode)
+  assert.match(root, /name="NewConversation"[\s\S]*displayMode === 'workstation'/);
   assert.match(root, /name="NewConversation"[\s\S]*presentation: 'formSheet'/);
+  assert.match(root, /name="NewConversation"[\s\S]*presentation: 'card'/);
   assert.match(screen, /'Private chat'[\s\S]*'Channel'/);
   assert.match(screen, /api\.createScoutThread\(sessionToken, newConversationBody\(attempt\)\)/);
   assert.match(screen, /navigation\.replace\('Thread'/);
@@ -39,7 +42,9 @@ test('Work exposes a real native private-chat and channel creation route', () =>
 test('Chat destination exposes New conversation directly (not only from Work)', () => {
   const chat = source('src', 'screens', 'ChatScreen.tsx');
   assert.match(chat, /accessibilityLabel="New conversation"/);
-  assert.match(chat, /navigation\.navigate\('NewConversation'\)/);
+  // Chat passes displayMode for iPad workstation support
+  assert.match(chat, /navigation\.navigate\('NewConversation', \{ displayMode: useWorkstation \? 'workstation' : 'sheet' \}\)/);
+  assert.match(chat, /WORKSTATION_MIN_WIDTH = 1024/);
   assert.match(chat, /<ChannelList/);
 });
 

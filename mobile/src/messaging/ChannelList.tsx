@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Keyboard, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -19,6 +19,9 @@ import {
   channelThreadAccessibilityLabel,
   type ChannelActiveWork,
 } from './channelListPerformance';
+
+/** iPad workstation threshold — ≥1024pt uses card presentation, not sheet. */
+const WORKSTATION_MIN_WIDTH = 1024;
 
 /**
  * The Threads segment — design §14.
@@ -163,8 +166,10 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
   const threadsRef = useRef(threads);
   sessionTokenRef.current = sessionToken;
   threadsRef.current = threads;
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width } = useWindowDimensions();
   const largeText = fontScale >= THREAD_LARGE_TEXT_FONT_SCALE;
+  const isIPad = Platform.OS === 'ios' && Platform.isPad;
+  const useWorkstation = isIPad && width >= WORKSTATION_MIN_WIDTH;
   const scopedThreads = threadsSessionToken === sessionToken ? threads : [];
   const scopedEditingThreadID = threadsSessionToken === sessionToken ? editingThreadID : null;
   const rows = useMemo(() => channelListRows(scopedThreads), [scopedThreads]);
@@ -321,7 +326,7 @@ export function ChannelList({ onOpenThread, selectedThreadId }: ChannelListProps
         <Pressable
           accessibilityLabel="Start your first conversation"
           accessibilityRole="button"
-          onPress={() => navigation.navigate('NewConversation')}
+          onPress={() => navigation.navigate('NewConversation', { displayMode: useWorkstation ? 'workstation' : 'sheet' })}
           style={({ pressed }) => [styles.emptyAction, pressed && styles.emptyActionPressed]}
         >
           <Text style={styles.emptyActionText}>Start your first conversation</Text>
