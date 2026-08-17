@@ -1268,8 +1268,8 @@ document.addEventListener('keydown',e=>{
 if(e.key==='ArrowRight'||e.key===' '){idx=Math.min(idx+1,pgs.length-1);show(idx);}
 if(e.key==='ArrowLeft'){idx=Math.max(idx-1,0);show(idx);}
 });
-function fitStage(){const s=document.getElementById('stage');if(!s)return;const scale=Math.min(innerWidth/1920,innerHeight/1080);s.style.transform='scale('+scale+')';}
-window.addEventListener('resize',fitStage);fitStage();
+function fitStage(){var s=document.getElementById('stage');if(!s)return;var w=innerWidth||480,h=innerHeight||270;var scale=Math.min(w/1920,h/1080);if(scale>0)s.style.transform='scale('+scale+')';}
+window.addEventListener('resize',fitStage);requestAnimationFrame(function(){requestAnimationFrame(fitStage);});
 </script>
 </body>
 </html>`, title, title, subtitle)

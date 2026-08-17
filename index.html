@@ -42111,18 +42111,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         // Inject viewport scaling script for fixed 1920x1080 stages
         // This ensures the deck scales to fit the iframe viewport (thumbnail or fullscreen)
-        // NOTE: Use <\/script> to avoid breaking the HTML parser (raw script end tag closes early)
+        // NOTE: Escape the script end tag to avoid breaking the HTML parser
         const scalingScript = '<script>' +
           '(function(){' +
           'var stage=document.getElementById("stage");' +
           'if(!stage)return;' +
-          'function fit(){' +
-          'var s=Math.min(innerWidth/1920,innerHeight/1080);' +
           'stage.style.transformOrigin="top left";' +
-          'stage.style.transform="scale("+s+")";' +
+          'function fit(){' +
+          'var w=innerWidth||480,h=innerHeight||270;' +
+          'var s=Math.min(w/1920,h/1080);' +
+          'if(s>0)stage.style.transform="scale("+s+")";' +
           '}' +
           'window.addEventListener("resize",fit);' +
-          'fit();' +
+          'requestAnimationFrame(function(){requestAnimationFrame(fit);});' +
           '})();' +
           '<\/script>'
         // Insert scaling script before </body> or at the end if no </body>
