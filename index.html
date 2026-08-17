@@ -42109,30 +42109,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (h1Match) title = h1Match[1].trim()
         }
 
-        // Inject CSS + JS for viewport scaling of fixed 1920x1080 stages
-        // CSS sets initial scale immediately; JS handles resize
+        // Inject JS-only for viewport scaling of fixed 1920x1080 stages
+        // Pure JS approach - sets inline styles with !important which override CSS
+        // Runs on DOMContentLoaded + multiple delays to win any race with LLM deck scripts
         // NOTE: Escape script end tag to avoid breaking the HTML parser
-        const scalingStyle = '<style>' +
-          '#stage{transform-origin:top left !important;transform:scale(0.25) !important}' +
-          '@media(min-width:961px){#stage{transform:scale(0.5) !important}}' +
-          '@media(min-width:1921px){#stage{transform:scale(1) !important}}' +
-          '<\/style>'
-        const scalingScript = '<script>' +
+        const scalingInject = '<script>' +
           '(function(){' +
-          'var stage=document.getElementById("stage");' +
-          'if(!stage)return;' +
-          'function fit(){' +
+          'function fix(){' +
+          'var s=document.getElementById("stage");if(!s)return;' +
+          's.style.setProperty("position","fixed","important");' +
+          's.style.setProperty("top","0","important");' +
+          's.style.setProperty("left","0","important");' +
+          's.style.setProperty("right","auto","important");' +
+          's.style.setProperty("bottom","auto","important");' +
+          's.style.setProperty("inset","auto","important");' +
+          's.style.setProperty("margin","0","important");' +
+          's.style.setProperty("transform-origin","top left","important");' +
           'var w=innerWidth||480,h=innerHeight||270;' +
-          'var s=Math.min(w/1920,h/1080);' +
-          'stage.style.setProperty("transform","scale("+s+")","important");' +
+          's.style.setProperty("transform","scale("+Math.min(w/1920,h/1080)+")","important");' +
+          'var pg=s.querySelector(".pg");if(pg)pg.style.setProperty("display","flex","important");' +
           '}' +
-          'window.addEventListener("resize",fit);' +
-          'fit();' +
-          'setTimeout(fit,0);' +
-          'setTimeout(fit,100);' +
+          'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",fix);}else{fix();}' +
+          'window.addEventListener("resize",fix);' +
+          'setTimeout(fix,0);setTimeout(fix,50);setTimeout(fix,150);setTimeout(fix,300);' +
           '})();' +
           '<\/script>'
-        const scalingInject = scalingStyle + scalingScript
         // Insert scaling CSS+JS before </body> or at the end if no </body>
         let enhancedHtml = htmlContent
         if (htmlContent.toLowerCase().includes('</body>')) {
