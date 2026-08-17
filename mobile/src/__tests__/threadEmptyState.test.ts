@@ -47,7 +47,11 @@ test("iPad keeps destination, conversation, and selected thread context together
   assert.match(screen, /selectedThreadId=\{privateRiff\?\.sourceThreadId \?\? route\.params\.sourceThreadId \?\? route\.params\.threadId\}/);
   assert.match(screen, /navigation\.replace\("Thread"/);
   assert.match(channelList, /accessibilityState=\{\{ selected: selectedThreadId === threadID \}\}/);
-  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(activeRoute === 'Thread' \|\| activeRoute === 'ChannelRiff'\)\)\}/);
+  // iPad workstation: Thread/ChannelRiff always keep sidebar, NewConversation/CreateRoom keep at ≥1024
+  assert.match(rootNavigator, /keepSidebarForFocusedRoute=\{Boolean\(user && sessionToken && \(/);
+  assert.match(rootNavigator, /activeRoute === 'Thread'/);
+  assert.match(rootNavigator, /activeRoute === 'ChannelRiff'/);
+  assert.match(rootNavigator, /isWorkstationWidth && \(activeRoute === 'NewConversation' \|\| activeRoute === 'CreateRoom'\)/);
   assert.match(rootNavigator, /presentation: 'card'/);
   assert.doesNotMatch(rootNavigator, /presentation: 'fullScreenModal'/);
 });
