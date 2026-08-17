@@ -12451,13 +12451,6 @@
         font: var(--type-caption);
         border-radius: 4px;
       }
-      .deck-editor__thumb iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        pointer-events: none;
-        transform-origin: top left;
-      }
       /* Canvas area */
       .deck-editor__canvas-wrap {
         flex: 1;
@@ -12471,8 +12464,9 @@
       .deck-editor__canvas {
         position: relative;
         width: 960px;
-        height: 540px;
-        background: #fff;
+        max-width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
         border-radius: var(--r-md);
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
         overflow: hidden;
@@ -12481,14 +12475,9 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 1920px;
-        height: 1080px;
+        width: 100%;
+        height: 100%;
         border: none;
-        /* Scale to fit canvas - base is 960px wide, so 960/1920 = 0.5 */
-        /* On responsive, canvas width changes, so we use a CSS variable */
-        --canvas-scale: 0.5;
-        transform: scale(var(--canvas-scale));
-        transform-origin: top left;
         pointer-events: none;
       }
       /* Selection overlay for editable elements */
@@ -12605,9 +12594,9 @@
         background: var(--surface-3);
         color: var(--text-1);
       }
-      /* Dark theme overrides for deck editor */
+      /* Dark theme overrides for deck editor - match slide background */
       [data-theme="dark"] .deck-editor__canvas {
-        background: #1a1a1a;
+        background: #000;
       }
       /* Tablet responsive deck editor (iPad) */
       @media (max-width: 1024px) {
@@ -12616,16 +12605,6 @@
         }
         .deck-editor__canvas-wrap {
           padding: 16px;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 400px);
-          height: calc((100vw - 400px) * 9 / 16);
-          max-width: 800px;
-          max-height: 450px;
-        }
-        .deck-editor__canvas iframe {
-          /* Scale for ~800px canvas: 800/1920 ≈ 0.417 */
-          --canvas-scale: calc((100vw - 400px) / 1920);
         }
         .deck-editor__props {
           width: 200px;
@@ -12640,13 +12619,6 @@
       @media (max-width: 768px) {
         .deck-editor__sidebar {
           width: 100px;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 300px);
-          height: calc((100vw - 300px) * 9 / 16);
-        }
-        .deck-editor__canvas iframe {
-          --canvas-scale: calc((100vw - 300px) / 1920);
         }
         .deck-editor__props {
           width: 160px;
@@ -12671,13 +12643,6 @@
         }
         .deck-editor__props {
           display: none;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 100px);
-          height: calc((100vw - 100px) * 9 / 16);
-        }
-        .deck-editor__canvas iframe {
-          --canvas-scale: calc((100vw - 100px) / 1920);
         }
         .deck-editor__title {
           max-width: 80px;
@@ -42452,12 +42417,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
               slideHtml = slideHtml.replace(/class\s*=\s*'([^']*)'/, "class='$1 on'")
             }
           }
-          // For thumbnails, use JS to scale after DOM is ready (100vw is 0 before paint)
-          // For canvas, parent CSS handles scaling
-          const scaleScript = options.fullSize ? '' :
-            '<script>(function(){var s=document.getElementById("stage");if(!s)return;' +
-            'function fit(){var w=innerWidth||1;s.style.transform="scale("+(w/1920)+")";}' +
-            'fit();window.onresize=fit;})();<\/script>'
+          // JS scaling - runs after DOM ready and periodically to catch dimension changes
+          const scaleScript = '<script>(function(){' +
+            'var s=document.getElementById("stage");if(!s)return;' +
+            'function fit(){' +
+            'var w=innerWidth,h=innerHeight;' +
+            'if(w<1||h<1)return;' +
+            'var scale=Math.min(w/1920,h/1080);' +
+            's.style.transform="scale("+scale+")";' +
+            '}' +
+            'fit();' +
+            'setTimeout(fit,0);' +
+            'setTimeout(fit,16);' +
+            'setTimeout(fit,100);' +
+            'setTimeout(fit,300);' +
+            'window.onresize=fit;' +
+            'window.onload=fit;' +
+            '})();<\/script>'
           // Force the single slide to display (override any deck CSS that hides non-.on slides)
           const slideVisibility = '.pg,.slide,section{display:none!important}' +
             '.pg.on,.slide.on,section.on{display:flex!important}'
