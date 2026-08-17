@@ -17,6 +17,8 @@ type Props = {
   loading?: boolean;
   artifactId?: string;
   sessionToken?: string;
+  /** Direct HTML content for live html_deck path (bypasses API fetch) */
+  htmlContent?: string;
   onEdit?: () => void;
   onPresent?: () => void;
   onExpand?: () => void;
@@ -55,6 +57,7 @@ export function InlineArtifactPreview({
   loading = false,
   artifactId,
   sessionToken,
+  htmlContent,
   onEdit,
   onPresent,
   onExpand,
@@ -70,10 +73,20 @@ export function InlineArtifactPreview({
   const containerWidth = Math.min(screenWidth - 48, 440);
   const containerHeight = containerWidth * (9 / 16);
 
-  // Fetch actual deck HTML for real in-thread deck view
+  // Live path: use htmlContent directly (bypasses API fetch)
+  // Work-thread path: fetch from API via artifactId
   useEffect(() => {
+    // If htmlContent is provided, use it directly (live path)
+    if (kind === 'html_deck' && htmlContent) {
+      setDeckHtml(htmlContent);
+      setDeckLoading(false);
+      setDeckError(false);
+      return;
+    }
+
+    // Work-thread path: fetch from API
     if (kind !== 'html_deck' || !artifactId || !sessionToken || loading) {
-      setDeckHtml(null);
+      if (!htmlContent) setDeckHtml(null);
       return;
     }
     let active = true;
@@ -97,7 +110,7 @@ export function InlineArtifactPreview({
         setDeckLoading(false);
       });
     return () => { active = false; };
-  }, [kind, artifactId, sessionToken, loading]);
+  }, [kind, artifactId, sessionToken, loading, htmlContent]);
 
   // html_deck: the 16:9 IS the slide
   if (isPresentable) {

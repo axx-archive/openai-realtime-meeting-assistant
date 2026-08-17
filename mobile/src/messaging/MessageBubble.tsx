@@ -66,6 +66,30 @@ function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | n
   return null;
 }
 
+/**
+ * Detect if message body is an HTML deck (Scout's live deliverable path).
+ *
+ * Mirrors web's artifactIsHTMLDeck: declared metadata type=html_deck, or a body
+ * that starts as an HTML document. This is the REAL deliverable path — not a
+ * work card, not a text bubble.
+ */
+function isHtmlDeckBody(text: string): boolean {
+  const body = String(text ?? '').trim().toLowerCase();
+  return body.startsWith('<!doctype html') || body.startsWith('<html');
+}
+
+/**
+ * Extract title from HTML deck body.
+ * Looks for <title> tag or first <h1>.
+ */
+function extractDeckTitle(html: string): string {
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) return titleMatch[1].trim();
+  const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  if (h1Match) return h1Match[1].trim();
+  return 'Presentation';
+}
+
 // Work cards carry dense state and controls. Preserve substantial Dynamic Type
 // growth without letting the largest accessibility categories collapse a
 // family or action into one-character columns; the full copy remains in the
@@ -615,6 +639,16 @@ export const MessageBubble = React.memo(function MessageBubble({
 
           {!generatedImagePending && !workProposal && !workThread && body && lifecycle?.state === 'canceled' ? (
             <Text style={styles.lifecycleCanceled}>{body}</Text>
+          ) : !generatedImagePending && !workThread && body && !linkOnly && scout && isHtmlDeckBody(body) ? (
+            /* Scout's live html_deck deliverable — real 16:9 in-thread view, not text bubble */
+            <InlineArtifactPreview
+              kind="html_deck"
+              title={extractDeckTitle(body)}
+              text=""
+              agentName="Scout"
+              htmlContent={body}
+              onPresent={onViewArtifactFullscreen ? () => onViewArtifactFullscreen?.(message) : undefined}
+            />
           ) : !generatedImagePending && !workThread && body && !linkOnly && scout ? (
             <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />
           ) : !generatedImagePending && !workThread && body && !linkOnly ? (
