@@ -42109,13 +42109,36 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (h1Match) title = h1Match[1].trim()
         }
 
+        // Inject viewport scaling script for fixed 1920x1080 stages
+        // This ensures the deck scales to fit the iframe viewport (thumbnail or fullscreen)
+        const scalingScript = `<script>
+(function(){
+  var stage=document.getElementById('stage');
+  if(!stage)return;
+  function fit(){
+    var s=Math.min(innerWidth/1920,innerHeight/1080);
+    stage.style.transformOrigin='top left';
+    stage.style.transform='scale('+s+')';
+  }
+  window.addEventListener('resize',fit);
+  fit();
+})();
+</script>`
+        // Insert scaling script before </body> or at the end if no </body>
+        let enhancedHtml = htmlContent
+        if (htmlContent.toLowerCase().includes('</body>')) {
+          enhancedHtml = htmlContent.replace(/<\/body>/i, scalingScript + '</body>')
+        } else {
+          enhancedHtml = htmlContent + scalingScript
+        }
+
         // Sandboxed iframe — fills the entire cover as the hero visual
         const frame = document.createElement('iframe')
         frame.className = 'chat-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
         frame.setAttribute('allowfullscreen', '')
         frame.title = 'deck preview'
-        frame.srcdoc = htmlContent
+        frame.srcdoc = enhancedHtml
 
         // Glass chrome overlay at bottom — title + action buttons
         const chrome = document.createElement('div')

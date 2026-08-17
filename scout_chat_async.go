@@ -1201,14 +1201,14 @@ func generateDefaultDeck(query string) string {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%%;overflow:hidden}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#000;color:#fff}
-#stage{position:fixed;inset:0;width:1920px;height:1080px;margin:auto}
-.pg{position:absolute;inset:0;display:none;overflow:hidden;background:#111;padding:80px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0a0a;color:#fff}
+#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}
+.pg{position:absolute;inset:0;display:none;overflow:hidden;background:linear-gradient(135deg,#1a1a2e 0%%,#16213e 50%%,#0f0f23 100%%);padding:80px}
 .pg.on{display:flex;flex-direction:column;justify-content:center}
-.pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px}
-.pg h2{font-size:56px;font-weight:600;line-height:1.2;margin-bottom:24px}
-.pg p{font-size:32px;line-height:1.6;opacity:0.9}
-.pg ul{font-size:28px;line-height:1.8;padding-left:48px}
+.pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px;color:#fff}
+.pg h2{font-size:56px;font-weight:600;line-height:1.2;margin-bottom:24px;color:#fff}
+.pg p{font-size:32px;line-height:1.6;opacity:0.9;color:#e0e0e0}
+.pg ul{font-size:28px;line-height:1.8;padding-left:48px;color:#e0e0e0}
 .pg li{margin-bottom:16px}
 .content{max-width:1600px}
 </style>
@@ -1268,6 +1268,8 @@ document.addEventListener('keydown',e=>{
 if(e.key==='ArrowRight'||e.key===' '){idx=Math.min(idx+1,pgs.length-1);show(idx);}
 if(e.key==='ArrowLeft'){idx=Math.max(idx-1,0);show(idx);}
 });
+function fitStage(){const s=document.getElementById('stage');if(!s)return;const scale=Math.min(innerWidth/1920,innerHeight/1080);s.style.transform='scale('+scale+')';}
+window.addEventListener('resize',fitStage);fitStage();
 </script>
 </body>
 </html>`, title, title, subtitle)
