@@ -3200,6 +3200,47 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		modelQuery = scoutChatContextTurnModelText(scoutChatContextTurnFromMessage(thread, userMessage))
 	}
 
+	// EARLY INTERCEPT: Deck confirmation after a direction pass (Approach B or choices card).
+	// This MUST run before the router to guarantee we never show subject-missing prose.
+	// After ANY Scout direction pass on a named deck ask, the next user confirmation
+	// ("yes" / "yeah" / "yep" / "looks good") forces generateDefaultDeck / html_deck.
+	// It does not matter: the exact Approach B wording, the exact refuse sentence,
+	// whether the worker is live, or what the router would return.
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && scoutChatDeckConfirmationDetected(text, history) {
+		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
+		if deckErr != nil {
+			unavailableMessage := scoutChatMessageRecord{
+				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:          "message",
+				Role:          "scout",
+				AuthorName:    visibleWorkerName,
+				IntentOutcome: string(conversationIntentUnavailable),
+				Text:          "I couldn't build that deck right now. Your message is saved.",
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailableMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			return response, nil
+		}
+		deckReply.ID = fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+		deckReply.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		deckReply.AuthorName = visibleWorkerName
+		saved, commitErr := commitUserMessage(userMessage, deckReply)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = deckReply
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentConversationalReply)
+		response["providerCalls"] = 1
+		return response, nil
+	}
+
 	// Native Stride actions outrank every work route. The same principal-bound
 	// router serves private Scout and explicit @Scout/direct-reply turns in
 	// channels; public human conversation still bypasses this function above.
