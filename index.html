@@ -945,17 +945,18 @@
         }
       }
 
-      /* The brand mark is the rail's only brand chrome — a small glyph at the
-         top of the slim icon rail. The wordmark lives in the topbar on desktop. */
+      /* The brand mark + wordmark at top of slim icon rail.
+         AJ override 2026-08-16: put the STRIDE wordmark back. */
       .topbar__mark {
         display: inline-flex;
+        flex-direction: column;
         position: relative;
         align-items: center;
         justify-content: center;
-        width: 40px;
-        height: 40px;
+        width: 56px;
         flex: 0 0 auto;
-        margin-bottom: 8px;
+        padding: 12px 0 8px;
+        margin-bottom: 4px;
         overflow: visible;
         transition: opacity var(--dur-med) var(--ease);
       }
@@ -969,8 +970,13 @@
       .topbar__mark-signal path {
         fill: currentColor;
       }
+      /* Wordmark back on rail — AJ override 2026-08-16 */
       .topbar__wordmark {
-        display: none;
+        display: block;
+        width: 44px;
+        height: 12px;
+        margin-top: 4px;
+        background: var(--wordmark-image) no-repeat center / contain;
       }
       /* Canon §1a: the wordmark holds ONE graphite per ground — state never
          re-colors the name. Listening shifts it to the ground's full-contrast
@@ -30525,11 +30531,16 @@
           background: transparent;
           border-right-color: var(--line-1);
         }
+        /* Mark + wordmark stack: 24×24 mark + 44×12 wordmark.
+           AJ override 2026-08-16: wordmark is back on the rail. */
         #appShell.is-authed .tool-rail > .topbar__mark {
           display: inline-flex;
-          width: 40px;
-          height: 40px;
-          margin: 0 0 8px;
+          flex-direction: column;
+          align-items: center;
+          width: 56px;
+          height: auto;
+          padding: 8px 0;
+          margin: 0 0 4px;
         }
         #appShell.is-authed .tool-rail__utilities {
           display: flex;
@@ -30991,6 +31002,7 @@
       <aside id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden>
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
           <svg class="topbar__mark-signal" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c0-.4.1-.7.2-1 .6-1.2 2.4-2 4.8-2.4 1.8-.3 3.8-.4 5-.4s3.2.1 5 .4c2.4.4 4.2 1.2 4.8 2.4.1.3.2.6.2 1s-.1.7-.2 1c-.6 1.2-2.4 2-4.8 2.4-1.8.3-3.8.4-5 .4s-3.2-.1-5-.4c-2.4-.4-4.2-1.2-4.8-2.4-.1-.3-.2-.6-.2-1Z"/></svg>
+          <span class="topbar__wordmark" aria-hidden="true"></span>
         </span>
         <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0">
