@@ -1,9 +1,9 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
-import { colors, radius, space } from '../theme/tokens';
+import { colors, radius, space, type } from '../theme/tokens';
 import { PersonalRealtimeFloatingControl } from '../realtime/PersonalRealtimeFloatingControl';
 import { useOptionalPersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import {
@@ -180,7 +180,8 @@ export function NativeUniversalShell({
           accessibilityRole="tablist"
           style={[styles.sidebar, { paddingTop: Math.max(insets.top, space[4]), paddingBottom: Math.max(insets.bottom, space[4]) }]}
         >
-          {/* No wordmark or tagline — mark only. Slim rail like web. */}
+          {/* iPad wordmark at top of rail, above dest icons — matches web. */}
+          <Text accessibilityRole="header" style={styles.sidebarWordmark}>stride</Text>
           <View style={styles.sidebarItems}>
             {visibleDestinations.map((destination) => (
               <ShellItem
@@ -270,7 +271,7 @@ function ShellItem({
         <DestMark
           icon={destination.icon}
           size={compact ? 20 : 20}
-          color={String(selected ? colors.ember : colors.text2)}
+          color={String(selected ? colors.ember : colors.text1)}
         />
         {hasUnread ? <View style={styles.unreadDot} /> : null}
       </View>
@@ -300,6 +301,12 @@ const styles = StyleSheet.create({
     borderRightColor: colors.border,
     backgroundColor: colors.surface1,
     alignItems: 'center',
+  },
+  sidebarWordmark: {
+    ...type.wordmark,
+    color: colors.wordmark,
+    textAlign: 'center',
+    textTransform: 'lowercase',
   },
   sidebarItems: { gap: space[2], marginTop: space[4], alignItems: 'center' },
   sidebarItem: {
