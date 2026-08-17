@@ -1169,6 +1169,13 @@ func looksLikeDeckRefusal(answer string) bool {
 		"need the subject",
 		"need more details",
 		"need more context",
+		// New patterns for live refusal "I need the deck's subject or source material"
+		"i need the deck",
+		"need the deck's subject",
+		"need the deck's topic",
+		"source material",
+		"before i can build",
+		"before i can create",
 	}
 	for _, pattern := range refusalPatterns {
 		if strings.Contains(lower, pattern) {

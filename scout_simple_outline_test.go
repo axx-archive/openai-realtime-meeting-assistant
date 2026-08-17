@@ -690,6 +690,75 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	}
 }
 
+// TestDeckGenerationAfterApproachBProse tests the exact prod-test scenario at d8a2fe28bb:
+// the router issues Approach B prose ("What's the deck about, and who's in the room?...")
+// and the user types "yes". This must generate a deck, not refuse.
+func TestDeckGenerationAfterApproachBProse(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// The prompt should NOT just say "User request: yes"
+		if strings.Contains(request.Input, "User request: yes") {
+			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
+		}
+		// The prompt should contain the CRITICAL instruction
+		if !strings.Contains(request.Input, "MUST generate") {
+			t.Error("Prompt missing CRITICAL instruction to always generate")
+		}
+		return `<!doctype html>
+<html lang="en">
+<head><title>Future of Work</title></head>
+<body><section class="pg on"><h1>The Future of Work</h1></section></body>
+</html>`, nil
+	})
+
+	// This is the exact prod-test scenario from d8a2fe28bb:
+	// 1. User: "make a 5-slide deck"
+	// 2. Scout (Approach B prose): "What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?"
+	// 3. User: "yes"
+	// The Approach B prose must be recognized as a direction pass (contains "mood").
+	liveApproachBProse := "What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?"
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: liveApproachBProse},
+	}
+
+	// First verify the detection works for the live Approach B prose
+	if !scoutChatLooksLikeDirectionPass(strings.ToLower(liveApproachBProse)) {
+		t.Fatal("scoutChatLooksLikeDirectionPass should return true for live Approach B prose")
+	}
+	if !scoutChatDeckConfirmationDetected("yes", history) {
+		t.Fatal("scoutChatDeckConfirmationDetected should return true for 'yes' after Approach B prose")
+	}
+
+	// Now test the full generation flow
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should produce HTML deck
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
+	}
+	// Should NOT contain refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "i need the deck's subject") {
+		t.Error("Reply contains exact prod-test refusal — should have generated a deck")
+	}
+}
+
 // TestDeckGenerationAfterChoicesCard tests the exact prod-test scenario where
 // the router issues a clarify_once choices card ("What should the 5-slide deck be about?")
 // and the user types "yes". This must generate a deck, not refuse.
@@ -766,6 +835,8 @@ func TestRefusalNeverBecomesDeck(t *testing.T) {
 		"Could you provide more details about the topic?",
 		"I can't create a deck without knowing the subject.",
 		"Please provide the topic for the presentation.",
+		// Exact live refusal from d8a2fe28bb prod-test
+		"I need the deck's subject or source material before I can build it.",
 	}
 	for _, refusal := range refusals {
 		if !looksLikeDeckRefusal(refusal) {
@@ -982,6 +1053,8 @@ func TestLooksLikeDirectionPass(t *testing.T) {
 		{"what's the presentation about?", true},
 		{"what should these slides focus on?", true},
 		{"what subject should the deck cover?", true},
+		// Live Approach B prose (exact verbatim from prod-test at d8a2fe28bb) — MUST match
+		{"what's the deck about, and who's in the room? should it feel polished and investor-ready, or more like a bold creative pitch? do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?", true},
 		// Not direction passes
 		{"i'll create that deck for you", false},
 		{"here's your presentation", false},
