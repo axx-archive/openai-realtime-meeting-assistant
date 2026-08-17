@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -701,6 +702,8 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 		"What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?",
 		// New live quote from eef34845
 		"What's the deck about, and who needs to believe it? Should it feel polished and investor-grade, or more cinematic and culture-forward? Do you want image-led slides or a clean typographic system that makes the argument carry the weight?",
+		// Live quote from fb067e0 prod-test (2026-08-17) — newest failure
+		"What's the deck about, and who's in the room? Should it feel polished and credibility-first, or more cinematic and culture-led? Do you want bold full-bleed imagery, or a clean typographic system with a few strong diagrams?",
 	}
 
 	for _, liveApproachBProse := range approachBVariants {
@@ -795,6 +798,45 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 			// Router should only be called once (for the first message)
 			if routerCalls != 1 {
 				t.Fatalf("router calls=%d, want 1 (early intercept should skip router for confirmation)", routerCalls)
+			}
+
+			// CRITICAL: Verify the thread's messages also contain the HTML deck.
+			// This is what the frontend renders from via payload.thread.messages.
+			// The viewer calls appendChatRichTextNodes on message.text which detects
+			// HTML and calls renderInlineChatDeck.
+			savedThread, ok := second["thread"].(scoutChatThreadRecord)
+			if !ok {
+				t.Fatalf("second response missing thread: %+v", second)
+			}
+			// Find the Scout reply in the thread messages
+			var deckMessage *scoutChatMessageRecord
+			for i := len(savedThread.Messages) - 1; i >= 0; i-- {
+				msg := savedThread.Messages[i]
+				if strings.ToLower(msg.Role) == "scout" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(msg.Text)), "<!doctype html") {
+					deckMessage = &savedThread.Messages[i]
+					break
+				}
+			}
+			if deckMessage == nil {
+				lastMsgs := ""
+				for _, m := range savedThread.Messages {
+					prefix := m.Text
+					if len(prefix) > 80 {
+						prefix = prefix[:80] + "..."
+					}
+					lastMsgs += fmt.Sprintf("\n  [%s/%s] %s", m.Kind, m.Role, prefix)
+				}
+				t.Fatalf("Thread messages do not contain HTML deck. Messages:%s", lastMsgs)
+			}
+			// Verify the message shape is what the viewer expects:
+			// - Kind must be "message" (not work_result, artifact, etc.)
+			// - Role must be "scout" (so appendChatRichTextNodes uses rich mode)
+			// - Text must start with HTML (so it triggers renderInlineChatDeck)
+			if deckMessage.Kind != "message" {
+				t.Errorf("deckMessage.Kind=%q, want 'message'", deckMessage.Kind)
+			}
+			if deckMessage.Role != "scout" {
+				t.Errorf("deckMessage.Role=%q, want 'scout'", deckMessage.Role)
 			}
 		})
 	}

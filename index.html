@@ -11734,6 +11734,16 @@
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
+      /* HTML deck inside a message body: never clamp — the deck is a
+         self-contained block that must render at full height with its
+         16:9 iframe and glass chrome controls visible */
+      .scout-chat-text:has(.chat-deck) {
+        display: block !important;
+        -webkit-line-clamp: unset !important;
+        -webkit-box-orient: unset !important;
+        overflow: visible !important;
+        padding: 0 !important;
+      }
       .scout-chat-msg__expand {
         order: 2;
         align-self: flex-start;
@@ -65592,6 +65602,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function mountScoutChatMessageOverflow(item, body, stack) {
         if (!item || !body || !stack) return
+        // HTML decks are self-contained blocks — never clamp them. The deck
+        // renders its own 16:9 iframe with glass chrome controls.
+        if (body.querySelector('.chat-deck')) return
         const bodyId = `scout-chat-message-body-${++scoutChatOverflowBodySequence}`
         body.id = bodyId
         // Clamp before the node can paint. Short messages are released by the
