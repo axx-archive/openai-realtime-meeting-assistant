@@ -12413,7 +12413,16 @@
         overflow: hidden;
         cursor: pointer;
         border: 2px solid transparent;
+        background: #000;
         transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+      .deck-editor__thumb iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        pointer-events: none;
       }
       .deck-editor__thumb:hover {
         border-color: var(--line-2);
@@ -42364,32 +42373,37 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const propsPanel = editor.querySelector('.deck-editor__props')
 
         // Build a self-contained HTML document for a single slide
+        // Uses the original deck styles so thumbnails/canvas match Present
         function buildSlidePreviewHtml(slide) {
           const slideHtml = slide.outerHTML || '<section class="pg on"></section>'
-          return '<!doctype html><html><head><meta charset="utf-8">' + state.styleBlocks +
-            '<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;overflow:hidden}' +
+          // Make sure the slide has .on class for visibility
+          const slideWithOn = slideHtml.replace(/class="pg(\s|")/, 'class="pg on ')
+          return '<!doctype html><html><head><meta charset="utf-8">' +
+            state.styleBlocks +
+            '<style>' +
+            'html,body{margin:0;padding:0;overflow:hidden;background:#000}' +
             '#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}' +
-            '.pg{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;' +
-            'overflow:hidden;background:#111;padding:80px}</style></head>' +
-            '<body><div id="stage">' + slideHtml.replace(/class="pg[^"]*"/, 'class="pg on"') +
-            '</div><script>(function(){var s=document.getElementById("stage");if(s){' +
-            'var scale=Math.min(innerWidth/1920,innerHeight/1080);' +
-            's.style.transform="scale("+scale+")";}}());<\/script></body></html>'
+            '</style></head>' +
+            '<body><div id="stage">' + slideWithOn + '</div>' +
+            '<script>(function(){' +
+            'var s=document.getElementById("stage");if(!s)return;' +
+            'function fit(){var scale=Math.min(innerWidth/1920,innerHeight/1080);s.style.transform="scale("+scale+")";}' +
+            'fit();window.onresize=fit;' +
+            '})();<\/script></body></html>'
         }
 
-        // Render slide thumbnails with real content
+        // Render slide thumbnails with real content (same as Present)
         function renderThumbs() {
           slideList.innerHTML = ''
           state.slides.forEach((slide, i) => {
             const thumb = document.createElement('div')
             thumb.className = 'deck-editor__thumb'
             thumb.setAttribute('aria-selected', i === state.currentSlide ? 'true' : 'false')
-            // Render actual slide in a mini iframe
+            // Render actual slide in a mini iframe (matches Present view)
             const iframe = document.createElement('iframe')
-            iframe.className = 'deck-editor__thumb-frame'
             iframe.setAttribute('sandbox', 'allow-scripts')
+            iframe.setAttribute('scrolling', 'no')
             iframe.srcdoc = buildSlidePreviewHtml(slide)
-            iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none'
             const num = document.createElement('span')
             num.className = 'deck-editor__thumb-num'
             num.textContent = String(i + 1)
@@ -42399,20 +42413,25 @@ Wrap the entire export in one code block. After the code block, say whether the 
           })
         }
 
-        // Render current slide with editable elements
+        // Render current slide - shows the actual slide content like Present
         function renderCanvas() {
           const slide = state.slides[state.currentSlide]
           if (!slide) return
           canvas.innerHTML = ''
           
-          // Render actual slide as backdrop iframe (scaled to fit)
+          // Render actual slide as the main content (same as Present)
           const backdrop = document.createElement('iframe')
           backdrop.className = 'deck-editor__canvas-backdrop'
           backdrop.setAttribute('sandbox', 'allow-scripts')
+          backdrop.setAttribute('scrolling', 'no')
           backdrop.srcdoc = buildSlidePreviewHtml(slide)
-          backdrop.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;z-index:0'
+          backdrop.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;z-index:0;border-radius:var(--r-md);overflow:hidden'
           canvas.appendChild(backdrop)
           
+          // For now, skip the overlay - just show the slide like Present
+          // Future: add overlay for element selection/editing
+          return
+
           // Overlay container for editable elements
           const overlay = document.createElement('div')
           overlay.className = 'deck-editor__canvas-overlay'
