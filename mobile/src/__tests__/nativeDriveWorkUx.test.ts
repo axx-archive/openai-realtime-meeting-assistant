@@ -52,7 +52,8 @@ test('running and failed work exposes family-aware progress and recovery actions
 	assert.match(bubble, /workThread\.progressCopy/);
 	assert.doesNotMatch(bubble, /review the draft|partial draft/iu);
   assert.match(bubble, /accessible=\{!\(workProposal \|\| workThread\)\}/);
-  assert.match(bubble, /Open live work details/);
+  // Running work shows progress indicator, not a button that dumps to LongMessageSheet
+  assert.match(bubble, /workThread\.family} in progress/);
   assert.match(bubble, /started this (?:workstream|goal|work)/);
   assert.doesNotMatch(bubble, /Confirmed · launched once/);
 	assert.doesNotMatch(screen, /Current stage: \$\{currentStage\}/);

@@ -30,46 +30,39 @@ import {
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
- * Returns null if the artifact kind cannot be determined or is not supported.
+ *
+ * Checks message.thread.mode (live path) first, then message.work.
+ * Does NOT infer kind from title/summary keywords alone — mode must be explicit.
  */
 function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
+  // Live path: kind=thread uses message.thread.mode
+  const threadMode = String(message.thread?.mode ?? '').toLowerCase();
+  if (threadMode) {
+    if (/^(html_deck|deck|presentation|slides?)$/u.test(threadMode)) return 'html_deck';
+    if (/^(table|data_table|spreadsheet)$/u.test(threadMode)) return 'table';
+    if (/^(ideation|ideas|brainstorm)$/u.test(threadMode)) return 'ideation';
+    if (/^(research|deep_research|report|analysis)$/u.test(threadMode)) return 'research';
+    if (/^(document|doc|memo|brief)$/u.test(threadMode)) return 'document';
+  }
+
+  // Governed work path: check explicit artifact kind fields
   const work = message.work;
-  if (!work) return null;
+  if (work) {
+    const kind = String(
+      (work as Record<string, unknown>).artifactKind ??
+      (work as Record<string, unknown>).workKind ??
+      (work as Record<string, unknown>).outputKind ??
+      ''
+    ).toLowerCase();
 
-  // Check for explicit artifact kind from various possible field names
-  const kind = String(
-    (work as Record<string, unknown>).artifactKind ??
-    (work as Record<string, unknown>).workKind ??
-    (work as Record<string, unknown>).outputKind ??
-    ''
-  ).toLowerCase();
-
-  if (kind === 'html_deck' || kind === 'presentation' || kind === 'deck' || kind === 'slides') {
-    return 'html_deck';
-  }
-  if (kind === 'table' || kind === 'data_table' || kind === 'spreadsheet') {
-    return 'table';
-  }
-  if (kind === 'ideation' || kind === 'ideas' || kind === 'brainstorm') {
-    return 'ideation';
-  }
-  if (kind === 'research' || kind === 'report' || kind === 'analysis') {
-    return 'research';
-  }
-  if (kind === 'document' || kind === 'doc' || kind === 'text') {
-    return 'document';
+    if (/^(html_deck|deck|presentation|slides?)$/u.test(kind)) return 'html_deck';
+    if (/^(table|data_table|spreadsheet)$/u.test(kind)) return 'table';
+    if (/^(ideation|ideas|brainstorm)$/u.test(kind)) return 'ideation';
+    if (/^(research|deep_research|report|analysis)$/u.test(kind)) return 'research';
+    if (/^(document|doc|memo|brief)$/u.test(kind)) return 'document';
   }
 
-  // Fallback: try to infer from the work family label or summary keywords
-  const title = String(work.title ?? '').toLowerCase();
-  const summary = String(work.summary ?? '').toLowerCase();
-  const combined = `${title} ${summary}`;
-
-  if (/presentation|slides?|deck/iu.test(combined)) return 'html_deck';
-  if (/table|data|spreadsheet|csv/iu.test(combined)) return 'table';
-  if (/ideation|brainstorm|ideas/iu.test(combined)) return 'ideation';
-  if (/research|report|analysis|findings/iu.test(combined)) return 'research';
-
+  // Do NOT infer from title/summary keywords — mode must be explicit
   return null;
 }
 
@@ -107,6 +100,7 @@ export type MessageBubbleProps = {
   onSaveWorkArtifact?: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact?: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact?: (message: ScoutMessage) => void;
+  onViewArtifactFullscreen?: (message: ScoutMessage) => void;
   onSaveImage?: (message: ScoutMessage) => void;
   onRegenerateImage?: (message: ScoutMessage) => void;
   resolvingProposal?: boolean;
@@ -270,6 +264,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onSaveWorkArtifact,
   onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
+  onViewArtifactFullscreen,
   onSaveImage,
   onRegenerateImage,
   resolvingProposal = false,
@@ -371,13 +366,13 @@ export const MessageBubble = React.memo(function MessageBubble({
           accessible={!(workProposal || workThread)}
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
-          accessibilityHint={workThread ? 'Opens live work details or the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
+          accessibilityHint={longMessage && !workThread ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
           accessibilityActions={[{ name: 'longpress', label: 'Show message actions' }]}
           delayLongPress={messageLongPressDelayMs}
           onAccessibilityAction={(event) => {
             if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
           }}
-          onPress={workThread && !workThread.complete ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
+          onPress={longMessage && !workThread ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
             styles.bubble,
@@ -512,15 +507,18 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : null}
             </View>
-          ) : workThread && workThread.complete && detectInlineArtifactKind(message) ? (
+          ) : workThread && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
             <InlineArtifactPreview
-              kind={detectInlineArtifactKind(message)!}
+              kind={detectInlineArtifactKind(message) ?? 'html_deck'}
               title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
               text={String(workThread.ref.resultPreview ?? '')}
               agentName={workThread.agentName}
-              onEdit={workThread.governedRecord ? undefined : () => onRegenerateWorkArtifact?.(message)}
-              onPresent={detectInlineArtifactKind(message) === 'html_deck' ? () => onOpenWorkArtifact?.(message) : undefined}
-              onExpand={() => onOpenWorkArtifact?.(message)}
+              loading={!workThread.complete}
+              artifactId={workThread.complete ? String(workThread.ref.artifactId ?? '').trim() : undefined}
+              sessionToken={sessionToken}
+              onEdit={workThread.complete && !workThread.governedRecord ? () => onRegenerateWorkArtifact?.(message) : undefined}
+              onPresent={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
+              onExpand={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
             />
           ) : workThread ? (
             <View style={styles.workCard}>
@@ -578,7 +576,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               {String(workThread.ref.provenance ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={2} style={styles.workProvenance}>{String(workThread.ref.provenance)}</Text> : null}
               {workThread.complete ? (
                 <View style={styles.workResultActions}>
-                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>
@@ -597,7 +595,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : workThread.failed ? (
                 <View style={styles.workResultActions}>
-                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel={`View ${workThread.family.toLowerCase()} failure details`} onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel={`View ${workThread.family.toLowerCase()} failure details`} onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="info.circle.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>View details</Text>
                   </Pressable>
@@ -607,16 +605,10 @@ export const MessageBubble = React.memo(function MessageBubble({
                   </Pressable>
                 </View>
               ) : (
-                <Pressable
-                  ref={workDetailsTriggerRef}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open live work details. ${workThread.phase}${workThread.progressPercent > 0 ? `, ${workThread.progressPercent}% complete` : ''}`}
-                  onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)}
-                  style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
-                >
+                <View style={styles.workFoot}>
                   <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`}</Text>
-                  <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
-                </Pressable>
+                  <ActivityIndicator color={colors.emberText} size="small" />
+                </View>
               )}
             </View>
           ) : null}

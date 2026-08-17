@@ -307,6 +307,18 @@ export function CanvasScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+      {/* In-app bell — navigates to Alerts */}
+      <View style={styles.bellHeader}>
+        <Pressable
+          accessibilityLabel="Notifications"
+          accessibilityRole="button"
+          accessibilityHint="Opens your notifications and alerts"
+          onPress={() => navigation.navigate('Alerts')}
+          style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}
+        >
+          <SymbolView name="bell.fill" size={20} tintColor={colors.text2} />
+        </Pressable>
+      </View>
       <ScrollView
         contentContainerStyle={canvasCradleComposition.body}
         automaticallyAdjustKeyboardInsets
@@ -519,6 +531,25 @@ export function CanvasScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgApp },
+  bellHeader: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    zIndex: 10,
+    paddingTop: space[1],
+    paddingRight: space[3],
+  },
+  bellButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+  },
+  bellPressed: {
+    opacity: 0.7,
+    backgroundColor: colors.surface2,
+  },
   projectChip: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1 },
   projectChipText: { ...type.caption, color: colors.text2 },
   projectSheet: { flex: 1, backgroundColor: colors.bgApp },

@@ -52,15 +52,26 @@ export function ChatScreen() {
           <View style={styles.listPane}>
             <View style={styles.header}>
               <Text accessibilityRole="header" style={styles.title}>Chat</Text>
-              <Pressable
-                accessibilityLabel="New conversation"
-                accessibilityRole="button"
-                onPress={() => navigation.navigate('NewConversation')}
-                style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
-              >
-                <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
-                <Text style={styles.createText}>New</Text>
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable
+                  accessibilityLabel="Notifications"
+                  accessibilityRole="button"
+                  accessibilityHint="Opens your notifications and alerts"
+                  onPress={() => navigation.navigate('Alerts')}
+                  style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}
+                >
+                  <SymbolView name="bell.fill" size={18} tintColor={colors.text2} />
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="New conversation"
+                  accessibilityRole="button"
+                  onPress={() => navigation.navigate('NewConversation')}
+                  style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
+                >
+                  <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
+                  <Text style={styles.createText}>New</Text>
+                </Pressable>
+              </View>
             </View>
             <View style={styles.listContainerSplit}>
               <ChannelList onOpenThread={handleOpenThread} selectedThreadId={selectedThreadId ?? undefined} />
@@ -84,15 +95,26 @@ export function ChatScreen() {
         <>
           <View style={styles.header}>
             <Text accessibilityRole="header" style={styles.title}>Chat</Text>
-            <Pressable
-              accessibilityLabel="New conversation"
-              accessibilityRole="button"
-              onPress={() => navigation.navigate('NewConversation')}
-              style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
-            >
-              <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
-              <Text style={styles.createText}>New</Text>
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityLabel="Notifications"
+                accessibilityRole="button"
+                accessibilityHint="Opens your notifications and alerts"
+                onPress={() => navigation.navigate('Alerts')}
+                style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}
+              >
+                <SymbolView name="bell.fill" size={18} tintColor={colors.text2} />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="New conversation"
+                accessibilityRole="button"
+                onPress={() => navigation.navigate('NewConversation')}
+                style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
+              >
+                <SymbolView name="square.and.pencil" size={16} tintColor={colors.onAccent} />
+                <Text style={styles.createText}>New</Text>
+              </Pressable>
+            </View>
           </View>
           <View style={styles.listContainer}>
             <ChannelList onOpenThread={handleOpenThread} />
@@ -114,6 +136,22 @@ const styles = StyleSheet.create({
     paddingTop: space[2],
   },
   title: { ...type.title1, color: colors.text1 },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+  },
+  bellButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+  },
+  bellPressed: {
+    opacity: 0.7,
+    backgroundColor: colors.surface2,
+  },
   createButton: {
     minHeight: 36,
     minWidth: 36,
