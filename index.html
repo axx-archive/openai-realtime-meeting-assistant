@@ -42109,29 +42109,36 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (h1Match) title = h1Match[1].trim()
         }
 
-        // Inject viewport scaling script for fixed 1920x1080 stages
-        // This ensures the deck scales to fit the iframe viewport (thumbnail or fullscreen)
-        // NOTE: Escape the script end tag to avoid breaking the HTML parser
+        // Inject CSS + JS for viewport scaling of fixed 1920x1080 stages
+        // CSS sets initial scale immediately; JS handles resize
+        // NOTE: Escape script end tag to avoid breaking the HTML parser
+        const scalingStyle = '<style>' +
+          '#stage{transform-origin:top left !important;transform:scale(0.25) !important}' +
+          '@media(min-width:961px){#stage{transform:scale(0.5) !important}}' +
+          '@media(min-width:1921px){#stage{transform:scale(1) !important}}' +
+          '<\/style>'
         const scalingScript = '<script>' +
           '(function(){' +
           'var stage=document.getElementById("stage");' +
           'if(!stage)return;' +
-          'stage.style.transformOrigin="top left";' +
           'function fit(){' +
           'var w=innerWidth||480,h=innerHeight||270;' +
           'var s=Math.min(w/1920,h/1080);' +
-          'if(s>0)stage.style.transform="scale("+s+")";' +
+          'stage.style.setProperty("transform","scale("+s+")","important");' +
           '}' +
           'window.addEventListener("resize",fit);' +
-          'requestAnimationFrame(function(){requestAnimationFrame(fit);});' +
+          'fit();' +
+          'setTimeout(fit,0);' +
+          'setTimeout(fit,100);' +
           '})();' +
           '<\/script>'
-        // Insert scaling script before </body> or at the end if no </body>
+        const scalingInject = scalingStyle + scalingScript
+        // Insert scaling CSS+JS before </body> or at the end if no </body>
         let enhancedHtml = htmlContent
         if (htmlContent.toLowerCase().includes('</body>')) {
-          enhancedHtml = htmlContent.replace(/<\/body>/i, scalingScript + '</body>')
+          enhancedHtml = htmlContent.replace(/<\/body>/i, scalingInject + '</body>')
         } else {
-          enhancedHtml = htmlContent + scalingScript
+          enhancedHtml = htmlContent + scalingInject
         }
 
         // Sandboxed iframe — fills the entire cover as the hero visual
