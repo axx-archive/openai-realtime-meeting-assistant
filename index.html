@@ -63682,9 +63682,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            actions.appendChild(reactionButton)
 	          })
 	          if (chatThreadIsChannel(selectedScoutChatThread())) {
-	            const riffButton = bfEl('button', '', 'riff privately')
+	            const riffButton = bfEl('button', '', 'riff')
 	            riffButton.type = 'button'
-	            riffButton.setAttribute('aria-label', 'Riff privately from this exact message')
+	            riffButton.setAttribute('aria-label', 'Riff with Scout from this message')
 	            riffButton.addEventListener('click', () => void openPrivateRiff(message.id, riffButton))
 	            actions.appendChild(riffButton)
 	          }
