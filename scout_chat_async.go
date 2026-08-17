@@ -1405,12 +1405,12 @@ Each slide uses the .pg class and can be one of three types:
 Use bleed slides sparingly (2-3 max) for moments that deserve visual drama.
 The overlay ensures text readability over any image.
 
-REQUIRED CSS (embed in <head>):
+REQUIRED CSS (embed in <head>) - COPY EXACTLY:
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#000;color:#fff}
-#stage{position:fixed;inset:0;width:1920px;height:1080px;margin:auto}
+#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}
 .pg{position:absolute;inset:0;display:none;overflow:hidden;background:#111;padding:80px}
 .pg.on{display:flex;flex-direction:column;justify-content:center}
 .pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px}
@@ -1426,10 +1426,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 @media print{.pg{position:relative;display:block;break-after:page}}
 </style>
 
+REQUIRED VIEWPORT SCALING SCRIPT (embed before </body>) - COPY EXACTLY:
+<script>
+(function(){var s=document.getElementById('stage');if(!s)return;function f(){var w=innerWidth||480,h=innerHeight||270;s.style.transform='scale('+Math.min(w/1920,h/1080)+')';}window.addEventListener('resize',f);f();})();
+</script>
+
 DECK STRUCTURE:
 1. First slide gets class="pg on" (visible by default)
 2. All slides inside <div id="stage">
-3. Add simple keyboard navigation script at end
+3. MUST include the viewport scaling script exactly as shown above
+4. Do NOT use inset:0 or margin:auto on #stage - use top:0;left:0 exactly as shown
 
 Generate ONLY the HTML document. Make it presentation-ready.`, query, directionSection)
 }
