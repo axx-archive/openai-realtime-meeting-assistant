@@ -65199,8 +65199,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // Detect HTML deck content and render with the in-thread deck viewer
         // (sandboxed iframe, Present button, cover hero) — same visual as
         // artifact decks but without requiring a stored artifact.
+        // Detection: starts with <!doctype html> or <html, OR looks like an
+        // HTML document (has <html>, <head>, <body> tags) with deck markers
+        // (.pg, .slide, #stage). The regex handles potential leading BOM or
+        // invisible characters by checking for the pattern anywhere in the
+        // first 200 characters.
         const lower = text.toLowerCase()
-        if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
+        const isHtmlDeck = (
+          lower.startsWith('<!doctype html') ||
+          lower.startsWith('<html') ||
+          // Fallback: check first 200 chars for HTML document structure with deck markers
+          /^[\s\S]{0,100}<!doctype\s+html/i.test(text) ||
+          (/^[\s\S]{0,200}<html[\s>]/i.test(text) && /<(?:body|head)[\s>]/i.test(text.slice(0, 500)) &&
+           /(?:class\s*=\s*["'][^"']*(?:\.?pg|\.?slide)|id\s*=\s*["']stage["'])/i.test(text))
+        )
+        if (isHtmlDeck) {
           renderInlineChatDeck(container, text)
           return
         }

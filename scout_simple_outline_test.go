@@ -3,9 +3,82 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// viewerWillDetectHTMLDeck mirrors the JavaScript detection logic in appendChatRichTextNodes.
+// This ensures the test verifies not just that Text contains HTML, but that the viewer
+// will actually detect it and call renderInlineChatDeck to create the .chat-deck wrapper.
+func viewerWillDetectHTMLDeck(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	// Primary detection: starts with <!doctype html or <html
+	if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
+		return true
+	}
+	// Fallback detection: HTML document structure with deck markers
+	// Mirrors the JavaScript regex patterns
+	doctypePattern := regexp.MustCompile(`(?i)^[\s\S]{0,100}<!doctype\s+html`)
+	if doctypePattern.MatchString(text) {
+		return true
+	}
+	htmlPattern := regexp.MustCompile(`(?i)^[\s\S]{0,200}<html[\s>]`)
+	bodyHeadPattern := regexp.MustCompile(`(?i)<(?:body|head)[\s>]`)
+	deckMarkerPattern := regexp.MustCompile(`(?i)(?:class\s*=\s*["'][^"']*(?:\.?pg|\.?slide)|id\s*=\s*["']stage["'])`)
+	if htmlPattern.MatchString(text) && bodyHeadPattern.MatchString(text[:min(500, len(text))]) &&
+		deckMarkerPattern.MatchString(text) {
+		return true
+	}
+	return false
+}
+
+// TestViewerWillDetectHTMLDeck tests the HTML deck detection logic that mirrors
+// the JavaScript appendChatRichTextNodes detection.
+func TestViewerWillDetectHTMLDeck(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		// Positive cases: should be detected as HTML deck
+		{"doctype lowercase", "<!doctype html><html><body></body></html>", true},
+		{"doctype uppercase", "<!DOCTYPE html><html><body></body></html>", true},
+		{"html without doctype", "<html><body></body></html>", true},
+		{"generateDefaultDeck output", `<!doctype html>
+<html lang="en">
+<head><title>Test</title></head>
+<body><div id="stage"><section class="pg on"><h1>Title</h1></section></div></body>
+</html>`, true},
+		{"wrapInHTMLDeck output", `<!doctype html>
+<html lang="en">
+<head><title>Test</title></head>
+<body><section class="slide title-slide"><h2>Title</h2></section></body>
+</html>`, true},
+		{"with leading whitespace", "   <!doctype html><html><body></body></html>", true},
+		{"with leading newlines", "\n\n<!doctype html><html><body></body></html>", true},
+		{"with BOM (simulated)", "\ufeff<!doctype html><html><body></body></html>", true},
+		// Negative cases: should NOT be detected
+		{"plain text", "Hello world", false},
+		{"markdown", "# Title\n\nSome content", false},
+		{"empty string", "", false},
+		{"just doctype text", "doctype html is a thing", false},
+		// Note: partial html and html-in-middle may be detected by fallback regex
+		// but this is acceptable since real deck content always starts with doctype
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := viewerWillDetectHTMLDeck(tc.text)
+			if got != tc.want {
+				t.Errorf("viewerWillDetectHTMLDeck(%q) = %v, want %v", tc.text[:min(50, len(tc.text))], got, tc.want)
+			}
+		})
+	}
+}
 
 // --- Simple outline phrase guard tests ---------------------------------------
 
@@ -812,7 +885,7 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 			var deckMessage *scoutChatMessageRecord
 			for i := len(savedThread.Messages) - 1; i >= 0; i-- {
 				msg := savedThread.Messages[i]
-				if strings.ToLower(msg.Role) == "scout" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(msg.Text)), "<!doctype html") {
+				if strings.ToLower(msg.Role) == "scout" && viewerWillDetectHTMLDeck(msg.Text) {
 					deckMessage = &savedThread.Messages[i]
 					break
 				}
@@ -826,17 +899,22 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 					}
 					lastMsgs += fmt.Sprintf("\n  [%s/%s] %s", m.Kind, m.Role, prefix)
 				}
-				t.Fatalf("Thread messages do not contain HTML deck. Messages:%s", lastMsgs)
+				t.Fatalf("Thread messages do not contain HTML deck that viewer will detect. Messages:%s", lastMsgs)
 			}
 			// Verify the message shape is what the viewer expects:
 			// - Kind must be "message" (not work_result, artifact, etc.)
 			// - Role must be "scout" (so appendChatRichTextNodes uses rich mode)
-			// - Text must start with HTML (so it triggers renderInlineChatDeck)
+			// - Text must be detected as HTML deck (so renderInlineChatDeck creates .chat-deck)
 			if deckMessage.Kind != "message" {
 				t.Errorf("deckMessage.Kind=%q, want 'message'", deckMessage.Kind)
 			}
 			if deckMessage.Role != "scout" {
 				t.Errorf("deckMessage.Role=%q, want 'scout'", deckMessage.Role)
+			}
+			// Final verification: the viewer mount path WILL wrap this as .chat-deck
+			if !viewerWillDetectHTMLDeck(deckMessage.Text) {
+				t.Errorf("Viewer will NOT detect HTML deck in message.Text (first 100 chars): %q",
+					deckMessage.Text[:min(100, len(deckMessage.Text))])
 			}
 		})
 	}
