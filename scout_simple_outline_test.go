@@ -567,6 +567,36 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 			},
 			want: false,
 		},
+		// Choices card scenario — the router issues a clarify_once choices card
+		// asking "What should the 5-slide deck be about?" The user types "yes".
+		// This must route to deck generation, not return "I still need the subject".
+		{
+			name: "yes after choices card topic question",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a 5-slide deck"},
+				{role: "scout", text: "What should the 5-slide deck be about?"},
+			},
+			want: true,
+		},
+		{
+			name: "yes after choices card with topic in question",
+			text: "yes",
+			history: []scoutChatTurn{
+				{role: "user", text: "create a presentation"},
+				{role: "scout", text: "What topic should the presentation cover?"},
+			},
+			want: true,
+		},
+		{
+			name: "looks good after slides question",
+			text: "looks good",
+			history: []scoutChatTurn{
+				{role: "user", text: "build a pitch deck"},
+				{role: "scout", text: "What should these slides focus on?"},
+			},
+			want: true,
+		},
 		// Empty/edge cases
 		{
 			name: "empty text",
@@ -657,6 +687,71 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(reply.Text), "missing") && strings.Contains(strings.ToLower(reply.Text), "subject") {
 		t.Error("Reply contains 'missing...subject' refusal — should have generated a deck")
+	}
+}
+
+// TestDeckGenerationAfterChoicesCard tests the exact prod-test scenario where
+// the router issues a clarify_once choices card ("What should the 5-slide deck be about?")
+// and the user types "yes". This must generate a deck, not refuse.
+func TestDeckGenerationAfterChoicesCard(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// The prompt should NOT just say "User request: yes"
+		if strings.Contains(request.Input, "User request: yes") {
+			t.Error("Prompt passed 'yes' as user request — should have built a proper request")
+		}
+		// The prompt should contain the CRITICAL instruction
+		if !strings.Contains(request.Input, "MUST generate") {
+			t.Error("Prompt missing CRITICAL instruction to always generate")
+		}
+		return `<!doctype html>
+<html lang="en">
+<head><title>Future of Work</title></head>
+<body><section class="pg on"><h1>The Future of Work</h1></section></body>
+</html>`, nil
+	})
+
+	// This is the exact prod-test scenario from bc21cf77:
+	// 1. User: "make a 5-slide deck"
+	// 2. Scout (choices card): "What should the 5-slide deck be about?"
+	// 3. User: "yes"
+	// The choices card question must be recognized as a direction pass.
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "What should the 5-slide deck be about?"},
+	}
+
+	// First verify the detection works
+	if !scoutChatDeckConfirmationDetected("yes", history) {
+		t.Fatal("scoutChatDeckConfirmationDetected should return true for 'yes' after choices card")
+	}
+
+	// Now test the full generation flow
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should produce HTML deck
+	if reply.Kind != "message" {
+		t.Errorf("reply.Kind=%q, want message", reply.Kind)
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(150, len(reply.Text))])
+	}
+	// Should NOT contain refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "i still need the deck's subject") {
+		t.Error("Reply contains exact prod-test refusal — should have generated a deck")
 	}
 }
 
@@ -880,11 +975,22 @@ func TestLooksLikeDirectionPass(t *testing.T) {
 		{"full-bleed imagery or typographic slides?", true},
 		{"are you presenting to investors?", true},
 		{"do you want something minimal or bold?", true},
+		// Topic clarification questions for decks (choices card scenario)
+		{"what should the 5-slide deck be about?", true},
+		{"what should the deck be about?", true},
+		{"what topic should the presentation cover?", true},
+		{"what's the presentation about?", true},
+		{"what should these slides focus on?", true},
+		{"what subject should the deck cover?", true},
 		// Not direction passes
 		{"i'll create that deck for you", false},
 		{"here's your presentation", false},
 		{"let me help with that", false},
 		{"", false},
+		// Just "about" without deck word shouldn't match
+		{"what's it about?", false},
+		// Just deck word without topic word shouldn't match
+		{"should i make this deck?", false},
 	}
 
 	for _, tc := range cases {
