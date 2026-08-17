@@ -12279,11 +12279,14 @@
         padding: 10px 16px;
         background: var(--surface-1);
         border-bottom: 1px solid var(--line-1);
+        overflow: visible;
       }
       .deck-editor__toolbar-left {
+        flex: none;
         display: flex;
         align-items: center;
         gap: 8px;
+        min-width: 0;
       }
       .deck-editor__toolbar-center {
         flex: 1;
@@ -12291,8 +12294,11 @@
         align-items: center;
         justify-content: center;
         gap: 4px;
+        min-width: 0;
+        overflow: hidden;
       }
       .deck-editor__toolbar-right {
+        flex: none;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -12303,6 +12309,8 @@
         font-weight: 600;
         color: var(--text-1);
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 240px;
@@ -12471,11 +12479,15 @@
       }
       .deck-editor__canvas iframe {
         position: absolute;
-        inset: 0;
+        top: 0;
+        left: 0;
         width: 1920px;
         height: 1080px;
         border: none;
-        transform: scale(0.5);
+        /* Scale to fit canvas - base is 960px wide, so 960/1920 = 0.5 */
+        /* On responsive, canvas width changes, so we use a CSS variable */
+        --canvas-scale: 0.5;
+        transform: scale(var(--canvas-scale));
         transform-origin: top left;
         pointer-events: none;
       }
@@ -12611,6 +12623,10 @@
           max-width: 800px;
           max-height: 450px;
         }
+        .deck-editor__canvas iframe {
+          /* Scale for ~800px canvas: 800/1920 ≈ 0.417 */
+          --canvas-scale: calc((100vw - 400px) / 1920);
+        }
         .deck-editor__props {
           width: 200px;
         }
@@ -12629,14 +12645,22 @@
           width: calc(100vw - 300px);
           height: calc((100vw - 300px) * 9 / 16);
         }
+        .deck-editor__canvas iframe {
+          --canvas-scale: calc((100vw - 300px) / 1920);
+        }
         .deck-editor__props {
           width: 160px;
           padding: 12px;
         }
         .deck-editor__title {
-          max-width: 120px;
+          max-width: 100px;
         }
         .deck-editor__btn--icon span {
+          display: none;
+        }
+        /* Hide some center toolbar items on smaller screens */
+        .deck-editor__toolbar-center [data-action="add-text"],
+        .deck-editor__toolbar-center [data-action="add-image"] {
           display: none;
         }
       }
@@ -12651,6 +12675,23 @@
         .deck-editor__canvas {
           width: calc(100vw - 100px);
           height: calc((100vw - 100px) * 9 / 16);
+        }
+        .deck-editor__canvas iframe {
+          --canvas-scale: calc((100vw - 100px) / 1920);
+        }
+        .deck-editor__title {
+          max-width: 80px;
+        }
+        /* Hide center tools on phone, keep only slide nav */
+        .deck-editor__toolbar-center [data-action="add-text"],
+        .deck-editor__toolbar-center [data-action="add-image"],
+        .deck-editor__toolbar-center [data-action="bring-front"],
+        .deck-editor__toolbar-center [data-action="send-back"] {
+          display: none;
+        }
+        /* Compact Present button on phone */
+        .deck-editor__toolbar-right [data-action="present"] span {
+          display: none;
         }
       }
 
@@ -42448,19 +42489,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // For canvas: renders at full 1920x1080, CSS handles scaling
         function buildSlidePreviewHtml(slide, options = {}) {
           let slideHtml = slide.outerHTML || '<section class="pg on"></section>'
-          // Make sure the slide has .on class for visibility (handles various class patterns)
-          if (!slideHtml.includes(' on') && !slideHtml.includes(' on"') && !slideHtml.includes("'on")) {
-            slideHtml = slideHtml.replace(/class="([^"]*)"/, 'class="$1 on"')
-            slideHtml = slideHtml.replace(/class='([^']*)'/, "class='$1 on'")
+          // Ensure the slide has .on class for visibility
+          // Check if already has 'on' class (with word boundary)
+          const hasOnClass = /\bclass\s*=\s*["'][^"']*\bon\b/.test(slideHtml)
+          if (!hasOnClass) {
+            // Add 'on' class to the first class attribute found
+            slideHtml = slideHtml.replace(/class\s*=\s*"([^"]*)"/, 'class="$1 on"')
+            if (!/\bon\b/.test(slideHtml)) {
+              slideHtml = slideHtml.replace(/class\s*=\s*'([^']*)'/, "class='$1 on'")
+            }
           }
-          // For canvas, render at full size (CSS scales it)
-          // For thumbnails, use CSS-based scaling for immediate paint (no JS delay)
+          // For canvas, render at full 1920x1080 (parent CSS scales it)
+          // For thumbnails, use CSS-based scaling for immediate paint
           const thumbScale = options.fullSize ? '' :
-            '#stage{transform:scale(0.1)}' +
-            '@media(min-width:100px){#stage{transform:scale(calc(100vw/1920))}}'
-          // Force single slide visibility via CSS (handles missing .on support in deck CSS)
-          const slideVisibility = '.pg,.slide,section{display:none!important}' +
-            '.pg.on,.slide.on,section.on{display:flex!important}'
+            '#stage{transform:scale(calc(100vw/1920))}'
+          // Force the single slide to display (override any deck CSS that hides non-.on slides)
+          // Use high specificity to ensure .on slides show regardless of other selectors
+          const slideVisibility = '#stage>.pg,#stage>.slide,#stage>section{display:none!important}' +
+            '#stage>.pg.on,#stage>.slide.on,#stage>section.on,#stage>[class*=" on"],#stage>[class$=" on"]{display:flex!important}'
           return '<!doctype html><html><head><meta charset="utf-8">' +
             state.styleBlocks +
             '<style>' +
@@ -42501,12 +42547,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!slide) return
           canvas.innerHTML = ''
           
-          // Render actual slide at full 1920x1080 - CSS scales it to fit canvas
+          // Render actual slide at full 1920x1080 - CSS class scales it to fit canvas
           const backdrop = document.createElement('iframe')
           backdrop.setAttribute('sandbox', 'allow-scripts')
           backdrop.setAttribute('scrolling', 'no')
           backdrop.srcdoc = buildSlidePreviewHtml(slide, { fullSize: true })
-          backdrop.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none'
+          // Let CSS handle sizing/scaling - don't override with inline styles
           canvas.appendChild(backdrop)
 
           // Overlay container for editable elements
@@ -42520,49 +42566,50 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (e.target === overlay) {
               state.selectedElement = null
               propsPanel.hidden = true
-              renderCanvas()
+              updateOverlaySelection()
             }
           })
 
           // Render each element as an editable box on the overlay
-          // Scale factor: canvas is 960x540, slide is 1920x1080, so 0.5
-          const scaleFactor = 0.5
+          // Use percentages so positioning scales with canvas size
+          // Calculate font scale based on actual canvas width (base: 960px)
+          const canvasWidth = canvas.getBoundingClientRect().width || 960
+          const fontScale = canvasWidth / 1920
+          
           slide.elements.forEach((el, i) => {
             const box = document.createElement('div')
             box.className = 'deck-editor__element'
             box.dataset.elementIndex = String(i)
+            // Convert 1920x1080 coordinates to percentages
+            const leftPct = (el.x / 1920 * 100).toFixed(3)
+            const topPct = (el.y / 1080 * 100).toFixed(3)
+            const widthPct = (el.width / 1920 * 100).toFixed(3)
+            const heightPct = (el.height / 1080 * 100).toFixed(3)
             box.style.cssText = `
               position:absolute;
-              left:${el.x * scaleFactor}px;
-              top:${el.y * scaleFactor}px;
-              width:${el.width * scaleFactor}px;
-              min-height:${el.height * scaleFactor}px;
+              left:${leftPct}%;
+              top:${topPct}%;
+              width:${widthPct}%;
+              min-height:${heightPct}%;
               z-index:${el.zIndex || i + 1};
               cursor:move;
-              border:1px solid transparent;
+              border:2px solid transparent;
               border-radius:4px;
-              transition:border-color 0.15s;
             `
-            if (state.selectedElement === i) {
-              box.dataset.selected = 'true'
-              box.style.borderColor = 'var(--accent, #0066ff)'
-              box.style.background = 'rgba(0,102,255,0.1)'
-            }
 
             if (el.type === 'text') {
               const textDiv = document.createElement('div')
               textDiv.contentEditable = 'true'
+              textDiv.className = 'deck-editor__text-edit'
               textDiv.style.cssText = `
-                width:100%;height:100%;padding:4px;
-                color:transparent;font-size:${(el.fontSize || 32) * scaleFactor}px;
+                width:100%;min-height:100%;padding:8px;
+                color:#fff;font-size:${Math.round((el.fontSize || 32) * fontScale)}px;
                 font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
-                outline:none;overflow:hidden;caret-color:#fff;
+                outline:none;overflow:visible;
+                background:rgba(0,0,0,0.6);border-radius:4px;
+                text-shadow:0 1px 2px rgba(0,0,0,0.5);
+                cursor:text;
               `
-              // Show text only when selected for editing
-              if (state.selectedElement === i) {
-                textDiv.style.color = '#fff'
-                textDiv.style.background = 'rgba(0,0,0,0.7)'
-              }
               textDiv.textContent = el.content
               textDiv.addEventListener('input', () => {
                 el.content = textDiv.textContent
@@ -42572,35 +42619,55 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 state.selectedElement = i
                 propsPanel.hidden = false
                 updatePropsPanel()
-                renderCanvas()
+                updateOverlaySelection()
               })
-              textDiv.addEventListener('mousedown', e => e.stopPropagation())
+              textDiv.addEventListener('mousedown', e => {
+                e.stopPropagation()
+                state.selectedElement = i
+                propsPanel.hidden = false
+                updatePropsPanel()
+                updateOverlaySelection()
+              })
               box.appendChild(textDiv)
             } else if (el.type === 'image' && el.src) {
               const img = document.createElement('img')
               img.src = el.src
-              img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none;opacity:0'
-              if (state.selectedElement === i) {
-                img.style.opacity = '0.3'
-              }
+              img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none;opacity:0.5'
               box.appendChild(img)
             }
 
-            // Selection handles for selected element
-            if (state.selectedElement === i) {
-              const handles = ['nw', 'ne', 'sw', 'se']
-              handles.forEach(pos => {
-                const handle = document.createElement('div')
-                handle.className = `deck-editor__handle deck-editor__handle--${pos}`
-                handle.dataset.handle = pos
-                box.appendChild(handle)
-              })
-            }
-
-            box.addEventListener('mousedown', e => startDragOrResize(i, e))
-            box.addEventListener('touchstart', e => startDragOrResize(i, e), { passive: false })
+            box.addEventListener('mousedown', e => {
+              if (e.target.contentEditable === 'true') return
+              startDragOrResize(i, e)
+            })
+            box.addEventListener('touchstart', e => {
+              if (e.target.contentEditable === 'true') return
+              startDragOrResize(i, e)
+            }, { passive: false })
             overlay.appendChild(box)
           })
+
+          // Update selection visuals without full re-render
+          function updateOverlaySelection() {
+            overlay.querySelectorAll('.deck-editor__element').forEach((box, i) => {
+              const isSelected = state.selectedElement === i
+              box.dataset.selected = isSelected ? 'true' : 'false'
+              box.style.borderColor = isSelected ? 'var(--accent, #0066ff)' : 'transparent'
+              // Remove old handles
+              box.querySelectorAll('.deck-editor__handle').forEach(h => h.remove())
+              // Add handles if selected
+              if (isSelected) {
+                const handles = ['nw', 'ne', 'sw', 'se']
+                handles.forEach(pos => {
+                  const handle = document.createElement('div')
+                  handle.className = `deck-editor__handle deck-editor__handle--${pos}`
+                  handle.dataset.handle = pos
+                  box.appendChild(handle)
+                })
+              }
+            })
+          }
+          updateOverlaySelection()
         }
 
         // Drag and resize (supports mouse and touch for iPad)
@@ -42611,11 +42678,25 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const el = slide?.elements[index]
           if (!el) return
 
-          // Select element
+          // Select element (update visuals without full re-render)
           state.selectedElement = index
           propsPanel.hidden = false
           updatePropsPanel()
-          renderCanvas()
+          // Update selection visuals on existing elements
+          canvas.querySelectorAll('.deck-editor__element').forEach((box, i) => {
+            const isSelected = i === index
+            box.dataset.selected = isSelected ? 'true' : 'false'
+            box.style.borderColor = isSelected ? 'var(--accent, #0066ff)' : 'transparent'
+            box.querySelectorAll('.deck-editor__handle').forEach(h => h.remove())
+            if (isSelected) {
+              ['nw', 'ne', 'sw', 'se'].forEach(pos => {
+                const h = document.createElement('div')
+                h.className = `deck-editor__handle deck-editor__handle--${pos}`
+                h.dataset.handle = pos
+                box.appendChild(h)
+              })
+            }
+          })
 
           // Get initial position (supports both mouse and touch)
           const getPos = (ev) => {
@@ -42630,11 +42711,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const origW = el.width
           const origH = el.height
 
+          // Get canvas size to calculate proper scale
+          const canvasRect = canvas.getBoundingClientRect()
+          const scaleX = 1920 / canvasRect.width
+          const scaleY = 1080 / canvasRect.height
+
+          const box = canvas.querySelector(`.deck-editor__element[data-element-index="${index}"]`)
           const onMove = (ev) => {
             ev.preventDefault()
             const pos = getPos(ev)
-            const dx = (pos.x - startPos.x) * 2  // Scale back to 1920x1080
-            const dy = (pos.y - startPos.y) * 2
+            // Convert screen pixels to 1920x1080 coordinates
+            const dx = (pos.x - startPos.x) * scaleX
+            const dy = (pos.y - startPos.y) * scaleY
             if (handle) {
               // Resize
               if (handle.includes('e')) el.width = Math.max(50, origW + dx)
@@ -42647,7 +42735,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
               el.y = origY + dy
             }
             state.dirty = true
-            renderCanvas()
+            // Update DOM directly with percentages
+            if (box) {
+              box.style.left = (el.x / 1920 * 100).toFixed(3) + '%'
+              box.style.top = (el.y / 1080 * 100).toFixed(3) + '%'
+              box.style.width = (el.width / 1920 * 100).toFixed(3) + '%'
+              box.style.minHeight = (el.height / 1080 * 100).toFixed(3) + '%'
+            }
             updatePropsPanel()
           }
           const onUp = () => {
@@ -42747,6 +42841,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         // Build updated HTML from edited state
         function buildUpdatedHtml() {
+          // If no changes were made, return original HTML exactly
+          if (!state.dirty) {
+            return state.originalHtml
+          }
+          
           const newDoc = parser.parseFromString(state.originalHtml, 'text/html')
           const newSlides = Array.from(newDoc.querySelectorAll('.pg, .slide, section'))
 
@@ -42754,23 +42853,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (!newSlides[slideIdx]) return
             const slideEl = newSlides[slideIdx]
             
-            // Update text content of existing elements in place
-            const textEls = slideEl.querySelectorAll('h1, h2, h3, h4, p, li, span, div')
-            const textElsArr = Array.from(textEls).filter(el => {
-              const text = el.textContent?.trim()
-              return text && text.length > 0 && !el.querySelector('h1, h2, h3, p, li')
-            })
-            
+            // Only update elements that actually changed
             slide.elements.forEach(el => {
               if (el.type === 'text' && el.originalEl) {
-                // Find corresponding element in the new doc
-                const origTag = el.originalEl.tagName.toLowerCase()
                 const origText = el.originalEl.textContent?.trim()
-                for (const newEl of textElsArr) {
-                  if (newEl.tagName.toLowerCase() === origTag && 
-                      newEl.textContent?.trim() === origText) {
-                    newEl.textContent = el.content
-                    break
+                const newText = el.content?.trim()
+                // Only modify if text actually changed
+                if (origText !== newText) {
+                  // Find the matching element in the new doc by walking the same path
+                  const origTag = el.originalEl.tagName.toLowerCase()
+                  const textEls = Array.from(slideEl.querySelectorAll(origTag))
+                  for (const newEl of textEls) {
+                    if (newEl.textContent?.trim() === origText) {
+                      // Preserve inner HTML structure if possible
+                      if (newEl.children.length === 0) {
+                        newEl.textContent = el.content
+                      } else {
+                        // Has child elements - update first text node only
+                        const walker = newDoc.createTreeWalker(newEl, NodeFilter.SHOW_TEXT)
+                        const textNode = walker.nextNode()
+                        if (textNode) textNode.textContent = el.content
+                      }
+                      break
+                    }
                   }
                 }
               }
@@ -42779,7 +42884,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
             // Add any new elements that were created in the editor
             slide.elements.forEach(el => {
               if (!el.originalEl) {
-                // This is a new element added in the editor
                 if (el.type === 'text') {
                   const newEl = newDoc.createElement(el.tag || 'p')
                   newEl.textContent = el.content
