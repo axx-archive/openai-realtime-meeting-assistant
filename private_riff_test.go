@@ -143,6 +143,85 @@ func TestPrivateRiffRouterCannotPreemptCheckpointAnswer(t *testing.T) {
 	}
 }
 
+func TestPrivateRiffAllowsImageGenerationAsDirectRender(t *testing.T) {
+	imageWork := conversationIntentDecision{
+		Outcome: conversationIntentStartPrivateWork,
+		Work:    &conversationWorkDecision{Kind: conversationWorkImage, Objective: "a sunset over the city"},
+		Source:  proposalSourceChatRouter,
+	}
+	constrained := constrainPrivateRiffDecision(imageWork)
+	if constrained.Outcome != conversationIntentStartPrivateWork || constrained.Work == nil || constrained.Work.Kind != conversationWorkImage {
+		t.Fatalf("image decision=%+v, want Riff to allow image generation", constrained)
+	}
+	if constrained.Work.Objective != "a sunset over the city" {
+		t.Fatalf("image prompt=%q, want preserved objective", constrained.Work.Objective)
+	}
+
+	for _, durableKind := range []conversationWorkKind{conversationWorkRegistryTool, conversationWorkWorkstream, conversationWorkGoal} {
+		durableWork := conversationIntentDecision{
+			Outcome: conversationIntentStartPrivateWork,
+			Work:    &conversationWorkDecision{Kind: durableKind},
+			Source:  proposalSourceChatRouter,
+		}
+		durableConstrained := constrainPrivateRiffDecision(durableWork)
+		if durableConstrained.Outcome != conversationIntentUnavailable || durableConstrained.Unavailable == nil || durableConstrained.Unavailable.Code != "private_riff_work_unavailable" {
+			t.Fatalf("durable work kind=%s constrained=%+v, want authority fence", durableKind, durableConstrained)
+		}
+	}
+}
+
+func TestPrivateRiffSharesImageMessageToSourceChannel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}
+	source := seedPrivateRiffChannel(t, app, user.Email, 2)
+	riff, _, err := app.createPrivateRiff(user, source.ID, "riff-source-02", "", "riff-image-share-create")
+	if err != nil {
+		t.Fatalf("create riff: %v", err)
+	}
+	imageMessage := scoutChatMessageRecord{
+		ID: "riff-image-answer", Kind: scoutChatMessageKindImage, Role: "scout", AuthorName: "Scout",
+		Text:      "here's the concept render.",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Image: &scoutChatImageRef{
+			Ref:  "sha256:" + strings.Repeat("a", 64),
+			Mime: "image/png",
+			Name: "sunset-concept.png",
+		},
+		Activity: completedPrivateRiffActivity(riff),
+	}
+	riff, err = app.commitScoutChatThreadMessages(user.Email, riff.ID, imageMessage)
+	if err != nil {
+		t.Fatalf("commit image message: %v", err)
+	}
+
+	result, err := app.publishPrivateRiffConversation(user, riff.ID, "riff-image-publish", privateRiffPublicationScopeReply, imageMessage.ID)
+	if err != nil || !result.OK || result.PublishedCount != 1 {
+		t.Fatalf("share image result=%+v err=%v", result, err)
+	}
+	updated, _, err := app.scoutChatThreadByID(user.Email, source.ID)
+	if err != nil {
+		t.Fatalf("read destination: %v", err)
+	}
+	posted := updated.Messages[len(updated.Messages)-1]
+	if posted.Kind != scoutChatMessageKindImage {
+		t.Fatalf("posted kind=%q, want %q", posted.Kind, scoutChatMessageKindImage)
+	}
+	if posted.Image == nil || posted.Image.Ref != imageMessage.Image.Ref || posted.Image.Mime != imageMessage.Image.Mime || posted.Image.Name != imageMessage.Image.Name {
+		t.Fatalf("posted image=%+v, want ref=%q mime=%q name=%q", posted.Image, imageMessage.Image.Ref, imageMessage.Image.Mime, imageMessage.Image.Name)
+	}
+	if posted.Text != imageMessage.Text || posted.Role != "scout" || posted.AuthorName != "Scout" {
+		t.Fatalf("posted authorship text=%q role=%q author=%q", posted.Text, posted.Role, posted.AuthorName)
+	}
+	if posted.Publication == nil || posted.Publication.Scope != "reply" || posted.Via != "private_riff" {
+		t.Fatalf("posted provenance=%+v via=%q", posted.Publication, posted.Via)
+	}
+	publicView := app.projectScoutChatThreadForViewer("tim@shareability.com", updated)
+	visible := publicView.Messages[len(publicView.Messages)-1]
+	if visible.Kind != scoutChatMessageKindImage || visible.Image == nil || visible.Image.Ref != imageMessage.Image.Ref {
+		t.Fatalf("public projection missing image kind=%q image=%+v", visible.Kind, visible.Image)
+	}
+}
+
 func TestPrivateRiffSourceDriftFailsClosed(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}
