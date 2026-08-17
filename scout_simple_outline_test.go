@@ -37,6 +37,17 @@ func viewerWillDetectHTMLDeck(text string) bool {
 	return false
 }
 
+// viewerWillSkipLinkPreviewForDeck mirrors the JavaScript logic in mountDesktopChatLinkPreview.
+// HTML deck content should NOT trigger link preview extraction — the deck is rendered by
+// renderInlineChatDeck, not as a link preview. This prevents xmlns/SVG namespace URLs
+// (e.g. http://www.w3.org/2000/svg) from being unfurled as degraded w3.org cards.
+func viewerWillSkipLinkPreviewForDeck(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.HasPrefix(lower, "<!doctype html") ||
+		strings.HasPrefix(lower, "<html") ||
+		regexp.MustCompile(`(?i)^[\s\S]{0,100}<!doctype\s+html`).MatchString(text)
+}
+
 // TestViewerWillDetectHTMLDeck tests the HTML deck detection logic that mirrors
 // the JavaScript appendChatRichTextNodes detection.
 func TestViewerWillDetectHTMLDeck(t *testing.T) {
@@ -775,8 +786,10 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 		"What's the deck about, and who's in the room? Should it feel polished and investor-ready, or more like a bold creative pitch? Do you want cinematic imagery carrying the mood, or a clean typographic system doing the work?",
 		// New live quote from eef34845
 		"What's the deck about, and who needs to believe it? Should it feel polished and investor-grade, or more cinematic and culture-forward? Do you want image-led slides or a clean typographic system that makes the argument carry the weight?",
-		// Live quote from fb067e0 prod-test (2026-08-17) — newest failure
+		// Live quote from fb067e0 prod-test (2026-08-17)
 		"What's the deck about, and who's in the room? Should it feel polished and credibility-first, or more cinematic and culture-led? Do you want bold full-bleed imagery, or a clean typographic system with a few strong diagrams?",
+		// Live quote from 5450fad6 prod-test — newest failure (2026-08-17)
+		"What's the deck about, and who needs to say yes after slide five? Should it feel like a sharp investor story, an internal working session, or a cinematic brand pitch? Do you want image-led atmosphere or clean typographic slides?",
 	}
 
 	for _, liveApproachBProse := range approachBVariants {
@@ -914,6 +927,13 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 			// Final verification: the viewer mount path WILL wrap this as .chat-deck
 			if !viewerWillDetectHTMLDeck(deckMessage.Text) {
 				t.Errorf("Viewer will NOT detect HTML deck in message.Text (first 100 chars): %q",
+					deckMessage.Text[:min(100, len(deckMessage.Text))])
+			}
+			// CRITICAL: Verify the viewer will SKIP link preview for this deck content.
+			// Deck HTML contains xmlns/SVG namespace URLs that would otherwise unfurl
+			// as degraded w3.org cards and collapse the .chat-deck to 0x0.
+			if !viewerWillSkipLinkPreviewForDeck(deckMessage.Text) {
+				t.Errorf("Viewer will NOT skip link preview for deck (first 100 chars): %q — w3.org unfurl will collapse deck",
 					deckMessage.Text[:min(100, len(deckMessage.Text))])
 			}
 		})

@@ -11744,6 +11744,12 @@
         overflow: visible !important;
         padding: 0 !important;
       }
+      /* When .chat-deck is present, hide any sibling link preview cards.
+         Deck HTML may contain namespace URLs that could trigger link unfurl. */
+      .scout-chat-text:has(.chat-deck) ~ .desktop-chat-link-preview,
+      .scout-chat-msg__stack:has(.chat-deck) .desktop-chat-link-preview {
+        display: none !important;
+      }
       .scout-chat-msg__expand {
         order: 2;
         align-self: flex-start;
@@ -63896,6 +63902,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function mountDesktopChatLinkPreview(stack, text) {
+	        // Skip HTML deck content — decks are rendered by renderInlineChatDeck,
+	        // not as link previews. Deck HTML contains xmlns/SVG namespace URLs
+	        // that would otherwise unfurl as degraded w3.org cards.
+	        const lower = String(text || '').toLowerCase()
+	        const isHtmlDeck = (
+	          lower.startsWith('<!doctype html') ||
+	          lower.startsWith('<html') ||
+	          /^[\s\S]{0,100}<!doctype\s+html/i.test(text)
+	        )
+	        if (isHtmlDeck) {
+	          return
+	        }
 	        const url = desktopChatFirstURL(text)
 	        if (!url || !stack) {
 	          return
