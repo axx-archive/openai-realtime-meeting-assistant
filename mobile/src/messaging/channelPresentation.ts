@@ -7,109 +7,84 @@ export function isBonfireChat(thread: Pick<ScoutThread, 'table' | 'title' | 'vis
 }
 
 /**
- * Forbidden thread title patterns — work status that leaks into titles.
- */
-const FORBIDDEN_STATUS_PATTERNS = [
-  /^scout is (working|thinking|listening)/iu,
-  /^(research|work|presentation|document) delivered/iu,
-  /^(generating|creating|building|preparing)/iu,
-  /^(needs attention|deliverable ready)/iu,
-];
-
-/**
- * Prompt-like patterns — if title matches, it's the user's query, not a heading.
- *
- * Prompts typically start with an imperative verb or are questions.
- * "make a 5-slide deck" is a prompt. "Q3 Strategy Review" is a heading.
- */
-const PROMPT_PATTERNS = [
-  // Imperative verbs at start (common prompt starters)
-  /^(make|create|build|write|draft|design|research|analyze|summarize|help|generate|prepare|develop|explain|describe|compare|find|search|look|get|give|tell|show|list|outline|review|revise|update|edit|translate|convert|turn|transform)\b/iu,
-  // Questions
-  /^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does|will)\b.+\??\s*$/iu,
-  // "I want/need" patterns
-  /^i (want|need|would like|'d like)\b/iu,
-  // Sentences ending with period (prompts are often full sentences)
-  /^[a-z].*\.$/iu,
-];
-
-/**
- * Extract a real heading from markdown or em/en-dash format.
- *
- * - `# Heading` → `Heading`
- * - `## Subheading` → `Subheading`
- * - `Title — Subtitle` keeps the structure
- */
-function extractMarkdownHeading(text: string): string | null {
-  // Markdown heading: # Title, ## Title, ### Title
-  const mdMatch = text.match(/^#{1,3}\s+(.+)$/u);
-  if (mdMatch) return mdMatch[1].trim();
-  return null;
-}
-
-/**
- * Check if text looks like a real title (not a prompt).
- *
- * Real titles:
- * - Short (under ~60 chars typically)
- * - Don't start with imperative verbs
- * - Aren't questions
- * - May have em/en-dash structure ("Strategy — Q3")
- */
-function looksLikeRealTitle(text: string): boolean {
-  // Too long to be a real title
-  if (text.length > 80) return false;
-  // Matches prompt patterns
-  if (PROMPT_PATTERNS.some((pattern) => pattern.test(text))) return false;
-  // Has em/en-dash structure (real titles often do)
-  if (/\s[—–-]\s/.test(text)) return true;
-  // Title case or all caps (real titles often are)
-  if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(text)) return true;
-  if (/^[A-Z\s]+$/.test(text) && text.length < 40) return true;
-  // Short and doesn't match prompt patterns — accept it
-  if (text.length < 40) return true;
-  return false;
-}
-
-/**
  * Heading-only title lift — matches web `desktopWorkTitle`.
  *
  * Locked plan:
- * - Lift markdown # / ## / ### or a real em/en-dash title
- * - Never thread.title if it equals the prompt
- * - Never resultTitle||query, never last spoken line
- * - If title === query (looks like a prompt), reject it
+ * - Lift markdown # / ## / ### heading
+ * - Accept em/en-dash structured titles ("Strategy — Q3 Review")
+ * - If title === query (the prompt), reject it
+ * - Never rely on verb patterns as the guard
  * - Fall back to "Conversation"
+ *
+ * Pass `query` (the user's original prompt) to enable the title===query check.
+ * If title equals query, it's the prompt being echoed back — reject it.
  */
-export function threadHeadingTitle(thread: Pick<ScoutThread, 'title'>): string {
+export function threadHeadingTitle(
+  thread: Pick<ScoutThread, 'title'>,
+  query?: string | null
+): string {
   const raw = String(thread.title ?? '').trim();
   if (!raw) return 'Conversation';
   
-  // Reject forbidden status patterns
-  if (FORBIDDEN_STATUS_PATTERNS.some((pattern) => pattern.test(raw))) return 'Conversation';
+  // Title === query check: if the title IS the prompt, reject it
+  const normalizedTitle = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+  const normalizedQuery = String(query ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (normalizedQuery && normalizedTitle === normalizedQuery) return 'Conversation';
   
-  // Try to extract markdown heading first
-  const mdHeading = extractMarkdownHeading(raw);
-  if (mdHeading && looksLikeRealTitle(mdHeading)) return mdHeading;
+  // Markdown heading: # Title, ## Title, ### Title — extract and use
+  const mdMatch = raw.match(/^#{1,3}\s+(.+)$/u);
+  if (mdMatch) {
+    const heading = mdMatch[1].trim();
+    if (heading) return heading;
+  }
   
-  // Check if raw title looks like a real title (not a prompt)
-  if (looksLikeRealTitle(raw)) return raw;
+  // Em/en-dash structured title ("Strategy — Q3 Review") — accept
+  if (/\s[—–]\s/.test(raw)) return raw;
   
-  // Title looks like a prompt — reject it
+  // Everything else is assumed to be a prompt — reject it
+  // This catches: "make a 5-slide deck", "Please make a deck", "A deck about Q3", etc.
   return 'Conversation';
+}
+
+/**
+ * Extract the query (user's prompt) from a thread if available.
+ *
+ * The query might be in activeWork.thread.query or in thread messages.
+ */
+function extractThreadQuery(thread: Pick<ScoutThread, 'activeWork' | 'messages'>): string | null {
+  // Try activeWork first
+  const activeQuery = (thread.activeWork as { thread?: { query?: string } } | undefined)?.thread?.query;
+  if (activeQuery) return activeQuery;
+  
+  // Try first user message as fallback
+  const messages = thread.messages ?? [];
+  const firstUserMessage = messages.find((m) => m.role === 'user');
+  if (firstUserMessage?.text) return firstUserMessage.text;
+  
+  return null;
 }
 
 /**
  * Channel display name — heading-only lift (locked plan).
  *
- * Never fall back to raw title (the prompt), preview, or last spoken line.
- * Uses threadHeadingTitle which filters forbidden patterns.
+ * Public channels: use the title directly (set by owner, not from query).
+ * Private conversations: use threadHeadingTitle with title===query check.
  */
-export function channelDisplayName(thread: Pick<ScoutThread, 'table' | 'title' | 'visibility' | 'preview'>): string {
+export function channelDisplayName(
+  thread: Pick<ScoutThread, 'table' | 'title' | 'visibility' | 'preview' | 'activeWork' | 'messages'>
+): string {
   if (isBonfireChat(thread)) return 'Bonfire Chat';
-  // Heading-only: never fall back to raw title (the prompt)
-  const heading = threadHeadingTitle(thread);
-  return thread.visibility === 'public' ? `#${heading.replace(/^#/, '')}` : heading;
+  
+  // Public channels have intentionally-set titles, not prompts
+  if (thread.visibility === 'public') {
+    const title = String(thread.title ?? '').trim() || 'Conversation';
+    return `#${title.replace(/^#/, '')}`;
+  }
+  
+  // Private conversations: extract query for title===query check
+  const query = extractThreadQuery(thread);
+  const heading = threadHeadingTitle(thread, query);
+  return heading;
 }
 
 export function pinBonfireChatFirst<T extends Pick<ScoutThread, 'table' | 'title' | 'visibility'>>(threads: readonly T[]): T[] {
