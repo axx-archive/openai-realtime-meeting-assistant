@@ -271,13 +271,15 @@ func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextR
 
 // openAITextJobIsToolIndependent names the exact work that can honestly use
 // the current single-response writer without the retired Bonfire function
-// loop. Research has its own hosted read-only web-search contract. A process
-// writer is admitted only when the durable goal stage carries a concrete
-// output contract and all prior-stage inputs were assembled into its prompt.
-// Ordinary chat work, free-form goals, and direct tools remain unavailable
-// until the OpenAI function-tool loop reaches authority/capability parity.
+// loop. Workstream modes (research, design, grill, workflow) have their own
+// hosted contracts. A process writer is admitted only when the durable goal
+// stage carries a concrete output contract and all prior-stage inputs were
+// assembled into its prompt. Ordinary chat work, free-form goals, and direct
+// tools remain unavailable until the OpenAI function-tool loop reaches
+// authority/capability parity.
 func openAITextJobIsToolIndependent(job AgentJob) bool {
-	if normalizeAgentThreadMode(job.Mode) == "research" {
+	switch normalizeAgentThreadMode(job.Mode) {
+	case "research", "design", "grill", "workflow":
 		return true
 	}
 	metadata := job.thread.Artifact.Metadata
