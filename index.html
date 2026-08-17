@@ -945,26 +945,28 @@
         }
       }
 
-      /* Wordmark at top of slim icon rail — AJ locked placement 2026-08-17.
-         Lowercase "stride" at top, dest icons below. No stacked mark. */
+      /* Minimal mark at top of slim icon rail — AJ + Design Critic lock 2026-08-17.
+         Wordmark moves to topbar; rail stays icon-only. */
       .topbar__mark {
         display: inline-flex;
         position: relative;
         align-items: center;
         justify-content: center;
-        width: 56px;
+        width: 40px;
+        height: 40px;
         flex: 0 0 auto;
-        padding: 10px 0;
-        margin-bottom: 4px;
+        margin-bottom: 8px;
         overflow: visible;
         transition: opacity var(--dur-med) var(--ease);
       }
-      /* Wordmark only (no signal mark) — black on light, orange on dark */
-      .topbar__wordmark {
-        display: block;
-        width: 44px;
-        height: 12px;
-        background: var(--wordmark-image) no-repeat center / contain;
+      /* The signal mark (ember/aperture) — the icon, not the wordmark */
+      .topbar__mark-signal {
+        width: 24px;
+        height: 24px;
+        color: var(--text-1);
+      }
+      .topbar__mark-signal path {
+        fill: currentColor;
       }
       /* Canon §1a: the wordmark holds ONE graphite per ground — state never
          re-colors the name. Listening shifts it to the ground's full-contrast
@@ -1006,13 +1008,13 @@
         flex: 0 0 auto;
       }
 
-      /* Wordmark hidden from content chrome — brand identity is the mark on the
-         rail; workspace identity (Bonfire) lives in the header as before. */
+      /* Wordmark in topbar LEFT of org switcher — AJ + Design Critic lock 2026-08-17.
+         Black on light, orange on dark. */
       .topbar__brand-wordmark {
-        display: none;
-        width: 68px;
-        height: 17px;
-        color: var(--wordmark);
+        display: block;
+        width: 44px;
+        height: 12px;
+        background: var(--wordmark-image) no-repeat center / contain;
         flex: 0 0 auto;
       }
 
@@ -30520,14 +30522,14 @@
           background: transparent;
           border-right-color: var(--line-1);
         }
-        /* Wordmark only at top of rail — AJ locked placement 2026-08-17 */
+        /* Minimal mark at top of rail — wordmark in topbar */
         #appShell.is-authed .tool-rail > .topbar__mark {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 56px;
-          padding: 10px 0;
-          margin: 0 0 4px;
+          width: 40px;
+          height: 40px;
+          margin: 0 0 8px;
         }
         #appShell.is-authed .tool-rail__utilities {
           display: flex;
@@ -30989,7 +30991,7 @@
     <main id="appShell" data-tool="office" data-pd1-destination="Home">
       <aside id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden>
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
-          <span class="topbar__wordmark" aria-hidden="true"></span>
+          <svg class="topbar__mark-signal" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c0-.4.1-.7.2-1 .6-1.2 2.4-2 4.8-2.4 1.8-.3 3.8-.4 5-.4s3.2.1 5 .4c2.4.4 4.2 1.2 4.8 2.4.1.3.2.6.2 1s-.1.7-.2 1c-.6 1.2-2.4 2-4.8 2.4-1.8.3-3.8.4-5 .4s-3.2-.1-5-.4c-2.4-.4-4.2-1.2-4.8-2.4-.1-.3-.2-.6-.2-1Z"/></svg>
         </span>
         <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0">
