@@ -12451,13 +12451,6 @@
         font: var(--type-caption);
         border-radius: 4px;
       }
-      .deck-editor__thumb iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        pointer-events: none;
-        transform-origin: top left;
-      }
       /* Canvas area */
       .deck-editor__canvas-wrap {
         flex: 1;
@@ -12471,8 +12464,9 @@
       .deck-editor__canvas {
         position: relative;
         width: 960px;
-        height: 540px;
-        background: #fff;
+        max-width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
         border-radius: var(--r-md);
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
         overflow: hidden;
@@ -12481,14 +12475,9 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 1920px;
-        height: 1080px;
+        width: 100%;
+        height: 100%;
         border: none;
-        /* Scale to fit canvas - base is 960px wide, so 960/1920 = 0.5 */
-        /* On responsive, canvas width changes, so we use a CSS variable */
-        --canvas-scale: 0.5;
-        transform: scale(var(--canvas-scale));
-        transform-origin: top left;
         pointer-events: none;
       }
       /* Selection overlay for editable elements */
@@ -12605,9 +12594,9 @@
         background: var(--surface-3);
         color: var(--text-1);
       }
-      /* Dark theme overrides for deck editor */
+      /* Dark theme overrides for deck editor - match slide background */
       [data-theme="dark"] .deck-editor__canvas {
-        background: #1a1a1a;
+        background: #000;
       }
       /* Tablet responsive deck editor (iPad) */
       @media (max-width: 1024px) {
@@ -12616,16 +12605,6 @@
         }
         .deck-editor__canvas-wrap {
           padding: 16px;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 400px);
-          height: calc((100vw - 400px) * 9 / 16);
-          max-width: 800px;
-          max-height: 450px;
-        }
-        .deck-editor__canvas iframe {
-          /* Scale for ~800px canvas: 800/1920 ≈ 0.417 */
-          --canvas-scale: calc((100vw - 400px) / 1920);
         }
         .deck-editor__props {
           width: 200px;
@@ -12640,13 +12619,6 @@
       @media (max-width: 768px) {
         .deck-editor__sidebar {
           width: 100px;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 300px);
-          height: calc((100vw - 300px) * 9 / 16);
-        }
-        .deck-editor__canvas iframe {
-          --canvas-scale: calc((100vw - 300px) / 1920);
         }
         .deck-editor__props {
           width: 160px;
@@ -12671,13 +12643,6 @@
         }
         .deck-editor__props {
           display: none;
-        }
-        .deck-editor__canvas {
-          width: calc(100vw - 100px);
-          height: calc((100vw - 100px) * 9 / 16);
-        }
-        .deck-editor__canvas iframe {
-          --canvas-scale: calc((100vw - 100px) / 1920);
         }
         .deck-editor__title {
           max-width: 80px;
@@ -42326,63 +42291,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
         let slideEls = Array.from(doc.querySelectorAll('.pg, .slide, section'))
         if (slideEls.length === 0) slideEls = [doc.body]
 
-        // Parse each slide into editable elements
-        const slides = slideEls.map((slideEl, slideIndex) => {
-          const elements = []
-          // Find all text elements (h1, h2, h3, p, li, div with text)
-          const textEls = slideEl.querySelectorAll('h1, h2, h3, h4, p, li, span, div')
-          textEls.forEach((el, i) => {
-            const text = el.textContent?.trim()
-            if (!text || text.length === 0) return
-            // Skip if this is a container with nested text elements
-            if (el.querySelector('h1, h2, h3, p, li')) return
-            const rect = { x: 80, y: 80 + i * 60, width: 800, height: 60 }
-            const style = el.getAttribute('style') || ''
-            const fontSize = parseInt(getComputedStyleValue(el, 'font-size')) || 32
-            elements.push({
-              type: 'text',
-              tag: el.tagName.toLowerCase(),
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-              content: text,
-              fontSize,
-              originalEl: el,
-              style
-            })
-          })
-          // Find images
-          const imgEls = slideEl.querySelectorAll('img, [style*="background-image"]')
-          imgEls.forEach((el, i) => {
-            let src = el.getAttribute('src') || ''
-            if (!src) {
-              const bgMatch = (el.getAttribute('style') || '').match(/url\(['"]?([^'")\s]+)['"]?\)/)
-              if (bgMatch) src = bgMatch[1]
-            }
-            if (!src) return
-            elements.push({
-              type: 'image',
-              x: 100,
-              y: 100 + i * 100,
-              width: 300,
-              height: 200,
-              src,
-              originalEl: el
-            })
-          })
-          return {
-            index: slideIndex,
-            originalEl: slideEl,
-            outerHTML: slideEl.outerHTML,
-            className: slideEl.className,
-            elements
-          }
-        })
-
-        function getComputedStyleValue(el, prop) {
-          try { return window.getComputedStyle(el)[prop] } catch { return '' }
-        }
+        // Build slide list - keep original HTML for rendering, no element extraction
+        // Element extraction was causing the "dump at top-left" bug because we can't
+        // determine actual element positions from parsed HTML
+        const slides = slideEls.map((slideEl, slideIndex) => ({
+          index: slideIndex,
+          originalEl: slideEl,
+          outerHTML: slideEl.outerHTML,
+          className: slideEl.className,
+          elements: [] // Empty - new elements can be added via toolbar
+        }))
 
         // Build editor UI
         const editor = document.createElement('div')
@@ -42499,22 +42417,34 @@ Wrap the entire export in one code block. After the code block, say whether the 
               slideHtml = slideHtml.replace(/class\s*=\s*'([^']*)'/, "class='$1 on'")
             }
           }
-          // For canvas, render at full 1920x1080 (parent CSS scales it)
-          // For thumbnails, use CSS-based scaling for immediate paint
-          const thumbScale = options.fullSize ? '' :
-            '#stage{transform:scale(calc(100vw/1920))}'
+          // JS scaling - runs after DOM ready and periodically to catch dimension changes
+          const scaleScript = '<script>(function(){' +
+            'var s=document.getElementById("stage");if(!s)return;' +
+            'function fit(){' +
+            'var w=innerWidth,h=innerHeight;' +
+            'if(w<1||h<1)return;' +
+            'var scale=Math.min(w/1920,h/1080);' +
+            's.style.transform="scale("+scale+")";' +
+            '}' +
+            'fit();' +
+            'setTimeout(fit,0);' +
+            'setTimeout(fit,16);' +
+            'setTimeout(fit,100);' +
+            'setTimeout(fit,300);' +
+            'window.onresize=fit;' +
+            'window.onload=fit;' +
+            '})();<\/script>'
           // Force the single slide to display (override any deck CSS that hides non-.on slides)
-          // Use high specificity to ensure .on slides show regardless of other selectors
-          const slideVisibility = '#stage>.pg,#stage>.slide,#stage>section{display:none!important}' +
-            '#stage>.pg.on,#stage>.slide.on,#stage>section.on,#stage>[class*=" on"],#stage>[class$=" on"]{display:flex!important}'
+          const slideVisibility = '.pg,.slide,section{display:none!important}' +
+            '.pg.on,.slide.on,section.on{display:flex!important}'
           return '<!doctype html><html><head><meta charset="utf-8">' +
             state.styleBlocks +
             '<style>' +
             'html,body{margin:0;padding:0;overflow:hidden;background:#000}' +
             '#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}' +
-            thumbScale + slideVisibility +
+            slideVisibility +
             '</style></head>' +
-            '<body><div id="stage">' + slideHtml + '</div></body></html>'
+            '<body><div id="stage">' + slideHtml + '</div>' + scaleScript + '</body></html>'
         }
 
         // Render slide thumbnails with real content (same as Present)
@@ -42548,126 +42478,71 @@ Wrap the entire export in one code block. After the code block, say whether the 
           canvas.innerHTML = ''
           
           // Render actual slide at full 1920x1080 - CSS class scales it to fit canvas
+          // This shows the DESIGNED slide exactly as it appears in Present mode
           const backdrop = document.createElement('iframe')
           backdrop.setAttribute('sandbox', 'allow-scripts')
           backdrop.setAttribute('scrolling', 'no')
           backdrop.srcdoc = buildSlidePreviewHtml(slide, { fullSize: true })
-          // Let CSS handle sizing/scaling - don't override with inline styles
           canvas.appendChild(backdrop)
-
-          // Overlay container for editable elements
-          const overlay = document.createElement('div')
-          overlay.className = 'deck-editor__canvas-overlay'
-          overlay.style.cssText = 'position:absolute;inset:0;z-index:1'
-          canvas.appendChild(overlay)
-
-          // Click on empty space deselects
-          overlay.addEventListener('click', e => {
-            if (e.target === overlay) {
-              state.selectedElement = null
-              propsPanel.hidden = true
-              updateOverlaySelection()
-            }
-          })
-
-          // Render each element as an editable box on the overlay
-          // Use percentages so positioning scales with canvas size
-          // Calculate font scale based on actual canvas width (base: 960px)
-          const canvasWidth = canvas.getBoundingClientRect().width || 960
-          const fontScale = canvasWidth / 1920
           
-          slide.elements.forEach((el, i) => {
-            const box = document.createElement('div')
-            box.className = 'deck-editor__element'
-            box.dataset.elementIndex = String(i)
-            // Convert 1920x1080 coordinates to percentages
-            const leftPct = (el.x / 1920 * 100).toFixed(3)
-            const topPct = (el.y / 1080 * 100).toFixed(3)
-            const widthPct = (el.width / 1920 * 100).toFixed(3)
-            const heightPct = (el.height / 1080 * 100).toFixed(3)
-            box.style.cssText = `
-              position:absolute;
-              left:${leftPct}%;
-              top:${topPct}%;
-              width:${widthPct}%;
-              min-height:${heightPct}%;
-              z-index:${el.zIndex || i + 1};
-              cursor:move;
-              border:2px solid transparent;
-              border-radius:4px;
-            `
-
-            if (el.type === 'text') {
-              const textDiv = document.createElement('div')
-              textDiv.contentEditable = 'true'
-              textDiv.className = 'deck-editor__text-edit'
-              textDiv.style.cssText = `
-                width:100%;min-height:100%;padding:8px;
-                color:#fff;font-size:${Math.round((el.fontSize || 32) * fontScale)}px;
-                font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
-                outline:none;overflow:visible;
-                background:rgba(0,0,0,0.6);border-radius:4px;
-                text-shadow:0 1px 2px rgba(0,0,0,0.5);
-                cursor:text;
+          // Only add overlay if there are NEW elements added via toolbar
+          // We don't extract existing elements (that caused the "dump" bug)
+          if (slide.elements.length > 0) {
+            const overlay = document.createElement('div')
+            overlay.className = 'deck-editor__canvas-overlay'
+            overlay.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none'
+            canvas.appendChild(overlay)
+            
+            const canvasWidth = canvas.getBoundingClientRect().width || 960
+            const fontScale = canvasWidth / 1920
+            
+            slide.elements.forEach((el, i) => {
+              const box = document.createElement('div')
+              box.className = 'deck-editor__element'
+              box.dataset.elementIndex = String(i)
+              box.style.cssText = `
+                position:absolute;
+                left:${(el.x / 1920 * 100).toFixed(3)}%;
+                top:${(el.y / 1080 * 100).toFixed(3)}%;
+                width:${(el.width / 1920 * 100).toFixed(3)}%;
+                min-height:${(el.height / 1080 * 100).toFixed(3)}%;
+                z-index:${el.zIndex || i + 1};
+                pointer-events:auto;
+                cursor:move;
+                border:2px solid ${state.selectedElement === i ? 'var(--accent, #0066ff)' : 'transparent'};
+                border-radius:4px;
               `
-              textDiv.textContent = el.content
-              textDiv.addEventListener('input', () => {
-                el.content = textDiv.textContent
-                state.dirty = true
-              })
-              textDiv.addEventListener('focus', () => {
-                state.selectedElement = i
-                propsPanel.hidden = false
-                updatePropsPanel()
-                updateOverlaySelection()
-              })
-              textDiv.addEventListener('mousedown', e => {
-                e.stopPropagation()
-                state.selectedElement = i
-                propsPanel.hidden = false
-                updatePropsPanel()
-                updateOverlaySelection()
-              })
-              box.appendChild(textDiv)
-            } else if (el.type === 'image' && el.src) {
-              const img = document.createElement('img')
-              img.src = el.src
-              img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none;opacity:0.5'
-              box.appendChild(img)
-            }
-
-            box.addEventListener('mousedown', e => {
-              if (e.target.contentEditable === 'true') return
-              startDragOrResize(i, e)
-            })
-            box.addEventListener('touchstart', e => {
-              if (e.target.contentEditable === 'true') return
-              startDragOrResize(i, e)
-            }, { passive: false })
-            overlay.appendChild(box)
-          })
-
-          // Update selection visuals without full re-render
-          function updateOverlaySelection() {
-            overlay.querySelectorAll('.deck-editor__element').forEach((box, i) => {
-              const isSelected = state.selectedElement === i
-              box.dataset.selected = isSelected ? 'true' : 'false'
-              box.style.borderColor = isSelected ? 'var(--accent, #0066ff)' : 'transparent'
-              // Remove old handles
-              box.querySelectorAll('.deck-editor__handle').forEach(h => h.remove())
-              // Add handles if selected
-              if (isSelected) {
-                const handles = ['nw', 'ne', 'sw', 'se']
-                handles.forEach(pos => {
-                  const handle = document.createElement('div')
-                  handle.className = `deck-editor__handle deck-editor__handle--${pos}`
-                  handle.dataset.handle = pos
-                  box.appendChild(handle)
+              
+              if (el.type === 'text') {
+                const textDiv = document.createElement('div')
+                textDiv.contentEditable = 'true'
+                textDiv.style.cssText = `
+                  width:100%;min-height:100%;padding:8px;
+                  color:#fff;font-size:${Math.round((el.fontSize || 32) * fontScale)}px;
+                  font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
+                  outline:none;background:rgba(0,0,0,0.7);border-radius:4px;
+                `
+                textDiv.textContent = el.content
+                textDiv.addEventListener('input', () => {
+                  el.content = textDiv.textContent
+                  state.dirty = true
                 })
+                textDiv.addEventListener('mousedown', e => e.stopPropagation())
+                box.appendChild(textDiv)
+              } else if (el.type === 'image' && el.src) {
+                const img = document.createElement('img')
+                img.src = el.src
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none'
+                box.appendChild(img)
               }
+              
+              box.addEventListener('mousedown', e => {
+                if (e.target.contentEditable === 'true') return
+                startDragOrResize(i, e)
+              })
+              overlay.appendChild(box)
             })
           }
-          updateOverlaySelection()
         }
 
         // Drag and resize (supports mouse and touch for iPad)
