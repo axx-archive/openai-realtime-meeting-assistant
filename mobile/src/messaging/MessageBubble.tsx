@@ -514,6 +514,8 @@ export const MessageBubble = React.memo(function MessageBubble({
               text={String(workThread.ref.resultPreview ?? '')}
               agentName={workThread.agentName}
               loading={!workThread.complete}
+              artifactId={workThread.complete ? String(workThread.ref.artifactId ?? '').trim() : undefined}
+              sessionToken={sessionToken}
               onEdit={workThread.complete && !workThread.governedRecord ? () => onRegenerateWorkArtifact?.(message) : undefined}
               onPresent={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
               onExpand={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
