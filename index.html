@@ -11743,12 +11743,21 @@
         -webkit-box-orient: unset !important;
         overflow: visible !important;
         padding: 0 !important;
+        /* Fill the stack width so .chat-deck's width:100% has a reference.
+           Without this, the flex stack shrinks to content and 100% of 0 = 0. */
+        width: 100%;
       }
       /* When .chat-deck is present, hide any sibling link preview cards.
          Deck HTML may contain namespace URLs that could trigger link unfurl. */
       .scout-chat-text:has(.chat-deck) ~ .desktop-chat-link-preview,
       .scout-chat-msg__stack:has(.chat-deck) .desktop-chat-link-preview {
         display: none !important;
+      }
+      /* Stack containing a deck needs min-width to give the deck room.
+         Default min-width:0 + align-items:flex-start shrinks to content,
+         but .chat-deck's content is a 0-height iframe until it has width. */
+      .scout-chat-msg__stack:has(.chat-deck) {
+        min-width: min(480px, calc(100% - 24px));
       }
       .scout-chat-msg__expand {
         order: 2;
@@ -12111,6 +12120,9 @@
         display: flex;
         flex-direction: column;
         width: 100%;
+        /* min-width ensures intrinsic size even if parent has no used width.
+           Prevents width:100% + aspect-ratio computing to 0×0 in flex contexts. */
+        min-width: min(480px, calc(100vw - 48px));
         max-width: 480px;
         aspect-ratio: 16 / 9;
         border-radius: var(--r-lg);

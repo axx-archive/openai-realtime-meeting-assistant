@@ -788,8 +788,10 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 		"What's the deck about, and who needs to believe it? Should it feel polished and investor-grade, or more cinematic and culture-forward? Do you want image-led slides or a clean typographic system that makes the argument carry the weight?",
 		// Live quote from fb067e0 prod-test (2026-08-17)
 		"What's the deck about, and who's in the room? Should it feel polished and credibility-first, or more cinematic and culture-led? Do you want bold full-bleed imagery, or a clean typographic system with a few strong diagrams?",
-		// Live quote from 5450fad6 prod-test — newest failure (2026-08-17)
+		// Live quote from 5450fad6 prod-test
 		"What's the deck about, and who needs to say yes after slide five? Should it feel like a sharp investor story, an internal working session, or a cinematic brand pitch? Do you want image-led atmosphere or clean typographic slides?",
+		// Live quote from 8404a53f prod-test (2026-08-17) — audience variant
+		"What should the 5-slide deck be about, and who is the audience?",
 	}
 
 	for _, liveApproachBProse := range approachBVariants {
@@ -936,6 +938,13 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 				t.Errorf("Viewer will NOT skip link preview for deck (first 100 chars): %q — w3.org unfurl will collapse deck",
 					deckMessage.Text[:min(100, len(deckMessage.Text))])
 			}
+			// NOTE: CSS layout for .chat-deck to paint at non-zero size:
+			// 1. .scout-chat-text:has(.chat-deck) { width: 100% } — fills the stack
+			// 2. .scout-chat-msg__stack:has(.chat-deck) { min-width: min(480px, calc(100% - 24px)) } — gives the stack intrinsic width
+			// 3. .chat-deck { min-width: min(480px, calc(100vw - 48px)) } — fallback intrinsic width
+			// 4. .chat-deck { aspect-ratio: 16 / 9 } — height computed from width
+			// These rules are in index.html; we cannot assert browser layout from Go tests,
+			// but the CSS ensures getBoundingClientRect will be non-zero when these rules apply.
 		})
 	}
 }
