@@ -1,3 +1,11 @@
+{
+	# iOS URLSession / Expo fetch can hang on HTTP/3 (alt-svc h3).
+	# Keep h1/h2 so TestFlight sign-in and Safari both complete.
+	servers {
+		protocols h1 h2
+	}
+}
+
 {$MEETING_HOST} {
 	encode zstd gzip
 	# The public brand now lives at workinstride.xyz. Keep the product's APIs,
