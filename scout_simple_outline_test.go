@@ -691,12 +691,14 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 }
 
 // TestDeckGenerationAfterApproachBProse tests the exact prod-test scenario at d8a2fe28bb
-// using the REAL append path (appendScoutChatThreadMessage), not stubbed resolveInlineDeckReply.
+// using the REAL append path (appendScoutChatThreadMessage) WITH THE WORKER LIVE.
 // The router issues Approach B prose ("What's the deck about, and who's in the room?...")
-// and the user types "yes". This must generate a deck, not a second clarify_once refuse.
+// then returns clarify_once again on "yes" (which gets remapped to unavailable).
+// The deck confirmation must bypass the unavailable return and generate a deck.
 func TestDeckGenerationAfterApproachBProse(t *testing.T) {
+	// Worker is LIVE — not stubbed. Deck confirmation must still generate a deck.
 	clearAgentRunnerEnv(t)
-	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+	t.Setenv("BONFIRE_AGENT_RUNNER", "openai_text")
 	setupAuthTestEnv(t)
 
 	app := newIsolatedKanbanBoardApp(t)
@@ -716,13 +718,15 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 					Message: liveApproachBProse,
 				}), nil
 			}
-			// Second call: "yes" → router should be told clarification already asked
-			// It should return conversational_reply so the deck gate is reached
+			// Second call: "yes" → router STILL returns clarify_once (gets remapped to unavailable)
+			// This tests the real flow: unavailable must be bypassed for deck confirmations
 			if !strings.Contains(request.Input, "One clarification has already been asked") {
 				t.Error("Router was not told clarification already asked — scoutChatClarificationAlreadyAsked failed")
 			}
+			// Return clarify_once again — will be remapped to unavailable with code "clarification_exhausted"
 			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-				Outcome: string(conversationIntentConversationalReply),
+				Outcome: string(conversationIntentClarifyOnce),
+				Message: "I still need more information.",
 			}), nil
 		case "scout_chat":
 			// Inline deck generation — return HTML
@@ -756,17 +760,16 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 		t.Fatalf("first answer=%+v, want Approach B prose with clarify_once", firstAnswer)
 	}
 
-	// 2. Second message: "yes" → must reach deck generation, not another clarify_once
+	// 2. Second message: "yes" → router returns clarify_once (remapped to unavailable)
+	// BUT the deck confirmation must bypass unavailable and generate a deck
 	second, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "yes", nil, "")
 	if err != nil {
 		t.Fatalf("second message: %v", err)
 	}
-	// Should be conversational_reply (deck generated), NOT clarify_once or unavailable
-	if second["intentOutcome"] == string(conversationIntentClarifyOnce) {
-		t.Fatal("second message got clarify_once — scoutChatClarificationAlreadyAsked did not mark Approach B as clarification")
-	}
+	// Should be conversational_reply (deck generated), NOT unavailable
 	if second["intentOutcome"] == string(conversationIntentUnavailable) {
-		t.Fatalf("second message got unavailable — deck generation failed: %+v", second["answer"])
+		unavailable, _ := second["unavailable"].(map[string]any)
+		t.Fatalf("second message got unavailable=%+v — deck confirmation should have bypassed unavailable return", unavailable)
 	}
 	if second["intentOutcome"] != string(conversationIntentConversationalReply) {
 		t.Fatalf("second outcome=%v, want conversational_reply", second["intentOutcome"])
@@ -780,7 +783,7 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 		t.Errorf("Expected HTML deck, got: %q", secondAnswer.Text[:min(150, len(secondAnswer.Text))])
 	}
 	// Should NOT contain refusal text
-	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") {
+	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") || strings.Contains(strings.ToLower(secondAnswer.Text), "i still need") {
 		t.Error("Reply contains refusal — should have generated a deck")
 	}
 	if routerCalls != 2 {
@@ -790,10 +793,11 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 
 // TestDeckGenerationAfterChoicesCard tests the prod-test scenario where
 // the router issues a clarify_once choices card ("What should the 5-slide deck be about?")
-// and the user types "yes". Uses the REAL append path, not stubbed resolveInlineDeckReply.
+// and the user types "yes". Uses the REAL append path WITH THE WORKER LIVE.
 func TestDeckGenerationAfterChoicesCard(t *testing.T) {
+	// Worker is LIVE — not stubbed. Deck confirmation must still generate a deck.
 	clearAgentRunnerEnv(t)
-	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+	t.Setenv("BONFIRE_AGENT_RUNNER", "openai_text")
 	setupAuthTestEnv(t)
 
 	app := newIsolatedKanbanBoardApp(t)
@@ -816,12 +820,15 @@ func TestDeckGenerationAfterChoicesCard(t *testing.T) {
 					},
 				}), nil
 			}
-			// Second call: "yes" → router should be told clarification already asked
+			// Second call: "yes" → router STILL returns clarify_once (gets remapped to unavailable)
+			// This tests the real flow: unavailable must be bypassed for deck confirmations
 			if !strings.Contains(request.Input, "One clarification has already been asked") {
 				t.Error("Router was not told clarification already asked — scoutChatClarificationAlreadyAsked failed")
 			}
+			// Return clarify_once again — will be remapped to unavailable with code "clarification_exhausted"
 			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-				Outcome: string(conversationIntentConversationalReply),
+				Outcome: string(conversationIntentClarifyOnce),
+				Message: "I still need more information.",
 			}), nil
 		case "scout_chat":
 			// Inline deck generation — return HTML
@@ -855,17 +862,16 @@ func TestDeckGenerationAfterChoicesCard(t *testing.T) {
 		t.Fatalf("first answer=%+v, want choices card", firstAnswer)
 	}
 
-	// 2. Second message: "yes" → must reach deck generation, not another clarify_once
+	// 2. Second message: "yes" → router returns clarify_once (remapped to unavailable)
+	// BUT the deck confirmation must bypass unavailable and generate a deck
 	second, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "yes", nil, "")
 	if err != nil {
 		t.Fatalf("second message: %v", err)
 	}
-	// Should be conversational_reply (deck generated), NOT clarify_once or unavailable
-	if second["intentOutcome"] == string(conversationIntentClarifyOnce) {
-		t.Fatal("second message got clarify_once — should have been marked as clarification already asked")
-	}
+	// Should be conversational_reply (deck generated), NOT unavailable
 	if second["intentOutcome"] == string(conversationIntentUnavailable) {
-		t.Fatalf("second message got unavailable — deck generation failed: %+v", second["answer"])
+		unavailable, _ := second["unavailable"].(map[string]any)
+		t.Fatalf("second message got unavailable=%+v — deck confirmation should have bypassed unavailable return", unavailable)
 	}
 	if second["intentOutcome"] != string(conversationIntentConversationalReply) {
 		t.Fatalf("second outcome=%v, want conversational_reply", second["intentOutcome"])
@@ -879,7 +885,7 @@ func TestDeckGenerationAfterChoicesCard(t *testing.T) {
 		t.Errorf("Expected HTML deck, got: %q", secondAnswer.Text[:min(150, len(secondAnswer.Text))])
 	}
 	// Should NOT contain refusal text
-	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") {
+	if strings.Contains(strings.ToLower(secondAnswer.Text), "i need the deck") || strings.Contains(strings.ToLower(secondAnswer.Text), "i still need") {
 		t.Error("Reply contains refusal — should have generated a deck")
 	}
 	if routerCalls != 2 {
