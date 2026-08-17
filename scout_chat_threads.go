@@ -2148,10 +2148,25 @@ func scoutChatClarificationAlreadyAsked(thread scoutChatThreadRecord) bool {
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			return false
 		}
+		// Formal choices card (clarify_once outcome)
 		if message.Kind == scoutChatMessageKindChoices && message.Choices != nil {
 			return true
 		}
-		if message.Kind == "message" || message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
+		// Approach B prose direction pass: Kind=message with IntentOutcome=clarify_once
+		// This ensures the router knows a clarification was already asked, preventing
+		// a second clarify_once that would emit "I need the deck's subject" prose.
+		if message.Kind == "message" {
+			author := strings.TrimSpace(message.AuthorName)
+			isScout := author == "" || strings.EqualFold(author, scoutParticipantName)
+			if isScout && message.IntentOutcome == string(conversationIntentClarifyOnce) {
+				return true
+			}
+			// Any other Scout message is not a clarification
+			if isScout {
+				return false
+			}
+		}
+		if message.Kind == scoutChatMessageKindProposal || message.Kind == "thread" {
 			return false
 		}
 	}
@@ -3346,21 +3361,31 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 
 	if routedIntent.Outcome == conversationIntentUnavailable && routedIntent.Unavailable != nil {
-		assistantMessage := scoutChatMessageRecord{
-			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
-			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
-			Text: routedIntent.Unavailable.Message, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		// Deck confirmation after a direction pass: do NOT return unavailable — fall through
+		// to the deck gate below. The unavailable "clarification_exhausted" code is the
+		// second clarify_once remapped; a deck confirmation should generate a default deck,
+		// not "I still don't have enough information...".
+		isDeckConfirmationAfterDirectionPass := scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate &&
+			routedIntent.Unavailable.Code == "clarification_exhausted" &&
+			scoutChatDeckConfirmationDetected(text, history)
+		if !isDeckConfirmationAfterDirectionPass {
+			assistantMessage := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+				Text: routedIntent.Unavailable.Message, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			response["unavailable"] = map[string]any{"code": routedIntent.Unavailable.Code, "message": routedIntent.Unavailable.Message}
+			response["providerCalls"] = providerCallCounter.Calls
+			return response, nil
 		}
-		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
-		if commitErr != nil {
-			return nil, commitErr
-		}
-		response["answer"] = assistantMessage
-		response["thread"] = saved
-		response["intentOutcome"] = string(conversationIntentUnavailable)
-		response["unavailable"] = map[string]any{"code": routedIntent.Unavailable.Code, "message": routedIntent.Unavailable.Message}
-		response["providerCalls"] = providerCallCounter.Calls
-		return response, nil
+		// Fall through — deck confirmation will be handled at the deck gate below
 	}
 
 	if routedIntent.Outcome == conversationIntentClarifyOnce {
@@ -3660,11 +3685,16 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			answerContext = withAssistantBoardShortcutDisabled(answerContext)
 		}
 	}
-	// When the worker is unavailable and the user is asking for a deck in a
-	// private thread, generate an HTML deck directly instead of a markdown outline.
-	// This produces a presentable in-thread deck viewer, not a work card.
-	// Also route confirmations after a direction pass to generate the deck.
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && !scoutAgentWorkerAvailable() && (scoutChatDeckRequestDetected(text) || scoutChatDeckConfirmationDetected(text, history)) {
+	// When the user is asking for a deck in a private thread, generate an HTML deck
+	// directly instead of a markdown outline or work card.
+	// Deck confirmation after a direction pass (Approach B or choices card) ALWAYS
+	// generates a default deck — even when the worker is live. This ensures "yes"
+	// after "What's the deck about?" produces a real deck, not subject-missing prose.
+	// New deck requests without a direction pass still gate on !scoutAgentWorkerAvailable().
+	isDeckConfirmation := scoutChatDeckConfirmationDetected(text, history)
+	isDeckRequest := scoutChatDeckRequestDetected(text)
+	workerGateAllows := !scoutAgentWorkerAvailable() || isDeckConfirmation
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && workerGateAllows && (isDeckRequest || isDeckConfirmation) {
 		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
 		if deckErr != nil {
 			unavailableMessage := scoutChatMessageRecord{
