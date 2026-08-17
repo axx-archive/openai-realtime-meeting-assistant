@@ -12478,7 +12478,7 @@
         width: 100%;
         height: 100%;
         border: none;
-        pointer-events: none;
+        pointer-events: auto;
       }
       /* Selection overlay for editable elements */
       .deck-editor__overlay {
@@ -42446,6 +42446,82 @@ Wrap the entire export in one code block. After the code block, say whether the 
             '</style></head>' +
             '<body><div id="stage">' + slideHtml + '</div>' + scaleScript + '</body></html>'
         }
+        
+        // Build editable slide HTML for the editor canvas
+        // Makes text elements contentEditable and sends changes via postMessage
+        function buildEditableSlideHtml(slide) {
+          let slideHtml = slide.outerHTML || '<section class="pg on"></section>'
+          const hasOnClass = /\bclass\s*=\s*["'][^"']*\bon\b/.test(slideHtml)
+          if (!hasOnClass) {
+            slideHtml = slideHtml.replace(/class\s*=\s*"([^"]*)"/, 'class="$1 on"')
+            if (!/\bon\b/.test(slideHtml)) {
+              slideHtml = slideHtml.replace(/class\s*=\s*'([^']*)'/, "class='$1 on'")
+            }
+          }
+          // JS for scaling + making text editable + syncing changes
+          const editScript = '<script>(function(){' +
+            'var s=document.getElementById("stage");if(!s)return;' +
+            // Scaling
+            'function fit(){' +
+            'var w=innerWidth,h=innerHeight;' +
+            'if(w<1||h<1)return;' +
+            'var scale=Math.min(w/1920,h/1080);' +
+            's.style.transform="scale("+scale+")";' +
+            '}' +
+            'fit();setTimeout(fit,0);setTimeout(fit,16);setTimeout(fit,100);setTimeout(fit,300);' +
+            'window.onresize=fit;window.onload=fit;' +
+            // Make text elements editable
+            'var textEls=s.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,li,td,th,figcaption,blockquote,label");' +
+            'var activeEl=null;' +
+            'textEls.forEach(function(el){' +
+            // Skip elements that only contain other elements (no direct text)
+            'var hasDirectText=false;' +
+            'for(var i=0;i<el.childNodes.length;i++){' +
+            'if(el.childNodes[i].nodeType===3&&el.childNodes[i].textContent.trim()){hasDirectText=true;break;}' +
+            '}' +
+            'if(!hasDirectText&&!el.innerText.trim())return;' +
+            // Add hover effect
+            'el.style.cursor="text";' +
+            'el.addEventListener("mouseenter",function(){' +
+            'if(activeEl!==el)el.style.outline="2px solid rgba(255,140,0,0.5)";' +
+            '});' +
+            'el.addEventListener("mouseleave",function(){' +
+            'if(activeEl!==el)el.style.outline="none";' +
+            '});' +
+            // Click to edit
+            'el.addEventListener("click",function(e){' +
+            'e.stopPropagation();' +
+            'if(activeEl&&activeEl!==el){activeEl.contentEditable="false";activeEl.style.outline="none";}' +
+            'activeEl=el;' +
+            'el.contentEditable="true";' +
+            'el.style.outline="2px solid #ff8c00";' +
+            'el.focus();' +
+            '});' +
+            // Input handler - notify parent
+            'el.addEventListener("input",function(){' +
+            'parent.postMessage({type:"slideEdit",html:s.innerHTML},"*");' +
+            '});' +
+            '});' +
+            // Click on stage background deselects
+            's.addEventListener("click",function(e){' +
+            'if(e.target===s||e.target.classList.contains("pg")||e.target.classList.contains("on")){' +
+            'if(activeEl){activeEl.contentEditable="false";activeEl.style.outline="none";activeEl=null;}' +
+            '}' +
+            '});' +
+            '})();<\/script>'
+          const slideVisibility = '.pg,.slide,section{display:none!important}' +
+            '.pg.on,.slide.on,section.on{display:flex!important}'
+          const editStyles = '[contenteditable="true"]{outline:2px solid #ff8c00!important;outline-offset:2px;min-width:20px;min-height:1em;}'
+          return '<!doctype html><html><head><meta charset="utf-8">' +
+            state.styleBlocks +
+            '<style>' +
+            'html,body{margin:0;padding:0;overflow:hidden;background:#000}' +
+            '#stage{position:fixed;top:0;left:0;width:1920px;height:1080px;transform-origin:top left}' +
+            slideVisibility +
+            editStyles +
+            '</style></head>' +
+            '<body><div id="stage">' + slideHtml + '</div>' + editScript + '</body></html>'
+        }
 
         // Render slide thumbnails with real content (same as Present)
         // Uses CSS-based scaling so content paints immediately (no JS delay)
@@ -42470,80 +42546,49 @@ Wrap the entire export in one code block. After the code block, say whether the 
           })
         }
 
-        // Render current slide - shows the actual slide content like Present
-        // with an editing overlay on top for selecting/editing elements
+        // Render current slide - editable in-place without overlay
+        // Text elements in the iframe are contentEditable; changes sync via postMessage
         function renderCanvas() {
           const slide = state.slides[state.currentSlide]
           if (!slide) return
           canvas.innerHTML = ''
           
-          // Render actual slide at full 1920x1080 - CSS class scales it to fit canvas
-          // This shows the DESIGNED slide exactly as it appears in Present mode
+          // Render editable slide - text elements inside are contentEditable
           const backdrop = document.createElement('iframe')
-          backdrop.setAttribute('sandbox', 'allow-scripts')
+          // No sandbox - we need full interactivity for editing
+          // Content is trusted (our own generated HTML)
           backdrop.setAttribute('scrolling', 'no')
-          backdrop.srcdoc = buildSlidePreviewHtml(slide, { fullSize: true })
+          backdrop.style.pointerEvents = 'auto'
+          backdrop.srcdoc = buildEditableSlideHtml(slide)
           canvas.appendChild(backdrop)
           
-          // Only add overlay if there are NEW elements added via toolbar
-          // We don't extract existing elements (that caused the "dump" bug)
-          if (slide.elements.length > 0) {
-            const overlay = document.createElement('div')
-            overlay.className = 'deck-editor__canvas-overlay'
-            overlay.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none'
-            canvas.appendChild(overlay)
-            
-            const canvasWidth = canvas.getBoundingClientRect().width || 960
-            const fontScale = canvasWidth / 1920
-            
-            slide.elements.forEach((el, i) => {
-              const box = document.createElement('div')
-              box.className = 'deck-editor__element'
-              box.dataset.elementIndex = String(i)
-              box.style.cssText = `
-                position:absolute;
-                left:${(el.x / 1920 * 100).toFixed(3)}%;
-                top:${(el.y / 1080 * 100).toFixed(3)}%;
-                width:${(el.width / 1920 * 100).toFixed(3)}%;
-                min-height:${(el.height / 1080 * 100).toFixed(3)}%;
-                z-index:${el.zIndex || i + 1};
-                pointer-events:auto;
-                cursor:move;
-                border:2px solid ${state.selectedElement === i ? 'var(--accent, #0066ff)' : 'transparent'};
-                border-radius:4px;
-              `
-              
-              if (el.type === 'text') {
-                const textDiv = document.createElement('div')
-                textDiv.contentEditable = 'true'
-                textDiv.style.cssText = `
-                  width:100%;min-height:100%;padding:8px;
-                  color:#fff;font-size:${Math.round((el.fontSize || 32) * fontScale)}px;
-                  font-weight:${el.tag === 'h1' || el.tag === 'h2' ? 'bold' : 'normal'};
-                  outline:none;background:rgba(0,0,0,0.7);border-radius:4px;
-                `
-                textDiv.textContent = el.content
-                textDiv.addEventListener('input', () => {
-                  el.content = textDiv.textContent
-                  state.dirty = true
-                })
-                textDiv.addEventListener('mousedown', e => e.stopPropagation())
-                box.appendChild(textDiv)
-              } else if (el.type === 'image' && el.src) {
-                const img = document.createElement('img')
-                img.src = el.src
-                img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none'
-                box.appendChild(img)
-              }
-              
-              box.addEventListener('mousedown', e => {
-                if (e.target.contentEditable === 'true') return
-                startDragOrResize(i, e)
-              })
-              overlay.appendChild(box)
-            })
-          }
+          // Store reference for postMessage handler
+          state.currentBackdrop = backdrop
         }
+        
+        // Listen for edit messages from the iframe
+        window.addEventListener('message', function(e) {
+          if (!state || !e.data || e.data.type !== 'slideEdit') return
+          const slide = state.slides[state.currentSlide]
+          if (!slide) return
+          // Update slide's inner HTML from iframe edit
+          // Parse the edited content and update outerHTML
+          const parser = new DOMParser()
+          const doc = parser.parseFromString('<div>' + e.data.html + '</div>', 'text/html')
+          const newSlide = doc.body.querySelector('.pg, .slide, section')
+          if (newSlide) {
+            slide.outerHTML = newSlide.outerHTML
+            state.dirty = true
+            // Update thumbnail for this slide
+            const thumbs = editor.querySelectorAll('.deck-editor__thumb')
+            if (thumbs[state.currentSlide]) {
+              const thumbIframe = thumbs[state.currentSlide].querySelector('iframe')
+              if (thumbIframe) {
+                thumbIframe.srcdoc = buildSlidePreviewHtml(slide)
+              }
+            }
+          }
+        })
 
         // Drag and resize (supports mouse and touch for iPad)
         function startDragOrResize(index, e) {
