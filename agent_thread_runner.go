@@ -1651,17 +1651,18 @@ func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEn
 }
 
 func agentThreadRequestTimeout(thread scoutAgentThread) time.Duration {
+	// Research is durable background work, not a chat completion. A hard
+	// wall-clock deadline turns a healthy long source pass into a false
+	// failure, so hosted research is cancellation-owned rather than timed.
+	// Check this BEFORE the runner-name switch because selectAgentRunner
+	// routes research to openAITextAgentRunner regardless of the deployment's
+	// configured runner — the timeout must honor that same override.
+	if agentThreadUsesLiveWebSearch(thread) {
+		return 0
+	}
 	switch selectedAgentRunnerName() {
 	case agentRunnerCodexSidecar, agentRunnerCodexLocal:
 		return codexExecConfigFromEnv().Timeout
-	case agentRunnerOpenAIText:
-		// Research is durable background work, not a chat completion. A hard
-		// wall-clock deadline turns a healthy long source pass into a false
-		// failure, so hosted research is cancellation-owned rather than timed.
-		if agentThreadUsesLiveWebSearch(thread) {
-			return 0
-		}
-		return defaultAgentThreadRequestTimeout
 	default:
 		return defaultAgentThreadRequestTimeout
 	}

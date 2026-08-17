@@ -217,6 +217,23 @@ func TestAgentThreadRequestContextLeavesLiveResearchUnbounded(t *testing.T) {
 	}
 }
 
+func TestAgentThreadRequestContextResearchUnboundedRegardlessOfRunner(t *testing.T) {
+	// Research must be unbounded even when the deployment is configured for a
+	// different runner, because selectAgentRunner routes research to
+	// openAITextAgentRunner regardless of the configured runner.
+	for _, runner := range []string{agentRunnerStub, agentRunnerAnthropicFable, "anthropic", "fable"} {
+		t.Run("runner="+runner, func(t *testing.T) {
+			t.Setenv("BONFIRE_AGENT_RUNNER", runner)
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			ctx, cancel := agentThreadRequestContext(context.Background(), scoutAgentThread{Mode: "research"})
+			defer cancel()
+			if _, hasDeadline := ctx.Deadline(); hasDeadline {
+				t.Fatalf("research context has deadline with runner=%q; research must be unbounded", runner)
+			}
+		})
+	}
+}
+
 func TestAgentThreadMaxOutputTokensIsBounded(t *testing.T) {
 	t.Setenv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", "1")
 	if got := agentThreadMaxOutputTokens(); got != 3200 {
