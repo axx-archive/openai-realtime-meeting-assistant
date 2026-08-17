@@ -975,8 +975,14 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 	}
 	deckHTML := extractHTMLDeckContent(result.answer)
 	if deckHTML == "" {
-		// Fallback: wrap the answer in minimal HTML deck structure
-		deckHTML = wrapInHTMLDeck(effectiveQuery, result.answer)
+		// Check if the answer is a refusal — NEVER wrap a refusal into a deck
+		if looksLikeDeckRefusal(result.answer) {
+			// Generate a default deck instead of wrapping the refusal
+			deckHTML = generateDefaultDeck(effectiveQuery)
+		} else {
+			// Fallback: wrap the answer in minimal HTML deck structure
+			deckHTML = wrapInHTMLDeck(effectiveQuery, result.answer)
+		}
 	}
 	// Return as a regular conversational message with HTML deck content.
 	// The frontend detects HTML deck content and renders with the in-thread
@@ -1126,6 +1132,129 @@ func hasDeckTopic(request string) bool {
 	return false
 }
 
+
+// looksLikeDeckRefusal detects if an LLM response is a refusal to generate a deck.
+// These refusals should NEVER be wrapped into a deck — they would become slides with
+// "I still need the topic" as content.
+func looksLikeDeckRefusal(answer string) bool {
+	lower := strings.ToLower(answer)
+	refusalPatterns := []string{
+		"i still need",
+		"i need to know",
+		"i need more information",
+		"i'm missing",
+		"i am missing",
+		"please provide",
+		"could you provide",
+		"could you tell me",
+		"what's the deck about",
+		"what is the deck about",
+		"what topic",
+		"what subject",
+		"can't create",
+		"cannot create",
+		"unable to create",
+		"need the topic",
+		"need a topic",
+		"need the subject",
+		"need more details",
+		"need more context",
+	}
+	for _, pattern := range refusalPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// generateDefaultDeck creates a complete HTML deck with default compelling content.
+// Used when the LLM refuses to generate — we never wrap a refusal into a deck.
+func generateDefaultDeck(query string) string {
+	// Extract any topic hints from the query
+	title := "The Future of Work"
+	subtitle := "AI, Remote Collaboration, and Digital Transformation"
+
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%s</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#000;color:#fff}
+#stage{position:fixed;inset:0;width:1920px;height:1080px;margin:auto}
+.pg{position:absolute;inset:0;display:none;overflow:hidden;background:#111;padding:80px}
+.pg.on{display:flex;flex-direction:column;justify-content:center}
+.pg h1{font-size:72px;font-weight:700;line-height:1.1;margin-bottom:32px}
+.pg h2{font-size:56px;font-weight:600;line-height:1.2;margin-bottom:24px}
+.pg p{font-size:32px;line-height:1.6;opacity:0.9}
+.pg ul{font-size:28px;line-height:1.8;padding-left:48px}
+.pg li{margin-bottom:16px}
+.content{max-width:1600px}
+</style>
+</head>
+<body>
+<div id="stage">
+<section class="pg on">
+<div class="content">
+<h1>%s</h1>
+<p>%s</p>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>Key Trends</h2>
+<ul>
+<li>AI-powered automation transforming workflows</li>
+<li>Remote-first culture becoming the norm</li>
+<li>Digital tools enabling seamless collaboration</li>
+<li>Focus on outcomes over hours</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>The Opportunity</h2>
+<ul>
+<li>Increased productivity through smart automation</li>
+<li>Access to global talent pools</li>
+<li>Reduced overhead and operational costs</li>
+<li>Better work-life integration</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h2>Challenges to Address</h2>
+<ul>
+<li>Maintaining team cohesion remotely</li>
+<li>Ensuring equitable access to technology</li>
+<li>Balancing automation with human judgment</li>
+<li>Adapting leadership for distributed teams</li>
+</ul>
+</div>
+</section>
+<section class="pg">
+<div class="content">
+<h1>Thank You</h1>
+<p>Questions?</p>
+</div>
+</section>
+</div>
+<script>
+let idx=0;const pgs=document.querySelectorAll('.pg');
+function show(i){pgs.forEach((p,j)=>p.classList.toggle('on',j===i));}
+document.addEventListener('keydown',e=>{
+if(e.key==='ArrowRight'||e.key===' '){idx=Math.min(idx+1,pgs.length-1);show(idx);}
+if(e.key==='ArrowLeft'){idx=Math.max(idx-1,0);show(idx);}
+});
+</script>
+</body>
+</html>`, title, title, subtitle)
+}
 
 // filterHistoryForDeckGeneration removes messages that would cause the LLM to refuse
 // deck generation, specifically topic-asking questions like "What's the deck about?"

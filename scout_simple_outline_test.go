@@ -660,6 +660,90 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 	}
 }
 
+// TestRefusalNeverBecomesDeck tests that LLM refusals ("I still need the topic")
+// are never wrapped into a deck as slide content.
+func TestRefusalNeverBecomesDeck(t *testing.T) {
+	// Test looksLikeDeckRefusal detection
+	refusals := []string{
+		"I still need the deck topic and intended audience to create it.",
+		"I'm missing the deck's subject or source material.",
+		"I need to know what the presentation is about.",
+		"Could you provide more details about the topic?",
+		"I can't create a deck without knowing the subject.",
+		"Please provide the topic for the presentation.",
+	}
+	for _, refusal := range refusals {
+		if !looksLikeDeckRefusal(refusal) {
+			t.Errorf("looksLikeDeckRefusal(%q) = false, want true", refusal[:min(50, len(refusal))])
+		}
+	}
+
+	// Test that non-refusals are not flagged
+	nonRefusals := []string{
+		"Here's a presentation about innovation.",
+		"This deck covers the future of work.",
+		"Let me create that for you.",
+	}
+	for _, text := range nonRefusals {
+		if looksLikeDeckRefusal(text) {
+			t.Errorf("looksLikeDeckRefusal(%q) = true, want false", text)
+		}
+	}
+
+	// Test generateDefaultDeck produces valid HTML
+	defaultDeck := generateDefaultDeck("make a 5-slide deck")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(defaultDeck)), "<!doctype html") {
+		t.Error("generateDefaultDeck should return valid HTML deck")
+	}
+	if strings.Contains(strings.ToLower(defaultDeck), "i still need") {
+		t.Error("generateDefaultDeck should not contain refusal text")
+	}
+}
+
+// TestDeckGenerationDoesNotWrapRefusal tests the full flow: if the LLM returns
+// a refusal, it should NOT be wrapped into a deck.
+func TestDeckGenerationDoesNotWrapRefusal(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
+
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-api-key"
+	setupAuthTestEnv(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("test user not found")
+	}
+
+	// Mock LLM to return a refusal (simulating when the pin fails)
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		// Return a refusal instead of HTML
+		return "I still need the deck topic and intended audience to create it.", nil
+	})
+
+	history := []scoutChatTurn{
+		{role: "user", text: "make a 5-slide deck"},
+		{role: "scout", text: "Should this feel corporate or startup?"},
+	}
+
+	reply, err := app.resolveInlineDeckReply(context.Background(), user, "yes", history)
+	if err != nil {
+		t.Fatalf("resolveInlineDeckReply: %v", err)
+	}
+
+	// Should still produce an HTML deck (the default), not a refusal wrapped in HTML
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(reply.Text)), "<!doctype html") {
+		t.Errorf("Expected HTML deck, got: %q", reply.Text[:min(100, len(reply.Text))])
+	}
+
+	// The deck content should NOT contain the refusal text
+	if strings.Contains(strings.ToLower(reply.Text), "i still need") {
+		t.Error("Deck should NOT contain refusal text 'I still need' — refusal was wrapped instead of generating default")
+	}
+	if strings.Contains(strings.ToLower(reply.Text), "topic and intended audience") {
+		t.Error("Deck should NOT contain refusal text — refusal was wrapped instead of generating default")
+	}
+}
+
 // TestExtractDirectionContextFiltersTopicQuestions tests that extractDirectionContext
 // does NOT forward topic-asking questions like "What's the deck about?"
 func TestExtractDirectionContextFiltersTopicQuestions(t *testing.T) {
