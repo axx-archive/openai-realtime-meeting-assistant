@@ -63509,6 +63509,76 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        }
 		      }
 
+		      // Reaction-only sync: updates reaction badges and action-bar pressed state
+		      // without rebuilding the feed or disrupting scroll position.
+		      function syncDesktopMessageReactions(thread, messageId) {
+		        if (!desktopChatLayoutQuery.matches || String(thread?.id || '') !== String(activeScoutThreadId || '')) return
+		        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+		        const message = messages.find(candidate => String(candidate?.id || '') === String(messageId || ''))
+		        if (!message) return
+		        const msgNode = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(String(message.id))}"]`)
+		        const stack = msgNode?.querySelector('.scout-chat-msg__stack')
+		        if (!stack) return
+
+		        const reactions = Array.isArray(message.reactions) ? message.reactions : []
+		        const currentRow = stack.querySelector('.desktop-chat-reactions')
+
+		        // Build grouped reaction data
+		        const grouped = new Map()
+		        reactions.forEach(reaction => {
+		          const emoji = String(reaction?.emoji || '')
+		          if (!emoji) return
+		          const current = grouped.get(emoji) || { count: 0, mine: false, names: [] }
+		          current.count += 1
+		          current.mine = current.mine || String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()
+		          if (reaction?.actorName) current.names.push(String(reaction.actorName))
+		          grouped.set(emoji, current)
+		        })
+
+		        // Build new reactions row (or null if no reactions)
+		        let newRow = null
+		        if (grouped.size > 0) {
+		          newRow = bfEl('div', 'desktop-chat-reactions')
+		          newRow.setAttribute('aria-label', 'Message reactions')
+		          grouped.forEach((summary, emoji) => {
+		            const button = bfEl('button', '', `${emoji} ${summary.count}`)
+		            button.type = 'button'
+		            button.setAttribute('aria-pressed', String(summary.mine))
+		            button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction; ${summary.count} total`)
+		            button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
+		            button.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !summary.mine))
+		            newRow.appendChild(button)
+		          })
+		        }
+
+		        // Update the reactions row in DOM
+		        if (currentRow && newRow) {
+		          currentRow.replaceWith(newRow)
+		        } else if (currentRow) {
+		          currentRow.remove()
+		        } else if (newRow) {
+		          const insertBefore = stack.querySelector('.desktop-chat-thread-summary, .desktop-chat-actions, .desktop-chat-link-preview')
+		          if (insertBefore) {
+		            stack.insertBefore(newRow, insertBefore)
+		          } else {
+		            stack.appendChild(newRow)
+		          }
+		        }
+
+		        // Update action bar quick-reaction buttons' pressed state
+		        const actions = stack.querySelector('.desktop-chat-actions')
+		        if (actions) {
+		          ;['👍', '❤️', '🔥'].forEach(emoji => {
+		            const mine = reactions.some(r => String(r?.emoji || '') === emoji && String(r?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
+		            const button = Array.from(actions.querySelectorAll('button')).find(b => b.textContent === emoji)
+		            if (button) {
+		              button.setAttribute('aria-pressed', String(mine))
+		              button.setAttribute('aria-label', `${mine ? 'Remove' : 'Add'} ${emoji} reaction`)
+		            }
+		          })
+		        }
+		      }
+
 	      function closeDesktopChatContext(options = {}) {
 	        chatContextGeneration += 1
 		chatContextProjectGeneration += 1
@@ -64261,7 +64331,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              const root = desktopChatReplyTopology(payload.thread.messages).rootFor(updatedMessage)
 	              syncDesktopReplySurfaces(payload.thread, root?.id || updatedMessage?.replyTo?.messageId)
 	            } else {
-	              renderActiveScoutThread()
+	              syncDesktopMessageReactions(payload.thread, messageId)
 	            }
 	          }
 	        } catch (error) {
