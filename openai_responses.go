@@ -36,6 +36,10 @@ type openAITextRequest struct {
 	Model        string
 	Instructions string
 	Input        string
+	// IdempotencyKey is reserved for server-owned durable operations. Ordinary
+	// chat/model calls leave it empty; crash-recoverable artifact work derives
+	// it from the immutable operation/run identity.
+	IdempotencyKey string
 	// Attachments are Responses-native input_image/input_file content items.
 	// They are kept separate from Input so ordinary text-only callers preserve
 	// the compact string input wire shape byte-for-byte.
@@ -344,6 +348,9 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
+	if idempotencyKey := strings.TrimSpace(request.IdempotencyKey); idempotencyKey != "" {
+		httpRequest.Header.Set("Idempotency-Key", idempotencyKey)
+	}
 
 	// W0 item 4: exactly ONE ledger entry per wire attempt — success or
 	// failure — recorded here at the seam so every consumer (ambient fleet +

@@ -123,12 +123,14 @@ func TestDirectNamedAgentCannotMaskRegistryWorkOrProviderTelemetry(t *testing.T)
 	}
 	previousGoalStarter := startGoalThreadAsync
 	var launches atomic.Int64
+	var routerCalls atomic.Int64
 	startGoalThreadAsync = func(*kanbanBoardApp, string) { launches.Add(1) }
 	t.Cleanup(func() { startGoalThreadAsync = previousGoalStarter })
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Workflow != "scout_route" {
 			t.Fatalf("unexpected direct-agent workflow %q", request.Workflow)
 		}
+		routerCalls.Add(1)
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
 			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: packagingStudioProcessID,
 			Objective: "Create a polished ten-slide investor presentation",
@@ -142,8 +144,8 @@ func TestDirectNamedAgentCannotMaskRegistryWorkOrProviderTelemetry(t *testing.T)
 	if launches.Load() != 0 || response["intentOutcome"] != string(conversationIntentUnavailable) {
 		t.Fatalf("named agent widened capability: launches=%d response=%#v", launches.Load(), response)
 	}
-	if response["providerCalls"] != 1 {
-		t.Fatalf("unavailable telemetry providerCalls=%v, want truthful attempted call", response["providerCalls"])
+	if routerCalls.Load() != 1 || response["providerCalls"] != 1 {
+		t.Fatalf("unavailable telemetry routerCalls=%d providerCalls=%v, want one truthful attempted call", routerCalls.Load(), response["providerCalls"])
 	}
 	saved := response["thread"].(scoutChatThreadRecord)
 	answer := saved.Messages[len(saved.Messages)-1]
@@ -297,7 +299,9 @@ func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
 		t.Fatalf("targeted launch=%+v metadata=%v launches=%d", launched, launched.Artifact.Metadata, launches.Load())
 	}
 	answer := accepted["answer"].(scoutChatMessageRecord)
-	if answer.AuthorName != hired.DisplayName || answer.ReplyTo == nil || answer.ReplyTo.MessageID != root.ID || answer.Thread == nil || answer.Thread.AgentID != hired.ID || answer.Thread.AgentName != hired.DisplayName || answer.Thread.DelegatedBy != "" || answer.Thread.Status != "complete" {
+	if answer.AuthorName != hired.DisplayName || answer.ReplyTo != nil || answer.CausedByMessageID != card.ID ||
+		answer.Thread == nil || answer.Thread.AgentID != hired.ID || answer.Thread.AgentName != hired.DisplayName || answer.Thread.DelegatedBy != "" || answer.Thread.Status != "complete" ||
+		launched.Artifact.Metadata["sourceMessageId"] != card.CausedByMessageID {
 		t.Fatalf("targeted attribution=%+v", answer)
 	}
 	// Replayed terminal callbacks remain idempotent and still derive their
@@ -313,12 +317,12 @@ func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
 			continue
 		}
 		workCards++
-		if message.ID != answer.ID || message.ReplyTo == nil || message.ReplyTo.MessageID != root.ID || message.Thread.Status != "complete" {
-			t.Fatalf("reloaded reply-local work card=%+v", message)
+		if message.ID != answer.ID || message.ReplyTo != nil || message.CausedByMessageID != card.ID || message.Thread.Status != "complete" {
+			t.Fatalf("reloaded main-channel work card=%+v", message)
 		}
 	}
 	if workCards != 1 {
-		t.Fatalf("reply-local completion produced %d work cards, want exactly one", workCards)
+		t.Fatalf("main-channel completion produced %d work cards, want exactly one", workCards)
 	}
 	replayed, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID})
 	if err != nil || replayed["reconciled"] != true || launches.Load() != 1 {

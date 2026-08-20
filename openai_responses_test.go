@@ -52,6 +52,36 @@ func openAIResponsesLedgerDir(t *testing.T) string {
 	return dir
 }
 
+func TestCreateOpenAITextResponseSendsIdempotencyKey(t *testing.T) {
+	openAIResponsesLedgerDir(t)
+	const operationKey = "public-work-deterministic-operation"
+	var gotKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("Idempotency-Key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-5.6-terra",
+			"status":"completed",
+			"output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+	routeOpenAIResponsesToTestServer(t, server.URL)
+
+	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model:          "gpt-5.6-terra",
+		Input:          "do the durable work",
+		IdempotencyKey: operationKey,
+	})
+	if err != nil {
+		t.Fatalf("createOpenAITextResponseHTTP: %v", err)
+	}
+	if text != "done" || gotKey != operationKey {
+		t.Fatalf("text=%q idempotency key=%q, want done/%q", text, gotKey, operationKey)
+	}
+}
+
 func TestCreateOpenAITextResponseSendsStrictSchemaAndRejectsTruncation(t *testing.T) {
 	dir := openAIResponsesLedgerDir(t)
 	var payload map[string]any

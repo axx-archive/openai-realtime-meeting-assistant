@@ -67,6 +67,7 @@ type codexRunnerJob struct {
 	HeartbeatAt     time.Time                         `json:"heartbeat_at,omitempty"`
 	Error           string                            `json:"error,omitempty"`
 	RunnerEvidence  string                            `json:"runner_evidence,omitempty"`
+	ResultText      string                            `json:"result_text,omitempty"`
 	Metadata        map[string]string                 `json:"metadata,omitempty"`
 	TenantAuthority *StrideE10TenantAuthorityEnvelope `json:"tenant_authority,omitempty"`
 }
@@ -641,7 +642,11 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifactForJob(_ context.Conte
 		return codexApprovalRequiredResult(thread, authority), nil
 	}
 
-	return app.enqueueCodexAgentThreadJobWithContext(job, authority, "")
+	reservedJobID := ""
+	if operationKey := publicConversationProviderOperationKey(thread); operationKey != "" {
+		reservedJobID = "codex-job-" + sha256Hex([]byte(operationKey))[:32]
+	}
+	return app.enqueueCodexAgentThreadJobWithContext(job, authority, reservedJobID)
 }
 
 func codexApprovalRequiredResult(thread scoutAgentThread, authority string) agentThreadWorkerResult {
@@ -742,12 +747,55 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithContextAndTenantAuthori
 	metadata["threadId"] = queuedJob.ThreadID
 	metadata["runnerQueuePath"] = store.dir
 	metadata["createdAt"] = queuedJob.CreatedAt.Format(time.RFC3339Nano)
+	if codexJobStatusTerminal(queuedJob.Status) {
+		return app.replayTerminalCodexRunnerJob(thread, queuedJob)
+	}
 
 	return agentThreadWorkerResult{
 		Text:     buildCodexQueuedArtifact(thread, queuedJob),
 		Metadata: metadata,
 		Terminal: false,
 	}, nil
+}
+
+func (app *kanbanBoardApp) replayTerminalCodexRunnerJob(thread scoutAgentThread, job codexRunnerJob) (agentThreadWorkerResult, error) {
+	if !codexJobStatusTerminal(job.Status) || job.ClaimGeneration == 0 || strings.TrimSpace(job.FencingToken) == "" {
+		return agentThreadWorkerResult{}, fmt.Errorf("terminal Codex job is missing its fenced claim")
+	}
+	existing, ok := app.osArtifactByID(thread.Artifact.ID)
+	if !ok || strings.TrimSpace(existing.Metadata["runnerJobId"]) != job.ID || strings.TrimSpace(existing.Metadata["threadId"]) != job.ThreadID {
+		return agentThreadWorkerResult{}, fmt.Errorf("terminal Codex job does not match its durable artifact")
+	}
+	currentStatus := strings.ToLower(strings.TrimSpace(existing.Metadata["threadStatus"]))
+	if currentStatus == "error" {
+		currentStatus = codexJobStatusFailed
+	}
+	if codexJobStatusTerminal(currentStatus) {
+		if currentStatus != strings.ToLower(strings.TrimSpace(job.Status)) {
+			return agentThreadWorkerResult{}, fmt.Errorf("terminal Codex artifact conflicts with its queue result")
+		}
+		return agentThreadWorkerResult{Text: existing.Text, Metadata: map[string]string{
+			openAIToolFinalizedMetadataKey: "true", "runnerJobId": job.ID, "codexRunner": "terminal_replay",
+		}, Terminal: true}, nil
+	}
+	if !codexJobStatusTransitionAllowed(currentStatus, job.Status) {
+		return agentThreadWorkerResult{}, fmt.Errorf("terminal Codex job cannot finalize artifact from %s", currentStatus)
+	}
+	payload := codexRunnerCallbackPayload{
+		JobID: job.ID, ArtifactID: job.ArtifactID, ThreadID: job.ThreadID, Status: job.Status,
+		Text: job.ResultText, Error: job.Error, RunnerEvidence: job.RunnerEvidence, Metadata: cloneCodexThreadMetadata(job.Metadata),
+		ClaimGeneration: job.ClaimGeneration, FencingToken: job.FencingToken,
+	}
+	if strings.TrimSpace(payload.Text) == "" && oneOf(job.Status, codexJobStatusComplete, codexJobStatusFailed) {
+		return agentThreadWorkerResult{}, fmt.Errorf("terminal Codex job result payload is unavailable")
+	}
+	artifact, _, err := app.finalizeCodexRunnerResult(existing, payload)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
+	return agentThreadWorkerResult{Text: artifact.Text, Metadata: map[string]string{
+		openAIToolFinalizedMetadataKey: "true", "runnerJobId": job.ID, "codexRunner": "terminal_replay",
+	}, Terminal: true}, nil
 }
 
 func cloneCodexThreadMetadata(source map[string]string) map[string]string {
@@ -1068,6 +1116,7 @@ func processCodexRunnerJobAuthorized(ctx context.Context, store *codexRunnerJobS
 		job.CompletedAt = completedAt
 		job.Error = err.Error()
 		job.RunnerEvidence = codexRunnerCommandEvidence(result, cfg)
+		job.ResultText = buildCodexRunnerErrorArtifact(job, err)
 		job.Metadata = mergeStringMaps(job.Metadata, map[string]string{
 			"status":          "error",
 			"threadStatus":    "error",
@@ -1087,7 +1136,7 @@ func processCodexRunnerJobAuthorized(ctx context.Context, store *codexRunnerJobS
 			ArtifactID:      job.ArtifactID,
 			ThreadID:        job.ThreadID,
 			Status:          codexJobStatusFailed,
-			Text:            buildCodexRunnerErrorArtifact(job, err),
+			Text:            job.ResultText,
 			Error:           err.Error(),
 			RunnerEvidence:  job.RunnerEvidence,
 			Metadata:        job.Metadata,
@@ -1115,6 +1164,7 @@ func processCodexRunnerJobAuthorized(ctx context.Context, store *codexRunnerJobS
 	job.Status = status
 	job.CompletedAt = completedAt
 	job.RunnerEvidence = codexRunnerCommandEvidence(result, cfg)
+	job.ResultText = text
 	job.Metadata = mergeStringMaps(job.Metadata, map[string]string{
 		"status":          status,
 		"threadStatus":    status,
@@ -1496,58 +1546,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata := map[string]string{
-		"runnerJobId": payload.JobID,
-		"codexRunner": "callback",
-	}
-	metadata["status"] = status
-	metadata["threadStatus"] = status
-	if payload.Error != "" {
-		metadata["error"] = payload.Error
-	}
-	for key, value := range payload.Metadata {
-		if strings.TrimSpace(value) != "" {
-			metadata[key] = value
-		}
-	}
-	// Callback-supplied metadata is descriptive only. It cannot rewrite the
-	// capability-bound identity or the validated state machine fields.
-	metadata["runnerJobId"] = callbackJobID
-	metadata["threadId"] = callbackThreadID
-	metadata["status"] = status
-	metadata["threadStatus"] = status
-	text := strings.TrimSpace(payload.Text)
-	if text == "" {
-		text = existing.Text
-	}
-
-	title := existing.Metadata["title"]
-	if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete && strings.TrimSpace(payload.Text) != "" {
-		// An explicit runner-supplied title wins; otherwise derive from the
-		// finished body so the prompt stops masquerading as the title.
-		if runnerTitle := strings.TrimSpace(payload.Metadata["title"]); runnerTitle != "" {
-			title = runnerTitle
-		} else if derived := agentThreadDisplayTitle(text, title); derived != "" && derived != title {
-			title = derived
-			metadata["titleSource"] = "derived"
-		}
-	}
-	// Grill runs landing through the queued-runner callback get the same
-	// READINESS parse as the synchronous seams (runAgentThread and the
-	// follow-up runner), so the readiness dial never depends on which worker
-	// produced the run.
-	if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete {
-		stampReadinessMetadata(existing, firstNonEmptyString(existing.Metadata["mode"], existing.Kind), text, metadata)
-	}
-
-	// Sidecar completion is still work by the named coworker. Reuse the same
-	// durable authorship resolver as synchronous and queued-interim seams so a
-	// Colton/Marvin run cannot fall back to the transport label at terminal.
-	writer := agentThreadArtifactWriter(
-		scoutAgentThread{Artifact: existing},
-		agentThreadWorkerResult{Metadata: metadata},
-	)
-	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, title, text, writer, metadata)
+	artifact, actions, err := kanbanApp.finalizeCodexRunnerResult(existing, payload)
 	if err != nil {
 		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -1556,97 +1555,91 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run ledger for the queued-runner lane too: codex-sidecar runs and
-	// approved external-write jobs terminate through this callback instead of
-	// the synchronous seam in runAgentThread, so the run_log line has to land
-	// here or "what has Scout run for us?" recall silently misses them. The
-	// ledger id derives from the thread id, so a retried callback dedupes in
-	// the store; failed maps to the ledger's complete/error vocabulary (the
-	// error summary reads the artifact's freshly stamped error metadata).
-	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
-	case codexJobStatusComplete:
-		kanbanApp.appendAgentRunLogEntryForArtifact(artifact, "complete", text)
-	case codexJobStatusFailed:
-		kanbanApp.appendAgentRunLogEntryForArtifact(artifact, "error", text)
-	}
-
-	// W0-5 lane metering (seat codex), sidecar path: the local exec meters each
-	// job with a wall-clock defer (codex_runner.go), but sidecar-queued jobs run
-	// in the codex-runner container and terminate through THIS callback, so the
-	// codex seat only books the sidecar lane if we meter it here. Mirror the
-	// local entry — duration-only, Estimated, under the server-pinned Codex
-	// model — deriving duration from the artifact's launch stamp. Gate on the
-	// terminal statuses AND `changed` so a
-	// retried callback cannot double-meter (the notify/deliver guards below do
-	// the same). Non-blocking and error-safe, like every recordLLMUsage caller.
-	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
-	case codexJobStatusComplete, codexJobStatusFailed:
-		if changed {
-			usageEntry := llmUsageEntry{
-				Provider:  providerOpenAI,
-				Model:     defaultCodexExecModel,
-				Seat:      seatCodex,
-				ThreadID:  firstNonEmptyString(strings.TrimSpace(payload.ThreadID), strings.TrimSpace(existing.Metadata["threadId"])),
-				Estimated: true,
-			}
-			if startedAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(existing.Metadata["startedAt"])); parseErr == nil {
-				usageEntry.DurationMS = time.Since(startedAt).Milliseconds()
-			}
-			if jobErr := strings.TrimSpace(payload.Error); jobErr != "" {
-				usageEntry.Error = jobErr
-			}
-			recordLLMUsage(usageEntry)
-		}
-	}
-
-	// Durable milestone: queued Codex jobs land through this callback instead
-	// of the synchronous runner paths (agent_thread_runner.go), so the creator
-	// notification has to happen here too. Gate on `changed` so a retried
-	// identical callback cannot re-notify.
-	statusMessage := codexRunnerStatusMessage(payload.Status, artifact)
-	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
-	case codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired:
-		if changed {
-			kanbanApp.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(statusMessage, artifact))
-			// Close the loop for queued Codex completions too; deliveredAt
-			// makes a retried callback a no-op.
-			if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete {
-				kanbanApp.deliverArtifactToOrigin(artifact, firstNonEmptyString(artifact.Metadata["latestThreadRun"], artifact.Metadata["threadId"]))
-			}
-			// Board auto-advance for the queued-runner terminal seam too:
-			// complete → Done, failed/approval_required → Blocked. The same
-			// `changed` guard keeps a retried callback from re-syncing.
-			kanbanApp.syncLinkedCardForArtifact(artifact, payload.Status)
-			// Goal-engine linkage: a codex-executed subtask child (or the single
-			// commit_push child) folds its terminal result back into the parent
-			// plan. This is the codex-callback twin of the runAgentThread fold
-			// hook — without it, execution-tagged subtasks strand the plan since
-			// their completion never passes through the synchronous runner seam.
-			// Fold on its own goroutine so a re-drive (which may make model calls)
-			// never blocks this HTTP callback; no-op for non-goal artifacts.
-			if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" {
-				switch strings.ToLower(strings.TrimSpace(payload.Status)) {
-				case codexJobStatusComplete, codexJobStatusFailed:
-					if strideE10TenantCutoverEnabled() {
-						// The local cutover callback already holds current envelope
-						// authority; do not let this derived write escape it.
-						kanbanApp.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
-					} else {
-						foldGoalChildAsync(kanbanApp, parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
-					}
-				}
-			}
-		}
-	}
-
-	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
-	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", statusMessage, agentThreadBroadcastMetadata("codex_runner", artifact.Metadata["threadId"], payload.Status, "listening"))
 	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
 		"ok":       true,
 		"artifact": artifact,
 		"actions":  actions,
 	})
+}
+
+// finalizeCodexRunnerResult is the single post-fence terminal seam shared by
+// the HTTP callback and durable terminal-job replay after a lost callback.
+func (app *kanbanBoardApp) finalizeCodexRunnerResult(existing meetingMemoryEntry, payload codexRunnerCallbackPayload) (meetingMemoryEntry, []osAssistantAction, error) {
+	status := strings.ToLower(strings.TrimSpace(payload.Status))
+	metadata := map[string]string{"runnerJobId": strings.TrimSpace(payload.JobID), "codexRunner": "callback", "status": status, "threadStatus": status}
+	if payload.Error != "" {
+		metadata["error"] = payload.Error
+	}
+	for key, value := range payload.Metadata {
+		if strings.TrimSpace(value) != "" {
+			metadata[key] = value
+		}
+	}
+	// Descriptive callback metadata cannot rewrite the fenced binding/state.
+	metadata["runnerJobId"] = strings.TrimSpace(payload.JobID)
+	metadata["threadId"] = strings.TrimSpace(payload.ThreadID)
+	metadata["status"] = status
+	metadata["threadStatus"] = status
+	if strings.TrimSpace(existing.Metadata[publicConversationWorkActivationState]) != "" {
+		metadata[publicConversationWorkActivationState] = publicConversationWorkComplete
+		if status == codexJobStatusFailed || status == codexJobStatusApprovalRequired {
+			metadata[publicConversationWorkActivationState] = publicConversationWorkNeedsAttention
+		}
+	}
+	text := strings.TrimSpace(payload.Text)
+	if text == "" {
+		text = existing.Text
+	}
+	title := existing.Metadata["title"]
+	if status == codexJobStatusComplete && strings.TrimSpace(payload.Text) != "" {
+		if runnerTitle := strings.TrimSpace(payload.Metadata["title"]); runnerTitle != "" {
+			title = runnerTitle
+		} else if derived := agentThreadDisplayTitle(text, title); derived != "" && derived != title {
+			title = derived
+			metadata["titleSource"] = "derived"
+		}
+		stampReadinessMetadata(existing, firstNonEmptyString(existing.Metadata["mode"], existing.Kind), text, metadata)
+	}
+	writer := agentThreadArtifactWriter(scoutAgentThread{Artifact: existing}, agentThreadWorkerResult{Metadata: metadata})
+	artifact, changed, err := app.updateOSArtifactWithMetadata(existing.ID, title, text, writer, metadata)
+	if err != nil {
+		return meetingMemoryEntry{}, nil, err
+	}
+	switch status {
+	case codexJobStatusComplete:
+		app.appendAgentRunLogEntryForArtifact(artifact, "complete", text)
+	case codexJobStatusFailed:
+		app.appendAgentRunLogEntryForArtifact(artifact, "error", text)
+	}
+	if changed && oneOf(status, codexJobStatusComplete, codexJobStatusFailed) {
+		usageEntry := llmUsageEntry{Provider: providerOpenAI, Model: defaultCodexExecModel, Seat: seatCodex,
+			ThreadID: firstNonEmptyString(strings.TrimSpace(payload.ThreadID), strings.TrimSpace(existing.Metadata["threadId"])), Estimated: true}
+		if startedAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(existing.Metadata["startedAt"])); parseErr == nil {
+			usageEntry.DurationMS = time.Since(startedAt).Milliseconds()
+		}
+		usageEntry.Error = strings.TrimSpace(payload.Error)
+		recordLLMUsage(usageEntry)
+	}
+	statusMessage := codexRunnerStatusMessage(payload.Status, artifact)
+	if changed && oneOf(status, codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired) {
+		app.updateScoutChatThreadRefs(payload.ThreadID, status, artifact.ID)
+		app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(statusMessage, artifact))
+		if status == codexJobStatusComplete {
+			app.deliverArtifactToOrigin(artifact, firstNonEmptyString(artifact.Metadata["latestThreadRun"], artifact.Metadata["threadId"]))
+		}
+		app.syncLinkedCardForArtifact(artifact, payload.Status)
+		if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" && oneOf(status, codexJobStatusComplete, codexJobStatusFailed) {
+			if strideE10TenantCutoverEnabled() {
+				app.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+			} else {
+				go app.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+			}
+		}
+	}
+	actions := app.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
+	broadcastSignedInKanbanEvent("memory", nil)
+	broadcastAssistantEvent("action", statusMessage, agentThreadBroadcastMetadata("codex_runner", artifact.Metadata["threadId"], payload.Status, "listening"))
+	return artifact, actions, nil
 }
 
 func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {

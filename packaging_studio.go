@@ -399,8 +399,13 @@ func packagingStudioDefinition() ProcessDefinition {
 					"Produce the deck as ONE self-contained HTML file: all CSS and JS inline, no external references — the ONLY URLs permitted anywhere are data: URIs (used for any embedded imagery). Start with <!doctype html>.",
 					"Build the deck on the REQUIRED print chassis. Include this exact <style> block verbatim in <head>, lay every slide out as a <section class=\"pg\">…</section> inside a single <div id=\"stage\">…</div>, and give the FIRST slide the extra class \"on\". NEVER remove or weaken the @page or @media print rules — they are what make the exported PDF contain EVERY slide instead of only the first one:",
 					"<style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>",
-					"Layer all brand aesthetics (colors, type, furniture) ON TOP of this chassis; do not fight its geometry (the 1920x1080 #stage, the .pg slide model).",
+					"Layer all brand aesthetics (colors, type, furniture) ON TOP of this chassis; do not fight its geometry (the 1920x1080 #stage, the .pg slide model). Treat every page as a designed 1920×1080 composition, never as a document paragraph parked in the upper-left.",
+					"FIRST-CLASS LAYOUT SYSTEM: establish CSS tokens for palette, heading/body type, spacing, safe margins, and a 12-column grid. Use a minimum 96px safe zone. Headline type should normally be 88-160px, body 34-48px, labels 22-28px. Use deliberate scale, alignment, and contrast that remains legible from presentation distance.",
+					"LAYOUT VARIETY WITH ONE VISUAL THESIS: choose the best supported composition per beat — cover, section break, statement, evidence, comparison, numbers, timeline, quote, image-led, or close. Mix at least four composition types. Do not repeat a title-plus-bullets template; do not leave accidental empty space; do not center every slide. Reserve centered type for intentional dramatic beats.",
+					"DENSITY AND CRAFT: one claim per slide, no prose wall, no orphan labels, no tiny footnotes, and no more than 45 client-facing words on a normal slide unless it is a deliberately designed evidence page. Turn metrics into large-number compositions, comparisons into aligned columns, sequences into a visible path, and quotations into typographic moments. Add restrained slide numbers and source/caption furniture where evidence or imagery requires it.",
+					"EDITOR COMPATIBILITY: put each slide's background color directly on its <section class=\"pg\"> inline style. Give every meaningful text block, image plate, and decorative shape a stable data-deck-element id plus data-deck-type=\"text|image|shape\". Put position:absolute and its left, top, width, height, z-index, opacity, and rotation directly in that element's inline style using 1920×1080 pixel coordinates; do not leave editable geometry only in a CSS class. Put text color/font-size/font-weight, image object-fit, and shape fill/stroke directly on the element too. Decorative background layers must carry data-deck-element when they are intended to be editable. This explicit geometry is part of the deliverable contract, not optional metadata.",
 					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. Build that slide's photo element as a plate or full-bleed carrying BOTH its type class AND class \"fig-N\" (matching the FIG number), with an empty <div class=\"ph\"></div> inside and the FIG. caption. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
+					"FULL-BLEED LAW: when a generated image carries the emotional beat, let it reach all four slide edges and place copy over a purpose-built solid or gradient scrim. When the image is evidence, use a disciplined plate with a caption. Never use a small decorative image that contributes no meaning.",
 					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the founder the script alongside each page.",
 					"Honor every founder_pass do_not_touch line exactly. Keep client-facing copy free of em dashes. " + studioFounderWordsLaw,
 				}, "\n"),
@@ -539,15 +544,16 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	}
 
 	filed, err := app.fileStudioShipDeliverables(studioShipInputs{
-		GoalID:    parentID,
-		PackageID: plan.PackageID,
-		CreatedBy: plan.CreatedBy,
-		DeckHTML:  deckHTML,
-		Wall:      wall,
-		Talk:      talk,
-		Rigor:     rigor,
-		Findings:  composeStudioFindingsRecord(app, plan, parentID),
-		DeckTitle: deckTitle,
+		GoalID:     parentID,
+		PackageID:  plan.PackageID,
+		CreatedBy:  plan.CreatedBy,
+		DeckHTML:   deckHTML,
+		DeckAssets: studioDeckImageryAssets(app, plan),
+		Wall:       wall,
+		Talk:       talk,
+		Rigor:      rigor,
+		Findings:   composeStudioFindingsRecord(app, plan, parentID),
+		DeckTitle:  deckTitle,
 	})
 	if err != nil {
 		return "", nil, err
@@ -1039,15 +1045,45 @@ type studioShipDeliverable struct {
 // interlocking artifacts — the outputs of the pipeline's WRITE / VOICE / RED-TEAM
 // / GATE stages, already produced by the time SHIP runs.
 type studioShipInputs struct {
-	GoalID    string // the running goal, stamped for provenance
-	PackageID string
-	CreatedBy string
-	DeckHTML  string // ship_deck's self-contained HTML
-	Wall      string // the slide-copy record ("The Wall")
-	Talk      string // the branded one-sheet ("The Talk") — text-native, paperKit
-	Rigor     string // the diligence companion
-	Findings  string // the findings audit trail (every panel/gate/jury verdict)
-	DeckTitle string
+	GoalID     string // the running goal, stamped for provenance
+	PackageID  string
+	CreatedBy  string
+	DeckHTML   string          // ship_deck's self-contained HTML
+	DeckAssets []artifactAsset // generated FIG images, attached for faithful editing
+	Wall       string          // the slide-copy record ("The Wall")
+	Talk       string          // the branded one-sheet ("The Talk") — text-native, paperKit
+	Rigor      string          // the diligence companion
+	Findings   string          // the findings audit trail (every panel/gate/jury verdict)
+	DeckTitle  string
+}
+
+func studioDeckImageryAssets(app *kanbanBoardApp, plan *goalPlan) []artifactAsset {
+	if app == nil || plan == nil {
+		return nil
+	}
+	stage := plan.subtaskByID("imagery_generate")
+	if stage == nil {
+		return nil
+	}
+	record, ok := app.osArtifactByID(stage.ArtifactID)
+	if !ok {
+		return nil
+	}
+	var placements []imageryGeneratedShot
+	if err := json.Unmarshal([]byte(record.Metadata["imageryFigs"]), &placements); err != nil {
+		return nil
+	}
+	assets := make([]artifactAsset, 0, len(placements))
+	for _, placement := range placements {
+		if placement.Fig < 1 || !validBlobRef(placement.Ref) || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(placement.Mime)), "image/") {
+			continue
+		}
+		assets = append(assets, artifactAsset{
+			Ref: placement.Ref, Mime: placement.Mime,
+			Name: fmt.Sprintf("fig-%d.%s", placement.Fig, deckImageExtension(placement.Mime)), Kind: "image",
+		})
+	}
+	return assets
 }
 
 // fileStudioShipDeliverables is the SHIP stage's compiler: it files the FIVE
@@ -1193,6 +1229,15 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 		if in.PackageID != "" {
 			if _, err := app.attachToPackage(in.PackageID, packageRefTypeArtifact, artifact.ID, createdBy); err != nil {
 				log.Errorf("packaging_studio ship: attach %s to package %s failed: %v", artifact.ID, in.PackageID, err)
+			}
+		}
+		if spec.contract == packagingStudioDeckContract {
+			for _, asset := range in.DeckAssets {
+				updated, attachErr := app.appendArtifactAsset(artifact.ID, asset)
+				if attachErr != nil {
+					return filed, fmt.Errorf("attach deck imagery %q: %w", asset.Name, attachErr)
+				}
+				artifact = updated
 			}
 		}
 

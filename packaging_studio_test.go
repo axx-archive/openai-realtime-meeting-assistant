@@ -211,6 +211,18 @@ func TestPackagingStudioShipDeckCarriesPrintChassis(t *testing.T) {
 	}
 }
 
+func TestPackagingStudioShipDeckCarriesFirstClassDesignAndEditorContract(t *testing.T) {
+	shipDeck := packagingStudioStage(t, packagingStudioDefinition(), "ship_deck")
+	for _, need := range []string{
+		"12-column grid", "minimum 96px safe zone", "Mix at least four composition types",
+		"no more than 45 client-facing words", "data-deck-element", "FULL-BLEED LAW",
+	} {
+		if !strings.Contains(shipDeck.PromptBody, need) {
+			t.Errorf("ship_deck prompt missing first-class design contract %q:\n%s", need, shipDeck.PromptBody)
+		}
+	}
+}
+
 // The render fallback stylesheet is a verbatim tail of the single chassis source
 // — there is no second copy to drift out of sync.
 func TestPackagingDeckPrintCSSDerivesFromChassis(t *testing.T) {

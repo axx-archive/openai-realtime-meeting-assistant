@@ -21,9 +21,15 @@ var conversationWorkBeforeCardCommitProbe func(scoutAgentThread) error
 var conversationWorkAfterCardCommitProbe func(scoutAgentThread) error
 
 func conversationApprovedWorkOperation(threadID string, requesterEmail string, proposalMessageID string, proposal scoutRouterProposal) (conversationTurnOperation, error) {
+	outputContract := firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode), strings.TrimSpace(proposal.Kind))
 	body, err := canonicalJSON(map[string]any{
-		"version":  "conversation-approved-work/v1",
+		"version":  "conversation-approved-work/v2",
 		"threadId": strings.TrimSpace(threadID), "requester": normalizeAccountEmail(requesterEmail),
+		// Public conversation work currently delivers to the channel that owns the
+		// accepted proposal. Name that fact explicitly in the operation body: the
+		// same approval can never be replayed into a different audience or output.
+		"destinationKind": "channel", "destinationThreadId": strings.TrimSpace(threadID),
+		"outputContract":    outputContract,
 		"proposalMessageId": strings.TrimSpace(proposalMessageID), "kind": strings.TrimSpace(proposal.Kind),
 		"intentOutcome": strings.TrimSpace(proposal.IntentOutcome), "effectClass": strings.TrimSpace(proposal.EffectClass),
 		"toolId": strings.TrimSpace(proposal.ToolID), "mode": strings.TrimSpace(proposal.Mode),

@@ -106,6 +106,8 @@ func TestScoutChatSimpleOutlineRequestDetected(t *testing.T) {
 		{"simple outline for the meeting", true},
 		{"in-thread outline for the Q3 review", true},
 		{"presentation outline, keep in-thread", true},
+		{"make a presentation outline", true},
+		{"create a deck outline", true},
 		{"5 slide presentation, don't email", true},
 
 		// Negative cases: heavier asks that should NOT be short-circuited
@@ -123,7 +125,7 @@ func TestScoutChatSimpleOutlineRequestDetected(t *testing.T) {
 
 		// Edge cases
 		{"", false},
-		{"outline", false}, // Just "outline" without simple-ask phrases
+		{"outline", false},      // Just "outline" without simple-ask phrases
 		{"presentation", false}, // Just "presentation" without simple-ask phrases
 	}
 
@@ -139,14 +141,14 @@ func TestScoutChatSimpleOutlineRequestDetected(t *testing.T) {
 
 // --- Routing tests for simple outline asks -----------------------------------
 
-func TestSimpleOutlineAsksRouteToConversationalReply(t *testing.T) {
+func TestSimpleOutlineAsksRouteToDurableOutline(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-api-key"
 
 	routerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		routerCalls++
-		t.Fatalf("router should not be called for simple outline asks; got workflow=%s", request.Workflow)
+		t.Fatalf("router should not be called for deterministic outline asks; got workflow=%s", request.Workflow)
 		return "", nil
 	})
 
@@ -155,26 +157,29 @@ func TestSimpleOutlineAsksRouteToConversationalReply(t *testing.T) {
 		"Create a five-slide outline, keep in thread",
 		"quick outline of the strategy, don't email",
 		"simple outline for the meeting, keep in-thread",
+		"make a presentation outline",
+		"create a deck outline",
 	}
 
 	for _, ask := range cases {
 		t.Run(ask, func(t *testing.T) {
 			decision := app.routeConversationIntentWithInput(context.Background(), ask, conversationIntentTurn{Text: ask}, nil)
 
-			if decision.Outcome != conversationIntentConversationalReply {
-				t.Errorf("outcome=%s, want conversational_reply", decision.Outcome)
+			if decision.Outcome != conversationIntentStartPrivateWork && decision.Outcome != conversationIntentApprovalRequired {
+				t.Errorf("outcome=%s, want durable outline work", decision.Outcome)
 			}
-			if decision.Work != nil {
-				t.Errorf("work=%#v, want nil (no proposal)", decision.Work)
+			work := decision.Work
+			if work == nil && decision.Approval != nil {
+				work = decision.Approval.Work
 			}
-			if decision.Approval != nil {
-				t.Errorf("approval=%#v, want nil (no approval gate)", decision.Approval)
+			if work == nil || work.ToolID != "deck_outline" {
+				t.Errorf("work=%#v, want deck_outline", work)
 			}
 		})
 	}
 
 	if routerCalls != 0 {
-		t.Errorf("router calls=%d, want 0 (simple outline should bypass router)", routerCalls)
+		t.Errorf("router calls=%d, want 0 (outline output is deterministic)", routerCalls)
 	}
 }
 
@@ -224,7 +229,7 @@ func TestWorkerUnavailableDoesNotMintWorkProposals(t *testing.T) {
 	}
 }
 
-func TestWorkerUnavailableSkipsDeterministicGuard(t *testing.T) {
+func TestWorkerUnavailableKeepsDeckOutlineOnDurableGoalPipeline(t *testing.T) {
 	// Force the agent runner to stub (unavailable)
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
@@ -239,11 +244,7 @@ func TestWorkerUnavailableSkipsDeterministicGuard(t *testing.T) {
 	routerCalls := 0
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		routerCalls++
-		if request.Workflow == "scout_route" {
-			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-				Outcome: string(conversationIntentConversationalReply),
-			}), nil
-		}
+		t.Error("router should not be called for the server-owned deck outline pipeline")
 		return "", nil
 	})
 
@@ -255,13 +256,18 @@ func TestWorkerUnavailableSkipsDeterministicGuard(t *testing.T) {
 		nil,
 	)
 
-	// With stub worker, deterministic guard should be skipped
-	// and router should be called (which returns conversational_reply)
-	if decision.Outcome != conversationIntentConversationalReply {
-		t.Errorf("outcome=%s, want conversational_reply", decision.Outcome)
+	if decision.Outcome != conversationIntentApprovalRequired && decision.Outcome != conversationIntentStartPrivateWork {
+		t.Errorf("outcome=%s, want durable deck_outline work", decision.Outcome)
 	}
-	if routerCalls == 0 {
-		t.Error("router should be called when worker unavailable skips deterministic guard")
+	work := decision.Work
+	if work == nil && decision.Approval != nil {
+		work = decision.Approval.Work
+	}
+	if work == nil || work.ToolID != "deck_outline" {
+		t.Fatalf("work=%+v, want deck_outline", work)
+	}
+	if routerCalls != 0 {
+		t.Errorf("router calls=%d, want 0", routerCalls)
 	}
 }
 
@@ -324,6 +330,8 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 		{"just the outline", false},
 		{"give me the outline only", false},
 		{"slide outline please", false},
+		{"make a presentation outline", false},
+		{"create a deck outline", false},
 
 		// Negative cases: non-deck requests
 		{"research the market", false},
@@ -332,7 +340,7 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 
 		// Edge cases
 		{"", false},
-		{"deck", false},       // Just "deck" without creation verb
+		{"deck", false},         // Just "deck" without creation verb
 		{"presentation", false}, // Just "presentation" without creation verb
 	}
 
@@ -652,6 +660,24 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "negated yes does not launch",
+			text: "yes, but don't build it",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel cinematic or typographic?"},
+			},
+			want: false,
+		},
+		{
+			name: "courtesy plus hold does not launch",
+			text: "thanks, hold off",
+			history: []scoutChatTurn{
+				{role: "user", text: "make a deck"},
+				{role: "scout", text: "Should this feel cinematic or typographic?"},
+			},
+			want: false,
+		},
 		// Choices card scenario — the router issues a clarify_once choices card
 		// asking "What should the 5-slide deck be about?" The user types "yes".
 		// This must route to deck generation, not return "I still need the subject".
@@ -693,10 +719,10 @@ func TestDeckConfirmationDetectedRoutesCorrectly(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "empty history",
-			text: "yes",
+			name:    "empty history",
+			text:    "yes",
 			history: nil,
-			want: false,
+			want:    false,
 		},
 	}
 
@@ -779,7 +805,7 @@ func TestDeckGenerationWithNoTopic(t *testing.T) {
 // using the REAL append path (appendScoutChatThreadMessage) WITH THE WORKER LIVE.
 // The early intercept must catch the deck confirmation BEFORE the router is called,
 // so no matter what the router would return, we always generate a deck.
-func TestDeckGenerationAfterApproachBProse(t *testing.T) {
+func legacyInlineDeckGenerationAfterApproachBProse(t *testing.T) {
 	// Test multiple Approach B phrasings — live keeps inventing new ones
 	approachBVariants := []string{
 		// Original live quote
@@ -953,7 +979,7 @@ func TestDeckGenerationAfterApproachBProse(t *testing.T) {
 // the router issues a clarify_once choices card ("What should the 5-slide deck be about?")
 // and the user types "yes". Uses the REAL append path WITH THE WORKER LIVE.
 // The early intercept must catch the deck confirmation BEFORE the router is called.
-func TestDeckGenerationAfterChoicesCard(t *testing.T) {
+func legacyInlineDeckGenerationAfterChoicesCard(t *testing.T) {
 	// Worker is LIVE — not stubbed. Deck confirmation must still generate a deck.
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "openai_text")
@@ -1190,11 +1216,11 @@ func TestExtractDirectionContextFiltersTopicQuestions(t *testing.T) {
 // TestExtractEffectiveDeckQuery tests the query extraction for confirmations.
 func TestExtractEffectiveDeckQuery(t *testing.T) {
 	cases := []struct {
-		name           string
-		query          string
-		history        []scoutChatTurn
-		wantContains   string // effective query should contain this
-		wantNotEquals  string // effective query should NOT be exactly this
+		name          string
+		query         string
+		history       []scoutChatTurn
+		wantContains  string // effective query should contain this
+		wantNotEquals string // effective query should NOT be exactly this
 	}{
 		{
 			name:  "yes with topic in original request",
@@ -1367,10 +1393,10 @@ func TestClarificationAlreadyAskedRecognizesApproachB(t *testing.T) {
 	}
 }
 
-// TestDeckAskRoutesToInlineDeckWithStubWorker tests the live path: a deck ask
-// through the routing system with stub worker should produce an in-thread
-// html_deck message, not a proposal or outline.
-func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
+// A deck ask remains a durable Packaging Studio request even when the generic
+// agent-thread runner is closed. It must never degrade to outline prose or an
+// ad-hoc inline HTML message.
+func TestDeckAskRoutesToPackagingStudioWithStubWorker(t *testing.T) {
 	// Force the agent runner to stub (unavailable)
 	clearAgentRunnerEnv(t)
 	t.Setenv("BONFIRE_AGENT_RUNNER", "stub")
@@ -1382,13 +1408,10 @@ func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-api-key"
 
-	// Mock the LLM to return HTML deck for deck generation prompts
+	// The deterministic route must not spend a router/model turn.
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		// Return HTML deck content
-		return `<!doctype html>
-<html><head><title>Test Deck</title></head>
-<body><section class="slide"><h1>Test</h1></section></body>
-</html>`, nil
+		t.Fatalf("unexpected provider call for workflow %q", request.Workflow)
+		return "", nil
 	})
 
 	cases := []string{
@@ -1405,7 +1428,7 @@ func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
 				t.Errorf("scoutChatDeckRequestDetected(%q) = false, want true", ask)
 			}
 
-			// Test that the router routes to conversational_reply (not work)
+			// The server-owned Packaging Studio pipeline remains available.
 			decision := app.routeConversationIntentWithInput(
 				context.Background(),
 				ask,
@@ -1413,9 +1436,15 @@ func TestDeckAskRoutesToInlineDeckWithStubWorker(t *testing.T) {
 				nil,
 			)
 
-			// With stub worker, deck asks should not mint work proposals
-			if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
-				t.Errorf("outcome=%s for deck ask with stub worker, want conversational_reply", decision.Outcome)
+			if decision.Outcome != conversationIntentStartPrivateWork && decision.Outcome != conversationIntentApprovalRequired {
+				t.Errorf("outcome=%s for deck ask with stub worker, want durable work", decision.Outcome)
+			}
+			work := decision.Work
+			if work == nil && decision.Approval != nil {
+				work = decision.Approval.Work
+			}
+			if work == nil || work.ToolID != packagingStudioProcessID {
+				t.Errorf("work=%+v, want packaging_studio", work)
 			}
 		})
 	}

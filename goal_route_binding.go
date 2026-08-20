@@ -134,7 +134,7 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 	if app == nil || plan == nil || receipt.Contract != goalRouteContractConversationV1 {
 		return fmt.Errorf("goal route receipt is missing or unsupported")
 	}
-	if receipt.Requester == "" || receipt.OriginKind != agentThreadOriginPrivateThread || receipt.OriginID == "" || receipt.SourceMessageID == "" ||
+	if receipt.Requester == "" || !oneOf(receipt.OriginKind, agentThreadOriginPrivateThread, agentThreadOriginChannel) || receipt.OriginID == "" || receipt.SourceMessageID == "" ||
 		!isHexDigest(receipt.SourceMessageDigest) || !isHexDigest(receipt.SourceWindowDigest) || receipt.OperationID == "" || !isHexDigest(receipt.OperationBodyDigest) {
 		return fmt.Errorf("goal route receipt is incomplete")
 	}
@@ -152,17 +152,24 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 	lock := app.scoutChatThreadLock(receipt.OriginID)
 	lock.Lock()
 	thread, _, threadErr := app.scoutChatThreadByID(receipt.Requester, receipt.OriginID)
-	if threadErr != nil || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate {
+	wantVisibility := scoutChatVisibilityPrivate
+	if receipt.OriginKind == agentThreadOriginChannel {
+		wantVisibility = scoutChatVisibilityPublic
+	}
+	if threadErr != nil || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != wantVisibility {
 		lock.Unlock()
-		return fmt.Errorf("originating private conversation is unavailable")
+		return fmt.Errorf("originating conversation is unavailable")
 	}
 	_, binding, bindingErr := scoutChatSourceWindow(thread, receipt.SourceMessageID)
 	var source scoutChatMessageRecord
+	var approved scoutChatMessageRecord
 	if bindingErr == nil {
 		for _, message := range thread.Messages {
 			if strings.TrimSpace(message.ID) == receipt.SourceMessageID {
 				source = message
-				break
+			}
+			if strings.TrimSpace(message.ID) == receipt.ApprovedProposalID {
+				approved = message
 			}
 		}
 	}
@@ -172,10 +179,20 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 	}
 
 	if receipt.ApprovedProposalID != "" {
-		if receipt.ApprovedProposalID != receipt.SourceMessageID || source.Proposal == nil || source.Proposal.Status != "accepted" {
+		proposalMessage := source
+		if receipt.OriginKind == agentThreadOriginChannel {
+			proposalMessage = approved
+			if receipt.ApprovedEffectClass != "expanded_audience" || proposalMessage.CausedByMessageID != source.ID {
+				return fmt.Errorf("approved public goal audience binding changed")
+			}
+		} else if receipt.ApprovedProposalID != receipt.SourceMessageID {
+			return fmt.Errorf("approved private goal proposal is no longer current")
+		}
+		if proposalMessage.ID != receipt.ApprovedProposalID || proposalMessage.Proposal == nil || proposalMessage.Proposal.Status != "accepted" ||
+			strings.TrimSpace(proposalMessage.Proposal.EffectClass) != receipt.ApprovedEffectClass {
 			return fmt.Errorf("approved goal proposal is no longer current")
 		}
-		operation, operationErr := conversationApprovedWorkOperation(receipt.OriginID, receipt.Requester, receipt.SourceMessageID, *source.Proposal)
+		operation, operationErr := conversationApprovedWorkOperation(receipt.OriginID, receipt.Requester, receipt.ApprovedProposalID, *proposalMessage.Proposal)
 		if operationErr != nil || operation.ID != receipt.OperationID || operation.BodyDigest != receipt.OperationBodyDigest {
 			return fmt.Errorf("approved goal operation binding changed")
 		}

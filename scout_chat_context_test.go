@@ -91,11 +91,13 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal, ok := response["proposal"].(*scoutRouterProposal)
-	if !ok || proposal == nil || !strings.Contains(proposal.Objective, "PRODUCTION_DR_MAY_SENTINEL") || !strings.Contains(proposal.Objective, "Tyler") {
+	if !ok || proposal == nil || proposal.ToolID != packagingStudioProcessID ||
+		!strings.Contains(proposal.Objective, "PRODUCTION_DR_MAY_SENTINEL") || !strings.Contains(proposal.Objective, "Tyler") ||
+		!strings.Contains(proposal.Query, "PRODUCTION_DR_MAY_SENTINEL") || !strings.Contains(proposal.Query, "Tyler") {
 		t.Fatalf("production proposal lost resolved source: %#v", response["proposal"])
 	}
-	if len(routerInputs) != 2 || !strings.Contains(routerInputs[1], "PRODUCTION_DR_MAY_SENTINEL") {
-		t.Fatalf("production work router lost pinned source: %#v", routerInputs)
+	if len(routerInputs) != 1 {
+		t.Fatalf("deterministic presentation route unexpectedly called the model router: %#v", routerInputs)
 	}
 }
 

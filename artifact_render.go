@@ -27,15 +27,20 @@ package main
 // NOT loosen that renderer (spec §4 item 4).
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
 const (
@@ -211,6 +216,11 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	body, err := artifactRenderBody(artifact)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 
 	w.Header().Set("Content-Security-Policy", artifactRenderCSP)
 	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
@@ -218,7 +228,103 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write([]byte(artifact.Text)); err != nil {
+	if _, err := w.Write(body); err != nil {
 		log.Errorf("Failed to serve rendered artifact %s: %v", artifact.ID, err)
 	}
+}
+
+// artifactRenderBody expands server-owned deck image refs only at render
+// time, keeping the artifact body small while satisfying the sandbox's
+// `img-src data:` policy. Any missing or unattached source fails closed.
+func artifactRenderBody(artifact meetingMemoryEntry) ([]byte, error) {
+	if strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) == "" {
+		return []byte(artifact.Text), nil
+	}
+	deck, imported, _, err := loadDeckDocument(artifact)
+	if err != nil || imported {
+		return nil, fmt.Errorf("load native deck scene")
+	}
+	source := compileDeckDocumentHTML(deck, strings.TrimSpace(artifact.Metadata["title"]))
+	source = injectArtifactDeckNavigation(source)
+	allowed := map[string]artifactAsset{}
+	for _, asset := range artifactAssets(artifact) {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Mime)), "image/") || asset.Kind == "image" {
+			allowed[asset.Ref] = asset
+		}
+	}
+	document, err := xhtml.Parse(strings.NewReader(source))
+	if err != nil {
+		return nil, fmt.Errorf("parse deck html: %w", err)
+	}
+	const expandedDeckRenderMaxBytes = 64 << 20
+	expandedImageBytes := 0
+	var expand func(*xhtml.Node) error
+	expand = func(node *xhtml.Node) error {
+		if node.Type == xhtml.ElementNode && node.Data == "img" {
+			sourceIndex := -1
+			for index := range node.Attr {
+				if node.Attr[index].Key == "src" {
+					sourceIndex = index
+					break
+				}
+			}
+			if sourceIndex < 0 {
+				return fmt.Errorf("deck image has no source")
+			}
+			parsed, err := url.Parse(strings.TrimSpace(node.Attr[sourceIndex].Val))
+			if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Path != "/artifacts/blob" {
+				return fmt.Errorf("deck image source is not an artifact blob")
+			}
+			for key := range parsed.Query() {
+				if key != "ref" && key != "name" {
+					return fmt.Errorf("deck image source has unsupported parameters")
+				}
+			}
+			ref := strings.TrimSpace(parsed.Query().Get("ref"))
+			asset, ok := allowed[ref]
+			if !ok || !validBlobRef(ref) {
+				return fmt.Errorf("deck image is not attached")
+			}
+			data, meta, err := getBlob(ref)
+			if err != nil || !strings.HasPrefix(strings.ToLower(meta.Mime), "image/") || (strings.TrimSpace(asset.Mime) != "" && !strings.EqualFold(strings.TrimSpace(asset.Mime), strings.TrimSpace(meta.Mime))) {
+				return fmt.Errorf("deck image is unavailable")
+			}
+			encodedBytes := base64.StdEncoding.EncodedLen(len(data)) + len(meta.Mime) + len("data:;base64,")
+			if encodedBytes > expandedDeckRenderMaxBytes-expandedImageBytes {
+				return fmt.Errorf("expanded deck exceeds render bound")
+			}
+			expandedImageBytes += encodedBytes
+			node.Attr[sourceIndex].Val = "data:" + meta.Mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if err := expand(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := expand(document); err != nil {
+		return nil, err
+	}
+	var output bytes.Buffer
+	if err := xhtml.Render(&output, document); err != nil {
+		return nil, fmt.Errorf("render deck html: %w", err)
+	}
+	if output.Len() > expandedDeckRenderMaxBytes {
+		return nil, fmt.Errorf("expanded deck exceeds render bound")
+	}
+	return output.Bytes(), nil
+}
+
+// injectArtifactDeckNavigation adds a fixed, server-owned viewer controller to
+// the deterministic scene projection. Artifact text never supplies this
+// script. It supports keyboard and button navigation and fits the 1920x1080
+// stage to the viewport while remaining compatible with the pinned CSP.
+func injectArtifactDeckNavigation(document string) string {
+	const viewer = `<style id="bonfire-deck-viewer-style">#deck-viewer-nav{position:fixed;right:24px;bottom:20px;z-index:2147483647;display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(255,255,255,.22);border-radius:999px;background:rgba(8,8,10,.78);color:#fff;font:600 14px/1 Arial,sans-serif;backdrop-filter:blur(12px)}#deck-viewer-nav button{width:36px;height:36px;border:0;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;font:700 20px/1 Arial,sans-serif;cursor:pointer}#deck-viewer-nav button:focus-visible{outline:3px solid #fff;outline-offset:2px}@media print{#deck-viewer-nav{display:none!important}}</style><nav id="deck-viewer-nav" data-deck-navigation="trusted" aria-label="Slide navigation"><button type="button" data-deck-prev aria-label="Previous slide">&#8592;</button><span data-deck-position aria-live="polite"></span><button type="button" data-deck-next aria-label="Next slide">&#8594;</button></nav><script id="bonfire-deck-viewer-script">(()=>{'use strict';const pages=Array.from(document.querySelectorAll('#stage>.pg'));const stage=document.getElementById('stage');const status=document.querySelector('[data-deck-position]');let index=0;function show(next){if(!pages.length)return;index=Math.max(0,Math.min(pages.length-1,next));pages.forEach((page,i)=>{page.classList.toggle('on',i===index);page.setAttribute('aria-hidden',i===index?'false':'true')});status.textContent=(index+1)+' / '+pages.length}function fit(){if(!stage)return;const scale=Math.min(innerWidth/1920,innerHeight/1080);stage.style.position='absolute';stage.style.transform='scale('+scale+')';stage.style.left=((innerWidth-1920*scale)/2)+'px';stage.style.top=((innerHeight-1080*scale)/2)+'px'}document.querySelector('[data-deck-prev]').addEventListener('click',()=>show(index-1));document.querySelector('[data-deck-next]').addEventListener('click',()=>show(index+1));addEventListener('keydown',event=>{if(['ArrowRight','PageDown',' '].includes(event.key)){event.preventDefault();show(index+1)}else if(['ArrowLeft','PageUp'].includes(event.key)){event.preventDefault();show(index-1)}else if(event.key==='Home'){show(0)}else if(event.key==='End'){show(pages.length-1)}});addEventListener('resize',fit);show(0);fit()})();</script>`
+	index := strings.LastIndex(strings.ToLower(document), "</body>")
+	if index < 0 {
+		return document + viewer
+	}
+	return document[:index] + viewer + document[index:]
 }

@@ -1,0 +1,193 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
+	body, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		"async function openDeckStudio(artifactId, title, options = {})",
+		"/artifacts/deck?id=${encodeURIComponent(artifactId)}",
+		"fetch('/artifacts/deck',",
+		"expectedVersion: state.version",
+		"if (payload?.canWrite !== true)",
+		"payload?.writeBlockedReason",
+		"const canEdit = access?.canWrite === true",
+		"fetch('/artifacts/deck/image-generations'",
+		"fetch('/artifacts/deck/assets'",
+		"data-action=\"add-rectangle\"",
+		"data-action=\"add-ellipse\"",
+		"data-action=\"undo\"",
+		"data-action=\"redo\"",
+		"openDeckStudio(artifactId, title,",
+		"if (e.source !== state.currentBackdrop?.contentWindow) return",
+		"artifactIsDeckOutline(entry)",
+		"Generate deck",
+		"async function openDeckPresentation(artifactId, title, initialPayload = null)",
+		"data-present-action=\"next\"",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("Deck Studio contract missing %q", want)
+		}
+	}
+	for _, banned := range []string{"src" + "doc", "allow-same-origin"} {
+		if strings.Contains(html, banned) {
+			t.Errorf("generated deck HTML can escape the tokened/opaque sandbox through %q", banned)
+		}
+	}
+	if strings.Contains(html, "artifactInFilesOrChannelShared") {
+		t.Fatal("Deck Studio still contains the retired client-side write-access heuristic")
+	}
+	saveStart := strings.Index(html, "async function saveDeck(closeAfter = true)")
+	if saveStart < 0 {
+		t.Fatal("Deck Studio durable save function is missing")
+	}
+	saveContract := html[saveStart:]
+	responseGate := strings.Index(saveContract, "if (!response.ok || !result?.deck) throw")
+	successToast := strings.Index(saveContract, "showToast({ text: 'Deck saved', kind: 'done' })")
+	if responseGate < 0 || successToast < 0 || successToast < responseGate {
+		t.Fatal("Deck Studio success UI is not gated on a successful durable PATCH response")
+	}
+}
+
+func TestDeckStudioRenderedFitEditSaveAndImageJourney(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
+const artifactId='deck-studio-artifact';
+let version=4;let canWrite=true;
+let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontWeight:700,color:'#ffffff',fill:'#ffffff',stroke:'#000000'}]}]};
+let patches=[];let imageRequests=[];let uploadRequests=[];
+const artifact=()=>({id:artifactId,title:'Studio proof',version,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version)}});
+const server=http.createServer((req,res)=>{
+  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
+  if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite}));}
+  if(req.url==='/artifacts/render-token?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,url:'/mock-deck-render'}));}
+  if(req.url==='/mock-deck-render'){res.writeHead(200,{'content-type':'text/html'});return res.end('<!doctype html><title>safe viewer</title>');}
+  if(req.url==='/artifacts/deck'&&req.method==='PATCH'){
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);patches.push(body);assert.equal(body.expectedVersion,version);deck=body.deck;version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck}));});return;
+  }
+  if(req.url==='/artifacts/deck/image-generations'&&req.method==='POST'){
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);imageRequests.push(body);const element={id:'generated-image',type:'image',x:260,y:360,width:780,height:440,z:8,opacity:1,rotation:0,ref:'a'.repeat(64),name:'generated.png',fit:'cover'};deck.slides[0].elements.push(element);version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck,element,image:{ref:element.ref,name:element.name,mime:'image/png'}}));});return;
+  }
+  if(req.url==='/artifacts/deck/assets'&&req.method==='POST'){
+    let bytes=0;req.on('data',chunk=>bytes+=chunk.length);req.on('end',()=>{uploadRequests.push({contentType:req.headers['content-type'],bytes});const element={id:'uploaded-image',type:'image',x:300,y:280,width:760,height:500,z:9,opacity:1,rotation:0,ref:'b'.repeat(64),name:'field-notes.png',fit:'cover'};deck.slides[0].elements.push(element);version++;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck,element,image:{ref:element.ref,name:element.name,mime:'image/png'}}));});return;
+  }
+  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1440,height:900}});
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
+ await page.waitForSelector('.deck-editor');
+ const geometry=await page.evaluate(()=>{const canvas=document.querySelector('.deck-editor__canvas').getBoundingClientRect();const wrap=document.querySelector('.deck-editor__canvas-wrap').getBoundingClientRect();return {canvas:canvas.toJSON(),wrap:wrap.toJSON(),ratio:canvas.width/canvas.height};});
+ assert.ok(geometry.canvas.width>700,JSON.stringify(geometry));
+ assert.ok(Math.abs(geometry.ratio-16/9)<0.01,JSON.stringify(geometry));
+ assert.ok(geometry.canvas.left>=geometry.wrap.left&&geometry.canvas.right<=geometry.wrap.right,JSON.stringify(geometry));
+ assert.ok(geometry.canvas.top>=geometry.wrap.top&&geometry.canvas.bottom<=geometry.wrap.bottom,JSON.stringify(geometry));
+
+ await page.getByRole('button',{name:'Rectangle'}).click();
+ await page.locator('[data-prop="fill"]').fill('#3366ff');
+ await page.locator('[data-prop="opacity"]').fill('0.55');
+ await page.locator('[data-prop="opacity"]').dispatchEvent('change');
+ assert.equal(await page.locator('.deck-editor__element[data-selected="true"]').count(),1);
+ const selectedBox=await page.locator('[data-scene] .deck-editor__element[data-selected="true"]').boundingBox();
+ await page.mouse.move(selectedBox.x+selectedBox.width/2,selectedBox.y+selectedBox.height/2);
+ await page.mouse.down();await page.mouse.move(selectedBox.x+selectedBox.width/2+60,selectedBox.y+selectedBox.height/2+36);await page.mouse.up();
+ const resizeHandle=await page.locator('[data-scene] .deck-editor__element[data-selected="true"] [data-handle="se"]').boundingBox();
+ await page.mouse.move(resizeHandle.x+resizeHandle.width/2,resizeHandle.y+resizeHandle.height/2);
+ await page.mouse.down();await page.mouse.move(resizeHandle.x+resizeHandle.width/2+45,resizeHandle.y+resizeHandle.height/2+28);await page.mouse.up();
+ await page.getByRole('button',{name:'Front',exact:true}).click();
+ await page.getByRole('button',{name:'Undo'}).click();
+ await page.getByRole('button',{name:'Redo'}).click();
+ await page.getByRole('button',{name:'Save',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
+ assert.equal(patches.length,1);
+ assert.equal(patches[0].artifactId,artifactId);
+ const savedShape=patches[0].deck.slides[0].elements.find(element=>element.type==='shape'&&element.shape==='rectangle');
+ assert.ok(savedShape);
+ assert.ok(savedShape.x>240&&savedShape.y>240,JSON.stringify(savedShape));
+ assert.ok(savedShape.width>520&&savedShape.height>360,JSON.stringify(savedShape));
+
+ await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
+ await page.waitForSelector('.deck-editor');
+ await page.locator('[data-image-prompt]').fill('Documentary wide image of a working farm at first light');
+ await page.getByRole('button',{name:'Generate'}).click();
+ await page.waitForFunction(()=>document.querySelector('[data-image-status]')?.textContent.includes('added'));
+ assert.equal(imageRequests.length,1);
+ assert.equal(imageRequests[0].artifactId,artifactId);
+ assert.equal(imageRequests[0].slideId,'slide-one');
+ assert.equal(await page.locator('[data-scene] [data-element-id="generated-image"]').count(),1);
+ assert.equal(await page.locator('.deck-editor__scout-status').textContent(),'Image generated and added to this slide.');
+
+ const chooserPromise=page.waitForEvent('filechooser');
+ await page.getByRole('button',{name:'Upload',exact:true}).click();
+ const chooser=await chooserPromise;
+ await chooser.setFiles({name:'field-notes.png',mimeType:'image/png',buffer:Buffer.from('89504e470d0a1a0a','hex')});
+ await page.waitForFunction(()=>document.querySelector('[data-image-status]')?.textContent.includes('uploaded'));
+ assert.equal(uploadRequests.length,1);
+ assert.match(uploadRequests[0].contentType,/^multipart\/form-data; boundary=/);
+ assert.ok(uploadRequests[0].bytes>8);
+ assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1);
+
+ await page.getByRole('button',{name:'Close editor'}).click();
+ canWrite=false;
+ deck.slides.push({id:'slide-two',background:'#f2eee5',elements:[{id:'second-title',type:'text',x:180,y:160,width:1300,height:180,z:1,opacity:1,text:'The second slide',fontSize:72,fontWeight:700,color:'#151515'}]});
+ await page.evaluate(id=>openDeckStudio(id,'Read-only proof',{}),artifactId);
+ await page.waitForTimeout(50);
+ assert.equal(await page.locator('.deck-editor').count(),0);
+ await page.evaluate(id=>{const host=document.createElement('div');host.id='readonly-deck-host';document.body.appendChild(host);renderArtifactDeck(host,{id,kind:'os_artifact',text:'<!doctype html>',metadata:{type:'html_deck',title:'Read-only proof',savedToFiles:'true'}},{autoPresent:true});},artifactId);
+ const readonlyHost=page.locator('#readonly-deck-host');
+ await readonlyHost.getByRole('button',{name:'Present'}).waitFor({state:'visible'});
+ await page.waitForFunction(()=>{const host=document.querySelector('#readonly-deck-host');return host?.querySelector('button')?.disabled===true&&Array.from(host.querySelectorAll('button')).some(button=>button.textContent.includes('Present')&&!button.disabled)});
+ const readonlyEdit=readonlyHost.getByRole('button',{name:'Edit'});
+ assert.equal(await readonlyEdit.isDisabled(),true);
+ await page.evaluate(()=>document.querySelector('#readonly-deck-host button')?.click());
+ assert.equal(await page.locator('.deck-editor').count(),0);
+ await page.waitForSelector('.deck-presenter');
+ assert.equal(await page.locator('[data-present-counter]').textContent(),'1 / 2');
+ await page.getByRole('button',{name:'Close'}).click();
+ await readonlyHost.getByRole('button',{name:'Present'}).click();
+ await page.waitForSelector('.deck-presenter');
+ assert.equal(await page.locator('[data-present-counter]').textContent(),'1 / 2');
+ assert.equal(await page.locator('[data-present-element-id="headline"]').count(),1);
+ await page.getByRole('button',{name:'Next slide'}).click();
+ assert.equal(await page.locator('[data-present-counter]').textContent(),'2 / 2');
+ assert.equal(await page.locator('[data-present-element-id="second-title"]').textContent(),'The second slide');
+ await page.keyboard.press('ArrowLeft');
+ assert.equal(await page.locator('[data-present-counter]').textContent(),'1 / 2');
+ await page.getByRole('button',{name:'Close'}).click();
+ assert.equal(await page.locator('.deck-presenter').count(),0);
+ await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	cmd.Env = append(os.Environ(), "DECK_STUDIO_INDEX="+indexPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered Deck Studio harness: %v\n%s", err, output)
+	}
+}

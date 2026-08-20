@@ -1,0 +1,1241 @@
+package main
+
+// deck_editor.go owns the server-side editable deck boundary. The editable
+// document is a bounded scene graph stored as a content-addressed JSON blob;
+// the artifact body remains a deterministic, sandbox-rendered HTML projection.
+// Generated images stay first-class artifact assets and are referenced by blob
+// id from the scene graph -- image bytes are never pasted into artifact HTML.
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"html"
+	"io"
+	"math"
+	"net/http"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	xhtml "golang.org/x/net/html"
+)
+
+const (
+	deckDocumentSchemaVersion = 1
+	deckDocumentWidth         = 1920
+	deckDocumentHeight        = 1080
+	deckDocumentMaxBytes      = 1 << 20
+	deckDocumentMaxSlides     = 100
+	deckSlideMaxElements      = 100
+	deckElementTextMaxRunes   = 20000
+	deckImagePromptMaxRunes   = 4000
+	deckImageUploadMaxBytes   = 16 << 20
+	deckSceneRefMetadataKey   = "deckSceneRef"
+	deckSchemaMetadataKey     = "deckSchemaVersion"
+)
+
+var (
+	deckIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$`)
+	deckHexColorPattern   = regexp.MustCompile(`^#[0-9A-Fa-f]{3,4}([0-9A-Fa-f]{3,4})?$`)
+	deckFontPattern       = regexp.MustCompile(`^[A-Za-z0-9 ,_-]{1,80}$`)
+	createDeckEditorImage = createOpenAIImage
+)
+
+type deckDocument struct {
+	SchemaVersion int         `json:"schemaVersion"`
+	Width         int         `json:"width"`
+	Height        int         `json:"height"`
+	Slides        []deckSlide `json:"slides"`
+}
+
+type deckSlide struct {
+	ID         string        `json:"id"`
+	Background string        `json:"background,omitempty"`
+	Elements   []deckElement `json:"elements"`
+}
+
+type deckElement struct {
+	ID          string  `json:"id"`
+	Type        string  `json:"type"` // text | image | shape
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
+	Width       float64 `json:"width"`
+	Height      float64 `json:"height"`
+	Z           int     `json:"z"`
+	Opacity     float64 `json:"opacity"`
+	Rotation    float64 `json:"rotation,omitempty"`
+	Text        string  `json:"text,omitempty"`
+	FontSize    float64 `json:"fontSize,omitempty"`
+	FontFamily  string  `json:"fontFamily,omitempty"`
+	FontWeight  int     `json:"fontWeight,omitempty"`
+	Color       string  `json:"color,omitempty"`
+	Ref         string  `json:"ref,omitempty"`
+	Name        string  `json:"name,omitempty"`
+	Fit         string  `json:"fit,omitempty"`   // cover | contain
+	Shape       string  `json:"shape,omitempty"` // rectangle | ellipse
+	Fill        string  `json:"fill,omitempty"`
+	Stroke      string  `json:"stroke,omitempty"`
+	StrokeWidth float64 `json:"strokeWidth,omitempty"`
+	Prompt      string  `json:"prompt,omitempty"`
+	GeneratedAt string  `json:"generatedAt,omitempty"`
+}
+
+type deckArtifactView struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Type      string `json:"type"`
+	Version   int    `json:"version"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+func deckArtifactViewFromEntry(entry meetingMemoryEntry) deckArtifactView {
+	return deckArtifactView{
+		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
+		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
+	}
+}
+
+func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		artifact, ok := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent)
+		if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+			writeAuthError(w, http.StatusNotFound, "deck artifact not found")
+			return
+		}
+		deck, imported, importQuality, err := loadDeckDocument(artifact)
+		if err != nil {
+			writeAuthError(w, http.StatusConflict, "deck document is unavailable")
+			return
+		}
+		_, aclCanWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
+		canWrite := aclCanWrite && importQuality != "approximate"
+		response := map[string]any{
+			"ok": true, "artifact": deckArtifactViewFromEntry(artifact), "deck": deck, "imported": imported, "importQuality": importQuality, "canWrite": canWrite,
+		}
+		if aclCanWrite && !canWrite {
+			response["writeBlockedReason"] = "legacy deck cannot be edited without losing unrecognized content"
+		}
+		writeAuthJSON(w, http.StatusOK, response)
+		return
+	}
+
+	payload := struct {
+		ArtifactID      string       `json:"artifactId"`
+		ExpectedVersion int          `json:"expectedVersion"`
+		Deck            deckDocument `json:"deck"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, deckDocumentMaxBytes+64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read deck update")
+		return
+	}
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLWrite)
+	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
+		return
+	}
+	if payload.ExpectedVersion < 1 || artifactVersion(artifact) != payload.ExpectedVersion {
+		writeDeckVersionConflict(w, artifact)
+		return
+	}
+	_, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil {
+		writeAuthError(w, http.StatusConflict, "deck document is unavailable")
+		return
+	}
+	if imported && quality == "approximate" {
+		writeAuthError(w, http.StatusConflict, "legacy deck cannot be edited without losing unrecognized content")
+		return
+	}
+	if err := validateDeckDocument(payload.Deck, artifactAssetRefSet(artifact)); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, changed, err := persistDeckDocument(r.Context(), user, artifact, payload.Deck, nil)
+	if err != nil {
+		writeDeckVersionConflict(w, artifact)
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "updated": changed, "artifact": deckArtifactViewFromEntry(updated), "deck": payload.Deck,
+	})
+}
+
+func deckEditorImageGenerationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+	payload := struct {
+		ArtifactID      string `json:"artifactId"`
+		ExpectedVersion int    `json:"expectedVersion"`
+		SlideID         string `json:"slideId"`
+		Prompt          string `json:"prompt"`
+		Placement       string `json:"placement"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read image generation request")
+		return
+	}
+	payload.ArtifactID = strings.TrimSpace(payload.ArtifactID)
+	payload.SlideID = strings.TrimSpace(payload.SlideID)
+	payload.Prompt = strings.TrimSpace(payload.Prompt)
+	payload.Placement = strings.ToLower(strings.TrimSpace(payload.Placement))
+	if payload.Placement == "" {
+		payload.Placement = "image"
+	}
+	if payload.ExpectedVersion < 1 || !deckIdentifierPattern.MatchString(payload.SlideID) || payload.Prompt == "" || len([]rune(payload.Prompt)) > deckImagePromptMaxRunes || (payload.Placement != "image" && payload.Placement != "full_bleed") {
+		writeAuthError(w, http.StatusBadRequest, "artifactId, expectedVersion, slideId, a bounded prompt, and placement image|full_bleed are required")
+		return
+	}
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
+		return
+	}
+	if artifactVersion(artifact) != payload.ExpectedVersion {
+		writeDeckVersionConflict(w, artifact)
+		return
+	}
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil || imported && quality == "approximate" || deckSlideIndex(deck, payload.SlideID) < 0 {
+		writeAuthError(w, http.StatusBadRequest, "target slide is unavailable")
+		return
+	}
+
+	// This endpoint is intentionally synchronous in v1. The client owns the
+	// visible blocking `generating` state for the lifetime of this request; no
+	// success is returned until the blob, asset, scene, and artifact revision
+	// are all durable.
+	ref, mime, err := createDeckEditorImage(r.Context(), payload.Prompt, openAIImageOptions{})
+	if err != nil {
+		writeAuthError(w, http.StatusBadGateway, "image generation failed: "+compactAssistantLine(err.Error()))
+		return
+	}
+
+	// Generation can take minutes. Reauthorize and re-check the requested
+	// revision before attaching anything to the deck.
+	current, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	if !ok || artifactVersion(current) != payload.ExpectedVersion {
+		writeDeckVersionConflict(w, current)
+		return
+	}
+	name := "generated-deck-image." + deckImageExtension(mime)
+	deck, imported, quality, err = loadDeckDocument(current)
+	if err != nil || imported && quality == "approximate" {
+		writeAuthError(w, http.StatusConflict, "deck document changed during image generation")
+		return
+	}
+	slideIndex := deckSlideIndex(deck, payload.SlideID)
+	if slideIndex < 0 {
+		writeAuthError(w, http.StatusConflict, "target slide changed during image generation")
+		return
+	}
+	element := generatedDeckImageElement(deck.Slides[slideIndex], ref, name, payload.Prompt, payload.Placement)
+	deck.Slides[slideIndex].Elements = append(deck.Slides[slideIndex].Elements, element)
+	allowedRefs := artifactAssetRefSet(current)
+	allowedRefs[ref] = struct{}{}
+	if err := validateDeckDocument(deck, allowedRefs); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	provenance := map[string]any{"ref": ref, "prompt": payload.Prompt, "slideId": payload.SlideID, "placement": payload.Placement, "generatedAt": element.GeneratedAt}
+	provenanceRaw, _ := json.Marshal(provenance)
+	assetsRaw, err := deckAssetsMetadataWith(current, artifactAsset{Ref: ref, Mime: mime, Name: name, Kind: "image"})
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "generated image could not be attached")
+		return
+	}
+	updated, _, err := persistDeckDocument(r.Context(), user, current, deck, map[string]string{
+		"deckLastImageGeneration": string(provenanceRaw), artifactAssetsMetadataKey: assetsRaw,
+	})
+	if err != nil {
+		writeDeckVersionConflict(w, current)
+		return
+	}
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"ok": true, "updated": true, "artifact": deckArtifactViewFromEntry(updated), "deck": deck,
+		"image": map[string]any{"ref": ref, "mime": mime, "name": name, "prompt": payload.Prompt}, "element": element,
+	})
+}
+
+func deckEditorAssetUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, deckImageUploadMaxBytes+1<<20)
+	if err := r.ParseMultipartForm(deckImageUploadMaxBytes); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read image upload")
+		return
+	}
+	artifactID := strings.TrimSpace(r.FormValue("artifactId"))
+	expectedVersion, err := strconv.Atoi(strings.TrimSpace(r.FormValue("expectedVersion")))
+	slideID := strings.TrimSpace(r.FormValue("slideId"))
+	placement := strings.ToLower(strings.TrimSpace(r.FormValue("placement")))
+	if placement == "" {
+		placement = "image"
+	}
+	if artifactID == "" || expectedVersion < 1 || !deckIdentifierPattern.MatchString(slideID) || (placement != "image" && placement != "full_bleed") {
+		writeAuthError(w, http.StatusBadRequest, "artifactId, expectedVersion, slideId, and placement image|full_bleed are required")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, "image file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, deckImageUploadMaxBytes+1))
+	if err != nil || len(data) == 0 || len(data) > deckImageUploadMaxBytes {
+		writeAuthError(w, http.StatusBadRequest, "image file exceeds the 16MB limit")
+		return
+	}
+	mime := http.DetectContentType(data)
+	if !oneOf(mime, "image/png", "image/jpeg", "image/webp", "image/gif") {
+		writeAuthError(w, http.StatusBadRequest, "image must be PNG, JPEG, WebP, or GIF")
+		return
+	}
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLWrite)
+	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
+		return
+	}
+	if artifactVersion(artifact) != expectedVersion {
+		writeDeckVersionConflict(w, artifact)
+		return
+	}
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil || imported && quality == "approximate" || deckSlideIndex(deck, slideID) < 0 {
+		writeAuthError(w, http.StatusBadRequest, "target slide is unavailable")
+		return
+	}
+	ref, err := putBlob(data, mime)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "image could not be stored")
+		return
+	}
+	name := strings.TrimSpace(filepath.Base(header.Filename))
+	if name == "." || name == "" || len(name) > 200 {
+		name = "deck-image." + deckImageExtension(mime)
+	}
+	element := generatedDeckImageElement(deck.Slides[deckSlideIndex(deck, slideID)], ref, name, "", placement)
+	element.GeneratedAt = ""
+	deck.Slides[deckSlideIndex(deck, slideID)].Elements = append(deck.Slides[deckSlideIndex(deck, slideID)].Elements, element)
+	allowedRefs := artifactAssetRefSet(artifact)
+	allowedRefs[ref] = struct{}{}
+	if err := validateDeckDocument(deck, allowedRefs); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	asset := artifactAsset{Ref: ref, Mime: mime, Name: name, Kind: "image"}
+	assetsRaw, err := deckAssetsMetadataWith(artifact, asset)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "image could not be attached")
+		return
+	}
+	updated, _, err := persistDeckDocument(r.Context(), user, artifact, deck, map[string]string{artifactAssetsMetadataKey: assetsRaw})
+	if err != nil {
+		writeDeckVersionConflict(w, artifact)
+		return
+	}
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"ok": true, "updated": true, "artifact": deckArtifactViewFromEntry(updated), "deck": deck,
+		"image": map[string]any{"ref": ref, "mime": mime, "name": name}, "element": element,
+	})
+}
+
+func deckAssetsMetadataWith(artifact meetingMemoryEntry, additions ...artifactAsset) (string, error) {
+	assets := artifactAssets(artifact)
+	byRef := make(map[string]int, len(assets))
+	for index, asset := range assets {
+		byRef[asset.Ref] = index
+	}
+	for _, addition := range additions {
+		if !validBlobRef(addition.Ref) {
+			return "", fmt.Errorf("invalid image ref")
+		}
+		if index, exists := byRef[addition.Ref]; exists {
+			assets[index] = addition
+		} else {
+			byRef[addition.Ref] = len(assets)
+			assets = append(assets, addition)
+		}
+	}
+	raw, err := json.Marshal(assets)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func writeDeckVersionConflict(w http.ResponseWriter, artifact meetingMemoryEntry) {
+	payload := map[string]any{"error": "deck revision changed; reload before saving", "currentVersion": 0}
+	if artifact.ID != "" {
+		payload["currentVersion"] = artifactVersion(artifact)
+		payload["artifactId"] = artifact.ID
+	}
+	writeAuthJSON(w, http.StatusConflict, payload)
+}
+
+func loadDeckDocument(artifact meetingMemoryEntry) (deckDocument, bool, string, error) {
+	if ref := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]); ref != "" {
+		if !validBlobRef(ref) {
+			return deckDocument{}, false, "", fmt.Errorf("invalid deck scene ref")
+		}
+		raw, _, err := getBlob(ref)
+		if err != nil || len(raw) > deckDocumentMaxBytes {
+			return deckDocument{}, false, "", fmt.Errorf("read deck scene")
+		}
+		var deck deckDocument
+		if err := strictJSONBytes(raw, &deck); err != nil {
+			return deckDocument{}, false, "", fmt.Errorf("decode deck scene")
+		}
+		if err := validateDeckDocument(deck, artifactAssetRefSet(artifact)); err != nil {
+			return deckDocument{}, false, "", err
+		}
+		return deck, false, "native", nil
+	}
+	deck, quality := importLegacyDeckDocument(artifact)
+	if err := validateDeckDocument(deck, artifactAssetRefSet(artifact)); err != nil {
+		return deckDocument{}, true, quality, err
+	}
+	return deck, true, quality, nil
+}
+
+func persistDeckDocument(ctx context.Context, user *userAccount, prior meetingMemoryEntry, deck deckDocument, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
+	raw, err := json.Marshal(deck)
+	if err != nil || len(raw) > deckDocumentMaxBytes {
+		return meetingMemoryEntry{}, false, fmt.Errorf("deck document exceeds its storage bound")
+	}
+	ref, err := putBlob(raw, "application/vnd.bonfire.deck+json")
+	if err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	metadata := map[string]string{deckSceneRefMetadataKey: ref, deckSchemaMetadataKey: strconv.Itoa(deckDocumentSchemaVersion), "type": artifactTypeHTMLDeck}
+	for key, value := range extraMetadata {
+		metadata[key] = value
+	}
+	assetSource := prior
+	if encoded, supplied := metadata[artifactAssetsMetadataKey]; supplied {
+		assetSource.Metadata = make(map[string]string, len(prior.Metadata)+1)
+		for key, value := range prior.Metadata {
+			assetSource.Metadata[key] = value
+		}
+		assetSource.Metadata[artifactAssetsMetadataKey] = encoded
+	}
+	assets := artifactAssets(assetSource)
+	assetRefs := make(map[string]struct{}, len(assets))
+	for _, asset := range assets {
+		assetRefs[asset.Ref] = struct{}{}
+	}
+	assetsChanged := false
+	for _, slide := range deck.Slides {
+		for _, element := range slide.Elements {
+			if element.Type != "image" {
+				continue
+			}
+			if _, attached := assetRefs[element.Ref]; attached {
+				continue
+			}
+			_, meta, err := getBlob(element.Ref)
+			if err != nil || !strings.HasPrefix(strings.ToLower(meta.Mime), "image/") {
+				return meetingMemoryEntry{}, false, fmt.Errorf("deck image is unavailable")
+			}
+			assets = append(assets, artifactAsset{Ref: element.Ref, Mime: meta.Mime, Name: firstNonEmptyString(element.Name, "deck-image."+deckImageExtension(meta.Mime)), Kind: "image"})
+			assetRefs[element.Ref] = struct{}{}
+			assetsChanged = true
+		}
+	}
+	if assetsChanged || metadata[artifactAssetsMetadataKey] != "" {
+		encoded, err := json.Marshal(assets)
+		if err != nil {
+			return meetingMemoryEntry{}, false, err
+		}
+		metadata[artifactAssetsMetadataKey] = string(encoded)
+	}
+	body := compileDeckDocumentHTML(deck, strings.TrimSpace(prior.Metadata["title"]))
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior))
+	var updated meetingMemoryEntry
+	var changed bool
+	err = kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
+		var updateErr error
+		updated, changed, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, prior.ID, prior.Metadata["title"], body, user.Name, metadata)
+		return updateErr
+	})
+	return updated, changed, err
+}
+
+func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{}) error {
+	if deck.SchemaVersion != deckDocumentSchemaVersion || deck.Width != deckDocumentWidth || deck.Height != deckDocumentHeight {
+		return fmt.Errorf("deck must use schemaVersion 1 and a 1920x1080 canvas")
+	}
+	if len(deck.Slides) < 1 || len(deck.Slides) > deckDocumentMaxSlides {
+		return fmt.Errorf("deck must contain 1-%d slides", deckDocumentMaxSlides)
+	}
+	seenSlides := map[string]struct{}{}
+	seenElements := map[string]struct{}{}
+	for _, slide := range deck.Slides {
+		if !deckIdentifierPattern.MatchString(slide.ID) {
+			return fmt.Errorf("slide id is invalid")
+		}
+		if _, duplicate := seenSlides[slide.ID]; duplicate {
+			return fmt.Errorf("slide ids must be unique")
+		}
+		seenSlides[slide.ID] = struct{}{}
+		if slide.Background != "" && !validDeckColor(slide.Background) {
+			return fmt.Errorf("slide background is invalid")
+		}
+		if len(slide.Elements) > deckSlideMaxElements {
+			return fmt.Errorf("a slide exceeds the %d element cap", deckSlideMaxElements)
+		}
+		for _, element := range slide.Elements {
+			if !deckIdentifierPattern.MatchString(element.ID) {
+				return fmt.Errorf("element id is invalid")
+			}
+			if _, duplicate := seenElements[element.ID]; duplicate {
+				return fmt.Errorf("element ids must be unique")
+			}
+			seenElements[element.ID] = struct{}{}
+			if !deckFinite(element.X, element.Y, element.Width, element.Height, element.Opacity, element.Rotation, element.FontSize, element.StrokeWidth) ||
+				element.X < -deckDocumentWidth || element.X > 2*deckDocumentWidth || element.Y < -deckDocumentHeight || element.Y > 2*deckDocumentHeight ||
+				element.Width < 1 || element.Width > 2*deckDocumentWidth || element.Height < 1 || element.Height > 2*deckDocumentHeight ||
+				element.Z < -1000 || element.Z > 1000 || element.Opacity < 0 || element.Opacity > 1 || element.Rotation < -360 || element.Rotation > 360 {
+				return fmt.Errorf("element geometry is outside the deck bounds")
+			}
+			switch element.Type {
+			case "text":
+				if len([]rune(element.Text)) > deckElementTextMaxRunes || element.FontSize < 8 || element.FontSize > 400 || element.FontWeight < 100 || element.FontWeight > 900 ||
+					(element.FontFamily != "" && !deckFontPattern.MatchString(element.FontFamily)) || !validDeckColor(firstNonEmptyString(element.Color, "#ffffff")) {
+					return fmt.Errorf("text element styling is invalid")
+				}
+			case "image":
+				if !validBlobRef(element.Ref) || len(element.Name) > 200 || (element.Fit != "cover" && element.Fit != "contain") {
+					return fmt.Errorf("image element is invalid")
+				}
+				if _, allowed := allowedImageRefs[element.Ref]; !allowed {
+					return fmt.Errorf("image element is not attached to this artifact")
+				}
+			case "shape":
+				if (element.Shape != "rectangle" && element.Shape != "ellipse") || !validDeckColor(firstNonEmptyString(element.Fill, "transparent")) ||
+					(element.Stroke != "" && !validDeckColor(element.Stroke)) || element.StrokeWidth < 0 || element.StrokeWidth > 100 {
+					return fmt.Errorf("shape element styling is invalid")
+				}
+			default:
+				return fmt.Errorf("element type must be text, image, or shape")
+			}
+		}
+	}
+	raw, err := json.Marshal(deck)
+	if err != nil || len(raw) > deckDocumentMaxBytes {
+		return fmt.Errorf("deck document exceeds its storage bound")
+	}
+	return nil
+}
+
+func deckFinite(values ...float64) bool {
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDeckColor(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "transparent" || value == "white" || value == "black" || deckHexColorPattern.MatchString(value)
+}
+
+func artifactAssetRefSet(artifact meetingMemoryEntry) map[string]struct{} {
+	refs := map[string]struct{}{}
+	for _, asset := range artifactAssets(artifact) {
+		if strings.HasPrefix(strings.ToLower(asset.Mime), "image/") || asset.Kind == "image" {
+			refs[asset.Ref] = struct{}{}
+		}
+	}
+	for ref := range legacyEmbeddedImageRefs(artifact.Text) {
+		refs[ref] = struct{}{}
+	}
+	return refs
+}
+
+func legacyEmbeddedImageRefs(body string) map[string]struct{} {
+	refs := map[string]struct{}{}
+	pattern := regexp.MustCompile(`(?i)data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)`)
+	for _, match := range pattern.FindAllStringSubmatch(body, -1) {
+		if len(match[2]) > (deckImageUploadMaxBytes*4/3)+8 {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(match[2])
+		if err != nil || len(data) == 0 || len(data) > deckImageUploadMaxBytes {
+			continue
+		}
+		digest := sha256.Sum256(data)
+		ref := hex.EncodeToString(digest[:])
+		if _, meta, err := getBlob(ref); err == nil && strings.HasPrefix(strings.ToLower(meta.Mime), "image/") {
+			refs[ref] = struct{}{}
+		}
+	}
+	return refs
+}
+
+func deckSlideIndex(deck deckDocument, id string) int {
+	for index := range deck.Slides {
+		if deck.Slides[index].ID == id {
+			return index
+		}
+	}
+	return -1
+}
+
+func generatedDeckImageElement(slide deckSlide, ref, name, prompt, placement string) deckElement {
+	id := "image-" + ref[:12]
+	used := map[string]struct{}{}
+	maxZ := 0
+	for _, element := range slide.Elements {
+		used[element.ID] = struct{}{}
+		if element.Z > maxZ {
+			maxZ = element.Z
+		}
+	}
+	for suffix := 2; ; suffix++ {
+		if _, exists := used[id]; !exists {
+			break
+		}
+		id = "image-" + ref[:12] + "-" + strconv.Itoa(suffix)
+	}
+	element := deckElement{ID: id, Type: "image", Ref: ref, Name: name, Fit: "cover", Opacity: 1, Prompt: prompt, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if placement == "full_bleed" {
+		element.X, element.Y, element.Width, element.Height, element.Z = 0, 0, deckDocumentWidth, deckDocumentHeight, -100
+	} else {
+		element.X, element.Y, element.Width, element.Height, element.Z = 960, 120, 840, 840, maxZ+1
+	}
+	return element
+}
+
+func deckImageExtension(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "image/jpeg":
+		return "jpg"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+func compileDeckDocumentHTML(deck deckDocument, title string) string {
+	var builder strings.Builder
+	builder.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>")
+	builder.WriteString(html.EscapeString(firstNonEmptyString(strings.TrimSpace(title), "Presentation")))
+	builder.WriteString("</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#08080a}#stage{position:relative;width:1920px;height:1080px;transform-origin:top left}.pg{position:absolute;inset:0;display:none;overflow:hidden}.pg.on{display:block}.el{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap;overflow:hidden;line-height:1.08}.image{display:block}.shape{box-sizing:border-box}@media print{@page{size:13.333333in 7.5in;margin:0}html,body{width:auto;height:auto;overflow:visible;background:#fff}#stage{width:auto;height:auto;transform:none!important}.pg,.pg.on{position:relative;display:block!important;width:1920px;height:1080px;break-after:page;page-break-after:always}}</style></head><body><div id=\"stage\">")
+	for slideIndex, slide := range deck.Slides {
+		className := "pg"
+		if slideIndex == 0 {
+			className += " on"
+		}
+		background := firstNonEmptyString(slide.Background, "#101014")
+		builder.WriteString("<section class=\"")
+		builder.WriteString(className)
+		builder.WriteString("\" data-slide-id=\"")
+		builder.WriteString(html.EscapeString(slide.ID))
+		builder.WriteString("\" style=\"background:")
+		builder.WriteString(background)
+		builder.WriteString("\">")
+		elements := append([]deckElement(nil), slide.Elements...)
+		sort.SliceStable(elements, func(i, j int) bool { return elements[i].Z < elements[j].Z })
+		for _, element := range elements {
+			style := deckElementStyle(element)
+			switch element.Type {
+			case "text":
+				builder.WriteString("<div class=\"el text\" data-element-id=\"")
+				builder.WriteString(html.EscapeString(element.ID))
+				builder.WriteString("\" style=\"")
+				builder.WriteString(style)
+				builder.WriteString(";font-size:")
+				builder.WriteString(deckCSSNumber(element.FontSize))
+				builder.WriteString("px;font-family:")
+				builder.WriteString(firstNonEmptyString(element.FontFamily, "Arial"))
+				builder.WriteString(";font-weight:")
+				builder.WriteString(strconv.Itoa(element.FontWeight))
+				builder.WriteString(";color:")
+				builder.WriteString(firstNonEmptyString(element.Color, "#ffffff"))
+				builder.WriteString("\">")
+				builder.WriteString(html.EscapeString(element.Text))
+				builder.WriteString("</div>")
+			case "image":
+				builder.WriteString("<img class=\"el image\" data-element-id=\"")
+				builder.WriteString(html.EscapeString(element.ID))
+				builder.WriteString("\" alt=\"")
+				builder.WriteString(html.EscapeString(firstNonEmptyString(element.Prompt, element.Name, "Deck image")))
+				builder.WriteString("\" src=\"/artifacts/blob?ref=")
+				builder.WriteString(url.QueryEscape(element.Ref))
+				builder.WriteString("&amp;name=")
+				builder.WriteString(url.QueryEscape(element.Name))
+				builder.WriteString("\" style=\"")
+				builder.WriteString(style)
+				builder.WriteString(";object-fit:")
+				builder.WriteString(element.Fit)
+				builder.WriteString("\">")
+			case "shape":
+				builder.WriteString("<div class=\"el shape\" data-element-id=\"")
+				builder.WriteString(html.EscapeString(element.ID))
+				builder.WriteString("\" style=\"")
+				builder.WriteString(style)
+				builder.WriteString(";background:")
+				builder.WriteString(firstNonEmptyString(element.Fill, "transparent"))
+				if element.Stroke != "" && element.StrokeWidth > 0 {
+					builder.WriteString(";border:")
+					builder.WriteString(deckCSSNumber(element.StrokeWidth))
+					builder.WriteString("px solid ")
+					builder.WriteString(element.Stroke)
+				}
+				if element.Shape == "ellipse" {
+					builder.WriteString(";border-radius:50%")
+				}
+				builder.WriteString("\"></div>")
+			}
+		}
+		builder.WriteString("</section>")
+	}
+	builder.WriteString("</div></body></html>")
+	return builder.String()
+}
+
+func deckElementStyle(element deckElement) string {
+	return strings.Join([]string{
+		"left:" + deckCSSNumber(element.X) + "px", "top:" + deckCSSNumber(element.Y) + "px",
+		"width:" + deckCSSNumber(element.Width) + "px", "height:" + deckCSSNumber(element.Height) + "px",
+		"z-index:" + strconv.Itoa(element.Z), "opacity:" + deckCSSNumber(element.Opacity),
+		"transform:rotate(" + deckCSSNumber(element.Rotation) + "deg)",
+	}, ";")
+}
+
+func deckCSSNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string) {
+	deck := deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight}
+	doc, err := xhtml.Parse(strings.NewReader(artifact.Text))
+	if err != nil {
+		return defaultImportedDeck(artifact), "approximate"
+	}
+	var slideNodes []*xhtml.Node
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && (node.Data == "section" || legacyNodeHasClass(node, "pg") || legacyNodeHasClass(node, "slide")) {
+			slideNodes = append(slideNodes, node)
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if len(slideNodes) == 0 {
+		return defaultImportedDeck(artifact), "approximate"
+	}
+	if len(slideNodes) > deckDocumentMaxSlides {
+		slideNodes = slideNodes[:deckDocumentMaxSlides]
+	}
+	faithful := !legacyDocumentHasUnsupportedBehavior(doc)
+	visualClasses := legacyDocumentVisualClasses(doc)
+	allowedRefs := artifactAssetRefSet(artifact)
+	for index, node := range slideNodes {
+		slideID := firstNonEmptyString(legacyNodeAttr(node, "data-deck-slide"), legacyNodeAttr(node, "id"), fmt.Sprintf("slide-%d", index+1))
+		if !deckIdentifierPattern.MatchString(slideID) {
+			slideID = fmt.Sprintf("slide-%d", index+1)
+		}
+		background := firstNonEmptyString(legacyStyleMap(node)["background-color"], legacyStyleMap(node)["background"], "#101014")
+		if !validDeckColor(background) {
+			background = "#101014"
+			faithful = false
+		}
+		elements, recognized := legacyDataDeckElements(node, allowedRefs, artifactAssets(artifact))
+		if recognized && !legacyMeaningfulContentCovered(node, visualClasses) {
+			recognized = false
+		}
+		if !recognized {
+			faithful = false
+			elements = legacyTextElements(node)
+		}
+		slide := deckSlide{ID: slideID, Background: background, Elements: elements}
+		if len(slide.Elements) == 0 {
+			faithful = false
+			slide.Elements = []deckElement{defaultDeckTextElement("text-"+strconv.Itoa(index+1), "Slide "+strconv.Itoa(index+1), 120, 120, 1680, 180, 72, 700)}
+		}
+		deck.Slides = append(deck.Slides, slide)
+	}
+	if faithful {
+		return deck, "faithful"
+	}
+	return deck, "approximate"
+}
+
+// legacyMeaningfulContentCovered prevents a partially annotated HTML deck
+// from being presented as faithful. Text and imagery outside a marked editor
+// element would disappear on the first save, so mixed marked/unmarked slides
+// are explicitly approximate and the HTTP mutation paths refuse them.
+func legacyMeaningfulContentCovered(root *xhtml.Node, visualClasses map[string]struct{}) bool {
+	complete := true
+	var walk func(*xhtml.Node, string)
+	walk = func(node *xhtml.Node, coveredType string) {
+		if !complete {
+			return
+		}
+		if node.Type == xhtml.ElementNode {
+			represented := legacyNodeAttr(node, "data-deck-element") != ""
+			if represented {
+				coveredType = strings.ToLower(legacyNodeAttr(node, "data-deck-type"))
+			}
+			if node != root && !represented && legacyNodeHasUnrepresentedVisual(node, coveredType, visualClasses) {
+				complete = false
+				return
+			}
+			if coveredType != "image" {
+				if node.Data == "img" || strings.Contains(strings.ToLower(legacyStyleMap(node)["background-image"]), "url(") {
+					complete = false
+					return
+				}
+				for _, className := range strings.Fields(legacyNodeAttr(node, "class")) {
+					if regexp.MustCompile(`^fig-[1-9][0-9]*$`).MatchString(className) {
+						complete = false
+						return
+					}
+				}
+			}
+		}
+		if node.Type == xhtml.TextNode && coveredType != "text" && strings.TrimSpace(node.Data) != "" {
+			parentName := ""
+			if node.Parent != nil {
+				parentName = node.Parent.Data
+			}
+			if parentName != "style" && parentName != "script" {
+				complete = false
+				return
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, coveredType)
+		}
+	}
+	walk(root, "")
+	return complete
+}
+
+func legacyDocumentHasUnsupportedBehavior(root *xhtml.Node) bool {
+	unsupported := false
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if unsupported {
+			return
+		}
+		if node.Type == xhtml.ElementNode {
+			if oneOf(node.Data, "script", "iframe", "object", "embed", "form", "input", "button", "video", "audio", "canvas", "svg") {
+				unsupported = true
+				return
+			}
+			for _, attribute := range node.Attr {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(attribute.Key)), "on") && strings.TrimSpace(attribute.Val) != "" {
+					unsupported = true
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	return unsupported
+}
+
+func legacyDocumentVisualClasses(root *xhtml.Node) map[string]struct{} {
+	classes := map[string]struct{}{}
+	classPattern := regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_-]*)`)
+	visualProperty := regexp.MustCompile(`(?i)(^|;)\s*(background(?:-color|-image)?|border(?:-[a-z-]+)?|box-shadow|filter|clip-path|mask(?:-[a-z-]+)?|transform|opacity|color|font(?:-[a-z-]+)?|text-decoration|display|grid(?:-[a-z-]+)?|flex(?:-[a-z-]+)?|gap|padding(?:-[a-z-]+)?|margin(?:-[a-z-]+)?)\s*:`)
+	rulePattern := regexp.MustCompile(`(?s)([^{}]+)\{([^{}]+)\}`)
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && node.Data == "style" {
+			css := legacyNodeTextPreservingWhitespace(node)
+			for _, rule := range rulePattern.FindAllStringSubmatch(css, -1) {
+				if !visualProperty.MatchString(rule[2]) {
+					continue
+				}
+				for _, match := range classPattern.FindAllStringSubmatch(rule[1], -1) {
+					classes[match[1]] = struct{}{}
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	return classes
+}
+
+func legacyNodeHasUnrepresentedVisual(node *xhtml.Node, coveredType string, visualClasses map[string]struct{}) bool {
+	if oneOf(node.Data, "svg", "canvas", "hr", "img", "picture", "video") {
+		return true
+	}
+	visualProperty := regexp.MustCompile(`(?i)^(background(?:-color|-image)?|border(?:-[a-z-]+)?|box-shadow|filter|clip-path|mask(?:-[a-z-]+)?|transform|opacity|color|font(?:-[a-z-]+)?|text-decoration|display|grid(?:-[a-z-]+)?|flex(?:-[a-z-]+)?|gap|padding(?:-[a-z-]+)?|margin(?:-[a-z-]+)?|position|left|top|right|bottom|width|height)$`)
+	for property, value := range legacyStyleMap(node) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if visualProperty.MatchString(property) && value != "" && value != "none" && value != "normal" && value != "transparent" && value != "inherit" && value != "initial" && value != "0" && value != "0px" && value != "1" {
+			return true
+		}
+	}
+	for _, className := range strings.Fields(legacyNodeAttr(node, "class")) {
+		if coveredType == "image" && className == "ph" {
+			continue
+		}
+		if _, visual := visualClasses[className]; visual {
+			return true
+		}
+	}
+	return false
+}
+
+func legacyNodeTextPreservingWhitespace(node *xhtml.Node) string {
+	var builder strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if current.Type == xhtml.TextNode {
+			builder.WriteString(current.Data)
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return builder.String()
+}
+
+func defaultImportedDeck(artifact meetingMemoryEntry) deckDocument {
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), "Presentation")
+	return deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight, Slides: []deckSlide{{
+		ID: "slide-1", Background: "#101014", Elements: []deckElement{defaultDeckTextElement("text-1", title, 120, 120, 1680, 240, 84, 700)},
+	}}}
+}
+
+func legacyTextElements(root *xhtml.Node) []deckElement {
+	var values []struct{ tag, text string }
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && oneOf(node.Data, "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote") {
+			text := strings.TrimSpace(legacyNodeText(node))
+			if text != "" {
+				values = append(values, struct{ tag, text string }{node.Data, trimForStorage(text, deckElementTextMaxRunes)})
+			}
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	if len(values) > 12 {
+		values = values[:12]
+	}
+	y := 100.0
+	elements := make([]deckElement, 0, len(values))
+	for index, value := range values {
+		fontSize, weight, height := 34.0, 400, 92.0
+		if strings.HasPrefix(value.tag, "h") {
+			fontSize, weight, height = 68, 700, 170
+		}
+		elements = append(elements, defaultDeckTextElement(fmt.Sprintf("text-%d", index+1), value.text, 120, y, 1680, height, fontSize, weight))
+		y += height + 24
+		if y > 1000 {
+			break
+		}
+	}
+	return elements
+}
+
+func defaultDeckTextElement(id, text string, x, y, width, height, fontSize float64, weight int) deckElement {
+	return deckElement{ID: id, Type: "text", X: x, Y: y, Width: width, Height: height, Z: 1, Opacity: 1, Text: text, FontSize: fontSize, FontFamily: "Arial", FontWeight: weight, Color: "#ffffff"}
+}
+
+func legacyNodeHasClass(node *xhtml.Node, className string) bool {
+	for _, attribute := range node.Attr {
+		if attribute.Key == "class" {
+			for _, value := range strings.Fields(attribute.Val) {
+				if value == className {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func legacyNodeAttr(node *xhtml.Node, key string) string {
+	for _, attribute := range node.Attr {
+		if strings.EqualFold(attribute.Key, key) {
+			return strings.TrimSpace(attribute.Val)
+		}
+	}
+	return ""
+}
+
+func legacyStyleMap(node *xhtml.Node) map[string]string {
+	styles := map[string]string{}
+	for _, declaration := range strings.Split(legacyNodeAttr(node, "style"), ";") {
+		parts := strings.SplitN(declaration, ":", 2)
+		if len(parts) == 2 {
+			styles[strings.ToLower(strings.TrimSpace(parts[0]))] = strings.TrimSpace(parts[1])
+		}
+	}
+	return styles
+}
+
+func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, assets []artifactAsset) ([]deckElement, bool) {
+	var nodes []*xhtml.Node
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && legacyNodeAttr(node, "data-deck-element") != "" {
+			nodes = append(nodes, node)
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	if len(nodes) == 0 || len(nodes) > deckSlideMaxElements {
+		return nil, false
+	}
+
+	elements := make([]deckElement, 0, len(nodes))
+	seen := map[string]struct{}{}
+	for index, node := range nodes {
+		styles := legacyStyleMap(node)
+		id := firstNonEmptyString(legacyNodeAttr(node, "data-deck-element"), legacyNodeAttr(node, "id"), fmt.Sprintf("element-%d", index+1))
+		if !deckIdentifierPattern.MatchString(id) {
+			return nil, false
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, false
+		}
+		seen[id] = struct{}{}
+		typ := strings.ToLower(legacyNodeAttr(node, "data-deck-type"))
+		x, okX := legacyDeckNumber(firstNonEmptyString(legacyNodeAttr(node, "data-deck-x"), styles["left"]))
+		y, okY := legacyDeckNumber(firstNonEmptyString(legacyNodeAttr(node, "data-deck-y"), styles["top"]))
+		width, okWidth := legacyDeckNumber(firstNonEmptyString(legacyNodeAttr(node, "data-deck-width"), styles["width"]))
+		height, okHeight := legacyDeckNumber(firstNonEmptyString(legacyNodeAttr(node, "data-deck-height"), styles["height"]))
+		if !okX || !okY || !okWidth || !okHeight {
+			return nil, false
+		}
+		element := deckElement{ID: id, Type: typ, X: x, Y: y, Width: width, Height: height, Opacity: 1}
+		if value, ok := legacyDeckNumber(styles["opacity"]); ok {
+			element.Opacity = value
+		}
+		if value, err := strconv.Atoi(styles["z-index"]); err == nil {
+			element.Z = value
+		}
+		if rotation := regexp.MustCompile(`(?i)rotate\(\s*(-?[0-9.]+)deg\s*\)`).FindStringSubmatch(styles["transform"]); len(rotation) == 2 {
+			element.Rotation, _ = strconv.ParseFloat(rotation[1], 64)
+		}
+		switch typ {
+		case "text":
+			element.Text = trimForStorage(strings.TrimSpace(legacyNodeText(node)), deckElementTextMaxRunes)
+			element.FontSize, _ = legacyDeckNumber(firstNonEmptyString(styles["font-size"], "32"))
+			element.FontFamily = strings.Trim(strings.TrimSpace(firstNonEmptyString(styles["font-family"], "Arial")), `"'`)
+			element.FontWeight = legacyFontWeight(firstNonEmptyString(styles["font-weight"], "400"))
+			element.Color = firstNonEmptyString(styles["color"], "#ffffff")
+		case "shape":
+			element.Shape = strings.ToLower(firstNonEmptyString(legacyNodeAttr(node, "data-deck-shape"), "rectangle"))
+			if strings.Contains(styles["border-radius"], "50%") {
+				element.Shape = "ellipse"
+			}
+			element.Fill = firstNonEmptyString(styles["background-color"], styles["background"], "transparent")
+		case "image":
+			ref, name, ok := legacyImageSource(legacyNodeAttr(node, "src"), allowedRefs)
+			if !ok {
+				ref, name, ok = legacyFigAsset(node, assets)
+			}
+			if !ok {
+				if source := legacyDescendantImageSource(node); source != "" {
+					ref, name, ok = legacyImageSource(source, allowedRefs)
+				}
+			}
+			if !ok {
+				return nil, false
+			}
+			element.Ref, element.Name = ref, name
+			element.Fit = firstNonEmptyString(styles["object-fit"], "cover")
+		default:
+			return nil, false
+		}
+		elements = append(elements, element)
+	}
+	return elements, true
+}
+
+func legacyFigAsset(node *xhtml.Node, assets []artifactAsset) (string, string, bool) {
+	figPattern := regexp.MustCompile(`^fig-([1-9][0-9]*)$`)
+	for _, className := range strings.Fields(legacyNodeAttr(node, "class")) {
+		if figPattern.MatchString(className) {
+			prefix := strings.ToLower(className + ".")
+			for _, asset := range assets {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Name)), prefix) && validBlobRef(asset.Ref) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Mime)), "image/") {
+					return asset.Ref, asset.Name, true
+				}
+			}
+		}
+	}
+	return "", "", false
+}
+
+func legacyDescendantImageSource(node *xhtml.Node) string {
+	var source string
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if source != "" || current == nil {
+			return
+		}
+		if current.Type == xhtml.ElementNode {
+			if candidate := legacyNodeAttr(current, "src"); candidate != "" {
+				source = candidate
+				return
+			}
+			if match := regexp.MustCompile(`(?i)url\(['"]?(data:image/[^)'\"]+)['"]?\)`).FindStringSubmatch(legacyStyleMap(current)["background-image"]); len(match) == 2 {
+				source = match[1]
+				return
+			}
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return source
+}
+
+func legacyDeckNumber(value string) (float64, bool) {
+	value = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(value), "px"))
+	if value == "" {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	return number, err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+func legacyFontWeight(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "normal":
+		return 400
+	case "bold", "bolder":
+		return 700
+	}
+	weight, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 400
+	}
+	return weight
+}
+
+func legacyImageSource(source string, allowedRefs map[string]struct{}) (string, string, bool) {
+	source = strings.TrimSpace(source)
+	if strings.HasPrefix(strings.ToLower(source), "data:image/") {
+		comma := strings.IndexByte(source, ',')
+		if comma < 0 || !strings.Contains(strings.ToLower(source[:comma]), ";base64") {
+			return "", "", false
+		}
+		data, err := base64.StdEncoding.DecodeString(source[comma+1:])
+		if err != nil || len(data) == 0 || len(data) > deckImageUploadMaxBytes {
+			return "", "", false
+		}
+		digest := sha256.Sum256(data)
+		ref := hex.EncodeToString(digest[:])
+		if _, allowed := allowedRefs[ref]; !allowed {
+			return "", "", false
+		}
+		return ref, "deck-image", true
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Path != "/artifacts/blob" {
+		return "", "", false
+	}
+	ref := strings.TrimSpace(parsed.Query().Get("ref"))
+	if _, allowed := allowedRefs[ref]; !allowed {
+		return "", "", false
+	}
+	return ref, strings.TrimSpace(parsed.Query().Get("name")), true
+}
+
+func legacyNodeText(node *xhtml.Node) string {
+	var builder strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if current.Type == xhtml.TextNode {
+			if text := strings.TrimSpace(current.Data); text != "" {
+				if builder.Len() > 0 {
+					builder.WriteByte(' ')
+				}
+				builder.WriteString(text)
+			}
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return builder.String()
+}

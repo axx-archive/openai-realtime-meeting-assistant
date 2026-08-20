@@ -1207,6 +1207,9 @@ func main() {
 	// 404 unless explicit media-soak mode and its purpose-scoped token are set.
 	http.HandleFunc("/internal/media-soak/", mediaSoakObserverHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
+	http.HandleFunc("/artifacts/deck", deckEditorHandler)
+	http.HandleFunc("/artifacts/deck/image-generations", deckEditorImageGenerationHandler)
+	http.HandleFunc("/artifacts/deck/assets", deckEditorAssetUploadHandler)
 	http.HandleFunc("/artifacts/workstream", artifactWorkstreamCorrectionHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)

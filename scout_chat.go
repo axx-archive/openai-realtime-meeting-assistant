@@ -800,6 +800,9 @@ func scoutChatDeckRequestDetected(text string) bool {
 	if !hasDeckWord {
 		return false
 	}
+	if scoutChatSimpleOutlineRequestDetected(text) {
+		return false
+	}
 	// Exclude outline-only asks
 	outlineOnly := []string{"outline only", "just the outline", "just an outline", "only the outline", "give me the outline", "slide outline"}
 	for _, phrase := range outlineOnly {
@@ -831,25 +834,7 @@ func scoutChatDeckRequestDetected(text string) bool {
 // This allows the deck generation to proceed after a direction pass without
 // requiring the user to repeat "deck" keywords.
 func scoutChatDeckConfirmationDetected(text string, history []scoutChatTurn) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
-		return false
-	}
-	// Check if this is a short confirmation phrase
-	confirmPhrases := []string{
-		"just make it", "make it", "proceed", "go ahead", "looks good",
-		"that works", "perfect", "do it", "yes", "yep", "sure", "ok", "okay",
-		"sounds good", "i like it", "great", "let's go", "build it",
-		"let's do it", "go for it", "yes please", "please", "thanks",
-	}
-	isConfirmation := false
-	for _, phrase := range confirmPhrases {
-		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
-			isConfirmation = true
-			break
-		}
-	}
-	if !isConfirmation {
+	if !scoutChatAffirmativeConfirmation(text) {
 		return false
 	}
 	// Must have a deck request earlier in history
@@ -870,6 +855,42 @@ func scoutChatDeckConfirmationDetected(text string, history []scoutChatTurn) boo
 		}
 	}
 	return false
+}
+
+// scoutChatAffirmativeConfirmation recognizes only a compact, unambiguous
+// acceptance. Substring matching is deliberately forbidden: phrases such as
+// "yes, but don't build it" and "thanks, hold off" must return to the router,
+// never launch durable work behind the user's correction.
+func scoutChatAffirmativeConfirmation(text string) bool {
+	raw := strings.ToLower(strings.TrimSpace(text))
+	if raw == "" {
+		return false
+	}
+	normalized := strings.Join(strings.FieldsFunc(raw, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}), " ")
+	if normalized == "" {
+		return false
+	}
+	negativePhrases := []string{
+		"do not", "don t", "dont", "hold off", "not yet", "wait", "stop",
+		"cancel", "never mind", "nevermind", "no thanks", "but not", "not build",
+	}
+	for _, phrase := range negativePhrases {
+		if normalized == phrase || strings.HasPrefix(normalized, phrase+" ") || strings.Contains(normalized, " "+phrase+" ") || strings.HasSuffix(normalized, " "+phrase) {
+			return false
+		}
+	}
+	confirmations := map[string]struct{}{
+		"just make it": {}, "make it": {}, "proceed": {}, "go ahead": {},
+		"looks good": {}, "looks good go ahead": {}, "that works": {}, "perfect do it": {},
+		"do it": {}, "yes": {}, "yes please": {}, "yes go ahead": {}, "yep": {},
+		"sure": {}, "sure go ahead": {}, "ok": {}, "okay": {}, "okay do it": {},
+		"sounds good": {}, "i like it": {}, "let s go": {}, "build it": {},
+		"let s do it": {}, "go for it": {},
+	}
+	_, ok := confirmations[normalized]
+	return ok
 }
 
 // scoutChatLooksLikeDirectionPass detects if text appears to be asking about
@@ -960,6 +981,9 @@ func scoutChatSimpleOutlineRequestDetected(text string) bool {
 			return false
 		}
 	}
+	if strings.Contains(lower, "presentation outline") || strings.Contains(lower, "deck outline") || strings.Contains(lower, "outline for a presentation") || strings.Contains(lower, "outline for the deck") {
+		return true
+	}
 	// Check for simple outline phrases
 	for _, phrase := range scoutRouterSimpleOutlinePhrases {
 		if strings.Contains(lower, phrase) {
@@ -974,6 +998,48 @@ func scoutChatSimpleOutlineRequestDetected(text string) bool {
 // or goal) should be minted — fall through to inline answer instead.
 func scoutAgentWorkerAvailable() bool {
 	return selectedAgentRunnerName() != agentRunnerStub
+}
+
+// scoutRegistryWorkAvailableWithoutAgentWorker reports the process-backed
+// deliverables whose goal engine remains the truthful execution carrier even
+// when the free-form agent-thread runner is closed. Packaging Studio and the
+// deck-outline process are server-owned pipelines; degrading either one into a
+// conversational answer recreates the exact failure where Scout returns prose
+// (or ad-hoc HTML) after the person explicitly asked for a durable deck.
+func scoutRegistryWorkAvailableWithoutAgentWorker(work *conversationWorkDecision) bool {
+	if work == nil || work.Kind != conversationWorkRegistryTool {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(work.ToolID)) {
+	case packagingStudioProcessID, "deck_outline":
+		return true
+	default:
+		return false
+	}
+}
+
+func deterministicScoutRegistryWorkDecision(toolID, objective, query string) (conversationIntentDecision, bool) {
+	proposal := scoutRouterProposalForToolID(toolID, objective, query)
+	if proposal == nil {
+		return conversationIntentDecision{}, false
+	}
+	work, err := conversationWorkFromScoutProposal(proposal)
+	if err != nil {
+		return conversationIntentDecision{}, false
+	}
+	decision := conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: proposalSourceDeterministicGuard}
+	if requiredEffect := conversationWorkRequiredEffectClass(work, ""); requiredEffect != "" {
+		decision = conversationIntentDecision{
+			Outcome: conversationIntentApprovalRequired,
+			Approval: &conversationApprovalDecision{
+				EffectClass: requiredEffect,
+				Summary:     "This governed action needs approval before it can run.",
+				Work:        &work,
+			},
+			Source: proposalSourceDeterministicGuard,
+		}
+	}
+	return decision, true
 }
 
 // scoutGuardEligibleMessage returns true when a message is work-shaped enough
@@ -1134,16 +1200,31 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
-	// Simple in-thread outline/presentation guard: when the agent worker is
-	// unavailable, these asks fall back to conversational_reply so the user gets
-	// a useful inline answer instead of a failed work proposal. When the worker
-	// IS available, let the request route to packaging_studio (for decks) or
-	// deck_outline (for outlines) which can produce real artifacts.
-	if !scoutAgentWorkerAvailable() && scoutChatSimpleOutlineRequestDetected(intentText) {
-		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
-		recordConversationIntentOutcome(decision, map[string]any{"reason": "simple_outline_inline", "degraded": "agent_worker_unavailable"})
-		return decision
+	// A direct deck ask is already a complete output decision. Route it before
+	// the model so channel history can never turn "make the actual deck" into an
+	// outline or a conversational HTML blob. Direct-agent chats remain model
+	// routed because the assigned seat's capability verdict and provider attempt
+	// are part of that surface's telemetry contract.
+	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
+		toolID := ""
+		switch {
+		case scoutChatSimpleOutlineRequestDetected(intentText):
+			toolID = "deck_outline"
+		case scoutChatDeckRequestDetected(intentText):
+			toolID = packagingStudioProcessID
+		}
+		if toolID != "" {
+			if decision, ok := deterministicScoutRegistryWorkDecision(toolID, intentText, intentText); ok {
+				recordConversationIntentOutcome(decision, map[string]any{"guard": "presentation_output"})
+				return decision
+			}
+		}
 	}
+	// Outlines and decks are durable products even when the free-form agent
+	// runner is closed. The deterministic guard below routes them into the
+	// server-owned deck_outline / Packaging Studio goal pipelines, where the
+	// result can expose Edit outline and Generate deck instead of ending as
+	// unstructured chat prose.
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
 	// so thread-context gravity can never drag the literal words off the flagship
@@ -1151,11 +1232,16 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 	// informed prompt interpretation before the app starts generation.
 	// When the agent worker is not available, skip the guard entirely to avoid
 	// minting proposals that would fail with "agent worker is not configured."
-	if !imageRequest && scoutAgentWorkerAvailable() {
+	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
 		if verdict := deterministicRouterGuard(intentText); verdict != nil {
 			work, err := conversationWorkFromScoutProposal(verdict.proposal)
 			if err != nil {
 				return unavailableConversationDecision("output_contract_unavailable", "That work does not have an accepted output contract yet.", verdict.source)
+			}
+			if !scoutAgentWorkerAvailable() && !scoutRegistryWorkAvailableWithoutAgentWorker(&work) {
+				// Free-form work still needs the admitted agent runner. Only the
+				// server-owned presentation pipelines above may cross this gate.
+				goto modelRoute
 			}
 			decision := conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: verdict.source}
 			if requiredEffect := conversationWorkRequiredEffectClass(work, ""); requiredEffect != "" {
@@ -1165,6 +1251,8 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 			return decision
 		}
 	}
+
+modelRoute:
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1238,6 +1326,16 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 	// exempt because they use a different execution path (image generation).
 	if !scoutAgentWorkerAvailable() && !imageRequest {
 		if decision.Outcome == conversationIntentStartPrivateWork || decision.Outcome == conversationIntentApprovalRequired {
+			var work *conversationWorkDecision
+			if decision.Work != nil {
+				work = decision.Work
+			} else if decision.Approval != nil {
+				work = decision.Approval.Work
+			}
+			if scoutRegistryWorkAvailableWithoutAgentWorker(work) {
+				recordConversationIntentOutcome(decision, map[string]any{"worker": "goal_engine"})
+				return decision
+			}
 			decision = conversationalReplyDecision(proposalSourceChatRouter)
 			recordConversationIntentOutcome(decision, map[string]any{"degraded": "agent_worker_unavailable"})
 			return decision

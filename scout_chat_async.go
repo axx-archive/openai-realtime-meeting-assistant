@@ -672,6 +672,9 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 	if answer == "" {
 		answer = "no answer yet"
 	}
+	if scoutConversationalAnswerPromisesFutureWork(answer) {
+		answer = "Nothing was scheduled from that answer. Send the exact deliverable request again; real work appears as a visible work card when it is queued."
+	}
 	return scoutChatMessageRecord{
 		Kind:    "message",
 		Role:    "scout",
@@ -823,9 +826,9 @@ func (app *kanbanBoardApp) retryScoutOpeningReply(viewerEmail string, threadID s
 // with HTML content that the frontend renders with the in-thread deck viewer.
 //
 // Scout creation flow (product bar 2026-08-16):
-//   1. Direction pass: 2-3 sharp aesthetic questions OR a proposed direction
-//   2. Once direction is established (via history), generate best-in-class deck
-//   NOT a 12-question form. NOT a work card. NOT Approve & run.
+//  1. Direction pass: 2-3 sharp aesthetic questions OR a proposed direction
+//  2. Once direction is established (via history), generate best-in-class deck
+//     NOT a 12-question form. NOT a work card. NOT Approve & run.
 func (app *kanbanBoardApp) resolveInlineDeckReply(ctx context.Context, user *userAccount, query string, history []scoutChatTurn) (scoutChatMessageRecord, error) {
 	// Check if direction context already exists in history
 	hasDirection := deckDirectionEstablished(query, history)
@@ -1012,24 +1015,7 @@ func (app *kanbanBoardApp) resolveDeckGeneration(ctx context.Context, user *user
 // we pick a topic from Scout's proposed options or use a tight default.
 // CRITICAL: Never return a query that would cause the LLM to refuse generation.
 func extractEffectiveDeckQuery(query string, history []scoutChatTurn) string {
-	lower := strings.ToLower(strings.TrimSpace(query))
-
-	// Check if this is a short confirmation
-	confirmPhrases := []string{
-		"just make it", "make it", "proceed", "go ahead", "looks good",
-		"that works", "perfect", "do it", "yes", "yep", "sure", "ok", "okay",
-		"sounds good", "i like it", "great", "let's go", "build it",
-		"let's do it", "go for it", "yes please", "please", "thanks",
-	}
-	isConfirmation := false
-	for _, phrase := range confirmPhrases {
-		if strings.Contains(lower, phrase) || strings.TrimSpace(lower) == phrase {
-			isConfirmation = true
-			break
-		}
-	}
-
-	if !isConfirmation {
+	if !scoutChatAffirmativeConfirmation(query) {
 		// Not a confirmation, use query as-is
 		return query
 	}
@@ -1141,7 +1127,6 @@ func hasDeckTopic(request string) bool {
 
 	return false
 }
-
 
 // looksLikeDeckRefusal detects if an LLM response is a refusal to generate a deck.
 // These refusals should NEVER be wrapped into a deck — they would become slides with

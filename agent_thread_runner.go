@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -950,6 +951,14 @@ func (app *kanbanBoardApp) quarantineScoutAgentThread(thread scoutAgentThread) {
 }
 
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
+	if strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" ||
+		strings.TrimSpace(thread.Artifact.Metadata[openAIToolActivationStateMetadataKey]) != "" {
+		// Activation registries are process-local suppression only. Every
+		// worker exit, including the legacy Responses worker, releases them;
+		// durable owner/state and terminal CAS decide whether a retry may run
+		// or publish after a crash.
+		defer app.forgetOpenAIToolActiveRun(thread.Artifact.ID)
+	}
 	if strings.TrimSpace(thread.Artifact.Metadata[roomWorkActivationMetadataKey]) != "" {
 		defer app.forgetRoomThreadStartedInProcess(thread.Artifact.ID)
 	}
@@ -1027,6 +1036,14 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 
 	workerResult, err := app.produceAgentThreadArtifactWithWorkerAuthorized(ctx, thread, createOpenAITextResponse)
 	output := workerResult.Text
+	if err == nil && workerResult.Terminal && strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" && publicConversationWorkAfterProviderAcceptedProbe != nil {
+		if publicConversationWorkAfterProviderAcceptedProbe(thread, workerResult) != nil {
+			// Test-only lost-local-ack seam: a real process loss stops here. The
+			// next boot reuses the deterministic provider operation and current
+			// owner CAS instead of publishing an unacknowledged result.
+			return
+		}
+	}
 	// The secure tool carrier commits the exact terminal artifact and durable
 	// chat-card projection while its current tenant/source lease is still held.
 	// Re-running the legacy terminal seam here would write outside that lease and
@@ -1093,6 +1110,14 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		title = derived
 		metadata["titleSource"] = "derived"
 	}
+	if strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" {
+		metadata[publicConversationWorkActivationState] = publicConversationWorkComplete
+		metadata[publicConversationProviderRequestKey] = ""
+		metadata[publicConversationProviderRequestHash] = ""
+		if err != nil {
+			metadata[publicConversationWorkActivationState] = publicConversationWorkNeedsAttention
+		}
+	}
 	if thread.Artifact.Metadata["originKind"] == agentThreadOriginRoom && strings.TrimSpace(thread.Artifact.Metadata[roomWorkActivationMetadataKey]) != "" {
 		if err == nil {
 			metadata[roomWorkActivationMetadataKey] = roomWorkActivationComplete
@@ -1115,6 +1140,21 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	var artifact meetingMemoryEntry
 	writeArtifact := func() error {
 		var innerErr error
+		if strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" {
+			var changed bool
+			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderAndMetadataMatch(
+				artifactAuthorizationHeaderFromEntry(thread.Artifact),
+				map[string]string{
+					publicConversationWorkActivationState: publicConversationWorkStarted,
+					publicConversationWorkActivationOwner: thread.Artifact.Metadata[publicConversationWorkActivationOwner],
+				},
+				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata,
+			)
+			if innerErr == nil && !changed {
+				innerErr = fmt.Errorf("public conversation work terminal effect was already claimed")
+			}
+			return innerErr
+		}
 		artifact, _, innerErr = app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
 		return innerErr
 	}
@@ -1129,6 +1169,12 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
+	if publicConversationWorkAfterTerminalCommitProbe != nil && strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" {
+		if publicConversationWorkAfterTerminalCommitProbe(artifact) != nil {
+			return
+		}
+	}
+	cleanupPrivatePublicConversationProviderRequest(thread.Artifact.Metadata[publicConversationProviderRequestKey])
 	app.forgetRoomThreadStartedInProcess(artifact.ID)
 
 	// Run ledger: one compact, SEARCHABLE run_log memory line per terminal run
@@ -1875,6 +1921,233 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 	return app.produceAgentThreadArtifactForJob(ctx, job, responder)
 }
 
+type durableOpenAITextRequest struct {
+	Model           string               `json:"model"`
+	Instructions    string               `json:"instructions"`
+	Input           string               `json:"input"`
+	IdempotencyKey  string               `json:"idempotencyKey"`
+	Attachments     []openAIInputContent `json:"attachments,omitempty"`
+	ReasoningEffort string               `json:"reasoningEffort,omitempty"`
+	Verbosity       string               `json:"verbosity,omitempty"`
+	MaxOutputTokens int                  `json:"maxOutputTokens,omitempty"`
+	Seat            string               `json:"seat,omitempty"`
+	Workflow        string               `json:"workflow,omitempty"`
+	ServiceTier     string               `json:"serviceTier,omitempty"`
+	JSONSchema      *openAIJSONSchema    `json:"jsonSchema,omitempty"`
+	EnableWebSearch bool                 `json:"enableWebSearch,omitempty"`
+}
+
+type publicConversationProviderAuthorityEntry struct {
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	CreatedAt      string `json:"createdAt"`
+	TextDigest     string `json:"textDigest"`
+	MetadataDigest string `json:"metadataDigest"`
+	BodyDigest     string `json:"bodyDigest,omitempty"`
+	ACLVersion     string `json:"aclVersion,omitempty"`
+	Revision       string `json:"revision,omitempty"`
+}
+
+type publicConversationProviderAuthorityManifest struct {
+	Requester           string                                     `json:"requester"`
+	ChannelID           string                                     `json:"channelId"`
+	DestinationRevision string                                     `json:"destinationRevision"`
+	SourceMessageID     string                                     `json:"sourceMessageId"`
+	SourceMessageDigest string                                     `json:"sourceMessageDigest"`
+	SourceWindowDigest  string                                     `json:"sourceWindowDigest"`
+	ContextRefsDigest   string                                     `json:"contextRefsDigest"`
+	Entries             []publicConversationProviderAuthorityEntry `json:"entries"`
+}
+
+type durablePublicConversationProviderRequest struct {
+	Version   int                                         `json:"version"`
+	Request   durableOpenAITextRequest                    `json:"request"`
+	Authority publicConversationProviderAuthorityManifest `json:"authority"`
+}
+
+func publicConversationProviderAuthority(thread scoutAgentThread, memory []meetingMemoryEntry) (publicConversationProviderAuthorityManifest, error) {
+	manifest := publicConversationProviderAuthorityManifest{
+		Requester: normalizeAccountEmail(thread.Artifact.Metadata["requestedBy"]), ChannelID: strings.TrimSpace(thread.Artifact.Metadata["originId"]),
+		DestinationRevision: strings.TrimSpace(thread.Artifact.Metadata["destinationRevision"]),
+		SourceMessageID:     strings.TrimSpace(thread.Artifact.Metadata["sourceMessageId"]), SourceMessageDigest: strings.TrimSpace(thread.Artifact.Metadata["sourceMessageDigest"]),
+		SourceWindowDigest: strings.TrimSpace(thread.Artifact.Metadata["sourceWindowDigest"]), ContextRefsDigest: sha256Hex([]byte(strings.TrimSpace(thread.Artifact.Metadata["contextRefs"]))),
+	}
+	for _, entry := range activeAgentMemory(memory) {
+		metadataRaw, err := json.Marshal(entry.Metadata)
+		if err != nil {
+			return publicConversationProviderAuthorityManifest{}, fmt.Errorf("encode provider authority metadata: %w", err)
+		}
+		manifest.Entries = append(manifest.Entries, publicConversationProviderAuthorityEntry{
+			ID: strings.TrimSpace(entry.ID), Kind: strings.TrimSpace(entry.Kind), CreatedAt: entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+			TextDigest: sha256Hex([]byte(entry.Text)), MetadataDigest: sha256Hex(metadataRaw), BodyDigest: strings.TrimSpace(entry.BodyDigest),
+			ACLVersion: strings.TrimSpace(entry.Metadata["aclVersion"]), Revision: firstNonEmptyString(strings.TrimSpace(entry.Metadata[artifactVersionMetadataKey]), strings.TrimSpace(entry.Metadata["revision"])),
+		})
+	}
+	return manifest, nil
+}
+
+func samePublicConversationProviderAuthority(left, right publicConversationProviderAuthorityManifest) bool {
+	leftEntries, rightEntries := left.Entries, right.Entries
+	left.Entries, right.Entries = nil, nil
+	leftRaw, leftErr := json.Marshal(left)
+	rightRaw, rightErr := json.Marshal(right)
+	if leftErr != nil || rightErr != nil || subtle.ConstantTimeCompare([]byte(sha256Hex(leftRaw)), []byte(sha256Hex(rightRaw))) != 1 {
+		return false
+	}
+	current := make(map[string]publicConversationProviderAuthorityEntry, len(rightEntries))
+	for _, entry := range rightEntries {
+		current[entry.Kind+"\x00"+entry.ID] = entry
+	}
+	// New ambient entries may appear after the provider accepted (for example,
+	// continuity bookkeeping for the visible work card). They were not embedded
+	// in the frozen request. Every entry that was embedded must still exist with
+	// the exact body, revision, metadata/ACL digest, and creation identity.
+	for _, expected := range leftEntries {
+		actual, ok := current[expected.Kind+"\x00"+expected.ID]
+		if !ok {
+			return false
+		}
+		expectedRaw, expectedErr := json.Marshal(expected)
+		actualRaw, actualErr := json.Marshal(actual)
+		if expectedErr != nil || actualErr != nil || subtle.ConstantTimeCompare([]byte(sha256Hex(expectedRaw)), []byte(sha256Hex(actualRaw))) != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func durableOpenAIRequest(request openAITextRequest) durableOpenAITextRequest {
+	return durableOpenAITextRequest{
+		Model: request.Model, Instructions: request.Instructions, Input: request.Input, IdempotencyKey: request.IdempotencyKey,
+		Attachments: request.Attachments, ReasoningEffort: request.ReasoningEffort, Verbosity: request.Verbosity,
+		MaxOutputTokens: request.MaxOutputTokens, Seat: request.Seat, Workflow: request.Workflow,
+		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch,
+	}
+}
+
+func (snapshot durableOpenAITextRequest) request(thread scoutAgentThread) openAITextRequest {
+	return openAITextRequest{
+		Model: snapshot.Model, Instructions: snapshot.Instructions, Input: snapshot.Input, IdempotencyKey: snapshot.IdempotencyKey,
+		Attachments: snapshot.Attachments, ReasoningEffort: snapshot.ReasoningEffort, Verbosity: snapshot.Verbosity,
+		MaxOutputTokens: snapshot.MaxOutputTokens, Seat: snapshot.Seat, Workflow: snapshot.Workflow,
+		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch,
+		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
+	}
+}
+
+func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread, job AgentJob, now time.Time) openAITextRequest {
+	liveWebSearch := agentThreadUsesLiveWebSearch(thread)
+	instructions := app.agentThreadInstructionsForThread(thread)
+	if liveWebSearch {
+		instructions += "\n\nLive research authority: Use the hosted web-search tool for every current or externally verifiable claim. Prefer primary or official sources, distinguish sourced fact from inference, and include the exact source URL for each material claim. If a claim cannot be verified with the tool in this run, label it unverified rather than filling the gap from recall."
+	}
+	return openAITextRequest{
+		Model:           agentThreadTextModel(thread),
+		Seat:            seatAgentThreadText,
+		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
+		IdempotencyKey:  publicConversationProviderOperationKey(thread),
+		Instructions:    instructions,
+		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, now),
+		ReasoningEffort: agentThreadTextReasoningEffort(thread),
+		Verbosity:       "medium",
+		MaxOutputTokens: agentThreadMaxOutputTokensForThread(thread),
+		EnableWebSearch: liveWebSearch,
+		ValidateOutput:  func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
+	}
+}
+
+func decodeDurablePublicConversationProviderRequest(thread scoutAgentThread, currentMemory []meetingMemoryEntry) (openAITextRequest, bool, error) {
+	ref := strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey])
+	if ref == "" {
+		return openAITextRequest{}, false, nil
+	}
+	raw, err := loadPrivatePublicConversationProviderRequest(ref, thread.Artifact.Metadata[publicConversationProviderRequestHash])
+	if err != nil {
+		return openAITextRequest{}, false, err
+	}
+	var snapshot durablePublicConversationProviderRequest
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return openAITextRequest{}, false, fmt.Errorf("decode public conversation provider request snapshot: %w", err)
+	}
+	if snapshot.Version != 1 || snapshot.Request.IdempotencyKey == "" || snapshot.Request.IdempotencyKey != publicConversationProviderOperationKey(thread) {
+		return openAITextRequest{}, false, fmt.Errorf("public conversation provider request binding changed")
+	}
+	currentAuthority, err := publicConversationProviderAuthority(thread, currentMemory)
+	if err != nil {
+		return openAITextRequest{}, false, err
+	}
+	if !samePublicConversationProviderAuthority(snapshot.Authority, currentAuthority) {
+		return openAITextRequest{}, false, fmt.Errorf("public conversation provider authority manifest changed")
+	}
+	return snapshot.Request.request(thread), true, nil
+}
+
+// preparePublicConversationProviderRequest freezes every wire-relevant field
+// before provider handoff. A restart may reauthorize the source, but it cannot
+// pair the stable idempotency key with a newly built timestamp/context prompt.
+func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scoutAgentThread) (scoutAgentThread, error) {
+	current, ok := app.osArtifactByID(thread.Artifact.ID)
+	if !ok {
+		return thread, fmt.Errorf("public conversation provider reservation is unavailable")
+	}
+	thread.Artifact = current
+	refreshed, err := app.reauthorizeAgentThreadProfile(thread)
+	if err != nil {
+		return thread, err
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), refreshed)
+	if err != nil {
+		return thread, err
+	}
+	job := app.newAgentJob(refreshed)
+	job.Context = providerContext
+	if _, found, err := decodeDurablePublicConversationProviderRequest(refreshed, providerContext.Memory); err != nil {
+		return thread, err
+	} else if found {
+		return refreshed, nil
+	}
+	authority, err := publicConversationProviderAuthority(refreshed, providerContext.Memory)
+	if err != nil {
+		return thread, err
+	}
+	snapshot := durablePublicConversationProviderRequest{Version: 1, Request: durableOpenAIRequest(app.buildAgentThreadOpenAIRequest(refreshed, job, time.Now())), Authority: authority}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return thread, fmt.Errorf("encode public conversation provider request snapshot: %w", err)
+	}
+	publicConversationProviderBlobMu.Lock()
+	defer publicConversationProviderBlobMu.Unlock()
+	retained, err := app.gcPrivatePublicConversationProviderRequestsLocked()
+	if err != nil {
+		return thread, err
+	}
+	ref, digest, err := storePrivatePublicConversationProviderRequestLocked(raw)
+	if err != nil {
+		return thread, err
+	}
+	if info, statErr := os.Stat(filepath.Join(filepath.Dir(meetingMemoryPath()), "private-operation-blobs", digest+".json")); statErr != nil || !privateProviderRequestRetentionAllowed(retained, info.Size()) {
+		_ = os.Remove(filepath.Join(filepath.Dir(meetingMemoryPath()), "private-operation-blobs", digest+".json"))
+		return thread, fmt.Errorf("private provider request retention cap would be exceeded")
+	}
+	updated, changed, err := app.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(
+		artifactAuthorizationHeaderFromEntry(current),
+		map[string]string{
+			publicConversationWorkActivationState: publicConversationWorkStarted,
+			publicConversationWorkActivationOwner: current.Metadata[publicConversationWorkActivationOwner],
+		},
+		current.ID,
+		map[string]string{
+			publicConversationProviderRequestKey:  ref,
+			publicConversationProviderRequestHash: digest,
+		},
+	)
+	if err != nil || !changed {
+		return thread, fmt.Errorf("public conversation provider request reservation changed")
+	}
+	thread.Artifact = updated
+	return thread, nil
+}
+
 // produceAgentThreadArtifactForJob consumes the provider-admission snapshot
 // already attached to the job. The runner wrapper must not re-read Files or
 // rebuild memory after the shared ACL fence.
@@ -1891,25 +2164,18 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
-	liveWebSearch := agentThreadUsesLiveWebSearch(thread)
-	instructions := app.agentThreadInstructionsForThread(thread)
-	if liveWebSearch {
-		instructions += "\n\nLive research authority: Use the hosted web-search tool for every current or externally verifiable claim. Prefer primary or official sources, distinguish sourced fact from inference, and include the exact source URL for each material claim. If a claim cannot be verified with the tool in this run, label it unverified rather than filling the gap from recall."
+	request := app.buildAgentThreadOpenAIRequest(thread, job, time.Now())
+	if request.IdempotencyKey != "" {
+		frozen, found, snapshotErr := decodeDurablePublicConversationProviderRequest(thread, job.Context.Memory)
+		if snapshotErr != nil {
+			return "", snapshotErr
+		}
+		if !found {
+			return "", fmt.Errorf("public conversation provider request snapshot is unavailable")
+		}
+		request = frozen
 	}
-	output, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           agentThreadTextModel(thread),
-		Seat:            seatAgentThreadText,
-		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
-		Instructions:    instructions,
-		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, time.Now()),
-		ReasoningEffort: agentThreadTextReasoningEffort(thread),
-		Verbosity:       "medium",
-		MaxOutputTokens: agentThreadMaxOutputTokensForThread(thread),
-		EnableWebSearch: liveWebSearch,
-		ValidateOutput: func(text string) error {
-			return validateAgentThreadTerminalArtifact(thread, text)
-		},
-	})
+	output, err := responder(ctx, apiKey, request)
 	if err != nil {
 		return "", err
 	}

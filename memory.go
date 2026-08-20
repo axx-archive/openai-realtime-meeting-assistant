@@ -1136,29 +1136,38 @@ func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text 
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(nil, "", "", "", id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(nil, nil, "", "", "", id, title, text, updatedBy, metadataUpdates)
 }
 
 // updateOSArtifactWithMetadataIfHeaderMatches is the authorized-write seam:
 // the security projection comparison and mutation happen under the same store
 // lock, so a caller can never authorize revision N and overwrite revision N+1.
 func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(&expected, "", "", "", id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(&expected, nil, "", "", "", id, title, text, updatedBy, metadataUpdates)
+}
+
+// updateOSArtifactWithMetadataIfHeaderAndMetadataMatch atomically commits a
+// body plus metadata only while both its authorization header and selected
+// ordinary-metadata ownership fields still match. Crash-recovered workers use
+// this to ensure that only the current dispatch owner can publish a terminal
+// effect; a stale provider result returns changed=false without overwriting it.
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderAndMetadataMatch(expected ArtifactAuthorizationHeader, expectedMetadata map[string]string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(&expected, expectedMetadata, "", "", "", id, title, text, updatedBy, metadataUpdates)
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderAndPostimageMatch(expected ArtifactAuthorizationHeader, expectedPostimage string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedPostimage), "", "", id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(&expected, nil, strings.TrimSpace(expectedPostimage), "", "", id, title, text, updatedBy, metadataUpdates)
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderAndToolPreimagesMatch(expected ArtifactAuthorizationHeader, expectedSemanticPostimage, expectedFullPreimage string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), "", id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(&expected, nil, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), "", id, title, text, updatedBy, metadataUpdates)
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderToolPreimagesAndStoreGenerationMatch(expected ArtifactAuthorizationHeader, expectedSemanticPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.updateOSArtifactWithMetadataExpected(&expected, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), strings.TrimSpace(expectedStoreGeneration), id, title, text, updatedBy, metadataUpdates)
+	return store.updateOSArtifactWithMetadataExpected(&expected, nil, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), strings.TrimSpace(expectedStoreGeneration), id, title, text, updatedBy, metadataUpdates)
 }
 
-func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -1195,6 +1204,13 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
 		if !artifactAuthorizationHeaderEqual(*expected, current) {
 			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+	}
+	if expectedMetadata != nil {
+		for key, value := range expectedMetadata {
+			if store.entries[index].Metadata[strings.TrimSpace(key)] != strings.TrimSpace(value) {
+				return cloneMemoryEntry(store.entries[index]), false, nil
+			}
 		}
 	}
 	if expectedPostimage != "" {

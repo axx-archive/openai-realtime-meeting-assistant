@@ -12251,12 +12251,10 @@
           inset 0 1px 0 rgba(255, 255, 255, 0.08);
       }
 
-      /* ---------- Deck Editor — Keynote/PowerPoint-class controls ----------
-         Edit mode lives alongside Present mode on the same deck. Provides:
-         - Move and resize text boxes
-         - Drop images
-         - Z-order controls (front/back)
-         - Standard object selection and transformation */
+      /* ---------- Deck Studio ----------
+         The artifact HTML remains inside the tokened sandboxed viewer. Edit
+         mode renders only the server-normalized scene model in the app DOM, so
+         generated HTML never executes with the application's origin. */
       .deck-editor {
         position: fixed;
         inset: 0;
@@ -12280,6 +12278,7 @@
         background: var(--surface-1);
         border-bottom: 1px solid var(--line-1);
         overflow: visible;
+        min-height: 56px;
       }
       .deck-editor__toolbar-left {
         flex: none;
@@ -12295,7 +12294,8 @@
         justify-content: center;
         gap: 4px;
         min-width: 0;
-        overflow: hidden;
+        overflow-x: auto;
+        scrollbar-width: none;
       }
       .deck-editor__toolbar-right {
         flex: none;
@@ -12407,7 +12407,7 @@
       /* Slide thumbnails sidebar */
       .deck-editor__sidebar {
         flex: none;
-        width: 180px;
+        width: 196px;
         background: var(--surface-2);
         border-right: 1px solid var(--line-1);
         overflow-y: auto;
@@ -12426,13 +12426,12 @@
         background: #000;
         transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
-      .deck-editor__thumb iframe {
+      .deck-editor__thumb-stage {
         position: absolute;
         inset: 0;
-        width: 100%;
-        height: 100%;
-        border: 0;
-        pointer-events: none;
+        overflow: hidden;
+        background: var(--deck-background, #111);
+        container-type: size;
       }
       .deck-editor__thumb:hover {
         border-color: var(--line-2);
@@ -12454,45 +12453,43 @@
       /* Canvas area */
       .deck-editor__canvas-wrap {
         flex: 1;
-        display: flex;
+        display: grid;
         align-items: center;
         justify-content: center;
         padding: 24px;
         background: var(--surface-3);
         overflow: hidden;
+        min-width: 0;
+        min-height: 0;
       }
       .deck-editor__canvas {
         position: relative;
-        width: 960px;
+        width: 100%;
+        height: 100%;
         max-width: 100%;
+        max-height: 100%;
         aspect-ratio: 16 / 9;
-        background: #000;
+        background: var(--deck-background, #111);
         border-radius: var(--r-md);
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
         overflow: hidden;
+        touch-action: none;
+        user-select: none;
+        container-type: size;
       }
-      .deck-editor__canvas iframe {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        border: none;
-        pointer-events: auto;
-      }
-      /* Selection overlay for editable elements */
-      .deck-editor__overlay {
+      .deck-editor__scene {
         position: absolute;
         inset: 0;
-        pointer-events: none;
+        overflow: hidden;
       }
       .deck-editor__element {
         position: absolute;
         pointer-events: auto;
         cursor: move;
-        border: 2px solid transparent;
+        border: 1px solid transparent;
         border-radius: 2px;
-        transition: border-color var(--dur-fast) var(--ease);
+        transform-origin: center;
+        overflow: visible;
       }
       .deck-editor__element:hover {
         border-color: rgba(66, 133, 244, 0.5);
@@ -12500,7 +12497,25 @@
       .deck-editor__element[data-selected="true"] {
         border-color: #4285f4;
       }
-      /* Resize handles */
+      .deck-editor__element-content {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        pointer-events: none;
+        white-space: pre-wrap;
+      }
+      .deck-editor__element-content--text {
+        display: flex;
+        align-items: center;
+        line-height: 1.15;
+      }
+      .deck-editor__element-content--shape {
+        border-style: solid;
+      }
+      .deck-editor__element-content--image {
+        display: block;
+        object-fit: cover;
+      }
       .deck-editor__handle {
         position: absolute;
         width: 10px;
@@ -12527,14 +12542,15 @@
         resize: none;
         font: inherit;
         color: inherit;
-        padding: 4px;
+        padding: 0;
         width: 100%;
         height: 100%;
+        z-index: 2;
       }
       /* Properties panel (right side) */
       .deck-editor__props {
         flex: none;
-        width: 240px;
+        width: 272px;
         background: var(--surface-1);
         border-left: 1px solid var(--line-1);
         overflow-y: auto;
@@ -12574,6 +12590,45 @@
         outline: none;
         border-color: var(--accent);
       }
+      .deck-editor__color {
+        width: 42px;
+        height: 32px;
+        padding: 2px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+      }
+      .deck-editor__range {
+        flex: 1;
+        min-width: 0;
+      }
+      .deck-editor__scout {
+        margin-top: auto;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-1);
+      }
+      .deck-editor__scout textarea {
+        width: 100%;
+        min-height: 76px;
+        resize: vertical;
+      }
+      .deck-editor__scout-status {
+        min-height: 18px;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+      .deck-editor__scout-status[data-state="working"] {
+        color: var(--accent);
+      }
+      .deck-editor__empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgba(255,255,255,.7);
+        font: var(--type-body);
+        pointer-events: none;
+      }
       /* Z-order buttons */
       .deck-editor__zorder {
         display: flex;
@@ -12607,7 +12662,7 @@
           padding: 16px;
         }
         .deck-editor__props {
-          width: 200px;
+          width: 228px;
         }
         .deck-editor__toolbar-center {
           gap: 2px;
@@ -12621,7 +12676,7 @@
           width: 100px;
         }
         .deck-editor__props {
-          width: 160px;
+          width: 196px;
           padding: 12px;
         }
         .deck-editor__title {
@@ -12632,7 +12687,9 @@
         }
         /* Hide some center toolbar items on smaller screens */
         .deck-editor__toolbar-center [data-action="add-text"],
-        .deck-editor__toolbar-center [data-action="add-image"] {
+        .deck-editor__toolbar-center [data-action="add-image"],
+        .deck-editor__toolbar-center [data-action="add-rectangle"],
+        .deck-editor__toolbar-center [data-action="add-ellipse"] {
           display: none;
         }
       }
@@ -12650,6 +12707,8 @@
         /* Hide center tools on phone, keep only slide nav */
         .deck-editor__toolbar-center [data-action="add-text"],
         .deck-editor__toolbar-center [data-action="add-image"],
+        .deck-editor__toolbar-center [data-action="add-rectangle"],
+        .deck-editor__toolbar-center [data-action="add-ellipse"],
         .deck-editor__toolbar-center [data-action="bring-front"],
         .deck-editor__toolbar-center [data-action="send-back"] {
           display: none;
@@ -12658,6 +12717,88 @@
         .deck-editor__toolbar-right [data-action="present"] span {
           display: none;
         }
+      }
+
+      .deck-presenter {
+        position: fixed;
+        inset: 0;
+        z-index: 9100;
+        display: grid;
+        grid-template-rows: 52px minmax(0, 1fr);
+        background: #08080a;
+        color: #fff;
+      }
+      .deck-presenter__chrome {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 14px;
+        background: rgba(18, 18, 20, .96);
+        border-bottom: 1px solid rgba(255,255,255,.12);
+      }
+      .deck-presenter__title {
+        min-width: 0;
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 600 14px var(--font-sans);
+      }
+      .deck-presenter__counter {
+        margin-left: auto;
+        color: rgba(255,255,255,.65);
+        font: var(--type-label);
+        font-variant-numeric: tabular-nums;
+      }
+      .deck-presenter__button {
+        display: inline-grid;
+        place-items: center;
+        min-width: 36px;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid rgba(255,255,255,.16);
+        border-radius: var(--r-full);
+        background: rgba(255,255,255,.07);
+        color: #fff;
+        font: var(--type-label);
+      }
+      .deck-presenter__button:disabled { opacity: .35; }
+      .deck-presenter__viewport {
+        position: relative;
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .deck-presenter__stage {
+        position: relative;
+        overflow: hidden;
+        background: var(--deck-background, #111);
+        box-shadow: 0 20px 80px rgba(0,0,0,.5);
+        container-type: size;
+      }
+      .deck-presenter__scene { position: absolute; inset: 0; overflow: hidden; }
+      .deck-presenter__element { position: absolute; transform-origin: center; overflow: hidden; }
+      .deck-presenter__text {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        white-space: pre-wrap;
+        overflow: hidden;
+        line-height: 1.08;
+      }
+      .deck-presenter__image { display: block; width: 100%; height: 100%; }
+      .deck-presenter__shape { width: 100%; height: 100%; border-style: solid; box-sizing: border-box; }
+      .deck-presenter__nav {
+        position: absolute;
+        left: 50%;
+        bottom: 18px;
+        z-index: 2;
+        display: flex;
+        gap: 8px;
+        transform: translateX(-50%);
       }
 
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
@@ -29241,6 +29382,22 @@
         gap: 3px;
       }
       .artifact-stage__actions { display: flex; align-items: center; gap: 8px; }
+      .artifact-outline-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 4px 0 20px;
+        padding: 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+      }
+      .artifact-outline-actions__copy {
+        flex: 1;
+        min-width: 0;
+        color: var(--text-2);
+        font: var(--type-body-sm);
+      }
       .artifact-stage__kicker {
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -42150,9 +42307,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return worker ? worker.replace(/_/g, ' ') : 'Scout'
       }
 
+      function setSandboxedFrameDocument(frame, html) {
+        if (!frame) return
+        frame.setAttribute('sandbox', 'allow-scripts')
+        const previous = frame.dataset.deckBlobUrl
+        if (previous) URL.revokeObjectURL(previous)
+        const url = URL.createObjectURL(new Blob([String(html || '')], { type: 'text/html' }))
+        frame.dataset.deckBlobUrl = url
+        frame.src = url
+      }
+
       // ---- inline chat deck viewer (worker-unavailable fallback) ----
-      // Renders an HTML deck directly in the chat thread without storing an
-      // artifact. Uses srcdoc for the sandboxed iframe (no server round-trip).
+      // Renders an HTML deck in an opaque-origin sandbox without storing an
+      // artifact. The canonical route now creates a durable deck artifact.
       // First-class cover: the thumbnail IS the package cover — 16:9 hero with
       // the first slide visible, title and controls overlaid as glass chrome.
       function renderInlineChatDeck(container, htmlContent) {
@@ -42228,7 +42395,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         frame.setAttribute('allowfullscreen', '')
         frame.setAttribute('scrolling', 'no')
         frame.title = 'deck preview'
-        frame.srcdoc = enhancedHtml
+        setSandboxedFrameDocument(frame, enhancedHtml)
 
         // Glass chrome overlay at bottom — title + action buttons
         const chrome = document.createElement('div')
@@ -42241,14 +42408,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const actions = document.createElement('div')
         actions.className = 'chat-deck__actions'
 
-        // Edit button (opens Edit mode in drawer/modal)
+        // Legacy inline decks have no durable artifact/version to save back to.
+        // Keep them presentable, but never offer a false editing surface.
         const editBtn = document.createElement('button')
         editBtn.type = 'button'
         editBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
-        editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit`
-        editBtn.addEventListener('click', () => {
-          openDeckEditor(htmlContent, title, { inline: true, source: deck })
-        })
+        editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit unavailable`
+        editBtn.disabled = true
+        editBtn.title = 'This legacy inline deck must be regenerated as a saved deck before it can be edited.'
 
         // Present button — fullscreens the sandboxed iframe
         const presentBtn = document.createElement('button')
@@ -42344,7 +42511,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 Present
               </button>
               <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="save">
-                Save
+                Apply preview
               </button>
             </div>
           </div>
@@ -42628,7 +42795,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             iframe.setAttribute('sandbox', 'allow-scripts')
             iframe.setAttribute('scrolling', 'no')
             iframe.setAttribute('loading', 'eager')
-            iframe.srcdoc = buildSlidePreviewHtml(slide)
+            setSandboxedFrameDocument(iframe, buildSlidePreviewHtml(slide))
             const num = document.createElement('span')
             num.className = 'deck-editor__thumb-num'
             num.textContent = String(i + 1)
@@ -42647,11 +42814,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           
           // Render editable slide - text elements inside are contentEditable
           const backdrop = document.createElement('iframe')
-          // No sandbox - we need full interactivity for editing
-          // Content is trusted (our own generated HTML)
+          backdrop.setAttribute('sandbox', 'allow-scripts')
           backdrop.setAttribute('scrolling', 'no')
           backdrop.style.pointerEvents = 'auto'
-          backdrop.srcdoc = buildEditableSlideHtml(slide)
+          setSandboxedFrameDocument(backdrop, buildEditableSlideHtml(slide))
           canvas.appendChild(backdrop)
           
           // Store reference for postMessage handler
@@ -42660,6 +42826,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         
         // Listen for edit messages from the iframe
         window.addEventListener('message', function(e) {
+          if (e.source !== state.currentBackdrop?.contentWindow) return
           if (!state || !e.data || e.data.type !== 'slideEdit') return
           const slide = state.slides[state.currentSlide]
           if (!slide) return
@@ -42676,7 +42843,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (thumbs[state.currentSlide]) {
               const thumbIframe = thumbs[state.currentSlide].querySelector('iframe')
               if (thumbIframe) {
-                thumbIframe.srcdoc = buildSlidePreviewHtml(slide)
+                setSandboxedFrameDocument(thumbIframe, buildSlidePreviewHtml(slide))
               }
             }
           }
@@ -42913,20 +43080,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return '<!doctype html>\n' + newDoc.documentElement.outerHTML
         }
 
-        // Save — writes the modified HTML back
+        // This retired inline editor can only update its ephemeral preview.
+        // Artifact decks use openDeckStudio and its revision-checked PATCH.
         function saveDeck() {
           const updatedHtml = buildUpdatedHtml()
           // Update the source element if this is an inline deck
           if (options.source && options.inline) {
             const frame = options.source.querySelector('iframe')
             if (frame) {
-              frame.srcdoc = updatedHtml
+              setSandboxedFrameDocument(frame, updatedHtml)
             }
           }
           // Store in options for retrieval
           state.savedHtml = updatedHtml
           state.dirty = false
-          showToast({ text: 'Deck saved', kind: 'done' })
+          showToast({ text: 'Preview updated for this session — it was not saved.', kind: 'note' })
           closeDeckEditor()
         }
 
@@ -42945,7 +43113,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000'
           const frame = document.createElement('iframe')
           frame.style.cssText = 'width:100%;height:100%;border:none'
-          frame.srcdoc = updatedHtml
+          setSandboxedFrameDocument(frame, updatedHtml)
           frame.setAttribute('sandbox', 'allow-scripts')
           frame.setAttribute('allowfullscreen', '')
           wrap.appendChild(frame)
@@ -43014,6 +43182,576 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderCanvas()
       }
 
+      // Structured Deck Studio. The server owns legacy-HTML import and HTML
+      // compilation; this surface edits only normalized inert scene data.
+      async function openDeckStudio(artifactId, title, options = {}) {
+        artifactId = String(artifactId || '').trim()
+        if (!artifactId) {
+          showToast({ text: 'Save this deck as an artifact before editing.', kind: 'note' })
+          return
+        }
+        let payload
+        try {
+          const response = await fetch(`/artifacts/deck?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+          payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload?.deck) throw new Error(payload?.error || 'Deck editor is unavailable')
+        } catch (error) {
+          showToast({ text: error?.message || 'Deck editor is unavailable', kind: 'error' })
+          return
+        }
+        if (payload?.canWrite !== true) {
+          showToast({ text: String(payload?.writeBlockedReason || 'This deck is view-only. You can still present it.'), kind: 'note' })
+          return
+        }
+        if (activeDeckEditor) closeDeckEditor()
+
+        const clone = value => JSON.parse(JSON.stringify(value))
+        const state = {
+          artifactId,
+          version: Number(payload?.artifact?.version || 1),
+          deck: normalizeDeckDocument(payload.deck),
+          slideIndex: 0,
+          selectedId: '',
+          history: [],
+          future: [],
+          dirty: false,
+          saving: false,
+          imageGenerating: false,
+          canWrite: true,
+          options
+        }
+
+        const editor = document.createElement('div')
+        editor.className = 'deck-editor'
+        editor.innerHTML = `
+          <div class="deck-editor__toolbar">
+            <div class="deck-editor__toolbar-left">
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close editor">×</button>
+              <h2 class="deck-editor__title">${escapeHtml(title || payload?.artifact?.title || 'Untitled deck')}</h2>
+            </div>
+            <div class="deck-editor__toolbar-center">
+              <button type="button" class="deck-editor__btn" data-action="undo" title="Undo">Undo</button>
+              <button type="button" class="deck-editor__btn" data-action="redo" title="Redo">Redo</button>
+              <span class="deck-editor__divider"></span>
+              <button type="button" class="deck-editor__btn" data-action="add-text">Text</button>
+              <button type="button" class="deck-editor__btn" data-action="add-image">Upload</button>
+              <button type="button" class="deck-editor__btn" data-action="add-rectangle">Rectangle</button>
+              <button type="button" class="deck-editor__btn" data-action="add-ellipse">Ellipse</button>
+              <span class="deck-editor__divider"></span>
+              <button type="button" class="deck-editor__btn" data-action="send-back">Back</button>
+              <button type="button" class="deck-editor__btn" data-action="bring-front">Front</button>
+            </div>
+            <div class="deck-editor__toolbar-right">
+              <div class="deck-editor__slide-nav">
+                <button type="button" data-action="prev-slide" aria-label="Previous slide">‹</button>
+                <span data-slide-indicator></span>
+                <button type="button" data-action="next-slide" aria-label="Next slide">›</button>
+              </div>
+              <button type="button" class="deck-editor__btn" data-action="present">Present</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="save">Save</button>
+            </div>
+          </div>
+          <div class="deck-editor__main">
+            <div class="deck-editor__sidebar" data-slide-list></div>
+            <div class="deck-editor__canvas-wrap" data-canvas-wrap>
+              <div class="deck-editor__canvas" data-canvas><div class="deck-editor__scene" data-scene></div></div>
+            </div>
+            <aside class="deck-editor__props">
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Position</span>
+                <div class="deck-editor__prop-row"><label>X</label><input type="number" class="deck-editor__prop-input" data-prop="x"><label>Y</label><input type="number" class="deck-editor__prop-input" data-prop="y"></div>
+              </div>
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Size</span>
+                <div class="deck-editor__prop-row"><label>W</label><input type="number" class="deck-editor__prop-input" data-prop="width"><label>H</label><input type="number" class="deck-editor__prop-input" data-prop="height"></div>
+              </div>
+              <div class="deck-editor__prop-section" data-style-controls>
+                <span class="deck-editor__prop-label">Appearance</span>
+                <div class="deck-editor__prop-row"><label>Fill</label><input type="color" class="deck-editor__color" data-prop="fill"><label>Stroke</label><input type="color" class="deck-editor__color" data-prop="stroke"></div>
+                <div class="deck-editor__prop-row"><label>Opacity</label><input type="range" class="deck-editor__range" min="0" max="1" step="0.05" data-prop="opacity"><output data-opacity-output></output></div>
+              </div>
+              <div class="deck-editor__prop-section deck-editor__scout">
+                <span class="deck-editor__prop-label">Scout imagery</span>
+                <textarea class="deck-editor__prop-input" data-image-prompt placeholder="Describe an image for this slide"></textarea>
+                <div class="deck-editor__prop-row">
+                  <select class="deck-editor__prop-input" data-image-placement aria-label="Image placement"><option value="image">Place image</option><option value="full_bleed">Full bleed</option></select>
+                  <button type="button" class="deck-editor__btn" data-action="generate-image">Generate</button>
+                </div>
+                <div class="deck-editor__scout-status" data-image-status aria-live="polite">Scout will add the finished image to this slide.</div>
+              </div>
+            </aside>
+          </div>`
+
+        const canvas = editor.querySelector('[data-canvas]')
+        const scene = editor.querySelector('[data-scene]')
+        const canvasWrap = editor.querySelector('[data-canvas-wrap]')
+        const slideList = editor.querySelector('[data-slide-list]')
+        const indicator = editor.querySelector('[data-slide-indicator]')
+        const saveButton = editor.querySelector('[data-action="save"]')
+        const imageStatus = editor.querySelector('[data-image-status]')
+
+        function normalizeDeckDocument(input) {
+          const deck = input && typeof input === 'object' ? clone(input) : {}
+          deck.schemaVersion = 1
+          deck.width = Number(deck.width) || 1920
+          deck.height = Number(deck.height) || 1080
+          deck.slides = Array.isArray(deck.slides) && deck.slides.length ? deck.slides : [{ id: 'slide-1', elements: [] }]
+          deck.slides.forEach((slide, slideIndex) => {
+            slide.id = String(slide.id || `slide-${slideIndex + 1}`)
+            slide.elements = Array.isArray(slide.elements) ? slide.elements : []
+            slide.elements.forEach((element, elementIndex) => normalizeElement(element, slideIndex, elementIndex))
+          })
+          return deck
+        }
+
+        function normalizeElement(element, slideIndex, elementIndex) {
+          element.id = String(element.id || `element-${slideIndex + 1}-${elementIndex + 1}`)
+          element.type = ['text', 'image', 'shape'].includes(element.type) ? element.type : 'text'
+          element.x = Number.isFinite(Number(element.x)) ? Number(element.x) : 160
+          element.y = Number.isFinite(Number(element.y)) ? Number(element.y) : 160
+          element.width = Math.max(24, Number(element.width) || 480)
+          element.height = Math.max(24, Number(element.height) || 160)
+          element.z = Number.isFinite(Number(element.z)) ? Number(element.z) : elementIndex + 1
+          element.opacity = Math.max(0, Math.min(1, Number.isFinite(Number(element.opacity)) ? Number(element.opacity) : 1))
+          element.rotation = Number(element.rotation) || 0
+          element.fill = String(element.fill || (element.type === 'shape' ? '#ff6b35' : element.color || '#ffffff'))
+          element.stroke = String(element.stroke || '#000000')
+          element.strokeWidth = Math.max(0, Number(element.strokeWidth) || 0)
+          element.shape = element.shape === 'ellipse' ? 'ellipse' : 'rectangle'
+          element.text = String(element.text || '')
+          element.fontSize = Math.max(8, Number(element.fontSize) || 48)
+          element.fontWeight = Number(element.fontWeight) || 600
+          element.color = String(element.color || '#ffffff')
+          element.fit = element.fit === 'contain' ? 'contain' : 'cover'
+          element.ref = String(element.ref || '')
+          element.name = String(element.name || '')
+          element.dataUrl = String(element.dataUrl || '')
+        }
+
+        function slide() { return state.deck.slides[state.slideIndex] }
+        function selected() { return slide()?.elements.find(element => element.id === state.selectedId) || null }
+        function requireDeckWrite() {
+          if (state.canWrite === true) return true
+          showToast({ text: 'This deck is view-only. Your changes were not sent.', kind: 'note' })
+          return false
+        }
+        function mergeArtifactUpdate(view) {
+          if (!view) return options.entry || null
+          const base = options.entry && typeof options.entry === 'object' ? options.entry : {}
+          const entry = { ...base, ...view }
+          entry.metadata = {
+            ...(base.metadata || {}),
+            title: String(view.title || base?.metadata?.title || title || 'Presentation'),
+            artifactVersion: String(view.version || state.version)
+          }
+          options.entry = entry
+          return entry
+        }
+        function checkpoint() {
+          state.history.push(clone(state.deck))
+          if (state.history.length > 60) state.history.shift()
+          state.future = []
+          state.dirty = true
+        }
+        function restore(snapshot) {
+          state.deck = normalizeDeckDocument(snapshot)
+          state.selectedId = ''
+          renderAll()
+        }
+
+        function elementImageUrl(element) {
+          if (element.dataUrl) return element.dataUrl
+          if (/^[0-9a-f]{64}$/.test(element.ref)) return artifactBlobUrl({ ref: element.ref, name: element.name })
+          return ''
+        }
+
+        function paintElement(element, miniature = false) {
+          const box = document.createElement('div')
+          box.className = 'deck-editor__element'
+          box.dataset.elementId = element.id
+          box.dataset.selected = !miniature && element.id === state.selectedId ? 'true' : 'false'
+          box.style.left = `${element.x / state.deck.width * 100}%`
+          box.style.top = `${element.y / state.deck.height * 100}%`
+          box.style.width = `${element.width / state.deck.width * 100}%`
+          box.style.height = `${element.height / state.deck.height * 100}%`
+          box.style.zIndex = String(element.z)
+          box.style.opacity = String(element.opacity)
+          box.style.transform = `rotate(${element.rotation}deg)`
+          if (element.type === 'text') {
+            const content = document.createElement('div')
+            content.className = 'deck-editor__element-content deck-editor__element-content--text'
+            content.textContent = element.text || 'Text'
+            content.style.color = element.color
+            content.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
+            content.style.fontWeight = String(element.fontWeight)
+            box.appendChild(content)
+          } else if (element.type === 'image') {
+            const image = document.createElement('img')
+            image.className = 'deck-editor__element-content deck-editor__element-content--image'
+            image.alt = element.alt || ''
+            image.src = elementImageUrl(element)
+            image.style.objectFit = element.fit
+            box.appendChild(image)
+          } else {
+            const shape = document.createElement('div')
+            shape.className = 'deck-editor__element-content deck-editor__element-content--shape'
+            shape.style.background = element.fill
+            shape.style.borderColor = element.stroke
+            shape.style.borderWidth = `${element.strokeWidth || 0}px`
+            shape.style.borderRadius = element.shape === 'ellipse' ? '50%' : '0'
+            box.appendChild(shape)
+          }
+          if (!miniature) {
+            box.addEventListener('pointerdown', event => beginTransform(event, element, 'move'))
+            box.addEventListener('dblclick', event => {
+              event.stopPropagation()
+              if (element.type === 'text') beginTextEdit(box, element)
+            })
+            if (element.id === state.selectedId) {
+              for (const handle of ['nw', 'ne', 'sw', 'se']) {
+                const node = document.createElement('span')
+                node.className = `deck-editor__handle deck-editor__handle--${handle}`
+                node.dataset.handle = handle
+                node.addEventListener('pointerdown', event => beginTransform(event, element, handle))
+                box.appendChild(node)
+              }
+            }
+          }
+          return box
+        }
+
+        function renderCanvas() {
+          scene.replaceChildren()
+          const current = slide()
+          canvas.style.setProperty('--deck-background', typeof current?.background === 'string' ? current.background : (current?.background?.color || state.deck?.theme?.background || '#111111'))
+          const ordered = [...(current?.elements || [])].sort((a, b) => a.z - b.z)
+          ordered.forEach(element => scene.appendChild(paintElement(element)))
+          if (!ordered.length) scene.appendChild(bfEl('div', 'deck-editor__empty', 'Add text, a shape, or an image'))
+          updateProperties()
+        }
+
+        function renderThumbs() {
+          slideList.replaceChildren()
+          state.deck.slides.forEach((item, index) => {
+            const thumb = document.createElement('button')
+            thumb.type = 'button'
+            thumb.className = 'deck-editor__thumb'
+            thumb.setAttribute('aria-selected', index === state.slideIndex ? 'true' : 'false')
+            const stage = document.createElement('div')
+            stage.className = 'deck-editor__thumb-stage'
+            stage.style.setProperty('--deck-background', typeof item?.background === 'string' ? item.background : (item?.background?.color || state.deck?.theme?.background || '#111111'))
+            ;[...(item.elements || [])].sort((a, b) => a.z - b.z).forEach(element => stage.appendChild(paintElement(element, true)))
+            const number = bfEl('span', 'deck-editor__thumb-num', String(index + 1))
+            thumb.append(stage, number)
+            thumb.addEventListener('click', () => { state.slideIndex = index; state.selectedId = ''; renderAll() })
+            slideList.appendChild(thumb)
+          })
+        }
+
+        function fitCanvas() {
+          const rect = canvasWrap.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+          const width = Math.max(1, Math.min(rect.width - 48, (rect.height - 48) * state.deck.width / state.deck.height))
+          canvas.style.width = `${width}px`
+          canvas.style.height = `${width * state.deck.height / state.deck.width}px`
+        }
+
+        function renderAll() {
+          fitCanvas()
+          renderCanvas()
+          renderThumbs()
+          indicator.textContent = `${state.slideIndex + 1} / ${state.deck.slides.length}`
+          editor.querySelector('[data-action="prev-slide"]').disabled = state.slideIndex === 0
+          editor.querySelector('[data-action="next-slide"]').disabled = state.slideIndex === state.deck.slides.length - 1
+          editor.querySelector('[data-action="undo"]').disabled = state.history.length === 0
+          editor.querySelector('[data-action="redo"]').disabled = state.future.length === 0
+        }
+
+        function updateProperties() {
+          const element = selected()
+          editor.querySelectorAll('[data-prop]').forEach(input => { input.disabled = !element })
+          if (!element) return
+          for (const prop of ['x', 'y', 'width', 'height', 'fill', 'stroke', 'opacity']) {
+            const input = editor.querySelector(`[data-prop="${prop}"]`)
+            if (input) input.value = element[prop]
+          }
+          const opacity = editor.querySelector('[data-opacity-output]')
+          if (opacity) opacity.textContent = `${Math.round(element.opacity * 100)}%`
+        }
+
+        function beginTextEdit(box, element) {
+          if (!requireDeckWrite()) return
+          if (box.querySelector('textarea')) return
+          checkpoint()
+          const input = document.createElement('textarea')
+          input.className = 'deck-editor__text-input'
+          input.value = element.text
+          input.style.color = element.color
+          input.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
+          input.style.fontWeight = String(element.fontWeight)
+          box.appendChild(input)
+          input.addEventListener('input', () => { element.text = input.value })
+          input.addEventListener('blur', () => renderAll(), { once: true })
+          input.focus()
+          input.select()
+        }
+
+        function beginTransform(event, element, mode) {
+          if (!requireDeckWrite()) return
+          if (event.button !== undefined && event.button !== 0) return
+          event.preventDefault()
+          event.stopPropagation()
+          state.selectedId = element.id
+          checkpoint()
+          renderCanvas()
+          const origin = { x: event.clientX, y: event.clientY, ex: element.x, ey: element.y, ew: element.width, eh: element.height }
+          const rect = canvas.getBoundingClientRect()
+          const sx = state.deck.width / rect.width
+          const sy = state.deck.height / rect.height
+          const move = next => {
+            const dx = (next.clientX - origin.x) * sx
+            const dy = (next.clientY - origin.y) * sy
+            if (mode === 'move') {
+              element.x = Math.max(0, Math.min(state.deck.width - element.width, origin.ex + dx))
+              element.y = Math.max(0, Math.min(state.deck.height - element.height, origin.ey + dy))
+            } else {
+              if (mode.includes('e')) element.width = Math.max(24, Math.min(state.deck.width - element.x, origin.ew + dx))
+              if (mode.includes('s')) element.height = Math.max(24, Math.min(state.deck.height - element.y, origin.eh + dy))
+              if (mode.includes('w')) { element.x = Math.max(0, Math.min(origin.ex + origin.ew - 24, origin.ex + dx)); element.width = origin.ew + origin.ex - element.x }
+              if (mode.includes('n')) { element.y = Math.max(0, Math.min(origin.ey + origin.eh - 24, origin.ey + dy)); element.height = origin.eh + origin.ey - element.y }
+            }
+            renderCanvas()
+          }
+          const up = () => {
+            document.removeEventListener('pointermove', move)
+            document.removeEventListener('pointerup', up)
+            renderThumbs()
+          }
+          document.addEventListener('pointermove', move)
+          document.addEventListener('pointerup', up, { once: true })
+        }
+
+        function addElement(type, overrides = {}) {
+          if (!requireDeckWrite()) return
+          checkpoint()
+          const elements = slide().elements
+          const element = {
+            id: `element-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            type, x: 240, y: 240, width: type === 'text' ? 720 : 520,
+            height: type === 'text' ? 150 : 360, z: Math.max(0, ...elements.map(item => item.z || 0)) + 1,
+            opacity: 1, rotation: 0, fill: '#ff6b35', stroke: '#000000', strokeWidth: 0,
+            shape: 'rectangle', text: type === 'text' ? 'New text' : '', fontSize: 56,
+            fontWeight: 650, color: '#ffffff', fit: 'cover', ref: '', name: '', ...overrides
+          }
+          normalizeElement(element, state.slideIndex, elements.length)
+          elements.push(element)
+          state.selectedId = element.id
+          renderAll()
+          if (type === 'text') requestAnimationFrame(() => editor.querySelector(`[data-element-id="${element.id}"]`)?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+        }
+
+        function addUploadedImage() {
+          if (!requireDeckWrite()) return
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.accept = 'image/png,image/jpeg,image/webp'
+          input.addEventListener('change', async () => {
+            const file = input.files?.[0]
+            if (!file) return
+            if (state.dirty && !(await saveDeck(false))) return
+            const form = new FormData()
+            form.append('artifactId', state.artifactId)
+            form.append('expectedVersion', String(state.version))
+            form.append('slideId', slide().id)
+            form.append('placement', 'image')
+            form.append('file', file, file.name)
+            imageStatus.dataset.state = 'working'
+            imageStatus.textContent = 'Uploading image…'
+            try {
+              const response = await fetch('/artifacts/deck/assets', { method: 'POST', body: form })
+              const result = await response.json().catch(() => ({}))
+              if (!response.ok || !result?.deck) throw new Error(result?.error || 'Image upload failed')
+              state.deck = normalizeDeckDocument(result.deck)
+              state.version = Number(result?.artifact?.version || state.version + 1)
+              state.selectedId = String(result?.element?.id || '')
+              state.history = []
+              state.future = []
+              state.dirty = false
+              imageStatus.dataset.state = 'done'
+              imageStatus.textContent = 'Image uploaded and added to this slide.'
+              const updatedEntry = mergeArtifactUpdate(result.artifact)
+              if (updatedEntry) addArtifactEntry(updatedEntry, { select: false })
+              renderAll()
+            } catch (error) {
+              imageStatus.dataset.state = 'error'
+              imageStatus.textContent = error?.message || 'Image upload failed'
+              showToast({ text: imageStatus.textContent, kind: 'error' })
+            }
+          }, { once: true })
+          input.click()
+        }
+
+        function changeLayer(direction) {
+          if (!requireDeckWrite()) return
+          const element = selected()
+          if (!element) return
+          checkpoint()
+          const ordered = [...slide().elements].sort((a, b) => a.z - b.z).filter(item => item.id !== element.id)
+          if (direction === 'front') ordered.push(element)
+          else ordered.unshift(element)
+          ordered.forEach((item, index) => { item.z = index + 1 })
+          renderAll()
+        }
+
+        async function saveDeck(closeAfter = true) {
+          if (!requireDeckWrite()) return false
+          if (state.saving) return false
+          const localImages = state.deck.slides.flatMap(item => item.elements).filter(element => element.type === 'image' && element.dataUrl && !element.ref)
+          if (localImages.length) {
+            showToast({ text: 'Upload persistence is not available yet. Remove local images or use Scout generation before saving.', kind: 'error' })
+            return false
+          }
+          state.saving = true
+          saveButton.disabled = true
+          saveButton.textContent = 'Saving…'
+          try {
+            const deck = clone(state.deck)
+            deck.slides.forEach(item => item.elements.forEach(element => delete element.dataUrl))
+            const response = await fetch('/artifacts/deck', {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, deck })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.deck) throw new Error(result?.error || (response.status === 409 ? 'This deck changed elsewhere. Reopen it before saving.' : 'Deck save failed'))
+            state.deck = normalizeDeckDocument(result.deck)
+            state.version = Number(result?.artifact?.version || state.version + 1)
+            state.history = []
+            state.future = []
+            state.dirty = false
+            const updatedEntry = mergeArtifactUpdate(result.artifact)
+            if (updatedEntry) addArtifactEntry(updatedEntry, { select: false })
+            showToast({ text: 'Deck saved', kind: 'done' })
+            if (closeAfter) closeDeckEditor()
+            if (closeAfter && options.source?.isConnected && updatedEntry) {
+              const host = options.source.parentElement
+              if (host) {
+                host.replaceChildren()
+                renderArtifactDeck(host, updatedEntry, {})
+              }
+            }
+            return true
+          } catch (error) {
+            showToast({ text: error?.message || 'Deck save failed', kind: 'error' })
+            return false
+          } finally {
+            state.saving = false
+            if (saveButton.isConnected) { saveButton.disabled = false; saveButton.textContent = 'Save' }
+          }
+        }
+
+        async function generateImage() {
+          if (!requireDeckWrite()) return
+          if (state.imageGenerating) return
+          const prompt = String(editor.querySelector('[data-image-prompt]')?.value || '').trim()
+          if (!prompt) { editor.querySelector('[data-image-prompt]')?.focus(); return }
+          const placement = String(editor.querySelector('[data-image-placement]')?.value || 'image')
+          if (state.dirty && !(await saveDeck(false))) return
+          state.imageGenerating = true
+          imageStatus.dataset.state = 'working'
+          imageStatus.textContent = 'Scout is generating this image…'
+          editor.querySelector('[data-action="generate-image"]').disabled = true
+          try {
+            const response = await fetch('/artifacts/deck/image-generations', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, slideId: slide().id, prompt, placement })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.deck) throw new Error(result?.error || 'Scout image generation failed')
+            state.deck = normalizeDeckDocument(result.deck)
+            state.version = Number(result?.artifact?.version || state.version + 1)
+            state.selectedId = String(result?.element?.id || '')
+            state.history = []
+            state.future = []
+            state.dirty = false
+            imageStatus.dataset.state = 'done'
+            imageStatus.textContent = 'Image generated and added to this slide.'
+            const updatedEntry = mergeArtifactUpdate(result.artifact)
+            if (updatedEntry) addArtifactEntry(updatedEntry, { select: false })
+            renderAll()
+          } catch (error) {
+            imageStatus.dataset.state = 'error'
+            imageStatus.textContent = error?.message || 'Scout image generation failed'
+            showToast({ text: imageStatus.textContent, kind: 'error' })
+          } finally {
+            state.imageGenerating = false
+            const button = editor.querySelector('[data-action="generate-image"]')
+            if (button) button.disabled = false
+          }
+        }
+
+        editor.addEventListener('click', event => {
+          const action = event.target.closest('[data-action]')?.dataset.action
+          if (!action) {
+            if (event.target === canvas || event.target === scene) { state.selectedId = ''; renderCanvas() }
+            return
+          }
+          if (action === 'close') closeDeckEditor()
+          else if (action === 'save') saveDeck(true)
+          else if (action === 'present') {
+            openDeckPresentation(state.artifactId, title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true })
+              .then(opened => { if (!opened) options.present?.() })
+          }
+          else if (action === 'add-text') addElement('text')
+          else if (action === 'add-image') addUploadedImage()
+          else if (action === 'add-rectangle') addElement('shape', { shape: 'rectangle' })
+          else if (action === 'add-ellipse') addElement('shape', { shape: 'ellipse' })
+          else if (action === 'bring-front') changeLayer('front')
+          else if (action === 'send-back') changeLayer('back')
+          else if (action === 'prev-slide' && state.slideIndex > 0) { state.slideIndex--; state.selectedId = ''; renderAll() }
+          else if (action === 'next-slide' && state.slideIndex < state.deck.slides.length - 1) { state.slideIndex++; state.selectedId = ''; renderAll() }
+          else if (action === 'undo' && state.history.length) { state.future.push(clone(state.deck)); restore(state.history.pop()) }
+          else if (action === 'redo' && state.future.length) { state.history.push(clone(state.deck)); restore(state.future.pop()) }
+          else if (action === 'generate-image') generateImage()
+        })
+
+        editor.querySelector('.deck-editor__props').addEventListener('change', event => {
+          if (!requireDeckWrite()) return
+          const prop = event.target.dataset?.prop
+          const element = selected()
+          if (!prop || !element) return
+          checkpoint()
+          element[prop] = ['x', 'y', 'width', 'height', 'opacity'].includes(prop) ? Number(event.target.value) : event.target.value
+          if (prop === 'opacity') element.opacity = Math.max(0, Math.min(1, element.opacity))
+          renderAll()
+        })
+
+        const handleKey = event => {
+          if (event.key === 'Escape') closeDeckEditor()
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+            event.preventDefault()
+            editor.querySelector(`[data-action="${event.shiftKey ? 'redo' : 'undo'}"]`)?.click()
+          }
+          if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedId && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) {
+            if (!requireDeckWrite()) return
+            checkpoint()
+            slide().elements = slide().elements.filter(element => element.id !== state.selectedId)
+            state.selectedId = ''
+            renderAll()
+          }
+        }
+        const resizeObserver = new ResizeObserver(fitCanvas)
+        resizeObserver.observe(canvasWrap)
+        document.addEventListener('keydown', handleKey)
+
+        activeDeckEditor = {
+          element: editor,
+          cleanup: () => { document.removeEventListener('keydown', handleKey); resizeObserver.disconnect() },
+          getDeck: () => clone(state.deck)
+        }
+        document.body.appendChild(editor)
+        renderAll()
+      }
+
       function closeDeckEditor() {
         if (!activeDeckEditor) return
         activeDeckEditor.cleanup?.()
@@ -43021,39 +43759,149 @@ Wrap the entire export in one code block. After the code block, say whether the 
         activeDeckEditor = null
       }
 
-      function escapeHtml(str) {
-        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      let activeDeckPresenter = null
+
+      async function openDeckPresentation(artifactId, title, initialPayload = null) {
+        artifactId = String(artifactId || '').trim()
+        if (!artifactId) return false
+        let payload = initialPayload
+        if (!payload?.deck) {
+          try {
+            const response = await fetch(`/artifacts/deck?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+            payload = await response.json().catch(() => ({}))
+            if (!response.ok || !payload?.deck) return false
+          } catch {
+            return false
+          }
+        }
+        const documentModel = payload.deck
+        const slides = Array.isArray(documentModel?.slides) ? documentModel.slides : []
+        if (!slides.length) return false
+        closeDeckPresentation()
+
+        const presenter = document.createElement('section')
+        presenter.className = 'deck-presenter'
+        presenter.setAttribute('role', 'dialog')
+        presenter.setAttribute('aria-modal', 'true')
+        presenter.setAttribute('aria-label', `${title || payload?.artifact?.title || 'Deck'} presentation`)
+        presenter.innerHTML = `
+          <header class="deck-presenter__chrome">
+            <h2 class="deck-presenter__title"></h2>
+            <span class="deck-presenter__counter" data-present-counter></span>
+            <button type="button" class="deck-presenter__button" data-present-action="close">Close</button>
+          </header>
+          <div class="deck-presenter__viewport" data-present-viewport>
+            <div class="deck-presenter__stage" data-present-stage><div class="deck-presenter__scene" data-present-scene></div></div>
+            <div class="deck-presenter__nav">
+              <button type="button" class="deck-presenter__button" data-present-action="previous" aria-label="Previous slide">←</button>
+              <button type="button" class="deck-presenter__button" data-present-action="next" aria-label="Next slide">→</button>
+            </div>
+          </div>`
+        presenter.querySelector('.deck-presenter__title').textContent = title || payload?.artifact?.title || 'Presentation'
+        const viewport = presenter.querySelector('[data-present-viewport]')
+        const stage = presenter.querySelector('[data-present-stage]')
+        const scene = presenter.querySelector('[data-present-scene]')
+        const counter = presenter.querySelector('[data-present-counter]')
+        let index = 0
+
+        const color = value => typeof value === 'string' ? value : (value?.color || '')
+        const imageURL = element => /^[0-9a-f]{64}$/.test(String(element?.ref || '')) ? artifactBlobUrl({ ref: element.ref, name: element.name }) : ''
+        const paint = element => {
+          const box = document.createElement('div')
+          box.className = 'deck-presenter__element'
+          box.dataset.presentElementId = String(element?.id || '')
+          box.style.left = `${Number(element?.x || 0) / Number(documentModel.width || 1920) * 100}%`
+          box.style.top = `${Number(element?.y || 0) / Number(documentModel.height || 1080) * 100}%`
+          box.style.width = `${Number(element?.width || 1) / Number(documentModel.width || 1920) * 100}%`
+          box.style.height = `${Number(element?.height || 1) / Number(documentModel.height || 1080) * 100}%`
+          box.style.zIndex = String(Number(element?.z || 0))
+          box.style.opacity = String(Math.max(0, Math.min(1, Number(element?.opacity ?? 1))))
+          box.style.transform = `rotate(${Number(element?.rotation || 0)}deg)`
+          if (element?.type === 'text') {
+            const text = document.createElement('div')
+            text.className = 'deck-presenter__text'
+            text.textContent = String(element.text || '')
+            text.style.color = String(element.color || '#fff')
+            text.style.fontFamily = String(element.fontFamily || 'Arial, sans-serif')
+            text.style.fontSize = `${Number(element.fontSize || 48) / Number(documentModel.height || 1080) * 100}cqh`
+            text.style.fontWeight = String(Number(element.fontWeight || 600))
+            box.appendChild(text)
+          } else if (element?.type === 'image') {
+            const image = document.createElement('img')
+            image.className = 'deck-presenter__image'
+            image.alt = String(element.prompt || element.name || '')
+            image.src = imageURL(element)
+            image.style.objectFit = element.fit === 'contain' ? 'contain' : 'cover'
+            box.appendChild(image)
+          } else if (element?.type === 'shape') {
+            const shape = document.createElement('div')
+            shape.className = 'deck-presenter__shape'
+            shape.style.background = String(element.fill || 'transparent')
+            shape.style.borderColor = String(element.stroke || 'transparent')
+            shape.style.borderWidth = `${Math.max(0, Number(element.strokeWidth || 0))}px`
+            shape.style.borderRadius = element.shape === 'ellipse' ? '50%' : '0'
+            box.appendChild(shape)
+          }
+          return box
+        }
+        const fit = () => {
+          const rect = viewport.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+          const deckWidth = Number(documentModel.width || 1920)
+          const deckHeight = Number(documentModel.height || 1080)
+          const width = Math.max(1, Math.min(rect.width - 32, (rect.height - 32) * deckWidth / deckHeight))
+          stage.style.width = `${width}px`
+          stage.style.height = `${width * deckHeight / deckWidth}px`
+        }
+        const render = () => {
+          const slide = slides[index]
+          stage.style.setProperty('--deck-background', color(slide?.background) || color(documentModel?.theme?.background) || '#111')
+          scene.replaceChildren()
+          ;[...(slide?.elements || [])].sort((a, b) => Number(a.z || 0) - Number(b.z || 0)).forEach(element => scene.appendChild(paint(element)))
+          counter.textContent = `${index + 1} / ${slides.length}`
+          presenter.querySelector('[data-present-action="previous"]').disabled = index === 0
+          presenter.querySelector('[data-present-action="next"]').disabled = index === slides.length - 1
+        }
+        const navigate = delta => {
+          index = Math.max(0, Math.min(slides.length - 1, index + delta))
+          render()
+        }
+        const handleKey = event => {
+          if (event.key === 'Escape') closeDeckPresentation()
+          else if (['ArrowRight', 'PageDown', ' '].includes(event.key)) { event.preventDefault(); navigate(1) }
+          else if (['ArrowLeft', 'PageUp'].includes(event.key)) { event.preventDefault(); navigate(-1) }
+          else if (event.key === 'Home') { event.preventDefault(); index = 0; render() }
+          else if (event.key === 'End') { event.preventDefault(); index = slides.length - 1; render() }
+        }
+        presenter.addEventListener('click', event => {
+          const action = event.target.closest('[data-present-action]')?.dataset.presentAction
+          if (action === 'close') closeDeckPresentation()
+          else if (action === 'previous') navigate(-1)
+          else if (action === 'next') navigate(1)
+        })
+        const resizeObserver = new ResizeObserver(fit)
+        activeDeckPresenter = {
+          element: presenter,
+          cleanup: () => { document.removeEventListener('keydown', handleKey); resizeObserver.disconnect() }
+        }
+        document.body.appendChild(presenter)
+        document.addEventListener('keydown', handleKey)
+        resizeObserver.observe(viewport)
+        fit()
+        render()
+        presenter.querySelector('[data-present-action="close"]')?.focus()
+        return true
       }
 
-      // Check if an artifact is in Files or shared to a channel (access control for Edit/Present)
-      // Anyone can enter Edit/Present if the deck is in Files or shared to a channel.
-      function artifactInFilesOrChannelShared(entry) {
-        if (!entry) return false
-        const metadata = entry.metadata || {}
-        // Check if saved to Files (has folder or drive indicator)
-        if (metadata.folderId || metadata.driveId || metadata.savedToFiles === 'true') {
-          return true
-        }
-        // Check if shared to a channel (has channel sharing metadata)
-        if (metadata.channelId || metadata.sharedToChannel === 'true' || metadata.channelShared === 'true') {
-          return true
-        }
-        // Check visibility — team/organization artifacts are accessible
-        if (metadata.visibility === 'team' || metadata.visibility === 'organization') {
-          return true
-        }
-        // Check if artifact is attached to a package (packages are shared)
-        if (metadata.packageId) {
-          return true
-        }
-        // Check if user owns the artifact (always can edit own content)
-        const ownerEmail = String(metadata.ownerEmail || metadata.createdBy || '').toLowerCase()
-        const currentUserEmail = String(window.currentUserEmail || '').toLowerCase()
-        if (ownerEmail && currentUserEmail && ownerEmail === currentUserEmail) {
-          return true
-        }
-        // Private artifacts without Files/channel sharing cannot be edited by others
-        return false
+      function closeDeckPresentation() {
+        if (!activeDeckPresenter) return
+        activeDeckPresenter.cleanup?.()
+        activeDeckPresenter.element?.remove()
+        activeDeckPresenter = null
+      }
+
+      function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
       }
 
       // ---- sandboxed HTML deck viewer (packaging OS §4 item 1, Wave 2 item 9) ----
@@ -43139,6 +43987,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const syncButtons = () => {
             stageEditBtn.disabled = editBtn.disabled
             stagePresentBtn.disabled = presentBtn.disabled
+            stageEditBtn.title = editBtn.title
+            stagePresentBtn.title = presentBtn.title
           }
           // Wire up stage buttons
           stageEditBtn.addEventListener('click', () => editBtn.click())
@@ -43151,12 +44001,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         container.appendChild(deck)
 
-        // Store deck content for edit mode
-        let deckContent = null
-
         const artifactId = String(entry?.id || '').trim()
         ;(async () => {
           try {
+            const deckAccessPromise = fetch(`/artifacts/deck?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+              .then(async response => {
+                const result = await response.json().catch(() => ({}))
+                return response.ok && result?.deck ? result : null
+              })
+              .catch(() => null)
             const response = await fetch(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok || !payload.url) {
@@ -43166,40 +44019,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
             frame.src = payload.url
             presentBtn.disabled = false
 
-            // Fetch deck content for edit mode (requires Files or channel-shared access)
-            const canEdit = artifactInFilesOrChannelShared(entry)
-            editBtn.disabled = !canEdit
-            if (canEdit) {
-              try {
-                const contentResponse = await fetch(payload.url)
-                deckContent = await contentResponse.text()
-              } catch {
-                editBtn.disabled = true
-              }
-            }
-
-            // Edit opens the deck editor with full Keynote-class controls
+            // Edit opens the inert structured scene editor. The raw deck stays
+            // confined to this tokened sandboxed viewer. openDeckStudio fetches
+            // the scene again and independently requires server canWrite=true.
             editBtn.addEventListener('click', () => {
-              if (!deckContent) {
-                showToast({ text: 'Deck content not available', kind: 'error' })
-                return
-              }
-              openDeckEditor(deckContent, title, { artifactId, entry, source: deck })
+              openDeckStudio(artifactId, title, {
+                entry,
+                source: deck,
+                present: async () => {
+                  const access = await deckAccessPromise
+                  if (!(await openDeckPresentation(artifactId, title, access))) frame.requestFullscreen?.()?.catch?.(() => {})
+                }
+              })
             })
 
-            // Present fullscreens the SAME sandboxed iframe — never a
-            // top-level navigation to the render URL, which would run the
-            // deck outside the iframe sandbox.
-            presentBtn.addEventListener('click', () => {
+            // Present prefers the inert structured scene presenter so slide
+            // navigation is viewer-owned and never depends on executing deck
+            // HTML. Legacy/read-only fallback remains the same sandboxed frame.
+            const present = async () => {
+              const access = await deckAccessPromise
+              if (await openDeckPresentation(artifactId, title, access)) return
               if (frame.requestFullscreen) {
                 frame.requestFullscreen().catch(() => {})
               } else if (frame.webkitRequestFullscreen) {
                 frame.webkitRequestFullscreen()
               }
-            })
+            }
+            presentBtn.addEventListener('click', present)
+
+            const access = await deckAccessPromise
+            const canEdit = access?.canWrite === true
+            editBtn.disabled = !canEdit
+            editBtn.title = canEdit ? 'Edit deck' : String(access?.writeBlockedReason || 'View-only deck')
 
             // Auto-present if requested (stage manifest pill)
-            if (options.autoPresent) frame.requestFullscreen?.()?.catch?.(() => {})
+            if (options.autoPresent) present()
           } catch {
             // No token (signed out, artifact gone, server refused): fall back
             // to the escaped safe renderer — never an inline document.
@@ -43208,6 +44062,45 @@ Wrap the entire export in one code block. After the code block, say whether the 
             renderArtifactRead(container, entry, { ...options, forceSafe: true })
           }
         })()
+      }
+
+      function artifactIsDeckOutline(entry) {
+        const contract = String(entry?.metadata?.artifactContract || entry?.metadata?.outputContract || '').trim()
+        return contract === 'deck_outline_v1'
+      }
+
+      function deckOutlineContinuationActions(entry) {
+        if (!artifactIsDeckOutline(entry)) return null
+        const actions = document.createElement('div')
+        actions.className = 'artifact-outline-actions'
+        actions.appendChild(bfEl('span', 'artifact-outline-actions__copy', 'Refine the narrative here, then turn this exact outline into a designed deck.'))
+
+        const edit = bfEl('button', 'btn btn--outline', 'Edit outline')
+        edit.type = 'button'
+        edit.addEventListener('click', () => {
+          closeArtifactStage()
+          openAgentArtifact(entry)
+          window.setTimeout(() => {
+            if (selectedArtifactId !== String(entry?.id || '')) selectArtifact(entry?.id)
+            artifactEditMode = true
+            renderArtifactDetail()
+            artifactBodyInput?.focus()
+          }, 0)
+        })
+
+        const generate = bfEl('button', 'btn btn--primary', 'Generate deck')
+        generate.type = 'button'
+        generate.addEventListener('click', () => {
+          const title = artifactDisplayTitle(entry)
+          const request = `Build the complete presentation deck from the existing outline “${title}” (artifact ${entry.id}). Use that outline as the narrative spine, preserve its evidence and intent, and produce the designed editable deck rather than another outline.`
+          closeArtifactStage()
+          setActiveTool('chat')
+          if (!sendScoutChat(request)) {
+            showToast({ text: 'Open a Scout conversation to generate this deck.', kind: 'note' })
+          }
+        })
+        actions.append(edit, generate)
+        return actions
       }
 
       function renderArtifactRead(container, entry, options = {}) {
@@ -43304,6 +44197,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           hero.appendChild(summaryEl)
         }
         container.appendChild(hero)
+
+        const outlineActions = deckOutlineContinuationActions(entry)
+        if (outlineActions) container.appendChild(outlineActions)
 
         const grid = document.createElement('div')
         grid.className = 'artifact-read__grid'

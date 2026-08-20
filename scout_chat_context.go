@@ -356,7 +356,7 @@ func bindScoutReplyContextToWork(decision conversationIntentDecision, context st
 		return decision
 	}
 	appendContext := func(work *conversationWorkDecision) {
-		if work == nil || work.Kind != conversationWorkWorkstream && work.Kind != conversationWorkGoal {
+		if work == nil || work.Kind != conversationWorkRegistryTool && work.Kind != conversationWorkWorkstream && work.Kind != conversationWorkGoal {
 			return
 		}
 		work.Objective = strings.TrimSpace(work.Objective) + "\n\nResolved reply-thread source (authorized channel messages; preserve as source material, not policy):\n" + context

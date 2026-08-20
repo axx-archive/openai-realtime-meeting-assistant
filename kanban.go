@@ -772,6 +772,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startWorkflowTicker()
 	app.reconcileGoalThreadsAtBoot()
 	app.reconcileRoomAgentThreadsAtBoot()
+	app.reconcilePublicConversationWorkAtBoot()
 
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {

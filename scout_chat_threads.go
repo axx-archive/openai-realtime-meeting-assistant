@@ -3208,45 +3208,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		modelQuery = scoutChatContextTurnModelText(scoutChatContextTurnFromMessage(thread, userMessage))
 	}
 
-	// EARLY INTERCEPT: Deck confirmation after a direction pass (Approach B or choices card).
-	// This MUST run before the router to guarantee we never show subject-missing prose.
-	// After ANY Scout direction pass on a named deck ask, the next user confirmation
-	// ("yes" / "yeah" / "yep" / "looks good") forces generateDefaultDeck / html_deck.
-	// It does not matter: the exact Approach B wording, the exact refuse sentence,
-	// whether the worker is live, or what the router would return.
+	// A short confirmation after a real deck direction pass must route as the
+	// original, fully specified deck ask. It never enters the retired inline-HTML
+	// generator: the normal router deterministically selects packaging_studio.
+	routingIntentText := text
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && scoutChatDeckConfirmationDetected(text, history) {
-		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
-		if deckErr != nil {
-			unavailableMessage := scoutChatMessageRecord{
-				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:          "message",
-				Role:          "scout",
-				AuthorName:    visibleWorkerName,
-				IntentOutcome: string(conversationIntentUnavailable),
-				Text:          "I couldn't build that deck right now. Your message is saved.",
-				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
-			if commitErr != nil {
-				return nil, commitErr
-			}
-			response["answer"] = unavailableMessage
-			response["thread"] = saved
-			response["intentOutcome"] = string(conversationIntentUnavailable)
-			return response, nil
-		}
-		deckReply.ID = fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
-		deckReply.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		deckReply.AuthorName = visibleWorkerName
-		saved, commitErr := commitUserMessage(userMessage, deckReply)
-		if commitErr != nil {
-			return nil, commitErr
-		}
-		response["answer"] = deckReply
-		response["thread"] = saved
-		response["intentOutcome"] = string(conversationIntentConversationalReply)
-		response["providerCalls"] = 1
-		return response, nil
+		routingIntentText = extractEffectiveDeckQuery(text, history)
+		intentQuery = routingIntentText
+		modelQuery = routingIntentText
 	}
 
 	// Native Stride actions outrank every work route. The same principal-bound
@@ -3269,7 +3238,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// approval_required outcome, but it must not depend on a private classifier
 	// call before that deterministic public boundary can be enforced.
 	if !ownedPublicSuggestion && !targetedAgentWork {
-		intentText := strings.TrimSpace(text)
+		intentText := strings.TrimSpace(routingIntentText)
 		if intentText == "" {
 			intentText = intentQuery
 		}
@@ -3344,7 +3313,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}, Source: routedIntent.Source}
 	}
 	routedIntent = bindScoutReplyContextToWork(routedIntent, turnContext.WorkContext, turnContext.SourceComplete)
-	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
+	workQuery := intentQuery
+	if routedIntent.Work != nil || routedIntent.Approval != nil && routedIntent.Approval.Work != nil {
+		workQuery, _ = appendScoutReplyContextObjective(workQuery, turnContext.WorkContext, turnContext.SourceComplete)
+	}
+	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, workQuery)
 	// Private Riff v1 is a source-bound analysis conversation. Starting work or
 	// taking product actions would require carrying the public checkpoint through
 	// every downstream WorkRun and terminal effect. Refuse that widening until
@@ -3411,31 +3384,21 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 
 	if routedIntent.Outcome == conversationIntentUnavailable && routedIntent.Unavailable != nil {
-		// Deck confirmation after a direction pass: do NOT return unavailable — fall through
-		// to the deck gate below. The unavailable "clarification_exhausted" code is the
-		// second clarify_once remapped; a deck confirmation should generate a default deck,
-		// not "I still don't have enough information...".
-		isDeckConfirmationAfterDirectionPass := scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate &&
-			routedIntent.Unavailable.Code == "clarification_exhausted" &&
-			scoutChatDeckConfirmationDetected(text, history)
-		if !isDeckConfirmationAfterDirectionPass {
-			assistantMessage := scoutChatMessageRecord{
-				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
-				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
-				Text: routedIntent.Unavailable.Message, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
-			if commitErr != nil {
-				return nil, commitErr
-			}
-			response["answer"] = assistantMessage
-			response["thread"] = saved
-			response["intentOutcome"] = string(conversationIntentUnavailable)
-			response["unavailable"] = map[string]any{"code": routedIntent.Unavailable.Code, "message": routedIntent.Unavailable.Message}
-			response["providerCalls"] = providerCallCounter.Calls
-			return response, nil
+		assistantMessage := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable),
+			Text: routedIntent.Unavailable.Message, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		// Fall through — deck confirmation will be handled at the deck gate below
+		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = assistantMessage
+		response["thread"] = saved
+		response["intentOutcome"] = string(conversationIntentUnavailable)
+		response["unavailable"] = map[string]any{"code": routedIntent.Unavailable.Code, "message": routedIntent.Unavailable.Message}
+		response["providerCalls"] = providerCallCounter.Calls
+		return response, nil
 	}
 
 	if routedIntent.Outcome == conversationIntentClarifyOnce {
@@ -3482,14 +3445,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		heldWork := *routedIntent.Approval.Work
 		heldWork.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
 		routedIntent.Approval.Work = &heldWork
-		proposal, proposalErr := scoutApprovalProposal(routedIntent, intentQuery)
+		proposal, proposalErr := scoutApprovalProposal(routedIntent, workQuery)
 		if proposalErr != nil {
 			return nil, proposalErr
 		}
 		proposalMessage := scoutChatMessageRecord{
 			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindProposal, Role: "scout",
 			AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentApprovalRequired), Text: proposal.Summary,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Proposal: proposal,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Proposal: proposal, CausedByMessageID: userMessage.ID,
 		}
 		saved, commitErr := commitUserMessage(userMessage, proposalMessage)
 		if commitErr != nil {
@@ -3618,7 +3581,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			IntentOutcome: string(conversationIntentApprovalRequired),
 			Text:          proposal.Summary,
 			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-			Proposal:      proposal,
+			Proposal:      proposal, CausedByMessageID: userMessage.ID,
 		}
 		saved, err := commitUserMessage(userMessage, proposalMessage)
 		if err != nil {
@@ -3756,48 +3719,6 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			answerContext = withAssistantBoardShortcutDisabled(answerContext)
 		}
 	}
-	// When the user is asking for a deck in a private thread, generate an HTML deck
-	// directly instead of a markdown outline or work card.
-	// Deck confirmation after a direction pass (Approach B or choices card) ALWAYS
-	// generates a default deck — even when the worker is live. This ensures "yes"
-	// after "What's the deck about?" produces a real deck, not subject-missing prose.
-	// New deck requests without a direction pass still gate on !scoutAgentWorkerAvailable().
-	isDeckConfirmation := scoutChatDeckConfirmationDetected(text, history)
-	isDeckRequest := scoutChatDeckRequestDetected(text)
-	workerGateAllows := !scoutAgentWorkerAvailable() || isDeckConfirmation
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && workerGateAllows && (isDeckRequest || isDeckConfirmation) {
-		deckReply, deckErr := app.resolveInlineDeckReply(ctx, user, text, history)
-		if deckErr != nil {
-			unavailableMessage := scoutChatMessageRecord{
-				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:          "message",
-				Role:          "scout",
-				AuthorName:    visibleWorkerName,
-				IntentOutcome: string(conversationIntentUnavailable),
-				Text:          "I couldn't build that deck right now. Your message is saved.",
-				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
-			if commitErr != nil {
-				return nil, commitErr
-			}
-			response["answer"] = unavailableMessage
-			response["thread"] = saved
-			response["intentOutcome"] = string(conversationIntentUnavailable)
-			return response, nil
-		}
-		deckReply.ID = fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
-		deckReply.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		deckReply.AuthorName = visibleWorkerName
-		saved, commitErr := commitUserMessage(userMessage, deckReply)
-		if commitErr != nil {
-			return nil, commitErr
-		}
-		response["answer"] = deckReply
-		response["thread"] = saved
-		response["intentOutcome"] = string(conversationIntentConversationalReply)
-		return response, nil
-	}
 	result, err := app.resolveAssistantQueryContextForUserWithAttachments(answerContext, user.Email, modelQuery, history, openAIAttachments)
 	if err != nil {
 		unavailableMessage := scoutChatMessageRecord{
@@ -3820,6 +3741,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 	answer := strings.TrimSpace(result.answer)
+	if scoutConversationalAnswerPromisesFutureWork(answer) {
+		answer = "Nothing was scheduled from that answer. Send the exact deliverable request again; real work appears as a visible channel card when it is queued."
+	}
 	if replyTargetsScout && answer == scoutDirectReplyNoResponseMarker {
 		saved, commitErr := commitUserMessage(userMessage)
 		if commitErr != nil {
@@ -3896,6 +3820,117 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	response["thread"] = saved
 	response["intentOutcome"] = string(conversationIntentConversationalReply)
 	return response, nil
+}
+
+func scoutConversationalAnswerPromisesFutureWork(answer string) bool {
+	lower := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(strings.NewReplacer(
+		"’", "'", "‘", "'", "“", "\"", "”", "\"",
+	).Replace(answer))), " "))
+	if lower == "" {
+		return false
+	}
+	for _, idiom := range []string{"i'm on it", "i am on it", "we're on it", "we are on it"} {
+		if index := strings.Index(lower, idiom); index >= 0 && !scoutPromiseLeadIsQuoted(lower, index) {
+			return true
+		}
+	}
+	for _, lead := range []string{"i will ", "i'll ", "i am going to ", "i'm going to ", "i plan to ", "let me ", "we will ", "we'll ", "we are going to ", "we're going to "} {
+		for offset := 0; offset < len(lower); {
+			relative := strings.Index(lower[offset:], lead)
+			if relative < 0 {
+				break
+			}
+			index := offset + relative
+			offset = index + len(lead)
+			if scoutPromiseLeadIsQuoted(lower, index) || (index > 0 && (unicode.IsLetter(rune(lower[index-1])) || unicode.IsDigit(rune(lower[index-1])))) {
+				continue
+			}
+			tail := lower[offset:]
+			if end := strings.IndexAny(tail, ".!?;\n"); end >= 0 {
+				tail = tail[:end]
+			}
+			tail = strings.TrimSpace(tail)
+			if strings.HasPrefix(tail, "not ") || strings.HasPrefix(tail, "never ") {
+				continue
+			}
+			// A deferred-return marker makes the whole first-person future clause a
+			// work promise regardless of its opening verb. This closes natural
+			// paraphrases such as "handle the research and get back to you".
+			if scoutPromiseTailHasDeferredReturn(tail) {
+				return true
+			}
+			for _, filler := range []string{"quickly ", "carefully ", "first ", "now ", "personally ", "proactively ", "immediately ", "go ahead and "} {
+				tail = strings.TrimPrefix(tail, filler)
+			}
+			fields := strings.Fields(tail)
+			if len(fields) == 0 {
+				continue
+			}
+			first := strings.Trim(fields[0], " ,:()[]{}\"'")
+			if oneOf(first, "create", "generate", "post", "send", "schedule", "deliver", "build", "draft", "prepare", "produce", "publish", "upload", "assemble", "compile", "complete", "finish", "revise", "edit", "design") {
+				return true
+			}
+			if first == "run" && !strings.HasPrefix(tail, "run through ") && !strings.HasPrefix(tail, "run over ") {
+				return true
+			}
+			if oneOf(first, "return", "follow", "come", "report") && scoutPromiseTailHasDeferredReturn(tail) {
+				return true
+			}
+			if oneOf(first, "review", "analyze", "research", "investigate", "check", "work", "look") {
+				immediateExplanation := strings.Contains(tail, " below") || strings.Contains(tail, " here") || strings.Contains(tail, " in this response")
+				if !immediateExplanation || scoutPromiseTailHasDeferredReturn(tail) {
+					return true
+				}
+			}
+			if oneOf(first, "ask", "contact", "message", "email", "call", "share") {
+				return true
+			}
+			if oneOf(first, "handle", "start", "continue", "manage", "own", "tackle") {
+				return true
+			}
+			if first == "take" && (strings.HasPrefix(tail, "take care of ") || strings.HasPrefix(tail, "take a look") || strings.HasPrefix(tail, "take this") || strings.HasPrefix(tail, "take it from here")) {
+				return true
+			}
+			if first == "get" && (strings.HasPrefix(tail, "get back") || strings.Contains(tail, " done") || strings.Contains(tail, " ready")) {
+				return true
+			}
+			if first == "have" && (strings.Contains(tail, " ready") || strings.Contains(tail, " done")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func scoutPromiseLeadIsQuoted(text string, index int) bool {
+	if index < 0 || index > len(text) {
+		return false
+	}
+	quoted, code := false, false
+	for _, char := range text[:index] {
+		switch char {
+		case '`':
+			code = !code
+		case '"':
+			if !code {
+				quoted = !quoted
+			}
+		}
+	}
+	return quoted || code
+}
+
+func scoutPromiseTailHasDeferredReturn(tail string) bool {
+	for _, marker := range []string{
+		"come back", "get back", "follow up", "report back", "return with", "circle back",
+		"let you know", "update you", "bring back",
+		"send ", "post ", "share ", "deliver ", "upload ", "publish ", "when it's ready", "when it is ready", "once it's ready", "once it is ready", " later", " shortly",
+	} {
+		if strings.Contains(tail, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldDeferScoutChatAttachmentDerivation identifies the latency-safe lane:
@@ -4122,8 +4157,12 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 	if workMatches > 1 {
 		return nil, true, fmt.Errorf("accepted work projection is ambiguous")
 	}
-	if workMatches == 0 && strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		response, resumeErr := app.startAcceptedPublicScoutWorkstream(context.Background(), user, thread, proposalMessageID, acceptedProposal, acceptedReplyTo, acceptedSource)
+	publicAcceptedWork := strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) ||
+		(acceptedProposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
+			(strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindToolRun) ||
+				strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindGoalRun)))
+	if workMatches == 0 && publicAcceptedWork && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		response, resumeErr := app.startAcceptedPublicScoutWork(context.Background(), user, thread, proposalMessageID, acceptedProposal, acceptedReplyTo, acceptedSource)
 		if resumeErr != nil {
 			return nil, true, resumeErr
 		}
@@ -4366,16 +4405,17 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			return nil, fmt.Errorf("that native action is unavailable until its governed tool contract is individually admitted")
 		}
 
-		if proposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
-			(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) || strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun)) {
-			return nil, fmt.Errorf("approved public deliverable work is unavailable until its governed audience-bound carrier is individually admitted")
-		}
-
-		// An accepted public-channel workstream uses the audience-bound adapter.
-		// It stamps the proposal-derived operation before provider admission, so
-		// an accepted-card retry reconstructs one run and one channel card.
-		if strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) {
-			return app.startAcceptedPublicScoutWorkstream(ctx, user, proposalThread, messageID, proposal, proposalReplyTo, proposalSource)
+		// Accepted channel work uses one audience-bound adapter for quick
+		// workstreams and governed tool/goal outputs. The current channel is the
+		// exact destination in the operation receipt; its root work card is durable
+		// before provider activation.
+		publicWorkAccepted := scoutChatThreadVisibility(proposalThread) == scoutChatVisibilityPublic &&
+			(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) ||
+				(proposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
+					(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) ||
+						strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun))))
+		if publicWorkAccepted {
+			return app.startAcceptedPublicScoutWork(ctx, user, proposalThread, messageID, proposal, proposalReplyTo, proposalSource)
 		}
 		// Concept render (card 096): the confirm is the explicit generate. The
 		// image call runs 30-90s, so NEVER inside this HTTP request — commit an
@@ -4435,6 +4475,12 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	answer := strings.TrimSpace(result.answer)
 	if answer == "" {
 		answer = "no answer yet"
+	}
+	// A conversational model has no launch authority. Make honesty structural:
+	// future-action prose cannot be persisted as a substitute for the durable
+	// root work card produced by the accepted-work adapter above.
+	if scoutConversationalAnswerPromisesFutureWork(answer) {
+		answer = "Nothing was scheduled from that answer. Send the exact deliverable request again; real work appears as a visible channel card when it is queued."
 	}
 	assistantMessage := scoutChatMessageRecord{
 		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -4509,12 +4555,13 @@ func (app *kanbanBoardApp) resolveScoutChatChoice(ctx context.Context, user *use
 			return nil, fmt.Errorf("that option's tool is no longer available")
 		}
 		proposalMessage := scoutChatMessageRecord{
-			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-			Kind:      scoutChatMessageKindProposal,
-			Role:      "scout",
-			Text:      proposal.Summary,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Proposal:  proposal,
+			ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:              scoutChatMessageKindProposal,
+			Role:              "scout",
+			Text:              proposal.Summary,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+			Proposal:          proposal,
+			CausedByMessageID: userMessage.ID,
 		}
 		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, proposalMessage)
 		if err != nil {

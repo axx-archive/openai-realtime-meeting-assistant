@@ -1302,7 +1302,7 @@ func TestConversationPresentationRequestShowsOnePremiumWorkCardNotInternalProces
 	if err != nil {
 		t.Fatal(err)
 	}
-	if routerCalls.Load() != 1 || starts.Load() != 1 || replay["replayed"] != true {
+	if routerCalls.Load() != 0 || starts.Load() != 1 || replay["replayed"] != true {
 		t.Fatalf("router=%d starts=%d replay=%#v", routerCalls.Load(), starts.Load(), replay)
 	}
 	saved := first["thread"].(scoutChatThreadRecord)

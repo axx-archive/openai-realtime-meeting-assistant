@@ -96,17 +96,18 @@ func TestIndexManifestHeldQuieting(t *testing.T) {
 	}
 }
 
-// Present routes through the artifact stage's sandboxed deck presenter: the
-// manifest pill opens the stage with { present: true }, openArtifactStage
-// threads it as autoPresent, and renderArtifactDeck fullscreens the SAME
-// sandboxed frame (rejection tolerated, never an error).
+// Present routes through the artifact stage's inert structured-scene
+// presenter: the manifest pill opens the stage with { present: true },
+// openArtifactStage threads it as autoPresent, and renderArtifactDeck calls
+// its safe presenter path. The opaque sandboxed frame remains fallback only.
 func TestIndexManifestPresentRouting(t *testing.T) {
 	html := readIndexForManifest(t)
 	for _, want := range []string{
 		"function openArtifactStage(artifactId, fallbackTitle, options)",
 		"{ present: true }",
 		"autoPresent: Boolean(options?.present)",
-		"if (options.autoPresent) frame.requestFullscreen?.()?.catch?.(() => {})",
+		"if (options.autoPresent) present()",
+		"openDeckPresentation(artifactId, title, access)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing manifest present-routing hook %q", want)
