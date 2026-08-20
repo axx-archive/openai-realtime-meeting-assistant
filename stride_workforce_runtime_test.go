@@ -212,6 +212,76 @@ func TestSTRIDEWorkforceInternalPreviewSeatSurvivesAuthenticatedRestore(t *testi
 	}
 }
 
+func TestSTRIDEWorkforceRestoreGrandfathersOnlyPreReviewGateRouteActivation(t *testing.T) {
+	runtime := NewSTRIDEWorkforceRuntime()
+	now := time.Date(2026, 8, 5, 2, 53, 9, 0, time.UTC)
+	request := strideWorkforceRequestForTest()
+	seat, _, err := runtime.CreateFromTemplate(strideWorkforceAdmin(), request, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Trial(strideWorkforceAdmin(), seat.ID, "trial_legacy", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Hire(strideWorkforceAdmin(), seat.ID, "hire_legacy", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{"identity", "capability", "profile", "route"} {
+		if _, err := runtime.Activate(strideWorkforceAdmin(), seat.ID, "activate_legacy_"+stage, stage, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := runtime.Review(strideWorkforceAdmin(), seat.ID, "review_legacy", now); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runtime.AuthenticatedSnapshot(strideSnapshotAuthorityForTest(), 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := snapshot
+	legacy.Receipts = append([]STRIDEWorkforceReceipt(nil), snapshot.Receipts...)
+	legacy.Seats = append([]STRIDEWorkforceSeat(nil), snapshot.Seats...)
+	filtered := legacy.Receipts[:0]
+	for _, receipt := range legacy.Receipts {
+		if receipt.Action == "review" {
+			continue
+		}
+		if receipt.Action == "activate_route" {
+			receipt.After = "active"
+			receipt.Digest = newSTRIDEWorkforceReceipt(receipt.Action, receipt.IdempotencyKey, receipt.AgentID, receipt.Before, receipt.After, receipt.At).Digest
+		}
+		filtered = append(filtered, receipt)
+	}
+	legacy.Receipts = filtered
+	resignWorkforceSnapshotForTest(t, &legacy)
+	policy := STRIDESnapshotRestorePolicy{Authority: strideSnapshotAuthorityForTest(), MinimumGeneration: 128}
+	if restored, err := RestoreSTRIDEWorkforceRuntime(legacy, policy); err != nil {
+		t.Fatalf("restore signed pre-cutover lifecycle: %v", err)
+	} else if view := restored.ScoutRosterView(); len(view.Seats) == 0 {
+		t.Fatal("restored pre-cutover roster is empty")
+	}
+
+	postCutover := legacy
+	postCutover.Receipts = append([]STRIDEWorkforceReceipt(nil), legacy.Receipts...)
+	postCutover.Seats = append([]STRIDEWorkforceSeat(nil), legacy.Seats...)
+	for index := range postCutover.Receipts {
+		if postCutover.Receipts[index].Action != "activate_route" {
+			continue
+		}
+		postCutover.Receipts[index].At = time.Unix(strideWorkforceReviewGateCutoverUnix, 0).UTC()
+		postCutover.Receipts[index].Digest = newSTRIDEWorkforceReceipt(postCutover.Receipts[index].Action, postCutover.Receipts[index].IdempotencyKey, postCutover.Receipts[index].AgentID, postCutover.Receipts[index].Before, postCutover.Receipts[index].After, postCutover.Receipts[index].At).Digest
+		for seatIndex := range postCutover.Seats {
+			if postCutover.Seats[seatIndex].ID == postCutover.Receipts[index].AgentID {
+				postCutover.Seats[seatIndex].UpdatedAt = postCutover.Receipts[index].At
+			}
+		}
+	}
+	resignWorkforceSnapshotForTest(t, &postCutover)
+	if _, err := RestoreSTRIDEWorkforceRuntime(postCutover, policy); !errors.Is(err, ErrSTRIDEWorkforceInvalid) {
+		t.Fatalf("post-cutover route-only active restore error=%v", err)
+	}
+}
+
 func TestSTRIDEWorkforceAuthorityCanaryAndLearningBoundaries(t *testing.T) {
 	runtime := NewSTRIDEWorkforceRuntime()
 	now := time.Now().UTC()

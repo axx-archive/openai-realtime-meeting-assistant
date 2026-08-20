@@ -22,6 +22,12 @@ var (
 	ErrSTRIDEWorkforceAuthority   = errors.New("STRIDE workforce authority denied")
 )
 
+// The explicit human review transition was added at 2026-08-07T18:37:01Z.
+// Snapshots signed before that cutover legitimately recorded activate_route as
+// the terminal transition to active. Restore accepts only that historical
+// receipt shape and timestamp; every post-cutover lifecycle requires review.
+const strideWorkforceReviewGateCutoverUnix int64 = 1786127821
+
 type STRIDEWorkforceSeat struct {
 	ID                 string
 	OrgIdentity        string
@@ -943,7 +949,11 @@ func replayValidSTRIDEWorkforceLifecycle(seats map[string]STRIDEWorkforceSeat, r
 				case "profile":
 					stage = "route"
 				case "route":
-					stage, status = "review", "review_required"
+					if legacySTRIDEWorkforceRouteActivation(receipt) {
+						stage, status, accessRevoked = "complete", "active", false
+					} else {
+						stage, status = "review", "review_required"
+					}
 				}
 				if receipt.After != status {
 					return false
@@ -986,6 +996,10 @@ func replayValidSTRIDEWorkforceLifecycle(seats map[string]STRIDEWorkforceSeat, r
 		}
 	}
 	return true
+}
+
+func legacySTRIDEWorkforceRouteActivation(receipt STRIDEWorkforceReceipt) bool {
+	return receipt.Action == "activate_route" && receipt.Before == "trial_active" && receipt.After == "active" && receipt.At.Unix() < strideWorkforceReviewGateCutoverUnix
 }
 
 func strideWorkforceActionOrder(action string) int {
