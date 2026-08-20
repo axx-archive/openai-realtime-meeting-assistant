@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -466,6 +467,34 @@ func TestBackupIncludeBlobsDefaultsOn(t *testing.T) {
 	}
 }
 
+func TestBackupTarGzStreamsLargeFileWithBoundedAllocation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meeting-memory.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const fileSize = 128 << 20
+	if err := file.Truncate(fileSize); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	if err := writeDataDirTarGz(io.Discard, dir, true); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated >= 16<<20 {
+		t.Fatalf("streaming %d-byte file allocated %d bytes", fileSize, allocated)
+	}
+}
+
 // TestDeriveBackupKeyAcceptsRawBase64 pins the server contract the restore doc
 // must mirror: a 32-byte key supplied as UNPADDED base64 is used as raw key
 // material, not SHA-256'd as a passphrase.
@@ -482,9 +511,9 @@ func TestDeriveBackupKeyAcceptsRawBase64(t *testing.T) {
 }
 
 // TestBackupTarGzToleratesVanishingFile pins the writeDataDirTarGz fix: a file
-// that vanishes between os.ReadFile and d.Info() (a memory-store compaction temp
-// renamed away mid-walk) is skipped, not fatal — one racing temp must never fail
-// the whole nightly snapshot.
+// that vanishes before it can be opened (a memory-store compaction temp renamed
+// away mid-walk) is skipped, not fatal — one racing temp must never fail the
+// whole nightly snapshot.
 func TestBackupTarGzToleratesVanishingFile(t *testing.T) {
 	// Premise: a WalkDir entry's Info() lazily lstats, so a file removed after it
 	// is listed yields an os.IsNotExist error — exactly the race the skip handles.

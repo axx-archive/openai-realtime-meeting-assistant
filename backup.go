@@ -13,8 +13,9 @@ package main
 // offsite via a pure-stdlib SigV4 signer (no new module deps).
 //
 // Consistency model: the target files are append-mostly JSON/JSONL. Each file is
-// read once, whole (os.ReadFile), and its byte count becomes the tar header size,
-// so a concurrent append never produces a size-mismatched (corrupt) tar entry.
+// opened and statted once, and exactly that observed byte count is streamed into
+// the tar entry, so a concurrent append never produces a size-mismatched
+// (corrupt) tar entry or forces an entire multi-gigabyte JSONL into memory.
 // No app lock is held. Worst case for a file mid-append is that the snapshot
 // captures the file as of its read instant and misses that same tick's tail —
 // i.e. the theoretical maximum loss on restore is the current day's tail, versus
@@ -414,8 +415,8 @@ func createBackupSnapshot(cfg backupConfig, now time.Time) (backupOutcome, error
 // regular file to w, with paths relative to dataDir. The backups/ subdir is
 // always excluded (a snapshot never contains prior snapshots — that would make
 // the ring grow without bound); blobs/ is excluded unless includeBlobs. Each
-// file is read whole so its declared tar size always matches its bytes, which
-// keeps a concurrent append from corrupting the archive.
+// open file is streamed only through the size captured by Stat, which keeps a
+// concurrent append out of the archive without allocating the file's full size.
 func writeDataDirTarGz(w io.Writer, dataDir string, includeBlobs bool) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
@@ -457,38 +458,40 @@ func writeDataDirTarGz(w io.Writer, dataDir string, includeBlobs bool) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			if os.IsNotExist(readErr) {
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			if os.IsNotExist(openErr) {
 				return nil
 			}
-			return readErr
+			return openErr
 		}
-		info, infoErr := d.Info()
+		info, infoErr := file.Stat()
 		if infoErr != nil {
-			// Same vanished-file race as the ReadFile above: d.Info() lazily lstats,
-			// so a compaction temp (e.g. .meeting-memory-*.jsonl) renamed away between
-			// the read and here yields IsNotExist. info feeds only cosmetic Mode/ModTime
-			// header fields for bytes already read, so skip the file rather than failing
-			// the whole nightly snapshot.
+			file.Close()
 			if os.IsNotExist(infoErr) {
 				return nil
 			}
 			return infoErr
 		}
+		if !info.Mode().IsRegular() {
+			file.Close()
+			return nil
+		}
 		hdr := &tar.Header{
 			Name:    filepath.ToSlash(rel),
 			Mode:    int64(info.Mode().Perm()),
-			Size:    int64(len(data)),
+			Size:    info.Size(),
 			ModTime: info.ModTime(),
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
+			file.Close()
 			return err
 		}
-		if _, err := tw.Write(data); err != nil {
+		if _, err := io.CopyN(tw, file, info.Size()); err != nil {
+			file.Close()
 			return err
 		}
-		return nil
+		return file.Close()
 	})
 	if walkErr != nil {
 		tw.Close()
