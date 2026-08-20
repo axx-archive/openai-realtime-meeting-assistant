@@ -150,15 +150,29 @@ const (
 // artifact when an approval admin approves it. Log-and-continue: the stamp
 // unlocks sharing, it never blocks the approval itself.
 func (app *kanbanBoardApp) stampArtifactHumanApproval(artifactID string, approver string) {
-	if app == nil || app.memory == nil {
-		return
-	}
-	if _, _, err := app.memory.updateOSArtifactMetadata(artifactID, map[string]string{
-		artifactHumanApprovedAtKey: time.Now().UTC().Format(time.RFC3339Nano),
-		artifactHumanApprovedByKey: canonicalRoomActorName(approver),
-	}); err != nil {
+	if err := app.stampArtifactHumanApprovalOnce(artifactID, approver, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		log.Errorf("Failed to stamp human approval on artifact %s: %v", artifactID, err)
 	}
+}
+
+// stampArtifactHumanApprovalOnce is the checkpoint-finalizer form: the
+// caller supplies the receipt timestamp, retries preserve the first stamp,
+// and persistence failures remain visible to the durable outbox.
+func (app *kanbanBoardApp) stampArtifactHumanApprovalOnce(artifactID string, approver string, approvedAt string) error {
+	if app == nil || app.memory == nil {
+		return fmt.Errorf("artifact memory is unavailable")
+	}
+	if current, ok := app.osArtifactByID(artifactID); ok && strings.TrimSpace(current.Metadata[artifactHumanApprovedAtKey]) != "" {
+		return nil
+	}
+	approvedAt = firstNonEmptyString(strings.TrimSpace(approvedAt), time.Now().UTC().Format(time.RFC3339Nano))
+	if _, _, err := app.memory.updateOSArtifactMetadata(artifactID, map[string]string{
+		artifactHumanApprovedAtKey: approvedAt,
+		artifactHumanApprovedByKey: canonicalRoomActorName(approver),
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // artifactShareEligible is the server-side status gate (spec item 14:

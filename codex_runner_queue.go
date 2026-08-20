@@ -1670,6 +1670,11 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// resumeApprovedGoalWithChoice — dropping it turns every negative
 		// option (hold, send back) into a silent proceed.
 		Choice string `json:"choice"`
+		// CheckpointID + CheckpointOptionID are the opaque server projection
+		// carried by a public work card. When present they replace free-form
+		// Choice: the persisted goal plan resolves the exact authored action.
+		CheckpointID       string `json:"checkpointId"`
+		CheckpointOptionID string `json:"checkpointOptionId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -1681,15 +1686,27 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "artifact id and action are required")
 		return
 	}
+	hasCheckpointBinding := strings.TrimSpace(payload.CheckpointID) != "" || strings.TrimSpace(payload.CheckpointOptionID) != ""
+	if hasCheckpointBinding && (action != "approve" || strings.TrimSpace(payload.CheckpointID) == "" || strings.TrimSpace(payload.CheckpointOptionID) == "") {
+		writeAuthError(w, http.StatusBadRequest, "checkpoint id and option id are required for a checkpoint choice")
+		return
+	}
 	requiredActions := artifactRunnerRequiredACLActions(action)
 	artifact, exists := authorizedArtifactForActions(r.Context(), user, artifactID, requiredActions...)
 	if !exists {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
+	if hasCheckpointBinding && goalCheckpointActionAfterAuthorizationProbe != nil {
+		goalCheckpointActionAfterAuthorizationProbe()
+	}
 
 	switch action {
 	case "approve":
+		if hasCheckpointBinding && !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "checkpoint choices are admin-only")
+			return
+		}
 		// External-write approval stays admin-gated, now with the card-069
 		// heavy-lane consensus door: the admin approves alone, and two distinct
 		// non-admin members together carry the same weight. A non-admin approve
@@ -1731,14 +1748,22 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			// the goal parked and a revise-action choice re-queues its target —
 			// resumeProcessCheckpoint's teeth are only real if the choice
 			// survives the HTTP door.
-			if err := kanbanApp.resumeApprovedGoalWithChoice(artifactID, user.Name, payload.Choice); err != nil {
+			replayed := false
+			receiptBound := hasCheckpointBinding
+			var resumeErr error
+			if hasCheckpointBinding {
+				replayed, resumeErr = kanbanApp.resumeApprovedGoalWithCheckpointOptionAuthorized(r.Context(), user, artifact, user.Name, payload.CheckpointID, payload.CheckpointOptionID)
+			} else {
+				replayed, receiptBound, resumeErr = kanbanApp.resumeApprovedGoalWithChoiceAuthorized(r.Context(), user, artifact, user.Name, payload.Choice)
+			}
+			if resumeErr != nil {
 				if endorsedToExecution {
 					// The consensus was consumed but the execution failed:
 					// un-consume it so a retry by either endorser can complete
 					// the launch (resolveCodexProposal's revert discipline).
 					kanbanApp.clearApprovalConsensusStamp(artifactID)
 				}
-				writeAuthError(w, http.StatusBadRequest, err.Error())
+				writeAuthError(w, http.StatusBadRequest, resumeErr.Error())
 				return
 			}
 			updated, _ := kanbanApp.osArtifactByID(artifactID)
@@ -1747,22 +1772,25 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			// budget-spent fallback, where the founder asked for revision and
 			// did NOT approve. Neither earns the durable approval stamp (it
 			// unlocks sharing) or the "approved · sent" fan-out.
-			if plan, ok := decodeGoalPlan(updated.Metadata["goalPlan"]); !ok || plan.Checkpoint == nil ||
-				(!plan.Checkpoint.Held && plan.Checkpoint.LastAction != processCheckpointActionRevise) {
-				// Durable human-approval record (share_links.go): reviewGate/status
-				// keep moving as the resumed work runs, so the share gate keys on
-				// this stamp instead.
-				kanbanApp.stampArtifactHumanApproval(artifactID, user.Name)
-				// Round-trip loop: fan the approval to the push channel + the
-				// requester so their origin surface flips to "approved · sent".
-				kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
-				updated, _ = kanbanApp.osArtifactByID(artifactID)
+			if !receiptBound && !replayed {
+				if plan, ok := decodeGoalPlan(updated.Metadata["goalPlan"]); !ok || plan.Checkpoint == nil ||
+					(!plan.Checkpoint.Held && plan.Checkpoint.LastAction != processCheckpointActionRevise) {
+					// Durable human-approval record (share_links.go): reviewGate/status
+					// keep moving as the resumed work runs, so the share gate keys on
+					// this stamp instead.
+					kanbanApp.stampArtifactHumanApproval(artifactID, user.Name)
+					// Round-trip loop: fan the approval to the push channel + the
+					// requester so their origin surface flips to "approved · sent".
+					kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
+					updated, _ = kanbanApp.osArtifactByID(artifactID)
+				}
 			}
 			actions := kanbanApp.osAssistantActions(updated.Metadata["threadQuery"], updated.Metadata["mode"], updated)
 			writeAuthJSON(w, http.StatusAccepted, map[string]any{
 				"ok":       true,
 				"artifact": updated,
 				"actions":  actions,
+				"replayed": replayed,
 			})
 			return
 		}

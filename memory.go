@@ -336,8 +336,10 @@ func artifactCapabilityMetadataKey(key string) bool {
 }
 
 func invalidateArtifactApprovalForRevision(entry *meetingMemoryEntry, explicitStatus string, explicitApprovedAt string) {
-	delete(entry.Metadata, artifactHumanApprovedAtKey)
-	delete(entry.Metadata, artifactHumanApprovedByKey)
+	if strings.TrimSpace(explicitApprovedAt) == "" {
+		delete(entry.Metadata, artifactHumanApprovedAtKey)
+		delete(entry.Metadata, artifactHumanApprovedByKey)
+	}
 	if artifactStatus(*entry) == artifactStatusApproved && (explicitStatus != artifactStatusApproved || strings.TrimSpace(explicitApprovedAt) == "") {
 		entry.Metadata["status"] = artifactStatusComplete
 	}

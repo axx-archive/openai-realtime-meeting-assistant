@@ -101,6 +101,8 @@ const (
 	processCheckpointActionProceed = "proceed"
 	processCheckpointActionRevise  = "revise"
 	processCheckpointActionHold    = "hold"
+	processCheckpointMaxOptions    = 3
+	processCheckpointMaxLabelRunes = 160
 )
 
 // ProcessCheckpointOption is one authored choice on a human_checkpoint. Label
@@ -337,10 +339,23 @@ func validateProcessDefinition(def ProcessDefinition) error {
 			if from := strings.TrimSpace(stage.CheckpointSpec.OptionsFrom); from != "" && !earlier[from] {
 				return fmt.Errorf("process %q checkpoint stage %q optionsFrom %q does not name an earlier stage", id, stageID, from)
 			}
+			if len(stage.CheckpointSpec.Options) > processCheckpointMaxOptions {
+				return fmt.Errorf("process %q checkpoint stage %q has %d options; maximum is %d", id, stageID, len(stage.CheckpointSpec.Options), processCheckpointMaxOptions)
+			}
+			seenOptionLabels := map[string]bool{}
 			for _, option := range stage.CheckpointSpec.Options {
-				if strings.TrimSpace(option.Label) == "" {
+				label := strings.TrimSpace(option.Label)
+				if label == "" {
 					return fmt.Errorf("process %q checkpoint stage %q has an option with no label", id, stageID)
 				}
+				if len([]rune(label)) > processCheckpointMaxLabelRunes {
+					return fmt.Errorf("process %q checkpoint stage %q option label exceeds %d characters", id, stageID, processCheckpointMaxLabelRunes)
+				}
+				foldedLabel := strings.ToLower(label)
+				if seenOptionLabels[foldedLabel] {
+					return fmt.Errorf("process %q checkpoint stage %q has duplicate option %q", id, stageID, option.Label)
+				}
+				seenOptionLabels[foldedLabel] = true
 				switch action := strings.TrimSpace(option.Action); action {
 				case "", processCheckpointActionProceed, processCheckpointActionHold:
 					if strings.TrimSpace(option.Target) != "" {
@@ -531,9 +546,21 @@ func decodeCheckpointOptionsArray(candidate string) []string {
 	if err := json.Unmarshal([]byte(candidate), &options); err != nil {
 		return nil
 	}
+	if len(options) > processCheckpointMaxOptions {
+		return nil
+	}
 	cleaned := make([]string, 0, len(options))
+	seen := map[string]bool{}
 	for _, option := range options {
 		if option = strings.TrimSpace(option); option != "" {
+			if len([]rune(option)) > processCheckpointMaxLabelRunes {
+				return nil
+			}
+			folded := strings.ToLower(option)
+			if seen[folded] {
+				return nil
+			}
+			seen[folded] = true
 			cleaned = append(cleaned, option)
 		}
 	}

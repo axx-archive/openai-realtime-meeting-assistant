@@ -160,6 +160,20 @@ func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 					{Label: "hold it", Action: processCheckpointActionHold},
 				}}}
 		}), ""},
+		{"checkpoint options exceed the public bound", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{
+					{Label: "one"}, {Label: "two"}, {Label: "three"}, {Label: "four"},
+				}}}
+		}), "maximum is 3"},
+		{"checkpoint option labels collide after normalization", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "Ship"}, {Label: " ship "}}}}
+		}), "duplicate option"},
+		{"checkpoint option label cannot be truncated", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: strings.Repeat("x", processCheckpointMaxLabelRunes+1)}}}}
+		}), "exceeds 160 characters"},
 		{"checkpoint option without a label", mutate(func(d *ProcessDefinition) {
 			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
 				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "  "}}}}
@@ -308,6 +322,9 @@ func TestProcessCheckpointOptionsFromText(t *testing.T) {
 		{"garbage degrades to nil", "no options here", nil},
 		{"malformed json degrades to nil", `["unterminated`, nil},
 		{"empty strings dropped", `[" ", "keep"]`, []string{"keep"}},
+		{"more than the public bound rejected", `["one", "two", "three", "four"]`, nil},
+		{"normalized duplicate rejected", `["Ship", " ship "]`, nil},
+		{"oversized label rejected instead of truncated", fmt.Sprintf(`["%s"]`, strings.Repeat("x", processCheckpointMaxLabelRunes+1)), nil},
 	}
 	for _, tc := range cases {
 		got := processCheckpointOptionsFromText(tc.text)

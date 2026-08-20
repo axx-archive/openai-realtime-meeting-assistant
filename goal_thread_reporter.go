@@ -7,6 +7,7 @@ package main
 // thread sees the run unfold without polling the artifact library.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -56,23 +57,43 @@ func (app *kanbanBoardApp) goalOriginChatThread(parent meetingMemoryEntry) (scou
 // thread. Silent skip on any guard failure — the creator notification remains
 // the fallback signal.
 func (app *kanbanBoardApp) postGoalOriginMessage(parentID string, message scoutChatMessageRecord) {
+	messageID := fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+	if err := app.postGoalOriginMessageOnce(parentID, messageID, message); err != nil {
+		log.Errorf("Failed to post goal %s message: %v", parentID, err)
+	}
+}
+
+// postGoalOriginMessageOnce persists a caller-bound message ID and treats an
+// existing ID as the acknowledged effect. Checkpoint finalization uses it so
+// a crash after chat persistence cannot append a duplicate manifest on boot.
+func (app *kanbanBoardApp) postGoalOriginMessageOnce(parentID, messageID string, message scoutChatMessageRecord) error {
 	if app == nil || app.memory == nil {
-		return
+		return fmt.Errorf("goal origin is unavailable")
 	}
 	parent, ok := app.osArtifactByID(strings.TrimSpace(parentID))
 	if !ok {
-		return
+		return fmt.Errorf("goal artifact not found")
 	}
 	thread, ok := app.goalOriginChatThread(parent)
 	if !ok {
-		return
+		return nil
 	}
-	message.ID = fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano())
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return fmt.Errorf("goal message id is required")
+	}
+	for _, existing := range thread.Messages {
+		if existing.ID == messageID {
+			return nil
+		}
+	}
+	message.ID = messageID
 	message.Role = firstNonEmptyString(message.Role, "scout")
 	message.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
-		log.Errorf("Failed to post goal %s message to chat thread %s: %v", parentID, thread.ID, err)
+		return err
 	}
+	return nil
 }
 
 // postGoalStageMessage narrates one completed stage deliverable into the
@@ -112,6 +133,43 @@ func goalStageMessageLine(title string, note string, revisions int) string {
 	return line
 }
 
+func scoutChatCheckpointRefForArtifact(artifact meetingMemoryEntry) *scoutChatWorkCheckpointRef {
+	if strings.TrimSpace(artifact.Metadata["mode"]) != "goal" ||
+		strings.ToLower(strings.TrimSpace(firstNonEmptyString(artifact.Metadata["threadStatus"], artifact.Metadata["status"]))) != codexJobStatusApprovalRequired {
+		return nil
+	}
+	checkpoint := goalProcessCheckpoint{}
+	if err := json.Unmarshal([]byte(artifact.Metadata["checkpoint"]), &checkpoint); err != nil ||
+		strings.TrimSpace(checkpoint.ResolvedAt) != "" || strings.TrimSpace(checkpoint.Question) == "" {
+		return nil
+	}
+	checkpointID := goalCheckpointID(artifact.ID, &checkpoint)
+	if len(checkpoint.Options) > processCheckpointMaxOptions {
+		return nil
+	}
+	ref := &scoutChatWorkCheckpointRef{
+		ID: checkpointID, StageID: strings.TrimSpace(checkpoint.StageID), Question: trimForStorage(strings.TrimSpace(checkpoint.Question), 480),
+	}
+	seenLabels := map[string]bool{}
+	for index, option := range checkpoint.Options {
+		label := strings.TrimSpace(option.Label)
+		if label == "" {
+			continue
+		}
+		// Labels are authority-bearing human choices. Never truncate them into
+		// an ambiguous display value, and fail closed on legacy/corrupt records
+		// that collide after the same normalization used by choice matching.
+		if len([]rune(label)) > processCheckpointMaxLabelRunes || seenLabels[strings.ToLower(label)] {
+			return nil
+		}
+		seenLabels[strings.ToLower(label)] = true
+		ref.Options = append(ref.Options, scoutChatWorkCheckpointOptionRef{
+			ID: goalCheckpointOptionID(checkpointID, option, index), Label: label, Action: option.action(),
+		})
+	}
+	return ref
+}
+
 // postGoalCheckpointMessage posts a checkpoint park into the origin thread as
 // the call-to-action: a kind:"thread" ref to the GOAL PARENT artifact, so the
 // client's latest-wins rule mounts the full goalcard (choice card included) at
@@ -126,16 +184,26 @@ func (app *kanbanBoardApp) postGoalCheckpointMessage(parentID string, question s
 	if !ok {
 		return
 	}
+	thread, hasOrigin := app.goalOriginChatThread(parent)
+	threadID := strings.TrimSpace(parent.Metadata["threadId"])
+	if hasOrigin && threadID != "" && scoutChatThreadHasAgentRef(thread, threadID) {
+		// Public work already owns one root channel card. Project the checkpoint
+		// onto that durable card instead of appending another card whose choices
+		// can drift away from the run it resumes.
+		app.updateScoutChatThreadRefs(threadID, codexJobStatusApprovalRequired, parent.ID)
+		return
+	}
 	app.postGoalOriginMessage(parentID, scoutChatMessageRecord{
 		Kind: "thread",
 		Role: "scout",
 		Text: "parked — " + compactAssistantLine(question),
 		Thread: &scoutChatThreadRef{
-			ID:         strings.TrimSpace(parent.Metadata["threadId"]),
+			ID:         threadID,
 			Mode:       "goal",
 			Query:      firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadQuery"]), strings.TrimSpace(parent.Metadata["objective"])),
 			Status:     codexJobStatusApprovalRequired,
 			ArtifactID: parent.ID,
+			Checkpoint: scoutChatCheckpointRefForArtifact(parent),
 		},
 	})
 }

@@ -129,7 +129,9 @@ type goalPlan struct {
 	// of a process-driven goal: the goal parks approval_required-style with
 	// this record mirrored into metadata["checkpoint"], and resumes through
 	// the resumeApprovedGoal seam carrying the human's {choice}.
-	Checkpoint *goalProcessCheckpoint `json:"checkpoint,omitempty"`
+	Checkpoint         *goalProcessCheckpoint            `json:"checkpoint,omitempty"`
+	CheckpointSequence int                               `json:"checkpointSequence,omitempty"`
+	CheckpointReceipts []goalCheckpointResolutionReceipt `json:"checkpointReceipts,omitempty"`
 }
 
 func goalPlanRequestedBy(plan goalPlan) string {
@@ -148,6 +150,7 @@ func goalPlanRequestedBy(plan goalPlan) string {
 // empty), the card renders the held badge, and only a subsequent
 // proceed-action choice resumes it.
 type goalProcessCheckpoint struct {
+	ID         string                 `json:"id,omitempty"`
 	StageID    string                 `json:"stageId"`
 	Question   string                 `json:"question"`
 	Options    []goalCheckpointOption `json:"options,omitempty"`
@@ -168,10 +171,61 @@ type goalProcessCheckpoint struct {
 // snapshotted at park time so a re-registered definition never rewires a
 // parked goal). Action empty means proceed.
 type goalCheckpointOption struct {
+	ID     string `json:"id,omitempty"`
 	Label  string `json:"label"`
 	Action string `json:"action,omitempty"`
 	Target string `json:"target,omitempty"`
 }
+
+// goalCheckpointResolutionReceipt makes a checkpoint-option tap replay-safe.
+// The server-generated checkpoint/option ids bind the effect to one exact
+// parked goal and one exact authored action; a lost HTTP response can retry
+// that tuple without running the goal twice.
+type goalCheckpointResolutionReceipt struct {
+	CheckpointID       string `json:"checkpointId"`
+	OptionID           string `json:"optionId"`
+	StageID            string `json:"stageId"`
+	Action             string `json:"action"`
+	Choice             string `json:"choice"`
+	ResolvedBy         string `json:"resolvedBy"`
+	DecisionArtifactID string `json:"decisionArtifactId"`
+	HumanApproval      bool   `json:"humanApproval,omitempty"`
+	EffectiveOutcome   string `json:"effectiveOutcome,omitempty"`
+	DriveNeeded        bool   `json:"driveNeeded,omitempty"`
+	DriveCompletedAt   string `json:"driveCompletedAt,omitempty"`
+	State              string `json:"state"`
+	ClaimedAt          string `json:"claimedAt"`
+	CommittedAt        string `json:"committedAt,omitempty"`
+	FinalizingAt       string `json:"finalizingAt,omitempty"`
+	FinalizedAt        string `json:"finalizedAt,omitempty"`
+}
+
+const (
+	goalCheckpointResolutionClaimed    = "claimed"
+	goalCheckpointResolutionCommitted  = "committed"
+	goalCheckpointResolutionFinalizing = "finalizing"
+	goalCheckpointResolutionFinalized  = "finalized"
+)
+
+type goalCheckpointResolutionAuthorization struct {
+	Context         context.Context
+	User            *userAccount
+	Snapshot        meetingMemoryEntry
+	RequiredActions []ACLAction
+	HumanApproval   bool
+}
+
+var (
+	goalCheckpointResolutionAfterClaimProbe     func(string) error
+	goalCheckpointResolutionAfterCommitProbe    func(string) error
+	goalCheckpointTransitionPersistProbe        func(string) error
+	goalCheckpointProjectionPersistProbe        func(meetingMemoryEntry) error
+	goalCheckpointResolutionRecoveryDoneProbe   func(string)
+	goalCheckpointResolutionAfterEffectsProbe   func(string) error
+	goalCheckpointActionAfterAuthorizationProbe func()
+	goalCheckpointAfterTransitionPersistProbe   func(string) error
+	goalCheckpointAfterDriveProbe               func(string) error
+)
 
 // UnmarshalJSON accepts the pre-teeth persisted shape — a plain option string
 // — alongside the object form, so a goal parked before the upgrade still
@@ -201,6 +255,51 @@ func (o goalCheckpointOption) action() string {
 		return processCheckpointActionHold
 	}
 	return processCheckpointActionProceed
+}
+
+func goalCheckpointID(parentID string, checkpoint *goalProcessCheckpoint) string {
+	if checkpoint == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(checkpoint.ID); id != "" {
+		return id
+	}
+	raw, _ := json.Marshal(struct {
+		StageID  string                 `json:"stageId"`
+		Question string                 `json:"question"`
+		Options  []goalCheckpointOption `json:"options"`
+	}{checkpoint.StageID, checkpoint.Question, checkpoint.Options})
+	return "goal-checkpoint-" + sha256Hex([]byte(strings.TrimSpace(parentID) + "\x00" + string(raw)))[:24]
+}
+
+func goalCheckpointOptionID(checkpointID string, option goalCheckpointOption, index int) string {
+	if id := strings.TrimSpace(option.ID); id != "" {
+		return id
+	}
+	digest := sha256Hex([]byte(strings.TrimSpace(checkpointID) + "\x00" + strconv.Itoa(index) + "\x00" + strings.TrimSpace(option.Label) + "\x00" + option.action() + "\x00" + strings.TrimSpace(option.Target)))
+	return "checkpoint-option-" + digest[:24]
+}
+
+// goalCheckpointFreeformOptionID gives a legacy optionless checkpoint request
+// the same durable identity as an authored option without exposing the text in
+// that identity. Equivalent casing/spacing maps to one request identity; the
+// checkpoint occurrence keeps the same words at a later park distinct.
+func goalCheckpointFreeformOptionID(checkpointID, choice string) string {
+	canonicalChoice := strings.ToLower(strings.Join(strings.Fields(choice), " "))
+	return "checkpoint-option-" + sha256Hex([]byte(strings.TrimSpace(checkpointID) + "\x00freeform\x00" + canonicalChoice))[:24]
+}
+
+func validGoalCheckpointChoiceID(value, prefix string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != len(prefix)+24 || !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	for _, r := range value[len(prefix):] {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 type goalSubtask struct {
@@ -423,7 +522,12 @@ type goalEngine struct {
 	expectedPersistBody      string
 	persistMetadata          map[string]string
 	conditionalPersistFailed bool
-	lastPersistedArtifact    meetingMemoryEntry
+	// checkpointProjectionFailed records that the durable approval transition
+	// landed but its channel-card projection did not. parkProcessCheckpoint
+	// must not immediately bypass that simulated crash through its legacy
+	// append/update seam; the boot reconciler owns the repair.
+	checkpointProjectionFailed bool
+	lastPersistedArtifact      meetingMemoryEntry
 }
 
 var goalFeedbackAfterPersistProbe func()
@@ -2276,7 +2380,13 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	if plan.Checkpoint != nil && plan.Checkpoint.StageID == st.ID {
 		lastAction = plan.Checkpoint.LastAction
 	}
+	plan.CheckpointSequence++
+	checkpointID := "goal-checkpoint-" + sha256Hex([]byte(strings.TrimSpace(parentID) + "\x00" + st.ID + "\x00" + strconv.Itoa(plan.CheckpointSequence)))[:24]
+	for index := range options {
+		options[index].ID = goalCheckpointOptionID(checkpointID, options[index], index)
+	}
 	plan.Checkpoint = &goalProcessCheckpoint{
+		ID:         checkpointID,
 		StageID:    st.ID,
 		Question:   question,
 		Options:    options,
@@ -2291,7 +2401,9 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	}
 	// The park lands in the origin thread as the call-to-action (P0-3): a goal
 	// ref message the client mounts as the full goalcard, choice card included.
-	e.app.postGoalCheckpointMessage(parentID, plan.Checkpoint.Question)
+	if !e.checkpointProjectionFailed {
+		e.app.postGoalCheckpointMessage(parentID, plan.Checkpoint.Question)
+	}
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is waiting on a human checkpoint: "+plan.Checkpoint.Question, artifact))
 }
 
@@ -2306,7 +2418,7 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 // on a spent budget falls back to proceed with the send-back DISCLOSED. hold
 // keeps the goal parked with the choice on the record; only a subsequent
 // proceed-action choice resumes it. The caller holds the parent lock.
-func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, approvedBy string, choice string) error {
+func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, approvedBy string, choice string, receiptIndex int) error {
 	checkpoint := plan.Checkpoint
 	choice = strings.TrimSpace(choice)
 	option, matched := checkpointOptionForChoice(checkpoint.Options, choice)
@@ -2322,6 +2434,11 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 	if matched {
 		action = option.action()
 	}
+	if receiptIndex >= 0 {
+		if receiptIndex >= len(plan.CheckpointReceipts) || plan.CheckpointReceipts[receiptIndex].State != goalCheckpointResolutionClaimed {
+			return fmt.Errorf("checkpoint resolution claim is unavailable")
+		}
+	}
 	// A held goal resumes ONLY through an explicit proceed-action choice — the
 	// plain approve button (empty choice) and another negative option keep it
 	// parked, honestly refused rather than silently resumed.
@@ -2329,9 +2446,25 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 		return fmt.Errorf("the goal is held at %q (by %s) — resuming requires an explicit proceed choice", checkpoint.StageID, firstNonEmptyString(checkpoint.HeldBy, "admin"))
 	}
 	checkpoint.LastAction = action
+	commitReceipt := func(outcome string, driveNeeded bool) {
+		if receiptIndex < 0 {
+			return
+		}
+		receipt := &plan.CheckpointReceipts[receiptIndex]
+		receipt.State = goalCheckpointResolutionCommitted
+		receipt.CommittedAt = e.now().UTC().Format(time.RFC3339Nano)
+		receipt.EffectiveOutcome = outcome
+		receipt.DriveNeeded = driveNeeded
+		if !driveNeeded {
+			receipt.DriveCompletedAt = receipt.CommittedAt
+		}
+	}
+	driveNeeded := false
+	var transitionErr error
 	switch action {
 	case processCheckpointActionHold:
-		return e.holdProcessCheckpoint(plan, parentID, resolvedBy, firstNonEmptyString(choice, option.Label))
+		commitReceipt(processCheckpointActionHold, false)
+		transitionErr = e.holdProcessCheckpoint(plan, parentID, resolvedBy, firstNonEmptyString(choice, option.Label))
 	case processCheckpointActionRevise:
 		target := plan.subtaskByID(option.Target)
 		disclosure := ""
@@ -2345,11 +2478,46 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 			// again; it proceeds with the send-back disclosed on the record.
 			disclosure = fmt.Sprintf("the send-back budget is spent (%d rounds) — proceeded with the request disclosed", st.Revisions)
 		default:
-			return e.reviseProcessCheckpoint(plan, parentID, st, target, resolvedBy, choice)
+			commitReceipt(processCheckpointActionRevise, true)
+			driveNeeded = true
+			transitionErr = e.reviseProcessCheckpoint(plan, parentID, st, target, resolvedBy, choice)
 		}
-		return e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, disclosure)
+		if disclosure != "" {
+			commitReceipt("proceed_unapproved", true)
+			driveNeeded = true
+			transitionErr = e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, disclosure)
+		}
+	default:
+		commitReceipt(processCheckpointActionProceed, true)
+		driveNeeded = true
+		transitionErr = e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, "")
 	}
-	return e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, "")
+	if transitionErr != nil {
+		return transitionErr
+	}
+	if !driveNeeded {
+		return nil
+	}
+	if goalCheckpointAfterTransitionPersistProbe != nil {
+		if err := goalCheckpointAfterTransitionPersistProbe(action); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+	e.drive(ctx, plan, parentID)
+	if goalCheckpointAfterDriveProbe != nil {
+		if err := goalCheckpointAfterDriveProbe(action); err != nil {
+			return err
+		}
+	}
+	if receiptIndex >= 0 {
+		plan.CheckpointReceipts[receiptIndex].DriveCompletedAt = e.now().UTC().Format(time.RFC3339Nano)
+		if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			return fmt.Errorf("checkpoint drive completion was not saved")
+		}
+	}
+	return nil
 }
 
 // proceedProcessCheckpoint is the proceed action: the checkpoint subtask
@@ -2385,7 +2553,19 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 	if plan.PackageID != "" {
 		metadata["packageId"] = plan.PackageID
 	}
-	artifact, _, err := e.app.createOSArtifactWithMetadata("workflow", "Checkpoint: "+checkpoint.Question, strings.Join(bodyLines, "\n"), resolvedBy, metadata)
+	decisionArtifactID := ""
+	for _, receipt := range plan.CheckpointReceipts {
+		if receipt.CheckpointID == goalCheckpointID(parentID, checkpoint) && receipt.State == goalCheckpointResolutionCommitted {
+			decisionArtifactID = receipt.DecisionArtifactID
+		}
+	}
+	var artifact meetingMemoryEntry
+	var err error
+	if decisionArtifactID != "" {
+		artifact, _, _, err = e.app.createOSArtifactWithIDAndMetadataAcknowledged(decisionArtifactID, "workflow", "Checkpoint: "+checkpoint.Question, strings.Join(bodyLines, "\n"), resolvedBy, metadata)
+	} else {
+		artifact, _, err = e.app.createOSArtifactWithMetadata("workflow", "Checkpoint: "+checkpoint.Question, strings.Join(bodyLines, "\n"), resolvedBy, metadata)
+	}
 	if err != nil || strings.TrimSpace(artifact.ID) == "" {
 		return fmt.Errorf("checkpoint decision artifact was not saved")
 	}
@@ -2396,19 +2576,14 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 	checkpoint.ResolvedBy = resolvedBy
 	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
 	plan.State = goalStateExecute
-	e.persist(plan, parentID, "")
-	if e.conditionalPersistFailed {
+	if goalCheckpointTransitionPersistProbe != nil {
+		if err := goalCheckpointTransitionPersistProbe(processCheckpointActionProceed); err != nil {
+			return err
+		}
+	}
+	if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
 		return fmt.Errorf("goal artifact not found")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
-	defer cancel()
-	e.drive(ctx, plan, parentID)
-	// The ship moment (sheet s05): a packaging_studio ship approval that
-	// proceeds hands over the goods — post-drive, so the manifest reads the
-	// composed report. A disclosed budget-spent send-back fallback proceeds
-	// WITHOUT the founder's approval (the HTTP door's rule), so its
-	// deliverables never earn share eligibility.
-	e.app.recordStudioShipResolution(plan, parentID, st.ID, manifestStatusShipped, resolvedBy, disclosure == "")
 	return nil
 }
 
@@ -2420,11 +2595,7 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 // cascade-invalidated so it re-runs against the revised work, and the engine
 // re-drives from execute.
 func (e *goalEngine) reviseProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) error {
-	e.applyProcessCheckpointSendBack(plan, parentID, st, target, resolvedBy, choice)
-	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
-	defer cancel()
-	e.drive(ctx, plan, parentID)
-	return nil
+	return e.applyProcessCheckpointSendBack(plan, parentID, st, target, resolvedBy, choice)
 }
 
 // applyProcessCheckpointSendBack is the send-back MUTATION, persisted but not
@@ -2432,7 +2603,7 @@ func (e *goalEngine) reviseProcessCheckpoint(plan *goalPlan, parentID string, st
 // the Wave 6 feedback door persists here under its lock hold and re-drives
 // async, so a crash or an interleaved resolution can never lose the note.
 // The caller holds the parent lock.
-func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) {
+func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) error {
 	checkpoint := plan.Checkpoint
 	recordedChoice := firstNonEmptyString(choice, "(sent back without notes)")
 	// The checkpoint spends a round and re-arms — readiness keeps it parked
@@ -2461,10 +2632,15 @@ func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID str
 	checkpoint.ResolvedBy = resolvedBy
 	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
 	plan.State = goalStateExecute
-	e.persist(plan, parentID, "")
-	if e.conditionalPersistFailed {
-		return
+	if goalCheckpointTransitionPersistProbe != nil {
+		if err := goalCheckpointTransitionPersistProbe(processCheckpointActionRevise); err != nil {
+			return err
+		}
 	}
+	if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+		return fmt.Errorf("goal artifact not found")
+	}
+	return nil
 }
 
 // resetGoalDependents cascade-invalidates a checkpoint send-back: every
@@ -2530,16 +2706,21 @@ func (e *goalEngine) holdProcessCheckpoint(plan *goalPlan, parentID string, held
 	checkpoint.Held = true
 	checkpoint.HeldBy = heldBy
 	checkpoint.HeldAt = e.now().UTC().Format(time.RFC3339Nano)
+	if goalCheckpointTransitionPersistProbe != nil {
+		if err := goalCheckpointTransitionPersistProbe(processCheckpointActionHold); err != nil {
+			return err
+		}
+	}
 	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
+	if strings.TrimSpace(artifact.ID) == "" || e.conditionalPersistFailed {
+		return fmt.Errorf("goal artifact not found")
+	}
 	if strings.TrimSpace(artifact.ID) == "" {
 		if current, ok := e.app.osArtifactByID(parentID); ok {
 			artifact = current
 		}
 	}
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is held at a checkpoint ("+compactAssistantLine(choice)+") — resume with a proceed choice.", artifact))
-	// A held packaging_studio ship posts the muted manifest variant (sheet
-	// §2c): artifacts stay filed, actions quieted, share links stay dark.
-	e.app.recordStudioShipResolution(plan, parentID, checkpoint.StageID, manifestStatusHeld, heldBy, false)
 	return nil
 }
 
@@ -3454,7 +3635,9 @@ func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorizedOperation(parentSnaps
 				}
 			}
 			checkpoint.LastAction = processCheckpointActionRevise
-			engine.applyProcessCheckpointSendBack(&plan, parentID, st, target, resumedByName, option.Label+" — "+note)
+			if err := engine.applyProcessCheckpointSendBack(&plan, parentID, st, target, resumedByName, option.Label+" — "+note); err != nil {
+				return scoutAgentThread{}, err
+			}
 		} else {
 			// An approval gate without a checkpoint: feedback re-arms the
 			// deliverable stage rather than silently approving the ship.
@@ -3605,52 +3788,440 @@ func (e *goalEngine) feedbackTargetSubtask(plan *goalPlan, deliverableArtifactID
 // admin approve button (choice="") keeps working on both park kinds — a
 // checkpoint approved without an explicit choice resumes with that disclosed.
 func (app *kanbanBoardApp) resumeApprovedGoalWithChoice(parentID string, approvedBy string, choice string) error {
+	_, _, err := app.resumeApprovedGoalBound(parentID, approvedBy, choice, "", "", nil)
+	return err
+}
+
+func (app *kanbanBoardApp) resumeApprovedGoalWithChoiceAuthorized(ctx context.Context, user *userAccount, parentSnapshot meetingMemoryEntry, approvedBy, choice string) (bool, bool, error) {
+	auth := &goalCheckpointResolutionAuthorization{Context: ctx, User: user, Snapshot: parentSnapshot, RequiredActions: artifactRunnerRequiredACLActions("approve"), HumanApproval: true}
+	return app.resumeApprovedGoalBound(parentSnapshot.ID, approvedBy, choice, "", "", auth)
+}
+
+// resumeApprovedGoalWithCheckpointOption is the public-card choice seam. The
+// client supplies only opaque ids projected by the server; the persisted plan
+// resolves the label and mechanical action under the goal lock. replayed=true
+// means this exact checkpoint/option effect already committed.
+func (app *kanbanBoardApp) resumeApprovedGoalWithCheckpointOption(parentID, approvedBy, checkpointID, optionID string) (bool, error) {
+	replayed, _, err := app.resumeApprovedGoalBound(parentID, approvedBy, "", checkpointID, optionID, nil)
+	return replayed, err
+}
+
+func (app *kanbanBoardApp) resumeApprovedGoalWithCheckpointOptionAuthorized(ctx context.Context, user *userAccount, parentSnapshot meetingMemoryEntry, approvedBy, checkpointID, optionID string) (bool, error) {
+	auth := &goalCheckpointResolutionAuthorization{
+		Context: ctx, User: user, Snapshot: parentSnapshot, RequiredActions: artifactRunnerRequiredACLActions("approve"), HumanApproval: true,
+	}
+	replayed, _, err := app.resumeApprovedGoalBound(parentSnapshot.ID, approvedBy, "", checkpointID, optionID, auth)
+	return replayed, err
+}
+
+// resumeApprovedGoalBound returns both replayed and receiptBound. receiptBound
+// tells the HTTP door that the durable checkpoint finalizer owns approval
+// stamps/fanout even on the first attempt; replayed distinguishes an exact
+// retry for the response contract.
+func (app *kanbanBoardApp) resumeApprovedGoalBound(parentID, approvedBy, choice, checkpointID, optionID string, authorization *goalCheckpointResolutionAuthorization) (bool, bool, error) {
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
-		return fmt.Errorf("goal id is required")
+		return false, false, fmt.Errorf("goal id is required")
+	}
+	checkpointID, optionID = strings.TrimSpace(checkpointID), strings.TrimSpace(optionID)
+	boundOption := checkpointID != "" || optionID != ""
+	if boundOption && (!validGoalCheckpointChoiceID(checkpointID, "goal-checkpoint-") || !validGoalCheckpointChoiceID(optionID, "checkpoint-option-")) {
+		return false, false, fmt.Errorf("checkpoint choice binding is invalid")
 	}
 	lock := goalEngineLock(parentID)
 	lock.Lock()
 	defer lock.Unlock()
 
-	parent, ok := app.osArtifactByID(parentID)
+	var parent meetingMemoryEntry
+	var ok bool
+	var expectedHeader *ArtifactAuthorizationHeader
+	if authorization != nil {
+		ctx := authorization.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		header := artifactAuthorizationHeaderFromEntry(authorization.Snapshot)
+		app.memory.mu.Lock()
+		header = app.memory.resolveArtifactHeaderSecurityLocked(header)
+		app.memory.mu.Unlock()
+		parent, ok = app.memory.artifactSnapshotIfHeaderMatches(parentID, header)
+		if ok {
+			for _, action := range authorization.RequiredActions {
+				if !artifactHeaderAuthorized(ctx, authorization.User, action, header) {
+					ok = false
+					break
+				}
+			}
+		}
+		if ok && !app.projectBoundArtifactCurrent(ctx, parent) {
+			ok = false
+		}
+		if ok {
+			expectedHeader = &header
+		}
+	} else {
+		parent, ok = app.osArtifactByID(parentID)
+	}
 	if !ok {
-		return fmt.Errorf("goal artifact not found")
+		return false, false, fmt.Errorf("goal artifact not found")
 	}
 	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
 	if !ok {
-		return fmt.Errorf("goal plan not found")
+		return false, false, fmt.Errorf("goal plan not found")
 	}
-	if plan.State != goalStateApproval {
-		return fmt.Errorf("goal is not waiting on an approval gate")
+	directChoice := !boundOption
+	freeformOption := false
+	if directChoice && plan.Checkpoint != nil && (plan.Checkpoint.ResolvedAt == "" || authorization != nil) {
+		if len(plan.Checkpoint.Options) == 0 {
+			checkpointID = goalCheckpointID(parentID, plan.Checkpoint)
+			optionID = goalCheckpointFreeformOptionID(checkpointID, choice)
+			boundOption = true
+			freeformOption = true
+		} else if strings.TrimSpace(choice) != "" {
+			if selected, matched := checkpointOptionForChoice(plan.Checkpoint.Options, choice); matched {
+				checkpointID = goalCheckpointID(parentID, plan.Checkpoint)
+				for index, option := range plan.Checkpoint.Options {
+					if strings.EqualFold(strings.TrimSpace(option.Label), strings.TrimSpace(selected.Label)) {
+						optionID = goalCheckpointOptionID(checkpointID, option, index)
+						boundOption = true
+						break
+					}
+				}
+			}
+		} else if authorization != nil {
+			// The legacy HTTP approve button sent no choice. Preserve that door
+			// only when the authored checkpoint has one unambiguous proceed path;
+			// never guess among multiple defaults or silently select hold/revise.
+			if plan.Checkpoint.Held {
+				return false, false, fmt.Errorf("the goal is held at %q (by %s) — resuming requires an explicit proceed choice", plan.Checkpoint.StageID, firstNonEmptyString(plan.Checkpoint.HeldBy, "admin"))
+			}
+			proceedIndex := -1
+			for index, option := range plan.Checkpoint.Options {
+				if option.action() != processCheckpointActionProceed {
+					continue
+				}
+				if proceedIndex >= 0 {
+					return false, false, fmt.Errorf("checkpoint has multiple proceed options; an explicit choice is required")
+				}
+				proceedIndex = index
+			}
+			if proceedIndex < 0 {
+				return false, false, fmt.Errorf("checkpoint has no proceed option; an explicit choice is required")
+			}
+			checkpointID = goalCheckpointID(parentID, plan.Checkpoint)
+			optionID = goalCheckpointOptionID(checkpointID, plan.Checkpoint.Options[proceedIndex], proceedIndex)
+			boundOption = true
+		}
+	}
+	receiptIndex := -1
+	receiptExisted := false
+	if boundOption {
+		for index, receipt := range plan.CheckpointReceipts {
+			if receipt.CheckpointID != checkpointID {
+				continue
+			}
+			if receipt.OptionID != optionID {
+				if receipt.State != goalCheckpointResolutionFinalized {
+					return false, true, fmt.Errorf("a different checkpoint choice is already being resolved")
+				}
+				continue
+			}
+			if !oneOf(receipt.State, goalCheckpointResolutionClaimed, goalCheckpointResolutionCommitted, goalCheckpointResolutionFinalizing, goalCheckpointResolutionFinalized) {
+				return false, true, fmt.Errorf("checkpoint resolution receipt is invalid")
+			}
+			receiptIndex = index
+			receiptExisted = true
+			choice = receipt.Choice
+			approvedBy = receipt.ResolvedBy
+			break
+		}
+	}
+	// Opaque and authorized HTTP checkpoint requests are idempotent protocol
+	// retries. An unauthenticated in-process free-form choice is the legacy
+	// conversational seam: once finalized it is evaluated against current state
+	// again (notably, a second "hold" remains an invalid resume attempt).
+	if directChoice && authorization == nil && receiptIndex >= 0 && plan.CheckpointReceipts[receiptIndex].State == goalCheckpointResolutionFinalized {
+		receiptIndex = -1
+		receiptExisted = false
 	}
 	engine := newGoalEngine(app)
+	if expectedHeader != nil {
+		engine.expectedPersistHeader = expectedHeader
+		engine.expectedPersistBody = parent.Text
+	}
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
-		return fmt.Errorf("saved goal route is unavailable: %w", err)
+		return false, boundOption, fmt.Errorf("saved goal route is unavailable: %w", err)
 	}
 	engine.applyProcessBudgets(&plan)
+	if receiptIndex >= 0 && plan.CheckpointReceipts[receiptIndex].State != goalCheckpointResolutionClaimed {
+		if err := engine.finalizeCheckpointResolution(&plan, parentID, receiptIndex); err != nil {
+			return false, true, err
+		}
+		return true, true, nil
+	}
+	if plan.State != goalStateApproval {
+		return false, boundOption, fmt.Errorf("goal is not waiting on an approval gate")
+	}
 	// A pending human_checkpoint owns the approval park; the external_write
 	// commit gate is only reachable once no checkpoint is waiting.
 	if plan.Checkpoint != nil && plan.Checkpoint.ResolvedAt == "" {
-		return engine.resumeProcessCheckpoint(&plan, parentID, approvedBy, choice)
+		if boundOption && receiptIndex < 0 {
+			currentCheckpointID := goalCheckpointID(parentID, plan.Checkpoint)
+			if checkpointID != currentCheckpointID {
+				return false, true, fmt.Errorf("checkpoint choice is stale")
+			}
+			matched := false
+			for index, option := range plan.Checkpoint.Options {
+				if goalCheckpointOptionID(currentCheckpointID, option, index) != optionID {
+					continue
+				}
+				if !directChoice {
+					choice = strings.TrimSpace(option.Label)
+				}
+				// Once held, only a proceed action can advance this checkpoint.
+				// Refuse other options before minting a durable claim so boot
+				// recovery never inherits an intentionally impossible effect.
+				if plan.Checkpoint.Held && option.action() != processCheckpointActionProceed {
+					return false, true, fmt.Errorf("the goal is held at %q (by %s) — resuming requires an explicit proceed choice", plan.Checkpoint.StageID, firstNonEmptyString(plan.Checkpoint.HeldBy, "admin"))
+				}
+				for otherIndex, other := range plan.Checkpoint.Options {
+					if otherIndex != index && strings.EqualFold(strings.TrimSpace(other.Label), choice) {
+						return false, true, fmt.Errorf("checkpoint options are ambiguous")
+					}
+				}
+				plan.Checkpoint.ID = currentCheckpointID
+				plan.Checkpoint.Options[index].ID = optionID
+				claimedAt := engine.now().UTC().Format(time.RFC3339Nano)
+				plan.CheckpointReceipts = append(plan.CheckpointReceipts, goalCheckpointResolutionReceipt{
+					CheckpointID: checkpointID, OptionID: optionID, StageID: plan.Checkpoint.StageID, Action: option.action(), Choice: choice,
+					ResolvedBy:         firstNonEmptyString(strings.TrimSpace(approvedBy), "admin"),
+					DecisionArtifactID: "os-artifact-checkpoint-" + sha256Hex([]byte(parentID + "\x00" + checkpointID + "\x00" + optionID))[:24],
+					HumanApproval:      authorization != nil && authorization.HumanApproval,
+					State:              goalCheckpointResolutionClaimed, ClaimedAt: claimedAt,
+				})
+				if len(plan.CheckpointReceipts) > goalMaxSubtasks*3 {
+					plan.CheckpointReceipts = plan.CheckpointReceipts[len(plan.CheckpointReceipts)-goalMaxSubtasks*3:]
+				}
+				receiptIndex = len(plan.CheckpointReceipts) - 1
+				matched = true
+				break
+			}
+			if freeformOption && len(plan.Checkpoint.Options) == 0 && optionID == goalCheckpointFreeformOptionID(currentCheckpointID, choice) {
+				plan.Checkpoint.ID = currentCheckpointID
+				claimedAt := engine.now().UTC().Format(time.RFC3339Nano)
+				plan.CheckpointReceipts = append(plan.CheckpointReceipts, goalCheckpointResolutionReceipt{
+					CheckpointID: checkpointID, OptionID: optionID, StageID: plan.Checkpoint.StageID, Action: processCheckpointActionProceed, Choice: strings.TrimSpace(choice),
+					ResolvedBy:         firstNonEmptyString(strings.TrimSpace(approvedBy), "admin"),
+					DecisionArtifactID: "os-artifact-checkpoint-" + sha256Hex([]byte(parentID + "\x00" + checkpointID + "\x00" + optionID))[:24],
+					HumanApproval:      authorization != nil && authorization.HumanApproval,
+					State:              goalCheckpointResolutionClaimed, ClaimedAt: claimedAt,
+				})
+				receiptIndex = len(plan.CheckpointReceipts) - 1
+				matched = true
+			}
+			if !matched {
+				return false, true, fmt.Errorf("checkpoint option is stale")
+			}
+			if len(plan.CheckpointReceipts) > goalMaxSubtasks*3 {
+				plan.CheckpointReceipts = plan.CheckpointReceipts[len(plan.CheckpointReceipts)-goalMaxSubtasks*3:]
+				receiptIndex = len(plan.CheckpointReceipts) - 1
+			}
+			if persisted := engine.persist(&plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || engine.conditionalPersistFailed {
+				return false, true, fmt.Errorf("checkpoint resolution claim was not saved")
+			}
+			if goalCheckpointResolutionAfterClaimProbe != nil {
+				if err := goalCheckpointResolutionAfterClaimProbe(plan.CheckpointReceipts[receiptIndex].Action); err != nil {
+					return false, true, err
+				}
+			}
+		}
+		if receiptIndex >= 0 {
+			choice = plan.CheckpointReceipts[receiptIndex].Choice
+			approvedBy = plan.CheckpointReceipts[receiptIndex].ResolvedBy
+		}
+		if err := engine.resumeProcessCheckpoint(&plan, parentID, approvedBy, choice, receiptIndex); err != nil {
+			return false, receiptIndex >= 0, err
+		}
+		if receiptIndex >= 0 && goalCheckpointResolutionAfterCommitProbe != nil {
+			if err := goalCheckpointResolutionAfterCommitProbe(plan.CheckpointReceipts[receiptIndex].Action); err != nil {
+				return false, true, err
+			}
+		}
+		if receiptIndex >= 0 {
+			if err := engine.finalizeCheckpointResolution(&plan, parentID, receiptIndex); err != nil {
+				return false, true, err
+			}
+		}
+		return receiptExisted, receiptIndex >= 0, nil
+	}
+	if boundOption {
+		return false, true, fmt.Errorf("goal is not waiting on that checkpoint")
 	}
 	if !plan.Gate.ApprovalRequired {
-		return fmt.Errorf("goal is not waiting on an approval gate")
+		return false, false, fmt.Errorf("goal is not waiting on an approval gate")
 	}
 	plan.Gate.Status = "passed"
 	plan.Gate.ReviewedBy = firstNonEmptyString(strings.TrimSpace(approvedBy), "admin")
 	plan.State = goalStateCommit
 
 	if _, err := engine.reserveGoalCommitOutbox(&plan, parentID); err != nil {
-		return err
+		return false, false, err
 	}
 	if persisted := engine.persist(&plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || engine.conditionalPersistFailed {
-		return fmt.Errorf("could not durably record external-write approval; nothing was enqueued")
+		return false, false, fmt.Errorf("could not durably record external-write approval; nothing was enqueued")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
 	engine.drive(ctx, &plan, parentID)
+	return false, false, nil
+}
+
+// finalizeCheckpointResolution is the durable effect finalizer for a committed
+// checkpoint transition. The parent first advances to finalizing (consuming an
+// authorized snapshot CAS on retries), then deterministic/idempotent external
+// projections land, and only then does the receipt become finalized. Boot and
+// HTTP retries resume either committed or finalizing receipts.
+func (e *goalEngine) finalizeCheckpointResolution(plan *goalPlan, parentID string, receiptIndex int) error {
+	if receiptIndex < 0 || receiptIndex >= len(plan.CheckpointReceipts) {
+		return fmt.Errorf("checkpoint finalization receipt is unavailable")
+	}
+	receipt := &plan.CheckpointReceipts[receiptIndex]
+	if receipt.State == goalCheckpointResolutionFinalized {
+		return nil
+	}
+	if receipt.EffectiveOutcome == "" {
+		receipt.EffectiveOutcome = receipt.Action
+	}
+	if receipt.DriveNeeded && receipt.DriveCompletedAt == "" {
+		effectsAllowed, err := e.recoverCheckpointDrive(plan, parentID)
+		if err != nil {
+			return err
+		}
+		if !effectsAllowed {
+			receipt.EffectiveOutcome = "drive_blocked"
+		}
+		receipt.DriveCompletedAt = e.now().UTC().Format(time.RFC3339Nano)
+		if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			return fmt.Errorf("checkpoint drive recovery was not saved")
+		}
+	}
+	if receipt.State == goalCheckpointResolutionCommitted {
+		receipt.State = goalCheckpointResolutionFinalizing
+		receipt.FinalizingAt = e.now().UTC().Format(time.RFC3339Nano)
+		if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			return fmt.Errorf("checkpoint finalization claim was not saved")
+		}
+	} else if receipt.State != goalCheckpointResolutionFinalizing {
+		return fmt.Errorf("checkpoint transition is not committed")
+	}
+
+	effectID := "checkpoint-finalization-" + sha256Hex([]byte(parentID + "\x00" + receipt.CheckpointID + "\x00" + receipt.OptionID))[:24]
+	manifestStatus := ""
+	manifestApproved := false
+	switch receipt.EffectiveOutcome {
+	case processCheckpointActionHold:
+		manifestStatus = manifestStatusHeld
+	case processCheckpointActionProceed:
+		manifestStatus, manifestApproved = manifestStatusShipped, true
+	case "proceed_unapproved":
+		manifestStatus = manifestStatusShipped
+	}
+	if manifestStatus != "" {
+		if err := e.app.recordStudioShipResolutionOnce(plan, parentID, receipt.StageID, manifestStatus, receipt.ResolvedBy, manifestApproved, effectID); err != nil {
+			return err
+		}
+	}
+	if receipt.HumanApproval && receipt.EffectiveOutcome == processCheckpointActionProceed {
+		approvedAt := firstNonEmptyString(receipt.CommittedAt, receipt.ClaimedAt)
+		if err := e.app.stampArtifactHumanApprovalOnce(parentID, receipt.ResolvedBy, approvedAt); err != nil {
+			return err
+		}
+		artifact, ok := e.app.osArtifactByID(parentID)
+		if !ok {
+			return fmt.Errorf("goal artifact not found during approval finalization")
+		}
+		if err := e.app.recordApprovalOutcomeOnce(artifact, "approve", "", receipt.ResolvedBy, effectID); err != nil {
+			return err
+		}
+	}
+	if goalCheckpointResolutionAfterEffectsProbe != nil {
+		if err := goalCheckpointResolutionAfterEffectsProbe(receipt.Action); err != nil {
+			return err
+		}
+	}
+	receipt.State = goalCheckpointResolutionFinalized
+	receipt.FinalizedAt = e.now().UTC().Format(time.RFC3339Nano)
+	if receipt.HumanApproval && receipt.EffectiveOutcome == processCheckpointActionProceed {
+		if e.persistMetadata == nil {
+			e.persistMetadata = map[string]string{}
+		}
+		e.persistMetadata[artifactHumanApprovedAtKey] = firstNonEmptyString(receipt.CommittedAt, receipt.ClaimedAt)
+		e.persistMetadata[artifactHumanApprovedByKey] = canonicalRoomActorName(receipt.ResolvedBy)
+		e.persistMetadata[checkpointApprovalOutcomeEffectMetadataKey] = effectID
+	}
+	if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+		return fmt.Errorf("checkpoint finalization was not saved")
+	}
 	return nil
+}
+
+// recoverCheckpointDrive is the under-lock restart half of a committed
+// checkpoint transition. It first reconciles any child the pre-crash drive
+// had already reserved/started, then re-enters the ordinary drive. A normal
+// revise is therefore re-dispatched/re-parked and can never be mistaken for a
+// shipped fallback merely because the process died between transition persist
+// and drive completion.
+func (e *goalEngine) recoverCheckpointDrive(plan *goalPlan, parentID string) (bool, error) {
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.Status != subtaskRunning {
+			continue
+		}
+		child, childFound := e.app.osArtifactByID(st.ArtifactID)
+		if childStatus, terminal := goalChildTerminalStatus(e.app, st.ArtifactID); terminal {
+			if !childFound || e.app.verifyGoalChildRoute(child) != nil {
+				return false, fmt.Errorf("saved goal child authority is unavailable")
+			}
+			st.Status = childStatus
+			continue
+		}
+		if childFound && strings.TrimSpace(child.Metadata["goalChildActivationState"]) == goalChildActivationReserved {
+			if err := e.app.verifyGoalChildReservation(child); err != nil {
+				return false, fmt.Errorf("saved goal child authority is unavailable")
+			}
+			thread := scoutAgentThread{
+				ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Mode: normalizeAgentThreadMode(child.Metadata["mode"]),
+				Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), Status: "running", Artifact: child,
+				Actions: e.app.osAssistantActions(firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), child.Metadata["mode"], child),
+			}
+			if err := e.app.activateReservedGoalAgentThread(thread, agentThreadGoalSpec{ToolTemplate: child.Metadata["toolTemplate"], RequestedBy: child.Metadata["requestedBy"], ParentGoalID: parentID}, plan.CreatedBy); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if childFound && e.app.goalChildStartedInProcess(child.ID) {
+			return true, nil
+		}
+		// Match the ordinary boot reconciler's fail-closed stance for an
+		// activated child whose provider state was lost across process death.
+		plan.State = goalStateBlocked
+		plan.Blocker = "goal child execution state is unknown after restart; nothing was replayed"
+		if persisted := e.persist(plan, parentID, composeGoalArtifact(plan)); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			return false, fmt.Errorf("checkpoint drive recovery blocker was not saved")
+		}
+		// The exact choice receipt can close, but none of its ship/approval
+		// projections may run: the resumed work did not reach a trustworthy
+		// dispatch seam after process death.
+		return false, nil
+	}
+	e.applyProcessBudgets(plan)
+	if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+		return false, fmt.Errorf("checkpoint drive recovery was not saved")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+	e.drive(ctx, plan, parentID)
+	return true, nil
 }
 
 // enqueueCommitPush enqueues the single external_write sidecar job the gate
@@ -4111,6 +4682,19 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 	}
 	e.lastPersistedArtifact = artifact
 	broadcastSignedInKanbanEvent("memory", nil)
+	e.checkpointProjectionFailed = false
+	projectionAllowed := true
+	if plan.State == goalStateApproval && goalCheckpointProjectionPersistProbe != nil {
+		projectionAllowed = goalCheckpointProjectionPersistProbe(artifact) == nil
+		e.checkpointProjectionFailed = !projectionAllowed
+	}
+	if projectionAllowed {
+		if threadID := strings.TrimSpace(artifact.Metadata["threadId"]); threadID != "" {
+			if status := strings.TrimSpace(artifact.Metadata["threadStatus"]); status != "" {
+				e.app.updateScoutChatThreadRefs(threadID, status, artifact.ID)
+			}
+		}
+	}
 	return artifact
 }
 
@@ -4182,14 +4766,42 @@ func (e *goalEngine) persistApprovalRequired(plan *goalPlan, parentID string) {
 // idempotently, and drive from the earliest non-complete state. Skips when the
 // OpenAI provider is unavailable; an Anthropic key alone never resumes work.
 func (app *kanbanBoardApp) reconcileGoalThreadsAtBoot() {
-	if app == nil || app.memory == nil || strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
+	if app == nil || app.memory == nil {
 		return
 	}
 	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, goalReconcileScanLimit) {
 		if artifact.Metadata["mode"] != "goal" {
 			continue
 		}
-		if isTerminalGoalState(artifact.Metadata["currentStage"]) {
+		plan, planOK := decodeGoalPlan(artifact.Metadata["goalPlan"])
+		if artifact.Metadata["currentStage"] == goalStateApproval {
+			app.updateScoutChatThreadRefs(artifact.Metadata["threadId"], codexJobStatusApprovalRequired, artifact.ID)
+		}
+		if planOK {
+			for _, receipt := range plan.CheckpointReceipts {
+				if !oneOf(receipt.State, goalCheckpointResolutionClaimed, goalCheckpointResolutionCommitted, goalCheckpointResolutionFinalizing) ||
+					(receipt.State == goalCheckpointResolutionClaimed && strings.TrimSpace(app.currentOpenAIAPIKey()) == "") {
+					continue
+				}
+				go func(parentID string, pending goalCheckpointResolutionReceipt) {
+					if goalCheckpointResolutionRecoveryDoneProbe != nil {
+						defer goalCheckpointResolutionRecoveryDoneProbe(parentID)
+					}
+					if _, err := app.resumeApprovedGoalWithCheckpointOption(parentID, pending.ResolvedBy, pending.CheckpointID, pending.OptionID); err != nil {
+						log.Errorf("goal %s checkpoint resolution recovery failed: %v", parentID, err)
+					}
+				}(artifact.ID, receipt)
+				planOK = false // one outstanding resolution per checkpoint occurrence
+				break
+			}
+			if !planOK {
+				continue
+			}
+		}
+		if artifact.Metadata["currentStage"] == goalStateApproval {
+			continue
+		}
+		if isTerminalGoalState(artifact.Metadata["currentStage"]) || strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
 			continue
 		}
 		go app.reconcileGoalThread(artifact.ID)

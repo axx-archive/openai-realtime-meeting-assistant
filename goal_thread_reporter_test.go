@@ -7,10 +7,35 @@ package main
 // extraction table, and the park's default-options fallback.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCheckpointProjectionRejectsAmbiguousOrTruncatedLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options []goalCheckpointOption
+	}{
+		{name: "normalized collision", options: []goalCheckpointOption{{Label: "Ship"}, {Label: " ship "}}},
+		{name: "truncation", options: []goalCheckpointOption{{Label: strings.Repeat("x", processCheckpointMaxLabelRunes+1)}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkpoint := goalProcessCheckpoint{ID: "goal-checkpoint-0123456789abcdef01234567", StageID: "approval", Question: "What next?", Options: tc.options}
+			raw, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact := meetingMemoryEntry{ID: "goal-projection-probe", Metadata: map[string]string{
+				"mode": "goal", "threadStatus": codexJobStatusApprovalRequired, "checkpoint": string(raw),
+			}}
+			if ref := scoutChatCheckpointRefForArtifact(artifact); ref != nil {
+				t.Fatalf("ambiguous checkpoint was projected: %+v", ref)
+			}
+		})
+	}
+}
 
 // newGoalParentForReporter files a goal-shaped parent artifact with the given
 // origin metadata, mirroring launchGoalThread's stamp.

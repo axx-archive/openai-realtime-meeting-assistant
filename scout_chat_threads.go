@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -202,22 +203,39 @@ type scoutChatFileAttachment struct {
 }
 
 type scoutChatThreadRef struct {
-	ID              string  `json:"id"`
-	Mode            string  `json:"mode"`
-	Query           string  `json:"query"`
-	Status          string  `json:"status"`
-	ArtifactID      string  `json:"artifactId,omitempty"`
-	AgentID         string  `json:"agentId,omitempty"`
-	AgentName       string  `json:"agentName,omitempty"`
-	DelegatedBy     string  `json:"delegatedBy,omitempty"`
-	CurrentStage    string  `json:"currentStage,omitempty"`
-	ProgressPercent float64 `json:"progressPercent,omitempty"`
-	ProgressNote    string  `json:"progressNote,omitempty"`
-	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
-	AttentionReason string  `json:"attentionReason,omitempty"`
-	StartedAt       string  `json:"startedAt,omitempty"`
-	ProjectID       string  `json:"projectId,omitempty"`
-	ProjectTitle    string  `json:"projectTitle,omitempty"`
+	ID              string                      `json:"id"`
+	Mode            string                      `json:"mode"`
+	Query           string                      `json:"query"`
+	Status          string                      `json:"status"`
+	ArtifactID      string                      `json:"artifactId,omitempty"`
+	AgentID         string                      `json:"agentId,omitempty"`
+	AgentName       string                      `json:"agentName,omitempty"`
+	DelegatedBy     string                      `json:"delegatedBy,omitempty"`
+	CurrentStage    string                      `json:"currentStage,omitempty"`
+	ProgressPercent float64                     `json:"progressPercent,omitempty"`
+	ProgressNote    string                      `json:"progressNote,omitempty"`
+	FollowUpStatus  string                      `json:"followUpStatus,omitempty"`
+	AttentionReason string                      `json:"attentionReason,omitempty"`
+	StartedAt       string                      `json:"startedAt,omitempty"`
+	ProjectID       string                      `json:"projectId,omitempty"`
+	ProjectTitle    string                      `json:"projectTitle,omitempty"`
+	Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+}
+
+// scoutChatWorkCheckpointRef is the bounded, display-safe checkpoint carried
+// on the existing root work card. Opaque ids are server minted; clients submit
+// them back to /artifacts/action and never choose the mechanical action.
+type scoutChatWorkCheckpointRef struct {
+	ID       string                             `json:"id"`
+	StageID  string                             `json:"stageId"`
+	Question string                             `json:"question"`
+	Options  []scoutChatWorkCheckpointOptionRef `json:"options,omitempty"`
+}
+
+type scoutChatWorkCheckpointOptionRef struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Action string `json:"action"`
 }
 
 // scoutChatWorkRecordRef is the conversation projection of a governed Work
@@ -5195,6 +5213,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatusWithContext(ctx context
 		ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
 		ref.CurrentStage = artifact.Metadata["currentStage"]
 		ref.ProgressNote = artifact.Metadata["progressNote"]
+		ref.Checkpoint = scoutChatCheckpointRefForArtifact(artifact)
 		ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
 		ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
 		ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
@@ -5206,7 +5225,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatusWithContext(ctx context
 				thread.Messages[index].Text = statusCopy
 			}
 		}
-		if *ref == before && thread.Messages[index].Text == beforeText {
+		if reflect.DeepEqual(*ref, before) && thread.Messages[index].Text == beforeText {
 			continue
 		}
 		changed = append(changed, thread.Messages[index])
@@ -5296,6 +5315,7 @@ func (app *kanbanBoardApp) reconcileScoutChatTerminalProjection(user *userAccoun
 	ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
 	ref.CurrentStage = artifact.Metadata["currentStage"]
 	ref.ProgressNote = artifact.Metadata["progressNote"]
+	ref.Checkpoint = scoutChatCheckpointRefForArtifact(artifact)
 	ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
 	ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
 	ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
@@ -5303,7 +5323,7 @@ func (app *kanbanBoardApp) reconcileScoutChatTerminalProjection(user *userAccoun
 		ref.ProgressPercent = progress
 	}
 	message.Text = terminalCopy
-	if *ref == before && message.Text == beforeText {
+	if reflect.DeepEqual(*ref, before) && message.Text == beforeText {
 		if scoutTerminalProjectionBeforeSaveProbe != nil {
 			scoutTerminalProjectionBeforeSaveProbe()
 		}

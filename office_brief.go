@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -495,6 +496,59 @@ func (app *kanbanBoardApp) recordApprovalOutcome(artifact meetingMemoryEntry, ac
 	if _, err := app.createNotification(requesterEmail, notificationKindAgent, text, origin, artifact.ID, "", false); err != nil {
 		log.Errorf("Failed to notify %s of approval outcome for %s: %v", requesterEmail, artifact.ID, err)
 	}
+}
+
+const checkpointApprovalOutcomeEffectMetadataKey = "checkpointApprovalOutcomeEffectId"
+
+// recordApprovalOutcomeOnce gives the checkpoint finalizer a durable dedupe
+// marker. A retry after all fanout effects landed observes the marker and does
+// not append a second notification/signal; a marker write failure leaves the
+// receipt finalizing so boot can repair rather than falsely report completion.
+func (app *kanbanBoardApp) recordApprovalOutcomeOnce(artifact meetingMemoryEntry, action, reason, approverName, effectID string) error {
+	if app == nil || app.memory == nil {
+		return fmt.Errorf("approval outcome is unavailable")
+	}
+	effectID = strings.TrimSpace(effectID)
+	if effectID == "" {
+		return fmt.Errorf("approval outcome effect id is required")
+	}
+	current, ok := app.osArtifactByID(artifact.ID)
+	if !ok {
+		return fmt.Errorf("approval artifact not found")
+	}
+	if current.Metadata[checkpointApprovalOutcomeEffectMetadataKey] == effectID {
+		return nil
+	}
+	title := firstNonEmptyString(strings.TrimSpace(current.Metadata["title"]), assistantToolLabel(current.Kind)+" artifact")
+	origin := firstNonEmptyString(strings.TrimSpace(current.Metadata["originKind"]), "artifacts")
+	approved := strings.EqualFold(strings.TrimSpace(action), "approve")
+	signalEvent, valence := signalEventProposalRejected, signalValenceNegative
+	if approved {
+		signalEvent, valence = signalEventProposalApproved, signalValencePositive
+	}
+	signalID := "signal-approval-outcome-" + sha256Hex([]byte(effectID))[:24]
+	if _, err := recordSignalWithID(app.memory, signalID, approverName, signalEvent, valence, current.ID, current.Metadata["packageId"], map[string]string{"reason": strings.TrimSpace(reason)}, effectID); err != nil {
+		return err
+	}
+	// The event is a body-free refresh hint keyed by the artifact ref. Replays
+	// are harmless because consumers fetch the single durable current record.
+	broadcastOSEvent(osEvent{Kind: osEventProposal, Ref: current.ID, Title: title, OriginSurface: origin, Actor: canonicalRoomActorName(approverName)})
+	requesterEmail := approvalRequesterEmail(current.Metadata)
+	if requesterEmail != "" && requesterEmail != normalizeAccountEmail(participantEmail(approverName)) {
+		text := "Approved · sent: " + title
+		if !approved {
+			reason = firstNonEmptyString(strings.TrimSpace(reason), "no reason given")
+			text = "Rejected: " + title + " — " + reason
+		}
+		notificationID := "notification-approval-outcome-" + sha256Hex([]byte(effectID))[:24]
+		if _, err := app.createNotificationRecordWithID(notificationID, requesterEmail, nil, notificationKindAgent, text, origin, current.ID, "", "", effectID, "", "", "", false); err != nil {
+			return err
+		}
+	}
+	if _, _, err := app.memory.updateOSArtifactMetadata(current.ID, map[string]string{checkpointApprovalOutcomeEffectMetadataKey: effectID}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // approvalGateNotified dedups the admin's gate-entry notification so an

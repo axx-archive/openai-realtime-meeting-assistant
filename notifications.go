@@ -313,6 +313,10 @@ func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind strin
 }
 
 func (app *kanbanBoardApp) createNotificationRecord(userEmail string, excludedUserEmails []string, kind string, text string, tool string, artifactID string, threadID string, proposalID string, messageID string, threadName string, authorName string, messagePreview string, deferred bool) (notificationRecord, error) {
+	return app.createNotificationRecordWithID("", userEmail, excludedUserEmails, kind, text, tool, artifactID, threadID, proposalID, messageID, threadName, authorName, messagePreview, deferred)
+}
+
+func (app *kanbanBoardApp) createNotificationRecordWithID(recordID string, userEmail string, excludedUserEmails []string, kind string, text string, tool string, artifactID string, threadID string, proposalID string, messageID string, threadName string, authorName string, messagePreview string, deferred bool) (notificationRecord, error) {
 	if app == nil {
 		return notificationRecord{}, fmt.Errorf("notifications are unavailable")
 	}
@@ -345,7 +349,23 @@ func (app *kanbanBoardApp) createNotificationRecord(userEmail string, excludedUs
 	}
 
 	app.mu.Lock()
-	record.ID = app.nextNotificationIDLocked()
+	if recordID = strings.TrimSpace(recordID); recordID != "" {
+		for _, existing := range app.notifications {
+			if existing.ID == recordID {
+				app.mu.Unlock()
+				// A retry may be repairing a crash after durable notification
+				// persistence but before transient websocket/device delivery.
+				// Re-push the same deterministic ID; clients dedupe the identity.
+				if existing.DeliverAfter == "" {
+					pushNotificationRecord(existing)
+				}
+				return existing, nil
+			}
+		}
+		record.ID = recordID
+	} else {
+		record.ID = app.nextNotificationIDLocked()
+	}
 	prior := append([]notificationRecord(nil), app.notifications...)
 	next := append(append([]notificationRecord(nil), app.notifications...), record)
 	var removed []notificationRecord

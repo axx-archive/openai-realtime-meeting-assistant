@@ -98,6 +98,13 @@ type signalRecord struct {
 // {event, valence, actor, artifactId, packageId} so future distillers can
 // filter without parsing JSON.
 func recordSignal(store *meetingMemoryStore, actor string, event string, valence string, artifactID string, packageID string, payload map[string]string) (meetingMemoryEntry, error) {
+	return recordSignalWithID(store, fmt.Sprintf("signal-%s-%d", strings.TrimSpace(event), time.Now().UnixNano()), actor, event, valence, artifactID, packageID, payload, "")
+}
+
+// recordSignalWithID is the deterministic effect form used by durable
+// finalizers. Re-appending the same ID is an acknowledged replay, not a second
+// taste signal.
+func recordSignalWithID(store *meetingMemoryStore, id string, actor string, event string, valence string, artifactID string, packageID string, payload map[string]string, effectID string) (meetingMemoryEntry, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, fmt.Errorf("memory store is unavailable")
 	}
@@ -152,13 +159,24 @@ func recordSignal(store *meetingMemoryStore, actor string, event string, valence
 	if record.PackageID != "" {
 		metadata["packageId"] = record.PackageID
 	}
+	if effectID = strings.TrimSpace(effectID); effectID != "" {
+		metadata["effectId"] = effectID
+	}
 
-	id := fmt.Sprintf("signal-%s-%d", event, time.Now().UnixNano())
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, fmt.Errorf("signal id is required")
+	}
 	entry, appended, err := store.appendEntry(meetingMemoryKindSignal, id, string(encoded), metadata)
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
 	if !appended {
+		for _, existing := range store.entriesOfKind(meetingMemoryKindSignal, 0) {
+			if existing.ID == id {
+				return existing, nil
+			}
+		}
 		return meetingMemoryEntry{}, fmt.Errorf("signal was not saved")
 	}
 	return entry, nil

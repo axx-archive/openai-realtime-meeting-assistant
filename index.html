@@ -16521,6 +16521,63 @@
 	      #chatTool .scout-chat-work-card__details[hidden] { display: none; }
 	      #chatTool .scout-chat-work-card__details strong { color: var(--text-1); font: var(--type-caption-medium); }
 
+	      #chatTool .scout-chat-work-card__checkpoint {
+	        grid-column: 1 / -1;
+	        display: grid;
+	        gap: 9px;
+	        padding: 13px 14px;
+	        border: 1px solid color-mix(in srgb, var(--warn) 34%, var(--line-1));
+	        border-radius: 14px;
+	        background: color-mix(in srgb, var(--warn) 7%, var(--surface-1));
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-kicker {
+	        color: var(--warn);
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        text-transform: uppercase;
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-question {
+	        margin: 0;
+	        color: var(--text-1);
+	        font: 650 15px/1.4 var(--font-sans);
+	        text-wrap: balance;
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-context,
+	      #chatTool .scout-chat-work-card__checkpoint-status {
+	        margin: 0;
+	        color: var(--text-2);
+	        font: var(--type-caption);
+	        text-wrap: pretty;
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-choices {
+	        display: flex;
+	        flex-wrap: wrap;
+	        gap: 8px;
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-choice {
+	        min-height: 40px;
+	        padding: 0 14px;
+	        border: 1px solid var(--line-2);
+	        border-radius: var(--r-full);
+	        background: var(--surface-1);
+	        color: var(--text-1);
+	        font: var(--type-caption-medium);
+	        text-align: left;
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-choice:hover:not([disabled]) { border-color: var(--text-3); }
+	      #chatTool .scout-chat-work-card__checkpoint-choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+	      #chatTool .scout-chat-work-card__checkpoint-choice[data-checkpoint-action="revise"] { border-color: color-mix(in srgb, var(--warn) 55%, var(--line-2)); }
+	      #chatTool .scout-chat-work-card__checkpoint-choice[data-checkpoint-action="hold"] { color: var(--text-2); }
+	      #chatTool .scout-chat-work-card__checkpoint-choice[aria-pressed="true"] {
+	        border-color: transparent;
+	        background: var(--accent);
+	        color: var(--on-accent);
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="pending"] .scout-chat-work-card__checkpoint-choice { cursor: wait; opacity: .62; }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] { border-color: var(--danger); }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] .scout-chat-work-card__checkpoint-status { color: var(--danger); }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="selected"] .scout-chat-work-card__checkpoint-status { color: var(--live); }
+
 	      @media (max-width: 860px) {
 	        #chatTool .scout-chat-work-card {
 	          width: calc(100% - 24px);
@@ -16541,6 +16598,9 @@
 	        #chatTool .scout-chat-work-card__meta { text-wrap: pretty; }
 	        #chatTool .scout-chat-work-card__progress { width: min(220px, 72%); }
 	        #chatTool .scout-chat-work-card__open { grid-column: 2; justify-self: start; }
+	        #chatTool .scout-chat-work-card__checkpoint { padding: 12px; }
+	        #chatTool .scout-chat-work-card__checkpoint-choices { display: grid; grid-template-columns: 1fr; }
+	        #chatTool .scout-chat-work-card__checkpoint-choice { width: 100%; }
 	      }
 
 	      @media (min-width: 1280px) {
@@ -53881,7 +53941,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // Reflect the decision in the bell too (the gate notification is stale
         // once acted on).
         if (typeof loadNotifications === 'function') loadNotifications()
+        return { ok, data }
       }
+
+	      async function submitCheckpointOption(id, checkpointId, checkpointOptionId) {
+	        const { ok, data } = await postAuthJSON('/artifacts/action', {
+	          id,
+	          action: 'approve',
+	          checkpointId: String(checkpointId || '').trim(),
+	          checkpointOptionId: String(checkpointOptionId || '').trim()
+	        })
+	        if (!ok) {
+	          setLog && setLog('could not record that checkpoint choice.')
+	        } else if (data && typeof data.message === 'string' && data.message) {
+	          setLog && setLog(data.message)
+	        }
+	        loadBrief()
+	        refreshBriefBadge()
+	        if (typeof loadNotifications === 'function') loadNotifications()
+	        return { ok, data }
+	      }
 
       // notificationApprovalActions renders the admin's one-tap approve/reject
       // directly in the bell (design §9). Only the admin ever receives a
@@ -65397,6 +65476,116 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(ref?.id || ref?.artifactId || artifact?.id || '')
 	      }
 
+	      function scoutDesktopCheckpointNode(card, artifact, plan, checkpoint) {
+	        if (!checkpoint || !artifact?.id) return null
+	        const stageId = String(checkpoint.stageId || '')
+	        const stage = (plan?.subtasks || []).find(candidate => String(candidate?.id || '') === stageId)
+	        const checkpointId = String(checkpoint.id || '').trim()
+	        const options = (Array.isArray(checkpoint.options) ? checkpoint.options : [])
+	          .map(option => typeof option === 'string'
+	            ? { id: '', label: option.trim(), action: 'proceed' }
+	            : { id: String(option?.id || '').trim(), label: String(option?.label || '').trim(), action: String(option?.action || 'proceed').trim() || 'proceed' })
+	          .filter(option => option.id && option.label)
+	        const panel = document.createElement('section')
+	        panel.className = 'scout-chat-work-card__checkpoint'
+	        panel.dataset.state = 'idle'
+	        const identity = `${desktopWorkCardIdentity({}, artifact)}-${stageId || 'checkpoint'}`.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120)
+	        const questionId = `channel-checkpoint-question-${identity}`
+	        const statusId = `channel-checkpoint-status-${identity}`
+	        panel.appendChild(bfEl('span', 'scout-chat-work-card__checkpoint-kicker', checkpoint.held ? 'Held · your choice' : 'Your choice'))
+	        const question = bfEl('h3', 'scout-chat-work-card__checkpoint-question', String(checkpoint.question || 'How should Scout continue?'))
+	        question.id = questionId
+	        panel.appendChild(question)
+	        const context = checkpoint.held
+	          ? 'This work remains held until you choose a proceed option.'
+	          : stage?.title
+	            ? `Scout paused at ${stage.title}. Choose the path that should shape the next stage.`
+	            : 'Scout paused here so the next step follows your decision.'
+	        panel.appendChild(bfEl('p', 'scout-chat-work-card__checkpoint-context', context))
+	        const status = bfEl('p', 'scout-chat-work-card__checkpoint-status', options.length ? 'Choose one option to continue.' : 'Open the work details to answer this checkpoint.')
+	        status.id = statusId
+	        status.setAttribute('role', 'status')
+	        status.setAttribute('aria-live', 'polite')
+	        panel.appendChild(status)
+
+	        if (!canApproveExternalWrites()) {
+	          status.textContent = `Waiting on ${accountHandle(artifactAdminEmail)} to choose.`
+	          return panel
+	        }
+	        if (!options.length) {
+	          const open = bfEl('button', 'scout-chat-work-card__checkpoint-choice', 'Answer in Intelligence')
+	          open.type = 'button'
+	          open.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
+	          panel.appendChild(open)
+	          return panel
+	        }
+
+	        const choices = bfEl('div', 'scout-chat-work-card__checkpoint-choices')
+	        choices.setAttribute('role', 'group')
+	        choices.setAttribute('aria-labelledby', questionId)
+	        const buttons = []
+	        let pending = false
+	        const choose = async (option, button) => {
+	          if (pending || button.disabled) return
+	          pending = true
+	          panel.dataset.state = 'pending'
+	          buttons.forEach(candidate => {
+	            candidate.disabled = true
+	            candidate.setAttribute('aria-pressed', String(candidate === button))
+	            candidate.dataset.choiceState = candidate === button ? 'pending' : 'idle'
+	          })
+	          status.textContent = `Saving “${option.label}”…`
+	          let result
+	          try {
+	            result = await submitCheckpointOption(artifact.id, checkpointId, option.id)
+	          } catch (error) {
+	            result = { ok: false, data: { error: error?.message || 'choice failed' } }
+	          }
+	          pending = false
+	          if (result?.ok) {
+	            panel.dataset.state = 'selected'
+	            button.dataset.choiceState = 'selected'
+	            status.textContent = option.action === 'hold'
+	              ? `Choice saved: ${option.label}. This work remains held.`
+	              : option.action === 'revise'
+	                ? `Choice saved: ${option.label}. The work was sent back for revision.`
+	                : `Choice saved: ${option.label}. Scout is continuing.`
+	            goalCardScheduleSync()
+	            return
+	          }
+	          panel.dataset.state = 'failed'
+	          button.dataset.choiceState = 'failed'
+	          buttons.forEach(candidate => { candidate.disabled = false })
+	          status.textContent = String(result?.data?.error || 'That choice could not be saved. Try again.')
+	          button.focus()
+	        }
+	        for (const option of options) {
+	          const button = bfEl('button', 'scout-chat-work-card__checkpoint-choice', option.label)
+	          button.type = 'button'
+	          button.dataset.checkpointAction = option.action
+	          button.dataset.choiceState = 'idle'
+	          button.setAttribute('aria-pressed', 'false')
+	          button.setAttribute('aria-describedby', statusId)
+	          button.disabled = false
+	          button.addEventListener('click', () => choose(option, button))
+	          buttons.push(button)
+	          choices.appendChild(button)
+	        }
+	        choices.addEventListener('keydown', event => {
+	          if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+	          const enabled = buttons.filter(button => !button.disabled)
+	          if (!enabled.length) return
+	          event.preventDefault()
+	          const current = enabled.indexOf(document.activeElement)
+	          const next = event.key === 'Home' ? 0
+	            : event.key === 'End' ? enabled.length - 1
+	              : (current + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + enabled.length) % enabled.length
+	          enabled[next].focus()
+	        })
+	        panel.appendChild(choices)
+	        return panel
+	      }
+
       function scoutDesktopGoalWorkCardNode(message, artifact) {
         const ref = message?.thread || {}
         const family = desktopWorkFamily(ref, artifact)
@@ -65415,8 +65604,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
         const phase = desktopWorkPhase(artifact, status, ref)
         const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
+	        const plan = goalPlanFromArtifact(artifact)
+	        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
         // One status: Draft is the thing, Blocked stays blocked, no fake percents
-        const state = status === 'approval_required'
+	        const state = checkpoint
+	          ? 'Needs input'
+	          : status === 'approval_required'
           ? 'Needs approval'
           : isComplete
             ? 'Delivered'
@@ -65433,7 +65626,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         card.className = 'scout-chat-work-card'
         card.dataset.state = status
         card.dataset.workArtifactId = workCardID
-        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
+	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${checkpoint ? `. Question: ${checkpoint.question}` : ''}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
         const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
         mark.setAttribute('aria-hidden', 'true')
         const copy = bfEl('span', 'scout-chat-work-card__copy')
@@ -65488,7 +65681,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          open.textContent = details.hidden ? 'View activity' : 'Hide activity'
 	          open.setAttribute('aria-expanded', String(!details.hidden))
 	        })
-	        card.append(mark, copy, open, details)
+	        const checkpointNode = checkpoint ? scoutDesktopCheckpointNode(card, artifact, plan, checkpoint) : null
+	        card.append(...[mark, copy, open, checkpointNode, details].filter(Boolean))
 	        return card
 	      }
 

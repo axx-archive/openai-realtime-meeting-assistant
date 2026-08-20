@@ -78,15 +78,28 @@ type scoutChatManifest struct {
 // ships the card with its share affordance dark. Silent no-op for any other
 // process, stage, or a run whose compile record is missing.
 func (app *kanbanBoardApp) recordStudioShipResolution(plan *goalPlan, parentID string, stageID string, status string, actor string, approved bool) {
+	effectID := "studio-ship-" + sha256Hex([]byte(parentID + "\x00" + stageID + "\x00" + status + "\x00" + actor))[:24]
+	if err := app.recordStudioShipResolutionOnce(plan, parentID, stageID, status, actor, approved, effectID); err != nil {
+		log.Errorf("Failed to record Studio ship resolution for %s: %v", parentID, err)
+	}
+}
+
+func (app *kanbanBoardApp) recordStudioShipResolutionOnce(plan *goalPlan, parentID string, stageID string, status string, actor string, approved bool, effectID string) error {
 	if app == nil || plan == nil || plan.ProcessID != packagingStudioProcessID || stageID != "ship_approval" {
-		return
+		return nil
 	}
 	if status == manifestStatusShipped && approved {
-		app.approveStudioShipDeliverables(studioShipArtifactIDs(app, plan), actor)
+		approvedAt := ""
+		if plan.Checkpoint != nil {
+			approvedAt = plan.Checkpoint.ResolvedAt
+		}
+		if err := app.approveStudioShipDeliverablesOnce(studioShipArtifactIDs(app, plan), actor, firstNonEmptyString(approvedAt, time.Now().UTC().Format(time.RFC3339Nano))); err != nil {
+			return err
+		}
 	}
 	manifest, ok := app.composeStudioShipManifest(plan, parentID, status, actor)
 	if !ok {
-		return
+		return fmt.Errorf("Studio ship manifest is unavailable")
 	}
 	line := "manifest filed — " + manifestCountLine(len(manifest.Deliverables))
 	if manifest.AttachedTo != "" {
@@ -95,7 +108,7 @@ func (app *kanbanBoardApp) recordStudioShipResolution(plan *goalPlan, parentID s
 	if status == manifestStatusHeld {
 		line = "package held — release requires " + firstNonEmptyString(strings.TrimSpace(actor), "admin")
 	}
-	app.postGoalOriginMessage(parentID, scoutChatMessageRecord{
+	return app.postGoalOriginMessageOnce(parentID, "scout-chat-message-"+strings.TrimPrefix(effectID, "checkpoint-finalization-"), scoutChatMessageRecord{
 		Kind:     scoutChatMessageKindManifest,
 		Role:     "scout",
 		Text:     line,
@@ -196,19 +209,29 @@ func (app *kanbanBoardApp) composeStudioShipManifest(plan *goalPlan, parentID st
 // what makes the manifest's share link mintable — and what a held package
 // never gets.
 func (app *kanbanBoardApp) approveStudioShipDeliverables(ids []string, approver string) {
+	if err := app.approveStudioShipDeliverablesOnce(ids, approver, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		log.Errorf("Studio ship approval failed: %v", err)
+	}
+}
+
+func (app *kanbanBoardApp) approveStudioShipDeliverablesOnce(ids []string, approver, approvedAt string) error {
 	if app == nil || app.memory == nil {
-		return
+		return fmt.Errorf("artifact memory is unavailable")
 	}
 	stamp := map[string]string{
 		"status":                   artifactStatusApproved,
-		artifactHumanApprovedAtKey: time.Now().UTC().Format(time.RFC3339Nano),
+		artifactHumanApprovedAtKey: firstNonEmptyString(strings.TrimSpace(approvedAt), time.Now().UTC().Format(time.RFC3339Nano)),
 		artifactHumanApprovedByKey: canonicalRoomActorName(approver),
 	}
 	for _, id := range ids {
+		if current, ok := app.osArtifactByID(id); ok && current.Metadata["status"] == artifactStatusApproved && strings.TrimSpace(current.Metadata[artifactHumanApprovedAtKey]) != "" {
+			continue
+		}
 		if _, _, err := app.memory.updateOSArtifactMetadata(id, stamp); err != nil {
-			log.Errorf("ship approval stamp on deliverable %s failed: %v", id, err)
+			return fmt.Errorf("ship approval stamp on deliverable %s: %w", id, err)
 		}
 	}
+	return nil
 }
 
 // studioShipArtifactIDs reads the compile stage's shipArtifactIds stamp — the

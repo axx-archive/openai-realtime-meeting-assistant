@@ -560,10 +560,14 @@ const studioTestDoNotTouch = "do_not_touch: keep the line \"" + studioTestFounde
 func installStudioChildRunner(t *testing.T, outputs map[string]string) *[]capturedChild {
 	t.Helper()
 	var mu sync.Mutex
+	var wg sync.WaitGroup
 	launched := &[]capturedChild{}
 
 	original := startAgentThreadAsync
-	t.Cleanup(func() { startAgentThreadAsync = original })
+	t.Cleanup(func() {
+		wg.Wait()
+		startAgentThreadAsync = original
+	})
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		mu.Lock()
@@ -584,7 +588,9 @@ func installStudioChildRunner(t *testing.T, outputs map[string]string) *[]captur
 		if body == "" {
 			body = "subtask output: " + thread.Query
 		}
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", body, "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",
@@ -676,6 +682,248 @@ func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, package
 	}
 	parks = append(parks, plan.Checkpoint.StageID)
 	return thread.Artifact.ID, launched, parks
+}
+
+func TestPackagingStudioShipFinalizationRecoversAfterCommittedCrash(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	parentID, _, _ := driveStudioRunToShipApproval(t, app, "")
+	plan := waitForGoalStage(t, app, parentID, goalStateApproval)
+	checkpointID := goalCheckpointID(parentID, plan.Checkpoint)
+	optionID := ""
+	for index, option := range plan.Checkpoint.Options {
+		if option.action() == processCheckpointActionProceed {
+			optionID = goalCheckpointOptionID(checkpointID, option, index)
+		}
+	}
+	if optionID == "" {
+		t.Fatal("ship proceed option missing")
+	}
+	goalCheckpointResolutionAfterCommitProbe = func(action string) error { return fmt.Errorf("injected committed %s crash", action) }
+	t.Cleanup(func() { goalCheckpointResolutionAfterCommitProbe = nil })
+	snapshot := mustArtifact(t, app, parentID)
+	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}
+	if _, err := app.resumeApprovedGoalWithCheckpointOptionAuthorized(context.Background(), user, snapshot, user.Name, checkpointID, optionID); err == nil {
+		t.Fatal("committed crash was not surfaced")
+	}
+	if receipt := checkpointReceiptFor(t, app, parentID, checkpointID, optionID); receipt.State != goalCheckpointResolutionCommitted {
+		t.Fatalf("crash receipt=%+v", receipt)
+	}
+	parent := mustArtifact(t, app, parentID)
+	origin, ok := app.goalOriginChatThread(parent)
+	if !ok {
+		t.Fatal("Studio goal origin missing")
+	}
+	manifestCount := func(thread scoutChatThreadRecord) int {
+		count := 0
+		for _, message := range thread.Messages {
+			if message.Kind == scoutChatMessageKindManifest && message.Manifest != nil && message.Manifest.GoalID == parentID {
+				count++
+			}
+		}
+		return count
+	}
+	if got := manifestCount(origin); got != 0 {
+		t.Fatalf("manifest effects ran before finalizer: %d", got)
+	}
+	goalCheckpointResolutionAfterCommitProbe = nil
+	restarted := newKanbanBoardApp()
+	kanbanApp = restarted
+	recoveryDone := make(chan string, 1)
+	goalCheckpointResolutionRecoveryDoneProbe = func(id string) { recoveryDone <- id }
+	t.Cleanup(func() { goalCheckpointResolutionRecoveryDoneProbe = nil })
+	restarted.reconcileGoalThreadsAtBoot()
+	select {
+	case got := <-recoveryDone:
+		if got != parentID {
+			t.Fatalf("recovered goal=%q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Studio checkpoint recovery did not finish")
+	}
+	if receipt := checkpointReceiptFor(t, restarted, parentID, checkpointID, optionID); receipt.State != goalCheckpointResolutionFinalized {
+		t.Fatalf("recovered receipt=%+v", receipt)
+	}
+	parent = mustArtifact(t, restarted, parentID)
+	origin, ok = restarted.goalOriginChatThread(parent)
+	if !ok || manifestCount(origin) != 1 {
+		t.Fatalf("recovered manifests=%d origin=%v", manifestCount(origin), ok)
+	}
+	for _, artifact := range studioFiledDeliverables(t, restarted, parentID) {
+		if artifact.Metadata[artifactHumanApprovedAtKey] == "" || artifact.Metadata["status"] != artifactStatusApproved {
+			t.Fatalf("ship deliverable was not approved by finalizer: %s %+v", artifact.ID, artifact.Metadata)
+		}
+	}
+}
+
+// A durable ship-approval send-back is not a shipment. If the process dies
+// after the revised transition is persisted but before the redo is driven,
+// boot re-drives the exact reset deck stage, re-parks a fresh ship checkpoint,
+// and finalizes the old receipt without ever filing a manifest.
+func TestPackagingStudioShipReviseRedrivesAfterPreDriveCrash(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, "", nil, map[string]string{
+		"originKind":  agentThreadOriginPrivateThread,
+		"originId":    channel.ID,
+		"requestedBy": "aj@shareability.com",
+	})
+	plan := waitForGoalStage(t, app, parentID, goalStateApproval)
+	oldCheckpointID := goalCheckpointID(parentID, plan.Checkpoint)
+	reviseOptionID := ""
+	for index, option := range plan.Checkpoint.Options {
+		if option.action() == processCheckpointActionRevise {
+			reviseOptionID = goalCheckpointOptionID(oldCheckpointID, option, index)
+			break
+		}
+	}
+	if reviseOptionID == "" {
+		t.Fatal("ship revise option missing")
+	}
+
+	goalCheckpointAfterTransitionPersistProbe = func(action string) error {
+		if action == processCheckpointActionRevise {
+			return fmt.Errorf("injected revise crash before drive")
+		}
+		return nil
+	}
+	t.Cleanup(func() { goalCheckpointAfterTransitionPersistProbe = nil })
+	if _, err := app.resumeApprovedGoalWithCheckpointOption(parentID, "aj@shareability.com", oldCheckpointID, reviseOptionID); err == nil {
+		t.Fatal("revise pre-drive crash was not surfaced")
+	}
+	crashed := waitForGoalStage(t, app, parentID, goalStateExecute)
+	receipt := checkpointReceiptFor(t, app, parentID, oldCheckpointID, reviseOptionID)
+	if receipt.State != goalCheckpointResolutionCommitted || receipt.EffectiveOutcome != processCheckpointActionRevise ||
+		!receipt.DriveNeeded || receipt.DriveCompletedAt != "" {
+		t.Fatalf("revise pre-drive receipt=%+v", receipt)
+	}
+	if target := crashed.subtaskByID("ship_deck"); target == nil || target.Status != subtaskReady {
+		t.Fatalf("ship deck was not durably reset before drive: %+v", target)
+	}
+	if manifests := studioManifestMessages(t, app, channel.ID); len(manifests) != 0 {
+		t.Fatalf("revise filed a manifest before recovery: %+v", manifests)
+	}
+
+	goalCheckpointAfterTransitionPersistProbe = nil
+	restarted := newKanbanBoardApp()
+	restarted.apiKey = "test-key"
+	kanbanApp = restarted
+	recoveryDone := make(chan string, 1)
+	goalCheckpointResolutionRecoveryDoneProbe = func(id string) { recoveryDone <- id }
+	t.Cleanup(func() { goalCheckpointResolutionRecoveryDoneProbe = nil })
+	restarted.reconcileGoalThreadsAtBoot()
+	select {
+	case got := <-recoveryDone:
+		if got != parentID {
+			t.Fatalf("recovered goal=%q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Studio revise recovery did not finish")
+	}
+	reparked := waitForGoalStage(t, restarted, parentID, goalStateApproval)
+	if reparked.Checkpoint == nil || reparked.Checkpoint.StageID != "ship_approval" || goalCheckpointID(parentID, reparked.Checkpoint) == oldCheckpointID {
+		t.Fatalf("revise did not re-park a fresh ship checkpoint: %+v", reparked.Checkpoint)
+	}
+	receipt = checkpointReceiptFor(t, restarted, parentID, oldCheckpointID, reviseOptionID)
+	if receipt.State != goalCheckpointResolutionFinalized || receipt.EffectiveOutcome != processCheckpointActionRevise || receipt.DriveCompletedAt == "" {
+		t.Fatalf("recovered revise receipt=%+v", receipt)
+	}
+	if manifests := studioManifestMessages(t, restarted, channel.ID); len(manifests) != 0 {
+		t.Fatalf("normal revise was misclassified as shipped: %+v", manifests)
+	}
+}
+
+// If the revise drive crossed the durable child-activation seam but the
+// process died before recording that drive acknowledgement, restart cannot
+// honestly replay the provider. It must fail closed and finalize the choice
+// receipt without projecting a shipped manifest.
+func TestPackagingStudioShipReviseMidDriveCrashFailsClosedWithoutManifest(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, "", nil, map[string]string{
+		"originKind":  agentThreadOriginPrivateThread,
+		"originId":    channel.ID,
+		"requestedBy": "aj@shareability.com",
+	})
+	plan := waitForGoalStage(t, app, parentID, goalStateApproval)
+	checkpointID := goalCheckpointID(parentID, plan.Checkpoint)
+	reviseOptionID := ""
+	for index, option := range plan.Checkpoint.Options {
+		if option.action() == processCheckpointActionRevise {
+			reviseOptionID = goalCheckpointOptionID(checkpointID, option, index)
+			break
+		}
+	}
+	if reviseOptionID == "" {
+		t.Fatal("ship revise option missing")
+	}
+
+	studioRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) {
+		if thread.Artifact.Metadata["goalSubtaskId"] == "ship_deck" {
+			return // provider accepted/start recorded; callback is lost with process death
+		}
+		studioRunner(app, thread)
+	}
+	t.Cleanup(func() { startAgentThreadAsync = studioRunner })
+	goalCheckpointAfterDriveProbe = func(action string) error {
+		if action == processCheckpointActionRevise {
+			return fmt.Errorf("injected crash after revise dispatch")
+		}
+		return nil
+	}
+	t.Cleanup(func() { goalCheckpointAfterDriveProbe = nil })
+	if _, err := app.resumeApprovedGoalWithCheckpointOption(parentID, "aj@shareability.com", checkpointID, reviseOptionID); err == nil {
+		t.Fatal("mid-drive crash was not surfaced")
+	}
+	crashed := waitForGoalStage(t, app, parentID, goalStateExecute)
+	if target := crashed.subtaskByID("ship_deck"); target == nil || target.Status != subtaskRunning {
+		t.Fatalf("mid-drive child is not durably running: %+v", target)
+	}
+	if receipt := checkpointReceiptFor(t, app, parentID, checkpointID, reviseOptionID); receipt.State != goalCheckpointResolutionCommitted || receipt.DriveCompletedAt != "" {
+		t.Fatalf("mid-drive receipt=%+v", receipt)
+	}
+
+	goalCheckpointAfterDriveProbe = nil
+	restarted := newKanbanBoardApp()
+	kanbanApp = restarted
+	recoveryDone := make(chan string, 1)
+	goalCheckpointResolutionRecoveryDoneProbe = func(id string) { recoveryDone <- id }
+	t.Cleanup(func() { goalCheckpointResolutionRecoveryDoneProbe = nil })
+	restarted.reconcileGoalThreadsAtBoot()
+	select {
+	case <-recoveryDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("mid-drive recovery did not finish")
+	}
+	blocked := waitForGoalStage(t, restarted, parentID, goalStateBlocked)
+	if !strings.Contains(blocked.Blocker, "execution state is unknown after restart") {
+		t.Fatalf("mid-drive blocker=%q", blocked.Blocker)
+	}
+	receipt := checkpointReceiptFor(t, restarted, parentID, checkpointID, reviseOptionID)
+	if receipt.State != goalCheckpointResolutionFinalized || receipt.EffectiveOutcome != "drive_blocked" || receipt.DriveCompletedAt == "" {
+		t.Fatalf("mid-drive finalized receipt=%+v", receipt)
+	}
+	if manifests := studioManifestMessages(t, restarted, channel.ID); len(manifests) != 0 {
+		t.Fatalf("ambiguous mid-drive revise projected a manifest: %+v", manifests)
+	}
 }
 
 // studioFiledDeliverables collects the artifacts the run's ship_compile stage
