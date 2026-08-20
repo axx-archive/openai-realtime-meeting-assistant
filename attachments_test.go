@@ -1615,6 +1615,12 @@ func TestCommittedAttachmentProjectionFailsClosedAcrossReaderSurfaces(t *testing
 		assertNoAttachmentLeak(label+" deposits", deposits)
 		history := app.scoutChatHistoryForViewer(viewer.Email, thread)
 		assertNoAttachmentLeak(label+" model history", history)
+		turnContext := app.scoutChatTurnContextForViewer(viewer.Email, thread, scoutChatMessageRecord{
+			ID: "projection-followup", Kind: "message", Role: "user", Text: "use the attachment above",
+			AuthorName: viewer.Name, AuthorEmail: viewer.Email,
+			ReplyTo: &scoutChatReplyRef{MessageID: message.ID, AuthorName: owner.Name, Text: message.Text},
+		})
+		assertNoAttachmentLeak(label+" reply context", turnContext)
 		payload := app.scoutChatThreadUpdatePayload(viewer.Email, thread, thread.Messages[0])
 		assertNoAttachmentLeak(label+" event", payload)
 	}

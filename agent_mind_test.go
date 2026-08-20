@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,34 @@ import (
 	"testing"
 	"time"
 )
+
+func TestAgentMindAnswerSelectionUsesResolvedRecallQuery(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "ball-dogs-recall", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := scoutChatMessageRecord{ID: "agent-mind-recall-question", Role: "user", Text: "What is the Ball Dogs strategy?"}
+	answer := scoutChatMessageRecord{ID: "agent-mind-recall-answer", Role: "scout", Text: "My read is that Ball Dogs should prove the athlete-led wedge first before expanding the franchise."}
+	thread.Messages = []scoutChatMessageRecord{question, answer}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	app.maybeRecordScoutAgentMindPosition(thread, question, answer)
+	app.apiKey = "agent-mind-recall-test"
+	var captured string
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		captured = request.Input
+		return "answer", nil
+	})
+	ctx := withAssistantRecallQuery(context.Background(), "Ball Dogs")
+	if _, err := app.answerAssistantQueryWithModel(ctx, "aj@shareability.com", `{"message":"use the source pasted above","channel_norm":"generic"}`, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(captured, "Scout AgentMind positions") || !strings.Contains(captured, "athlete-led wedge") {
+		t.Fatalf("resolved recall query did not select AgentMind position: %s", captured)
+	}
+}
 
 func TestAgentMindPositionPersistsEvolvesAndCanBeHumanResolved(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)

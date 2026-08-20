@@ -2142,9 +2142,16 @@ func scoutChatReplyTargetsScout(thread scoutChatThreadRecord, messageID string) 
 	return author == "" || strings.EqualFold(author, scoutParticipantName)
 }
 
-func scoutChatClarificationAlreadyAsked(thread scoutChatThreadRecord) bool {
+func scoutChatClarificationAlreadyAsked(thread scoutChatThreadRecord, replyRootIDs ...string) bool {
+	replyRootID := ""
+	if len(replyRootIDs) > 0 {
+		replyRootID = strings.TrimSpace(replyRootIDs[0])
+	}
 	for index := len(thread.Messages) - 1; index >= 0; index-- {
 		message := thread.Messages[index]
+		if replyRootID != "" && message.ID != replyRootID && scoutChatMessageReplyRootID(thread, message) != replyRootID {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			return false
 		}
@@ -2578,7 +2585,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			}
 		}
 	}
-	history := app.scoutChatHistoryForViewer(user.Email, historyThread)
+	turnContext := app.scoutChatTurnContextForViewer(user.Email, historyThread, userMessage)
+	history := turnContext.History
 	var meetingConversation *meetingRecordConversationContext
 
 	// @-mention bell nudges are collaborative-channel behavior only, and only
@@ -3254,7 +3262,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	ownedPublicSuggestion := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
 		app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() &&
-		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork
+		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork && turnContext.ReplyRootID == ""
 	routedIntent := conversationalReplyDecision(proposalSourceDeterministicGuard)
 	// A public addressed-agent work mention is governed by the existing
 	// channel/audience confirmation policy below. It still produces exactly one
@@ -3268,7 +3276,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		intentTurn := conversationIntentTurn{
 			Text: intentText, AttachmentsContext: conversationAttachmentContext(files), ReplyContext: conversationReplyContext(replyTo),
 			Modality: modality, AddressedAgentID: addressedAgentID,
-			ClarificationAlreadyAsked: scoutChatClarificationAlreadyAsked(thread),
+			ClarificationAlreadyAsked: scoutChatClarificationAlreadyAsked(thread, turnContext.ReplyRootID),
 		}
 		routerInput, inputErr := conversationIntentModelText(intentTurn)
 		if inputErr != nil {
@@ -3335,6 +3343,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			Work:        &work,
 		}, Source: routedIntent.Source}
 	}
+	routedIntent = bindScoutReplyContextToWork(routedIntent, turnContext.WorkContext, turnContext.SourceComplete)
 	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
 	// Private Riff v1 is a source-bound analysis conversation. Starting work or
 	// taking product actions would require carrying the public checkpoint through
@@ -3507,7 +3516,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// a legacy agent launch or a conversational provider call.
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
 		app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() &&
-		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork {
+		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork && turnContext.ReplyRootID == "" {
 		saved, err := commitUserMessage(userMessage)
 		if err != nil {
 			return nil, err
@@ -3564,6 +3573,24 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if mode != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		requestText := strings.TrimSpace(text)
 		objective := polishedWorkstreamObjective(requestText)
+		var sourceComplete bool
+		objective, sourceComplete = appendScoutReplyContextObjective(objective, turnContext.WorkContext, turnContext.SourceComplete)
+		if !sourceComplete {
+			unavailable := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
+				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable), CausedByMessageID: userMessage.ID,
+				Text:      "The reply-thread source is too large to carry into governed work without dropping content. Attach it as a readable file, then ask again; nothing was launched.",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailable)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailable
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			return response, nil
+		}
 		if targetedAgentWork && replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
 			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
 		}
@@ -3721,7 +3748,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// wrote. Strategy chat is also never permission to take the legacy Board
 		// shortcut; an explicit Board surface/field phrase or exact card title/id
 		// remains eligible.
-		answerContext = withAssistantRecallQuery(answerContext, text)
+		answerContext = withAssistantRecallQuery(answerContext, turnContext.RecallQuery)
+		if turnContext.ReplyRootID != "" {
+			answerContext = withAssistantConversationRecallScope(answerContext, thread.ID, turnContext.RecallMessageIDs)
+		}
 		if !isCurrentBoardQuery(text) && !queryNamesBoardCard(text, app.snapshotState().Cards) {
 			answerContext = withAssistantBoardShortcutDisabled(answerContext)
 		}

@@ -693,25 +693,34 @@ func restoreSTRIDERuntimeTenantState(config STRIDERuntimeConfig, payload strideR
 }
 
 func restoreSTRIDERegistry(snapshot STRIDERegistrySnapshot) (*STRIDERegistry, error) {
-	if !isHexDigest(snapshot.Digest) || len(snapshot.Features) != len(allSTRIDEFeatures) {
+	if !isHexDigest(snapshot.Digest) || len(snapshot.Features) == 0 {
+		return nil, ErrSTRIDERegistryInvalid
+	}
+	digest, err := STRIDEContractDigest(struct {
+		Entries  []STRIDERegistryEntry `json:"entries"`
+		Features []STRIDEFeatureState  `json:"features"`
+	}{snapshot.Entries, snapshot.Features})
+	if err != nil || digest != snapshot.Digest {
 		return nil, ErrSTRIDERegistryInvalid
 	}
 	seen := make(map[STRIDEFeature]bool, len(snapshot.Features))
-	for _, feature := range snapshot.Features {
+	for index, feature := range snapshot.Features {
 		if !validSTRIDEFeature(feature.Feature) || feature.Enabled || seen[feature.Feature] {
+			return nil, ErrSTRIDERegistryInvalid
+		}
+		if index > 0 && snapshot.Features[index-1].Feature >= feature.Feature {
 			return nil, ErrSTRIDERegistryInvalid
 		}
 		seen[feature.Feature] = true
 	}
 	registry := NewSTRIDERegistry()
-	for _, entry := range snapshot.Entries {
+	for index, entry := range snapshot.Entries {
+		if !seen[entry.Feature] || index > 0 && strideRegistryEntryKey(snapshot.Entries[index-1].TenantID, snapshot.Entries[index-1].Kind, snapshot.Entries[index-1].Key) >= strideRegistryEntryKey(entry.TenantID, entry.Kind, entry.Key) {
+			return nil, ErrSTRIDERegistryInvalid
+		}
 		if err := registry.Register(entry); err != nil {
 			return nil, err
 		}
-	}
-	rebuilt, err := registry.Snapshot()
-	if err != nil || rebuilt.Digest != snapshot.Digest {
-		return nil, ErrSTRIDERegistryInvalid
 	}
 	return registry, nil
 }

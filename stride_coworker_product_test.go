@@ -125,6 +125,33 @@ func TestSTRIDECoworkerContextIsBodyFreeAndFeedsActualPublicScoutQuery(t *testin
 	}
 }
 
+func TestSTRIDECoworkerContextEnrichesDirectReplyWithoutMention(t *testing.T) {
+	fixture := newSTRIDECoworkerTestFixture(t)
+	parent := scoutChatMessageRecord{
+		ID: "coworker-scout-parent", Kind: "message", Role: "scout", AuthorName: scoutParticipantName,
+		Text: "Which source should I use?", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	thread, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, fixture.table.ID, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := scoutChatMessageRecord{
+		ID: "coworker-direct-reply", Kind: "message", Role: "user", AuthorName: fixture.user.Name, AuthorEmail: fixture.user.Email,
+		Text: "Use Dr. May's recommendation pasted above.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ReplyTo: &scoutChatReplyRef{MessageID: parent.ID, AuthorName: scoutParticipantName, Text: parent.Text},
+	}
+	prepared := fixture.app.prepareSTRIDECoworkerModelQuery(fixture.user, thread, pending, "base query")
+	if prepared == "base query" || !strings.Contains(prepared, "[STRIDE authorized context:") {
+		t.Fatalf("direct reply without @Scout omitted STRIDE context: %q", prepared)
+	}
+	ordinary := pending
+	ordinary.ID = "coworker-ordinary"
+	ordinary.ReplyTo = nil
+	if got := fixture.app.prepareSTRIDECoworkerModelQuery(fixture.user, thread, ordinary, "unchanged"); got != "unchanged" {
+		t.Fatalf("ordinary unaddressed channel message was enriched: %q", got)
+	}
+}
+
 func TestSTRIDECoworkerDefaultOffAndInvocationBoundariesFailClosed(t *testing.T) {
 	fixture := newSTRIDECoworkerTestFixture(t)
 	message := fixture.commitUserMessage(t, "coworker-boundary", "ordinary team message")

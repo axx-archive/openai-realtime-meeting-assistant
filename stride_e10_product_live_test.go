@@ -313,7 +313,7 @@ func TestStrideE10ProductLiveFileOperationStoreReconcilesPreparedMutationAndRest
 
 func TestStrideE10OrganizationSwitchPreparedLossReconcilesBothSessionStores(t *testing.T) {
 	setupAuthTestEnv(t)
-	now := time.Date(2026, 8, 8, 18, 10, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	path := filepath.Join(t.TempDir(), "switch-operations.json")
 	keys := strideE10ProductTestKeys("switch-operation-key", 1)
 	store, err := newStrideE10FileOperationStore(path, keys)

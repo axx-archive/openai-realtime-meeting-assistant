@@ -71,7 +71,7 @@ func (app *kanbanBoardApp) assembleSTRIDECoworkerContext(product STRIDEProductCo
 	if app == nil || product.Conversation == nil || user == nil || product.Receipt.Scope != STRIDEProductScopeCoworker ||
 		product.Receipt.Mode != "deterministic_local" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" ||
 		!containsSTRIDEID(product.Conversation.config.RecallThreadIDs, thread.ID) || current.Role != "user" ||
-		normalizeAccountEmail(current.AuthorEmail) != normalizeAccountEmail(user.Email) || !scoutChatMessageMentionsScout(current) {
+		normalizeAccountEmail(current.AuthorEmail) != normalizeAccountEmail(user.Email) || !scoutChatMessageAddressesScout(thread, current) {
 		return STRIDEAssembledAgentContext{}, ErrSTRIDECoworkerDenied
 	}
 	requester := strideRuntimePrincipalForEmail(user.Email)
@@ -315,8 +315,12 @@ func strideCoworkerRelationshipSourcesAuthorized(preference STRIDECollaborationC
 	return true
 }
 
+func scoutChatMessageAddressesScout(thread scoutChatThreadRecord, message scoutChatMessageRecord) bool {
+	return scoutChatMessageMentionsScout(message) || message.ReplyTo != nil && scoutChatReplyRefTargetsScout(thread, message.ReplyTo)
+}
+
 func (app *kanbanBoardApp) prepareSTRIDECoworkerModelQuery(user *userAccount, thread scoutChatThreadRecord, message scoutChatMessageRecord, query string) string {
-	if app == nil || app.strideRuntime == nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || !scoutChatMessageMentionsScout(message) {
+	if app == nil || app.strideRuntime == nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || !scoutChatMessageAddressesScout(thread, message) {
 		return query
 	}
 	var assembled STRIDEAssembledAgentContext

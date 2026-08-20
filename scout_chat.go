@@ -36,8 +36,10 @@ const (
 )
 
 type scoutChatTurn struct {
-	role string // "user" or "scout"
-	text string
+	role   string // "user" or "scout"
+	text   string
+	pinned bool
+	source bool
 }
 
 type scoutChatTurnPayload struct {
@@ -620,17 +622,76 @@ func scoutRouterTools() []anthropicTool {
 // routing turn's single user block — enough context to tell a follow-up
 // question from a fresh deliverable ask, bounded so routing stays cheap.
 func scoutRouterInput(text string, history []scoutChatTurn) string {
+	const (
+		maxTurns              = 24
+		maxTurnBytes          = 8000
+		maxSourceTurnBytes    = 20000
+		maxSourceBytes        = 32000
+		maxAnchorBytes        = 16000
+		maxRecentHistoryBytes = 32000
+	)
 	var builder strings.Builder
 	if len(history) > 0 {
-		builder.WriteString("# Conversation so far\n")
-		start := 0
-		if len(history) > 6 {
-			start = len(history) - 6
+		writeTurns := func(heading string, turns []scoutChatTurn, totalLimit int, turnLimit int) {
+			if len(turns) == 0 {
+				return
+			}
+			builder.WriteString(heading + "\n")
+			written := 0
+			for _, turn := range turns {
+				remaining := totalLimit - written
+				if remaining <= 0 {
+					builder.WriteString("[Additional authorized context omitted by router budget.]\n")
+					break
+				}
+				limit := turnLimit
+				if remaining < limit {
+					limit = remaining
+				}
+				value := truncateScoutContextWithMarker(turn.text, limit)
+				builder.WriteString(turn.role + ": " + value + "\n")
+				written += len(value)
+			}
+			builder.WriteString("\n")
 		}
-		for _, turn := range history[start:] {
-			builder.WriteString(turn.role + ": " + truncateAgentThreadText(turn.text, 400) + "\n")
+		sources, anchors, recent := []scoutChatTurn{}, []scoutChatTurn{}, []scoutChatTurn{}
+		for _, turn := range history {
+			switch {
+			case turn.source:
+				sources = append(sources, turn)
+			case turn.pinned:
+				anchors = append(anchors, turn)
+			default:
+				recent = append(recent, turn)
+			}
 		}
-		builder.WriteString("\n")
+		if len(recent) > maxTurns {
+			recent = recent[len(recent)-maxTurns:]
+		}
+		// Keep the newest ordinary turns when their combined bodies exceed the
+		// router budget. Sources and structural anchors were already separated
+		// above, so dropping an older ordinary turn cannot evict the pinned paste.
+		selectedRecent := make([]scoutChatTurn, 0, len(recent))
+		recentBytes := 0
+		omittedRecent := false
+		for index := len(recent) - 1; index >= 0; index-- {
+			cost := len(recent[index].text)
+			if cost > maxTurnBytes {
+				cost = maxTurnBytes
+			}
+			if recentBytes+cost > maxRecentHistoryBytes {
+				omittedRecent = true
+				continue
+			}
+			selectedRecent = append([]scoutChatTurn{recent[index]}, selectedRecent...)
+			recentBytes += cost
+		}
+		if omittedRecent {
+			selectedRecent = append([]scoutChatTurn{{role: "user", text: "[Older authorized non-source conversation omitted by router budget.]"}}, selectedRecent...)
+		}
+		writeTurns("# Pinned reply sources", sources, maxSourceBytes, maxSourceTurnBytes)
+		writeTurns("# Reply anchors", anchors, maxAnchorBytes, maxTurnBytes)
+		writeTurns("# Recent conversation", selectedRecent, maxRecentHistoryBytes, maxTurnBytes)
 	}
 	builder.WriteString("# New message\n" + text)
 	return builder.String()

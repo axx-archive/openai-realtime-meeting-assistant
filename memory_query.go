@@ -218,6 +218,8 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	includeAuthorizedRecall := !assistantExactSourceContext(ctx) || assistantAuthorizedRecall(ctx)
 	if includeAuthorizedRecall {
 		matches, contextEntries = recallApp.memoryMatchesAndContext(recallQuery)
+		matches = filterAssistantConversationRecallMatches(ctx, matches)
+		contextEntries = filterAssistantConversationRecallEntries(ctx, contextEntries)
 	}
 	// Files is a first-class Scout source, not just a visual tab. Relevance
 	// search remains useful for broad company recall, but an exact file ref
@@ -269,6 +271,61 @@ type assistantBoardShortcutDisabledContextKey struct{}
 type assistantRecallQueryContextKey struct{}
 type assistantExactSourceContextKey struct{}
 type assistantAuthorizedRecallContextKey struct{}
+type assistantConversationRecallScopeContextKey struct{}
+
+type assistantConversationRecallScope struct {
+	ThreadID   string
+	MessageIDs map[string]bool
+}
+
+func withAssistantConversationRecallScope(ctx context.Context, threadID string, messageIDs map[string]bool) context.Context {
+	threadID = strings.TrimSpace(threadID)
+	if ctx == nil || threadID == "" || len(messageIDs) == 0 {
+		return ctx
+	}
+	allowed := make(map[string]bool, len(messageIDs))
+	for messageID, included := range messageIDs {
+		messageID = strings.TrimSpace(messageID)
+		if included && messageID != "" {
+			allowed[messageID] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, assistantConversationRecallScopeContextKey{}, assistantConversationRecallScope{ThreadID: threadID, MessageIDs: allowed})
+}
+
+func assistantConversationRecallEntryAllowed(ctx context.Context, entry meetingMemoryEntry) bool {
+	if ctx == nil {
+		return true
+	}
+	scope, ok := ctx.Value(assistantConversationRecallScopeContextKey{}).(assistantConversationRecallScope)
+	if !ok || scope.ThreadID == "" || strings.TrimSpace(entry.Metadata["threadId"]) != scope.ThreadID {
+		return true
+	}
+	return scope.MessageIDs[strings.TrimSpace(entry.Metadata["messageId"])]
+}
+
+func filterAssistantConversationRecallEntries(ctx context.Context, entries []meetingMemoryEntry) []meetingMemoryEntry {
+	filtered := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if assistantConversationRecallEntryAllowed(ctx, entry) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func filterAssistantConversationRecallMatches(ctx context.Context, matches []meetingMemoryMatch) []meetingMemoryMatch {
+	filtered := make([]meetingMemoryMatch, 0, len(matches))
+	for _, match := range matches {
+		if assistantConversationRecallEntryAllowed(ctx, match.Entry) {
+			filtered = append(filtered, match)
+		}
+	}
+	return filtered
+}
 
 // withAssistantExactSourceContext prevents a revision-bound surface from
 // silently widening into Board, Files, general recall, relationship memory, or
@@ -469,7 +526,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	if !exactSources {
 		pinned = app.pinnedProfileNotes(requester)
 	}
-	if positions := app.agentMindPositionPrompt(agentMindScoutID, query); !exactSources && positions != "" {
+	if positions := app.agentMindPositionPrompt(agentMindScoutID, assistantRecallQuery(ctx, query)); !exactSources && positions != "" {
 		pinned = append(pinned, assistantPinnedNote{
 			heading:  "Scout AgentMind positions",
 			body:     positions,
