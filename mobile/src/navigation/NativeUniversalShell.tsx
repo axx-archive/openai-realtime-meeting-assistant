@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type ColorValue } from 'react-native';
 import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
@@ -36,13 +36,13 @@ type Props = {
  *   • stacked-sheets: three stacked rectangles with depth
  * NOT house, NOT camera, NOT SF Symbols, NOT Lucide, NOT Expo stock.
  */
-function DestMark({ icon, size, color }: { icon: string; size: number; color: string }) {
+function DestMark({ icon, size, color }: { icon: string; size: number; color: ColorValue }) {
   const strokeWidth = 1.8;
   switch (icon) {
     case 'home-mark':
       // Hearth: flame shape with inner circle (live web line 30958)
       return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
             d="M12 4c-5.5 3-8 6.5-8 10a8 8 0 0 0 16 0c0-3.5-2.5-7-8-10Z"
             stroke={color}
@@ -62,7 +62,7 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: st
     case 'meet-mark':
       // Two faces: overlapping ellipses with pupils (live web line 30962)
       return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Ellipse
             cx="8"
             cy="12"
@@ -98,7 +98,7 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: st
     case 'chat-bubble':
       // One speech bubble with lower-left tail (live web line 30966)
       return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
             d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"
             stroke={color}
@@ -111,7 +111,7 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: st
     case 'stacked-sheets':
       // Three stacked rectangles with depth (live web line 30970)
       return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
             d="M7 3h8c1.1 0 2 .9 2 2v1"
             stroke={color}
@@ -137,7 +137,7 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: st
       );
     default:
       return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Circle cx="12" cy="12" r="8" stroke={color} strokeWidth={strokeWidth} />
         </Svg>
       );
@@ -271,7 +271,7 @@ function ShellItem({
         <DestMark
           icon={destination.icon}
           size={compact ? 20 : 20}
-          color={String(selected ? colors.ember : colors.text1)}
+          color={selected ? colors.ember : colors.text1}
         />
         {hasUnread ? <View style={styles.unreadDot} /> : null}
       </View>
@@ -339,9 +339,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     borderRadius: radius.full,
+    zIndex: 1,
   },
   compactItemSelected: { backgroundColor: colors.accentSoft },
-  iconWrap: { position: 'relative' },
+  iconWrap: { position: 'relative', opacity: 1, zIndex: 2 },
+  destMark: { opacity: 1, zIndex: 2 },
   unreadDot: {
     position: 'absolute',
     top: -2,

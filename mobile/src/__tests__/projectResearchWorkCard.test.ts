@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import test from 'node:test';
 
-test('Project-bound Research exposes exact Open Drive and regenerate actions on native cards', async () => {
+test('Project-bound Research uses governed actions while Project presentations keep the deck viewer', async () => {
   registerHooks({
     resolve(specifier, context, nextResolve) {
       const stubs = new Set([
-        'react-native', 'expo-image', 'expo-symbols', 'expo-linking', '@shopify/flash-list',
-        '../files/fileActions', '../theme/tokens', './LinkPreviewCard', './ScoutRichText',
+        'react-native', 'react-native-webview', 'expo-image', 'expo-symbols', 'expo-linking', 'expo-blur', 'expo-glass-effect', '@shopify/flash-list',
+        '../api/client', '../files/fileActions', '../theme/glass', '../theme/tokens', './LinkPreviewCard', './ScoutRichText',
         './ChatAvatar', './messageGestures', './scoutReplyLifecycle', './messagePresentation',
-        './workPresentation',
+        './workPresentation', './InlineArtifactPreview',
       ]);
       if (stubs.has(specifier)) return { url: `project-work-card-stub:${specifier}`, shortCircuit: true };
       return nextResolve(specifier, context);
@@ -20,14 +20,20 @@ test('Project-bound Research exposes exact Open Drive and regenerate actions on 
           export const ActivityIndicator='ActivityIndicator';
           export const Animated={View:'AnimatedView'};
           export const findNodeHandle=()=>1;
-          export const Pressable='Pressable'; export const Text='Text'; export const TextInput='TextInput'; export const View='View';
+          export const Pressable='Pressable'; export const ScrollView='ScrollView'; export const Text='Text'; export const TextInput='TextInput'; export const View='View';
           export const StyleSheet={create:value=>value};
+          export const useWindowDimensions=()=>({width:390,height:844,fontScale:1});
         `,
+        'project-work-card-stub:react-native-webview': `export const WebView='WebView';`,
         'project-work-card-stub:expo-image': `export const Image='Image';`,
         'project-work-card-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'project-work-card-stub:expo-linking': `export const openURL=async()=>{};`,
+        'project-work-card-stub:expo-blur': `export const BlurView='BlurView';`,
+        'project-work-card-stub:expo-glass-effect': `export const GlassView='GlassView'; export const isLiquidGlassAvailable=()=>false;`,
         'project-work-card-stub:@shopify/flash-list': `export const useMappingHelper=()=>({getMappingKey:value=>String(value)});`,
+        'project-work-card-stub:../api/client': `export const api={};`,
         'project-work-card-stub:../files/fileActions': `export const authenticatedFileHeaders=()=>({}); export const authenticatedFileUrl=()=>'';`,
+        'project-work-card-stub:../theme/glass': `export const Glass='Glass';`,
         'project-work-card-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const shadow=proxy; export const space=proxy; export const type=proxy;`,
         'project-work-card-stub:./LinkPreviewCard': `export const LinkPreviewCard='LinkPreviewCard';`,
         'project-work-card-stub:./ScoutRichText': `export const ScoutRichText='ScoutRichText';`,
@@ -35,12 +41,14 @@ test('Project-bound Research exposes exact Open Drive and regenerate actions on 
         'project-work-card-stub:./messageGestures': `export const messageLongPressDelayMs=350;`,
         'project-work-card-stub:./scoutReplyLifecycle': `export const scoutReplyLifecyclePresentation=()=>null;`,
         'project-work-card-stub:./messagePresentation': `export const extractHttpUrls=()=>[]; export const groupMessageReactions=()=>[]; export const parseMessageTextSegments=()=>[];`,
-        'project-work-card-stub:./workPresentation': `export const safeWorkProgressNote=(value,fallback)=>String(value||fallback); export const workFamilyLabel=()=> 'Research'; export const workPhaseLabel=()=> 'Delivered';`,
+        'project-work-card-stub:./workPresentation': `export const safeWorkProgressNote=(value,fallback)=>String(value||fallback); export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'?'Presentation':'Research'; export const workPhaseLabel=()=> 'Delivered';`,
+        'project-work-card-stub:./InlineArtifactPreview': `export const InlineArtifactPreview='InlineArtifactPreview';`,
       };
       if (modules[url]) return { format: 'module', source: modules[url], shortCircuit: true };
       return nextLoad(url, context);
     },
   });
+  (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const React = (await import('react')).default;
   const { act, create } = await import('react-test-renderer');
@@ -72,4 +80,21 @@ test('Project-bound Research exposes exact Open Drive and regenerate actions on 
   assert.equal(drive.findByType('Text' as any).children.join(''), 'Open in Drive');
   await act(async () => { drive.props.onPress(); });
   assert.equal(openedDrive, 1);
+
+  const presentationMessage = {
+    id: 'project-presentation-work', kind: 'thread', role: 'scout', text: 'Presentation delivered.', createdAt: '2026-08-13T18:05:00Z',
+    thread: { id: 'run-project-presentation', mode: 'presentation', query: 'Build the launch deck', status: 'complete', artifactId: 'artifact-project-presentation', projectId: 'project-presentation', projectTitle: 'Launch Project', progressPercent: 100 },
+  };
+  let presented = 0;
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: presentationMessage, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+      onViewArtifactFullscreen: () => { presented += 1; },
+    } as any));
+  });
+  const deck = renderer!.root.findByType('InlineArtifactPreview' as any);
+  assert.equal(deck.props.kind, 'html_deck');
+  assert.equal(deck.props.artifactId, 'artifact-project-presentation');
+  await act(async () => { deck.props.onPresent(); });
+  assert.equal(presented, 1);
 });

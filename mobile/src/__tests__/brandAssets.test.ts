@@ -136,8 +136,8 @@ test('React Native shell separates the static logo from composer voice controls'
   const navigation = text('src/navigation/RootNavigator.tsx');
   const composition = text('src/components/CanvasCradleComposition.tsx');
   assert.match(navigation, /return <LaunchCradle \/>/);
-  assert.match(navigation, /Animated\.timing\(launchOpacity,[\s\S]*useNativeDriver: true/);
-  assert.match(navigation, /<LaunchCradle \/>/g);
+  assert.doesNotMatch(navigation, /launchOverlay|launchOpacity|launchVisible/);
+  assert.doesNotMatch(navigation, /Animated\.timing/);
   assert.match(composition, /<StrideCradle trace=\{EMPTY_TRACE\} listening=\{false\} \/>/);
   assert.match(composition, /export const canvasCradleComposition/);
   assert.match(canvas, /contentContainerStyle=\{canvasCradleComposition\.body\}/);
@@ -246,38 +246,27 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   // being generated even though iOS no longer reads them.
   assert.ok(read('assets/ios-icon-dark.png').length > 0);
   assert.ok(read('assets/ios-icon-tinted.png').length > 0);
-  // This repository checks in ios/, so the signed native build compiles the
-  // Xcode AppIcon catalog rather than relying on Expo prebuild to regenerate
-  // it. A prior build could therefore regress even while the Expo sources were
-  // correct. Pin all three compiled renditions to the canonical brand bytes.
-  const nativeCatalog = JSON.parse(
-    text('ios/Stride/Images.xcassets/AppIcon.appiconset/Contents.json'),
-  );
+  // Keep the unit gate deterministic in a clean clone: mobile/ios is generated
+  // and gitignored, so native-copy assertions belong to the clean prebuild
+  // release gate. Here, bind config to the complete checked-in source bundle.
+  const iconBundle = JSON.parse(text('assets/Stride.icon/icon.json')) as {
+    groups: Array<{ layers: Array<{ 'image-name': string }> }>;
+    'supported-platforms': { squares: string[] };
+  };
+  assert.deepEqual(iconBundle['supported-platforms'].squares, ['iOS', 'macOS']);
   assert.deepEqual(
-    nativeCatalog.images.map((image: { filename?: string }) => image.filename),
-    [
-      'App-Icon-1024x1024@1x.png',
-      'App-Icon-dark-1024x1024@1x.png',
-      'App-Icon-tinted-1024x1024@1x.png',
-    ],
+    iconBundle.groups.flatMap(group => group.layers.map(layer => layer['image-name'])),
+    ['receiving-mass-1.svg', 'receiving-mass-2.svg', 'strike-mass.svg'],
   );
-  assert.equal(
-    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png')),
-    sha256(read('assets/icon.png')),
-    'the compiled light app icon must match the canonical light source',
-  );
-  assert.equal(
-    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-dark-1024x1024@1x.png')),
-    sha256(read('assets/ios-icon-dark.png')),
-    'the compiled dark app icon must match the canonical dark source',
-  );
-  assert.equal(
-    sha256(read('ios/Stride/Images.xcassets/AppIcon.appiconset/App-Icon-tinted-1024x1024@1x.png')),
-    sha256(read('assets/ios-icon-tinted.png')),
-    'the compiled tinted app icon must match the canonical tinted source',
-  );
-  const nativeProject = text('ios/Stride.xcodeproj/project.pbxproj');
-  assert.match(nativeProject, /ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/);
+  for (const name of ['receiving-mass-1.svg', 'receiving-mass-2.svg', 'strike-mass.svg']) {
+    assert.match(text(`assets/Stride.icon/Assets/${name}`), /<svg\b/);
+  }
   assert.match(config, /imageWidth: 313/);
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
+});
+
+test('the checked-in iOS build number matches the Build 69 source line', () => {
+  const appConfig = text('app.config.ts');
+  assert.match(appConfig, /buildNumber:\s*'69'/);
+  assert.doesNotMatch(appConfig, /buildNumber:\s*'(?:66|68)'/);
 });

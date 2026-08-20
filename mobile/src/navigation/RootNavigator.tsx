@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Platform, StyleSheet, View, useColorScheme, useWindowDimensions } from 'react-native';
+import { AccessibilityInfo, Platform, StyleSheet, View, useColorScheme, useWindowDimensions } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -40,8 +40,6 @@ import {
   WorkRecordScreen,
 } from '../screens/StrideProductScreens';
 import { LaunchCradle } from '../components/CanvasCradleComposition';
-import { duration, ease, useReduceMotion } from '../theme/motion';
-import { colors } from '../theme/tokens';
 import type { RootStackParamList } from './types';
 import { NativeUniversalShell } from './NativeUniversalShell';
 import { PersonalRealtimeProvider } from '../realtime/PersonalRealtimeProvider';
@@ -99,12 +97,9 @@ export function RootNavigator() {
   const { user, bootstrapping, sessionToken } = useAuth();
   const accountKey = pushAccountKey(user?.email, sessionToken);
   const dark = useColorScheme() === 'dark';
-  const reduceMotion = useReduceMotion();
   const { width } = useWindowDimensions();
   const isIPad = Platform.OS === 'ios' && Platform.isPad;
   const isWorkstationWidth = isIPad && width >= WORKSTATION_MIN_WIDTH;
-  const launchOpacity = useRef(new Animated.Value(1)).current;
-  const [launchVisible, setLaunchVisible] = useState(true);
   const pendingPushTargetRef = useRef<PendingPushTarget | null>(null);
   const [pendingPushVersion, setPendingPushVersion] = useState(0);
   const [activeRoute, setActiveRoute] = useState<keyof RootStackParamList | undefined>('Canvas');
@@ -121,29 +116,6 @@ export function RootNavigator() {
       pendingPushTargetRef.current = null;
     }
   }, [accountKey]);
-
-  useEffect(() => {
-    if (bootstrapping) {
-      launchOpacity.setValue(1);
-      setLaunchVisible(true);
-      return;
-    }
-    if (reduceMotion) {
-      launchOpacity.setValue(0);
-      setLaunchVisible(false);
-      return;
-    }
-    const fade = Animated.timing(launchOpacity, {
-      toValue: 0,
-      duration: duration.slow,
-      easing: ease,
-      useNativeDriver: true,
-    });
-    fade.start(({ finished }) => {
-      if (finished) setLaunchVisible(false);
-    });
-    return () => fade.stop();
-  }, [bootstrapping, launchOpacity, reduceMotion]);
 
   const openPushTarget = useCallback((target: PushTarget) => {
     // usePushRegistration derives this target from the current account's
@@ -386,14 +358,6 @@ export function RootNavigator() {
         </NavigationContainer>
         </NativeUniversalShell>
       </PersonalRealtimeProvider>
-      {launchVisible ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.launchOverlay, { opacity: launchOpacity }]}
-        >
-          <LaunchCradle />
-        </Animated.View>
-      ) : null}
     </View>
   );
 }
@@ -401,14 +365,5 @@ export function RootNavigator() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-  },
-  launchOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: colors.bgApp,
-    zIndex: 20,
   },
 });

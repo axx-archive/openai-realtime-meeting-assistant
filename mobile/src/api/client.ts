@@ -52,9 +52,14 @@ import {
   parseConsentStatus,
 } from "./consent";
 import {
+  AUTH_REQUEST_TIMEOUT_MS,
+  apiErrorMessage,
+  apiTransportError,
   buildApiUrl,
   buildAuthHeaders,
   buildIdempotencyHeaders,
+  createRequestDeadline,
+  parseApiResponseText,
 } from "./requestHelpers";
 import {
   fenceUnauthorizedResponse,
@@ -85,6 +90,7 @@ type RequestOptions = {
   body?: unknown;
   sessionToken?: string | null;
   signal?: AbortSignal;
+  timeoutMs?: number;
   headers?: Record<string, string>;
   suppressUnauthorizedHandler?: boolean;
 };
@@ -104,36 +110,38 @@ async function requestWithResponse<T>(
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(url, {
-    method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-    signal: options.signal,
-  });
-
-  const text = await readTextAfterUnauthorizedFence(
-    response,
-    options.sessionToken,
-    options.suppressUnauthorizedHandler,
-  );
-  let data: unknown = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { error: text };
-    }
+  const deadline = options.timeoutMs
+    ? createRequestDeadline(options.signal, options.timeoutMs)
+    : null;
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(url, {
+      method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
+      headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: deadline?.signal ?? options.signal,
+    });
+    text = await readTextAfterUnauthorizedFence(
+      response,
+      options.sessionToken,
+      options.suppressUnauthorizedHandler,
+    );
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    throw apiTransportError(deadline?.didTimeout() === true);
+  } finally {
+    deadline?.dispose();
   }
 
+  const data = parseApiResponseText(text);
+
   if (!response.ok) {
-    const message =
-      (data &&
-      typeof data === "object" &&
-      "error" in data &&
-      typeof (data as { error: unknown }).error === "string"
-        ? (data as { error: string }).error
-        : null) || `Request failed (${response.status})`;
-    throw new BonfireApiError(response.status, message, data);
+    throw new BonfireApiError(
+      response.status,
+      apiErrorMessage(response.status, data),
+      data,
+    );
   }
 
   return { data: data as T, response };
@@ -151,6 +159,7 @@ export const api = {
     return request<Identity>("/auth/login", {
       method: "POST",
       body: { name: name.trim(), password },
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
     });
   },
 
@@ -158,6 +167,7 @@ export const api = {
     return request("/auth/reset/request", {
       method: "POST",
       body: { email: email.trim() },
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
     });
   },
 
@@ -168,6 +178,7 @@ export const api = {
     return request("/auth/reset/confirm", {
       method: "POST",
       body: { token, newPassword },
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
     });
   },
 
@@ -177,7 +188,11 @@ export const api = {
   }> {
     const { data, response } = await requestWithResponse<{
       publicKey: Record<string, unknown>;
-    }>("/auth/passkey/login/begin", { method: "POST", body: {} });
+    }>("/auth/passkey/login/begin", {
+      method: "POST",
+      body: {},
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
+    });
     const ceremony = response.headers.get("X-Bonfire-WebAuthn-Ceremony") ?? "";
     if (!ceremony)
       throw new Error("The server did not start a native passkey session.");
@@ -189,11 +204,15 @@ export const api = {
       method: "POST",
       body: credential,
       headers: { "X-Bonfire-WebAuthn-Ceremony": ceremony },
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
     });
   },
 
   me(sessionToken: string): Promise<Identity> {
-    return request<Identity>("/auth/me", { sessionToken });
+    return request<Identity>("/auth/me", {
+      sessionToken,
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
+    });
   },
 
   logout(

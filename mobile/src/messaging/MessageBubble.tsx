@@ -534,7 +534,9 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : null}
             </View>
-          ) : workThread && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
+          ) : workThread
+            && !(String(workThread.ref.projectTitle ?? '').trim() && workThread.family === 'Research')
+            && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
             <InlineArtifactPreview
               kind={detectInlineArtifactKind(message) ?? 'html_deck'}
               title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
@@ -603,7 +605,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               {String(workThread.ref.provenance ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={2} style={styles.workProvenance}>{String(workThread.ref.provenance)}</Text> : null}
               {workThread.complete ? (
                 <View style={styles.workResultActions}>
-                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                  <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>

@@ -18,19 +18,11 @@ function source(path: string): string {
   return readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), 'utf8');
 }
 
-test('orientation and multitasking declarations survive Expo regeneration', () => {
+test('checked-in Expo config declares rotation and iPad multitasking inputs', () => {
   const config = source('app.config.ts');
-  const plist = source('ios/Stride/Info.plist');
   assert.match(config, /orientation:\s*'default'/u);
-  assert.match(plist, /<key>UIRequiresFullScreen<\/key>\s*<false\/>/u);
-  for (const orientation of [
-    'UIInterfaceOrientationPortrait',
-    'UIInterfaceOrientationPortraitUpsideDown',
-    'UIInterfaceOrientationLandscapeLeft',
-    'UIInterfaceOrientationLandscapeRight',
-  ]) {
-    assert.ok(plist.split(orientation).length >= 3, `${orientation} must be present for iPhone and iPad`);
-  }
+  assert.match(config, /supportsTablet:\s*true/u);
+  assert.doesNotMatch(config, /requireFullScreen:\s*true/u);
 });
 
 test('thread geometry preserves a useful detail pane across rotation, split view and large text', () => {

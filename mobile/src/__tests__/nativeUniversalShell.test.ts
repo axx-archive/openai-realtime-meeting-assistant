@@ -55,14 +55,15 @@ test('mounted shell press preserves its navigator child through destination, ful
   };
   registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (['react-native', 'expo-symbols', 'react-native-safe-area-context', 'expo-blur', 'expo-glass-effect'].includes(specifier)) {
+      if (['react-native', 'react-native-svg', 'expo-symbols', 'react-native-safe-area-context', 'expo-blur', 'expo-glass-effect'].includes(specifier)) {
         return { url: `native-shell-stub:${specifier}`, shortCircuit: true };
       }
       return nextResolve(specifier, context);
     },
     load(url, context, nextLoad) {
       const modules: Record<string, string> = {
-        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>value.light; export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
+        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>({dynamic:value}); export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
+        'native-shell-stub:react-native-svg': `const Svg='Svg'; export default Svg; export const Path='Path'; export const Circle='Circle'; export const Ellipse='Ellipse';`,
         'native-shell-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'native-shell-stub:react-native-safe-area-context': `export const useSafeAreaInsets=()=>globalThis.__nativeShellInsets||({top:0,right:0,bottom:0,left:0});`,
         'native-shell-stub:expo-blur': `export const BlurView='BlurView';`,
@@ -111,6 +112,17 @@ test('mounted shell press preserves its navigator child through destination, ful
   await act(async () => { renderer = create(shell('home', true)); });
   const mountedNavigator = renderer!.root.findByProps({ testID: 'root-navigation' });
   const mountID = mountedNavigator.props.mountID;
+  const pathType = 'Path' as unknown as React.ElementType;
+  const ellipseType = 'Ellipse' as unknown as React.ElementType;
+  const renderedPaths = renderer!.root.findAllByType(pathType);
+  const renderedEllipses = renderer!.root.findAllByType(ellipseType);
+  assert.equal(renderedPaths[0].props.stroke, '#FF5A19', 'selected custom mark lost its static ember stroke');
+  assert.deepEqual(
+    renderedEllipses[0].props.stroke,
+    { dynamic: { light: '#26231E', dark: '#F7F7F9' } },
+    'inactive custom mark did not preserve the native adaptive ColorValue',
+  );
+  assert.notEqual(renderedEllipses[0].props.stroke, '[object Object]', 'adaptive SVG stroke was string-coerced into an invalid color');
 
   // Test Chat navigation (replaces Work test since Work is no longer a destination)
   const chatPressable = renderer!.root.findByProps({ accessibilityLabel: 'Chat' });
@@ -213,6 +225,13 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.match(shell, /accessibilityState=\{\{ selected \}\}/);
   assert.match(shell, /minHeight: 48/);
   assert.match(shell, /minHeight: 58/);
+  assert.equal((shell.match(/style=\{styles\.destMark\}/g) ?? []).length, 5);
+  assert.match(shell, /<Text accessibilityRole="header" style=\{styles\.sidebarWordmark\}>stride<\/Text>/);
+  assert.match(shell, /color=\{selected \? colors\.ember : colors\.text1\}/);
+  assert.doesNotMatch(shell, /String\(selected \? colors\.ember : colors\.text1\)/);
+  assert.match(shell, /compactItem:[\s\S]*zIndex: 1/);
+  assert.match(shell, /iconWrap: \{ position: 'relative', opacity: 1, zIndex: 2 \}/);
+  assert.match(shell, /destMark: \{ opacity: 1, zIndex: 2 \}/);
   assert.match(shell, /transform: \[\{ scale: 0\.96 \}\]/);
   // Slim rail design uses icon-only marks without labels, no text scaling needed
   assert.doesNotMatch(shell, /Animated\.|LayoutAnimation|setTimeout/);

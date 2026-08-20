@@ -43,12 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 63 carries the Priority-1 meeting-intelligence, private Realtime
-      // recovery, current AppIcon, permanent Meeting Record, workstream-owned
-      // Project correction, and Board-retirement candidate. It retains Build
-      // 62's exact Project attachment/reply source-group compatibility.
+      // Build 69 carries bounded auth transport deadlines and safe errors,
+      // the direct launch handoff, adaptive shell icon rendering, governed
+      // Research/Presentation work-card routing, and Expo 57 patch alignment.
+      // It retains the existing Project attachment/reply compatibility.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '66',
+      buildNumber: '69',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
@@ -143,8 +143,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         'expo-splash-screen',
         {
-          // The OS splash is the cradle at rest. The in-app launch overlay uses
-          // the same component and scale, then fades into the live Canvas.
+          // The OS splash is the cradle at rest. The bootstrapping screen uses
+          // the same composition, then hands directly to the live Canvas with
+          // no post-bootstrap overlay that could strand the signed-in app.
           backgroundColor: '#CFC5B7',
           image: './assets/splash-icon.png',
           // Matches the live Canvas cradle's 391 * 0.8 rendered width so the
