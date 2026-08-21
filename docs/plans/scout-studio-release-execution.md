@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 138 proved the integrated UI/source work live, then exposed and locally closed a long exact-approval comparison bug; ship that narrow hotfix before rerunning the deck and submitting Mobile Build 69.
+Current phase: generation 139 proved the exact-approval hotfix and the in-channel checkpoint/stage flow live, then exposed an attachment-selection gap for an explicitly named older main-channel PDF. The source resolver/replay fence is now critic-approved locally; finish the chat-polish gate, ship one final exact release, rerun the deck, then build Mobile 69 from that same SHA.
 
 ## Invariants
 
@@ -22,7 +22,7 @@ Current phase: generation 138 proved the integrated UI/source work live, then ex
 | W2 | Durable channel checkpoint choices on the existing root card | W1 | Focused normal/race tests, production exact-release verifier, live two-checkpoint journey | Complete and live in `25bf7248` |
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
-| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete in combined release tree; integration gate green |
+| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete locally: one interaction surface, no zero-count pills, true-tail send pin; release pending |
 | W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Pending |
 | W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Pending |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Pending |
@@ -50,16 +50,22 @@ Current phase: generation 138 proved the integrated UI/source work live, then ex
 - Final independent critic verdict: PASS after critical normal/race, PiP/Studio/stage, 230-event chat stress, and canonical cold-index browser suites.
 - Combined release tree `d96fc89bdbb3372bfa57e2cdbbcc0f5ea288f5c8` contains web commit `712f2dce` plus Mobile Build 69 commit `d96fc89b`; the exact combined focused Go/browser gate passed in 19.119s, all 587 mobile tests passed, TypeScript passed, and `git diff --check` was clean. A clean `npm ci` reproduced the known eight high transitive Expo/Metro advisories without changing the lockfile.
 - Generation 138 deployed `38397bb359b82d8d6bcba9d320e1f26c796e3595` and verified as `verified-local-unsigned`. Its first production reply-thread proposal visibly included the full Dr. May paste, but exact approval failed closed because the client copy alone was truncated to 4,000 characters before comparison. The hotfix compares immutable approvals byte-for-byte and applies the cap only to editable proposals; a >4,000-character acceptance regression and focused race gate pass. No work launched from the rejected approval. The first EAS attempt was interrupted before creation after its upload stalled, so no stale Build 69 exists.
+- Generation 139 deployed hotfix `b2959fa72a54167351ccf307a7224499b57d1e95` and verified as `verified-local-unsigned`; the pending >4,000-character proposal then accepted successfully and created one root-channel scheduled-work card. Intake and narrative checkpoints rendered as bounded in-channel choices; the already-approved `no brand assets — develop identity` and `franchise-playbook` paths resumed the same run.
+- The production run landed Red-team, Identity, competing-architect, competing-judge, and Write stage artifacts. The redesigned drawer rendered the 757-line/90-row Red-team result and the 465-line Identity system cleanly, with progressive disclosure and a coherent Fieldhouse Ledger / Sideline Almanac art direction. Architects truthfully declared Tyler's exact PDF absent and carried a HOLD; the run stopped needs-attention and emitted no compromised deck.
+- Root cause of that HOLD: reply asks restricted fuzzy file selection to the reply branch, so an explicitly named older top-level channel PDF never entered proposal ContextRefs; route replay also did not independently fence unrelated sibling refs. The local fix resolves every explicit upload-safe filename conjunctively by full normalized equality, binds one unique authorized top-level/causal attachment and exact revision into the proposal/receipt/stage packet, rejects missing/ambiguous/revoked/over-four/sibling/suffix-collision cases before approval, and re-enforces topology on persisted pre-fix receipts. Focused normal/race suites and independent critic pass.
+- User live screenshot reopened W5: stacked zero-count reaction pills and duplicated hover actions are visually noisy, and posting a new comment can still finish above the true rendered tail. The final UI gate must show only meaningful reaction state in one surface and prove multiline send + delayed socket echo + reflow ends within 1 px of the real tail.
+- Two EAS uploads from `b2959fa7` ended or were intentionally stopped before build creation; Build 69 remains unused. A reproducible Node 20.20.2 / EAS CLI 21.4.0 lane is prepared for the final post-fix SHA.
+- The screenshot-driven W5 fix is release-gated: zero-count reaction summaries are absent, add/reply/riff/more share one interaction pill, keyboard/coarse-pointer access remains intact, and a six-second author-send pin survives multiline composer collapse, delayed HTTP projection, socket echo, and late media sizing while wheel/touch reader intent cancels it. The exact rendered journey passed three consecutive times; the adjacent chat suite, exact named-source normal/race suites, compile-only gate, and `git diff --check` are green.
 
 ## Pending Dependencies
 
-- W3-W5 and Mobile Build 69 are green in the exact combined release tree; GitHub, VPS, production deck, EAS, Apple, and cleanup proof remain pending.
+- The exact named-attachment source fix and reopened W5 live-polish gate are green locally. Final GitHub/VPS release, production deck, EAS, Apple, and cleanup proof remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed integrated source to `axx/main`; deploy the exact web release to the DigitalOcean VPS; rerun and edit the production deck; build and submit the exact Mobile Build 69 to TestFlight.
-- Not yet executed: approval hotfix commit/push/deploy, production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
+- Not yet executed: final source/chat-polish commit and exact-release deploy, successful production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
 - Rollback: retain production release `25bf7248` and its images until the replacement passes the retained verifier and live canaries.
 
 ## Risks And Decisions
@@ -72,7 +78,9 @@ Current phase: generation 138 proved the integrated UI/source work live, then ex
 ## Resume Here
 
 1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, and `axx/main` before trusting any status above.
-2. Commit this release checkpoint, fetch and compare `axx/main`, and push only if it remains the expected ancestor; verify local/remote exact parity.
-3. Preserve the combined source receipt: web `712f2dce`, mobile `d96fc89b`, and the final ledger-only release commit.
-4. Deploy and verify the exact VPS release, rerun the production deck workflow, and start the exact-SHA EAS Build 69 in parallel.
-5. Verify the deck save/reopen/present/channel receipts and TestFlight processing/groups before cleaning preserved worktrees and stale refs.
+2. Finish and independently gate the reopened W5 reaction/tail-position work; keep the exact attachment-source gate green.
+3. Commit this checkpoint with the source/UI fixes, fetch and compare `axx/main`, and push only if it remains the expected ancestor; verify local/remote exact parity.
+4. Deploy and verify that exact VPS release. Send a new production request naming Tyler's exact PDF, require the PDF revision/text in every stage, and answer only the already-selected no-assets/franchise-playbook checkpoints.
+5. Generate, edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
+6. Build and submit Mobile Build 69 from the same final SHA with Node 20 / EAS CLI 21.4.0; verify Apple processing and tester groups.
+7. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

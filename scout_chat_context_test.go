@@ -49,8 +49,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	root := replyContextTestMessage("production-root", "scout", scoutParticipantName, rootRef.Text, nil)
 	root.CausedByMessageID = "production-tyler"
 	paste := replyContextTestMessage("production-paste", "user", "AJ", longPaste, rootRef)
-	paste.Files = []scoutChatFileAttachment{grantedPDF}
-	paste.attachmentReservationID = "production-pdf-reservation"
+	mainChannelPDF := replyContextTestMessage("production-main-pdf", "user", "Tyler", "The source PDF is attached in the main channel.", nil)
+	mainChannelPDF.Files = []scoutChatFileAttachment{grantedPDF}
+	mainChannelPDF.attachmentReservationID = "production-pdf-reservation"
 	siblingRoot := replyContextTestMessage("production-sibling-root", "scout", scoutParticipantName, "Unrelated campaign work.", nil)
 	sibling := replyContextTestMessage("production-sibling", "user", "Coworker", "Use the private sibling plan.", &scoutChatReplyRef{MessageID: siblingRoot.ID})
 	sibling.Files = []scoutChatFileAttachment{grantedSibling}
@@ -58,6 +59,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	seed := []scoutChatMessageRecord{
 		replyContextTestMessage("production-unrelated", "user", "Coworker", "PRODUCTION_UNRELATED_SENTINEL", nil),
 		replyContextTestMessage("production-tyler", "user", "Tyler", "Use Tom's recommendations to build the Like A Farmer optimization report.", nil),
+		mainChannelPDF,
 		root,
 		paste,
 		replyContextTestMessage("production-ack", "scout", scoutParticipantName, "I have Dr. May's full source now.", rootRef),
@@ -110,7 +112,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		t.Fatalf("production reply path leaked unrelated top-level body: router=%t answer=%t context=%q", routerLeak, strings.Contains(answerInputs[0], "PRODUCTION_UNRELATED_SENTINEL"), answerInputs[0][start:end])
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), user, channel.ID, "Review Dr. May's PDF and put the source into a 10-slide presentation for this channel.", nil, "", root.ID, "")
+	response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), user, channel.ID, "Review Like_A_Farmer_Audience_Growth_Media_Strategy.pdf and put the source into a 10-slide presentation for this channel.", nil, "", root.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +125,8 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if len(routerInputs) != 1 {
 		t.Fatalf("deterministic presentation route unexpectedly called the model router: %#v", routerInputs)
 	}
-	if refs := decodeAssistantContextRefs(proposal.ContextRefs); len(refs) != 1 || !strings.Contains(refs[0], "production-paste") {
-		t.Fatalf("proposal context refs=%#v, want only the PDF in the approved reply branch", refs)
+	if refs := decodeAssistantContextRefs(proposal.ContextRefs); len(refs) != 1 || !strings.Contains(refs[0], "production-main-pdf") {
+		t.Fatalf("proposal context refs=%#v, want the exact explicitly named main-channel PDF", refs)
 	}
 
 	previousGoalStart := startGoalThreadAsync
@@ -141,6 +143,10 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		plan.RouteReceipt == nil || plan.RouteReceipt.ContextRefsDigest != goalContextRefsDigest(proposal.ContextRefs) {
 		t.Fatalf("accepted goal did not durably bind exact context refs: plan=%q artifact=%q receipt=%+v", plan.ContextRefs, run.Artifact.Metadata["contextRefs"], plan.RouteReceipt)
 	}
+	boundSelection, err := kanbanApp.goalRouteSourceSelection(*plan.RouteReceipt)
+	if err != nil || boundSelection.Digest != plan.RouteReceipt.SourceSelectionDigest || !strings.Contains(strings.Join(boundSelection.FileProofs, "\n"), grantedPDF.SourceRevision) {
+		t.Fatalf("receipt source manifest did not bind the exact named PDF revision: err=%v receipt=%q selection=%+v", err, plan.RouteReceipt.SourceSelectionDigest, boundSelection)
+	}
 	engine := newGoalEngine(kanbanApp)
 	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
 		t.Fatalf("prepare accepted route: %v", err)
@@ -155,7 +161,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		if taskErr != nil {
 			t.Fatalf("authorized task for %s: %v", stageID, taskErr)
 		}
-		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", plan.RouteReceipt.SourceMessageDigest, plan.RouteReceipt.SourceWindowDigest, plan.RouteReceipt.SourceSelectionDigest} {
+		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision, plan.RouteReceipt.SourceMessageDigest, plan.RouteReceipt.SourceWindowDigest, plan.RouteReceipt.SourceSelectionDigest} {
 			if !strings.Contains(task, want) {
 				t.Fatalf("stage %s lost %q from authorized source packet:\n%s", stageID, want, task)
 			}
@@ -181,7 +187,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		t.Fatalf("production Red-team provider stage did not execute: stage=%+v calls=%d", redTeamProviderStage, len(redTeamProviderInputs))
 	}
 	for index, input := range redTeamProviderInputs {
-		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL"} {
+		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision} {
 			if !strings.Contains(input, want) {
 				t.Fatalf("Red-team provider call %d lost %q:\n%s", index, want, input)
 			}
@@ -189,6 +195,52 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		if strings.Contains(input, "PRODUCTION_UNRELATED_SENTINEL") || strings.Contains(input, "PRODUCTION_SIBLING_PDF_SECRET") {
 			t.Fatalf("Red-team provider call %d leaked another branch:\n%s", index, input)
 		}
+	}
+	// A proposal persisted by the pre-topology exact-name resolver could carry
+	// a guessed chatfile ref from an unrelated reply root. Route admission must
+	// reject that old accepted receipt before any provider call, even though the
+	// file itself is still authorized in the same channel.
+	preFixThread, _, err := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preFixMutated := preFixThread
+	preFixMutated.Messages = append([]scoutChatMessageRecord(nil), preFixThread.Messages...)
+	approvedIndex := scoutChatMessageIndex(preFixMutated, proposalMessage.ID)
+	preFixProposal := *preFixMutated.Messages[approvedIndex].Proposal
+	siblingContextRef := scoutChatFileContextRef(channel.ID, sibling.ID, 0)
+	preFixProposal.ContextRefs = encodeAssistantContextRefs([]string{siblingContextRef})
+	preFixMutated.Messages[approvedIndex].Proposal = &preFixProposal
+	if err := kanbanApp.saveScoutChatThread(preFixMutated); err != nil {
+		t.Fatal(err)
+	}
+	preFixPlan := plan
+	preFixPlan.ContextRefs = preFixProposal.ContextRefs
+	preFixReceipt := *plan.RouteReceipt
+	preFixOperation, operationErr := conversationApprovedWorkOperation(channel.ID, user.Email, proposalMessage.ID, preFixProposal)
+	if operationErr != nil {
+		t.Fatal(operationErr)
+	}
+	preFixReceipt.ContextRefsDigest = goalContextRefsDigest(preFixPlan.ContextRefs)
+	preFixReceipt.OperationID = preFixOperation.ID
+	preFixReceipt.OperationBodyDigest = preFixOperation.BodyDigest
+	preFixReceipt.SourceSelectionDigest = strings.Repeat("a", 64) // opaque digest minted by the pre-topology implementation
+	preFixReceipt.Digest, err = preFixReceipt.contractDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preFixPlan.RouteReceipt = &preFixReceipt
+	preFixPlan.routeVerified = true
+	preFixStage := *preFixPlan.subtaskByID("red_team")
+	preFixStage.Status = subtaskRunning
+	providerCallsBeforePreFix := len(redTeamProviderInputs)
+	engine.runProcessPanelStage(context.Background(), &preFixPlan, run.Artifact.ID, &preFixStage, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	if len(redTeamProviderInputs) != providerCallsBeforePreFix || preFixStage.Status != subtaskFailed || preFixStage.Review == nil ||
+		!strings.Contains(preFixStage.Review.Reasons, "outside the source topology") || strings.Contains(preFixStage.Review.Reasons, "PRODUCTION_SIBLING_PDF_SECRET") {
+		t.Fatalf("pre-fix sibling receipt reached provider or leaked source: before=%d after=%d stage=%+v", providerCallsBeforePreFix, len(redTeamProviderInputs), preFixStage)
+	}
+	if err := kanbanApp.saveScoutChatThread(preFixThread); err != nil {
+		t.Fatal(err)
 	}
 	legacyPlan := plan
 	legacyReceipt := *plan.RouteReceipt
@@ -254,7 +306,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if err := engine.launchSubtask(&plan, voice, run.Artifact.ID); err != nil {
 		t.Fatalf("launch production writer stage: %v", err)
 	}
-	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL"} {
+	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision} {
 		if !strings.Contains(writerQuery, want) {
 			t.Fatalf("writer provider query lost %q:\n%s", want, writerQuery)
 		}
@@ -367,7 +419,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		thread.Messages[scoutChatMessageIndex(*thread, "production-paste")].AuthorName = "Changed speaker label"
 	})
 	assertMutationBlocked("attachment kind", func(thread *scoutChatThreadRecord) {
-		index := scoutChatMessageIndex(*thread, "production-paste")
+		index := scoutChatMessageIndex(*thread, "production-main-pdf")
 		thread.Messages[index].Files = append([]scoutChatFileAttachment(nil), thread.Messages[index].Files...)
 		thread.Messages[index].Files[0].Kind = "text"
 	})

@@ -27,7 +27,15 @@ func TestWebChatSportsCarStaticContract(t *testing.T) {
 		"var desktopChatReactionIntents = new Map()",
 		"function flushDesktopChatReactionIntent(intent)",
 		"queueMicrotask(() => void flushDesktopChatReactionIntent(intent))",
+		"function desktopChatReactionPickerControl(message, grouped, options = {})",
+		"desktop-chat-interactions",
+		`.desktop-chat-reactions[hidden]`,
+		`.desktop-chat-reactions button[hidden]`,
 		"data-chat-reaction-message-id",
+		"function beginScoutChatOwnSendTailPin()",
+		"function maintainScoutChatOwnSendTailPin()",
+		"new ResizeObserver(() => maintainScoutChatOwnSendTailPin())",
+		"new MutationObserver(() => {",
 		"{ skipRail: patched }",
 		"renderActiveScoutThread({ forceBottom: true })",
 		"const boundedFeedMessages = feedMessages.slice(-scoutChatMaxNodes)",
@@ -58,6 +66,7 @@ const messages=Array.from({length:90},(_,index)=>({
  authorEmail:index%3===0?'aj@shareability.com':'tyler@example.test',
  text:'Message '+index+' · '+('context '.repeat(7)),createdAt:new Date(baseTime+index*1000).toISOString(),reactions:[]
 }));
+messages[88].files=[{ref:'late-tail-media',name:'tail-proof.svg',mime:'image/svg+xml',size:2048}];
 const root=messages[60];
 const replies=Array.from({length:16},(_,index)=>({id:'reply-'+(index+1),kind:'message',role:'user',authorName:'Tyler',authorEmail:'tyler@example.test',text:'Reply context '+(index+1)+' stays open. '+('detail '.repeat(8)),createdAt:new Date(baseTime+91000+index*1000).toISOString(),reactions:[],replyTo:{messageId:root.id,authorName:root.authorName,text:root.text}}));
 const reply=replies[0];
@@ -93,6 +102,19 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
    serverThread.updatedAt=new Date(Date.parse(serverThread.updatedAt)+1000).toISOString();
    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,thread:clone(serverThread)})});
  });
+	 await page.route('**/artifacts/blob?ref=late-tail-media&name=tail-proof.svg',async route=>{
+	   await new Promise(resolve=>setTimeout(resolve,900));
+	   return route.fulfill({status:200,contentType:'image/svg+xml',headers:{'cache-control':'no-store'},body:'<svg xmlns="http://www.w3.org/2000/svg" width="320" height="520" viewBox="0 0 320 520"><rect width="320" height="520" fill="#d96b42"/></svg>'});
+	 });
+	 await page.route('**/assistant/chat-threads/channel-fast/messages',async route=>{
+	   const posted=JSON.parse(route.request().postData()||'{}');
+	   await new Promise(resolve=>setTimeout(resolve,450));
+	   const committed={id:'send-committed',kind:'message',role:'user',authorName:'AJ',authorEmail:'aj@shareability.com',text:String(posted.text||''),createdAt:'2026-08-20T18:02:30Z',reactions:[]};
+	   if(!serverThread.messages.some(message=>message.id===committed.id))serverThread.messages.push(committed);
+	   serverThread.updatedAt='2026-08-20T18:02:30Z';
+	   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,thread:clone(serverThread)})});
+	   setTimeout(()=>page.evaluate(message=>handleChatThreadEvent({id:'channel-fast',updatedAt:'2026-08-20T18:02:31Z',message}),clone(committed)).catch(()=>{}),250);
+	 });
  await page.goto('http://127.0.0.1:'+server.address().port+'/chat',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
  await page.waitForFunction(()=>document.getElementById('appShell').dataset.tool==='chat'&&getComputedStyle(document.getElementById('chatTool')).display!=='none');
@@ -100,13 +122,54 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
    scoutChatThreads=[thread];activeScoutThreadId=thread.id;renderActiveScoutThread({forceBottom:true});
  },clone(serverThread));
 	 const reactionButton=(messageId,emoji,context=false)=>page.locator((context?'#chatContextRail ':'#scoutChatThread ')+'[data-message-id="'+messageId+'"] [data-chat-reaction-emoji="'+emoji+'"]:not([data-chat-reaction-summary])').first();
+	 const reactionPicker=(messageId,context=false)=>page.locator((context?'#chatContextRail ':'#scoutChatThread ')+'[data-message-id="'+messageId+'"] button[aria-label="Add reaction"]').first();
+
+	 // One compact surface: zero-count summaries are absent at rest, while
+	 // keyboard/pointer intent reveals add/reply/riff/more in the same pill.
+	 const interactionTruth=await page.locator('[data-message-id="message-70"]').evaluate(node=>{
+	   const surfaces=node.querySelectorAll('.desktop-chat-interactions');
+	   const surface=surfaces[0];
+	   return {surfaces:surfaces.length,hasReactions:surface?.dataset.hasReactions,visibleZeroCounts:[...node.querySelectorAll('[data-chat-reaction-summary]')].filter(button=>!button.hidden).length,actionsOpacity:getComputedStyle(node.querySelector('.desktop-chat-actions')).opacity};
+	 });
+	 assert.deepEqual(interactionTruth,{surfaces:1,hasReactions:'false',visibleZeroCounts:0,actionsOpacity:'0'});
+	 await reactionPicker('message-70').focus();
+	 await page.waitForTimeout(250);
+	 const focusTruth=await page.locator('[data-message-id="message-70"]').evaluate(node=>({focusWithin:node.matches(':focus-within'),surfaceOpacity:getComputedStyle(node.querySelector('.desktop-chat-interactions')).opacity,actionsOpacity:getComputedStyle(node.querySelector('.desktop-chat-actions')).opacity,maxWidth:getComputedStyle(node.querySelector('.desktop-chat-actions')).maxWidth}));
+	 assert.equal(focusTruth.actionsOpacity,'1',JSON.stringify(focusTruth));
+
+	 // A multi-line author send is an explicit jump to the true tail. Delayed
+	 // HTTP projection, socket echo, composer collapse, and a late image above
+	 // it never expose a visual gap or bounce away from the committed message.
+	 await page.locator('[data-message-id="message-35"]').evaluate(node=>node.scrollIntoView({block:'start'}));
+	 const multiline='line one\nline two\nline three\nline four\nline five\nline six';
+	 await page.locator('#scoutChatInput').fill(multiline);
+	 const composerHeight=await page.locator('#scoutChatInput').evaluate(node=>node.getBoundingClientRect().height);
+	 assert.ok(composerHeight>60,'fixture did not create a multi-line composer');
+	 await page.locator('#scoutChatSend').click();
+	 const sendTail=await page.evaluate(async()=>{
+	   const samples=[];
+	   for(let index=0;index<34;index+=1){
+	     await new Promise(resolve=>setTimeout(resolve,60));
+	     samples.push(scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight);
+	   }
+	   const committed=scoutChatThread.querySelector('[data-message-id="send-committed"]');
+	   const media=scoutChatThread.querySelector('img[alt="tail-proof.svg"]');
+	   return {samples,maxDistance:Math.max(...samples),finalDistance:samples.at(-1),committed:Boolean(committed),committedBottom:committed?.getBoundingClientRect().bottom-scoutChatThread.getBoundingClientRect().bottom,mediaHeight:media?.getBoundingClientRect().height||0,inputHeight:scoutChatInput.getBoundingClientRect().height};
+	 });
+	 assert.equal(sendTail.committed,true,JSON.stringify(sendTail));
+	 assert.ok(sendTail.mediaHeight>100,JSON.stringify(sendTail));
+	 assert.ok(sendTail.maxDistance<=1&&Math.abs(sendTail.finalDistance)<=1,JSON.stringify(sendTail));
+	 assert.ok(sendTail.committedBottom<=1,JSON.stringify(sendTail));
+	 assert.ok(sendTail.inputHeight<composerHeight,JSON.stringify(sendTail));
 
  // Immediate paint plus latest-intent coalescing: true -> false -> true while
  // one PUT is in flight results in one request and never waits to feel pressed.
  const like=reactionButton('message-70','👍');
  const started=Date.now();
 	 await like.evaluate(node=>node.click());
- assert.equal(await like.getAttribute('aria-pressed'),'true');
+	 assert.equal(await like.getAttribute('aria-pressed'),'true');
+	 const optimisticSurface=await page.locator('[data-message-id="message-70"] .desktop-chat-interactions').evaluate(node=>({surfaces:node.closest('[data-message-id]').querySelectorAll('.desktop-chat-interactions').length,hasReactions:node.dataset.hasReactions,counts:[...node.querySelectorAll('[data-chat-reaction-summary]')].filter(button=>!button.hidden).map(button=>button.textContent.trim())}));
+	 assert.deepEqual(optimisticSurface,{surfaces:1,hasReactions:'true',counts:['👍 1']});
  assert.ok(Date.now()-started<300,'optimistic reaction waited for the delayed response');
 	 await like.evaluate(node=>node.click());
 	 await like.evaluate(node=>node.click());
@@ -117,23 +180,32 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 
  // Failure restores the last server-owned state and remains keyboard-legible.
  const heart=reactionButton('message-71','❤️');
- await heart.focus();
+	 const heartPicker=reactionPicker('message-71');
+	 await heartPicker.focus();
+	 await page.keyboard.press('Enter');
+	 await page.keyboard.press('ArrowRight');
  await page.keyboard.press('Enter');
  assert.equal(await heart.getAttribute('aria-pressed'),'true');
+	 assert.equal(await heartPicker.evaluate(node=>node===document.activeElement),true);
  await page.waitForTimeout(600);
- assert.equal(await heart.getAttribute('aria-pressed'),'false');
- assert.equal(await heart.getAttribute('aria-busy'),'false');
+	 assert.equal(await heart.getAttribute('aria-pressed'),'false');
+	 assert.equal(await heart.getAttribute('aria-busy'),'false');
+	 assert.equal(await page.locator('[data-message-id="message-71"] .desktop-chat-interactions').getAttribute('data-has-reactions'),'false');
 
  // A reaction changes only its keyed surfaces: the exact visible message and
  // pixel offset remain fixed, and focus stays on the same DOM control.
+	 await page.locator('#scoutChatThread').dispatchEvent('wheel');
  await page.locator('[data-message-id="message-35"]').evaluate(node=>node.scrollIntoView({block:'start'}));
 	 const fire=reactionButton('message-35','🔥');
-	 await fire.focus();
+	 const firePicker=reactionPicker('message-35');
+	 await firePicker.focus();
 	 const anchorBefore=await page.locator('[data-message-id="message-35"]').evaluate(node=>node.getBoundingClientRect().top);
+	 await page.keyboard.press('Enter');
+	 await page.keyboard.press('End');
  await page.keyboard.press('Enter');
  const anchorAfter=await page.locator('[data-message-id="message-35"]').evaluate(node=>node.getBoundingClientRect().top);
 	 assert.ok(Math.abs(anchorAfter-anchorBefore)<=1,'reaction anchor drifted '+(anchorAfter-anchorBefore)+'px');
-	 assert.equal(await fire.evaluate(node=>node===document.activeElement),true);
+	 assert.equal(await firePicker.evaluate(node=>node===document.activeElement),true);
 	 await page.waitForTimeout(600);
 
 	 // Reply-context reactions share the optimistic keyed projection without
@@ -146,13 +218,15 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 	 await page.locator('#chatContextRail').waitFor({state:'visible'});
 	 await page.locator('#chatContextReplyInput').fill('reply draft survives');
 	 const replyLike=reactionButton('reply-1','👍',true);
-	 await replyLike.focus();
+	 const replyPicker=reactionPicker('reply-1',true);
+	 await replyPicker.focus();
+	 await page.keyboard.press('Enter');
 	 await page.keyboard.press('Enter');
 	 assert.equal(await replyLike.getAttribute('aria-pressed'),'true');
 	 await page.waitForTimeout(600);
 	 assert.equal(await page.locator('#chatContextRail').isVisible(),true);
 	 assert.equal(await page.locator('#chatContextReplyInput').inputValue(),'reply draft survives');
-	 assert.equal(await replyLike.evaluate(node=>node===document.activeElement),true);
+	 assert.equal(await replyPicker.evaluate(node=>node===document.activeElement),true);
 
 	 // Editing a much earlier reply uses the reply rail's own element+offset
 	 // anchor; hostile height growth above the reader causes no rail drift.
@@ -262,6 +336,19 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 	 });
 	 assert.ok(sustainedTail.ownDistance<=1&&sustainedTail.peerDistance<=1,JSON.stringify(sustainedTail));
 	 assert.ok(sustainedTail.eligible<=200,JSON.stringify(sustainedTail));
+
+	 // Coarse-pointer web keeps the same single surface and exposes >=40px
+	 // controls without requiring a hover gesture. Native/Expo is untouched.
+	 const touchPage=await browser.newPage({viewport:{width:1024,height:768},hasTouch:true});
+	 await touchPage.goto('http://127.0.0.1:'+server.address().port+'/chat',{waitUntil:'domcontentloaded'});
+	 await touchPage.waitForSelector('#appShell.is-authed');
+	 await touchPage.evaluate(thread=>{thread.messages.forEach(message=>{message.files=[]});scoutChatThreads=[thread];activeScoutThreadId=thread.id;renderActiveScoutThread({forceBottom:true});},clone(serverThread));
+	 const touchTruth=await touchPage.locator('[data-message-id="message-70"]').evaluate(node=>{const surface=node.querySelector('.desktop-chat-interactions');const action=surface.querySelector('.desktop-chat-actions button');return {surfaces:node.querySelectorAll('.desktop-chat-interactions').length,surfaceOpacity:getComputedStyle(surface).opacity,actionOpacity:getComputedStyle(surface.querySelector('.desktop-chat-actions')).opacity,width:action.getBoundingClientRect().width,height:action.getBoundingClientRect().height};});
+	 assert.equal(touchTruth.surfaces,1,JSON.stringify(touchTruth));
+	 assert.equal(touchTruth.surfaceOpacity,'1',JSON.stringify(touchTruth));
+	 assert.equal(touchTruth.actionOpacity,'1',JSON.stringify(touchTruth));
+	 assert.ok(touchTruth.width>=40&&touchTruth.height>=40,JSON.stringify(touchTruth));
+	 await touchPage.close();
 
 	 await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`

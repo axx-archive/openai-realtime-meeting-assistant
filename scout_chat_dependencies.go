@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -89,6 +90,167 @@ type scoutChatFileCandidate struct {
 	score      int
 }
 
+func canonicalScoutExplicitFilename(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(value)), " "))
+}
+
+func scoutChatSupportedFilename(value string) bool {
+	lower := canonicalScoutExplicitFilename(value)
+	// Extensions are only syntax hints; the existing upload-safe MIME contract
+	// remains the authority for which attachment classes can be named.
+	for _, candidate := range []struct{ suffix, mime string }{
+		{".png", "image/png"}, {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"},
+		{".webp", "image/webp"}, {".gif", "image/gif"}, {".pdf", "application/pdf"},
+		{".txt", "text/plain"}, {".md", "text/markdown"}, {".markdown", "text/markdown"},
+	} {
+		if strings.HasSuffix(lower, candidate.suffix) {
+			return attachmentUploadSafeMimes[candidate.mime]
+		}
+	}
+	return false
+}
+
+// scoutChatExplicitFilenameMentions parses the complete filename tokens the
+// user supplied. Quoted names retain spaces; unquoted names are bounded by
+// whitespace or list punctuation. Returning every mention makes the whole
+// dependency set conjunctive: Existing.pdf + Missing.pdf cannot degrade to
+// just Existing.pdf.
+func scoutChatExplicitFilenameMentions(text string) []string {
+	runes := []rune(text)
+	unquoted := append([]rune(nil), runes...)
+	var mentions []string
+	seen := map[string]bool{}
+	appendMention := func(value string) {
+		value = strings.TrimSpace(value)
+		key := canonicalScoutExplicitFilename(value)
+		if value != "" && scoutChatSupportedFilename(value) && !seen[key] {
+			seen[key] = true
+			mentions = append(mentions, value)
+		}
+	}
+	closerFor := map[rune]rune{'"': '"', '\'': '\'', '“': '”', '‘': '’'}
+	for index := 0; index < len(runes); index++ {
+		closer, quoted := closerFor[runes[index]]
+		if !quoted {
+			continue
+		}
+		end := index + 1
+		for end < len(runes) && runes[end] != closer {
+			end++
+		}
+		if end >= len(runes) {
+			continue
+		}
+		candidate := string(runes[index+1 : end])
+		if scoutChatSupportedFilename(candidate) {
+			appendMention(candidate)
+			for clear := index; clear <= end; clear++ {
+				unquoted[clear] = ' '
+			}
+		}
+		index = end
+	}
+	for _, field := range strings.FieldsFunc(string(unquoted), func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune("+,&;", r)
+	}) {
+		candidate := strings.Trim(field, "\t\r\n\"'“”‘’()[]{}<>,;:")
+		candidate = strings.TrimRight(candidate, ".!?")
+		appendMention(candidate)
+	}
+	return mentions
+}
+
+// exactNamedScoutChatFileCandidates resolves only attachments whose complete
+// filename appears in the request. This is the narrow cross-branch exception:
+// an explicit unique name may select an older main-channel attachment, while
+// unnamed/recent/similarly-tokened sibling files remain ineligible.
+func (app *kanbanBoardApp) exactNamedScoutChatFileCandidates(user *userAccount, thread scoutChatThreadRecord, message scoutChatMessageRecord) ([]scoutChatFileCandidate, bool, string) {
+	if app == nil || user == nil {
+		return nil, false, ""
+	}
+	mentions := scoutChatExplicitFilenameMentions(message.Text)
+	if len(mentions) == 0 {
+		return nil, false, ""
+	}
+	type namedGroup struct {
+		name       string
+		candidates []scoutChatFileCandidate
+		identities map[string]bool
+	}
+	groups := map[string]*namedGroup{}
+	for _, mention := range mentions {
+		key := canonicalScoutExplicitFilename(mention)
+		groups[key] = &namedGroup{name: mention, identities: map[string]bool{}}
+	}
+	addNamed := func(file scoutChatFileAttachment, contextRef string, authorized bool) {
+		key := canonicalScoutExplicitFilename(file.Name)
+		group := groups[key]
+		if group == nil {
+			return
+		}
+		if !authorized {
+			return
+		}
+		identity := strings.TrimSpace(file.Ref) + "\x00" + strings.TrimSpace(file.SourceRevision)
+		if group.identities[identity] {
+			return
+		}
+		group.identities[identity] = true
+		group.candidates = append(group.candidates, scoutChatFileCandidate{file: file, contextRef: contextRef})
+	}
+	for index, file := range message.Files {
+		// Current-turn attachments passed sanitizeScoutChatFiles and remain bound
+		// to their reservation until commitUserMessage lands them.
+		if groups[canonicalScoutExplicitFilename(file.Name)] != nil {
+			addNamed(file, scoutChatFileContextRef(thread.ID, message.ID, index), true)
+		}
+	}
+	branchEligible := map[string]bool{}
+	if message.ReplyTo != nil {
+		rootID := scoutChatReplyRootID(thread, message.ReplyTo.MessageID)
+		for _, selected := range scoutChatReplyContextMessages(thread, rootID).Messages {
+			branchEligible[selected.ID] = true
+		}
+	}
+	for messageIndex := len(thread.Messages) - 1; messageIndex >= 0; messageIndex-- {
+		prior := thread.Messages[messageIndex]
+		// The exact-name cross-branch exception is intentionally limited to the
+		// main channel. A file buried in another reply branch remains invisible
+		// even when its name is guessed exactly; the current causal branch remains
+		// eligible through the same bounded selection used by reply context.
+		if prior.ReplyTo != nil && !branchEligible[prior.ID] {
+			continue
+		}
+		for fileIndex, file := range prior.Files {
+			if groups[canonicalScoutExplicitFilename(file.Name)] == nil {
+				continue
+			}
+			addNamed(file, scoutChatFileContextRef(thread.ID, prior.ID, fileIndex), app.committedChatAttachmentAuthorized(user.Email, thread.ID, prior.ID, file))
+		}
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var resolved []scoutChatFileCandidate
+	for _, key := range keys {
+		group := groups[key]
+		switch len(group.candidates) {
+		case 0:
+			return nil, true, "I couldn't resolve exactly one readable attachment named “" + group.name + "” in this channel. Attach that exact file, restore its access, or correct the filename; nothing was launched."
+		case 1:
+			resolved = append(resolved, group.candidates[0])
+		default:
+			return nil, true, "More than one readable attachment is named “" + group.name + "”. Reattach the exact revision you want in this reply, or rename it so the source is unambiguous; nothing was launched."
+		}
+	}
+	if len(resolved) > scoutFileContextLimit {
+		return nil, true, fmt.Sprintf("Scout can bind no more than %d exact files to one run. Name fewer files and ask again; nothing was launched.", scoutFileContextLimit)
+	}
+	return resolved, true, ""
+}
+
 func bestScoutChatFileCandidate(thread scoutChatThreadRecord, message scoutChatMessageRecord) (scoutChatFileCandidate, bool) {
 	query := message.Text
 	var candidates []scoutChatFileCandidate
@@ -149,7 +311,30 @@ func (app *kanbanBoardApp) scoutChatReadableSourceNeed(ctx context.Context, user
 		Required: scoutChatRequestNeedsReadableSource(message.Text),
 		Work:     scoutChatRequestIsFileWork(message.Text),
 	}
-	if !need.Required || app == nil || user == nil {
+	if app == nil || user == nil {
+		return need
+	}
+	if exact, named, issue := app.exactNamedScoutChatFileCandidates(user, thread, message); named {
+		need.Required = true
+		if issue != "" {
+			need.Missing = true
+			need.MissingMessage = issue
+			return need
+		}
+		for _, candidate := range exact {
+			need.FileName = strings.TrimSpace(candidate.file.Name)
+			need.FileSize += candidate.file.Size
+			if strings.TrimSpace(candidate.file.Text) == "" {
+				need.Missing = true
+				need.MissingMessage = "I found “" + need.FileName + "”, but it has no readable contents. Attach a readable copy of that exact revision; nothing was launched."
+				return need
+			}
+			need.ContextRefs = append(need.ContextRefs, candidate.contextRef)
+		}
+		need.ContextRefs = canonicalAssistantContextRefs(need.ContextRefs)
+		return need
+	}
+	if !need.Required {
 		return need
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -295,33 +296,54 @@ type goalRouteSourceSelectionSnapshot struct {
 	Digest         string
 	Context        string
 	AttachmentRefs []string
+	FileProofs     []string
 }
 
 type goalRouteSourceSelectionMessage struct {
-	ID        string         `json:"id"`
-	Role      string         `json:"role"`
-	Author    string         `json:"author"`
-	CreatedAt string         `json:"createdAt"`
-	ReplyTo   string         `json:"replyTo,omitempty"`
-	CausedBy  string         `json:"causedBy,omitempty"`
-	Text      string         `json:"text,omitempty"`
-	Sources   []answerSource `json:"sources,omitempty"`
-	Files     []struct {
-		Name           string `json:"name"`
-		Ref            string `json:"ref"`
-		Mime           string `json:"mime"`
-		Kind           string `json:"kind"`
-		Size           int64  `json:"size"`
-		SourceID       string `json:"sourceId"`
-		SourceRevision string `json:"sourceRevision"`
-		Text           string `json:"text"`
-	} `json:"files,omitempty"`
+	ID        string                         `json:"id"`
+	Role      string                         `json:"role"`
+	Author    string                         `json:"author"`
+	CreatedAt string                         `json:"createdAt"`
+	ReplyTo   string                         `json:"replyTo,omitempty"`
+	CausedBy  string                         `json:"causedBy,omitempty"`
+	Text      string                         `json:"text,omitempty"`
+	Sources   []answerSource                 `json:"sources,omitempty"`
+	Files     []goalRouteSourceSelectionFile `json:"files,omitempty"`
+}
+
+type goalRouteSourceSelectionFile struct {
+	Name           string `json:"name"`
+	Ref            string `json:"ref"`
+	Mime           string `json:"mime"`
+	Kind           string `json:"kind"`
+	Size           int64  `json:"size"`
+	SourceID       string `json:"sourceId"`
+	SourceRevision string `json:"sourceRevision"`
+	Text           string `json:"text"`
+}
+
+type goalRouteBoundSourceFile struct {
+	MessageID string                       `json:"messageId"`
+	FileIndex int                          `json:"fileIndex"`
+	File      goalRouteSourceSelectionFile `json:"file"`
+}
+
+func goalRouteSelectionFile(file scoutChatFileAttachment) goalRouteSourceSelectionFile {
+	return goalRouteSourceSelectionFile{
+		Name: file.Name, Ref: file.Ref, Mime: file.Mime, Kind: file.Kind, Size: file.Size,
+		SourceID: file.SourceID, SourceRevision: file.SourceRevision, Text: file.Text,
+	}
 }
 
 func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (goalRouteSourceSelectionSnapshot, error) {
 	thread, _, err := app.scoutChatThreadByID(receipt.Requester, receipt.OriginID)
 	if err != nil {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("originating conversation is unavailable")
+	}
+	fullThread := thread
+	approvedContextRefs := []string{}
+	if approvedIndex := scoutChatMessageIndex(fullThread, receipt.ApprovedProposalID); approvedIndex >= 0 && fullThread.Messages[approvedIndex].Proposal != nil {
+		approvedContextRefs = decodeAssistantContextRefs(fullThread.Messages[approvedIndex].Proposal.ContextRefs)
 	}
 	sourceIndex := scoutChatMessageIndex(thread, receipt.SourceMessageID)
 	if sourceIndex < 0 {
@@ -348,8 +370,20 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	}
 	manifest := make([]goalRouteSourceSelectionMessage, 0, len(selected))
 	projectedSelected := make([]scoutChatMessageRecord, 0, len(selected))
+	selectedMessageIDs := map[string]bool{}
 	attachmentRefs := []string{}
+	selectedAttachmentRefs := map[string]bool{}
+	fileProofs := []string{}
+	fileProofSeen := map[string]bool{}
+	appendFileProof := func(file scoutChatFileAttachment) {
+		proof := strings.TrimSpace(file.Name) + " revision " + strings.TrimSpace(file.SourceRevision)
+		if strings.TrimSpace(file.SourceRevision) != "" && !fileProofSeen[proof] {
+			fileProofSeen[proof] = true
+			fileProofs = append(fileProofs, proof)
+		}
+	}
 	for _, raw := range selected {
+		selectedMessageIDs[raw.ID] = true
 		projectedIndex := scoutChatMessageIndex(projected, raw.ID)
 		if projectedIndex < 0 {
 			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source is no longer readable")
@@ -366,21 +400,61 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 			item.ReplyTo = visible.ReplyTo.MessageID
 		}
 		for rawIndex, file := range visible.Files {
-			part := struct {
-				Name           string `json:"name"`
-				Ref            string `json:"ref"`
-				Mime           string `json:"mime"`
-				Kind           string `json:"kind"`
-				Size           int64  `json:"size"`
-				SourceID       string `json:"sourceId"`
-				SourceRevision string `json:"sourceRevision"`
-				Text           string `json:"text"`
-			}{file.Name, file.Ref, file.Mime, file.Kind, file.Size, file.SourceID, file.SourceRevision, file.Text}
-			item.Files = append(item.Files, part)
-			attachmentRefs = append(attachmentRefs, scoutChatFileContextRef(thread.ID, raw.ID, rawIndex))
+			item.Files = append(item.Files, goalRouteSelectionFile(file))
+			appendFileProof(file)
+			ref := scoutChatFileContextRef(thread.ID, raw.ID, rawIndex)
+			attachmentRefs = append(attachmentRefs, ref)
+			selectedAttachmentRefs[ref] = true
 		}
 		manifest = append(manifest, item)
 		projectedSelected = append(projectedSelected, visible)
+	}
+	// Explicit proposal ContextRefs may name a unique authorized attachment in
+	// the same public channel but outside the reply branch. Bind that exact file
+	// (never its surrounding message or sibling files) into the source manifest.
+	// It must predate the approved source turn and remain viewer-authorized.
+	boundFiles := []goalRouteBoundSourceFile{}
+	for _, ref := range approvedContextRefs {
+		if selectedAttachmentRefs[ref] {
+			continue
+		}
+		parts := strings.Split(ref, "|")
+		if len(parts) != 4 || parts[0] != "chatfile" {
+			continue
+		}
+		fileIndex, indexErr := strconv.Atoi(parts[3])
+		messageIndex := scoutChatMessageIndex(fullThread, parts[2])
+		if indexErr != nil || fileIndex < 0 || parts[1] != receipt.OriginID || messageIndex < 0 || messageIndex > sourceIndex || fileIndex >= len(fullThread.Messages[messageIndex].Files) {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is outside the source turn")
+		}
+		rawFile := fullThread.Messages[messageIndex].Files[fileIndex]
+		if fullThread.Messages[messageIndex].ReplyTo != nil && !selectedMessageIDs[parts[2]] {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is outside the source topology")
+		}
+		if !app.committedChatAttachmentAuthorized(receipt.Requester, fullThread.ID, parts[2], rawFile) {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is no longer readable")
+		}
+		projectedIndex := scoutChatMessageIndex(projected, parts[2])
+		if projectedIndex < 0 {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is no longer readable")
+		}
+		var visibleFile *scoutChatFileAttachment
+		for visibleIndex := range projected.Messages[projectedIndex].Files {
+			candidate := &projected.Messages[projectedIndex].Files[visibleIndex]
+			if candidate.Ref == rawFile.Ref && candidate.SourceID == rawFile.SourceID && candidate.SourceRevision == rawFile.SourceRevision {
+				if visibleFile != nil {
+					return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is ambiguous")
+				}
+				visibleFile = candidate
+			}
+		}
+		if visibleFile == nil {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection changed: bound attachment is no longer readable")
+		}
+		boundFiles = append(boundFiles, goalRouteBoundSourceFile{MessageID: parts[2], FileIndex: fileIndex, File: goalRouteSelectionFile(*visibleFile)})
+		appendFileProof(*visibleFile)
+		attachmentRefs = append(attachmentRefs, ref)
+		selectedAttachmentRefs[ref] = true
 	}
 	contextText := ""
 	if source.ReplyTo != nil {
@@ -405,13 +479,14 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	// topology and every visible file identity/revision, preventing two distinct
 	// branches that happen to render the same prose from becoming interchangeable.
 	digest, err := STRIDEContractDigest(struct {
-		Context  string                            `json:"context"`
-		Messages []goalRouteSourceSelectionMessage `json:"messages"`
-	}{Context: contextText, Messages: manifest})
+		Context    string                            `json:"context"`
+		Messages   []goalRouteSourceSelectionMessage `json:"messages"`
+		BoundFiles []goalRouteBoundSourceFile        `json:"boundFiles,omitempty"`
+	}{Context: contextText, Messages: manifest, BoundFiles: boundFiles})
 	if err != nil {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection is invalid")
 	}
-	return goalRouteSourceSelectionSnapshot{Digest: digest, Context: contextText, AttachmentRefs: canonicalAssistantContextRefs(attachmentRefs)}, nil
+	return goalRouteSourceSelectionSnapshot{Digest: digest, Context: contextText, AttachmentRefs: canonicalAssistantContextRefs(attachmentRefs), FileProofs: fileProofs}, nil
 }
 
 func (app *kanbanBoardApp) legacyGoalRouteSelectionMatchesApprovedProposal(receipt goalRouteReceipt, selection goalRouteSourceSelectionSnapshot) bool {

@@ -2187,6 +2187,9 @@ func (e *goalEngine) processStageSourcePacket(ctx context.Context, plan *goalPla
 	builder.WriteString("\n- source_message_digest: " + receipt.SourceMessageDigest)
 	builder.WriteString("\n- source_window_digest: " + receipt.SourceWindowDigest)
 	builder.WriteString("\n- source_selection_digest: " + receipt.SourceSelectionDigest)
+	if len(selection.FileProofs) > 0 {
+		builder.WriteString("\n- authorized_attachment_revisions: " + strings.Join(selection.FileProofs, "; "))
+	}
 	if digest := goalContextRefsDigest(effectiveContextRefs); digest != "" {
 		builder.WriteString("\n- context_refs_digest: " + digest)
 	}
