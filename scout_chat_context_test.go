@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,14 +33,36 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	}
 	rootRef := &scoutChatReplyRef{MessageID: "production-root", AuthorName: scoutParticipantName, Text: "Please paste Tom's recommendations."}
 	longPaste := strings.Repeat("podcast evidence before the old router cutoff ", 230) + " PRODUCTION_DR_MAY_SENTINEL"
+	pdfText := "PRODUCTION_PDF_SENTINEL 6.1M total audience, 3.7M Instagram, 2.6M YouTube, 2.3M TikTok, and 2.8M monthly podcast listeners."
+	pdfRef, err := putBlob([]byte("%PDF-1.7 production source"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantedPDF := reserveTestAttachment(t, kanbanApp, user, channel, scoutChatFileAttachment{Ref: pdfRef, Name: "Like_A_Farmer_Audience_Growth_Media_Strategy.pdf", Kind: "pdf"}, "production-pdf-reservation")
+	grantedPDF.Text = pdfText
+	siblingRef, err := putBlob([]byte("%PDF-1.7 sibling secret"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantedSibling := reserveTestAttachment(t, kanbanApp, user, channel, scoutChatFileAttachment{Ref: siblingRef, Name: "Sibling_Strategy.pdf", Kind: "pdf"}, "production-sibling-reservation")
+	grantedSibling.Text = "PRODUCTION_SIBLING_PDF_SECRET"
 	root := replyContextTestMessage("production-root", "scout", scoutParticipantName, rootRef.Text, nil)
 	root.CausedByMessageID = "production-tyler"
+	paste := replyContextTestMessage("production-paste", "user", "AJ", longPaste, rootRef)
+	paste.Files = []scoutChatFileAttachment{grantedPDF}
+	paste.attachmentReservationID = "production-pdf-reservation"
+	siblingRoot := replyContextTestMessage("production-sibling-root", "scout", scoutParticipantName, "Unrelated campaign work.", nil)
+	sibling := replyContextTestMessage("production-sibling", "user", "Coworker", "Use the private sibling plan.", &scoutChatReplyRef{MessageID: siblingRoot.ID})
+	sibling.Files = []scoutChatFileAttachment{grantedSibling}
+	sibling.attachmentReservationID = "production-sibling-reservation"
 	seed := []scoutChatMessageRecord{
 		replyContextTestMessage("production-unrelated", "user", "Coworker", "PRODUCTION_UNRELATED_SENTINEL", nil),
 		replyContextTestMessage("production-tyler", "user", "Tyler", "Use Tom's recommendations to build the Like A Farmer optimization report.", nil),
 		root,
-		replyContextTestMessage("production-paste", "user", "AJ", longPaste, rootRef),
+		paste,
 		replyContextTestMessage("production-ack", "scout", scoutParticipantName, "I have Dr. May's full source now.", rootRef),
+		siblingRoot,
+		sibling,
 	}
 	for index := 0; index < 28; index++ {
 		seed = append(seed, replyContextTestMessage("production-chatter-"+string(rune('a'+index)), "user", "AJ", "short threaded follow-up", rootRef))
@@ -86,7 +110,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		t.Fatalf("production reply path leaked unrelated top-level body: router=%t answer=%t context=%q", routerLeak, strings.Contains(answerInputs[0], "PRODUCTION_UNRELATED_SENTINEL"), answerInputs[0][start:end])
 	}
 
-	response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), user, channel.ID, "Put Dr. May's source into a 10-slide presentation for this channel.", nil, "", root.ID, "")
+	response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), user, channel.ID, "Review Dr. May's PDF and put the source into a 10-slide presentation for this channel.", nil, "", root.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +122,267 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	}
 	if len(routerInputs) != 1 {
 		t.Fatalf("deterministic presentation route unexpectedly called the model router: %#v", routerInputs)
+	}
+	if refs := decodeAssistantContextRefs(proposal.ContextRefs); len(refs) != 1 || !strings.Contains(refs[0], "production-paste") {
+		t.Fatalf("proposal context refs=%#v, want only the PDF in the approved reply branch", refs)
+	}
+
+	previousGoalStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousGoalStart })
+	proposalMessage := response["answer"].(scoutChatMessageRecord)
+	accepted, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: proposalMessage.ID})
+	if err != nil {
+		t.Fatalf("accept production proposal: %v", err)
+	}
+	run := accepted["agentThread"].(scoutAgentThread)
+	plan := mustGoalPlan(t, kanbanApp, run.Artifact.ID)
+	if plan.ContextRefs != proposal.ContextRefs || run.Artifact.Metadata["contextRefs"] != proposal.ContextRefs ||
+		plan.RouteReceipt == nil || plan.RouteReceipt.ContextRefsDigest != goalContextRefsDigest(proposal.ContextRefs) {
+		t.Fatalf("accepted goal did not durably bind exact context refs: plan=%q artifact=%q receipt=%+v", plan.ContextRefs, run.Artifact.Metadata["contextRefs"], plan.RouteReceipt)
+	}
+	engine := newGoalEngine(kanbanApp)
+	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
+		t.Fatalf("prepare accepted route: %v", err)
+	}
+	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+		t.Fatalf("instantiate accepted Studio plan: %v", err)
+	}
+	for _, stageID := range []string{"red_team", "identity", "compete_architects", "compete_judges", "write", "gate"} {
+		stage := packagingStudioStage(t, packagingStudioDefinition(), stageID)
+		st := plan.subtaskByID(stageID)
+		task, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, st, stage)
+		if taskErr != nil {
+			t.Fatalf("authorized task for %s: %v", stageID, taskErr)
+		}
+		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", plan.RouteReceipt.SourceMessageDigest, plan.RouteReceipt.SourceWindowDigest, plan.RouteReceipt.SourceSelectionDigest} {
+			if !strings.Contains(task, want) {
+				t.Fatalf("stage %s lost %q from authorized source packet:\n%s", stageID, want, task)
+			}
+		}
+		for _, forbidden := range []string{"PRODUCTION_UNRELATED_SENTINEL", "PRODUCTION_SIBLING_PDF_SECRET"} {
+			if strings.Contains(task, forbidden) {
+				t.Fatalf("stage %s leaked %q across a channel/reply boundary", stageID, forbidden)
+			}
+		}
+	}
+	var providerMu sync.Mutex
+	var redTeamProviderInputs []string
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		providerMu.Lock()
+		redTeamProviderInputs = append(redTeamProviderInputs, request.Input)
+		providerMu.Unlock()
+		return "Grounded objection and synthesis from the supplied source.", nil
+	})
+	redTeamProviderStage := plan.subtaskByID("red_team")
+	redTeamProviderStage.Status = subtaskRunning
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeamProviderStage, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	if redTeamProviderStage.Status != subtaskComplete || len(redTeamProviderInputs) < 2 {
+		t.Fatalf("production Red-team provider stage did not execute: stage=%+v calls=%d", redTeamProviderStage, len(redTeamProviderInputs))
+	}
+	for index, input := range redTeamProviderInputs {
+		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL"} {
+			if !strings.Contains(input, want) {
+				t.Fatalf("Red-team provider call %d lost %q:\n%s", index, want, input)
+			}
+		}
+		if strings.Contains(input, "PRODUCTION_UNRELATED_SENTINEL") || strings.Contains(input, "PRODUCTION_SIBLING_PDF_SECRET") {
+			t.Fatalf("Red-team provider call %d leaked another branch:\n%s", index, input)
+		}
+	}
+	legacyPlan := plan
+	legacyReceipt := *plan.RouteReceipt
+	legacyReceipt.SourceSelectionDigest = ""
+	legacyReceipt.Digest, err = legacyReceipt.contractDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPlan.RouteReceipt = &legacyReceipt
+	legacyRaw, err := json.Marshal(legacyPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentParent := mustArtifact(t, kanbanApp, run.Artifact.ID)
+	if _, _, err := kanbanApp.updateOSArtifactWithMetadata(run.Artifact.ID, "", currentParent.Text, scoutParticipantName, map[string]string{"goalPlan": string(legacyRaw), "goalRouteDigest": legacyReceipt.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	badLegacyReceipt := legacyReceipt
+	badLegacyReceipt.Digest = strings.Repeat("0", 64)
+	badLegacyPlan := legacyPlan
+	badLegacyPlan.RouteReceipt = &badLegacyReceipt
+	if err := engine.prepareGoalRoute(&badLegacyPlan, run.Artifact.ID); err == nil {
+		t.Fatal("legacy upgrade replaced an unauthenticated old receipt digest")
+	}
+	legacyThread, _, err := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedLegacyThread := legacyThread
+	changedLegacyThread.Messages = append([]scoutChatMessageRecord(nil), legacyThread.Messages...)
+	changedLegacyThread.Messages[scoutChatMessageIndex(changedLegacyThread, "production-paste")].Text = "ship"
+	if err := kanbanApp.saveScoutChatThread(changedLegacyThread); err != nil {
+		t.Fatal(err)
+	}
+	changedLegacyPlan := legacyPlan
+	if err := engine.prepareGoalRoute(&changedLegacyPlan, run.Artifact.ID); err == nil {
+		t.Fatal("legacy upgrade accepted shortened mutable source context")
+	}
+	if persisted := mustGoalPlan(t, kanbanApp, run.Artifact.ID); persisted.RouteReceipt == nil || persisted.RouteReceipt.SourceSelectionDigest != "" {
+		t.Fatalf("failed legacy authentication persisted a new selection binding: %+v", persisted.RouteReceipt)
+	}
+	if err := kanbanApp.saveScoutChatThread(legacyThread); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.prepareGoalRoute(&legacyPlan, run.Artifact.ID); err != nil {
+		t.Fatalf("legacy selection upgrade: %v", err)
+	}
+	if legacyPlan.RouteReceipt.SourceSelectionDigest == "" || mustGoalPlan(t, kanbanApp, run.Artifact.ID).RouteReceipt.SourceSelectionDigest == "" {
+		t.Fatal("legacy source selection upgrade was not durably bound on the parent")
+	}
+	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, legacyPlan.subtaskByID("red_team"), packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	if err != nil || !strings.Contains(legacyTask, "PRODUCTION_PDF_SENTINEL") {
+		t.Fatalf("pre-contextRefs live receipt did not rehydrate its exact accepted proposal source: err=%v task=%s", err, legacyTask)
+	}
+
+	var writerQuery string
+	previousAgentStart := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, child scoutAgentThread) { writerQuery = child.Query }
+	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
+	plan.State = goalStateExecute
+	voice := plan.subtaskByID("voice")
+	voice.Status = subtaskReady
+	if err := engine.launchSubtask(&plan, voice, run.Artifact.ID); err != nil {
+		t.Fatalf("launch production writer stage: %v", err)
+	}
+	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL"} {
+		if !strings.Contains(writerQuery, want) {
+			t.Fatalf("writer provider query lost %q:\n%s", want, writerQuery)
+		}
+	}
+	if strings.Contains(writerQuery, "PRODUCTION_UNRELATED_SENTINEL") || strings.Contains(writerQuery, "PRODUCTION_SIBLING_PDF_SECRET") {
+		t.Fatalf("writer provider query leaked another channel branch:\n%s", writerQuery)
+	}
+
+	kanbanApp.pendingAttachmentUploadsMu.Lock()
+	revoked := kanbanApp.pendingAttachmentUploads[grantedPDF.SourceID]
+	revoked.State = attachmentSourceRevoked
+	kanbanApp.pendingAttachmentUploads[grantedPDF.SourceID] = revoked
+	kanbanApp.pendingAttachmentUploadsMu.Unlock()
+	var blockedProviderCalls int
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		blockedProviderCalls++
+		return "must not run", nil
+	})
+	redTeam := plan.subtaskByID("red_team")
+	redTeam.Status = subtaskRunning
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeam, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	if blockedProviderCalls != 0 || redTeam.Status != subtaskFailed || redTeam.Review == nil ||
+		(!strings.Contains(redTeam.Review.Reasons, "changed") && !strings.Contains(redTeam.Review.Reasons, "readable")) {
+		t.Fatalf("revoked source did not fail closed before provider admission: calls=%d reason=%q stage=%+v", blockedProviderCalls, firstNonBlank(redTeam.Review.Reasons, "none"), redTeam)
+	}
+	// A revoked source at the last gate round is not a low score. Even with
+	// ForceAccept enabled it must terminalize with reattach/new-run guidance,
+	// without a scorer call or a proceed-with-gaps checkpoint.
+	revokedGatePlan := plan
+	revokedGatePlan.Subtasks = append([]goalSubtask(nil), plan.Subtasks...)
+	revokedGatePlan.State = goalStateExecute
+	revokedGatePlan.Checkpoint = nil
+	revokedGateStage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
+	revokedGateStage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: true}
+	revokedGate := revokedGatePlan.subtaskByID("gate")
+	revokedGate.Status = subtaskRunning
+	revokedGate.Revisions = 1
+	probeParent, _, err := kanbanApp.createOSArtifactWithMetadata("workflow", "Revoked source gate probe", "Gate probe", scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeGateProviderCalls := blockedProviderCalls
+	engine.runProcessGateStage(context.Background(), &revokedGatePlan, probeParent.ID, revokedGate, revokedGateStage)
+	if blockedProviderCalls != beforeGateProviderCalls || revokedGatePlan.State != goalStateBlocked || revokedGatePlan.Checkpoint != nil || revokedGate.Status != subtaskFailed ||
+		!strings.Contains(revokedGatePlan.Blocker, "reattach") || !strings.Contains(revokedGatePlan.Blocker, "cannot be overridden") {
+		t.Fatalf("last-round revoked source was scored/revised/overridden: before=%d after=%d state=%q checkpoint=%+v blocker=%q stage=%+v", beforeGateProviderCalls, blockedProviderCalls, revokedGatePlan.State, revokedGatePlan.Checkpoint, revokedGatePlan.Blocker, revokedGate)
+	}
+	if probe := mustArtifact(t, kanbanApp, probeParent.ID); probe.Metadata["threadStatus"] != "error" || probe.Metadata["status"] != "error" {
+		t.Fatalf("revoked-source terminal classification was not durable: %+v", probe.Metadata)
+	}
+	kanbanApp.pendingAttachmentUploadsMu.Lock()
+	revoked.State = attachmentSourceCommitted
+	kanbanApp.pendingAttachmentUploads[grantedPDF.SourceID] = revoked
+	kanbanApp.pendingAttachmentUploadsMu.Unlock()
+
+	loadThread := func() scoutChatThreadRecord {
+		current, _, loadErr := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		return current
+	}
+	originalThread := loadThread()
+	toctouMutated := originalThread
+	toctouMutated.Messages = append([]scoutChatMessageRecord(nil), originalThread.Messages...)
+	toctouMutated.Messages[scoutChatMessageIndex(toctouMutated, "production-paste")].Text += " MUTATED_BETWEEN_SNAPSHOT_AND_VERIFY"
+	engine.sourceSelectionAfterSnapshotProbe = func() {
+		engine.sourceSelectionAfterSnapshotProbe = nil
+		if saveErr := kanbanApp.saveScoutChatThread(toctouMutated); saveErr != nil {
+			t.Fatal(saveErr)
+		}
+	}
+	beforeTOCTOU := blockedProviderCalls
+	toctouCandidate := *plan.subtaskByID("red_team")
+	toctouCandidate.Status = subtaskRunning
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &toctouCandidate, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	engine.sourceSelectionAfterSnapshotProbe = nil
+	if blockedProviderCalls != beforeTOCTOU || toctouCandidate.Status != subtaskFailed || toctouCandidate.Review == nil || !strings.Contains(toctouCandidate.Review.Reasons, "changed") {
+		t.Fatalf("mutation between selected snapshot and route verification reached provider: before=%d after=%d stage=%+v", beforeTOCTOU, blockedProviderCalls, toctouCandidate)
+	}
+	if saveErr := kanbanApp.saveScoutChatThread(originalThread); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	assertMutationBlocked := func(label string, mutate func(*scoutChatThreadRecord)) {
+		mutated := originalThread
+		mutated.Messages = append([]scoutChatMessageRecord(nil), originalThread.Messages...)
+		mutate(&mutated)
+		if saveErr := kanbanApp.saveScoutChatThread(mutated); saveErr != nil {
+			t.Fatal(saveErr)
+		}
+		before := blockedProviderCalls
+		candidate := *plan.subtaskByID("red_team")
+		candidate.Status = subtaskRunning
+		engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &candidate, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+		if blockedProviderCalls != before || candidate.Status != subtaskFailed || candidate.Review == nil || !strings.Contains(candidate.Review.Reasons, "changed") {
+			t.Fatalf("%s old-branch mutation reached provider or lacked truthful classification: before=%d after=%d stage=%+v", label, before, blockedProviderCalls, candidate)
+		}
+		if saveErr := kanbanApp.saveScoutChatThread(originalThread); saveErr != nil {
+			t.Fatal(saveErr)
+		}
+	}
+	assertMutationBlocked("edit", func(thread *scoutChatThreadRecord) {
+		thread.Messages[scoutChatMessageIndex(*thread, "production-paste")].Text += " MUTATED_AFTER_APPROVAL"
+	})
+	assertMutationBlocked("delete", func(thread *scoutChatThreadRecord) {
+		index := scoutChatMessageIndex(*thread, "production-paste")
+		thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+	})
+	assertMutationBlocked("author label", func(thread *scoutChatThreadRecord) {
+		thread.Messages[scoutChatMessageIndex(*thread, "production-paste")].AuthorName = "Changed speaker label"
+	})
+	assertMutationBlocked("attachment kind", func(thread *scoutChatThreadRecord) {
+		index := scoutChatMessageIndex(*thread, "production-paste")
+		thread.Messages[index].Files = append([]scoutChatFileAttachment(nil), thread.Messages[index].Files...)
+		thread.Messages[index].Files[0].Kind = "text"
+	})
+
+	mutated := originalThread
+	mutated.Messages = append([]scoutChatMessageRecord(nil), originalThread.Messages...)
+	mutated.Messages[scoutChatMessageIndex(mutated, "production-paste")].Text += " MUTATED_FOR_TERMINAL_PROOF"
+	if err := kanbanApp.saveScoutChatThread(mutated); err != nil {
+		t.Fatal(err)
+	}
+	kanbanApp.runGoalThread(run.Artifact.ID)
+	terminal := mustArtifact(t, kanbanApp, run.Artifact.ID)
+	if terminal.Metadata["threadStatus"] != "error" || !strings.Contains(terminal.Metadata["goalBlocker"], "source selection changed") ||
+		strings.Contains(terminal.Metadata["goalBlocker"], "PRODUCTION_PDF_SENTINEL") || strings.Contains(terminal.Metadata["goalBlocker"], "MUTATED_FOR_TERMINAL_PROOF") {
+		t.Fatalf("mutated old source did not terminalize visibly and without source leakage: status=%q blocker=%q", terminal.Metadata["threadStatus"], terminal.Metadata["goalBlocker"])
 	}
 }
 

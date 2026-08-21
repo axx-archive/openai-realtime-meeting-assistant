@@ -318,13 +318,30 @@ func (app *kanbanBoardApp) assistantContextEntryForRef(ctx context.Context, prin
 	if err != nil {
 		return meetingMemoryEntry{}, false
 	}
+	rawMessageIndex := scoutChatMessageIndex(thread, parts[2])
+	if rawMessageIndex < 0 || index >= len(thread.Messages[rawMessageIndex].Files) {
+		return meetingMemoryEntry{}, false
+	}
+	boundFile := thread.Messages[rawMessageIndex].Files[index]
+	if !app.committedChatAttachmentAuthorized(viewerEmail, thread.ID, parts[2], boundFile) {
+		return meetingMemoryEntry{}, false
+	}
 	thread = app.projectScoutChatThreadForViewer(viewerEmail, thread)
 	messageIndex := scoutChatMessageIndex(thread, parts[2])
-	if messageIndex < 0 || index >= len(thread.Messages[messageIndex].Files) {
+	if messageIndex < 0 {
 		return meetingMemoryEntry{}, false
 	}
 	message := thread.Messages[messageIndex]
-	file := message.Files[index]
+	file := scoutChatFileAttachment{}
+	for _, candidate := range message.Files {
+		if candidate.SourceID == boundFile.SourceID && candidate.SourceRevision == boundFile.SourceRevision && candidate.Ref == boundFile.Ref {
+			file = candidate
+			break
+		}
+	}
+	if file.SourceID == "" {
+		return meetingMemoryEntry{}, false
+	}
 	if strings.TrimSpace(file.Text) == "" {
 		return meetingMemoryEntry{}, false
 	}

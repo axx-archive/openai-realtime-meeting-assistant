@@ -175,7 +175,8 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 		"optimisticMessage.dataset.delivery = 'sending'",
 		"optimisticState.textContent = 'not sent'",
 		"function updateDesktopChatReaction(messageId, emoji, set, options = {})",
-		"method: set ? 'PUT' : 'DELETE'",
+		"method: intent.requested ? 'PUT' : 'DELETE'",
+		"queueMicrotask(() => void flushDesktopChatReactionIntent(intent))",
 		"openDesktopMessageContext(message, replyButton)",
 		"submitDesktopThreadReply",
 	} {
@@ -187,7 +188,7 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 
 func TestDesktopChatSendRenderIsOneScrollStableTransaction(t *testing.T) {
 	html := desktopChatQualityHTML(t)
-	render := functionBody(html, "function renderActiveScoutThread()")
+	render := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	if render == "" {
 		t.Fatal("could not extract renderActiveScoutThread body")
 	}
@@ -199,22 +200,21 @@ func TestDesktopChatSendRenderIsOneScrollStableTransaction(t *testing.T) {
 			t.Errorf("chat render must be wrapped in one synchronous transaction: missing %q", want)
 		}
 	}
-	transaction := functionBody(html, "function withScoutChatRenderTransaction(render)")
+	transaction := functionBodyAfterSignature(html, "function withScoutChatRenderTransaction(render, options = {})")
 	if transaction == "" {
 		t.Fatal("missing chat render transaction helper")
 	}
 	for _, want := range []string{
 		"scoutChatRenderBatchDepth += 1",
 		"scoutChatRenderBatchDepth -= 1",
-		"if (wasNearBottom)",
-		"scoutChatThread.scrollTop = scoutChatThread.scrollHeight",
-		"scoutChatThread.scrollTop = previousScrollTop",
+		"captureScoutChatViewport(options)",
+		"restoreScoutChatViewport(viewport)",
 	} {
 		if !strings.Contains(transaction, want) {
 			t.Errorf("chat render transaction missing scroll-stability guard %q", want)
 		}
 	}
-	appendNode := functionBody(html, "function appendScoutChatNode(node)")
+	appendNode := functionBodyAfterSignature(html, "function appendScoutChatNode(node, options = {})")
 	if appendNode == "" || !strings.Contains(appendNode, "scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()") {
 		t.Fatal("chat node append must not force scrollTop during a batched render")
 	}
@@ -447,8 +447,9 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 
 	reaction := functionBodyAfterSignature(html, "function updateDesktopChatReaction(messageId, emoji, set, options = {})")
 	for _, want := range []string{
-		"options.contextOnly || updatedMessage?.replyTo?.messageId",
-		"syncDesktopReplySurfaces(payload.thread, root?.id",
+		"desktopChatReactionIntents.set(key, intent)",
+		"patchDesktopChatReactionSurfaces(threadId, messageId)",
+		"flushDesktopChatReactionIntent(intent)",
 	} {
 		if !strings.Contains(reaction, want) {
 			t.Errorf("reply reaction isolation missing %q", want)
@@ -457,7 +458,7 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 	for signature, wants := range map[string][]string{
 		"function handleChatThreadEvent(payload)": {
 			"desktopChatLayoutQuery.matches && message?.replyTo?.messageId",
-			"syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId)",
+			"syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId, { skipRail: patched })",
 		},
 		"function removeScoutChatThreadMessage(threadId, messageId)": {
 			"desktopChatLayoutQuery.matches && replyRoot?.id",
@@ -472,7 +473,7 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 		}
 	}
 	renderRail := functionBodyAfterSignature(html, "function renderDesktopMessageContext(thread, root, options = {})")
-	for _, want := range []string{"const priorScrollTop", "const wasNearBottom", "chatContextParent.replaceChildren", "chatContextBody.scrollTop = priorScrollTop"} {
+	for _, want := range []string{"captureDesktopChatContextViewport(options)", "chatContextParent.replaceChildren", "restoreDesktopChatContextViewport(viewport)"} {
 		if !strings.Contains(renderRail, want) {
 			t.Errorf("reply rail scroll stability missing %q", want)
 		}
@@ -482,7 +483,7 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)
-	renderBody := functionBody(html, "function renderActiveScoutThread()")
+	renderBody := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	for _, want := range []string{
 		"const feedMessages = desktopChatLayoutQuery.matches",
 		"messages.filter(message => !message?.replyTo?.messageId)",

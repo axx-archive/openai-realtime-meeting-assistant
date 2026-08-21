@@ -26207,9 +26207,8 @@
         }
       }
 
-      /* phone: NO PiP (D12) — pipMeetingActive() returns false on phones so
-         the desktop clearance :has() rules never match; the old top-docked
-         phone PiP block and its 256px caption clearance are gone */
+      /* phone: the persistent call PiP is compact and viewport-safe; its
+         final override lives in the dedicated Persistent call PiP region. */
 
       @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         /* the phone shell: single top header + floating bottom glass tab bar
@@ -26323,12 +26322,13 @@
           display: flex;
         }
 
-        /* NO PiP on mobile (D12) — the header live pill replaces it */
+        /* Legacy mobile fallback. The later Persistent call PiP region
+           deliberately overrides this while an active call is off-room. */
         #pipMeeting {
           display: none;
         }
 
-        /* the live pill is the mobile PiP (D12) — 28px, live-soft, timer */
+        /* The live pill remains a terse return shortcut beside the full PiP. */
         .topbar-live {
           height: 28px;
           padding: 0 12px;
@@ -29398,7 +29398,7 @@
       .artifact-stage {
         position: fixed;
         inset: 0;
-        z-index: 80;
+        z-index: 1200;
         display: flex;
         justify-content: flex-end;
       }
@@ -29419,6 +29419,7 @@
         display: flex;
         flex-direction: column;
         animation: artifact-stage-in var(--dur-slow) var(--ease);
+        overscroll-behavior: contain;
       }
       @keyframes artifact-stage-in {
         from { transform: translateX(28px); opacity: 0; }
@@ -29428,11 +29429,17 @@
         .artifact-stage__panel { animation: none; }
       }
       .artifact-stage__head {
+        position: sticky;
+        top: 0;
+        z-index: 12;
         display: flex;
         align-items: center;
         gap: 12px;
         padding: 14px 18px;
         border-bottom: 1px solid var(--line-1);
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        backdrop-filter: blur(18px) saturate(1.1);
+        -webkit-backdrop-filter: blur(18px) saturate(1.1);
       }
       .artifact-stage__headings {
         flex: 1;
@@ -29441,7 +29448,7 @@
         flex-direction: column;
         gap: 3px;
       }
-      .artifact-stage__actions { display: flex; align-items: center; gap: 8px; }
+      .artifact-stage__actions { display: flex; align-items: center; gap: 8px; flex: none; }
       .artifact-outline-actions {
         display: flex;
         align-items: center;
@@ -29478,20 +29485,24 @@
       }
       .artifact-stage__escape {
         flex: none;
+        min-height: 40px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-full);
         background: transparent;
         color: var(--text-2);
         font: var(--type-caption);
-        padding: 6px 12px;
+        padding: 0 13px;
         cursor: pointer;
-        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        transition-property: color, border-color, background-color, scale;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
-      .artifact-stage__escape:hover { color: var(--text-1); border-color: var(--line-2); }
+      .artifact-stage__escape:hover { color: var(--text-1); border-color: var(--line-2); background: var(--surface-2); }
+      .artifact-stage__escape:active { scale: 0.96; }
       .artifact-stage__close {
         flex: none;
-        width: 30px;
-        height: 30px;
+        width: 44px;
+        height: 44px;
         display: grid;
         place-items: center;
         border: 0;
@@ -29500,9 +29511,12 @@
         border-radius: var(--r-md);
         cursor: pointer;
         font: var(--type-body);
-        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+        transition-property: color, background-color, scale;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
       .artifact-stage__close:hover { color: var(--text-1); background: var(--accent-soft); }
+      .artifact-stage__close:active { scale: 0.96; }
       .artifact-stage__body {
         flex: 1;
         min-height: 0;
@@ -29512,6 +29526,7 @@
       .artifact-stage__body--read {
         overflow-y: auto;
         padding: 24px;
+        overscroll-behavior: contain;
       }
       .artifact-stage__read {
         width: 100%;
@@ -29540,6 +29555,257 @@
         text-transform: lowercase;
         text-wrap: initial;
       }
+
+      /* Process-stage activity reader. Packaging Studio outputs are often
+         tens of thousands of characters with hostile-width ledgers. The
+         drawer leads with the exact recorded verdict/decision, a bounded
+         factual map, then keeps the complete record behind progressive
+         disclosures. Nothing here manufactures a verdict from a score. */
+      .artifact-stage__body--activity {
+        overflow-y: auto;
+        padding: clamp(16px, 3vw, 30px);
+        background:
+          radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--ember) 8%, transparent), transparent 28%),
+          var(--surface-2);
+        overscroll-behavior: contain;
+      }
+      .artifact-stage-activity {
+        width: min(100%, 880px);
+        margin: 0 auto;
+        display: grid;
+        gap: 14px;
+      }
+      .artifact-stage-activity__overview {
+        display: grid;
+        gap: 16px;
+        padding: clamp(18px, 3vw, 28px);
+        border-radius: 24px;
+        background: var(--surface-1);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.06),
+          0 1px 2px -1px rgba(0, 0, 0, 0.06),
+          0 12px 32px rgba(0, 0, 0, 0.06);
+      }
+      [data-theme="dark"] .artifact-stage-activity__overview {
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 16px 36px rgba(0, 0, 0, 0.24);
+      }
+      .artifact-stage-activity__topline {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .artifact-stage-activity__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .artifact-stage-activity__state {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--live) 10%, var(--surface-2));
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .artifact-stage-activity__state[data-tone="attention"] {
+        background: color-mix(in srgb, var(--warn) 14%, var(--surface-2));
+        color: color-mix(in srgb, var(--warn) 74%, var(--text-1));
+      }
+      .artifact-stage-activity__state[data-tone="error"] {
+        background: color-mix(in srgb, var(--danger) 12%, var(--surface-2));
+        color: color-mix(in srgb, var(--danger) 78%, var(--text-1));
+      }
+      .artifact-stage-activity__heading {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        text-wrap: balance;
+      }
+      .artifact-stage-activity__summary {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 7;
+        overflow: hidden;
+        margin: 0;
+        max-width: 72ch;
+        color: var(--text-2);
+        font: var(--type-body-longform, var(--type-body));
+        line-height: 1.62;
+        white-space: pre-line;
+        overflow-wrap: anywhere;
+        text-wrap: pretty;
+      }
+      .artifact-stage-activity__facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .artifact-stage-activity__fact {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+      .artifact-stage-activity__map {
+        display: grid;
+        gap: 8px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line-1);
+      }
+      .artifact-stage-activity__map-label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .artifact-stage-activity__map-items {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .artifact-stage-activity__map-item {
+        max-width: 100%;
+        padding: 5px 9px;
+        border-radius: 8px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-caption);
+        overflow-wrap: anywhere;
+      }
+      .artifact-stage-activity__checkpoint.scout-chat-work-card__checkpoint {
+        margin: 0;
+        padding: 16px;
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--warn) 7%, var(--surface-2));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 22%, transparent);
+      }
+      .artifact-stage-activity__checkpoint .scout-chat-work-card__checkpoint-question {
+        font: var(--type-body-medium);
+        text-wrap: balance;
+      }
+      .artifact-stage-activity__checkpoint .scout-chat-work-card__checkpoint-choice {
+        min-height: 40px;
+      }
+      .artifact-stage-activity__record {
+        border-radius: 20px;
+        background: var(--surface-1);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.06),
+          0 1px 2px -1px rgba(0, 0, 0, 0.06),
+          0 8px 24px rgba(0, 0, 0, 0.04);
+        overflow: clip;
+      }
+      [data-theme="dark"] .artifact-stage-activity__record {
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+      .artifact-stage-activity__record > summary,
+      .artifact-read__section-disclosure > summary {
+        min-height: 52px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 16px;
+        list-style: none;
+        cursor: pointer;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        user-select: none;
+        transition-property: background-color, color;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .artifact-stage-activity__record > summary::-webkit-details-marker,
+      .artifact-read__section-disclosure > summary::-webkit-details-marker { display: none; }
+      .artifact-stage-activity__record > summary::marker,
+      .artifact-read__section-disclosure > summary::marker { content: ""; }
+      .artifact-stage-activity__record > summary:hover,
+      .artifact-read__section-disclosure > summary:hover { background: var(--surface-2); }
+      .artifact-stage-activity__record > summary:focus-visible,
+      .artifact-read__section-disclosure > summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -3px;
+      }
+      .artifact-stage-activity__chevron {
+        flex: none;
+        color: var(--text-3);
+        transition-property: transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .artifact-stage-activity__record[open] > summary .artifact-stage-activity__chevron,
+      .artifact-read__section-disclosure[open] > summary .artifact-stage-activity__chevron { transform: rotate(90deg); }
+      .artifact-stage-activity__record-meta,
+      .artifact-read__section-disclosure-meta {
+        margin-left: auto;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+      .artifact-stage-activity__record-body {
+        padding: 8px clamp(16px, 3vw, 28px) 28px;
+        border-top: 1px solid var(--line-1);
+      }
+      .artifact-stage-activity__record-body .artifact-stage__read {
+        max-width: none;
+      }
+      .artifact-stage-activity__record-body .artifact-read__grid { gap: 12px; }
+      .artifact-stage-activity__record-body .artifact-read__section {
+        padding: 0;
+      }
+      .artifact-read__section-disclosure {
+        border-radius: 14px;
+        background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--line-1) 78%, transparent);
+        overflow: clip;
+      }
+      .artifact-read__section-disclosure-body {
+        padding: 0 16px 18px;
+      }
+      .artifact-stage-activity .artifact-read__table-wrap {
+        border: 0;
+        border-radius: 12px;
+        outline: 1px solid var(--line-1);
+        outline-offset: -1px;
+        overscroll-behavior-inline: contain;
+      }
+      .artifact-stage-activity .artifact-read__table th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .artifact-stage-activity .artifact-read__table td {
+        min-width: 140px;
+        max-width: 360px;
+      }
+      .artifact-read__code-block {
+        max-width: 100%;
+        margin: 0;
+        padding: 14px 16px;
+        border-radius: 12px;
+        overflow: auto;
+        background: #111317;
+        color: #f4f4f2;
+        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline-offset: -1px;
+        font: 500 12px/1.6 var(--font-mono);
+        tab-size: 2;
+      }
+      .artifact-read__code-block code { white-space: pre; }
       .artifact-stage__body--deck { padding: 0; }
       .artifact-stage__body--deck .chat-deck,
       .artifact-stage__body--deck .artifact-deck {
@@ -29789,6 +30055,44 @@
       }
       @media (max-width: 860px) {
         .artifact-stage__panel { width: 100%; }
+        .artifact-stage__head {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px 10px;
+          padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+        }
+        .artifact-stage__headings { grid-column: 1 / 2; grid-row: 1; }
+        .artifact-stage__close { grid-column: 2; grid-row: 1; }
+        .artifact-stage__actions,
+        .artifact-stage__escape {
+          grid-row: 2;
+        }
+        .artifact-stage__actions {
+          grid-column: 1;
+          min-width: 0;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .artifact-stage__actions::-webkit-scrollbar { display: none; }
+        .artifact-stage__escape { grid-column: 2; white-space: nowrap; }
+        .artifact-stage__body--read { padding: 16px; }
+        .artifact-stage__body--activity { padding: 12px; }
+        .artifact-stage-activity__overview { border-radius: 20px; }
+        .artifact-stage-activity__summary { -webkit-line-clamp: 8; }
+        .artifact-stage-activity__map-items {
+          flex-wrap: nowrap;
+          max-width: 100%;
+          overflow-x: auto;
+          padding-bottom: 3px;
+          scrollbar-width: thin;
+        }
+        .artifact-stage-activity__map-item { flex: 0 0 auto; max-width: min(76vw, 340px); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .artifact-stage-activity__chevron,
+        .artifact-stage__escape,
+        .artifact-stage__close { transition: none; }
       }
 
       /* the stage-header PDF affordance — the escape's quiet register; the
@@ -30561,6 +30865,174 @@
         .stride-agent-dialog__row { grid-template-columns: 1fr; }
       }
 
+      /* ---------- Persistent call PiP ----------
+         This is a view of the room-owned streams, never a second call owner.
+         It stays above SPA surfaces and docks away from primary actions. */
+      .pip-meeting {
+        width: 304px;
+        max-width: calc(100vw - 16px);
+        /* Artifact Stage and Content Studio are body-owned overlays at 1200.
+           The live call is an explicit peer in that composite, so it must
+           remain both painted and hit-testable above either surface. */
+        z-index: 1300;
+        border: 0;
+        border-radius: 22px;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.1),
+          0 2px 8px rgba(0, 0, 0, 0.16),
+          0 24px 72px rgba(0, 0, 0, 0.38);
+        isolation: isolate;
+      }
+
+      /* Wide drawers leave a narrow safe rail on the left. Compact only while
+         one is open so the call avoids the panel instead of covering its work. */
+      .pip-meeting[data-composite="true"] { width: 184px; }
+
+      .pip-meeting[data-composite="true"] .pip-meeting__controls {
+        display: grid;
+        grid-template-columns: repeat(3, 40px);
+        justify-content: center;
+      }
+
+      .pip-meeting[data-composite="true"] .pip-meeting__controls-spacer { display: none; }
+
+      .pip-meeting[data-composite="true"] .pip-return {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
+
+      .pip-meeting.is-dragging { opacity: 0.96; }
+
+      .pip-meeting__head {
+        min-height: 52px;
+        padding: 8px 10px 7px 14px;
+      }
+
+      .pip-meeting__head:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -3px;
+        border-radius: 20px 20px 8px 8px;
+      }
+
+      .pip-meeting__identity {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 1px;
+      }
+
+      .pip-meeting__title { display: block; }
+
+      .pip-meeting__status {
+        overflow: hidden;
+        color: var(--text-3);
+        font: 500 10px/1.35 var(--font-sans);
+        letter-spacing: 0.01em;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-wrap: pretty;
+      }
+
+      .pip-meeting[data-state="reconnecting"] .pip-meeting__dot {
+        background: var(--warning, #f5a524);
+      }
+
+      .pip-meeting[data-state="error"] .pip-meeting__dot {
+        background: var(--danger);
+        animation: none;
+      }
+
+      .pip-meeting__expand,
+      .pip-control,
+      .pip-return {
+        min-width: 40px;
+        min-height: 40px;
+      }
+
+      .pip-meeting__expand {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+      }
+
+      .pip-meeting__tiles { padding: 0 10px; }
+
+      .pip-tile {
+        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline-offset: -1px;
+      }
+
+      .pip-meeting__controls {
+        gap: 6px;
+        padding: 10px;
+      }
+
+      .pip-control {
+        flex: 0 0 40px;
+        width: 40px;
+        height: 40px;
+        border: 0;
+        border-radius: 12px;
+        box-shadow: 0 0 0 1px var(--line-1), 0 1px 2px rgba(0, 0, 0, 0.08);
+        transition-property: background-color, color, filter, transform, box-shadow;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .pip-control:active { transform: scale(0.96); }
+
+      .pip-control--end {
+        background: var(--danger-soft);
+        color: var(--danger);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
+      }
+
+      .pip-return {
+        flex: none;
+        height: 40px;
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 12px;
+      }
+
+      .call-pip-sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
+        #pipMeeting {
+          display: block;
+          width: min(304px, calc(100vw - 24px));
+          right: 12px;
+          top: calc(env(safe-area-inset-top, 0px) + 58px);
+          bottom: auto;
+          z-index: 1300;
+        }
+
+        #pipMeeting[hidden] { display: none; }
+
+        .pip-meeting__head { min-height: 48px; }
+
+        .pip-meeting__tiles { gap: 6px; }
+
+        .pip-tile { aspect-ratio: 16 / 9; }
+
+        .pip-meeting__controls { padding: 8px 10px 10px; }
+
+        .pip-return { padding-inline: 12px; }
+      }
+
       /* ---------- Reduced motion ----------
          The kit zeroes the motion tokens (--dur-fast/--dur-med/--dur-slow → 0ms,
          declared beside the token table); everything declared in token time
@@ -30895,6 +31367,271 @@
       .pd1-primary-nav__item[aria-current="page"] > svg {
         stroke-width: 2.2;
       }
+      .pd1-primary-nav__external-wrap {
+        position: relative;
+        width: 40px;
+        margin-top: 8px;
+        padding-top: 9px;
+      }
+      .pd1-primary-nav__external-wrap::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 8px;
+        right: 8px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--line-2), transparent);
+      }
+      .pd1-primary-nav__external {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: var(--r-md);
+        color: color-mix(in srgb, var(--ember) 72%, var(--text-2));
+        text-decoration: none;
+        background: transparent;
+        transition-property: background-color, color, box-shadow, scale;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .pd1-primary-nav__external > svg { width: 21px; height: 21px; }
+      .pd1-primary-nav__external:hover,
+      .pd1-primary-nav__external:focus-visible {
+        color: var(--text-1);
+        background: color-mix(in srgb, var(--ember) 10%, var(--surface-2));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember) 20%, transparent);
+      }
+      .pd1-primary-nav__external:active { scale: 0.96; }
+      .pd1-primary-nav__external-label {
+        position: absolute;
+        z-index: 300;
+        left: calc(100% + 14px);
+        top: 50%;
+        translate: -4px -50%;
+        padding: 6px 10px;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--glass-chrome) 94%, transparent);
+        border: 1px solid color-mix(in srgb, var(--glass-border) 86%, transparent);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), 0 8px 20px rgb(0 0 0 / 0.18);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition-property: opacity, translate;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .pd1-primary-nav__external:hover .pd1-primary-nav__external-label,
+      .pd1-primary-nav__external:focus-visible .pd1-primary-nav__external-label {
+        opacity: 1;
+        translate: 0 -50%;
+      }
+      .content-studio-drawer {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: flex;
+        justify-content: flex-end;
+      }
+      .content-studio-drawer__scrim {
+        position: absolute;
+        inset: 0;
+        border: 0;
+        padding: 0;
+        background: var(--scrim);
+      }
+      .content-studio-drawer__panel {
+        position: relative;
+        width: min(1120px, 84vw);
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-3);
+        overflow: hidden;
+        transform: translateX(0);
+        transition-property: transform, opacity;
+        transition-duration: var(--dur-med);
+        transition-timing-function: var(--ease);
+      }
+      .content-studio-drawer__head {
+        position: relative;
+        z-index: 2;
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px 10px 18px;
+        border-bottom: 1px solid var(--line-1);
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        backdrop-filter: blur(18px) saturate(1.1);
+        -webkit-backdrop-filter: blur(18px) saturate(1.1);
+      }
+      .content-studio-drawer__identity {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .content-studio-drawer__mark {
+        width: 38px;
+        height: 38px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--ember) 11%, var(--surface-2));
+        color: color-mix(in srgb, var(--ember) 74%, var(--text-1));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember) 18%, transparent);
+      }
+      .content-studio-drawer__mark svg { width: 20px; height: 20px; }
+      .content-studio-drawer__title {
+        margin: 0;
+        overflow: hidden;
+        color: var(--text-1);
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .content-studio-drawer__status {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+      }
+      .content-studio-drawer__actions {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .content-studio-drawer__action,
+      .content-studio-drawer__close {
+        min-width: 40px;
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        text-decoration: none;
+        cursor: pointer;
+        transition-property: background-color, border-color, color, scale;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .content-studio-drawer__action { padding: 0 13px; }
+      .content-studio-drawer__close { width: 40px; padding: 0; }
+      .content-studio-drawer__action:hover,
+      .content-studio-drawer__action:focus-visible,
+      .content-studio-drawer__close:hover,
+      .content-studio-drawer__close:focus-visible {
+        border-color: var(--line-2);
+        background: var(--surface-2);
+        color: var(--text-1);
+      }
+      .content-studio-drawer__action:active,
+      .content-studio-drawer__close:active { scale: 0.96; }
+      .content-studio-drawer__viewport {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        background: var(--surface-2);
+      }
+      .content-studio-drawer__focus-sentinel {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .content-studio-drawer__focus-sentinel--before { inset: 0 auto auto 0; }
+      .content-studio-drawer__focus-sentinel--after { inset: auto 0 0 auto; }
+      .content-studio-drawer__frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #fff;
+      }
+      .content-studio-drawer__loading,
+      .content-studio-drawer__fallback {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        background: var(--surface-2);
+      }
+      .content-studio-drawer__loading[hidden],
+      .content-studio-drawer__fallback[hidden] { display: none; }
+      .content-studio-drawer__loading-inner,
+      .content-studio-drawer__fallback-inner {
+        width: min(440px, 100%);
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        text-align: center;
+      }
+      .content-studio-drawer__pulse {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--ember) 16%, var(--surface-1));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember) 24%, transparent);
+        animation: content-studio-breathe 1.4s ease-in-out infinite alternate;
+      }
+      @keyframes content-studio-breathe {
+        from { opacity: 0.5; transform: scale(0.92); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .content-studio-drawer__fallback h3 {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        text-wrap: balance;
+      }
+      .content-studio-drawer__fallback p {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        line-height: 1.55;
+        text-wrap: pretty;
+      }
+      .content-studio-drawer__fallback-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+      }
+      @media (max-width: 860px) {
+        .content-studio-drawer__panel { width: 100%; }
+        .content-studio-drawer__head { padding-top: max(10px, env(safe-area-inset-top)); }
+        .content-studio-drawer__status { display: none; }
+        .content-studio-drawer__action { padding: 0 11px; }
+      }
+      @media (max-width: 520px) {
+        .content-studio-drawer__action { width: 40px; padding: 0; font-size: 0; }
+        .content-studio-drawer__action::before { content: "↗"; font: var(--type-body-medium); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .content-studio-drawer__panel,
+        .content-studio-drawer__action,
+        .content-studio-drawer__close { transition: none; }
+        .content-studio-drawer__pulse { animation: none; }
+      }
       /* Hide Work/Network/Work Search/You — only Home/Meet/Chat/Files are destinations */
       .pd1-primary-nav__item[data-pd1-destination="Work"],
       .pd1-primary-nav__item[data-pd1-destination="Network"],
@@ -31018,6 +31755,7 @@
       @media (max-width: 760px) {
         #appShell.is-authed { --shell-topbar-height: calc(60px + env(safe-area-inset-top, 0px)); }
         .pd1-primary-nav__item { min-height: 44px; }
+        .pd1-primary-nav__external-wrap { display: none !important; }
         .pd1-destination-surface { padding: var(--sp-4); padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
         .pd1-destination-state { padding: var(--sp-5); border-radius: var(--r-lg); }
         .stride-w2 { inset: 60px 0 0; display: block; overflow-y: auto; padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
@@ -31066,6 +31804,9 @@
           max-height: min(420px, calc(100svh - 180px));
           overflow-y: auto;
         }
+      }
+      @media (hover: none) and (pointer: coarse) {
+        .pd1-primary-nav__external-wrap { display: none !important; }
       }
       @media (prefers-reduced-motion: reduce) {
         .topbar__mark.is-wake .topbar__wordmark,
@@ -31298,6 +32039,17 @@
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8c1.1 0 2 .9 2 2v1"/><path d="M5 6h10c1.1 0 2 .9 2 2v1"/><path d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"/></svg>
             <span>Files</span>
           </button>
+          <span class="pd1-primary-nav__external-wrap">
+            <a id="contentStudioRailLink" class="pd1-primary-nav__external" href="https://kino.grok.me" aria-label="Open Content Studio" aria-haspopup="dialog" aria-controls="contentStudioDrawer" aria-expanded="false" title="Content Studio">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3.5" y="4.5" width="17" height="15" rx="3"></rect>
+                <path d="M8 4.5 10 8M14 4.5 16 8M3.5 8h17"></path>
+                <path d="m10 11.5 5 2.75-5 2.75v-5.5Z"></path>
+                <path d="M17.5 2.75v3M16 4.25h3"></path>
+              </svg>
+              <span class="pd1-primary-nav__external-label" aria-hidden="true">Content Studio</span>
+            </a>
+          </span>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
             <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
             <span>Work</span>
@@ -33136,10 +33888,13 @@
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
     <!-- PiP meeting — the room follows you into Chat/Memory (kit meeting/PiPMeeting) -->
-    <aside id="pipMeeting" class="pip-meeting" hidden aria-label="Meeting — picture in picture">
-      <div id="pipHandle" class="pip-meeting__head">
+    <aside id="pipMeeting" class="pip-meeting" hidden aria-label="Meeting — picture in picture" aria-describedby="pipStatus" data-state="live">
+      <div id="pipHandle" class="pip-meeting__head" role="group" tabindex="0" aria-label="Move call window. Use left and right arrows to dock, and up and down arrows to reposition.">
         <span class="pip-meeting__dot" aria-hidden="true"></span>
-        <span id="pipTitle" class="pip-meeting__title">room</span>
+        <span class="pip-meeting__identity">
+          <span id="pipTitle" class="pip-meeting__title">room</span>
+          <span id="pipStatus" class="pip-meeting__status" role="status" aria-live="polite">live call</span>
+        </span>
         <span id="pipUnread" class="pip-meeting__unread" aria-label="unread room chat" hidden>0</span>
         <button id="pipExpand" class="pip-meeting__expand" type="button" aria-label="Return to the room" title="Return to the room">
           <svg class="stride-mark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -33175,9 +33930,16 @@
             <line x1="2" y1="2" x2="22" y2="22"></line>
           </svg>
         </button>
+        <button id="pipEnd" class="pip-control pip-control--end" type="button" aria-label="End call" title="End call">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.5 15.5c1.9-1.7 4.4-2.6 7.5-2.6s5.6.9 7.5 2.6"></path>
+            <path d="M5.7 16.8 3.8 19"></path><path d="m18.3 16.8 1.9 2.2"></path>
+          </svg>
+        </button>
         <span class="pip-meeting__controls-spacer" aria-hidden="true"></span>
         <button id="pipReturn" class="pip-return" type="button" aria-label="Return to the room">Return</button>
       </div>
+      <span id="pipPlacementStatus" class="call-pip-sr-only" role="status" aria-live="polite"></span>
     </aside>
     <div id="settingsRegion" class="settings-region" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <section class="settings-panel" tabindex="-1">
@@ -34301,10 +35063,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const pipMeeting = document.getElementById('pipMeeting')
       const pipTiles = document.getElementById('pipTiles')
       const pipTitle = document.getElementById('pipTitle')
+      const pipStatus = document.getElementById('pipStatus')
+      const pipPlacementStatus = document.getElementById('pipPlacementStatus')
       const pipHandle = document.getElementById('pipHandle')
       const pipExpand = document.getElementById('pipExpand')
       const pipMute = document.getElementById('pipMute')
       const pipCamera = document.getElementById('pipCamera')
+      const pipEnd = document.getElementById('pipEnd')
       const pipReturn = document.getElementById('pipReturn')
       // room stage chrome + in-room board panel
       const stageMeetingLabel = document.getElementById('stageMeetingLabel')
@@ -34721,6 +35486,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let pipMoreIndicator = null
       let pipEmptyIndicator = null
       let pipRenderTimer = 0
+      let callPipLayoutFrame = 0
+      let callPipSurfaceFrame = 0
+      let callPipSurfaceObserver = null
       const scoutChatMaxNodes = 200
       const roomChatMaxNodes = 200
       const roomChatSeenIds = new Set()
@@ -35823,8 +36591,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       agentTemplateButtons.forEach(button => {
         button.addEventListener('click', () => applyAgentTemplate(button.dataset.agentTemplate, button.dataset.templateText))
       })
-      pipExpand.addEventListener('click', () => setActiveTool('room'))
-      pipReturn?.addEventListener('click', () => setActiveTool('room'))
+      // Return through the canonical destination router so Home/Chat/Files
+      // update both the SPA tool and the durable /video URL in one transition.
+      pipExpand.addEventListener('click', () => selectPD1Destination('Video'))
+      pipReturn?.addEventListener('click', () => selectPD1Destination('Video'))
       roomBoardToggleButton?.addEventListener('click', () => setRoomBoardPanel(roomBoardPanel?.hidden !== false))
       roomBoardPanelOpen?.addEventListener('click', () => {
         setRoomBoardPanel(false)
@@ -35834,7 +36604,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // the dock's own buttons
       pipMute.addEventListener('click', () => muteMicButton.click())
       pipCamera.addEventListener('click', () => toggleCameraButton.click())
+      pipEnd.addEventListener('click', () => leaveButton.click())
       pipHandle.addEventListener('pointerdown', startPipDrag)
+      pipHandle.addEventListener('keydown', callPipHandleKeyboardMove)
+      document.addEventListener('keydown', callPipTrapCompositeTab, true)
+      window.addEventListener('resize', () => callPipScheduleSafePlacement())
+      window.visualViewport?.addEventListener('resize', () => callPipScheduleSafePlacement())
+      callPipObserveObscuringSurfaces()
       function loadRailHiddenPreference() {
         return false
       }
@@ -41439,11 +42215,217 @@ Wrap the entire export in one code block. After the code block, say whether the 
          pdf. "open in intelligence" stays as the data-room escape hatch. */
       var artifactStageNode = null
       var artifactStageReturnFocus = null
+      const contentStudioURL = 'https://kino.grok.me'
+      var contentStudioDrawerNode = null
+      var contentStudioReturnFocus = null
+      var contentStudioLoadTimer = 0
+      var contentStudioBackgroundState = null
+
+      function setContentStudioBackgroundInert(inert) {
+        if (!appShell) return
+        if (inert) {
+          if (!contentStudioBackgroundState) {
+            contentStudioBackgroundState = {
+              hadInert: appShell.hasAttribute('inert'),
+              ariaHidden: appShell.getAttribute('aria-hidden')
+            }
+          }
+          appShell.setAttribute('inert', '')
+          appShell.setAttribute('aria-hidden', 'true')
+          return
+        }
+        const prior = contentStudioBackgroundState
+        contentStudioBackgroundState = null
+        if (!prior) return
+        if (prior.hadInert) appShell.setAttribute('inert', '')
+        else appShell.removeAttribute('inert')
+        if (prior.ariaHidden === null) appShell.removeAttribute('aria-hidden')
+        else appShell.setAttribute('aria-hidden', prior.ariaHidden)
+      }
+
+      // Both right-side viewers protect the underlying application. PiP lives
+      // beside #appShell, so it remains operable without reopening background
+      // navigation, composer, or destructive controls.
+      function syncStudioBackgroundInert() {
+        setContentStudioBackgroundInert(Boolean(contentStudioDrawerNode || artifactStageNode))
+      }
+
+      function closeContentStudio() {
+        if (!contentStudioDrawerNode) return
+        window.clearTimeout(contentStudioLoadTimer)
+        contentStudioLoadTimer = 0
+        contentStudioDrawerNode.remove()
+        contentStudioDrawerNode = null
+        syncStudioBackgroundInert()
+        callPipSyncOpenSurfaceContracts()
+        const trigger = document.getElementById('contentStudioRailLink')
+        trigger?.setAttribute('aria-expanded', 'false')
+        const back = contentStudioReturnFocus
+        contentStudioReturnFocus = null
+        if (back && back.isConnected && typeof back.focus === 'function') back.focus()
+      }
+
+      function openContentStudio(returnFocus) {
+        if (contentStudioDrawerNode) {
+          contentStudioDrawerNode.querySelector('.content-studio-drawer__close')?.focus()
+          return
+        }
+        contentStudioReturnFocus = returnFocus || document.activeElement
+        const trigger = document.getElementById('contentStudioRailLink')
+        trigger?.setAttribute('aria-expanded', 'true')
+        const drawer = bfEl('div', 'content-studio-drawer')
+        drawer.id = 'contentStudioDrawer'
+        drawer.setAttribute('role', 'dialog')
+        drawer.setAttribute('aria-modal', 'true')
+        drawer.setAttribute('aria-labelledby', 'contentStudioDrawerTitle')
+        const scrim = bfEl('button', 'content-studio-drawer__scrim')
+        scrim.type = 'button'
+        scrim.tabIndex = -1
+        scrim.setAttribute('aria-label', 'Close Content Studio')
+        scrim.addEventListener('click', closeContentStudio)
+        const panel = bfEl('section', 'content-studio-drawer__panel')
+        const head = bfEl('header', 'content-studio-drawer__head')
+        const identity = bfEl('div', 'content-studio-drawer__identity')
+        const mark = bfEl('span', 'content-studio-drawer__mark')
+        mark.setAttribute('aria-hidden', 'true')
+        mark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"></rect><path d="M8 4.5 10 8M14 4.5 16 8M3.5 8h17"></path><path d="m10 11.5 5 2.75-5 2.75v-5.5Z"></path></svg>'
+        const title = bfEl('h2', 'content-studio-drawer__title', 'Content Studio')
+        title.id = 'contentStudioDrawerTitle'
+        const status = bfEl('span', 'content-studio-drawer__status', 'Loading')
+        status.setAttribute('role', 'status')
+        status.setAttribute('aria-live', 'polite')
+        identity.append(mark, title, status)
+        const actions = bfEl('div', 'content-studio-drawer__actions')
+        const external = document.createElement('a')
+        external.className = 'content-studio-drawer__action'
+        external.href = contentStudioURL
+        external.target = '_blank'
+        external.rel = 'noopener noreferrer'
+        external.textContent = 'Open externally'
+        external.setAttribute('aria-label', 'Open Content Studio externally in a new tab')
+        const close = bfEl('button', 'content-studio-drawer__close')
+        close.type = 'button'
+        close.setAttribute('aria-label', 'Close Content Studio')
+        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+        close.addEventListener('click', closeContentStudio)
+        actions.append(external, close)
+	        head.append(identity, actions)
+
+	        const viewport = bfEl('div', 'content-studio-drawer__viewport')
+	        const beforeFrame = bfEl('span', 'content-studio-drawer__focus-sentinel content-studio-drawer__focus-sentinel--before')
+	        beforeFrame.tabIndex = 0
+	        beforeFrame.setAttribute('aria-label', 'Start of embedded Content Studio')
+        const loading = bfEl('div', 'content-studio-drawer__loading')
+        const loadingInner = bfEl('div', 'content-studio-drawer__loading-inner')
+        loadingInner.append(bfEl('span', 'content-studio-drawer__pulse'), bfEl('span', 'content-studio-drawer__status', 'Opening Content Studio'))
+        loading.appendChild(loadingInner)
+        const fallback = bfEl('div', 'content-studio-drawer__fallback')
+        fallback.hidden = true
+        const fallbackInner = bfEl('div', 'content-studio-drawer__fallback-inner')
+        fallbackInner.append(
+          bfEl('h3', null, 'Content Studio did not open here'),
+          bfEl('p', null, 'The site may be taking longer than expected or may not allow an embedded session. Retry here or open the same canonical site in a new tab.')
+        )
+        const fallbackActions = bfEl('div', 'content-studio-drawer__fallback-actions')
+        const retry = bfEl('button', 'content-studio-drawer__action', 'Retry')
+        retry.type = 'button'
+        const fallbackExternal = external.cloneNode(true)
+        fallbackActions.append(retry, fallbackExternal)
+        fallbackInner.appendChild(fallbackActions)
+        fallback.appendChild(fallbackInner)
+        const frame = document.createElement('iframe')
+        frame.className = 'content-studio-drawer__frame'
+        frame.title = 'Content Studio'
+	        frame.referrerPolicy = 'strict-origin-when-cross-origin'
+	        frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads')
+	        frame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen')
+	        const afterFrame = bfEl('span', 'content-studio-drawer__focus-sentinel content-studio-drawer__focus-sentinel--after')
+	        afterFrame.tabIndex = 0
+	        afterFrame.setAttribute('aria-label', 'End of embedded Content Studio')
+	        beforeFrame.addEventListener('focus', () => {
+	          drawer.dataset.lastFocusBoundary = 'before'
+	          close.focus({ preventScroll: true })
+	        })
+	        afterFrame.addEventListener('focus', () => {
+	          drawer.dataset.lastFocusBoundary = 'after'
+	          const pipFocus = callPipCompositeActive() ? callPipFocusableNodes(pipMeeting)[0] : null
+	          ;(pipFocus || external).focus({ preventScroll: true })
+	        })
+	        let loaded = false
+	        const setEmbeddedFocusPath = embedded => {
+	          frame.tabIndex = embedded ? 0 : -1
+	          beforeFrame.tabIndex = embedded ? 0 : -1
+	          afterFrame.tabIndex = embedded ? 0 : -1
+	        }
+	        const showFallback = () => {
+	          if (loaded || !drawer.isConnected) return
+	          setEmbeddedFocusPath(false)
+          loading.hidden = true
+          fallback.hidden = false
+          status.textContent = 'Unable to embed'
+        }
+	        const loadFrame = () => {
+	          loaded = false
+	          setEmbeddedFocusPath(true)
+          loading.hidden = false
+          fallback.hidden = true
+          status.textContent = 'Loading'
+          frame.src = contentStudioURL
+          window.clearTimeout(contentStudioLoadTimer)
+          contentStudioLoadTimer = window.setTimeout(showFallback, 12000)
+        }
+        frame.addEventListener('load', () => {
+          loaded = true
+          window.clearTimeout(contentStudioLoadTimer)
+          contentStudioLoadTimer = 0
+          loading.hidden = true
+          fallback.hidden = true
+          status.textContent = 'Ready'
+        })
+        frame.addEventListener('error', showFallback)
+        retry.addEventListener('click', loadFrame)
+	        viewport.append(beforeFrame, frame, afterFrame, loading, fallback)
+        panel.append(head, viewport)
+        drawer.append(scrim, panel)
+        drawer.addEventListener('keydown', event => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            closeContentStudio()
+            return
+          }
+          if (event.key !== 'Tab') return
+	          // Parent key events stop at the cross-origin boundary. Header
+	          // controls hand off to the frame directly; the DOM sentinels on
+	          // either side receive focus when the browser exits the foreign
+	          // document and return it to the matching edge of this header.
+	          if (event.shiftKey && document.activeElement === external) {
+	            event.preventDefault()
+	            ;(fallback.hidden ? frame : fallbackExternal).focus({ preventScroll: true })
+	          } else if (!event.shiftKey && document.activeElement === close) {
+	            event.preventDefault()
+	            ;(fallback.hidden ? frame : retry).focus({ preventScroll: true })
+	          }
+	        })
+	        contentStudioDrawerNode = drawer
+	        document.body.appendChild(drawer)
+	        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
+        loadFrame()
+        close.focus()
+      }
+
+      document.getElementById('contentStudioRailLink')?.addEventListener('click', event => {
+        event.preventDefault()
+        openContentStudio(event.currentTarget)
+      })
 
       function closeArtifactStage() {
         if (!artifactStageNode) return
         artifactStageNode.remove()
         artifactStageNode = null
+        syncStudioBackgroundInert()
+        callPipSyncOpenSurfaceContracts()
         const back = artifactStageReturnFocus
         artifactStageReturnFocus = null
         if (back && back.isConnected && typeof back.focus === 'function') back.focus()
@@ -41454,6 +42436,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // gateOutcome, with the flat metadata mirror as the fallback)
       function artifactStageKicker(entry) {
         const m = entry?.metadata || {}
+        const activity = artifactStageActivityContext(entry)
+        if (activity) return `packaging studio · ${activity.label} · ${activity.stateLabel}`
         // kind derives from the SAME sniff the body dispatch uses, so the
         // kicker can never say "markdown" over a rendering deck; and a raw
         // file-format word ("markdown"/"md"/"text") is never shown to the
@@ -41483,6 +42467,196 @@ Wrap the entire export in one code block. After the code block, say whether the 
           || String(entry?.metadata?.threadQuery || entry?.metadata?.query || '').trim()
           || String(fallback || '').trim()
           || previewable || 'artifact'
+      }
+
+      const packagingStudioJudgmentStages = {
+        red_team: {
+          label: 'Red-team',
+          preferred: ['red-team verdict', 'verdict', 'objection ledger', 'strengths to keep']
+        },
+        identity: {
+          label: 'Identity',
+          preferred: ['decision', 'winner', 'winning direction', 'identity verdict']
+        },
+        compete_architects: {
+          label: 'Compete architects',
+          preferred: ['spine matrix', 'synthesis', 'rival narrative spines']
+        },
+        compete_judges: {
+          label: 'Compete judges',
+          preferred: ['winner', 'verdict', 'decision', 'jury verdict']
+        },
+        write: {
+          label: 'Write',
+          preferred: ['deck manuscript', 'deck copy', 'slide 1', 'opening']
+        }
+      }
+
+      function artifactStageTransportSource(url) {
+        try {
+          const host = new URL(String(url || '')).hostname.toLowerCase()
+          return host === 'api.openai.com' || host === 'openai.azure.com' || host.endsWith('.openai.azure.com')
+        } catch {
+          return false
+        }
+      }
+
+      function artifactStageOnlyTransportSources(body) {
+        const text = String(body || '').trim()
+        if (!text) return false
+        const urls = Array.from(text.matchAll(/https?:\/\/[^\s)\]}>]+/g), match => match[0].replace(/[.,;:]+$/, ''))
+        if (!urls.length || !urls.every(artifactStageTransportSource)) return false
+        const residue = text
+          .replace(/https?:\/\/[^\s)\]}>]+/g, '')
+          .replace(/\b(?:sources?|references?|provider|transport|openai|api|link)\b/gi, '')
+          .replace(/^[\s*\-\d.)|]+$/gm, '')
+          .replace(/[\s|:._\-[\]()]/g, '')
+        return !residue
+      }
+
+      function artifactStagePlainExcerpt(value, limit = 680) {
+        const plain = String(value || '')
+          .replace(/^\s*#{1,6}\s+/gm, '')
+          .replace(/^\s*```[^\n]*$/gm, '')
+          .replace(/^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+\s*\|?\s*$/gm, '')
+          .replace(/^\s*\|/gm, '')
+          .replace(/\|\s*$/gm, '')
+          .replace(/\s*\|\s*/g, ' · ')
+          .replace(/\*\*/g, '')
+          .replace(/`+/g, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+        if (plain.length <= limit) return plain
+        const clipped = plain.slice(0, limit)
+        const sentence = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf('\n'))
+        return `${clipped.slice(0, sentence > limit * 0.55 ? sentence + 1 : limit).trim()}…`
+      }
+
+      function artifactStageActivityContext(entry) {
+        const metadata = entry?.metadata || {}
+        const processId = String(metadata.processId || '').trim()
+        const stageId = String(metadata.processStage || metadata.goalSubtaskId || '').trim()
+        const definition = packagingStudioJudgmentStages[stageId]
+        if (!definition || (processId && processId !== 'packaging_studio')) return null
+        const text = String(entry?.text || '').trim()
+        const parsed = artifactSections(entry)
+        const sections = (parsed.sections || []).filter(section => String(section?.body || '').trim())
+        const lines = text.split('\n')
+        const nonblankLines = lines.filter(line => line.trim()).length
+        const tableRows = lines.filter(line => /^\s*\|.*\|\s*$/.test(line) && !/^\s*\|?[\s:|-]+\|?\s*$/.test(line)).length
+        const codeBlocks = Math.floor(lines.filter(line => /^\s*```/.test(line)).length / 2)
+        const explicitBlocker = lines.find(line => /^(?:#{1,6}\s*)?(?:\*{0,2})?(?:blocked for production|blocked|do not ship|not ready for production)\b/i.test(line.trim())) || ''
+        const metadataStatus = artifactStatusValue(entry)
+        const failed = ['error', 'failed', 'needs_attention', 'rejected'].includes(String(metadataStatus || '').toLowerCase())
+        const normalizedSections = new Map(sections.map(section => [normalizedSectionName(section.h), section]))
+        let focusSection = null
+        for (const preferred of definition.preferred) {
+          focusSection = normalizedSections.get(normalizedSectionName(preferred)) || null
+          if (focusSection) break
+        }
+        const leading = explicitBlocker
+          ? lines.slice(Math.max(0, lines.indexOf(explicitBlocker)), Math.max(0, lines.indexOf(explicitBlocker)) + 8).join('\n')
+          : focusSection?.body || parsed.objective || sections[0]?.body || text
+        const sectionNames = sections
+          .filter(section => !artifactStageOnlyTransportSources(section.body))
+          .map(section => String(section.h || '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+        return {
+          stageId,
+          label: definition.label,
+          role: String(metadata.processRole || '').replace(/_/g, ' '),
+          tone: failed ? 'error' : explicitBlocker ? 'attention' : 'complete',
+          stateLabel: failed ? 'Stage failed' : explicitBlocker ? 'Blocking verdict in output' : 'Stage output complete',
+          focusLabel: explicitBlocker ? 'Recorded blocker' : String(focusSection?.h || 'Opening result').trim(),
+          summary: artifactStagePlainExcerpt(leading),
+          nonblankLines,
+          tableRows,
+          codeBlocks,
+          sectionNames
+        }
+      }
+
+      function artifactStagePendingCheckpoint(entry, context) {
+        const parentId = String(entry?.metadata?.goalParentId || '').trim()
+        if (!parentId) return null
+        const parent = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === parentId)
+        if (!parent) return null
+        const plan = goalPlanFromArtifact(parent)
+        const checkpoint = goalPendingCheckpoint(parent, plan)
+        if (!checkpoint) return null
+        const checkpointTask = (plan?.subtasks || []).find(task => String(task?.id || '') === String(checkpoint.stageId || ''))
+        const relevant = (checkpointTask?.dependsOn || []).some(dependencyId => {
+          if (String(dependencyId) === String(context?.stageId || '')) return true
+          const dependency = (plan?.subtasks || []).find(task => String(task?.id || '') === String(dependencyId))
+          return String(dependency?.artifactId || '') === String(entry?.id || '')
+        })
+        return relevant ? { parent, plan, checkpoint } : null
+      }
+
+      function artifactStageActivityNode(entry, context) {
+        const activity = bfEl('div', 'artifact-stage-activity')
+        const overview = bfEl('section', 'artifact-stage-activity__overview')
+        overview.setAttribute('aria-labelledby', `artifact-stage-result-${String(entry.id || context.stageId).replace(/[^A-Za-z0-9_-]/g, '-')}`)
+        const topline = bfEl('div', 'artifact-stage-activity__topline')
+        topline.appendChild(bfEl('span', 'artifact-stage-activity__label', `${context.label}${context.role ? ` · ${context.role}` : ''}`))
+        const state = bfEl('span', 'artifact-stage-activity__state', context.stateLabel)
+        state.dataset.tone = context.tone
+        topline.appendChild(state)
+        overview.appendChild(topline)
+        const heading = bfEl('h3', 'artifact-stage-activity__heading', context.focusLabel)
+        heading.id = `artifact-stage-result-${String(entry.id || context.stageId).replace(/[^A-Za-z0-9_-]/g, '-')}`
+        overview.appendChild(heading)
+        overview.appendChild(bfEl('p', 'artifact-stage-activity__summary', context.summary || 'No stage summary was recorded. Open the full output for the saved record.'))
+        const facts = bfEl('ul', 'artifact-stage-activity__facts')
+        for (const fact of [
+          `${context.nonblankLines.toLocaleString()} lines`,
+          context.tableRows ? `${context.tableRows.toLocaleString()} table rows` : '',
+          context.codeBlocks ? `${context.codeBlocks.toLocaleString()} code block${context.codeBlocks === 1 ? '' : 's'}` : '',
+          context.sectionNames.length ? `${context.sectionNames.length}+ sections` : ''
+        ]) {
+          if (fact) facts.appendChild(bfEl('li', 'artifact-stage-activity__fact', fact))
+        }
+        overview.appendChild(facts)
+        if (context.sectionNames.length) {
+          const map = bfEl('div', 'artifact-stage-activity__map')
+          map.appendChild(bfEl('span', 'artifact-stage-activity__map-label', 'Document map'))
+          const items = bfEl('div', 'artifact-stage-activity__map-items')
+          context.sectionNames.forEach(name => items.appendChild(bfEl('span', 'artifact-stage-activity__map-item', name)))
+          map.appendChild(items)
+          overview.appendChild(map)
+        }
+        const pendingCheckpoint = artifactStagePendingCheckpoint(entry, context)
+        if (pendingCheckpoint) {
+          const checkpointNode = scoutDesktopCheckpointNode(null, pendingCheckpoint.parent, pendingCheckpoint.plan, pendingCheckpoint.checkpoint)
+          if (checkpointNode) {
+            checkpointNode.classList.add('artifact-stage-activity__checkpoint')
+            overview.appendChild(checkpointNode)
+          }
+        }
+        activity.appendChild(overview)
+
+        const record = document.createElement('details')
+        record.className = 'artifact-stage-activity__record'
+        const summary = document.createElement('summary')
+        const chevron = bfEl('span', 'artifact-stage-activity__chevron')
+        chevron.setAttribute('aria-hidden', 'true')
+        chevron.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>'
+        summary.append(chevron, bfEl('span', null, 'Full stage output'))
+        summary.appendChild(bfEl('span', 'artifact-stage-activity__record-meta', `${context.nonblankLines.toLocaleString()} lines`))
+        record.appendChild(summary)
+        const recordBody = bfEl('div', 'artifact-stage-activity__record-body')
+        const read = bfEl('div', 'artifact-stage__read')
+        recordBody.appendChild(read)
+        record.appendChild(recordBody)
+        let rendered = false
+        record.addEventListener('toggle', () => {
+          if (!record.open || rendered) return
+          rendered = true
+          renderArtifactRead(read, entry, { stageActivity: true })
+        })
+        activity.appendChild(record)
+        return activity
       }
 
       // ---------- §7b the deck hero (DD-1) ----------
@@ -41814,6 +42988,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!deckContext && !artifactIsHTMLDeck(entry)) {
           await ensureArtifactBody(entry)
         }
+        const stageActivity = !deckContext ? artifactStageActivityContext(entry) : null
         // founder ask 2026-07-07: every markdown deliverable offers a branded
         // PDF from the stage header — a direct download when the asset already
         // exists, otherwise POST /artifacts/export-pdf with an optimistic
@@ -41845,6 +43020,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // DD-1: lead with the deck cover; present swaps in the sandboxed deck
           // iframe below, and the run-log demotes to a "run details" disclosure
           renderArtifactStageDeckHero(body, deckContext, { headActions })
+        } else if (stageActivity) {
+          body.classList.add('artifact-stage__body--activity')
+          body.appendChild(artifactStageActivityNode(entry, stageActivity))
         } else if (artifactIsHTMLDeck(entry)) {
           // full-fidelity deck: sandboxed iframe via the short-lived render
           // token; Present fullscreens the SAME sandboxed frame (never a
@@ -41899,6 +43077,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         artifactStageNode = stage
         document.body.appendChild(stage)
+        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
         close.focus()
       }
 
@@ -44217,8 +45398,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         const parsed = artifactSections(entry)
-        const sections = parsed.sections.slice()
-        const sources = artifactSources(entry)
+        const sections = parsed.sections
+          .slice()
+          .filter(section => !options.stageActivity || normalizedSectionName(section.h) !== 'sources' || !artifactStageOnlyTransportSources(section.body))
+        const sources = artifactSources(entry).filter(source => !options.stageActivity || !artifactStageTransportSource(source.url))
         const status = artifactStatusLabel(entry)
         const progress = artifactProgressPercent(entry, artifactStatusValue(entry) === 'complete' || artifactStatusValue(entry) === 'published' ? 100 : 35)
         const summarySection = artifactPreferredSection(entry, ['Executive summary', 'Summary', 'Thesis', 'Recommendation', 'Report', 'Design intent', 'Vision', 'Goal'])
@@ -44256,7 +45439,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           summaryEl.textContent = compactArtifactPreview(summary || 'artifact saved')
           hero.appendChild(summaryEl)
         }
-        container.appendChild(hero)
+        if (!options.stageActivity) container.appendChild(hero)
 
         const outlineActions = deckOutlineContinuationActions(entry)
         if (outlineActions) container.appendChild(outlineActions)
@@ -44264,7 +45447,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const grid = document.createElement('div')
         grid.className = 'artifact-read__grid'
         if (parsed.objective && parsed.objective !== summary) {
-          grid.appendChild(artifactReadSectionNode('objective', parsed.objective, { wide: true }))
+          grid.appendChild(artifactReadSectionNode('objective', parsed.objective, {
+            wide: true,
+            collapsible: options.stageActivity && parsed.objective.length > 1800
+          }))
         }
         const rendered = sections.length ? sections : [{ h: 'artifact', body: String(entry.text || '') }]
         // A "# Title" body head parses to a leading heading-only section that
@@ -44290,7 +45476,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return
           }
           grid.appendChild(artifactReadSectionNode(heading || `section ${index + 1}`, body, {
-            wide: shouldArtifactSectionSpan(heading, body)
+            wide: shouldArtifactSectionSpan(heading, body),
+            collapsible: options.stageActivity && (body.length > 1800 || body.split('\n').filter(line => /^\s*\|.*\|\s*$/.test(line)).length > 12)
           }))
         })
         container.appendChild(grid)
@@ -44901,12 +46088,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (options.wide) {
           section.classList.add('artifact-read__section--wide')
         }
+        const title = String(heading || 'section').trim() || 'section'
         const h = document.createElement('h4')
-        h.textContent = String(heading || 'section').trim() || 'section'
+        h.textContent = title
         const content = document.createElement('div')
         content.className = 'artifact-read__section-body'
         appendArtifactBodyNodes(content, body)
-        section.append(h, content)
+        if (options.collapsible) {
+          const details = document.createElement('details')
+          details.className = 'artifact-read__section-disclosure'
+          const summary = document.createElement('summary')
+          const chevron = bfEl('span', 'artifact-stage-activity__chevron')
+          chevron.setAttribute('aria-hidden', 'true')
+          chevron.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>'
+          summary.append(chevron, bfEl('span', null, title))
+          const lines = String(body || '').split('\n').filter(line => line.trim()).length
+          summary.appendChild(bfEl('span', 'artifact-read__section-disclosure-meta', `${lines.toLocaleString()} lines`))
+          const disclosureBody = bfEl('div', 'artifact-read__section-disclosure-body')
+          disclosureBody.appendChild(content)
+          details.append(summary, disclosureBody)
+          section.appendChild(details)
+        } else {
+          section.append(h, content)
+        }
         return section
       }
 
@@ -44935,6 +46139,26 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!line.trim()) {
             flushParagraph()
             index += 1
+            continue
+          }
+          const fence = /^\s*```([\w.+-]*)\s*$/.exec(line)
+          if (fence) {
+            flushParagraph()
+            const codeLines = []
+            index += 1
+            while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+              codeLines.push(lines[index])
+              index += 1
+            }
+            if (index < lines.length) index += 1
+            const pre = document.createElement('pre')
+            pre.className = 'artifact-read__code-block'
+            pre.tabIndex = 0
+            pre.setAttribute('aria-label', fence[1] ? `${fence[1]} code block` : 'Code block')
+            const code = document.createElement('code')
+            code.textContent = codeLines.join('\n')
+            pre.appendChild(code)
+            container.appendChild(pre)
             continue
           }
           if (artifactTableStarts(lines, index)) {
@@ -45078,10 +46302,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function artifactTableNode(lines) {
         const wrap = document.createElement('div')
         wrap.className = 'artifact-read__table-wrap'
+        wrap.tabIndex = 0
+        wrap.setAttribute('role', 'region')
         const table = document.createElement('table')
         table.className = 'artifact-read__table'
         const rows = lines.map(line => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()))
         const headers = rows[0] || []
+        wrap.setAttribute('aria-label', `Scrollable table${headers.length ? `: ${headers.slice(0, 3).join(', ')}` : ''}`)
         const thead = document.createElement('thead')
         const headRow = document.createElement('tr')
         headers.forEach(header => {
@@ -48100,7 +49327,270 @@ Wrap the entire export in one code block. After the code block, say whether the 
          join auxiliaryVideoPlaybackTargets() so the existing repair machinery
          keeps them alive. The Board tool keeps its own dock strip instead. */
       function pipMeetingActive() {
-        return false
+        const callActive = Boolean(
+          (authedUser || guestMode)
+          && appShell.classList.contains('is-in-room')
+          && roomMediaActive()
+          && currentParticipantName
+          && !isLeavingRoom
+        )
+        if (!callActive) {
+          return false
+        }
+        const awayFromRoom = (appShell.dataset.tool || 'office') !== 'room'
+        return awayFromRoom || callPipObscuringSurfaceOpen()
+      }
+
+      function callPipObscuringSurfaceOpen() {
+        return Boolean(
+          artifactStageNode
+          || document.getElementById('contentStudioDrawer')
+          || document.querySelector('[data-call-pip-obscures-room="true"]')
+        )
+      }
+
+      function callPipCompositeActive() {
+        return Boolean(pipMeeting && !pipMeeting.hidden && callPipObscuringSurfaceOpen())
+      }
+
+      function callPipOpenSurfaces() {
+        return [contentStudioDrawerNode, artifactStageNode].filter(node => node?.isConnected)
+      }
+
+      // A live PiP makes the viewer + call one non-modal composite. The app
+      // behind them remains inert; aria-modal=false truthfully exposes the
+      // external call controls to assistive technology.
+      function callPipSyncOpenSurfaceContracts() {
+        const composite = callPipCompositeActive()
+        callPipOpenSurfaces().forEach(surface => {
+          surface.setAttribute('aria-modal', composite ? 'false' : 'true')
+          surface.dataset.callPipComposite = composite ? 'true' : 'false'
+        })
+      }
+
+      function callPipFocusableNodes(root) {
+        if (!root) return []
+        return Array.from(root.querySelectorAll('button, [href], input, textarea, select, iframe, embed, [tabindex]:not([tabindex="-1"])'))
+          .filter(node => !node.disabled
+            && !node.hidden
+            && node.getAttribute('aria-hidden') !== 'true'
+            && !node.classList.contains('content-studio-drawer__focus-sentinel')
+            && node.getClientRects().length)
+      }
+
+      // The body-owned PiP is allowlisted into the active viewer's keyboard
+      // cycle. Cross-origin Content Studio exits through its after sentinel;
+      // all parent-document boundaries are handled here.
+      function callPipTrapCompositeTab(event) {
+        if (event.key !== 'Tab' || !callPipCompositeActive()) return
+        const surface = contentStudioDrawerNode?.isConnected ? contentStudioDrawerNode : artifactStageNode
+        const surfaceFocus = callPipFocusableNodes(surface)
+        const pipFocus = callPipFocusableNodes(pipMeeting)
+        if (!surfaceFocus.length || !pipFocus.length) return
+        const active = document.activeElement
+        let target = null
+        if (!event.shiftKey && active === surfaceFocus[surfaceFocus.length - 1]) target = pipFocus[0]
+        if (event.shiftKey && active === surfaceFocus[0]) target = pipFocus[pipFocus.length - 1]
+        if (!event.shiftKey && active === pipFocus[pipFocus.length - 1]) target = surfaceFocus[0]
+        if (event.shiftKey && active === pipFocus[0]) target = surfaceFocus[surfaceFocus.length - 1]
+        if (!target) return
+        event.preventDefault()
+        event.stopPropagation()
+        target.focus({ preventScroll: true })
+      }
+
+      function callPipPlacementKey() {
+        return phoneLayoutQuery.matches
+          ? 'stride.call-pip.placement.compact.v1'
+          : 'stride.call-pip.placement.wide.v1'
+      }
+
+      function callPipReadPlacement() {
+        try {
+          const parsed = JSON.parse(window.localStorage?.getItem(callPipPlacementKey()) || 'null')
+          if (!parsed || !['left', 'right'].includes(parsed.dock) || !Number.isFinite(parsed.y)) {
+            return null
+          }
+          return { dock: parsed.dock, y: Math.min(1, Math.max(0, parsed.y)) }
+        } catch (_) {
+          return null
+        }
+      }
+
+      function callPipWritePlacement(placement) {
+        try {
+          window.localStorage?.setItem(callPipPlacementKey(), JSON.stringify({
+            dock: placement.dock === 'left' ? 'left' : 'right',
+            y: Math.min(1, Math.max(0, Number(placement.y) || 0))
+          }))
+        } catch (_) {
+          // Private browsing can deny storage; the in-memory position remains safe.
+        }
+      }
+
+      function callPipViewportMargin() {
+        return phoneLayoutQuery.matches ? 12 : 10
+      }
+
+      function callPipProtectedRects() {
+        const selectors = [
+          '#scoutChatForm',
+          '#chatContextReplyForm:not([hidden])',
+          '.artifact-stage__actions',
+          '.content-studio-drawer__head',
+          '.deck-studio__toolbar',
+          '.document-studio__toolbar'
+        ]
+        // On desktop the 184px composite fits in the rail left by either
+        // right-side panel. Phone drawers are full-width, so the truthful safe
+        // contract is to stay above them while avoiding their header/actions.
+        if (window.innerWidth > 860) {
+          selectors.push('.artifact-stage__panel', '.content-studio-drawer__panel')
+        }
+        return selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)))
+          .filter(node => !node.hidden && node.getClientRects().length)
+          .map(node => node.getBoundingClientRect())
+      }
+
+      function callPipCandidateIntersectsProtected(candidate) {
+        const pad = 10
+        return callPipProtectedRects().some(rect => !(
+          candidate.right + pad <= rect.left
+          || candidate.left >= rect.right + pad
+          || candidate.bottom + pad <= rect.top
+          || candidate.top >= rect.bottom + pad
+        ))
+      }
+
+      function callPipCandidate(dock, top, width, height, margin) {
+        const left = dock === 'left' ? margin : Math.max(margin, window.innerWidth - width - margin)
+        return { dock, left, top, right: left + width, bottom: top + height }
+      }
+
+      function callPipApplySafePlacement(placement = null) {
+        if (!pipMeeting || pipMeeting.hidden) {
+          return
+        }
+        const margin = callPipViewportMargin()
+        const rect = pipMeeting.getBoundingClientRect()
+        const width = Math.min(rect.width || 304, Math.max(0, window.innerWidth - margin * 2))
+        const height = Math.min(rect.height || 220, Math.max(0, window.innerHeight - margin * 2))
+        const availableY = Math.max(0, window.innerHeight - height - margin * 2)
+        const stored = placement || callPipReadPlacement()
+        const dock = stored?.dock === 'left' ? 'left' : 'right'
+        const defaultTop = phoneLayoutQuery.matches
+          ? Math.max(margin, (document.querySelector('.topbar')?.getBoundingClientRect().bottom || 48) + 10)
+          : Math.max(margin, (document.querySelector('.topbar')?.getBoundingClientRect().bottom || 56) + 12)
+        const top = stored
+          ? margin + availableY * stored.y
+          : Math.min(margin + availableY, defaultTop)
+        const opposite = dock === 'left' ? 'right' : 'left'
+        const topEdge = Math.min(margin + availableY, defaultTop)
+        const bottomEdge = margin + availableY
+        const candidates = [
+          callPipCandidate(dock, top, width, height, margin),
+          callPipCandidate(opposite, top, width, height, margin),
+          callPipCandidate(dock, topEdge, width, height, margin),
+          callPipCandidate(opposite, topEdge, width, height, margin),
+          callPipCandidate(dock, bottomEdge, width, height, margin),
+          callPipCandidate(opposite, bottomEdge, width, height, margin)
+        ]
+        const candidate = candidates.find(value => !callPipCandidateIntersectsProtected(value)) || candidates[0]
+        pipMeeting.dataset.dock = candidate.dock
+        pipMeeting.style.left = `${Math.round(candidate.left)}px`
+        pipMeeting.style.top = `${Math.round(Math.min(Math.max(margin, candidate.top), margin + availableY))}px`
+        pipMeeting.style.right = 'auto'
+        pipMeeting.style.bottom = 'auto'
+      }
+
+      function callPipScheduleSafePlacement(placement = null) {
+        if (callPipLayoutFrame) {
+          window.cancelAnimationFrame(callPipLayoutFrame)
+        }
+        callPipLayoutFrame = window.requestAnimationFrame(() => {
+          callPipLayoutFrame = 0
+          callPipApplySafePlacement(placement)
+        })
+      }
+
+      function callPipPersistCurrentPlacement() {
+        if (!pipMeeting || pipMeeting.hidden) {
+          return
+        }
+        const margin = callPipViewportMargin()
+        const rect = pipMeeting.getBoundingClientRect()
+        const availableY = Math.max(1, window.innerHeight - rect.height - margin * 2)
+        const dock = rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right'
+        const y = Math.min(1, Math.max(0, (rect.top - margin) / availableY))
+        callPipWritePlacement({ dock, y })
+        callPipApplySafePlacement({ dock, y })
+        if (pipPlacementStatus) {
+          pipPlacementStatus.textContent = `Call window docked ${dock}`
+        }
+      }
+
+      function callPipHandleKeyboardMove(event) {
+        if (!pipMeetingActive()) {
+          return
+        }
+        const current = callPipReadPlacement() || { dock: pipMeeting.dataset.dock || 'right', y: 0 }
+        let next = null
+        if (event.key === 'ArrowLeft') next = { ...current, dock: 'left' }
+        if (event.key === 'ArrowRight') next = { ...current, dock: 'right' }
+        if (event.key === 'ArrowUp') next = { ...current, y: Math.max(0, current.y - 0.1) }
+        if (event.key === 'ArrowDown') next = { ...current, y: Math.min(1, current.y + 0.1) }
+        if (event.key === 'Home') next = { ...current, y: 0 }
+        if (event.key === 'End') next = { ...current, y: 1 }
+        if (!next) {
+          return
+        }
+        event.preventDefault()
+        callPipWritePlacement(next)
+        callPipScheduleSafePlacement(next)
+        if (pipPlacementStatus) {
+          pipPlacementStatus.textContent = `Call window docked ${next.dock}, ${next.y === 0 ? 'top' : next.y === 1 ? 'bottom' : 'moved'}`
+        }
+      }
+
+      function callPipConnectionPresentation(participantCount) {
+        const peerState = String(pc?.connectionState || '')
+        if (lastConnectionState === 'offline' || peerState === 'failed') {
+          return { state: 'error', label: 'connection issue · trying to keep the call' }
+        }
+        if (
+          isSignalReconnecting
+          || lastConnectionState === 'connecting'
+          || ['connecting', 'disconnected'].includes(peerState)
+          || !ws
+          || ws.readyState !== WebSocket.OPEN
+        ) {
+          return { state: 'reconnecting', label: 'reconnecting · your call is still active' }
+        }
+        const count = Math.max(1, participantCount)
+        const speaker = activeSpeakerDisplayName()
+        const speakerLabel = speaker && speaker !== 'the room'
+          ? ` · ${speaker === currentParticipantName ? 'you are speaking' : `${speaker} is speaking`}`
+          : ''
+        return { state: 'live', label: `live · ${count} ${count === 1 ? 'person' : 'people'}${speakerLabel}` }
+      }
+
+      function callPipObserveObscuringSurfaces() {
+        if (callPipSurfaceObserver || !document.body) {
+          return
+        }
+        callPipSurfaceObserver = new MutationObserver(() => {
+          if (callPipSurfaceFrame) {
+            return
+          }
+          callPipSurfaceFrame = window.requestAnimationFrame(() => {
+            callPipSurfaceFrame = 0
+            renderPipMeeting()
+            callPipScheduleSafePlacement()
+          })
+        })
+        // Artifact Stage and the KINO browser are body-owned, transient roots.
+        // Watching only direct children avoids coupling PiP work to their internals.
+        callPipSurfaceObserver.observe(document.body, { childList: true })
       }
 
       // Live <video> elements should not be detached and reinserted on a timer.
@@ -48139,6 +49629,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const wasHidden = pipMeeting.hidden
         pipMeeting.hidden = false
+        pipMeeting.dataset.composite = callPipObscuringSurfaceOpen() ? 'true' : 'false'
+        callPipSyncOpenSurfaceContracts()
 
         const names = visibleParticipantNames().filter(name => name && name !== 'the room')
         const speaker = activeSpeakerDisplayName()
@@ -48190,6 +49682,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const project = (topbarProjectEl.textContent || 'room').trim().toLowerCase()
         const elapsed = topbarElapsedEl.dataset.started === 'true' ? topbarElapsedEl.textContent : ''
         pipTitle.textContent = elapsed ? `${project} · ${elapsed}` : project
+        const connection = callPipConnectionPresentation(names.length)
+        pipMeeting.dataset.state = connection.state
+        pipStatus.textContent = connection.label
+        pipMeeting.setAttribute('aria-label', `Meeting picture in picture. ${connection.label}`)
 
         // mirror the dock's media state — never a second source of truth
         const micOff = muteMicButton.getAttribute('aria-pressed') === 'true'
@@ -48204,9 +49700,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         pipCamera.setAttribute('aria-label', camOff ? 'Turn camera on' : 'Turn camera off')
         pipCamera.title = camOff ? 'Turn camera on' : 'Turn camera off'
         pipCamera.disabled = toggleCameraButton.disabled
+        pipEnd.disabled = leaveButton.disabled
 
         if (wasHidden) {
           scheduleAuxiliaryVideoPlaybackRepair('pip shown', 0)
+          callPipScheduleSafePlacement()
         }
         if (!pipRenderTimer) {
           pipRenderTimer = window.setInterval(renderPipMeeting, 1000)
@@ -48222,6 +49720,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         pipMeeting.hidden = true
+        pipMeeting.dataset.composite = 'false'
+        callPipSyncOpenSurfaceContracts()
         for (const tile of pipVideoTilesByParticipant.values()) {
           disposePipVideoTile(tile)
         }
@@ -48296,7 +49796,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         tile?.remove?.()
       }
 
-      /* kit drag spec: pointer events, fixed left/top, 8px viewport clamp */
+      /* Pointer drag stays view-only: the room owns the streams and session.
+         Release snaps to the nearest safe edge and persists a normalized Y. */
       function startPipDrag(event) {
         if (event.target.closest('button')) {
           return
@@ -48304,9 +49805,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const rect = pipMeeting.getBoundingClientRect()
         const dx = event.clientX - rect.left
         const dy = event.clientY - rect.top
+        const margin = callPipViewportMargin()
+        pipMeeting.classList.add('is-dragging')
+        try { pipHandle.setPointerCapture?.(event.pointerId) } catch (_) { /* window listeners still own drag */ }
         const move = ev => {
-          const x = Math.min(Math.max(8, ev.clientX - dx), window.innerWidth - rect.width - 8)
-          const y = Math.min(Math.max(8, ev.clientY - dy), window.innerHeight - rect.height - 8)
+          const x = Math.min(Math.max(margin, ev.clientX - dx), Math.max(margin, window.innerWidth - rect.width - margin))
+          const y = Math.min(Math.max(margin, ev.clientY - dy), Math.max(margin, window.innerHeight - rect.height - margin))
           pipMeeting.style.left = `${x}px`
           pipMeeting.style.top = `${y}px`
           pipMeeting.style.right = 'auto'
@@ -48316,6 +49820,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
           window.removeEventListener('pointercancel', up)
+          pipMeeting.classList.remove('is-dragging')
+          try { pipHandle.releasePointerCapture?.(event.pointerId) } catch (_) { /* already released */ }
+          callPipPersistCurrentPlacement()
         }
         window.addEventListener('pointermove', move)
         window.addEventListener('pointerup', up)
@@ -57197,12 +58704,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        const message = payload.message
+	        let previousMessage = null
+	        let messageWasNew = false
 	        if (message?.id) {
 	          const messages = Array.isArray(candidate.messages) ? candidate.messages : []
 	          const messageIndex = messages.findIndex(candidate => String(candidate?.id || '') === String(message.id))
 	          if (messageIndex === -1) {
+	            messageWasNew = true
 	            candidate.messages = [...messages, message]
 	          } else if (!chatMessageEventRegressesProjectAdmission(messages[messageIndex], message)) {
+	            previousMessage = messages[messageIndex]
 	            // A re-broadcast of an existing message (e.g. a thread ref whose
 	            // status just flipped to complete) replaces it in place.
 	            candidate.messages = messages.map((entry, index) => index === messageIndex ? message : entry)
@@ -57214,12 +58725,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatContextState.pending = false
 	          renderPrivateRiffContext(candidate)
 	        }
-		        if (activeScoutThreadId === id) {
-		          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
-		            const root = desktopChatReplyTopology(candidate.messages).rootFor(message)
-		            syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId)
-		            return
-		          }
+	        if (activeScoutThreadId === id) {
+	          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
+	            const root = desktopChatReplyTopology(candidate.messages).rootFor(message)
+	            const patched = !messageWasNew && patchActiveScoutChatMessage(previousMessage, message)
+	            syncDesktopReplySurfaces(candidate, root?.id || message.replyTo.messageId, { skipRail: patched })
+	            patchDesktopChatReactionSurfaces(id, message.id)
+	            return
+	          }
+	          const commitMessageProjection = () => {
+	            const ownMessage = String(message?.authorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()
+	            if (messageWasNew && appendActiveScoutChatMessage(candidate, message, { forceBottom: ownMessage })) return
+	            if (!messageWasNew && patchActiveScoutChatMessage(previousMessage, message)) return
+	            renderActiveScoutThread()
+	          }
 		          // a scout reply arriving over the socket respects the thinking
 	          // indicator's 1.7s minimum display — data lands now, render waits.
 	          // A turn can resolve into a CARD instead of a scout bubble
@@ -57233,11 +58752,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            withScoutChatThinkingHold(() => {
 	              hideScoutChatThinking()
 	              if (activeScoutThreadId === id) {
-	                renderActiveScoutThread()
+	                commitMessageProjection()
 	              }
 	            })
 	          } else {
-	            renderActiveScoutThread()
+	            commitMessageProjection()
 	          }
 	        }
 	      }
@@ -57364,6 +58883,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const optimisticState = bfEl('span', 'desktop-chat-state', 'sending')
 	        optimisticMessage.querySelector('.scout-chat-msg__stack')?.appendChild(optimisticState)
 	        appendScoutChatNode(optimisticMessage)
+	        // Sending is an explicit navigation to the conversation tail even
+	        // when the author had been reading older messages.
+	        scoutChatThread.scrollTop = scoutChatThread.scrollHeight
 	        updateChatThreadItem(text || attachedFilesPreview(files), ts)
 	        // Channels only summon Scout on an @scout mention (server-enforced);
 	        // skip the thinking indicator for plain human-to-human messages.
@@ -57425,7 +58947,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            }
 	            if (payload.thread) {
 	              upsertScoutChatThread(payload.thread)
-	              renderActiveScoutThread()
+	              renderActiveScoutThread({ forceBottom: true })
 	            } else if (payload.answer?.text) {
 	              appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
 	              updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
@@ -62727,6 +64249,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      var feedPrevMsgTs = 0
 	      var scoutChatReplyTarget = null
 	      var scoutInlineWorkDetailsExpanded = null
+	      var scoutChatIncrementalAnchorPin = null
 	      // var + lazy init: boot can call renderActiveScoutThread before this
 	      // late chat section executes, matching the render-pass vars above.
 	      var desktopChatPreviewCache = null
@@ -62737,6 +64260,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        feedPrevMsgKey = ''
 	        feedPrevMsgDay = ''
 	        feedPrevMsgTs = 0
+	        scoutChatIncrementalAnchorPin = null
 	      }
 
 	      function desktopChatUnreadBoundaryNode() {
@@ -62866,31 +64390,63 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      let scoutChatRenderBatchDepth = 0
 
+	      function captureScoutChatViewport(options = {}) {
+	        if (!scoutChatThread) return null
+	        const bounds = scoutChatThread.getBoundingClientRect()
+	        const children = Array.from(scoutChatThread.children)
+	        let focusedRecord = scoutChatThread.contains(document.activeElement) ? document.activeElement : null
+	        while (focusedRecord && focusedRecord.parentElement !== scoutChatThread) focusedRecord = focusedRecord.parentElement
+	        const visible = node => {
+	          if (!node || node === scoutChatThinking || node.hidden) return false
+	          const rect = node.getBoundingClientRect()
+	          return rect.bottom > bounds.top + 1 && rect.top < bounds.bottom - 1
+	        }
+	        // A keyboard user's active control is the strongest possible anchor:
+	        // retaining focus but moving its record is still a perceptual jump.
+	        const anchor = visible(focusedRecord) ? focusedRecord : children.find(visible)
+	        return {
+	          followBottom: options.forceBottom === true || scoutChatIsNearBottom(),
+	          scrollTop: scoutChatThread.scrollTop,
+	          anchor,
+	          anchorMessageId: String(anchor?.dataset?.messageId || ''),
+	          anchorTop: anchor ? anchor.getBoundingClientRect().top - bounds.top : 0
+	        }
+	      }
+
+	      function restoreScoutChatViewport(snapshot) {
+	        if (!snapshot || !scoutChatThread) return
+	        if (snapshot.followBottom) {
+	          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	          return
+	        }
+	        const anchor = snapshot.anchor?.isConnected
+	          ? snapshot.anchor
+	          : snapshot.anchorMessageId
+	            ? scoutChatThread.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(snapshot.anchorMessageId)}"]`)
+	            : null
+	        if (anchor) {
+	          const bounds = scoutChatThread.getBoundingClientRect()
+	          const nextTop = anchor.getBoundingClientRect().top - bounds.top
+	          scoutChatThread.scrollTop += nextTop - snapshot.anchorTop
+	          return
+	        }
+	        scoutChatThread.scrollTop = snapshot.scrollTop
+	      }
+
 	      // A send can be acknowledged by both the HTTP response and the live
-	      // chat event. Rebuilding the feed once per acknowledgement used to
-	      // clear the scroll box, append each node while forcing scrollTop, and
-	      // let the browser paint the intermediate positions. Keep the existing
-	      // renderer, but make each rebuild one synchronous visual transaction.
-	      function withScoutChatRenderTransaction(render) {
+	      // chat event. Rebuilds remain a single transaction for complex cards,
+	      // but restoration is tied to the exact visible element and pixel offset.
+	      // That remains stable when an edit above the reader changes height.
+	      function withScoutChatRenderTransaction(render, options = {}) {
 	        if (typeof render !== 'function') return
 	        const nested = scoutChatRenderBatchDepth > 0
-	        const wasNearBottom = nested ? false : scoutChatIsNearBottom()
-	        const previousScrollTop = nested ? 0 : scoutChatThread.scrollTop
+	        const viewport = nested ? null : captureScoutChatViewport(options)
 	        scoutChatRenderBatchDepth += 1
 	        try {
 	          return render()
 	        } finally {
 	          scoutChatRenderBatchDepth -= 1
-	          if (!nested) {
-	            // Restore only after the complete feed is mounted. This keeps
-	            // the newest turn pinned when the user was at the tail, while a
-	            // reader who scrolled up remains exactly where they were.
-	            if (wasNearBottom) {
-	              scoutChatThread.scrollTop = scoutChatThread.scrollHeight
-	            } else {
-	              scoutChatThread.scrollTop = previousScrollTop
-	            }
-	          }
+	          if (!nested) restoreScoutChatViewport(viewport)
 	        }
 	      }
 
@@ -62907,7 +64463,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          ?.focus?.({ preventScroll: true })
 	      }
 
-	      function renderActiveScoutThread() {
+	      function renderActiveScoutThread(options = {}) {
 	        return withScoutChatRenderTransaction(() => {
 	        const focusedWorkCardId = scoutWorkCardFocusSnapshot()
 	        // a rebuild from persisted state (reload, poll, socket echo) never
@@ -63022,7 +64578,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        syncDesktopOpenChatContext()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	        restoreScoutWorkCardFocus(focusedWorkCardId)
-        })
+	        }, options)
       }
 
 	      function scoutReplyLifecyclePresentation(message) {
@@ -63236,6 +64792,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        feedPrevMsgKey = viaScout ? '' : followKey
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        node.dataset.messageId = String(message?.id || '')
+	        node.dataset.messageCreatedAt = String(message?.createdAt || '')
+	        node.dataset.messageRenderKey = scoutChatMessageRenderKey(message)
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
 	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
 		        const projectTitle = String(message?.project?.title || '').trim()
@@ -63267,6 +64825,105 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	        }
 	        return node
+	      }
+
+	      function scoutChatMessageRenderKey(message) {
+	        const source = JSON.stringify(message || {})
+	        let hash = 2166136261
+	        for (let index = 0; index < source.length; index += 1) {
+	          hash ^= source.charCodeAt(index)
+	          hash = Math.imul(hash, 16777619)
+	        }
+	        return `${source.length}:${(hash >>> 0).toString(36)}`
+	      }
+
+	      function scoutChatMessageSupportsNarrowPatch(message) {
+	        const kind = String(message?.kind || 'message')
+	        return kind === 'message' && !message?.thread && !message?.work && !message?.proposal &&
+	          !message?.choices && !message?.manifest && !message?.image && !message?.imageGeneration
+	      }
+
+	      function patchScoutChatMessageTextSurface(container, message, selector) {
+	        const body = container?.querySelector(selector)
+	        if (!body) return
+	        const nextText = String(message?.text || message?.content || '')
+	        const role = String(message?.role || '').toLowerCase()
+	        const rich = ['assistant', 'scout', 'error'].includes(role)
+	        body.replaceChildren()
+	        body.classList.toggle('chat-rich', rich)
+	        if (rich) appendChatRichTextNodes(body, nextText)
+	        else appendChatMentionTextNodes(body, nextText)
+	        body.hidden = !nextText && Boolean(message?.files?.length)
+	      }
+
+	      function patchActiveScoutChatMessage(previous, message) {
+	        if (!desktopChatLayoutQuery.matches || !scoutChatMessageSupportsNarrowPatch(message)) return false
+	        const messageId = String(message?.id || '')
+	        const node = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(messageId)}"]`)
+	        const contextCards = document.querySelectorAll(`.chat-context-card[data-message-id="${selectorEscape(messageId)}"]`)
+	        if (!node && !contextCards.length) return false
+	        const renderKey = scoutChatMessageRenderKey(message)
+	        if (node?.dataset.messageRenderKey === renderKey) return true
+	        const viewport = node ? captureScoutChatViewport() : null
+	        const contextViewport = contextCards.length ? captureDesktopChatContextViewport() : null
+	        if (String(previous?.text || previous?.content || '') !== String(message?.text || message?.content || '')) {
+	          if (node) {
+	            patchScoutChatMessageTextSurface(node, message, '.scout-chat-text')
+	            node.querySelector('a.desktop-chat-link-preview')?.remove()
+	            mountDesktopChatLinkPreview(node.querySelector('.scout-chat-msg__stack'), String(message?.text || ''))
+	          }
+	        }
+	        const stack = node?.querySelector('.scout-chat-msg__stack')
+	        const editedState = Array.from(stack?.children || []).find(child => child.classList?.contains('desktop-chat-state'))
+	        if (editedState) editedState.remove()
+	        if (message?.editedAt && stack) {
+	          const state = bfEl('span', 'desktop-chat-state', `edited ${scoutChatTimeLabel(message.editedAt)}`)
+	          stack.insertBefore(state, stack.querySelector('.desktop-chat-reactions, .desktop-chat-thread-summary, .desktop-chat-actions, .desktop-chat-link-preview'))
+	        }
+	        node?.querySelector('.scout-chat-reply-state')?.remove()
+	        if (node) {
+	          delete node.dataset.replyState
+	          node.removeAttribute('aria-busy')
+	          decorateScoutReplyLifecycle(node, message, scoutReplyLifecyclePresentation(message))
+	          node.dataset.messageRenderKey = renderKey
+	        }
+	        contextCards.forEach(card => {
+	          patchScoutChatMessageTextSurface(card, message, '.chat-context-card__body')
+	          const meta = card.querySelector('.chat-context-card__meta')
+	          if (meta) meta.textContent = `${scoutChatTimeLabel(message?.createdAt)}${message?.editedAt ? ' · edited' : ''}`
+	        })
+	        patchDesktopChatReactionSurfaces(activeScoutThreadId, messageId)
+	        restoreScoutChatViewport(viewport)
+	        restoreDesktopChatContextViewport(contextViewport)
+	        return true
+	      }
+
+	      function appendActiveScoutChatMessage(thread, message, options = {}) {
+	        if (!desktopChatLayoutQuery.matches || message?.replyTo?.messageId || !scoutChatMessageSupportsNarrowPatch(message)) return false
+	        const messageId = String(message?.id || '')
+	        if (!messageId || scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(messageId)}"]`)) return true
+	        const viewport = captureScoutChatViewport({ forceBottom: options.forceBottom })
+	        const priorOverflowAnchor = scoutChatThread.style.overflowAnchor
+	        scoutChatThread.style.overflowAnchor = 'none'
+	        try {
+	          const trimmed = appendScoutChatNode(scoutChatMessageRecordNode(message), { protectedNode: viewport?.anchor })
+	          syncDesktopActiveWorkIndicator()
+	          updateChatThreadItem(thread?.preview || message?.text || 'chat thread', thread?.updatedAt || message?.createdAt)
+	          if (trimmed > 0 && viewport?.anchor && !viewport.followBottom) {
+	            const pinned = scoutChatIncrementalAnchorPin
+	            if (!pinned || pinned.node !== viewport.anchor || Math.abs(viewport.scrollTop - pinned.scrollTop) > 0.5) {
+	              scoutChatIncrementalAnchorPin = { node: viewport.anchor, top: viewport.anchorTop, scrollTop: viewport.scrollTop }
+	            }
+	            viewport.anchorTop = scoutChatIncrementalAnchorPin.top
+	          } else {
+	            scoutChatIncrementalAnchorPin = null
+	          }
+	          restoreScoutChatViewport(viewport)
+	          if (scoutChatIncrementalAnchorPin) scoutChatIncrementalAnchorPin.scrollTop = scoutChatThread.scrollTop
+	        } finally {
+	          scoutChatThread.style.overflowAnchor = priorOverflowAnchor
+	        }
+	        return true
 	      }
 
 	      function governedWorkResourcePath(href, resourceKind) {
@@ -63315,6 +64972,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        stage.append(scrim, panel)
 	        document.body.appendChild(stage)
 	        artifactStageNode = stage
+	        syncStudioBackgroundInert()
+	        renderPipMeeting()
+	        callPipSyncOpenSurfaceContracts()
 	        close.focus()
 
 	        const section = (viewer, label, value) => {
@@ -63767,7 +65427,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            const payload = await response.json().catch(() => ({}))
 	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'message could not be edited')
 	            upsertScoutChatThread(payload.thread, { select: false })
-	            renderActiveScoutThread()
+	            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
+	            if (!updatedMessage || !patchActiveScoutChatMessage(message, updatedMessage)) renderActiveScoutThread()
 	          } catch (error) {
 	            save.disabled = false
 	            cancel.disabled = false
@@ -63841,8 +65502,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		            const payload = await response.json().catch(() => ({}))
 		            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be edited')
 		            upsertScoutChatThread(payload.thread, { select: false })
-		            const root = desktopChatReplyTopology(payload.thread.messages).rootFor(message)
-		            syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId)
+		            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
+		            const patched = updatedMessage && patchActiveScoutChatMessage(message, updatedMessage)
+		            const root = desktopChatReplyTopology(payload.thread.messages).rootFor(updatedMessage || message)
+		            syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId, { skipRail: Boolean(patched) })
 	          } catch (error) {
 	            save.disabled = false
 	            cancel.disabled = false
@@ -63886,29 +65549,70 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function desktopContextReactionRowNode(message) {
-	        const reactions = Array.isArray(message?.reactions) ? message.reactions : []
-	        if (!reactions.length) return null
+	      var desktopChatReactionIntents = new Map()
+
+	      function desktopChatReactionIntentKey(threadId, messageId, emoji) {
+	        return `${String(threadId || '')}\u0000${String(messageId || '')}\u0000${String(emoji || '')}`
+	      }
+
+	      function desktopChatMessageById(threadId, messageId) {
+	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(threadId || ''))
+	        return thread?.messages?.find(candidate => String(candidate?.id || '') === String(messageId || '')) || null
+	      }
+
+	      function desktopChatReactionSummaries(message, threadId = activeScoutThreadId) {
 	        const grouped = new Map()
-	        reactions.forEach(reaction => {
+	        const selfEmail = String(authedUser?.email || '').toLowerCase()
+	        ;(Array.isArray(message?.reactions) ? message.reactions : []).forEach(reaction => {
 	          const emoji = String(reaction?.emoji || '')
 	          if (!emoji) return
 	          const summary = grouped.get(emoji) || { count: 0, mine: false, names: [] }
 	          summary.count += 1
-	          summary.mine = summary.mine || String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()
+	          summary.mine = summary.mine || String(reaction?.actorEmail || '').toLowerCase() === selfEmail
 	          if (reaction?.actorName) summary.names.push(String(reaction.actorName))
 	          grouped.set(emoji, summary)
 	        })
+	        for (const emoji of ['👍', '❤️', '🔥']) {
+	          const summary = grouped.get(emoji) || { count: 0, mine: false, names: [] }
+	          const intent = desktopChatReactionIntents.get(desktopChatReactionIntentKey(threadId, message?.id, emoji))
+	          if (intent && intent.desired !== summary.mine) {
+	            summary.count = Math.max(0, summary.count + (intent.desired ? 1 : -1))
+	            summary.mine = intent.desired
+	          }
+	          grouped.set(emoji, summary)
+	        }
+	        return grouped
+	      }
+
+	      function prepareDesktopChatReactionButton(button, message, emoji, summary, options = {}) {
+	        button.type = 'button'
+	        button.dataset.chatReactionMessageId = String(message?.id || '')
+	        button.dataset.chatReactionEmoji = emoji
+	        if (options.summary) button.dataset.chatReactionSummary = 'true'
+	        if (options.contextOnly) button.dataset.chatReactionContext = 'true'
+	        button.setAttribute('aria-pressed', String(summary.mine))
+	        button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction${options.summary ? `; ${summary.count} total` : ''}`)
+	        button.setAttribute('aria-busy', String(Boolean(desktopChatReactionIntents.get(desktopChatReactionIntentKey(activeScoutThreadId, message?.id, emoji))?.sending)))
+	        if (options.summary) {
+	          button.textContent = `${emoji} ${summary.count}`
+	          button.hidden = summary.count === 0
+	          button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
+	        }
+	        button.addEventListener('click', () => {
+	          const next = button.getAttribute('aria-pressed') !== 'true'
+	          updateDesktopChatReaction(message.id, emoji, next, { contextOnly: options.contextOnly })
+	        })
+	        return button
+	      }
+
+	      function desktopContextReactionRowNode(message) {
+	        const grouped = desktopChatReactionSummaries(message)
 	        const row = bfEl('div', 'chat-context-card__reactions')
 	        row.setAttribute('aria-label', 'Reply reactions')
-	        grouped.forEach((summary, emoji) => {
+	        row.hidden = ![...grouped.values()].some(summary => summary.count > 0)
+	        ;[...grouped.entries()].forEach(([emoji, summary]) => {
 	          const button = bfEl('button', 'chat-context-card__reaction', `${emoji} ${summary.count}`)
-	          button.type = 'button'
-	          button.setAttribute('aria-pressed', String(summary.mine))
-	          button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction; ${summary.count} total`)
-	          button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
-	          button.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !summary.mine, { contextOnly: true }))
-	          row.appendChild(button)
+	          row.appendChild(prepareDesktopChatReactionButton(button, message, emoji, summary, { summary: true, contextOnly: true }))
 	        })
 	        return row
 	      }
@@ -63917,15 +65621,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (options.root || options.readOnly || !message?.id) return null
 	        const messageActions = bfEl('span', 'chat-context-card__message-actions')
 	        messageActions.setAttribute('aria-label', 'Reply actions')
-	        const reactions = Array.isArray(message?.reactions) ? message.reactions : []
+	        const grouped = desktopChatReactionSummaries(message)
 	        ;['👍', '❤️', '🔥'].forEach(emoji => {
-	          const mine = reactions.some(reaction => String(reaction?.emoji || '') === emoji && String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
+	          const summary = grouped.get(emoji) || { count: 0, mine: false, names: [] }
 	          const reaction = bfEl('button', 'chat-context-card__message-action', emoji)
-	          reaction.type = 'button'
-	          reaction.setAttribute('aria-label', `${mine ? 'Remove' : 'Add'} ${emoji} reaction`)
-	          reaction.setAttribute('aria-pressed', String(mine))
-	          reaction.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !mine, { contextOnly: true }))
-	          messageActions.appendChild(reaction)
+	          messageActions.appendChild(prepareDesktopChatReactionButton(reaction, message, emoji, summary, { contextOnly: true }))
 	        })
 	        const reply = bfEl('button', 'chat-context-card__message-action', 'reply')
 	        reply.type = 'button'
@@ -63967,6 +65667,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function desktopContextMessageCard(thread, message, options = {}) {
 	        const card = document.createElement('article')
 	        card.className = 'chat-context-card chat-context-card--message'
+	        card.dataset.messageId = String(message?.id || '')
 	        if (options.root) card.dataset.root = 'true'
 	        // Root proposal cards already own their one cached/actionable node in
 	        // the main feed. Reply proposals are absent from that root-only feed,
@@ -64405,26 +66106,66 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+		      function captureDesktopChatContextViewport(options = {}) {
+		        if (!chatContextBody) return null
+		        const bounds = chatContextBody.getBoundingClientRect()
+		        const anchor = Array.from(chatContextBody.children).find(node => {
+		          const rect = node.getBoundingClientRect()
+		          return !node.hidden && rect.bottom > bounds.top + 1 && rect.top < bounds.bottom - 1
+		        })
+		        const focused = chatContextBody.contains(document.activeElement) ? document.activeElement : null
+		        return {
+		          followBottom: options.scrollToBottom === true ||
+		            (options.scrollToBottom === undefined && chatContextBody.scrollHeight - chatContextBody.scrollTop - chatContextBody.clientHeight < 48),
+		          scrollTop: chatContextBody.scrollTop,
+		          anchor,
+		          anchorMessageId: String(anchor?.dataset?.messageId || ''),
+		          anchorTop: anchor ? anchor.getBoundingClientRect().top - bounds.top : 0,
+		          focusMessageId: String(focused?.closest?.('[data-message-id]')?.dataset?.messageId || ''),
+		          focusReactionEmoji: String(focused?.dataset?.chatReactionEmoji || ''),
+		          focusLabel: String(focused?.getAttribute?.('aria-label') || '')
+		        }
+		      }
+
+		      function restoreDesktopChatContextViewport(snapshot) {
+		        if (!snapshot || !chatContextBody) return
+		        if (snapshot.followBottom) {
+		          chatContextBody.scrollTop = chatContextBody.scrollHeight
+		        } else {
+		          const anchor = snapshot.anchor?.isConnected
+		            ? snapshot.anchor
+		            : snapshot.anchorMessageId
+		              ? chatContextBody.querySelector(`[data-message-id="${selectorEscape(snapshot.anchorMessageId)}"]`)
+		              : null
+		          if (anchor) {
+		            const bounds = chatContextBody.getBoundingClientRect()
+		            chatContextBody.scrollTop += anchor.getBoundingClientRect().top - bounds.top - snapshot.anchorTop
+		          } else {
+		            chatContextBody.scrollTop = snapshot.scrollTop
+		          }
+		        }
+		        if (snapshot.focusMessageId) {
+		          const card = chatContextBody.querySelector(`[data-message-id="${selectorEscape(snapshot.focusMessageId)}"]`)
+		          const control = snapshot.focusReactionEmoji
+		            ? Array.from(card?.querySelectorAll('[data-chat-reaction-emoji]') || []).find(node => node.dataset.chatReactionEmoji === snapshot.focusReactionEmoji)
+		            : Array.from(card?.querySelectorAll('button, a, input, textarea') || []).find(node => node.getAttribute('aria-label') === snapshot.focusLabel)
+		          control?.focus?.({ preventScroll: true })
+		        }
+		      }
+
 		      function renderDesktopMessageContext(thread, root, options = {}) {
 		        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 		        const topology = desktopChatReplyTopology(messages)
 		        const resolvedRoot = topology.rootFor(root)
 		        const replies = topology.repliesFor(resolvedRoot)
-		        const priorScrollTop = chatContextBody?.scrollTop || 0
-		        const wasNearBottom = chatContextBody
-		          ? chatContextBody.scrollHeight - chatContextBody.scrollTop - chatContextBody.clientHeight < 48
-		          : false
+		        const viewport = captureDesktopChatContextViewport(options)
 		        const fragment = document.createDocumentFragment()
 		        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
 		        chatContextParent.replaceChildren(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
 		        chatContextParent.hidden = false
 		        chatContextBody.replaceChildren(fragment)
 		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
-		        if (options.scrollToBottom === true || (options.scrollToBottom === undefined && wasNearBottom)) {
-		          chatContextBody.scrollTop = chatContextBody.scrollHeight
-		        } else {
-		          chatContextBody.scrollTop = priorScrollTop
-		        }
+		        restoreDesktopChatContextViewport(viewport)
 		      }
 
 		      function desktopChatThreadSummaryNode(message, threadMessages) {
@@ -64471,7 +66212,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		          else if (current) current.remove()
 		          else if (next) stack.insertBefore(next, stack.querySelector('.desktop-chat-actions, .desktop-chat-link-preview'))
 		        }
-		        if (chatContextState?.mode === 'thread' &&
+	        if (!options.skipRail && chatContextState?.mode === 'thread' &&
 		          String(chatContextState.threadId || '') === String(thread.id || '') &&
 		          String(chatContextState.rootMessageId || '') === String(root.id || '')) {
 		          renderDesktopMessageContext(thread, root, { scrollToBottom: options.scrollRailToBottom })
@@ -65126,27 +66867,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 
 	        const reactions = Array.isArray(message.reactions) ? message.reactions : []
-	        if (reactions.length && messageActionsReady) {
-	          const grouped = new Map()
-	          reactions.forEach(reaction => {
-	            const emoji = String(reaction?.emoji || '')
-	            if (!emoji) return
-	            const current = grouped.get(emoji) || { count: 0, mine: false, names: [] }
-	            current.count += 1
-	            current.mine = current.mine || String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()
-	            if (reaction?.actorName) current.names.push(String(reaction.actorName))
-	            grouped.set(emoji, current)
-	          })
+	        const groupedReactions = desktopChatReactionSummaries(message)
+	        if (messageActionsReady) {
 	          const reactionRow = bfEl('div', 'desktop-chat-reactions')
 	          reactionRow.setAttribute('aria-label', 'Message reactions')
-	          grouped.forEach((summary, emoji) => {
+	          reactionRow.hidden = ![...groupedReactions.values()].some(summary => summary.count > 0)
+	          ;[...groupedReactions.entries()].forEach(([emoji, summary]) => {
 	            const button = bfEl('button', '', `${emoji} ${summary.count}`)
-	            button.type = 'button'
-	            button.setAttribute('aria-pressed', String(summary.mine))
-	            button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction; ${summary.count} total`)
-	            button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
-	            button.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !summary.mine))
-	            reactionRow.appendChild(button)
+	            reactionRow.appendChild(prepareDesktopChatReactionButton(button, message, emoji, summary, { summary: true }))
 	          })
 	          stack.appendChild(reactionRow)
 	        }
@@ -65161,13 +66889,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          replyButton.type = 'button'
 	          replyButton.addEventListener('click', () => openDesktopMessageContext(message, replyButton))
 	          ;['👍', '❤️', '🔥'].forEach(emoji => {
-	            const mine = reactions.some(reaction => String(reaction?.emoji || '') === emoji && String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
+	            const summary = groupedReactions.get(emoji) || { count: 0, mine: false, names: [] }
 	            const reactionButton = bfEl('button', '', emoji)
-	            reactionButton.type = 'button'
-	            reactionButton.setAttribute('aria-label', `${mine ? 'Remove' : 'Add'} ${emoji} reaction`)
-	            reactionButton.setAttribute('aria-pressed', String(mine))
-	            reactionButton.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !mine))
-	            actions.appendChild(reactionButton)
+	            actions.appendChild(prepareDesktopChatReactionButton(reactionButton, message, emoji, summary))
 	          })
 	          if (chatThreadIsChannel(selectedScoutChatThread())) {
 	            const riffButton = bfEl('button', '', 'riff')
@@ -65213,35 +66937,119 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        target.focus?.({ preventScroll: true })
 	      }
 
-	      async function updateDesktopChatReaction(messageId, emoji, set, options = {}) {
-	        const threadId = String(activeScoutThreadId || '')
-	        if (!desktopChatLayoutQuery.matches || !threadId || !messageId || !authedUser) {
+	      function patchDesktopChatReactionSurfaces(threadId, messageId) {
+	        const message = desktopChatMessageById(threadId, messageId)
+	        if (!message || String(threadId || '') !== String(activeScoutThreadId || '')) return
+	        const viewport = captureScoutChatViewport()
+	        const contextViewport = captureDesktopChatContextViewport()
+	        const feedNode = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(String(messageId || ''))}"]`)
+	        if (feedNode) feedNode.dataset.messageRenderKey = scoutChatMessageRenderKey(message)
+	        const grouped = desktopChatReactionSummaries(message, threadId)
+	        const buttons = document.querySelectorAll('[data-chat-reaction-message-id]')
+	        buttons.forEach(button => {
+	          if (String(button.dataset.chatReactionMessageId || '') !== String(messageId || '')) return
+	          const emoji = String(button.dataset.chatReactionEmoji || '')
+	          const summary = grouped.get(emoji) || { count: 0, mine: false, names: [] }
+	          const intent = desktopChatReactionIntents.get(desktopChatReactionIntentKey(threadId, messageId, emoji))
+	          button.setAttribute('aria-pressed', String(summary.mine))
+	          button.setAttribute('aria-busy', String(Boolean(intent?.sending)))
+	          const suffix = button.dataset.chatReactionSummary === 'true' ? `; ${summary.count} total` : ''
+	          button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction${suffix}`)
+	          if (button.dataset.chatReactionSummary === 'true') {
+	            button.textContent = `${emoji} ${summary.count}`
+	            button.hidden = summary.count === 0
+	            button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
+	          }
+	        })
+	        document.querySelectorAll('.desktop-chat-reactions, .chat-context-card__reactions').forEach(row => {
+	          const owner = row.closest('[data-message-id]')
+	          if (String(owner?.dataset?.messageId || '') !== String(messageId || '')) return
+	          row.hidden = !Array.from(row.querySelectorAll('[data-chat-reaction-summary]')).some(button => !button.hidden)
+	        })
+	        restoreScoutChatViewport(viewport)
+	        restoreDesktopChatContextViewport(contextViewport)
+	      }
+
+	      function desktopChatServerReactionMine(message, emoji) {
+	        const selfEmail = String(authedUser?.email || '').toLowerCase()
+	        return Boolean(message?.reactions?.some(reaction =>
+	          String(reaction?.emoji || '') === String(emoji || '') &&
+	          String(reaction?.actorEmail || '').toLowerCase() === selfEmail
+	        ))
+	      }
+
+	      function mergeDesktopChatReactionThread(payloadThread, messageId, emoji, intent) {
+	        if (!payloadThread?.id) {
+	          intent.confirmed = intent.requested
 	          return
 	        }
+	        const merged = upsertScoutChatThread({ ...payloadThread, messagesLoaded: true }, { select: false }) || payloadThread
+	        const message = merged.messages?.find(candidate => String(candidate?.id || '') === String(messageId || ''))
+	        intent.confirmed = message ? desktopChatServerReactionMine(message, emoji) : intent.requested
+	      }
+
+	      async function flushDesktopChatReactionIntent(intent) {
+	        if (!intent || intent.sending) return
+	        if (intent.desired === intent.confirmed) {
+	          desktopChatReactionIntents.delete(intent.key)
+	          patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
+	          return
+	        }
+	        intent.sending = true
+	        intent.requested = intent.desired
+	        patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
 	        try {
-	          const endpoint = `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/reaction`
-	          const response = await fetch(set ? endpoint : `${endpoint}?emoji=${encodeURIComponent(emoji)}`, {
-	            method: set ? 'PUT' : 'DELETE',
-	            headers: set ? { 'Content-Type': 'application/json' } : undefined,
-	            body: set ? JSON.stringify({ emoji }) : undefined
+	          const endpoint = `/assistant/chat-threads/${encodeURIComponent(intent.threadId)}/messages/${encodeURIComponent(intent.messageId)}/reaction`
+	          const response = await fetch(intent.requested ? endpoint : `${endpoint}?emoji=${encodeURIComponent(intent.emoji)}`, {
+	            method: intent.requested ? 'PUT' : 'DELETE',
+	            headers: intent.requested ? { 'Content-Type': 'application/json' } : undefined,
+	            body: intent.requested ? JSON.stringify({ emoji: intent.emoji }) : undefined
 	          })
 	          const payload = await response.json().catch(() => ({}))
-	          if (!response.ok) {
-	            throw new Error(payload.error || 'reaction could not be saved')
-	          }
-	          if (payload.thread) {
-	            upsertScoutChatThread(payload.thread, { select: false })
-	            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(messageId || ''))
-	            if (updatedMessage && (options.contextOnly || updatedMessage?.replyTo?.messageId)) {
-	              const root = desktopChatReplyTopology(payload.thread.messages).rootFor(updatedMessage)
-	              syncDesktopReplySurfaces(payload.thread, root?.id || updatedMessage?.replyTo?.messageId)
-	            } else {
-	              renderActiveScoutThread()
-	            }
-	          }
+	          if (!response.ok) throw new Error(payload.error || 'reaction could not be saved')
+	          mergeDesktopChatReactionThread(payload.thread, intent.messageId, intent.emoji, intent)
 	        } catch (error) {
+	          // The failed request never became server truth. If the user tapped
+	          // again while it was in flight, that latest intent still wins; when
+	          // it already matches confirmed truth there is no second request.
+	          if (intent.desired === intent.requested) intent.desired = intent.confirmed
 	          showToast({ text: error.message || 'reaction could not be saved', kind: 'error' })
+	        } finally {
+	          intent.sending = false
+	          patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
+	          if (intent.desired !== intent.confirmed) {
+	            void flushDesktopChatReactionIntent(intent)
+	          } else {
+	            desktopChatReactionIntents.delete(intent.key)
+	            patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
+	          }
 	        }
+	      }
+
+	      function updateDesktopChatReaction(messageId, emoji, set, options = {}) {
+	        const threadId = String(activeScoutThreadId || '')
+	        if (!desktopChatLayoutQuery.matches || !threadId || !messageId || !authedUser) return
+	        const key = desktopChatReactionIntentKey(threadId, messageId, emoji)
+	        const message = desktopChatMessageById(threadId, messageId)
+	        if (!message) return
+	        const intent = desktopChatReactionIntents.get(key) || {
+	          key,
+	          threadId,
+	          messageId: String(messageId),
+	          emoji: String(emoji),
+	          confirmed: desktopChatServerReactionMine(message, emoji),
+	          desired: desktopChatServerReactionMine(message, emoji),
+	          requested: false,
+	          sending: false,
+	          contextOnly: Boolean(options.contextOnly)
+	        }
+	        intent.desired = Boolean(set)
+	        intent.contextOnly = intent.contextOnly || Boolean(options.contextOnly)
+	        desktopChatReactionIntents.set(key, intent)
+	        // Paint first; network work starts in a microtask so pointer and
+	        // keyboard users see their intent in the same frame as the input.
+	        patchDesktopChatReactionSurfaces(threadId, messageId)
+	        queueMicrotask(() => void flushDesktopChatReactionIntent(intent))
 	      }
 
 	      // Well-known XML/SVG namespace URLs that should never become link previews.
@@ -67787,22 +69595,116 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         appendScoutChatNode(chip)
       }
 
-	      function appendScoutChatNode(node) {
+	      const scoutChatFeedRecordSelector = [
+	        '.scout-chat-msg', '.scout-chat-system', '.scout-chat-research',
+	        '.scout-chat-work-card', '.scout-chat-work-record', '.scout-chat-image',
+	        '.scout-chat-image-pending', '.runlog', '.scout-choices',
+	        '.scout-proposal-card', '.manifest-card', '.private-riff-episode'
+	      ].join(', ')
+
+	      function scoutChatFeedRecordNodes() {
+	        return Array.from(scoutChatThread?.children || []).filter(node =>
+	          node !== scoutChatThinking && node.matches?.(scoutChatFeedRecordSelector)
+	        )
+	      }
+
+	      function scoutChatNodeOwnsSelection(node) {
+	        const selection = document.getSelection?.()
+	        return Boolean(selection && !selection.isCollapsed &&
+	          (node.contains(selection.anchorNode) || node.contains(selection.focusNode)))
+	      }
+
+	      function releaseScoutChatFeedNode(node) {
+	        if (!node) return
+	        node.querySelectorAll?.('video, audio').forEach(media => {
+	          try { media.pause?.() } catch (_) {}
+	          try { media.srcObject = null } catch (_) {}
+	          media.removeAttribute('src')
+	          try { media.load?.() } catch (_) {}
+	        })
+	        node.querySelectorAll?.('iframe').forEach(frame => {
+	          frame.removeAttribute('src')
+	          frame.remove()
+	        })
+	        node.remove()
+	      }
+
+	      function repairScoutChatRetainedBoundary() {
+	        const records = scoutChatFeedRecordNodes()
+	        const first = records[0]
+	        if (!first) {
+	          scoutChatThread.querySelectorAll(':scope > .scout-chat-daybreak, :scope > .desktop-chat-unread').forEach(node => node.remove())
+	          return
+	        }
+	        // A divider describes the record after it. Once that record is
+	        // evicted, discard only the now-leading dividers and recreate one
+	        // from the first retained message's server timestamp.
+		        let cursor = scoutChatThread.firstElementChild
+		        const retainedBoundaryIsCurrent = cursor?.classList?.contains('scout-chat-daybreak') &&
+		          cursor.dataset.retainedBoundary === 'true' &&
+		          cursor.dataset.forMessageId === String(first.dataset.messageId || '')
+		        if (retainedBoundaryIsCurrent) cursor = cursor.nextElementSibling
+		        while (cursor && cursor !== first && (cursor.classList.contains('scout-chat-daybreak') || cursor.classList.contains('desktop-chat-unread'))) {
+	          const next = cursor.nextElementSibling
+	          cursor.remove()
+	          cursor = next
+	        }
+	        if (!first.classList.contains('scout-chat-msg')) return
+	        first.classList.remove('is-followup')
+	        const createdAt = String(first.dataset.messageCreatedAt || '')
+	        if (createdAt && !first.previousElementSibling?.classList?.contains('scout-chat-daybreak')) {
+	          const at = new Date(createdAt)
+	          if (!Number.isNaN(at.valueOf())) {
+	            const daybreak = document.createElement('div')
+	            daybreak.className = 'scout-chat-daybreak'
+		            daybreak.setAttribute('role', 'separator')
+		            daybreak.dataset.retainedBoundary = 'true'
+		            daybreak.dataset.forMessageId = String(first.dataset.messageId || '')
+	            daybreak.appendChild(bfEl('span', 'scout-chat-daybreak__label', `${scoutChatDayLabel(createdAt)} · ${at.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`))
+	            scoutChatThread.insertBefore(daybreak, first)
+	          }
+	        }
+	        if (first.classList.contains('scout-chat-msg--user') && !first.querySelector('.scout-chat-msg__meta')) {
+	          const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(first.dataset.messageId || ''))
+	          const template = scoutChatMessageNode('user', '', message?.createdAt || createdAt, [], '', Boolean(String(message?.postedOnBehalfOf || '').trim()))
+	          const meta = template.querySelector('.scout-chat-msg__meta')
+	          if (meta) first.querySelector('.scout-chat-msg__stack')?.appendChild(meta)
+	        }
+	      }
+
+	      function trimScoutChatIncrementalFeed(options = {}) {
+	        let records = scoutChatFeedRecordNodes()
+	        if (records.length <= scoutChatMaxNodes) return 0
+	        const viewportAnchor = options.protectedNode || captureScoutChatViewport()?.anchor || null
+	        const focused = document.activeElement
+	        let removed = 0
+	        while (records.length > scoutChatMaxNodes) {
+	          const candidate = records.find(node =>
+	            node !== viewportAnchor && !node.contains(focused) && !scoutChatNodeOwnsSelection(node)
+	          )
+	          if (!candidate) break
+	          releaseScoutChatFeedNode(candidate)
+	          removed += 1
+	          records = scoutChatFeedRecordNodes()
+	        }
+	        if (removed) repairScoutChatRetainedBoundary()
+	        return removed
+	      }
+
+	      function appendScoutChatNode(node, options = {}) {
 	        const stick = scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()
         scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
         scoutChatThread.insertBefore(node, scoutChatThinking)
-        // Cap the rendered thread; drop oldest so long sessions stay light.
-        while (scoutChatThread.children.length - 1 > scoutChatMaxNodes) {
-          const first = scoutChatThread.firstElementChild
-          if (!first || first === scoutChatThinking) {
-            break
-          }
-          first.remove()
-        }
-        if (stick) {
-          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
-        }
-      }
+	        // Incremental socket traffic uses the same hard record cap as a full
+	        // projection without reconstructing the feed. Protect the reader's
+	        // visible anchor, active control, and selected text while evicting the
+	        // oldest other record; the thinking sentinel is never eligible.
+	        const trimmed = trimScoutChatIncrementalFeed(options)
+	        if (stick) {
+	          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	        }
+	        return trimmed
+	      }
 
       function showScoutChatThinking(text) {
         const stick = scoutChatIsNearBottom()
@@ -77134,6 +79036,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         lastConnectionState = state
         lastConnectionLabel = label
         applyStatusPillForTool()
+        renderPipMeeting()
         updateOfficeHome()
         if (state === 'listening') {
           brandMarkEl.classList.add('is-listening')

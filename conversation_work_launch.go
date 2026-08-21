@@ -227,7 +227,7 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		if process, ok := processByID(work.ToolID); ok && !process.Hidden {
 			launched, err = app.launchGoalThread(goalLaunchSpec{
 				Objective: work.Objective, CreatedBy: user.Name, Authority: process.Authority,
-				PackageID: work.PackageID, ToolTemplate: process.ID,
+				PackageID: work.PackageID, ToolTemplate: process.ID, ContextRefs: work.ContextRefs,
 				Origin: origin,
 			})
 			label = process.Title
@@ -244,7 +244,7 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		}
 		launched, err = app.launchGoalThread(goalLaunchSpec{
 			Objective: work.Objective, CreatedBy: user.Name, Authority: tool.Authority,
-			PackageID: work.PackageID, ToolTemplate: tool.ID,
+			PackageID: work.PackageID, ToolTemplate: tool.ID, ContextRefs: work.ContextRefs,
 			Origin: origin,
 		})
 		label = tool.Name
@@ -256,8 +256,8 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		}
 		launched, err = app.launchGoalThread(goalLaunchSpec{
 			Objective: work.Objective, CreatedBy: user.Name, Authority: authority,
-			PackageID: work.PackageID,
-			Origin:    origin,
+			PackageID: work.PackageID, ContextRefs: work.ContextRefs,
+			Origin: origin,
 		})
 		label = "Goal"
 

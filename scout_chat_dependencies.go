@@ -99,15 +99,29 @@ func bestScoutChatFileCandidate(thread scoutChatThreadRecord, message scoutChatM
 			score:      1000 + scoutFileNameScore(query, file.Name),
 		})
 	}
-	// The newest relevant attachment wins for pronoun follow-ups such as
-	// “open it and review it.” Bound the scan so an unrelated old deck does not
-	// silently become the source of a later generic request.
+	// A reply can only inherit attachments from its own causal branch. Scan the
+	// bounded branch selection (which pins substantive/file sources) rather than
+	// the channel tail, where a newer sibling PDF could otherwise become the
+	// approved source. Root turns retain the historical recent-tail behavior.
+	eligible := map[string]bool{}
+	branchScoped := message.ReplyTo != nil
 	start := len(thread.Messages) - 16
 	if start < 0 {
 		start = 0
 	}
+	if branchScoped {
+		rootID := scoutChatReplyRootID(thread, message.ReplyTo.MessageID)
+		selection := scoutChatReplyContextMessages(thread, rootID)
+		for _, selected := range selection.Messages {
+			eligible[selected.ID] = true
+		}
+		start = 0
+	}
 	for messageIndex := len(thread.Messages) - 1; messageIndex >= start; messageIndex-- {
 		prior := thread.Messages[messageIndex]
+		if branchScoped && !eligible[prior.ID] {
+			continue
+		}
 		for fileIndex := len(prior.Files) - 1; fileIndex >= 0; fileIndex-- {
 			file := prior.Files[fileIndex]
 			recency := messageIndex - start

@@ -377,14 +377,14 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWork(
 			}
 		case conversationWorkRegistryTool:
 			if process, ok := processByID(work.ToolID); ok && !process.Hidden {
-				launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: process.Authority, PackageID: work.PackageID, ToolTemplate: process.ID, Origin: origin})
+				launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: process.Authority, PackageID: work.PackageID, ToolTemplate: process.ID, ContextRefs: proposal.ContextRefs, Origin: origin})
 			} else if tool, ok := toolByID(work.ToolID); ok && tool.ID != ventureWorkbookToolID {
-				launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: tool.Authority, PackageID: work.PackageID, ToolTemplate: tool.ID, Origin: origin})
+				launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: tool.Authority, PackageID: work.PackageID, ToolTemplate: tool.ID, ContextRefs: proposal.ContextRefs, Origin: origin})
 			} else {
 				err = fmt.Errorf("the requested public output contract is unavailable")
 			}
 		case conversationWorkGoal:
-			launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: work.Authority, PackageID: work.PackageID, Origin: origin})
+			launched, err = app.launchGoalThread(goalLaunchSpec{Objective: objective, CreatedBy: user.Name, Authority: work.Authority, PackageID: work.PackageID, ContextRefs: proposal.ContextRefs, Origin: origin})
 		default:
 			err = fmt.Errorf("public work route %q is unavailable", work.Kind)
 		}

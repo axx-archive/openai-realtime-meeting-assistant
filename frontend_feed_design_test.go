@@ -314,7 +314,8 @@ func TestDesktopLongConversationStaysAMessageAndUsesTheThreadInspector(t *testin
 		"chatContextParent.replaceChildren(desktopContextMessageCard(thread, resolvedRoot, { root: true }))",
 		"chatContextParent.hidden = false",
 		"chatContextBody.replaceChildren(fragment)",
-		"options.scrollToBottom === true || (options.scrollToBottom === undefined && wasNearBottom)",
+		"captureDesktopChatContextViewport(options)",
+		"restoreDesktopChatContextViewport(viewport)",
 	} {
 		if !strings.Contains(context, want) {
 			t.Errorf("thread inspector must retain full parent and replies: missing %q", want)

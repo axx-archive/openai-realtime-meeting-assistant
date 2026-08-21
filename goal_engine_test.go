@@ -834,6 +834,120 @@ func TestGoalChildAuthorityClampsToParent(t *testing.T) {
 	}
 }
 
+func TestProcessGateBlockerProjectsActionableCheckpoint(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "gate-checkpoint-test"
+	t.Setenv("OPENAI_API_KEY", "gate-checkpoint-test")
+	previousStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStart })
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"dimensions":[{"name":"Grounding","score":2,"gap":"Founder must decide whether the disclosed evidence gap is acceptable"}],"reasons":"judgment is required"}`, nil
+	})
+
+	run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Prepare the decision deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, app, run.Artifact.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	stage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
+	stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: false}
+	st := plan.subtaskByID(stage.ID)
+	st.Status = subtaskRunning
+	st.Revisions = 1
+	engine.runProcessGateStage(context.Background(), &plan, run.Artifact.ID, st, stage)
+
+	if plan.State != goalStateApproval || plan.Checkpoint == nil || plan.Checkpoint.StageID != stage.ID {
+		t.Fatalf("blocked gate did not park as an actionable checkpoint: state=%q checkpoint=%+v", plan.State, plan.Checkpoint)
+	}
+	if !strings.Contains(plan.Checkpoint.Question, "judgment is required") || len(plan.Checkpoint.Options) != 2 ||
+		plan.Checkpoint.Options[0].action() != processCheckpointActionProceed || plan.Checkpoint.Options[1].action() != processCheckpointActionHold {
+		t.Fatalf("blocked gate checkpoint is not truthful/actionable: %+v", plan.Checkpoint)
+	}
+	parent := mustArtifact(t, app, run.Artifact.ID)
+	projected := scoutChatCheckpointRefForArtifact(parent)
+	if projected == nil || projected.ID != plan.Checkpoint.ID || len(projected.Options) != 2 {
+		t.Fatalf("root-card projection lost the blocked gate decision: %+v", projected)
+	}
+}
+
+func TestProcessGateScorerFailuresTerminalCannotBeOverridden(t *testing.T) {
+	cases := []struct {
+		name        string
+		response    string
+		providerErr error
+		failure     string
+	}{
+		{name: "provider failed", providerErr: errors.New("provider unavailable"), failure: goalGateFailureInfrastructure},
+		{name: "malformed response", response: "not JSON", failure: goalGateFailureMalformed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupAuthTestEnv(t)
+			app := newIsolatedKanbanBoardApp(t)
+			app.apiKey = "gate-terminal-test"
+			t.Setenv("OPENAI_API_KEY", "gate-terminal-test")
+			previousStart := startGoalThreadAsync
+			startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+			t.Cleanup(func() { startGoalThreadAsync = previousStart })
+			providerCalls := 0
+			swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+				providerCalls++
+				return tc.response, tc.providerErr
+			})
+
+			run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+				Objective: "Prepare the decision deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := mustGoalPlan(t, app, run.Artifact.ID)
+			engine := newGoalEngine(app)
+			if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+				t.Fatal(err)
+			}
+			stage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
+			stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: true}
+			st := plan.subtaskByID(stage.ID)
+			st.Status = subtaskRunning
+			st.Revisions = 1
+			engine.runProcessGateStage(context.Background(), &plan, run.Artifact.ID, st, stage)
+
+			if providerCalls != 1 || plan.State != goalStateBlocked || plan.Checkpoint != nil || st.Status != subtaskFailed || st.Revisions != 1 {
+				t.Fatalf("scorer failure was revised or made overridable: calls=%d state=%q checkpoint=%+v stage=%+v", providerCalls, plan.State, plan.Checkpoint, st)
+			}
+			if !strings.Contains(plan.Blocker, "cannot be overridden") || strings.Contains(plan.Blocker, "proceed with") || strings.Contains(plan.Blocker, "provider unavailable") {
+				t.Fatalf("terminal scorer blocker is not truthful/safe: %q", plan.Blocker)
+			}
+			parent := mustArtifact(t, app, run.Artifact.ID)
+			persisted := mustGoalPlan(t, app, run.Artifact.ID)
+			if parent.Metadata["threadStatus"] != "error" || persisted.State != goalStateBlocked || persisted.Checkpoint != nil || persisted.subtaskByID(stage.ID).Status != subtaskFailed {
+				t.Fatalf("terminal scorer failure was not durably projected: status=%q plan=%+v", parent.Metadata["threadStatus"], persisted)
+			}
+			decision := runGoalGate(context.Background(), goalGateSpec{Round: 1, MaxRounds: 1, ForceAccept: true, Score: func(context.Context) goalGateRound {
+				return goalGateRound{Failure: tc.failure, Reasons: "non-judgment failure"}
+			}})
+			if decision.Outcome != goalGateOutcomeTerminal || decision.Failure != tc.failure {
+				t.Fatalf("last-round failure was converted to force-accept: %+v", decision)
+			}
+		})
+	}
+}
+
 // --- Resumability: reconciler folds completed children, no duplicates --------
 
 func TestReconcileGoalThreadResumesInFlightPlan(t *testing.T) {
@@ -2885,6 +2999,16 @@ func TestRunGoalGateThresholdFloorRoundsAndForceAccept(t *testing.T) {
 	if decision.Outcome != goalGateOutcomeForceAccept || !strings.Contains(strings.Join(decision.Gaps, "; "), "unanswered: the price point") {
 		t.Fatalf("force-accept must disclose the dimension gap: %+v", decision)
 	}
+
+	terminal := runGoalGate(context.Background(), goalGateSpec{
+		Round: goalGateDefaultMaxRounds, ForceAccept: true,
+		Score: func(context.Context) goalGateRound {
+			return goalGateRound{Failure: goalGateFailureInfrastructure, Reasons: "scorer unavailable"}
+		},
+	})
+	if terminal.Outcome != goalGateOutcomeTerminal || terminal.Verdict != goalReviewFail || terminal.Failure != goalGateFailureInfrastructure {
+		t.Fatalf("non-judgment failure was converted by the spent-round force-accept policy: %+v", terminal)
+	}
 }
 
 // Rubric-equivalence: the degenerate verdict-driven case behaves exactly like
@@ -3377,7 +3501,8 @@ func TestProcessRenderStageSkipsDisclosedWhenSidecarAbsent(t *testing.T) {
 }
 
 // A failing gate re-queues its input stage with the gaps as revision notes,
-// bounded by the stage's MaxRounds, then blocks the goal (no ForceAccept).
+// bounded by MaxRounds, then parks an actionable human judgment checkpoint
+// (no ForceAccept) instead of collapsing the root card to a generic blocker.
 func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{
@@ -3395,10 +3520,10 @@ func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	}
 	app.runGoalThread(thread.Artifact.ID)
 
-	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateBlocked)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
 	gate := plan.subtaskByID("note_gate")
-	if gate == nil || gate.Status != subtaskBlocked {
-		t.Fatalf("gate did not block after its rounds: %+v", gate)
+	if gate == nil || gate.Status != subtaskRunning {
+		t.Fatalf("gate did not remain parked on its human judgment after its rounds: %+v", gate)
 	}
 	if gate.Revisions != 2 {
 		t.Fatalf("gate revisions=%d, want the probe's MaxRounds 2", gate.Revisions)
@@ -3413,6 +3538,10 @@ func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	}
 	if !strings.Contains(plan.Blocker, "note_gate") {
 		t.Fatalf("blocker does not name the gate: %q", plan.Blocker)
+	}
+	if plan.Checkpoint == nil || plan.Checkpoint.StageID != "note_gate" || len(plan.Checkpoint.Options) != 2 ||
+		plan.Checkpoint.Options[0].action() != processCheckpointActionProceed || plan.Checkpoint.Options[1].action() != processCheckpointActionHold {
+		t.Fatalf("blocked gate did not expose its truthful proceed/hold checkpoint: %+v", plan.Checkpoint)
 	}
 	// The checkpoint never ran — nothing downstream of a blocked gate executes.
 	if pick := plan.subtaskByID("ship_choice"); pick.Status == subtaskComplete {
