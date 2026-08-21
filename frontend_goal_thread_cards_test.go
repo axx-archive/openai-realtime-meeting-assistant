@@ -66,7 +66,11 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 		"scout-chat-deck-result",
 		"renderArtifactDeck(result, artifact)",
 		"candidate?.thread?.resultArtifactId",
-		"metadata.goalParentId || metadata.goalId",
+		"metadata.goalParentId",
+		"metadata.goalId",
+		"sourceMetadata.goalParentId",
+		"sourceMetadata.goalId",
+		"message?.thread?.mode || '') === 'goal' ? sourceArtifactId",
 		"canonicalResultId !== resultId",
 		"['thread', 'artifact'].includes",
 	} {

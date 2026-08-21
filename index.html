@@ -68122,7 +68122,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!resultId || !artifact || !artifactIsHTMLDeck(artifact)) return document.createDocumentFragment()
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
 	        const metadata = artifact?.metadata || {}
-	        const goalId = String(metadata.goalParentId || metadata.goalId || '').trim()
+	        // Older generated deck bodies may predate result-level goal metadata.
+	        // Their durable chat receipt still points at the stage/goal artifact,
+	        // which owns the immutable goal relationship. Resolve through that
+	        // source before deciding which result is canonical so approving a
+	        // goal cannot make superseded HTML attempts reappear in the feed.
+	        const sourceArtifactId = String(message?.thread?.artifactId || '').trim()
+	        const sourceArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === sourceArtifactId)
+	        const sourceMetadata = sourceArtifact?.metadata || {}
+	        const goalId = String(
+	          metadata.goalParentId ||
+	          metadata.goalId ||
+	          sourceMetadata.goalParentId ||
+	          sourceMetadata.goalId ||
+	          (String(message?.thread?.mode || '') === 'goal' ? sourceArtifactId : '')
+	        ).trim()
 	        if (goalId) {
 	          let canonicalResultId = ''
 	          for (const candidate of messages) {
