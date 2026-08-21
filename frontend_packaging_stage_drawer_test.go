@@ -120,6 +120,7 @@ const fixtures=[
 const checkpoint={id:'checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',stageId:'compete_choice',question:'Which narrative spine should become the deck backbone?',options:[{id:'option-111111111111111111111111',label:'Founder conviction',action:'proceed'},{id:'option-222222222222222222222222',label:'Cultural moment',action:'revise'},{id:'option-333333333333333333333333',label:'Hold for founder review',action:'hold'}]};
 const parentPlan={state:'approval_required',checkpoint,subtasks:[{id:'compete_judges',title:'Compete — judge the spines',role:'judges',status:'complete',artifactId:'stage-judges'},{id:'compete_choice',title:'Choose the winning spine',role:'human_checkpoint',status:'running',dependsOn:['compete_judges']}]};
 const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date().toISOString(),metadata:{title:'Packaging Studio',mode:'goal',processId:'packaging_studio',status:'approval_required',threadStatus:'approval_required',goalPlan:JSON.stringify(parentPlan),checkpoint:JSON.stringify(checkpoint)}};
+fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdAt:new Date().toISOString(),metadata:{title:'Ship — the self-contained presenter deck',source:'agent_thread',goalParentId:'packaging-goal',goalSubtaskId:'ship_deck',processStage:'ship_deck',status:'complete'}});
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true});
@@ -142,6 +143,8 @@ const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date()
    };
  });
  assert.deepEqual(customerStage,{title:'Build the 10-slide story',meta:'rev 1 · deck story drafted',threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
+ const legacyWriter=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');return {title:artifactDisplayTitle(artifact),query:scoutThreadFromArtifact(artifact).query};});
+ assert.deepEqual(legacyWriter,{title:'Build the editable presentation',query:'Build the editable presentation'});
  await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
 
  const savedGoalCopy=await page.evaluate(()=>{

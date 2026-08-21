@@ -42587,8 +42587,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function packagingStudioStagePresentationFor(entry) {
         const metadata = entry?.metadata || {}
-        if (String(metadata.processId || '').trim() !== 'packaging_studio') return null
-        return packagingStudioStagePresentation[String(metadata.processStage || metadata.goalSubtaskId || '').trim()] || null
+		const presentation = packagingStudioStagePresentation[String(metadata.processStage || metadata.goalSubtaskId || '').trim()] || null
+		if (!presentation) return null
+		if (String(metadata.processId || '').trim() === 'packaging_studio') return presentation
+		// Older writer outputs predate the direct processId stamp. Their saved
+		// goal parent still owns the process identity, so resolve through it rather
+		// than exposing the retired writer prompt as product copy.
+		const parentId = String(metadata.goalParentId || metadata.parentGoalId || metadata.goalId || '').trim()
+		const parent = parentId && typeof artifactEntries !== 'undefined'
+		  ? artifactEntries.find(candidate => String(candidate?.id || '') === parentId)
+		  : null
+		const parentPlan = parent ? goalPlanFromArtifact(parent) : null
+		return String(parent?.metadata?.processId || parentPlan?.processId || parentPlan?.toolTemplate || '').trim() === 'packaging_studio'
+		  ? presentation
+		  : null
       }
 
       function packagingStudioTaskDisplayTitle(plan, task) {
