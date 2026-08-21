@@ -288,11 +288,11 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "compete_choice",
-				Title:     "Compete — the choice card (human overrule)",
+				Title:     "Narrative direction",
 				Role:      processRoleHumanCheckpoint,
 				InputFrom: []string{"compete_judges"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question:    "The judges scored the rival spines and named the beats to steal. Confirm the winning angle, or overrule it — before WRITE spends tokens.",
+					Question:    "Scout evaluated three narrative directions. Which one should shape the deck?",
 					OptionsFrom: "compete_judges",
 				},
 			},
@@ -338,11 +338,11 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "founder_pass",
-				Title:     "Founder pass — read the gated draft, mark do_not_touch",
+				Title:     "Final content review",
 				Role:      processRoleHumanCheckpoint,
 				InputFrom: []string{"write", "voice", "gate"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "The gated draft and its presenter script are ready. Read them and decide: ship as-is, or send back — and mark any lines as do_not_touch so SHIP preserves them exactly. This is the taste pass.",
+					Question: "The deck copy and presenter notes are ready. Approve this version, or send it back with any lines Scout should preserve exactly.",
 					// The labels tell the truth (the checkpoint-option teeth): a
 					// send-back mechanically re-queues WRITE with the founder's
 					// words as revision notes; ship-as-is proceeds.
@@ -436,11 +436,11 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "ship_approval",
-				Title:     "Ship approval — the package leaves the building",
+				Title:     "Final deck review",
 				Role:      processRoleHumanCheckpoint,
 				InputFrom: []string{"ship_compile", "slide_jury", "ship_deck"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "The five interlocking artifacts are filed and attached to the package — the deck, The Wall, The Talk, the rigor companion, and the findings record — with the render exports queued or their skips disclosed, and the slide jury's scoreboard (or its disclosed skip) on the findings record. Approve the ship, or hold the package.",
+					Question: "The deck, presenter notes, supporting analysis, and review findings are ready. Approve this version, send the deck back for changes, or keep it on hold.",
 					Options: []ProcessCheckpointOption{
 						{Label: "approve the ship"},
 						// The first live run proved a bad deck can reach this park

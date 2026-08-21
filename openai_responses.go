@@ -63,6 +63,10 @@ type openAITextRequest struct {
 	// meeting, routing, and structured-output calls retain their existing
 	// authority and wire contract.
 	EnableWebSearch bool
+	// LongRunning is a server-owned transport hint for durable, contract-bearing
+	// artifact generation. It changes only the HTTP deadline; it is never sent
+	// to the provider and ordinary chat/routing calls leave it false.
+	LongRunning bool
 	// ValidateOutput runs before a wire response is accepted. It is deliberately
 	// request-local so strict lanes can book wire success separately from a
 	// parse/schema rejection while ordinary text callers remain unchanged.
@@ -472,6 +476,9 @@ func openAIResponsesRequestTimeout(request openAITextRequest) time.Duration {
 		// Its durable thread context owns cancellation; a client-wide deadline
 		// would manufacture failures based on wall time rather than work state.
 		return 0
+	}
+	if request.LongRunning {
+		return orchestratorTimeout()
 	}
 	if request.MaxOutputTokens > 4000 {
 		return 120 * time.Second

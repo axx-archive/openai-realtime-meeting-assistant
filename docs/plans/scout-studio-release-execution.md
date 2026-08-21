@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 140 serves exact release `9b2a04a8` with the named-PDF resolver, chat polish, Deck Studio, Content Studio, PiP, and Mobile Build 69 source integrated. Build 69 was uploaded to Apple from that exact SHA and is awaiting processing/group proof. A live Like A Farmer rerun proved the PDF path but exposed a second source gap: the top-level request named Dr. May's older authored recommendations, yet only Tyler's exact PDF entered the governed source window. A narrow local follow-up now binds explicit possessive collaborator sources (for example, “Dr. May's full recommendations” and “Tyler's ask”) and replaces leaked studio-policy checkpoint copy; independent review and final release/rerun remain.
+Current phase: generation 141 serves exact release `af67bc66` with the named-PDF resolver, explicit named-collaborator source binding, customer-facing intake copy, chat polish, Deck Studio, Content Studio, PiP, and Mobile Build 69 source integrated. Build 69 was uploaded to Apple from web/mobile release `9b2a04a8` and is awaiting processing/group proof; the later `af67bc66` change is web-only. The source-complete Like A Farmer run reached its 10-slide gated draft, then blocked at Voice because production still pins the retired `anthropic_fable` orchestrator and its durable writer subtask was assigned to the unavailable stub. A local routing repair now assigns only server-authored process writers with concrete output contracts to the existing source-bound OpenAI text runner while preserving child artifacts, recovery, and resume semantics; checkpoint copy is being cleaned of internal production language before the exact follow-up release.
 
 ## Invariants
 
@@ -23,7 +23,7 @@ Current phase: generation 140 serves exact release `9b2a04a8` with the named-PDF
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
 | W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress; current run is editor QA only because Dr. May's authored source was absent |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress on generation 141; both named sources are proven in the held prompt and first stage |
 | W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Uploaded from `9b2a04a8`; Apple processing/groups pending |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
 
@@ -60,17 +60,25 @@ Current phase: generation 140 serves exact release `9b2a04a8` with the named-PDF
 - EAS Build 69 is build ID `9ffa1417-bf63-433d-a231-db6b24b27513`, fingerprint `b2864e34da14e6c3341a90c0348fda834e852414`, and exact Git commit `9b2a04a8`; Apple submission `2daac20b-a38e-4ef2-bf77-57557213e1d9` completed upload and is awaiting authenticated processing/group verification.
 - The 01:55 production rerun durably showed “Presentation in progress,” rendered both in-channel checkpoint cards, accepted the selected no-assets and franchise-playbook choices, and landed Red-team, Identity, competing architects/judges, Gate, and three Write revisions. The Working Fieldbook identity and PDF-derived figures are strong, but the artifacts lack Dr. May's Clips Engine and Country + Football source language; Voice then blocked after two revisions and no deck was emitted. This run is not final acceptance evidence.
 - Local follow-up tests prove an explicit older named collaborator source survives both the ordinary history cutoff and 16-message release-binding window, reaches the work context, recall query, and authenticated source window, while focused normal/race gates remain green. Intake copy now asks only whether to use existing brand assets or develop a visual direction; internal founder-word fidelity remains downstream.
+- Independent critic returned PASS after the collaborator resolver was tightened to one stable AuthorEmail-backed identity, one unique ask/recommendation-shaped top-level message, topic relevance, top-level-only provider history, and edit/delete invalidation. Ambiguity now fails closed instead of guessing.
+- Generation 141 serves exact `af67bc661fc945f5f39a5235d7c4d1adabfda8b0` as `verified-local-unsigned`; public health/readiness, serving app/render images, release ledger, and retained generation-140 rollback agreed.
+- The generation-141 production run visibly posted one durable `Presentation in progress` / `Scheduled work` card. Its intake checkpoint is now `Intake — source, audience, and visual direction` and asks `Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?`; `no brand assets — develop identity` resumed the same job.
+- The new Red-team artifact proves both source streams reached downstream generation: it quotes Dr. May's dedicated Clips channel, 5+ daily clips, 150+ monthly tests, Country + Football, 10–20 native pieces, and `Guests create spikes. Formats create habits.`; it separately cites PDF figures including 6.1M/3.7M, 2.6M/2.3M, 2.8M, 30K–52K vs 2K–15K, 72-hour releases, rights gates, and the 2x trailing-30-day-median rule. It correctly identifies and resolves the Clips-channel versus flagship-first conflict instead of hiding it.
+- Identity, competing narratives, gate, and Write completed; Write reached a gate-accepted 10-slide draft with ten distinct compositions, image frames, and source strips. Voice then failed twice with `agent worker is not configured` / `worker=stub`, proving a deterministic provider assignment defect rather than a source or content failure.
+- Production runner evidence: `BONFIRE_AGENT_RUNNER=anthropic_fable` resolves fail-closed to `stub`, while the already-authored process-writer admission requires a parent goal, subtask, deliverable flag, and concrete output contract. The local fix assigns that exact bounded lane to `openai_text`; all dispatched-child lifecycle tests remain intact and the broad Packaging Studio/resume/provider focused gate is green.
+- User-facing checkpoints now say `Narrative direction`, `Final content review`, and `Final deck review`; internal terms such as founder, verbatim, do_not_touch, token spending, SHIP, render-export mechanics, and jury scoreboard no longer appear in their questions. Visible action pills map to `Approve this version`, `Request changes`, and `Keep on hold` without changing their durable action IDs.
+- The independent follow-up gate caught the secondary Intelligence checkpoint renderer and the OpenAI wire deadline. Both checkpoint renderers now share the same customer labels while submitting the original stable option values; the legacy textarea says `Changes for Scout` and explains exact preservation without exposing `do_not_touch`. Governed process writers now receive a 12K-64K deliverable output window and the durable orchestrator deadline at both the thread and HTTP layers; ordinary compact, generic long-form, and hosted-research deadlines are unchanged.
 
 ## Pending Dependencies
 
-- Independent review, exact GitHub/VPS release of the collaborator-source/copy follow-up, one source-complete production deck rerun, editor/presenter proof, Apple processing/groups, and safe cleanup remain pending.
+- Completion of the active source-complete production run, editor/presenter proof, Apple processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; rerun and edit the production deck; verify the already-uploaded Build 69 in TestFlight.
-- Not yet executed: collaborator-source/copy follow-up release, source-complete deck, editor/presenter acceptance, Apple processing/group verification, final repository cleanup.
-- Rollback: retain production release `9b2a04a8` and its images until the follow-up passes the retained verifier and live canaries.
+- Not yet executed: source-complete deck completion, editor/presenter acceptance, Apple processing/group verification, final repository cleanup.
+- Rollback: retain production release `9b2a04a8` and its images until the generation-141 live deck/editor journey passes.
 
 ## Risks And Decisions
 
@@ -81,10 +89,9 @@ Current phase: generation 140 serves exact release `9b2a04a8` with the named-PDF
 
 ## Resume Here
 
-1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 140 before trusting any status above.
-2. Finish the independent authority review; revise and rerun focused normal/race tests if needed. Use the current source-incomplete run only to expose deck/editor defects.
-3. Commit the collaborator-source/copy follow-up, fetch and compare `axx/main`, push only if `9b2a04a8` remains the expected ancestor, then exact-release and verify it.
-4. Rerun the same production request and require both Dr. May's authored Clips Engine/Country + Football language and Tyler's exact PDF revision/text in the stages.
-5. Generate, edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
-6. Verify Apple Build 69 processing and intended TestFlight groups without implying the later web-only copy/source commit is in that mobile binary.
-7. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.
+1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 141 before trusting any status above.
+2. Finish normal/race/compile gates for the bounded writer assignment and customer checkpoint copy, commit/push, exact-release generation 142, and verify serving identity plus rollback.
+3. Use `Retry from here` on goal `os-artifact-workflow-1787294011307003318`; require only blocked Voice to reset while the completed source-complete stages remain intact, then inspect each remaining stage and checkpoint.
+4. Generate, edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
+5. Verify Apple Build 69 processing and intended TestFlight groups without implying the later web-only copy/source commit is in that mobile binary.
+6. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

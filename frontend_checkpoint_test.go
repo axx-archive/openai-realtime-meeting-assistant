@@ -87,12 +87,12 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 		// inline brief exposes the judge scores + steals without leaving the card
 		"goalcard__checkpoint-brief",
 		// options → tappable choice buttons (labels, actions ride separately)
-		"const choiceBtn = bfEl('button', 'goalcard__choice', option.label)",
+		"const choiceBtn = bfEl('button', 'goalcard__choice', desktopCheckpointChoiceLabel(option.label))",
 		// every tap appends the typed notes as the choice suffix (the
 		// prefix-matched founder-pass grammar)
 		"post(noteText() ? `${option.label} — ${noteText()}` : option.label)",
-		// no options → the do_not_touch notes input IS the choice
-		"do_not_touch",
+		// no options → the notes input IS the choice
+		"Add any context Scout should carry forward…",
 		"const noteText = () => String(notes?.value || '').trim()",
 		"go.addEventListener('click', () => post(noteText()))",
 		// resume rides the EXISTING approve seam carrying {choice}
@@ -129,13 +129,13 @@ func TestIndexCheckpointCardNegativeActions(t *testing.T) {
 		"typeof option === 'string'",
 		"{ label: option.trim(), action: 'proceed' }",
 		"String(option?.action || 'proceed').trim() || 'proceed'",
-		// revise options bring the generalized send-back notes input; the
-		// do_not_touch grammar lives in the placeholder, not the label
+		// revise options bring a customer-facing changes field while raw option
+		// values remain the durable action grammar submitted to the server
 		"const hasRevise = options.some(option => option.action === 'revise')",
 		"if (!options.length || hasRevise) {",
-		"? 'notes for the send-back'",
-		": 'notes for the next stage'",
-		"notes.placeholder = 'do_not_touch: …'",
+		"? 'Changes for Scout'",
+		": 'Notes for Scout'",
+		"Add requested changes or lines Scout should preserve exactly…",
 		// the actions read as what they mechanically do
 		"choiceBtn.classList.add('goalcard__choice--revise')",
 		"choiceBtn.classList.add('goalcard__choice--hold')",

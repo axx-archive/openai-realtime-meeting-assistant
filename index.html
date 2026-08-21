@@ -61009,12 +61009,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!options.length || hasRevise) {
             const field = bfEl('div', 'palette__form-field')
             field.appendChild(bfEl('label', 'palette__form-label', hasRevise
-              ? 'notes for the send-back'
-              : 'notes for the next stage'))
+              ? 'Changes for Scout'
+              : 'Notes for Scout'))
             notes = document.createElement('textarea')
             notes.className = 'palette__field'
             notes.rows = 3
-            notes.placeholder = 'do_not_touch: …'
+            notes.placeholder = hasRevise
+              ? 'Add requested changes or lines Scout should preserve exactly…'
+              : 'Add any context Scout should carry forward…'
             field.appendChild(notes)
             wrap.appendChild(field)
           }
@@ -61031,7 +61033,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             // lone proceed keeps the filled primary.
             const proceedCount = options.filter(option => option.action === 'proceed').length
             for (const option of options) {
-              const choiceBtn = bfEl('button', 'goalcard__choice', option.label)
+              const choiceBtn = bfEl('button', 'goalcard__choice', desktopCheckpointChoiceLabel(option.label))
               choiceBtn.type = 'button'
               // §4: proceed is THE primary door only when it is the sole one;
               // revise/hold step down a register
@@ -67485,6 +67487,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(ref?.id || ref?.artifactId || artifact?.id || '')
 	      }
 
+	      function desktopCheckpointChoiceLabel(label) {
+	        const value = String(label || '').trim()
+	        const customerLabels = {
+	          'ship as-is': 'Approve this version',
+	          'approve the ship': 'Approve this version',
+	          'send back for changes': 'Request changes',
+	          'send back — rebuild the deck': 'Request changes',
+	          'hold the package': 'Keep on hold',
+	        }
+	        if (customerLabels[value.toLowerCase()]) return customerLabels[value.toLowerCase()]
+	        if (!/^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(value)) return value
+	        const words = value.replace(/-+/g, ' ')
+	        return words.charAt(0).toUpperCase() + words.slice(1)
+	      }
+
 	      function scoutDesktopCheckpointNode(card, artifact, plan, checkpoint) {
 	        if (!checkpoint || !artifact?.id) return null
 	        const stageId = String(checkpoint.stageId || '')
@@ -67543,7 +67560,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            candidate.setAttribute('aria-pressed', String(candidate === button))
 	            candidate.dataset.choiceState = candidate === button ? 'pending' : 'idle'
 	          })
-	          status.textContent = `Saving “${option.label}”…`
+	          const displayLabel = desktopCheckpointChoiceLabel(option.label)
+	          status.textContent = `Saving “${displayLabel}”…`
 	          let result
 	          try {
 	            result = await submitCheckpointOption(artifact.id, checkpointId, option.id)
@@ -67555,10 +67573,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            panel.dataset.state = 'selected'
 	            button.dataset.choiceState = 'selected'
 	            status.textContent = option.action === 'hold'
-	              ? `Choice saved: ${option.label}. This work remains held.`
+	              ? `Choice saved: ${displayLabel}. This work remains held.`
 	              : option.action === 'revise'
-	                ? `Choice saved: ${option.label}. The work was sent back for revision.`
-	                : `Choice saved: ${option.label}. Scout is continuing.`
+	                ? `Choice saved: ${displayLabel}. The work was sent back for revision.`
+	                : `Choice saved: ${displayLabel}. Scout is continuing.`
 	            goalCardScheduleSync()
 	            return
 	          }
@@ -67569,7 +67587,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          button.focus()
 	        }
 	        for (const option of options) {
-	          const button = bfEl('button', 'scout-chat-work-card__checkpoint-choice', option.label)
+	          const button = bfEl('button', 'scout-chat-work-card__checkpoint-choice', desktopCheckpointChoiceLabel(option.label))
 	          button.type = 'button'
 	          button.dataset.checkpointAction = option.action
 	          button.dataset.choiceState = 'idle'

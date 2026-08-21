@@ -436,6 +436,20 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	if choice.CheckpointSpec.OptionsFrom != "compete_judges" {
 		t.Fatalf("compete_choice optionsFrom=%q, want compete_judges (the winner + overrule card)", choice.CheckpointSpec.OptionsFrom)
 	}
+	if choice.Title != "Narrative direction" {
+		t.Fatalf("compete_choice title=%q, want customer-facing narrative language", choice.Title)
+	}
+	choiceQuestion := strings.ToLower(choice.CheckpointSpec.Question)
+	for _, leaked := range []string{"spends tokens", "human overrule", "write spends"} {
+		if strings.Contains(choiceQuestion, leaked) {
+			t.Fatalf("compete choice leaks internal execution language %q: %q", leaked, choice.CheckpointSpec.Question)
+		}
+	}
+	for _, need := range []string{"three narrative directions", "shape the deck"} {
+		if !strings.Contains(choiceQuestion, need) {
+			t.Fatalf("compete choice missing customer-facing decision %q: %q", need, choice.CheckpointSpec.Question)
+		}
+	}
 	if !containsString(choice.InputFrom, "compete_judges") {
 		t.Fatalf("compete_choice inputFrom=%v, must read the judges' verdict", choice.InputFrom)
 	}
@@ -444,8 +458,17 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	if founder.CheckpointSpec == nil || strings.TrimSpace(founder.CheckpointSpec.Question) == "" {
 		t.Fatal("founder_pass has no checkpoint question")
 	}
-	if !strings.Contains(strings.ToLower(founder.CheckpointSpec.Question), "do_not_touch") {
-		t.Fatalf("founder_pass question must offer the do_not_touch mark: %q", founder.CheckpointSpec.Question)
+	if founder.Title != "Final content review" {
+		t.Fatalf("founder_pass title=%q, want a customer-facing review title", founder.Title)
+	}
+	founderQuestion := strings.ToLower(founder.CheckpointSpec.Question)
+	for _, leaked := range []string{"founder", "do_not_touch", "ship preserves", "taste pass"} {
+		if strings.Contains(founderQuestion, leaked) {
+			t.Fatalf("final content review leaks internal term %q: %q", leaked, founder.CheckpointSpec.Question)
+		}
+	}
+	if !strings.Contains(founderQuestion, "preserve exactly") {
+		t.Fatalf("final content review lost the source-fidelity choice: %q", founder.CheckpointSpec.Question)
 	}
 	// The labels tell the truth (the negative-option teeth): "send back for
 	// changes" mechanically re-queues WRITE with the founder's words as
@@ -478,6 +501,63 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	}
 	if hold.Label != "hold the package" || processCheckpointOptionAction(hold) != processCheckpointActionHold {
 		t.Fatalf("ship_approval third option=%+v, want a hold-action hold", hold)
+	}
+	if approval.Title != "Final deck review" {
+		t.Fatalf("ship_approval title=%q, want a customer-facing review title", approval.Title)
+	}
+	approvalQuestion := strings.ToLower(approval.CheckpointSpec.Question)
+	for _, leaked := range []string{"five interlocking", "approve the ship", "render exports", "scoreboard"} {
+		if strings.Contains(approvalQuestion, leaked) {
+			t.Fatalf("final deck review leaks internal term %q: %q", leaked, approval.CheckpointSpec.Question)
+		}
+	}
+}
+
+func TestPackagingStudioModelWrittenStagesUseBoundedOpenAIWriter(t *testing.T) {
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
+	def := packagingStudioDefinition()
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	if err := instantiateProcessPlan(def, plan); err != nil {
+		t.Fatalf("instantiateProcessPlan: %v", err)
+	}
+	assignGoalRunners(plan)
+	for _, stageID := range []string{"voice", "imagery_direction", "ship_deck"} {
+		stage := packagingStudioStage(t, def, stageID)
+		if stage.Role != processRoleWriter || processStageThreadMode(stage) != "artifacts" {
+			t.Fatalf("stage %s role/mode=%s/%s, want writer/artifacts", stageID, stage.Role, processStageThreadMode(stage))
+		}
+		st := plan.subtaskByID(stageID)
+		if st == nil || st.Runner != agentRunnerOpenAIText {
+			t.Fatalf("stage %s runner=%+v, want bounded openai_text despite retired deployment pin", stageID, st)
+		}
+	}
+}
+
+func TestPackagingStudioRetryReassignmentPreservesBlockedPlan(t *testing.T) {
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
+	def := packagingStudioDefinition()
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateBlocked, routeVerified: true}
+	if err := instantiateProcessPlan(def, plan); err != nil {
+		t.Fatalf("instantiateProcessPlan: %v", err)
+	}
+	write := plan.subtaskByID("write")
+	write.Status = subtaskComplete
+	write.ArtifactID = "saved-write"
+	voice := plan.subtaskByID("voice")
+	voice.Status = subtaskBlocked
+	voice.Revisions = goalMaxRevisions
+	voice.Runner = agentRunnerStub
+
+	assignGoalRunners(plan)
+
+	if voice.Runner != agentRunnerOpenAIText {
+		t.Fatalf("blocked voice runner=%q, want repaired openai_text lane", voice.Runner)
+	}
+	if voice.Status != subtaskBlocked || voice.Revisions != goalMaxRevisions {
+		t.Fatalf("runner refresh rewrote blocked retry state: %+v", voice)
+	}
+	if write.Status != subtaskComplete || write.ArtifactID != "saved-write" {
+		t.Fatalf("runner refresh rewrote completed stage: %+v", write)
 	}
 }
 

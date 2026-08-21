@@ -253,6 +253,28 @@ func TestAgentThreadMaxOutputTokensIsBounded(t *testing.T) {
 	if got := agentThreadMaxOutputTokensForThread(research); got != 32000 {
 		t.Fatalf("high research budget=%d, want 32000", got)
 	}
+
+	deliverable := scoutAgentThread{Mode: "artifacts", Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"goalParentId": "goal-1", "goalSubtaskId": "ship_deck", "goalDeliverable": "true", "outputContract": packagingStudioDeckContract,
+	}}}
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "1")
+	if got := agentThreadMaxOutputTokensForThread(deliverable); got != 12000 {
+		t.Fatalf("low deliverable budget=%d, want 12000", got)
+	}
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "999999")
+	if got := agentThreadMaxOutputTokensForThread(deliverable); got != 64000 {
+		t.Fatalf("high deliverable budget=%d, want 64000", got)
+	}
+}
+
+func TestGroundedDeliverableUsesLongRequestWindow(t *testing.T) {
+	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "7m")
+	thread := scoutAgentThread{Mode: "artifacts", Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"goalParentId": "goal-1", "goalSubtaskId": "ship_deck", "goalDeliverable": "true", "outputContract": packagingStudioDeckContract,
+	}}}
+	if got := agentThreadRequestTimeout(thread); got != 7*time.Minute {
+		t.Fatalf("grounded deliverable timeout=%s, want 7m", got)
+	}
 }
 
 func TestScoutChatThreadAttentionReasonIsClosedAndActionable(t *testing.T) {

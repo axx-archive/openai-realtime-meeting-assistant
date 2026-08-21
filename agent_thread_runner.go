@@ -1706,6 +1706,12 @@ func agentThreadRequestTimeout(thread scoutAgentThread) time.Duration {
 	if agentThreadUsesLiveWebSearch(thread) {
 		return 0
 	}
+	// Contract-bearing process writers can produce an entire presentation file,
+	// not a chat-sized answer. Give only this already-authorized lane the same
+	// bounded long-run window as a deliverable orchestrator turn.
+	if agentThreadUsesGroundedDeliverableContract(thread) {
+		return orchestratorTimeout()
+	}
 	switch selectedAgentRunnerName() {
 	case agentRunnerCodexSidecar, agentRunnerCodexLocal:
 		return codexExecConfigFromEnv().Timeout
@@ -1935,6 +1941,7 @@ type durableOpenAITextRequest struct {
 	ServiceTier     string               `json:"serviceTier,omitempty"`
 	JSONSchema      *openAIJSONSchema    `json:"jsonSchema,omitempty"`
 	EnableWebSearch bool                 `json:"enableWebSearch,omitempty"`
+	LongRunning     bool                 `json:"longRunning,omitempty"`
 }
 
 type publicConversationProviderAuthorityEntry struct {
@@ -2021,7 +2028,7 @@ func durableOpenAIRequest(request openAITextRequest) durableOpenAITextRequest {
 		Model: request.Model, Instructions: request.Instructions, Input: request.Input, IdempotencyKey: request.IdempotencyKey,
 		Attachments: request.Attachments, ReasoningEffort: request.ReasoningEffort, Verbosity: request.Verbosity,
 		MaxOutputTokens: request.MaxOutputTokens, Seat: request.Seat, Workflow: request.Workflow,
-		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch,
+		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch, LongRunning: request.LongRunning,
 	}
 }
 
@@ -2030,7 +2037,7 @@ func (snapshot durableOpenAITextRequest) request(thread scoutAgentThread) openAI
 		Model: snapshot.Model, Instructions: snapshot.Instructions, Input: snapshot.Input, IdempotencyKey: snapshot.IdempotencyKey,
 		Attachments: snapshot.Attachments, ReasoningEffort: snapshot.ReasoningEffort, Verbosity: snapshot.Verbosity,
 		MaxOutputTokens: snapshot.MaxOutputTokens, Seat: snapshot.Seat, Workflow: snapshot.Workflow,
-		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch,
+		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch, LongRunning: snapshot.LongRunning,
 		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
 	}
 }
@@ -2052,6 +2059,7 @@ func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread
 		Verbosity:       "medium",
 		MaxOutputTokens: agentThreadMaxOutputTokensForThread(thread),
 		EnableWebSearch: liveWebSearch,
+		LongRunning:     agentThreadUsesGroundedDeliverableContract(thread),
 		ValidateOutput:  func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
 	}
 }
@@ -2264,17 +2272,27 @@ func agentThreadMaxOutputTokens() int {
 }
 
 func agentThreadMaxOutputTokensForThread(thread scoutAgentThread) int {
-	if !agentThreadUsesLiveWebSearch(thread) {
-		return agentThreadMaxOutputTokens()
+	if agentThreadUsesGroundedDeliverableContract(thread) {
+		value := deliverableMaxTokens()
+		if value < 12000 {
+			return 12000
+		}
+		if value > 64000 {
+			return 64000
+		}
+		return value
 	}
-	value := positiveIntEnv("BONFIRE_RESEARCH_MAX_OUTPUT_TOKENS", defaultResearchAgentThreadMaxOutputTokens)
-	if value < 12000 {
-		return 12000
+	if agentThreadUsesLiveWebSearch(thread) {
+		value := positiveIntEnv("BONFIRE_RESEARCH_MAX_OUTPUT_TOKENS", defaultResearchAgentThreadMaxOutputTokens)
+		if value < 12000 {
+			return 12000
+		}
+		if value > 32000 {
+			return 32000
+		}
+		return value
 	}
-	if value > 32000 {
-		return 32000
-	}
-	return value
+	return agentThreadMaxOutputTokens()
 }
 
 func (app *kanbanBoardApp) currentOpenAIAPIKey() string {

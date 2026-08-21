@@ -448,6 +448,10 @@ func TestOpenAIResponsesRequestTimeoutIsScopedToWorkShape(t *testing.T) {
 	if got := openAIResponsesRequestTimeout(openAITextRequest{MaxOutputTokens: 8000}); got != 120*time.Second {
 		t.Fatalf("long-form timeout=%s, want 120s", got)
 	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "7m")
+	if got := openAIResponsesRequestTimeout(openAITextRequest{MaxOutputTokens: 32000, LongRunning: true}); got != 7*time.Minute {
+		t.Fatalf("grounded deliverable timeout=%s, want 7m", got)
+	}
 	if got := openAIResponsesRequestTimeout(openAITextRequest{MaxOutputTokens: 8000, EnableWebSearch: true}); got != 0 {
 		t.Fatalf("hosted-search timeout=%s, want cancellation-owned work with no artificial deadline", got)
 	}

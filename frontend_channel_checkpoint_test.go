@@ -27,6 +27,7 @@ func TestChannelWorkCardOwnsCheckpointDecision(t *testing.T) {
 		"submitCheckpointOption(artifact.id, checkpointId, option.id)",
 		"checkpointId: String(checkpointId || '').trim()",
 		"checkpointOptionId: String(checkpointOptionId || '').trim()",
+		"function desktopCheckpointChoiceLabel(label)",
 		"This work remains held.",
 		"The work was sent back for revision.",
 		"Scout is continuing.",
@@ -135,7 +136,10 @@ const server=http.createServer((req,res)=>{
 	assert.deepEqual(requests[2],{id:'goal-channel-hold',action:'approve',checkpointId:'goal-checkpoint-bbbbbbbbbbbbbbbbbbbbbbbb',checkpointOptionId:'checkpoint-option-444444444444444444444444'});
 	assert.equal(requests.length,3);
 	assert.ok(requests.every(request=>!Object.prototype.hasOwnProperty.call(request,'choice')));
- await browser.close();server.close();
+	await page.evaluate(()=>mountChannelCheckpointFixture('channel-studio-copy','goal-channel-studio',{id:'goal-checkpoint-cccccccccccccccccccccccc',stageId:'ship_approval',question:'The deck is ready. What would you like to do?',options:[{id:'checkpoint-option-666666666666666666666666',label:'approve the ship',action:'proceed'},{id:'checkpoint-option-777777777777777777777777',label:'send back — rebuild the deck',action:'revise'},{id:'checkpoint-option-888888888888888888888888',label:'hold the package',action:'hold'},{id:'checkpoint-option-999999999999999999999999',label:'franchise-playbook',action:'proceed'}]},'Finish this deck'));
+	const studioLabels=await page.locator('#channel-studio-copy .scout-chat-work-card__checkpoint-choice').allTextContents();
+	assert.deepEqual(studioLabels,['Approve this version','Request changes','Keep on hold','Franchise playbook']);
+	await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
 	cmd.Env = append(os.Environ(), "CHANNEL_CHECKPOINT_INDEX="+indexPath)

@@ -1304,6 +1304,19 @@ func assignGoalRunners(plan *goalPlan) {
 	}
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
+		// Process writers with concrete server-authored contracts are bounded
+		// text-generation jobs: the engine has already assembled their authorized
+		// source packet and prior-stage inputs. Route that exact lane to OpenAI even
+		// when an obsolete deployment-wide orchestrator pin resolves to the
+		// unavailable stub. Shell/repo work remains on the isolated execution lane.
+		if st.Role == processRoleWriter {
+			if def, found := processByID(plan.ProcessID); found {
+				if stage, stageFound := def.stageByID(st.ID); stageFound && strings.TrimSpace(stage.OutputContract) != "" {
+					st.Runner = agentRunnerOpenAIText
+					continue
+				}
+			}
+		}
 		if goalSubtaskNeedsExecution(st) {
 			st.Runner = selectedExecutionRunnerName()
 		} else {
@@ -3712,6 +3725,12 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	engine := newGoalEngine(app)
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
 		return fmt.Errorf("saved goal route is unavailable: %w", err)
+	}
+	// Runner selection is server-owned and re-derivable. Refresh it before a
+	// blocked process resumes so a repaired provider route takes effect without
+	// rewriting completed artifacts, checkpoints, revisions, or dependencies.
+	if _, ok := engine.resolvedProcess(&plan); ok {
+		assignGoalRunners(&plan)
 	}
 	reset := 0
 	for index := range plan.Subtasks {
