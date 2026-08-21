@@ -74,10 +74,13 @@ func TestDeckDocumentValidationAndCompile(t *testing.T) {
 		t.Fatalf("validateDeckDocument: %v", err)
 	}
 	html := compileDeckDocumentHTML(deck, "Like a Farmer")
-	for _, want := range []string{"width:1920px", "height:1080px", "Farmers &lt; founders", "text-align:center", "line-height:1.05", "letter-spacing:.04em", `<div class="notes" hidden>Open with the field story [BEAT]</div>`, "/artifacts/blob?ref=" + ref} {
+	for _, want := range []string{"width:1920px", "height:1080px", "@page{size:1920px 1080px;margin:0}", ".pg:last-of-type{break-after:auto;page-break-after:auto}", "Farmers &lt; founders", "text-align:center", "line-height:1.05", "letter-spacing:.04em", `<div class="notes" hidden>Open with the field story [BEAT]</div>`, "/artifacts/blob?ref=" + ref} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("compiled HTML missing %q: %s", want, html)
 		}
+	}
+	if strings.Contains(html, "size:13.333333in 7.5in") {
+		t.Fatalf("compiled HTML regressed to a 1280x720 print page that splits a 1920x1080 native slide: %s", html)
 	}
 	if strings.Contains(html, "data:image") || strings.Contains(strings.ToLower(html), "<script") {
 		t.Fatalf("compiled HTML must remain byte-light and script-free: %s", html)

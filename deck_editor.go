@@ -705,7 +705,14 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 	var builder strings.Builder
 	builder.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>")
 	builder.WriteString(html.EscapeString(firstNonEmptyString(strings.TrimSpace(title), "Presentation")))
-	builder.WriteString("</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#08080a}#stage{position:relative;width:1920px;height:1080px;transform-origin:top left}.pg{position:absolute;inset:0;display:none;overflow:hidden}.pg.on{display:block}.el{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap;overflow:hidden;line-height:1.08}.image{display:block}.shape{box-sizing:border-box}@media print{@page{size:13.333333in 7.5in;margin:0}html,body{width:auto;height:auto;overflow:visible;background:#fff}#stage{width:auto;height:auto;transform:none!important}.pg,.pg.on{position:relative;display:block!important;width:1920px;height:1080px;break-after:page;page-break-after:always}}</style></head><body><div id=\"stage\">")
+	builder.WriteString("</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#08080a}#stage{position:relative;width:1920px;height:1080px;transform-origin:top left}.pg{position:absolute;inset:0;display:none;overflow:hidden}.pg.on{display:block}.el{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap;overflow:hidden;line-height:1.08}.image{display:block}.shape{box-sizing:border-box}")
+	// The editor and Packaging Studio intentionally share one print contract.
+	// Native scenes use the same 1920x1080 page geometry as their canvas: a
+	// smaller physical page lets Chromium split a full-bleed slide, producing a
+	// mostly blank spill page before the next slide. Keeping this derived from
+	// the invariant chassis also preserves the last-page break guard.
+	builder.WriteString(packagingDeckPrintCSS())
+	builder.WriteString("</style></head><body><div id=\"stage\">")
 	for slideIndex, slide := range deck.Slides {
 		className := "pg"
 		if slideIndex == 0 {

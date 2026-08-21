@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 153 serves exact release `e411da3158239d34e518127f343e3dcc69fb13d6` as `verified-local-unsigned`. Signed-in production QA now shows exactly one canonical Like A Farmer deck card for `os-artifact-artifacts-1787303409669546304`, with the actual first slide and working Edit/Present controls. The same visual pass found three repeated two-stage run logs from historical render retries; the current follow-up keeps those receipts in View activity but emits only the latest exact goal + stage row in the conversation. Final approval remains parked. Because the release includes native changes after Build 69, the final TestFlight lane is Build 70 from the exact combined release SHA.
+Current phase: generation 155 serves exact release `a690389de807aa5c96e2654d19f6d2de71d89c4d` as `verified-local-unsigned`. Signed-in production QA shows exactly one canonical Like A Farmer deck card for `os-artifact-artifacts-1787303409669546304`, with the actual first slide, one current-goal activity sequence, and working full-window Edit/Present controls. The authoritative image-expanded re-export exposed a new hard gate: the 1920x1080 native scene was compiled against a 1280x720 print page, splitting slide 1's bottom source strip onto an eleventh page. The candidate now derives native-scene print CSS from the invariant 1920x1080 Packaging Studio chassis; a real Chromium edge-footer reproduction prints exactly 10/10 pages. Final approval remains parked until the fixed production export is inspected. Because the release includes native changes after Build 69, the final TestFlight lane is Build 70 from the exact combined release SHA.
 
 ## Invariants
 
@@ -23,7 +23,7 @@ Current phase: generation 153 serves exact release `e411da3158239d34e518127f343e
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
 | W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Native deck edited on generation 151; rich feed card and image-complete re-export pending candidate release |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Native deck edited; one rich card plus Edit/Present verified on generation 155; 10-page export correction pending release |
 | W7 | Publish the final combined native SHA as Build 70 to TestFlight | Final web/mobile release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Build 69 uploaded from `9b2a04a8`; Build 70 required for current native result/preview fixes |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
 
@@ -100,17 +100,20 @@ Current phase: generation 153 serves exact release `e411da3158239d34e518127f343e
 - Focused gates pass: result projection and cross-goal isolation; lock-safe lost-response recovery; native-image export expansion; rich web deck routing; rendered checkpoint/chat/Deck Studio journeys with bundled Playwright; TypeScript; and all 587 mobile tests. The broad repository run additionally revealed and closed a candidate-introduced memory re-entry deadlock; the lock-sensitive recovery test now passes. Remaining broad failures are the documented baseline/static suite drift and missing default Playwright module path, not accepted as candidate evidence.
 - Generation 152 deployed exact `04b71a3794b0e284440e916cae06b67983564764` as `verified-local-unsigned`, with app image `sha256:714ff6b0f03bae84b026b5e7fcf82ad5b0e3c7fe0806a4dc14793f600f157062` and render image `sha256:090ad1c21b13fe653b5bbbd5f8515fbce3ed45a0907b17f6a2d85a6d270caae6`. Signed-in Like A Farmer QA found four rich cards because three historical attempts have distinct artifact IDs. The candidate now chooses the newest declared HTML deck bound conjunctively by `goalId`/`goalParentId` and exact source, and suppresses other same-goal attempts from the feed without deleting them.
 - Generation 153 deployed exact `e411da3158239d34e518127f343e3dcc69fb13d6` as `verified-local-unsigned`, with app image `sha256:0690f1a00e44703a04d6e84b20622c52fc7c87ee9cda36cd2f5e1a2b2855227c` and render image `sha256:6b5a730e8cd730238ca71f9707944c54fc45088161b94c3598d234aa56b6157c`. Production now renders one canonical rich deck card. The screenshot gate caught repeated historical Assemble/Review run logs; the follow-up globally latest-wins each exact goal + customer-facing stage while retaining all receipts in activity.
+- Generations 154 and 155 collapsed superseded same-stage retries and then historical goals from the main feed while preserving their receipts in View activity. Generation 155 serves exact `a690389de807aa5c96e2654d19f6d2de71d89c4d` as `verified-local-unsigned`, with app image `sha256:f90312f7525b9439f74e0bf2d3f644e6222d624b9b16e7769ea458d46f231bc1`, render image `sha256:5efca38ab682e56369f13d1ef0eef9732dfe1635a259a5129ae119719df126a2`, bundle `b8cd49dc56f555951618dd6037b77dcaaa6a731c9864fd04ad151d44070b7773`, and generation 154 retained. The first build failed safely at full disk; `docker builder prune --force` removed only 2.515 GB of reclaimable build cache, touched no images/releases/containers/data, and the exact same archive then activated and verified.
+- Live generation-155 acceptance proves one 16:9 rich card, one Edit action, one Present action, ten native editor slides, enabled Save/Scout imagery/shape/layer controls, and a 1/10 presenter. The official authenticated Export PDF completed with both protected Scout image assets, but reported 11 pages. Inspection of all eleven JPEGs proved slide 1's bottom source strip alone occupied page 2 and slides 2-10 shifted to pages 3-11. The compiler mismatch was exact: `.pg` is 1920x1080 while native print CSS declared 13.333333in x 7.5in (1280x720 at CSS resolution).
+- The print candidate removes the drift by deriving native-scene pagination from `packagingDeckPrintCSS()`, including `@page{size:1920px 1080px;margin:0}` and the final-page break guard. A headless Chromium reproduction with ten 1920x1080 slides and an element at y=1040 produced exactly ten PDF pages; focused normal and race tests pass, TypeScript passes, all 587 mobile tests pass, and `git diff --check` is clean. The required broad `go test ./...` was executed; it reproduced documented static/Playwright-path drift and exhausted its global 10-minute timeout in the unrelated dictation qualification mutation test, while the touched pagination tests remained green.
 
 ## Pending Dependencies
 
-- Exact candidate release, current-deck feed/render acceptance, final approval, Build 70 processing/groups, and safe cleanup remain pending.
+- Exact pagination release, fixed 10-page production render acceptance, final approval, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; re-export/approve the current production deck; build and submit exact Build 70; verify TestFlight.
-- Not yet executed: rich production feed acceptance, image-complete re-export, final approval/channel completion, Build 70 processing/group verification, final repository cleanup.
-- Rollback: retain production generation 150 (`e4263cbf`) and generation 151 images until the follow-up live feed/export journey passes.
+- Not yet executed: fixed 10-page image-complete re-export, final approval/channel completion, Build 70 processing/group verification, final repository cleanup.
+- Rollback: retain the active generation and its immediately prior verified release/images until the follow-up live export journey passes.
 
 ## Risks And Decisions
 
@@ -121,9 +124,8 @@ Current phase: generation 153 serves exact release `e411da3158239d34e518127f343e
 
 ## Resume Here
 
-1. Verify `git status`, `git diff --check`, focused Go/browser/native gates, `axx/main`, and generation 151.
-2. Commit/push the exact candidate, deploy the next receipted release, and verify serving identity plus retained generation-150 rollback.
-3. Reload Like A Farmer in the signed-in production browser. Require one rich 16:9 deck card with Edit and Present, no duplicate generic deck/process cards, and a visually bounded final decision surface.
-4. Re-export artifact `os-artifact-artifacts-1787303409669546304`; inspect all ten rendered pages and require the Scout images on slides 1 and 7. Reopen editor/presenter, then approve final review and confirm the completion/channel receipt.
-5. Increment iOS to Build 70, build/submit the exact final main SHA by explicit EAS build ID, and verify Apple processing plus intended groups.
-6. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.
+1. Commit/push the 1920x1080 native print-contract candidate, deploy the next receipted release, and verify serving identity plus retained generation-155 rollback.
+2. Re-export artifact `os-artifact-artifacts-1787303409669546304` through the signed-in production UI; require exactly ten rendered pages, inspect every page, and require the Scout images on slides 1 and 7 with no clipping or spill page.
+3. Reconfirm one rich 16:9 channel card plus full-window Edit and 1/10 Present. Approve final review only after the ten-page gate passes, then confirm the completion/channel receipt.
+4. Build/submit iOS Build 70 from the exact final main SHA by explicit EAS build ID, and verify Apple processing plus intended groups.
+5. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.
