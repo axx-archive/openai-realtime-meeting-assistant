@@ -556,6 +556,10 @@ func TestDeckAssetUploadPersistsExactSlideAndBumpsVersion(t *testing.T) {
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &initial) != nil {
 		t.Fatalf("GET status=%d body=%s", get.Code, get.Body.String())
 	}
+	initial.Deck.Slides[0].Elements = append(initial.Deck.Slides[0].Elements,
+		deckElement{ID: "zero-scrim", Type: "shape", X: 0, Y: 0, Width: 1920, Height: 1080, Z: 0, Opacity: .7, Shape: "rectangle", Fill: "#102030"},
+		deckElement{ID: "zero-copy", Type: "text", X: 96, Y: 96, Width: 900, Height: 200, Z: 0, Opacity: 1, Text: "Authored zero layer", FontSize: 64, FontFamily: "Arial", FontWeight: 700, Color: "#ffffff"},
+	)
 	patchBody, _ := json.Marshal(map[string]any{"artifactId": artifact.ID, "expectedVersion": artifactVersion(artifact), "deck": initial.Deck})
 	patch := artifactAuthorizationRequest(t, http.MethodPatch, "/artifacts/deck", string(patchBody), cookies, deckEditorHandler)
 	var native struct {
@@ -592,11 +596,18 @@ func TestDeckAssetUploadPersistsExactSlideAndBumpsVersion(t *testing.T) {
 		Deck     deckDocument     `json:"deck"`
 		Element  deckElement      `json:"element"`
 	}
-	if json.Unmarshal(recorder.Body.Bytes(), &uploaded) != nil || uploaded.Artifact.Version <= native.Artifact.Version || uploaded.Element.Ref == "" || uploaded.Element.X != 0 || uploaded.Element.Width != 1920 {
+	if json.Unmarshal(recorder.Body.Bytes(), &uploaded) != nil || uploaded.Artifact.Version <= native.Artifact.Version || uploaded.Element.Ref == "" || uploaded.Element.X != 0 || uploaded.Element.Width != 1920 || uploaded.Element.Z != 0 {
 		t.Fatalf("upload response=%s, want full-bleed exact-slide element and bumped version", recorder.Body.String())
 	}
-	if got := uploaded.Deck.Slides[0].Elements[len(uploaded.Deck.Slides[0].Elements)-1].Ref; got != uploaded.Element.Ref {
-		t.Fatalf("last slide element ref=%q, want uploaded ref %q", got, uploaded.Element.Ref)
+	if got := uploaded.Deck.Slides[0].Elements[0].Ref; got != uploaded.Element.Ref {
+		t.Fatalf("base slide element ref=%q, want uploaded ref %q", got, uploaded.Element.Ref)
+	}
+	compiled := compileDeckDocumentHTML(uploaded.Deck, "Layer order regression")
+	imageAt := strings.Index(compiled, `data-element-id="`+uploaded.Element.ID+`"`)
+	scrimAt := strings.Index(compiled, `data-element-id="zero-scrim"`)
+	copyAt := strings.Index(compiled, `data-element-id="zero-copy"`)
+	if imageAt < 0 || scrimAt < 0 || copyAt < 0 || imageAt >= scrimAt || imageAt >= copyAt {
+		t.Fatalf("compiled z=0 order image=%d scrim=%d copy=%d, want generated base before authored layers: %s", imageAt, scrimAt, copyAt, compiled)
 	}
 }
 

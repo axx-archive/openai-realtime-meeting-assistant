@@ -458,7 +458,7 @@ func deckEditorImageGenerationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	element := generatedDeckImageElement(deck.Slides[slideIndex], ref, name, payload.Prompt, payload.Placement)
-	deck.Slides[slideIndex].Elements = append(deck.Slides[slideIndex].Elements, element)
+	insertDeckImageElement(&deck.Slides[slideIndex], element, payload.Placement)
 	allowedRefs := artifactAssetRefSet(current)
 	allowedRefs[ref] = struct{}{}
 	if err := validateDeckDocument(deck, allowedRefs); err != nil {
@@ -560,7 +560,7 @@ func deckEditorAssetUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	element := generatedDeckImageElement(deck.Slides[deckSlideIndex(deck, slideID)], ref, name, "", placement)
 	element.GeneratedAt = ""
-	deck.Slides[deckSlideIndex(deck, slideID)].Elements = append(deck.Slides[deckSlideIndex(deck, slideID)].Elements, element)
+	insertDeckImageElement(&deck.Slides[deckSlideIndex(deck, slideID)], element, placement)
 	allowedRefs := artifactAssetRefSet(artifact)
 	allowedRefs[ref] = struct{}{}
 	if err := validateDeckDocument(deck, allowedRefs); err != nil {
@@ -855,11 +855,27 @@ func generatedDeckImageElement(slide deckSlide, ref, name, prompt, placement str
 	}
 	element := deckElement{ID: id, Type: "image", Ref: ref, Name: name, Fit: "cover", Opacity: 1, Prompt: prompt, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if placement == "full_bleed" {
-		element.X, element.Y, element.Width, element.Height, element.Z = 0, 0, deckDocumentWidth, deckDocumentHeight, -100
+		// z=0 keeps the image above the slide's own background paint. Full-bleed
+		// images are also inserted before authored elements so stable z sorting
+		// leaves existing z=0 scrims and content above the generated base layer.
+		// A negative z-index sits behind the scene background and makes a
+		// successful generation appear to have produced nothing.
+		element.X, element.Y, element.Width, element.Height, element.Z = 0, 0, deckDocumentWidth, deckDocumentHeight, 0
 	} else {
 		element.X, element.Y, element.Width, element.Height, element.Z = 960, 120, 840, 840, maxZ+1
 	}
 	return element
+}
+
+func insertDeckImageElement(slide *deckSlide, element deckElement, placement string) {
+	if placement == "full_bleed" {
+		// Both the editor and compiled presentation use stable z-only ordering.
+		// Prepending makes the generated z=0 image the base of the z=0 group
+		// without rewriting authored layer values or risking the z bounds.
+		slide.Elements = append([]deckElement{element}, slide.Elements...)
+		return
+	}
+	slide.Elements = append(slide.Elements, element)
 }
 
 func deckImageExtension(mime string) string {
