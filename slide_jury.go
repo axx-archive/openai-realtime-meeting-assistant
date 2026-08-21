@@ -10,7 +10,7 @@ package main
 //      and dropped payload.PageJPEGPaths on the floor; now every page JPEG is
 //      read off the shared volume (path-validated against the render queue —
 //      the sidecar is the least-trusted box in the system), stored in the
-//      content-addressed blob store, and appended as a {kind: image} asset on
+//      content-addressed blob store, and appended as a {kind: page_image} asset on
 //      the same artifact via the existing appendArtifactAsset seam.
 //   2. runSlideJury — pulls those page-image assets, loads the JPEGs from the
 //      blob store, and runs the /packaging jury trio (headline ear / design
@@ -36,6 +36,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
 const (
@@ -67,7 +69,7 @@ func slideJuryWaitTimeout() time.Duration {
 const renderPageImageAssetCap = 100
 
 // persistRenderPageImageAssets stores the callback's page JPEGs as {kind:
-// image} assets on the artifact, returning how many were persisted. Before
+// page_image} assets on the artifact, returning how many were persisted. Before
 // this wave the page images were NOT persisted anywhere — the callback kept
 // only the PDF — so the jury had nothing to see. Each path gets the same trust
 // treatment as the callback's PDF path (resolveRenderQueueFile): it must live
@@ -112,13 +114,13 @@ func persistRenderPageImageAssets(app *kanbanBoardApp, artifactID string, payloa
 			Ref:  ref,
 			Mime: "image/jpeg",
 			Name: fmt.Sprintf("page-%02d.jpg", index+1),
-			Kind: "image",
+			Kind: "page_image",
 		})
 	}
 	if len(pages) == 0 {
 		return 0
 	}
-	if _, err := app.replaceArtifactAssetsOfKind(artifactID, "image", pages); err != nil {
+	if _, err := app.replaceArtifactAssetsOfKind(artifactID, "page_image", pages); err != nil {
 		log.Warnf("Render callback page images did not attach to %s: %v", artifactID, err)
 		return 0
 	}
@@ -126,15 +128,42 @@ func persistRenderPageImageAssets(app *kanbanBoardApp, artifactID string, payloa
 }
 
 // artifactPageImageAssets filters an artifact's assets down to the page images
-// the jury consumes ({kind: image} — the render callback's stamp).
+// the jury consumes. Generated deck imagery remains kind=image and must never
+// masquerade as rendered pages. The narrow filename fallback reads callbacks
+// filed before page_image became its own kind.
 func artifactPageImageAssets(entry meetingMemoryEntry) []artifactAsset {
 	var pages []artifactAsset
 	for _, asset := range artifactAssets(entry) {
-		if asset.Kind == "image" {
+		if artifactAssetIsPageImage(asset) {
 			pages = append(pages, asset)
 		}
 	}
 	return pages
+}
+
+// renderedDeckSlideCount reads the authored slide topology, ignoring nested
+// semantic sections. A slide is a .pg/.slide element or a direct section child
+// of #stage for older decks. This is the structural side of the jury contract:
+// every authored slide must have exactly one rendered page before review.
+func renderedDeckSlideCount(source string) int {
+	doc, err := xhtml.Parse(strings.NewReader(source))
+	if err != nil {
+		return 0
+	}
+	count := 0
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		isStageChild := node.Type == xhtml.ElementNode && node.Data == "section" && node.Parent != nil && legacyNodeAttr(node.Parent, "id") == "stage"
+		if node.Type == xhtml.ElementNode && (legacyNodeHasClass(node, "pg") || legacyNodeHasClass(node, "slide") || isStageChild) {
+			count++
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	return count
 }
 
 // waitForDeckPageImages polls the deck artifact until page-image assets exist

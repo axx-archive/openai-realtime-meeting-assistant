@@ -243,6 +243,52 @@ func checkpointReceiptFor(t *testing.T, app *kanbanBoardApp, artifactID, checkpo
 	return goalCheckpointResolutionReceipt{}
 }
 
+func TestOpaqueCheckpointOptionKeepsExactActionAndTargetWithRevisionNote(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	processID := "checkpoint_prefix_collision_" + sha256Hex([]byte(t.Name()))[:12]
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID: processID, Version: 1, Title: "Prefix collision probe", Authority: toolAuthorityWorkspaceWrite, Hidden: true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Draft", Role: processRoleWriter},
+			{ID: "approval", Title: "Review", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"}, CheckpointSpec: &ProcessCheckpointSpec{
+				Question: "What next?", Options: []ProcessCheckpointOption{
+					{Label: "send"},
+					{Label: "send back", Action: processCheckpointActionRevise, Target: "w1"},
+				},
+			}},
+		},
+	})
+	work, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Prefix collision", CreatedBy: "aj@shareability.com", ToolTemplate: processID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.runGoalThread(work.Artifact.ID)
+	plan := waitForGoalStage(t, app, work.Artifact.ID, goalStateApproval)
+	checkpointID := goalCheckpointID(work.Artifact.ID, plan.Checkpoint)
+	reviseID := goalCheckpointOptionID(checkpointID, plan.Checkpoint.Options[1], 1)
+	replayed, bound, err := app.resumeApprovedGoalBound(work.Artifact.ID, "AJ", "tighten the ending", checkpointID, reviseID, nil)
+	if err != nil || replayed || !bound {
+		t.Fatalf("exact revise replayed=%v bound=%v err=%v", replayed, bound, err)
+	}
+	plan = waitForGoalStage(t, app, work.Artifact.ID, goalStateApproval)
+	if len(*launched) != 2 || (*launched)[1].subtaskID != "w1" {
+		t.Fatalf("opaque revise executed the wrong option/target: %+v", *launched)
+	}
+	receipt := checkpointReceiptFor(t, app, work.Artifact.ID, checkpointID, reviseID)
+	if receipt.Action != processCheckpointActionRevise || receipt.Target != "w1" || receipt.Choice != "send back — tighten the ending" {
+		t.Fatalf("receipt lost exact option authority: %+v", receipt)
+	}
+	replayed, bound, err = app.resumeApprovedGoalBound(work.Artifact.ID, "AJ", "different note", checkpointID, reviseID, nil)
+	if err != nil || !replayed || !bound || len(*launched) != 2 {
+		t.Fatalf("retry replayed=%v bound=%v err=%v launches=%+v", replayed, bound, err, *launched)
+	}
+	if replay := checkpointReceiptFor(t, app, work.Artifact.ID, checkpointID, reviseID); replay.Choice != receipt.Choice {
+		t.Fatalf("retry changed the first decision: before=%+v after=%+v", receipt, replay)
+	}
+}
+
 func TestOpaqueCheckpointActionsRecoverWriteFailureAndLostAck(t *testing.T) {
 	for _, action := range []string{processCheckpointActionProceed, processCheckpointActionHold, processCheckpointActionRevise} {
 		t.Run(action+"/write_failure", func(t *testing.T) {
@@ -963,10 +1009,22 @@ func TestArtifactActionHTTPReviseChoiceRequeuesTarget(t *testing.T) {
 		t.Fatalf("launchGoalThread: %v", err)
 	}
 	kanbanApp.runGoalThread(thread.Artifact.ID)
-	waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	parked := waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	checkpointID := goalCheckpointID(thread.Artifact.ID, parked.Checkpoint)
+	optionID := ""
+	for index, option := range parked.Checkpoint.Options {
+		if option.action() == processCheckpointActionRevise {
+			optionID = goalCheckpointOptionID(checkpointID, option, index)
+			break
+		}
+	}
+	if optionID == "" {
+		t.Fatal("revise checkpoint option missing")
+	}
 
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
-	recorder := postArtifactAction(t, cookies, fmt.Sprintf(`{"id":%q,"action":"approve","choice":"send back — HTTP door check"}`, thread.Artifact.ID))
+	const revisionNote = "Keep the opening. Rebuild every incomplete rendered slide."
+	recorder := postArtifactAction(t, cookies, fmt.Sprintf(`{"id":%q,"action":"approve","checkpointId":%q,"checkpointOptionId":%q,"checkpointNote":%q}`, thread.Artifact.ID, checkpointID, optionID, revisionNote))
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("revise choice status=%d body=%s, want 202", recorder.Code, recorder.Body.String())
 	}
@@ -980,7 +1038,7 @@ func TestArtifactActionHTTPReviseChoiceRequeuesTarget(t *testing.T) {
 	if len(*launched) != 2 || (*launched)[1].subtaskID != "w1" {
 		t.Fatalf("launched children=%+v, want the initial w1 + one send-back redo", *launched)
 	}
-	if !strings.Contains((*launched)[1].query, "send back — HTTP door check") {
+	if !strings.Contains((*launched)[1].query, revisionNote) {
 		t.Fatalf("redo query does not carry the HTTP choice notes:\n%s", (*launched)[1].query)
 	}
 

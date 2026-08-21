@@ -79,11 +79,12 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 	for _, want := range []string{
 		// the question is the legible headline
 		"goalcard__checkpoint-question",
-		"String(checkpoint.question || 'Approve this stage to continue?')",
+		"packagingStudioCheckpointQuestion(plan, checkpoint) || 'Approve this stage to continue?'",
 		// review-the-draft doors open the input stages' artifacts in the
 		// chat-side artifact stage (§7 — Intelligence stays the data room)
 		"const inputTasks = (stageTask?.dependsOn || [])",
-		"openArtifactStage(input.artifactId, input.title || input.id)",
+		"const inputTitle = packagingStudioTaskDisplayTitle(plan, input)",
+		"openArtifactStage(input.artifactId, inputTitle)",
 		// inline brief exposes the judge scores + steals without leaving the card
 		"goalcard__checkpoint-brief",
 		// options → tappable choice buttons (labels, actions ride separately)
@@ -215,7 +216,7 @@ func TestIndexProcessStageDetailLines(t *testing.T) {
 	// a parked checkpoint drives the live stage line (the question, not a
 	// generic wait)
 	if !strings.Contains(update, "const pendingCheckpoint = goalPendingCheckpoint(artifact, plan)") ||
-		!strings.Contains(update, "String(pendingCheckpoint.question || '')") {
+		!strings.Contains(update, "packagingStudioCheckpointQuestion(plan, pendingCheckpoint)") {
 		t.Error("updateGoalCard stage line must surface the pending checkpoint question")
 	}
 }

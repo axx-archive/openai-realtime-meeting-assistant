@@ -604,17 +604,16 @@ func TestPackagingStudioHouseJudgeSeatConditional(t *testing.T) {
 	}
 }
 
-// The founder's verbatim words are LAW downstream: the gate's authored prompt
-// instructs quoting them, and the runtime assembly (processStageTask) carries
-// the goal objective — which holds the founder's words — into the gate scorer's
-// prompt, so a gate is never scored blind to what the founder actually said.
-func TestPackagingStudioFounderWordsReachGate(t *testing.T) {
+// Approved source language stays exact downstream: the gate's authored prompt
+// preserves quotations, and processStageTask carries the full goal objective
+// into the scorer so the review is never blind to the source request.
+func TestPackagingStudioApprovedSourceLanguageReachesGate(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	def := packagingStudioDefinition()
 
 	gate := packagingStudioStage(t, def, "gate")
-	if !strings.Contains(gate.PromptBody, "founder") {
-		t.Fatalf("gate prompt does not make the founder's words law:\n%s", gate.PromptBody)
+	if !strings.Contains(gate.PromptBody, "fixed source material") {
+		t.Fatalf("gate prompt does not preserve approved source language:\n%s", gate.PromptBody)
 	}
 
 	const founderPhrase = "we are the last honest voice in this category"
@@ -738,7 +737,7 @@ func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, package
 	}
 	launched := installStudioChildRunner(t, map[string]string{
 		"voice":     "Presenter script. Page 1 (30s): " + studioTestFounderPhrase + ". [BEAT] Close on the ask.",
-		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
+		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><div id=\"stage\"><section class=\"pg on\">Slide 1 — " + studioTestFounderPhrase + "</section><section class=\"pg\">Slide 2 — Close</section></div></body></html>",
 	})
 
 	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
@@ -1382,7 +1381,7 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 			Ref:  ref,
 			Mime: "image/jpeg",
 			Name: fmt.Sprintf("page-%02d.jpg", index+1),
-			Kind: "image",
+			Kind: "page_image",
 		})
 	}
 	var sidecarErr error
@@ -1393,7 +1392,7 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 			sidecarErr = fmt.Errorf("slide jury observed an unstamped/non-studio deck: %v", deck.Metadata)
 			return
 		}
-		_, sidecarErr = app.replaceArtifactAssetsOfKind(deck.ID, "image", pages)
+		_, sidecarErr = app.replaceArtifactAssetsOfKind(deck.ID, "page_image", pages)
 	}
 
 	parentID, _, parks := driveStudioRunToShipApprovalWithSetup(t, app, "", wrapJuryResponder)

@@ -16615,6 +16615,32 @@
 	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] { border-color: var(--danger); }
 	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] .scout-chat-work-card__checkpoint-status { color: var(--danger); }
 	      #chatTool .scout-chat-work-card__checkpoint[data-state="selected"] .scout-chat-work-card__checkpoint-status { color: var(--live); }
+	      #chatTool .scout-chat-work-card__checkpoint-revision {
+	        display: grid;
+	        gap: 8px;
+	        padding: 11px;
+	        border: 1px solid var(--line-2);
+	        border-radius: 12px;
+	        background: var(--surface-1);
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-revision label {
+	        color: var(--text-1);
+	        font: var(--type-caption-medium);
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-revision textarea {
+	        width: 100%;
+	        min-height: 88px;
+	        resize: vertical;
+	        padding: 10px 11px;
+	        border: 1px solid var(--line-2);
+	        border-radius: 10px;
+	        background: var(--surface-0);
+	        color: var(--text-1);
+	        font: var(--type-body-sm);
+	      }
+	      #chatTool .scout-chat-work-card__checkpoint-revision textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+	      #chatTool .scout-chat-work-card__checkpoint-revision-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+	      #chatTool .scout-chat-work-card__checkpoint-revision-submit { background: var(--text-1); color: var(--surface-1); }
 
 	      @media (max-width: 860px) {
 	        #chatTool .scout-chat-work-card {
@@ -29865,6 +29891,10 @@
       .artifact-stage__body--deck .chat-deck,
       .artifact-stage__body--deck .artifact-deck {
         flex: 1;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		max-width: none;
         min-height: 0;
         display: flex;
         flex-direction: column;
@@ -42518,10 +42548,63 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // so a markup-shaped title (css/tags) is junk — prose only
         const stamped = String(entry?.metadata?.title || '').trim()
         const proseTitle = stamped && !/[{}<>]/.test(stamped) ? stamped : ''
-        return proseTitle
+        return packagingStudioStagePresentationFor(entry)?.label
+          || proseTitle
           || String(entry?.metadata?.threadQuery || entry?.metadata?.query || '').trim()
           || String(fallback || '').trim()
           || previewable || 'artifact'
+      }
+
+      // Customer-facing stage language. The process engine keeps stable IDs,
+      // roles, prompts, and action values, but none of that production jargon
+      // should become the title of a channel card or artifact. Keeping this
+      // map at the presentation boundary also cleans up already-saved runs.
+      const packagingStudioStagePresentation = {
+        intake: { label: 'Source and visual direction', note: 'direction selected' },
+        red_team: { label: 'Stress-test the brief', note: 'brief reviewed' },
+        identity: { label: 'Build the visual system', note: 'visual direction selected' },
+        compete_architects: { label: 'Explore narrative directions', note: 'three story directions developed' },
+        compete_judges: { label: 'Choose the strongest story', note: 'story directions compared' },
+        compete_choice: { label: 'Narrative direction', note: 'direction selected' },
+        write: { label: 'Build the 10-slide story', note: 'deck story drafted' },
+        gate: { label: 'Check the story against the brief', note: 'content review complete' },
+        voice: { label: 'Add presenter notes', note: 'presenter notes ready' },
+        founder_pass: { label: 'Final content review', note: 'content approved' },
+        imagery_direction: { label: 'Plan the visual beats', note: 'image plan ready' },
+        imagery_generate: { label: 'Generate the selected imagery', note: 'imagery ready' },
+        ship_deck: { label: 'Build the editable presentation', note: 'presentation built' },
+        ship_compile: { label: 'Assemble the presentation package', note: 'package assembled' },
+        slide_jury: { label: 'Review every rendered slide', note: 'visual review complete' },
+        ship_approval: { label: 'Final deck review', note: 'final decision recorded' }
+      }
+
+      const packagingStudioCheckpointQuestions = {
+        intake: 'Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?',
+        compete_choice: 'Scout evaluated three narrative directions. Which one should shape the deck?',
+        founder_pass: 'The deck copy and presenter notes are ready. Approve this version, or send it back with any lines Scout should preserve exactly.',
+        ship_approval: 'The deck, presenter notes, supporting analysis, and review findings are ready. Approve this version, request changes, or keep it on hold.'
+      }
+
+      function packagingStudioStagePresentationFor(entry) {
+        const metadata = entry?.metadata || {}
+        if (String(metadata.processId || '').trim() !== 'packaging_studio') return null
+        return packagingStudioStagePresentation[String(metadata.processStage || metadata.goalSubtaskId || '').trim()] || null
+      }
+
+      function packagingStudioTaskDisplayTitle(plan, task) {
+        const processId = String(plan?.processId || plan?.toolTemplate || '').trim()
+        if (processId === 'packaging_studio') {
+          return packagingStudioStagePresentation[String(task?.id || '').trim()]?.label || String(task?.title || task?.id || '')
+        }
+        return String(task?.title || task?.id || '')
+      }
+
+      function packagingStudioCheckpointQuestion(plan, checkpoint) {
+        const processId = String(plan?.processId || plan?.toolTemplate || '').trim()
+        if (processId === 'packaging_studio') {
+          return packagingStudioCheckpointQuestions[String(checkpoint?.stageId || '').trim()] || String(checkpoint?.question || '')
+        }
+        return String(checkpoint?.question || '')
       }
 
       const packagingStudioJudgmentStages = {
@@ -42619,8 +42702,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           .slice(0, 8)
         return {
           stageId,
-          label: definition.label,
-          role: String(metadata.processRole || '').replace(/_/g, ' '),
+          label: packagingStudioStagePresentationFor(entry)?.label || definition.label,
+          role: '',
           tone: failed ? 'error' : explicitBlocker ? 'attention' : 'complete',
           stateLabel: failed ? 'Stage failed' : explicitBlocker ? 'Blocking verdict in output' : 'Stage output complete',
           focusLabel: explicitBlocker ? 'Recorded blocker' : String(focusSection?.h || 'Opening result').trim(),
@@ -45760,6 +45843,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       }
 
+      function artifactAssetIsRenderedPage(asset) {
+        const kind = String(asset?.kind || '').trim().toLowerCase()
+        if (kind === 'page_image') return true
+        const name = String(asset?.name || '').trim().toLowerCase()
+        return kind === 'image' && name.startsWith('page-') && (name.endsWith('.jpg') || name.endsWith('.jpeg'))
+      }
+
       function artifactBlobUrl(asset) {
         return `/artifacts/blob?ref=${encodeURIComponent(asset.ref)}&name=${encodeURIComponent(String(asset.name || ''))}`
       }
@@ -46097,7 +46187,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
          renders, imagery boards) render inline above their download link; every
          other kind is download-only. DOM-built, never innerHTML. */
       function renderArtifactAssets(container, entry) {
-        const assets = artifactAssetEntries(entry)
+		// Flattened page JPEGs are internal visual-QA evidence for the slide
+		// jury, not customer assets. Keep them out of download/image galleries.
+        const assets = artifactAssetEntries(entry).filter(asset => !artifactAssetIsRenderedPage(asset))
         if (!assets.length) return
         const wrap = bfEl('section', 'artifact-assets')
         wrap.appendChild(bfEl('h4', 'artifact-assets__title', `assets (${assets.length})`))
@@ -55506,13 +55598,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return { ok, data }
       }
 
-	      async function submitCheckpointOption(id, checkpointId, checkpointOptionId) {
-	        const { ok, data } = await postAuthJSON('/artifacts/action', {
+	      async function submitCheckpointOption(id, checkpointId, checkpointOptionId, checkpointNote = '') {
+	        const body = {
 	          id,
 	          action: 'approve',
 	          checkpointId: String(checkpointId || '').trim(),
 	          checkpointOptionId: String(checkpointOptionId || '').trim()
-	        })
+	        }
+	        const note = String(checkpointNote || '').trim()
+	        if (note) body.checkpointNote = note
+	        const { ok, data } = await postAuthJSON('/artifacts/action', body)
 	        if (!ok) {
 	          setLog && setLog('could not record that checkpoint choice.')
 	        } else if (data && typeof data.message === 'string' && data.message) {
@@ -60722,8 +60817,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // the held quieting only stands while a held checkpoint is pending
         card.dataset.held = state === 'gate' && pendingCheckpoint?.held ? '1' : ''
         const detail = (state === 'gate' && pendingCheckpoint)
-          ? String(pendingCheckpoint.question || '')
-          : (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
+          ? packagingStudioCheckpointQuestion(plan, pendingCheckpoint)
+          : (state === 'running' && revisionNote) ? revisionNote : (running ? packagingStudioTaskDisplayTitle(plan, running) : (plan?.report?.headline || ''))
         const normalizedStage = normalizedGoalStage(currentStage)
         const indexedStage = (goalStageDefs[Math.min(currentIndex, goalStageDefs.length - 1)] || [])[0]
         const label = state === 'complete'
@@ -60813,7 +60908,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         working.replaceChildren()
         for (const task of subtasks) {
           const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : task.status === 'failed' ? '✕' : '○'
-          working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${task.title || task.id}`))
+          working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${packagingStudioTaskDisplayTitle(plan, task)}`))
           const stageDetail = goalProcessStageDetail(task, plan)
           if (stageDetail) working.appendChild(bfEl('div', 'goalcard__work-line goalcard__work-line--detail', stageDetail))
         }
@@ -60940,7 +61035,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (held) {
           wrap.appendChild(bfEl('div', 'goalcard__checkpoint-held', `held${checkpoint.heldBy ? ' by ' + checkpoint.heldBy : ''} — resume with a proceed choice`))
         }
-        wrap.appendChild(bfEl('div', 'goalcard__checkpoint-question', String(checkpoint.question || 'Approve this stage to continue?')))
+	        wrap.appendChild(bfEl('div', 'goalcard__checkpoint-question', packagingStudioCheckpointQuestion(plan, checkpoint) || 'Approve this stage to continue?'))
 
         // "review the draft" doors: every input stage that produced an artifact
         // (the founder-pass draft, the COMPETE synthesis with judge scores and
@@ -60950,11 +61045,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           .map(id => (plan?.subtasks || []).find(task => task.id === id))
           .filter(task => task && task.artifactId)
         if (inputTasks.length) {
-          const doors = bfEl('div', 'goalcard__terminal-actions')
-          for (const input of inputTasks) {
-            const door = bfEl('button', 'goalcard__link goalcard__link--accent', `review · ${input.title || input.id}`)
-            door.type = 'button'
-            door.addEventListener('click', () => openArtifactStage(input.artifactId, input.title || input.id))
+	          const doors = bfEl('div', 'goalcard__terminal-actions')
+	          for (const input of inputTasks) {
+	            const inputTitle = packagingStudioTaskDisplayTitle(plan, input)
+	            const door = bfEl('button', 'goalcard__link goalcard__link--accent', `review · ${inputTitle}`)
+	            door.type = 'button'
+	            door.addEventListener('click', () => openArtifactStage(input.artifactId, inputTitle))
             doors.appendChild(door)
           }
           wrap.appendChild(doors)
@@ -67530,6 +67626,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          'send back for changes': 'Request changes',
 	          'send back — rebuild the deck': 'Request changes',
 	          'hold the package': 'Keep on hold',
+	          'cultural-moment': 'Cultural moment',
+	          'franchise-playbook': 'Franchise playbook',
+	          'founder-conviction': 'Leadership conviction',
 	        }
 	        if (customerLabels[value.toLowerCase()]) return customerLabels[value.toLowerCase()]
 	        if (!/^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(value)) return value
@@ -67541,6 +67640,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!checkpoint || !artifact?.id) return null
 	        const stageId = String(checkpoint.stageId || '')
 	        const stage = (plan?.subtasks || []).find(candidate => String(candidate?.id || '') === stageId)
+	        const stageTitle = stage ? packagingStudioTaskDisplayTitle(plan, stage) : ''
 	        const checkpointId = String(checkpoint.id || '').trim()
 	        const options = (Array.isArray(checkpoint.options) ? checkpoint.options : [])
 	          .map(option => typeof option === 'string'
@@ -67554,13 +67654,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const questionId = `channel-checkpoint-question-${identity}`
 	        const statusId = `channel-checkpoint-status-${identity}`
 	        panel.appendChild(bfEl('span', 'scout-chat-work-card__checkpoint-kicker', checkpoint.held ? 'Held · your choice' : 'Your choice'))
-	        const question = bfEl('h3', 'scout-chat-work-card__checkpoint-question', String(checkpoint.question || 'How should Scout continue?'))
+	        const customerQuestion = packagingStudioCheckpointQuestion(plan, checkpoint) || 'How should Scout continue?'
+	        const question = bfEl('h3', 'scout-chat-work-card__checkpoint-question', customerQuestion)
 	        question.id = questionId
 	        panel.appendChild(question)
 	        const context = checkpoint.held
 	          ? 'This work remains held until you choose a proceed option.'
-	          : stage?.title
-	            ? `Scout paused at ${stage.title}. Choose the path that should shape the next stage.`
+	          : stageTitle
+	            ? `Scout paused at ${stageTitle}. Choose the path that should shape the next stage.`
 	            : 'Scout paused here so the next step follows your decision.'
 	        panel.appendChild(bfEl('p', 'scout-chat-work-card__checkpoint-context', context))
 	        const status = bfEl('p', 'scout-chat-work-card__checkpoint-status', options.length ? 'Choose one option to continue.' : 'Open the work details to answer this checkpoint.')
@@ -67586,7 +67687,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        choices.setAttribute('aria-labelledby', questionId)
 	        const buttons = []
 	        let pending = false
-	        const choose = async (option, button) => {
+	        let revisionComposer = null
+	        const choose = async (option, button, revisionNote = '') => {
 	          if (pending || button.disabled) return
 	          pending = true
 	          panel.dataset.state = 'pending'
@@ -67599,7 +67701,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          status.textContent = `Saving “${displayLabel}”…`
 	          let result
 	          try {
-	            result = await submitCheckpointOption(artifact.id, checkpointId, option.id)
+	            result = await submitCheckpointOption(artifact.id, checkpointId, option.id, revisionNote)
 	          } catch (error) {
 	            result = { ok: false, data: { error: error?.message || 'choice failed' } }
 	          }
@@ -67621,6 +67723,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          status.textContent = String(result?.data?.error || 'That choice could not be saved. Try again.')
 	          button.focus()
 	        }
+	        const openRevisionComposer = (option, button) => {
+	          if (pending) return
+	          if (revisionComposer?.isConnected) {
+	            revisionComposer.querySelector('textarea')?.focus()
+	            return
+	          }
+	          revisionComposer = bfEl('div', 'scout-chat-work-card__checkpoint-revision')
+	          const label = bfEl('label', '', 'Changes for Scout')
+	          const textarea = document.createElement('textarea')
+	          const noteId = `${identity}-revision-note`
+	          label.htmlFor = noteId
+	          textarea.id = noteId
+	          textarea.maxLength = 4000
+	          textarea.placeholder = 'Tell Scout what to improve and what should stay unchanged.'
+	          const actions = bfEl('div', 'scout-chat-work-card__checkpoint-revision-actions')
+	          const submit = bfEl('button', 'scout-chat-work-card__checkpoint-choice scout-chat-work-card__checkpoint-revision-submit', 'Send changes')
+	          submit.type = 'button'
+	          const cancel = bfEl('button', 'scout-chat-work-card__checkpoint-choice', 'Cancel')
+	          cancel.type = 'button'
+	          submit.addEventListener('click', () => {
+	            const note = textarea.value.trim()
+	            if (!note) {
+	              status.textContent = 'Add a short note so Scout knows what to change.'
+	              textarea.focus()
+	              return
+	            }
+	            choose(option, button, note)
+	          })
+	          cancel.addEventListener('click', () => {
+	            revisionComposer.remove()
+	            revisionComposer = null
+	            status.textContent = 'Choose one option to continue.'
+	            button.focus()
+	          })
+	          actions.append(submit, cancel)
+	          revisionComposer.append(label, textarea, actions)
+	          panel.insertBefore(revisionComposer, status)
+	          status.textContent = 'Describe the revision before Scout starts another pass.'
+	          textarea.focus()
+	        }
 	        for (const option of options) {
 	          const button = bfEl('button', 'scout-chat-work-card__checkpoint-choice', desktopCheckpointChoiceLabel(option.label))
 	          button.type = 'button'
@@ -67629,7 +67771,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          button.setAttribute('aria-pressed', 'false')
 	          button.setAttribute('aria-describedby', statusId)
 	          button.disabled = false
-	          button.addEventListener('click', () => choose(option, button))
+	          button.addEventListener('click', () => option.action === 'revise' ? openRevisionComposer(option, button) : choose(option, button))
 	          buttons.push(button)
 	          choices.appendChild(button)
 	        }
@@ -67688,7 +67830,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         card.className = 'scout-chat-work-card'
         card.dataset.state = status
         card.dataset.workArtifactId = workCardID
-	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${checkpoint ? `. Question: ${checkpoint.question}` : ''}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
+	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${checkpoint ? `. Question: ${packagingStudioCheckpointQuestion(plan, checkpoint)}` : ''}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
         const mark = bfEl('span', 'scout-chat-work-card__mark', desktopWorkFamilyGlyph(family))
         mark.setAttribute('aria-hidden', 'true')
         const copy = bfEl('span', 'scout-chat-work-card__copy')
@@ -67801,12 +67943,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutStageArtifactNode(message) {
 	        const artifactId = String(message?.thread?.artifactId || '')
 	        const line = String(message?.text || '')
-	        const dedupKey = String(message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
+	        const artifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
+	        const dedupKey = String(stagePresentation?.label || message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
 	        // goalStageMessageLine grammar: "<title> is in — <note> (revision N)"
 	        const revMatch = /\(revision (\d+)\)\s*$/.exec(line)
 	        const rev = revMatch ? Number(revMatch[1]) + 1 : 1
 	        const tailParts = line.split(' is in — ')
-	        const detail = (tailParts.length > 1 ? tailParts[tailParts.length - 1] : '')
+	        const detail = (stagePresentation?.note || (tailParts.length > 1 ? tailParts[tailParts.length - 1] : ''))
 	          .replace(/\s*\(revision \d+\)\s*$/, '')
 	          .trim()
 
@@ -69439,7 +69583,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function scoutThreadFromArtifact(entry, fallback = {}) {
         const metadata = entry?.metadata || {}
         const mode = String(fallback.mode || metadata.mode || scoutThreadModeForText(metadata.threadQuery || metadata.query || metadata.title || '') || 'research').trim()
-        const query = String(fallback.query || metadata.threadQuery || metadata.query || metadata.title || '').trim()
+        const stagePresentation = packagingStudioStagePresentationFor(entry)
+        const query = String(stagePresentation?.label || fallback.query || metadata.threadQuery || metadata.query || metadata.title || '').trim()
         return {
           id: fallback.id || metadata.threadId || entry?.id || '',
           mode,
@@ -75392,6 +75537,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          heading. The artifact editor keeps reading raw metadata.title. */
       function artifactDisplayTitle(entry) {
         const meta = entry?.metadata || {}
+        const stagePresentation = packagingStudioStagePresentationFor(entry)
+        if (stagePresentation) return stagePresentation.label
         const title = String(meta.title || '').trim()
         const query = String(meta.threadQuery || meta.query || '').trim()
         if (!title || (query && title === query.slice(0, title.length) && title.length > 60)) {

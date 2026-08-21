@@ -191,6 +191,7 @@ type goalCheckpointResolutionReceipt struct {
 	OptionID           string `json:"optionId"`
 	StageID            string `json:"stageId"`
 	Action             string `json:"action"`
+	Target             string `json:"target,omitempty"`
 	Choice             string `json:"choice"`
 	ResolvedBy         string `json:"resolvedBy"`
 	DecisionArtifactID string `json:"decisionArtifactId"`
@@ -2663,24 +2664,42 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, approvedBy string, choice string, receiptIndex int) error {
 	checkpoint := plan.Checkpoint
 	choice = strings.TrimSpace(choice)
-	option, matched := checkpointOptionForChoice(checkpoint.Options, choice)
-	if choice != "" && len(checkpoint.Options) > 0 && !matched {
-		return fmt.Errorf("choice %q is not one of the checkpoint options (%s)", choice, strings.Join(checkpointOptionLabels(checkpoint.Options), ", "))
+	option := goalCheckpointOption{}
+	matched := false
+	action := processCheckpointActionProceed
+	if receiptIndex >= 0 {
+		if receiptIndex >= len(plan.CheckpointReceipts) || plan.CheckpointReceipts[receiptIndex].State != goalCheckpointResolutionClaimed {
+			return fmt.Errorf("checkpoint resolution claim is unavailable")
+		}
+		receipt := plan.CheckpointReceipts[receiptIndex]
+		action = firstNonEmptyString(strings.TrimSpace(receipt.Action), processCheckpointActionProceed)
+		option = goalCheckpointOption{ID: receipt.OptionID, Label: receipt.Choice, Action: action, Target: receipt.Target}
+		// Compatibility for claims persisted before Target was receipted: recover
+		// the exact option by its opaque ID, never by a label prefix.
+		if option.Target == "" && action == processCheckpointActionRevise {
+			checkpointID := goalCheckpointID(parentID, checkpoint)
+			for index, candidate := range checkpoint.Options {
+				if goalCheckpointOptionID(checkpointID, candidate, index) == receipt.OptionID {
+					option.Target = candidate.Target
+					break
+				}
+			}
+		}
+		matched = true
+	} else {
+		option, matched = checkpointOptionForChoice(checkpoint.Options, choice)
+		if choice != "" && len(checkpoint.Options) > 0 && !matched {
+			return fmt.Errorf("choice %q is not one of the checkpoint options (%s)", choice, strings.Join(checkpointOptionLabels(checkpoint.Options), ", "))
+		}
+		if matched {
+			action = option.action()
+		}
 	}
 	st := plan.subtaskByID(checkpoint.StageID)
 	if st == nil {
 		return fmt.Errorf("checkpoint stage %q is missing from the plan", checkpoint.StageID)
 	}
 	resolvedBy := firstNonEmptyString(strings.TrimSpace(approvedBy), "admin")
-	action := processCheckpointActionProceed
-	if matched {
-		action = option.action()
-	}
-	if receiptIndex >= 0 {
-		if receiptIndex >= len(plan.CheckpointReceipts) || plan.CheckpointReceipts[receiptIndex].State != goalCheckpointResolutionClaimed {
-			return fmt.Errorf("checkpoint resolution claim is unavailable")
-		}
-	}
 	// A held goal resumes ONLY through an explicit proceed-action choice — the
 	// plain approve button (empty choice) and another negative option keep it
 	// parked, honestly refused rather than silently resumed.
@@ -4056,10 +4075,14 @@ func (app *kanbanBoardApp) resumeApprovedGoalWithCheckpointOption(parentID, appr
 }
 
 func (app *kanbanBoardApp) resumeApprovedGoalWithCheckpointOptionAuthorized(ctx context.Context, user *userAccount, parentSnapshot meetingMemoryEntry, approvedBy, checkpointID, optionID string) (bool, error) {
+	return app.resumeApprovedGoalWithCheckpointOptionAuthorizedNote(ctx, user, parentSnapshot, approvedBy, checkpointID, optionID, "")
+}
+
+func (app *kanbanBoardApp) resumeApprovedGoalWithCheckpointOptionAuthorizedNote(ctx context.Context, user *userAccount, parentSnapshot meetingMemoryEntry, approvedBy, checkpointID, optionID, checkpointNote string) (bool, error) {
 	auth := &goalCheckpointResolutionAuthorization{
 		Context: ctx, User: user, Snapshot: parentSnapshot, RequiredActions: artifactRunnerRequiredACLActions("approve"), HumanApproval: true,
 	}
-	replayed, _, err := app.resumeApprovedGoalBound(parentSnapshot.ID, approvedBy, "", checkpointID, optionID, auth)
+	replayed, _, err := app.resumeApprovedGoalBound(parentSnapshot.ID, approvedBy, strings.TrimSpace(checkpointNote), checkpointID, optionID, auth)
 	return replayed, err
 }
 
@@ -4074,6 +4097,10 @@ func (app *kanbanBoardApp) resumeApprovedGoalBound(parentID, approvedBy, choice,
 	}
 	checkpointID, optionID = strings.TrimSpace(checkpointID), strings.TrimSpace(optionID)
 	boundOption := checkpointID != "" || optionID != ""
+	boundNote := ""
+	if boundOption {
+		boundNote = truncateAgentThreadText(strings.TrimSpace(choice), 4000)
+	}
 	if boundOption && (!validGoalCheckpointChoiceID(checkpointID, "goal-checkpoint-") || !validGoalCheckpointChoiceID(optionID, "checkpoint-option-")) {
 		return false, false, fmt.Errorf("checkpoint choice binding is invalid")
 	}
@@ -4226,6 +4253,9 @@ func (app *kanbanBoardApp) resumeApprovedGoalBound(parentID, approvedBy, choice,
 				}
 				if !directChoice {
 					choice = strings.TrimSpace(option.Label)
+					if option.action() == processCheckpointActionRevise && boundNote != "" {
+						choice += " — " + boundNote
+					}
 				}
 				// Once held, only a proceed action can advance this checkpoint.
 				// Refuse other options before minting a durable claim so boot
@@ -4242,7 +4272,7 @@ func (app *kanbanBoardApp) resumeApprovedGoalBound(parentID, approvedBy, choice,
 				plan.Checkpoint.Options[index].ID = optionID
 				claimedAt := engine.now().UTC().Format(time.RFC3339Nano)
 				plan.CheckpointReceipts = append(plan.CheckpointReceipts, goalCheckpointResolutionReceipt{
-					CheckpointID: checkpointID, OptionID: optionID, StageID: plan.Checkpoint.StageID, Action: option.action(), Choice: choice,
+					CheckpointID: checkpointID, OptionID: optionID, StageID: plan.Checkpoint.StageID, Action: option.action(), Target: option.Target, Choice: choice,
 					ResolvedBy:         firstNonEmptyString(strings.TrimSpace(approvedBy), "admin"),
 					DecisionArtifactID: "os-artifact-checkpoint-" + sha256Hex([]byte(parentID + "\x00" + checkpointID + "\x00" + optionID))[:24],
 					HumanApproval:      authorization != nil && authorization.HumanApproval,

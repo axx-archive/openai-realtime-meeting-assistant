@@ -87,12 +87,9 @@ const (
 	packagingStudioFindingsContract         = "packaging_findings_v1"
 )
 
-// studioFounderWordsLaw is the standing instruction spliced into every
-// downstream stage: the founder's verbatim words captured at INTAKE (and
-// carried in the goal objective) are law — quoted, never paraphrased. It is
-// the mechanism behind "the founder's words are LAW downstream: quote them in
-// every gate".
-const studioFounderWordsLaw = "The founder's verbatim words from the INTAKE brief (and the goal objective) are LAW: quote them exactly, never paraphrase them, and never contradict them."
+// studioSourceLanguageLaw keeps quoted source language faithful downstream
+// without turning an internal production rule into customer-facing jargon.
+const studioSourceLanguageLaw = "Language explicitly quoted in the approved intake brief or goal objective is fixed source material: preserve its exact wording when used, never attribute a paraphrase as a quote, and do not contradict it."
 
 // packagingDeckChassisCSS is the INVARIANT deck chassis (stage geometry, the
 // .pg slide model, and — critically — the @page + @media print pagination).
@@ -163,9 +160,9 @@ func studioIdentityJudges() []ProcessPersona {
 // genuinely different spines, not three phrasings of one.
 func studioCompeteArchitects() []ProcessPersona {
 	return []ProcessPersona{
-		{Name: "cultural_moment", System: "You are a narrative architect building the spine around the CULTURAL MOMENT: why the world is ready for this now, what shift makes it inevitable. Write a complete, distinctive narrative spine (the slide-by-slide argument). Quote the founder's verbatim words. Make it genuinely different from a franchise or founder-conviction angle."},
-		{Name: "franchise_playbook", System: "You are a narrative architect building the spine around the FRANCHISE PLAYBOOK: the durable, expandable machine — the universe, the flywheel, the second and third act the first success unlocks. Write a complete, distinctive narrative spine. Quote the founder's verbatim words."},
-		{Name: "founder_conviction", System: "You are a narrative architect building the spine around FOUNDER CONVICTION: the earned insight, the why-this-team, the thing they see that others do not. Write a complete, distinctive narrative spine. Quote the founder's verbatim words."},
+		{Name: "cultural_moment", System: "You are a narrative architect building the spine around the CULTURAL MOMENT: why the world is ready for this now, what shift makes it inevitable. Write a complete, distinctive narrative spine (the slide-by-slide argument). Preserve approved source language exactly when quoted. Make it genuinely different from a franchise or leadership-conviction angle."},
+		{Name: "franchise_playbook", System: "You are a narrative architect building the spine around the FRANCHISE PLAYBOOK: the durable, expandable machine — the universe, the flywheel, the second and third act the first success unlocks. Write a complete, distinctive narrative spine. Preserve approved source language exactly when quoted."},
+		{Name: "founder_conviction", System: "You are a narrative architect building the spine around LEADERSHIP CONVICTION: the earned insight, the why-this-team, the thing the team sees that others do not. Write a complete, distinctive narrative spine. Preserve approved source language exactly when quoted."},
 	}
 }
 
@@ -207,15 +204,15 @@ func studioHouseJudgeSeat() (ProcessPersona, bool) {
 // fresh on every processDefinitions() call (the builtin pattern), so the
 // conditional house judge seats reflect the CURRENT house_style — a definition
 // listed before the distiller runs carries the base panels; one listed after
-// carries the house seat. The stage bodies splice studioFounderWordsLaw so the
-// founder's verbatim words are quoted at every downstream stage, and the
+// carries the house seat. The stage bodies splice studioSourceLanguageLaw so
+// approved source language stays exact downstream, and the
 // InputFrom chains carry the INTAKE brief forward so the gate re-reads them.
 func packagingStudioDefinition() ProcessDefinition {
 	return ProcessDefinition{
 		ID:          packagingStudioProcessID,
 		Version:     1,
 		Title:       "Packaging Studio",
-		Description: "Take a venture from a founder's words to a gated, presenter-ready deck — red-team, rival narrative competition, identity, closed-loop gate, speechwriter, and a founder pass, shipped as an attacked-and-documented package.",
+		Description: "Turn source material into a reviewed, presenter-ready deck with a clear story, a coherent visual system, editable imagery, presenter notes, and customer checkpoints before delivery.",
 		Group:       toolGroupProcesses,
 		Authority:   toolAuthorityWorkspaceWrite,
 		// 14 stages + headroom; the free-form cap (6) never applies to an authored
@@ -236,12 +233,12 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "red_team",
-				Title:     "Red-team — the hostile room, with teeth",
+				Title:     "Stress-test the brief",
 				Role:      processRolePanel,
 				InputFrom: []string{"intake"},
 				Personas:  studioRedTeamPersonas(),
 				PromptBody: strings.Join([]string{
-					"Attack the venture as the hostile room it will actually face. " + studioFounderWordsLaw,
+					"Attack the venture as the skeptical room it will actually face. " + studioSourceLanguageLaw,
 					"Produce an objection ledger: the objections that would sink the meeting, each tied to a SPECIFIC weakness — generic clichés fail.",
 					"CONTRACTUAL: name strengths_to_keep — what already works and must survive every downstream revision. The synthesis carries both the objections and the strengths_to_keep list forward.",
 				}, "\n"),
@@ -249,7 +246,7 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "identity",
-				Title:     "Identity — develop the visual system, or disclose the skip",
+				Title:     "Build the visual system",
 				Role:      processRoleJudges,
 				InputFrom: []string{"intake", "red_team"},
 				Personas:  studioIdentityJudges(),
@@ -257,25 +254,25 @@ func packagingStudioDefinition() ProcessDefinition {
 					"Read the INTAKE choice. TWO BRANCHES, pick by what INTAKE declared:",
 					"- If INTAKE says 'brand assets provided': DISCLOSE A SKIP — state in one short paragraph that a client identity exists, that the deck chassis recolors to it, and that no identity competition was run. Do not invent directions.",
 					"- If INTAKE says 'no brand assets — develop identity': run the competition. Propose 2-3 RIVAL visual directions (each a token set + a type pairing + a duotone treatment) described in copy for the SAME 2-3 sample slides, judge them, and pick a WINNER. State the winner's tokens explicitly — they feed WRITE and SHIP's deck chassis.",
-					studioFounderWordsLaw,
+					studioSourceLanguageLaw,
 				}, "\n"),
 				OutputContract: "identity_direction_v1",
 			},
 			{
 				ID:        "compete_architects",
-				Title:     "Compete — three rival narrative architects",
+				Title:     "Explore narrative directions",
 				Role:      processRolePanel,
 				InputFrom: []string{"intake", "red_team"},
 				Personas:  studioCompeteArchitects(),
 				PromptBody: strings.Join([]string{
-					"Each architect writes a COMPLETE, genuinely distinct narrative spine (the slide-by-slide argument) from their assigned angle. " + studioFounderWordsLaw,
+					"Each architect writes a COMPLETE, genuinely distinct narrative spine (the slide-by-slide argument) from their assigned angle. " + studioSourceLanguageLaw,
 					"Respect the red_team's strengths_to_keep; do not re-introduce a sunk objection. The synthesis presents all three spines side by side for judging.",
 				}, "\n"),
 				OutputContract: "narrative_spines_v1",
 			},
 			{
 				ID:        "compete_judges",
-				Title:     "Compete — judge the spines, steal the best beats",
+				Title:     "Choose the strongest story",
 				Role:      processRoleJudges,
 				InputFrom: []string{"compete_architects"},
 				Personas:  studioCompeteJudges(),
@@ -298,25 +295,25 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "write",
-				Title:     "Write — graft the winning spine",
+				Title:     "Build the 10-slide story",
 				Role:      processRoleSynthesizer,
 				InputFrom: []string{"intake", "red_team", "identity", "compete_architects", "compete_judges", "compete_choice"},
 				PromptBody: strings.Join([]string{
 					"Write the deck copy: the CHOSEN spine (compete_choice) as the backbone, with the judges' best_beats_to_steal grafted in, honoring the red_team's strengths_to_keep as a CONTRACT — every one survives.",
 					"Write in a spoken register. NO em dashes in any client-facing line (the engine's law sweep enforces this). Use the winning identity's tokens where the copy references look and feel.",
-					studioFounderWordsLaw,
+					studioSourceLanguageLaw,
 				}, "\n"),
 				OutputContract: "deck_copy_v1",
 			},
 			{
 				ID:        "gate",
-				Title:     "Gate — the personas re-review, objections in hand",
+				Title:     "Check the story against the brief",
 				Role:      processRoleGate,
 				InputFrom: []string{"write", "red_team"},
 				PromptBody: strings.Join([]string{
 					"Score the deck copy against the RED-TEAM's round-1 objection ledger (red_team), the closed loop generalized.",
 					"Rubric dimensions: Objections answered (each round-1 objection is verifiably addressed, not ignored), Strengths kept (every strengths_to_keep entry survives), Spine integrity (the chosen angle and grafted steals cohere), Copy law (spoken register, no em dashes, no unearned hype).",
-					"A dimension scores low when its objections remain open. " + studioFounderWordsLaw,
+					"A dimension scores low when its objections remain open. " + studioSourceLanguageLaw,
 				}, "\n"),
 				// The SKILL semantics: 9.0 threshold, 7.0 floor, 2 rounds,
 				// force-accept below threshold ships with the gaps DISCLOSED (always
@@ -325,13 +322,13 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "voice",
-				Title:     "Voice — the speechwriter's per-page script",
+				Title:     "Add presenter notes",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
 				InputFrom: []string{"write", "gate"},
 				PromptBody: strings.Join([]string{
 					"Write the presenter script: for EACH deck page, a 25-45 second spoken script with exactly one [BEAT] marking the pause.",
-					"Weave the founder's VERBATIM phrases into the spoken lines. " + studioFounderWordsLaw,
+					"Use approved source language naturally in the spoken lines when it strengthens the story. " + studioSourceLanguageLaw,
 					"INTERLOCK RULE: the VOICE owns the parables and the emotional turns; the SLIDE owns the numbers. Never put a figure in the script that is not on its slide, and never make the slide carry a story the voice should tell.",
 				}, "\n"),
 				OutputContract: "presenter_script_v1",
@@ -361,7 +358,7 @@ func packagingStudioDefinition() ProcessDefinition {
 				// the next compile step) and does NOT embed bytes (ship_compile
 				// inlines them). Output is a machine-readable shot list.
 				ID:        "imagery_direction",
-				Title:     "Imagery direction — where an image earns the beat",
+				Title:     "Plan the visual beats",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
 				InputFrom: []string{"identity", "write", "voice", "founder_pass"},
@@ -383,7 +380,7 @@ func packagingStudioDefinition() ProcessDefinition {
 				// timeout) is DISCLOSED and skipped; zero generated images is a
 				// valid, non-fatal outcome. It never blocks the ship.
 				ID:         "imagery_generate",
-				Title:      "Imagery — generate the directed shots",
+				Title:      "Generate the selected imagery",
 				Role:       processRoleCompile,
 				InputFrom:  []string{"imagery_direction"},
 				PromptBody: "Deterministic generation step: read the imagery_direction shot list and generate each directed shot on the one visual system via the OpenAI image API, filing the results as {kind:image} assets. Per-shot failure is disclosed and skipped; keyless or zero shots ships the package typographic. Authored Go — never a model call.",
@@ -391,7 +388,7 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "ship_deck",
-				Title:     "Ship — the self-contained presenter deck",
+				Title:     "Build the editable presentation",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
 				InputFrom: []string{"write", "voice", "founder_pass", "imagery_direction", "imagery_generate"},
@@ -406,14 +403,14 @@ func packagingStudioDefinition() ProcessDefinition {
 					"EDITOR COMPATIBILITY: put each slide's background color directly on its <section class=\"pg\"> inline style. Give every meaningful text block, image plate, and decorative shape a stable data-deck-element id plus data-deck-type=\"text|image|shape\". Put position:absolute and its left, top, width, height, z-index, opacity, and rotation directly in that element's inline style using 1920×1080 pixel coordinates; do not leave editable geometry only in a CSS class. Put text color/font-size/font-weight, image object-fit, and shape fill/stroke directly on the element too. Decorative background layers must carry data-deck-element when they are intended to be editable. This explicit geometry is part of the deliverable contract, not optional metadata.",
 					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. Build that slide's photo element as a plate or full-bleed carrying BOTH its type class AND class \"fig-N\" (matching the FIG number), with an empty <div class=\"ph\"></div> inside and the FIG. caption. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
 					"FULL-BLEED LAW: when a generated image carries the emotional beat, let it reach all four slide edges and place copy over a purpose-built solid or gradient scrim. When the image is evidence, use a disciplined plate with a caption. Never use a small decorative image that contributes no meaning.",
-					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the founder the script alongside each page.",
-					"Honor every founder_pass do_not_touch line exactly. Keep client-facing copy free of em dashes. " + studioFounderWordsLaw,
+					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the presenter the script alongside each page.",
+					"Honor the decisions captured in Final content review, including any lines the reviewer explicitly asked Scout to preserve. Keep client-facing copy free of em dashes. " + studioSourceLanguageLaw,
 				}, "\n"),
 				OutputContract: packagingStudioDeckContract,
 			},
 			{
 				ID:        "ship_compile",
-				Title:     "Ship — compile the five-artifact package",
+				Title:     "Assemble the presentation package",
 				Role:      processRoleCompile,
 				InputFrom: []string{"red_team", "write", "gate", "voice", "founder_pass", "ship_deck"},
 				// Documentation only — compile is authored Go (below), never a
@@ -424,14 +421,14 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID:        "slide_jury",
-				Title:     "Slide jury — the critics see the rendered pages",
+				Title:     "Review every rendered slide",
 				Role:      processRoleCompile,
 				InputFrom: []string{"ship_compile"},
 				// Documentation only — the jury stage is authored Go (below). It is
 				// ADVISORY: findings land as revision notes on the findings record,
 				// never as an auto-revise; keyless / sidecar-absent / export-timeout
 				// all disclose a skip and the ship proceeds to its approval.
-				PromptBody: "Vision jury step: once the deck's PDF export completes, the render-runner's page JPEGs go before the /packaging jury trio (headline ear, design eye, the domain-literate room gut) — each seat sees ALL pages, scores per page, names weakest_three/strongest_three, and every fix is executable or the literal word KEEP. The merged scoreboard files as slide_jury_v1 and lands as revision notes on the findings record; the founder decides what to apply. Sidecar absent or export incomplete: the skip is disclosed.",
+				PromptBody: "Vision jury step: once the deck's PDF export completes, the render-runner's page JPEGs go before the /packaging jury trio (headline ear, design eye, the domain-literate room gut) — each seat sees ALL pages, scores per page, names weakest_three/strongest_three, and every fix is executable or the literal word KEEP. The merged scoreboard files as slide_jury_v1 and lands as revision notes on the findings record; the reviewer decides what to apply. Sidecar absent or export incomplete: the skip is disclosed.",
 				Compile:    compilePackagingStudioSlideJury,
 			},
 			{
@@ -510,7 +507,7 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	wall := strings.Join([]string{
 		"# The Wall — slide-copy record",
 		"",
-		"Every client-facing line of the gated deck copy, on the record. No em dashes in a client-facing line; the founder's verbatim words are quoted, never paraphrased.",
+		"Every client-facing line of the reviewed deck copy, on the record. No em dashes in a client-facing line; quoted source language remains exact.",
 		"",
 		deckCopy,
 	}, "\n")
@@ -524,7 +521,7 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	rigor := strings.Join([]string{
 		"# Rigor companion",
 		"",
-		"The diligence trail behind the deck: what the hostile room said, what the gate verified, and what the founder locked.",
+		"The diligence trail behind the deck: what the skeptical review raised, what the content check verified, and what was approved in final review.",
 		"",
 		"## The round-1 objection ledger (red team)",
 		ledger,
@@ -532,7 +529,7 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 		"## The gate's decision, objections in hand",
 		gateRecord,
 		"",
-		"## The founder pass",
+		"## Final content review",
 		founderPass,
 	}, "\n")
 
@@ -864,6 +861,10 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 	if !ready {
 		return skip(fmt.Sprintf("the deck's PDF export did not complete within the %s wait window — no rendered page images landed", slideJuryWaitTimeout()))
 	}
+	pageImages := artifactPageImageAssets(deck)
+	if err := validatePackagingStudioDeckRender(deck); err != nil {
+		return "", nil, err
+	}
 	if strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
 		return skip("no OpenAI key is configured (providerless deploy) — the jury seats cannot see")
 	}
@@ -881,12 +882,23 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 	lines := []string{
 		"Slide jury — the critics saw the rendered pages",
 		"",
-		fmt.Sprintf("- %d rendered page image(s) went before the 3-seat jury (headline ear, design eye, room gut) — every seat saw all pages.", len(artifactPageImageAssets(deck))),
+		fmt.Sprintf("- %d rendered page image(s) went before the 3-seat jury (headline ear, design eye, room gut) — every seat saw all pages.", len(pageImages)),
 		"- Merged scoreboard filed: " + slideJuryContract + " → " + jury.ID,
 		"- " + findingsNote,
-		"- Advisory by design: revision notes only, no auto-revise — the founder decides what to apply at ship approval.",
+		"- Advisory by design: revision notes only, no auto-revise — the reviewer decides what to apply at final deck review.",
 	}
 	return strings.Join(lines, "\n"), map[string]string{"slideJuryArtifactId": jury.ID}, nil
+}
+
+func validatePackagingStudioDeckRender(deck meetingMemoryEntry) error {
+	expected := renderedDeckSlideCount(deck.Text)
+	if expected <= 0 {
+		return fmt.Errorf("the deck has no recognized authored slide topology; final review cannot proceed")
+	}
+	if pageCount := len(artifactPageImageAssets(deck)); pageCount != expected {
+		return fmt.Errorf("the deck render is incomplete: %d authored slide(s), %d rendered page image(s); final review cannot proceed", expected, pageCount)
+	}
+	return nil
 }
 
 // studioShipArtifactsForJury resolves the deck and findings artifacts the SHIP

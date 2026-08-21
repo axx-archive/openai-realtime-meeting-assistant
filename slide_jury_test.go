@@ -1,7 +1,7 @@
 package main
 
 // slide_jury_test.go — the vision slide jury (Wave 5 item 21). Pinned here:
-// the callback-side page-image persistence (path-validated, {kind: image}
+// the callback-side page-image persistence (path-validated, {kind: page_image}
 // assets), the page budget with its disclosed truncation, and the jury run
 // itself — 3-seat fan-out + synthesis where EVERY call carries ALL page image
 // blocks, and the merged scoreboard files as a slide_jury_v1 artifact. The
@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func seedSlideJuryDeck(t *testing.T, app *kanbanBoardApp, pages ...[]byte) meeti
 			Ref:  ref,
 			Mime: "image/jpeg",
 			Name: fmt.Sprintf("page-%02d.jpg", index+1),
-			Kind: "image",
+			Kind: "page_image",
 		}); err != nil {
 			t.Fatalf("attach page image %d: %v", index+1, err)
 		}
@@ -52,8 +53,31 @@ func seedSlideJuryDeck(t *testing.T, app *kanbanBoardApp, pages ...[]byte) meeti
 	return fresh
 }
 
+func TestArtifactPageImagesExcludeGeneratedDeckImagery(t *testing.T) {
+	assets, _ := json.Marshal([]artifactAsset{
+		{Ref: strings.Repeat("a", 64), Mime: "image/png", Name: "fig-01.png", Kind: "image"},
+		{Ref: strings.Repeat("b", 64), Mime: "image/jpeg", Name: "page-01.jpg", Kind: "page_image"},
+		{Ref: strings.Repeat("c", 64), Mime: "image/jpeg", Name: "page-02.jpg", Kind: "image"}, // legacy callback
+	})
+	entry := meetingMemoryEntry{Metadata: map[string]string{artifactAssetsMetadataKey: string(assets)}}
+	pages := artifactPageImageAssets(entry)
+	if len(pages) != 2 || pages[0].Name != "page-01.jpg" || pages[1].Name != "page-02.jpg" {
+		t.Fatalf("page assets=%+v, want only rendered pages", pages)
+	}
+}
+
+func TestRenderedDeckSlideCountIgnoresNestedSemanticSections(t *testing.T) {
+	source := `<!doctype html><html><body><div id="stage">
+		<section class="pg on"><section><h2>Evidence</h2></section></section>
+		<section class="pg"><div><section>Notes</section></div></section>
+	</div></body></html>`
+	if got := renderedDeckSlideCount(source); got != 2 {
+		t.Fatalf("renderedDeckSlideCount=%d, want 2 authored slides", got)
+	}
+}
+
 // The callback-side seam: page JPEGs on the shared volume persist to the blob
-// store and attach as {kind: image} assets — and a path outside the render
+// store and attach as {kind: page_image} assets — and a path outside the render
 // queue (the sidecar is the least-trusted box) is skipped, never read.
 func TestPersistRenderPageImageAssetsStoresJuryPages(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
@@ -93,8 +117,8 @@ func TestPersistRenderPageImageAssetsStoresJuryPages(t *testing.T) {
 	}
 	for index, want := range [][]byte{pageOne, pageTwo} {
 		asset := assets[index]
-		if asset.Kind != "image" || asset.Mime != "image/jpeg" {
-			t.Fatalf("asset %d = %+v, want kind=image mime=image/jpeg", index, asset)
+		if asset.Kind != "page_image" || asset.Mime != "image/jpeg" {
+			t.Fatalf("asset %d = %+v, want kind=page_image mime=image/jpeg", index, asset)
 		}
 		data, _, err := getBlob(asset.Ref)
 		if err != nil || !bytes.Equal(data, want) {
@@ -155,6 +179,14 @@ func TestPersistRenderPageImageAssetsRejectsSymlinkEscape(t *testing.T) {
 func TestPersistRenderPageImageAssetsReplacesStalePages(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	deck := seedSlideJuryDeck(t, app)
+	legacyRef, _ := putBlob([]byte("legacy-page"), "image/jpeg")
+	imageRef, _ := putBlob([]byte("generated-figure"), "image/png")
+	if _, err := app.appendArtifactAsset(deck.ID, artifactAsset{Ref: legacyRef, Mime: "image/jpeg", Name: "page-99.jpg", Kind: "image"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.appendArtifactAsset(deck.ID, artifactAsset{Ref: imageRef, Mime: "image/png", Name: "fig-01.png", Kind: "image"}); err != nil {
+		t.Fatal(err)
+	}
 
 	resultsDir := renderJobResultsDir(renderRunnerQueuePath(), "render-job-re")
 	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
@@ -183,9 +215,21 @@ func TestPersistRenderPageImageAssetsReplacesStalePages(t *testing.T) {
 	if len(assets) != 1 {
 		t.Fatalf("deck carries %d image assets after the re-export, want ONLY the fresh page: %+v", len(assets), assets)
 	}
+	freshAssets := artifactAssets(fresh)
+	if len(freshAssets) != 2 || freshAssets[0].Name != "fig-01.png" {
+		t.Fatalf("re-export did not remove legacy pages while preserving generated imagery: %+v", freshAssets)
+	}
 	data, _, err := getBlob(assets[0].Ref)
 	if err != nil || !bytes.Equal(data, []byte("v2-page-one")) {
 		t.Fatalf("surviving page is not the re-export's: err=%v data=%q", err, data)
+	}
+}
+
+func TestPackagingStudioDeckRenderFailsClosedWithoutAuthoredSlides(t *testing.T) {
+	assets, _ := json.Marshal([]artifactAsset{{Ref: strings.Repeat("a", 64), Mime: "image/jpeg", Name: "page-01.jpg", Kind: "page_image"}})
+	deck := meetingMemoryEntry{Text: `<!doctype html><html><body><div>not a slide deck</div></body></html>`, Metadata: map[string]string{artifactAssetsMetadataKey: string(assets)}}
+	if err := validatePackagingStudioDeckRender(deck); err == nil || !strings.Contains(err.Error(), "no recognized authored slide topology") {
+		t.Fatalf("malformed deck gate error=%v", err)
 	}
 }
 

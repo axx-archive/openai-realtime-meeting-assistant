@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 141 serves exact release `af67bc66` with the named-PDF resolver, explicit named-collaborator source binding, customer-facing intake copy, chat polish, Deck Studio, Content Studio, PiP, and Mobile Build 69 source integrated. Build 69 was uploaded to Apple from web/mobile release `9b2a04a8` and is awaiting processing/group proof; the later `af67bc66` change is web-only. The source-complete Like A Farmer run reached its 10-slide gated draft, then blocked at Voice because production still pins the retired `anthropic_fable` orchestrator and its durable writer subtask was assigned to the unavailable stub. A local routing repair now assigns only server-authored process writers with concrete output contracts to the existing source-bound OpenAI text runner while preserving child artifacts, recovery, and resume semantics; checkpoint copy is being cleaned of internal production language before the exact follow-up release.
+Current phase: generation 144 serves exact release `35e30d855a18f7cbfbc5c7a0c479a7e72f398ba5` with the source-complete Like A Farmer run parked at its second final-deck review. Build 69 was uploaded to Apple from web/mobile release `9b2a04a8` and is awaiting processing/group proof; later changes are web-only. The run built a 10-slide, 9.84 MB HTML deck and three Working Fieldbook images, but generation 144's 8 MB render limit rejected the deck export and the legacy image kind let those three generated images masquerade as rendered slide pages. The current local release candidate raises the verified render ceiling to 32 MB, distinguishes editable imagery from rendered page evidence (including legacy cleanup), requires exact authored-slide/page parity, fixes full-canvas staging, binds revision notes to the exact opaque action and target, and translates both new and already-saved workflow language into customer-facing copy. The current final review remains parked so its last revision can be spent once, with concrete source-grounded instructions, only after this correction is live.
 
 ## Invariants
 
@@ -23,7 +23,7 @@ Current phase: generation 141 serves exact release `af67bc66` with the named-PDF
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
 | W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress on generation 141; both named sources are proven in the held prompt and first stage |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress on generation 144; final review parked pending the render/editor correction |
 | W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Uploaded from `9b2a04a8`; Apple processing/groups pending |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
 
@@ -69,6 +69,13 @@ Current phase: generation 141 serves exact release `af67bc66` with the named-PDF
 - User-facing checkpoints now say `Narrative direction`, `Final content review`, and `Final deck review`; internal terms such as founder, verbatim, do_not_touch, token spending, SHIP, render-export mechanics, and jury scoreboard no longer appear in their questions. Visible action pills map to `Approve this version`, `Request changes`, and `Keep on hold` without changing their durable action IDs.
 - The independent follow-up gate caught the secondary Intelligence checkpoint renderer and the OpenAI wire deadline. Both checkpoint renderers now share the same customer labels while submitting the original stable option values; the legacy textarea says `Changes for Scout` and explains exact preservation without exposing `do_not_touch`. Governed process writers now receive a 12K-64K deliverable output window and the durable orchestrator deadline at both the thread and HTTP layers; ordinary compact, generic long-form, and hosted-research deadlines are unchanged.
 - Generation 142 deployed exact `c689efb564ae1f1ceeeba84997943a9f9058c30e` as `verified-local-unsigned`, but live recovery inspection exposed that the blocked channel card's `Retry` action still armed a new conversational follow-up instead of resuming the durable process. The local follow-up changes that visible action to `Retry from here` and posts the parent artifact to the authorized `resume` door, with pending/error UI; this must ship before using the card.
+- Generation 144 serves exact `35e30d855a18f7cbfbc5c7a0c479a7e72f398ba5` as `verified-local-unsigned`; the prior generation 143 release `d8858d2b3ede0e8637e6c22a6a0d18f56bbadddc` and images are retained.
+- The source-complete run reached Building, approved its clean final-content checkpoint, planned exactly three Working Fieldbook images, generated all three, and compiled a 9.84 MB self-contained HTML presentation with ten authored `.pg` slides. Source inspection confirms 10 slide sections, 204 editable element markers, and the three intended imagery slots.
+- Generation 144 rejected the render enqueue because its compose default remained 8 MB (`9,840,900 > 8,388,608`). Its slide jury then incorrectly consumed the three generated `kind=image` assets as three rendered pages and reported a false three-page deck. The candidate raises only the HTML enqueue bound to 32 MB and makes rendered output `kind=page_image`; callbacks replace both new and legacy `page-*.jpg` render evidence without removing generated imagery.
+- The production stage screenshot reproduced the small-corner edit defect: `.chat-deck` retained a 480 px max width inside the stage. The candidate resets width, height, min-width, and max-width within the deck stage so the presentation fills the available workspace.
+- The first final-review `Request changes` action on generation 144 carried no note and spent one revision with generic copy. The second final review is intentionally parked. The candidate adds a required `Changes for Scout` composer and receipts the exact opaque action and target; an adversarial `send` versus `send back` prefix-collision test proves the note cannot change the chosen action or target, and retries cannot rewrite the first decision.
+- Customer-facing language is now a presentation boundary over stable workflow IDs: current and already-saved stage titles, progress rows, checkpoint context, questions, and choices render as `Final content review`, `Final deck review`, `Approve this version`, `Request changes`, and `Keep on hold`. Internal source-fidelity language no longer leaks as product copy.
+- New gate evidence: focused page-image/action/title tests pass; the complete rendered checkpoint, stage-drawer, full-canvas Deck Studio, and live slide-jury harnesses pass with bundled Playwright Chromium; selected race tests for exact opaque resolution, recovery, jury pages, page replacement, and Deck CAS pass.
 
 ## Pending Dependencies
 
@@ -79,7 +86,7 @@ Current phase: generation 141 serves exact release `af67bc66` with the named-PDF
 
 - Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; rerun and edit the production deck; verify the already-uploaded Build 69 in TestFlight.
 - Not yet executed: source-complete deck completion, editor/presenter acceptance, Apple processing/group verification, final repository cleanup.
-- Rollback: retain production release `9b2a04a8` and its images until the generation-141 live deck/editor journey passes.
+- Rollback: retain production generation 144 (`35e30d85`) and its images until the follow-up live deck/editor journey passes.
 
 ## Risks And Decisions
 
@@ -90,9 +97,9 @@ Current phase: generation 141 serves exact release `af67bc66` with the named-PDF
 
 ## Resume Here
 
-1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 141 before trusting any status above.
-2. Finish normal/race/compile gates for the bounded writer assignment and customer checkpoint copy, commit/push, exact-release generation 142, and verify serving identity plus rollback.
-3. Use `Retry from here` on goal `os-artifact-workflow-1787294011307003318`; require only blocked Voice to reset while the completed source-complete stages remain intact, then inspect each remaining stage and checkpoint.
-4. Generate, edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
-5. Verify Apple Build 69 processing and intended TestFlight groups without implying the later web-only copy/source commit is in that mobile binary.
+1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 144 before trusting any status above.
+2. Obtain the independent critic PASS, commit/push the exact candidate, deploy the next receipted release, and verify serving identity plus retained generation-144 rollback.
+3. Reload the parked final-review card for goal `os-artifact-workflow-1787294011307003318`, use `Request changes` once with the concrete source/layout preservation note, and require ten distinct rendered pages plus a real slide-jury result before approval.
+4. Approve only a source-complete candidate; then edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
+5. Verify Apple Build 69 processing and intended TestFlight groups without implying later web-only commits are in that mobile binary.
 6. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

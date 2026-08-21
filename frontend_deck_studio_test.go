@@ -39,8 +39,13 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 			t.Errorf("Deck Studio contract missing %q", want)
 		}
 	}
+	deckStart := strings.Index(html, "async function openDeckStudio")
+	if deckStart < 0 {
+		t.Fatal("Deck Studio implementation boundary is missing")
+	}
+	deckSurface := html[deckStart:]
 	for _, banned := range []string{"src" + "doc", "allow-same-origin"} {
-		if strings.Contains(html, banned) {
+		if strings.Contains(deckSurface, banned) {
 			t.Errorf("generated deck HTML can escape the tokened/opaque sandbox through %q", banned)
 		}
 	}

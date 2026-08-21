@@ -1675,6 +1675,10 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// Choice: the persisted goal plan resolves the exact authored action.
 		CheckpointID       string `json:"checkpointId"`
 		CheckpointOptionID string `json:"checkpointOptionId"`
+		// CheckpointNote is optional customer feedback for an authored revise
+		// option. The server binds it to the selected opaque option; it never
+		// changes the option's action or target.
+		CheckpointNote string `json:"checkpointNote"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -1752,7 +1756,7 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			receiptBound := hasCheckpointBinding
 			var resumeErr error
 			if hasCheckpointBinding {
-				replayed, resumeErr = kanbanApp.resumeApprovedGoalWithCheckpointOptionAuthorized(r.Context(), user, artifact, user.Name, payload.CheckpointID, payload.CheckpointOptionID)
+				replayed, resumeErr = kanbanApp.resumeApprovedGoalWithCheckpointOptionAuthorizedNote(r.Context(), user, artifact, user.Name, payload.CheckpointID, payload.CheckpointOptionID, payload.CheckpointNote)
 			} else {
 				replayed, receiptBound, resumeErr = kanbanApp.resumeApprovedGoalWithChoiceAuthorized(r.Context(), user, artifact, user.Name, payload.Choice)
 			}

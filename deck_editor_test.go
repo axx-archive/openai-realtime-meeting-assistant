@@ -119,6 +119,20 @@ func TestImportLegacyDeckPreservesDataDeckGeometryAndFigAsset(t *testing.T) {
 	}
 }
 
+func TestImportLegacyDeckIgnoresNestedSemanticSections(t *testing.T) {
+	artifact := meetingMemoryEntry{Metadata: map[string]string{"type": artifactTypeHTMLDeck}, Text: `<!doctype html><html><body><div id="stage">
+		<section class="pg on" data-deck-slide="one"><div data-deck-element="one-title" data-deck-type="text" style="position:absolute;left:96px;top:96px;width:900px;height:140px;z-index:2;opacity:1;font-size:72px;color:#fff"><section>Opening</section></div></section>
+		<section class="pg" data-deck-slide="two"><div data-deck-element="two-title" data-deck-type="text" style="position:absolute;left:96px;top:96px;width:900px;height:140px;z-index:2;opacity:1;font-size:72px;color:#fff">Close</div></section>
+	</div></body></html>`}
+	deck, _, _, err := loadDeckDocument(artifact)
+	if err != nil {
+		t.Fatalf("loadDeckDocument: %v", err)
+	}
+	if len(deck.Slides) != 2 {
+		t.Fatalf("imported %d slides, want only the two stage children", len(deck.Slides))
+	}
+}
+
 func TestImportUnknownLegacyDeckIsExplicitlyApproximate(t *testing.T) {
 	artifact := meetingMemoryEntry{Metadata: map[string]string{"type": artifactTypeHTMLDeck}, Text: `<!doctype html><section><h1>Outline only</h1><p>No editor contract.</p></section>`}
 	deck, imported, quality, err := loadDeckDocument(artifact)
@@ -182,6 +196,26 @@ func TestArtifactRenderBodyExpandsAttachedDeckImagesAndFailsClosed(t *testing.T)
 	}}
 	if _, err := artifactRenderBody(large); err == nil || !strings.Contains(err.Error(), "render bound") {
 		t.Fatalf("oversized repeated images error=%v, want bounded expansion", err)
+	}
+}
+
+func TestRenderedPageAssetsAreNotEditableDeckImagery(t *testing.T) {
+	for _, testCase := range []artifactAsset{
+		{Ref: strings.Repeat("a", 64), Mime: "image/jpeg", Name: "page-01.jpg", Kind: "page_image"},
+		{Ref: strings.Repeat("b", 64), Mime: "image/jpeg", Name: "page-02.jpg", Kind: "image"},
+	} {
+		assets, _ := json.Marshal([]artifactAsset{testCase})
+		artifact := meetingMemoryEntry{Metadata: map[string]string{artifactAssetsMetadataKey: string(assets)}}
+		if _, allowed := artifactAssetRefSet(artifact)[testCase.Ref]; allowed {
+			t.Fatalf("rendered page %q entered the editable image palette", testCase.Name)
+		}
+		if artifactAssetIsEditableImage(testCase) {
+			t.Fatalf("rendered page %q classified as editable imagery", testCase.Name)
+		}
+	}
+	generated := artifactAsset{Ref: strings.Repeat("c", 64), Mime: "image/png", Name: "fig-01.png", Kind: "image"}
+	if !artifactAssetIsEditableImage(generated) {
+		t.Fatal("generated deck imagery was excluded with rendered pages")
 	}
 }
 

@@ -63,12 +63,14 @@ const (
 	artifactAssetsMetadataKey = "assets"
 )
 
-// artifactAssetKinds is the closed vocabulary for artifactAsset.Kind
-// (spec §4: pdf | image | export).
+// artifactAssetKinds is the closed vocabulary for artifactAsset.Kind.
+// page_image is deliberately distinct from editable/generated imagery: it is
+// a flattened render used only for export QA and slide juries.
 var artifactAssetKinds = map[string]bool{
-	"pdf":    true,
-	"image":  true,
-	"export": true,
+	"pdf":        true,
+	"image":      true,
+	"page_image": true,
+	"export":     true,
 }
 
 // blobMeta is the sidecar JSON written beside each blob file.
@@ -84,7 +86,29 @@ type artifactAsset struct {
 	Ref  string `json:"ref"`
 	Mime string `json:"mime,omitempty"`
 	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"` // pdf | image | export
+	Kind string `json:"kind,omitempty"` // pdf | image | page_image | export
+}
+
+// artifactAssetIsPageImage identifies flattened render output, including the
+// narrow legacy shape emitted before page_image became its own kind. Rendered
+// pages are review evidence — never editable source imagery.
+func artifactAssetIsPageImage(asset artifactAsset) bool {
+	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
+	if kind == "page_image" {
+		return true
+	}
+	name := strings.ToLower(strings.TrimSpace(asset.Name))
+	return kind == "image" && strings.HasPrefix(name, "page-") &&
+		(strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg"))
+}
+
+func artifactAssetIsEditableImage(asset artifactAsset) bool {
+	if artifactAssetIsPageImage(asset) {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
+	mime := strings.ToLower(strings.TrimSpace(asset.Mime))
+	return (kind == "" || kind == "image") && strings.HasPrefix(mime, "image/")
 }
 
 func blobStoreDir() string {
@@ -281,7 +305,7 @@ func (app *kanbanBoardApp) appendArtifactAsset(artifactID string, asset artifact
 	asset.Name = strings.TrimSpace(asset.Name)
 	asset.Kind = strings.ToLower(strings.TrimSpace(asset.Kind))
 	if asset.Kind != "" && !artifactAssetKinds[asset.Kind] {
-		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, or export")
+		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, page_image, or export")
 	}
 
 	artifact, found := app.osArtifactByID(artifactID)
@@ -325,7 +349,7 @@ func (app *kanbanBoardApp) replaceArtifactAssetsOfKind(artifactID string, kind s
 	}
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	if !artifactAssetKinds[kind] {
-		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, or export")
+		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, page_image, or export")
 	}
 	normalized := make([]artifactAsset, 0, len(fresh))
 	for _, asset := range fresh {
@@ -349,7 +373,7 @@ func (app *kanbanBoardApp) replaceArtifactAssetsOfKind(artifactID string, kind s
 	existing := artifactAssets(artifact)
 	assets := make([]artifactAsset, 0, len(existing)+len(normalized))
 	for _, asset := range existing {
-		if asset.Kind != kind {
+		if (kind == "page_image" && !artifactAssetIsPageImage(asset)) || (kind != "page_image" && asset.Kind != kind) {
 			assets = append(assets, asset)
 		}
 	}

@@ -16,6 +16,8 @@ func TestChannelWorkCardOwnsCheckpointDecision(t *testing.T) {
 	html := string(body)
 	for _, want := range []string{
 		"function scoutDesktopCheckpointNode(card, artifact, plan, checkpoint)",
+		"const customerQuestion = packagingStudioCheckpointQuestion(plan, checkpoint)",
+		"const stageTitle = stage ? packagingStudioTaskDisplayTitle(plan, stage) : ''",
 		"ref?.checkpoint || goalPendingCheckpoint(artifact, plan)",
 		"scout-chat-work-card__checkpoint-question",
 		"scout-chat-work-card__checkpoint-context",
@@ -24,9 +26,12 @@ func TestChannelWorkCardOwnsCheckpointDecision(t *testing.T) {
 		"panel.dataset.state = 'pending'",
 		"panel.dataset.state = 'failed'",
 		"panel.dataset.state = 'selected'",
-		"submitCheckpointOption(artifact.id, checkpointId, option.id)",
+		"submitCheckpointOption(artifact.id, checkpointId, option.id, revisionNote)",
 		"checkpointId: String(checkpointId || '').trim()",
 		"checkpointOptionId: String(checkpointOptionId || '').trim()",
+		"body.checkpointNote = note",
+		"Changes for Scout",
+		"Send changes",
 		"function desktopCheckpointChoiceLabel(label)",
 		"function desktopWorkRecoveryControl(artifact, plan, ref, options = {})",
 		"const control = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')",
@@ -104,7 +109,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(await card.locator('.scout-chat-work-card__eyebrow').textContent(),'Presentation · Needs input');
  assert.equal(await card.locator('.scout-chat-work-card__checkpoint-question').textContent(),'Which creative direction should Scout build?');
  assert.match(await card.locator('.scout-chat-work-card__checkpoint-context').textContent(),/Creative direction/);
- const optionButtons=card.locator('.scout-chat-work-card__checkpoint-choice');
+ const optionButtons=card.locator('.scout-chat-work-card__checkpoint-choices > .scout-chat-work-card__checkpoint-choice');
  assert.equal(await optionButtons.count(),3);
 	assert.equal(await optionButtons.nth(2).getAttribute('data-checkpoint-action'),'hold');
  assert.equal(await card.locator('[role="group"]').getAttribute('aria-labelledby'),await card.locator('.scout-chat-work-card__checkpoint-question').getAttribute('id'));
@@ -114,23 +119,30 @@ const server=http.createServer((req,res)=>{
  await optionButtons.nth(0).focus();await page.keyboard.press('ArrowRight');
  assert.equal(await optionButtons.nth(1).evaluate(node=>node===document.activeElement),true);
  await optionButtons.nth(1).evaluate(button=>{button.click();button.click();});
+	const revision=card.locator('.scout-chat-work-card__checkpoint-revision');
+	await revision.waitFor({state:'visible'});
+	assert.equal(await card.locator('.scout-chat-work-card__checkpoint').getAttribute('data-state'),'idle');
+	assert.equal(requests.length,0);
+	const revisionNote='Keep the current opening. Rebuild slides 2 and 3 with complete rendered content.';
+	await revision.locator('textarea').fill(revisionNote);
+	await revision.getByRole('button',{name:'Send changes'}).evaluate(button=>{button.click();button.click();});
  assert.equal(await card.locator('.scout-chat-work-card__checkpoint').getAttribute('data-state'),'pending');
  assert.equal(await optionButtons.nth(1).getAttribute('aria-pressed'),'true');
  assert.equal(await optionButtons.nth(0).isDisabled(),true);
 	await page.waitForTimeout(40);
 	assert.equal(requests.length,1);
-	assert.deepEqual(requests[0],{id:'goal-channel-checkpoint',action:'approve',checkpointId:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',checkpointOptionId:'checkpoint-option-222222222222222222222222'});
+	assert.deepEqual(requests[0],{id:'goal-channel-checkpoint',action:'approve',checkpointId:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',checkpointOptionId:'checkpoint-option-222222222222222222222222',checkpointNote:revisionNote});
  await page.waitForFunction(()=>document.querySelector('#channel-checkpoint-fixture .scout-chat-work-card__checkpoint')?.dataset.state==='failed');
  assert.equal(await optionButtons.nth(1).getAttribute('data-choice-state'),'failed');
  assert.equal(await optionButtons.nth(0).isEnabled(),true);
  assert.match(await card.locator('[role="status"]').textContent(),/could not be saved/i);
-	await optionButtons.nth(1).click();
+	await revision.getByRole('button',{name:'Send changes'}).click();
  await page.waitForFunction(()=>document.querySelector('#channel-checkpoint-fixture .scout-chat-work-card__checkpoint')?.dataset.state==='selected');
 	assert.equal(await optionButtons.nth(1).getAttribute('data-choice-state'),'selected');
 	assert.equal(await optionButtons.nth(1).getAttribute('aria-pressed'),'true');
 	assert.match(await card.locator('[role="status"]').textContent(),/sent back for revision/);
 	assert.equal(requests.length,2);
-	assert.deepEqual(requests[1],{id:'goal-channel-checkpoint',action:'approve',checkpointId:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',checkpointOptionId:'checkpoint-option-222222222222222222222222'});
+	assert.deepEqual(requests[1],{id:'goal-channel-checkpoint',action:'approve',checkpointId:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',checkpointOptionId:'checkpoint-option-222222222222222222222222',checkpointNote:revisionNote});
 	assert.equal(Object.prototype.hasOwnProperty.call(requests[0],'choice'),false);
 	await page.evaluate(()=>mountChannelCheckpointFixture('channel-hold-fixture','goal-channel-hold',{id:'goal-checkpoint-bbbbbbbbbbbbbbbbbbbbbbbb',stageId:'direction',question:'Should this work remain held?',options:[{id:'checkpoint-option-444444444444444444444444',label:'Keep this held',action:'hold'},{id:'checkpoint-option-555555555555555555555555',label:'Proceed now',action:'proceed'}]},'Hold this launch deck'));
 	const holdCard=page.locator('#channel-hold-fixture .scout-chat-work-card');

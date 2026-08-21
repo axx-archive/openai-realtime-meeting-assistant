@@ -248,7 +248,7 @@ func artifactRenderBody(artifact meetingMemoryEntry) ([]byte, error) {
 	source = injectArtifactDeckNavigation(source)
 	allowed := map[string]artifactAsset{}
 	for _, asset := range artifactAssets(artifact) {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Mime)), "image/") || asset.Kind == "image" {
+		if artifactAssetIsEditableImage(asset) {
 			allowed[asset.Ref] = asset
 		}
 	}

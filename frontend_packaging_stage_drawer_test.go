@@ -15,6 +15,12 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 	}
 	html := string(body)
 	for _, want := range []string{
+		"const packagingStudioStagePresentation",
+		"function packagingStudioTaskDisplayTitle(plan, task)",
+		"function packagingStudioCheckpointQuestion(plan, checkpoint)",
+		"Build the 10-slide story",
+		"Add presenter notes",
+		"Build the editable presentation",
 		"const packagingStudioJudgmentStages",
 		"red_team:",
 		"compete_architects:",
@@ -28,6 +34,7 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 		"wrap.setAttribute('role', 'region')",
 		"position: sticky;",
 		"overscroll-behavior: contain;",
+		"artifactAssetIsRenderedPage(asset)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("packaging stage drawer contract missing %q", want)
@@ -104,12 +111,12 @@ const server=http.createServer((req,res)=>{
 });
 const tableRows=Array.from({length:18},(_,i)=>'| '+(i+1)+' | Objection '+(i+1)+' | '+('Specific risk evidence '.repeat(16))+' | Fix the claim |').join('\n');
 const fixtures=[
- {id:'stage-red',stage:'red_team',title:'Red-team — the hostile room, with teeth',role:'panel',text:'# Red-team verdict\n\nBLOCKED FOR PRODUCTION.\n\nThe saved output explicitly says the source context is incomplete and the claims should not ship.\n\n## Objection ledger\n\n| # | objection | evidence | repair |\n|---|---|---|---|\n'+tableRows+'\n\n## Strengths to keep\n\n- Founder language is direct.\n- The wedge is memorable.'},
- {id:'stage-identity',stage:'identity',title:'Identity — develop the visual system',role:'judges',text:'# Identity direction\n\n## Decision\n\nDirection B wins because the panel recorded the strongest audience fit.\n\n## Tokens\n\n'+tick+tick+tick+'css\n:root {\n  --ink: #151513;\n  --paper: #f5f0e7;\n  --heat: #e45d32;\n}\n'+tick+tick+tick+'\n\n## Sources\n\n- [OpenAI API](https://api.openai.com/v1)'},
- {id:'stage-architects',stage:'compete_architects',title:'Compete — three rival narrative architects',role:'panel',text:'# Narrative competition\n\n## Spine matrix\n\n| beat | cultural moment | franchise playbook | founder conviction |\n|---|---|---|---|\n| opening | The shift | The machine | The earned insight |\n| ask | Move now | Build the flywheel | Back the founder |\n\n## Cultural moment\n\n'+('A complete slide-by-slide spine. '.repeat(85))+'\n\n## Franchise playbook\n\n'+('A distinct expandable narrative. '.repeat(85))},
- {id:'stage-judges',stage:'compete_judges',title:'Compete — judge the spines',role:'judges',text:'# Jury verdict\n\n## Winner\n\nFounder conviction wins unanimously, 4–0.\n\n## Scorecard\n\n| spine | excitement | coherence | credibility |\n|---|---:|---:|---:|\n| founder conviction | 9 | 9 | 9 |\n| cultural moment | 8 | 7 | 8 |'},
- {id:'stage-write',stage:'write',title:'Write — graft the winning spine',role:'synthesizer',text:'# Deck manuscript\n\n## Slide 1 — The opening\n\nThe recorded opening line.\n\n## Slide 2 — The shift\n\nThe recorded argument.\n\n## Speaker notes\n\n[BEAT] The recorded delivery note.\n\n## Composition\n\n| slide | layout | source note |\n|---|---|---|\n| 1 | full bleed | founder brief |'}
-].map(entry=>({id:entry.id,text:entry.text,createdAt:new Date().toISOString(),metadata:{title:entry.title,type:'markdown',status:'complete',threadStatus:'complete',source:'process_stage',processId:'packaging_studio',processStage:entry.stage,goalSubtaskId:entry.stage,goalParentId:'packaging-goal',processRole:entry.role}}));
+ {id:'stage-red',stage:'red_team',title:'Red-team — the hostile room, with teeth',display:'Stress-test the brief',role:'panel',text:'# Red-team verdict\n\nBLOCKED FOR PRODUCTION.\n\nThe saved output explicitly says the source context is incomplete and the claims should not ship.\n\n## Objection ledger\n\n| # | objection | evidence | repair |\n|---|---|---|---|\n'+tableRows+'\n\n## Strengths to keep\n\n- Source language is direct.\n- The wedge is memorable.'},
+ {id:'stage-identity',stage:'identity',title:'Identity — develop the visual system',display:'Build the visual system',role:'judges',text:'# Identity direction\n\n## Decision\n\nDirection B wins because the panel recorded the strongest audience fit.\n\n## Tokens\n\n'+tick+tick+tick+'css\n:root {\n  --ink: #151513;\n  --paper: #f5f0e7;\n  --heat: #e45d32;\n}\n'+tick+tick+tick+'\n\n## Sources\n\n- [OpenAI API](https://api.openai.com/v1)'},
+ {id:'stage-architects',stage:'compete_architects',title:'Compete — three rival narrative architects',display:'Explore narrative directions',role:'panel',text:'# Narrative competition\n\n## Spine matrix\n\n| beat | cultural moment | franchise playbook | leadership conviction |\n|---|---|---|---|\n| opening | The shift | The machine | The earned insight |\n| ask | Move now | Build the flywheel | Back the team |\n\n## Cultural moment\n\n'+('A complete slide-by-slide spine. '.repeat(85))+'\n\n## Franchise playbook\n\n'+('A distinct expandable narrative. '.repeat(85))},
+ {id:'stage-judges',stage:'compete_judges',title:'Compete — judge the spines',display:'Choose the strongest story',role:'judges',text:'# Jury verdict\n\n## Winner\n\nLeadership conviction wins unanimously, 4–0.\n\n## Scorecard\n\n| spine | excitement | coherence | credibility |\n|---|---:|---:|---:|\n| leadership conviction | 9 | 9 | 9 |\n| cultural moment | 8 | 7 | 8 |'},
+ {id:'stage-write',stage:'write',title:'Write — graft the winning spine',display:'Build the 10-slide story',role:'synthesizer',text:'# Deck manuscript\n\n## Slide 1 — The opening\n\nThe recorded opening line.\n\n## Slide 2 — The shift\n\nThe recorded argument.\n\n## Speaker notes\n\n[BEAT] The recorded delivery note.\n\n## Composition\n\n| slide | layout | source note |\n|---|---|---|\n| 1 | full bleed | source brief |'}
+].map(entry=>({id:entry.id,display:entry.display,text:entry.text,createdAt:new Date().toISOString(),metadata:{title:entry.title,type:'markdown',status:'complete',threadStatus:'complete',source:'process_stage',processId:'packaging_studio',processStage:entry.stage,goalSubtaskId:entry.stage,goalParentId:'packaging-goal',processRole:entry.role}}));
 const checkpoint={id:'checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',stageId:'compete_choice',question:'Which narrative spine should become the deck backbone?',options:[{id:'option-111111111111111111111111',label:'Founder conviction',action:'proceed'},{id:'option-222222222222222222222222',label:'Cultural moment',action:'revise'},{id:'option-333333333333333333333333',label:'Hold for founder review',action:'hold'}]};
 const parentPlan={state:'approval_required',checkpoint,subtasks:[{id:'compete_judges',title:'Compete — judge the spines',role:'judges',status:'complete',artifactId:'stage-judges'},{id:'compete_choice',title:'Choose the winning spine',role:'human_checkpoint',status:'running',dependsOn:['compete_judges']}]};
 const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date().toISOString(),metadata:{title:'Packaging Studio',mode:'goal',processId:'packaging_studio',status:'approval_required',threadStatus:'approval_required',goalPlan:JSON.stringify(parentPlan),checkpoint:JSON.stringify(checkpoint)}};
@@ -121,6 +128,38 @@ const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date()
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
  await page.evaluate(({entries,parent})=>{artifactEntries=[...entries,parent];const trigger=document.createElement('button');trigger.id='stage-return-focus';trigger.textContent='Open stage';document.body.appendChild(trigger);trigger.focus();},{entries:fixtures,parent});
+
+ const customerStage=await page.evaluate(()=>{
+   runlogOpen=null;
+   const node=scoutStageArtifactNode({text:'Write — graft the winning spine is in — synthesizer output',thread:{artifactId:'stage-write',query:'Write — graft the winning spine'}});
+   document.body.appendChild(node);
+   const artifact=artifactEntries.find(entry=>entry.id==='stage-write');
+   return {
+     title:document.querySelector('.runlog__title')?.textContent,
+     meta:document.querySelector('.runlog__meta')?.textContent,
+     threadQuery:scoutThreadFromArtifact(artifact).query,
+     artifactTitle:artifactDisplayTitle(artifact)
+   };
+ });
+ assert.deepEqual(customerStage,{title:'Build the 10-slide story',meta:'rev 1 · deck story drafted',threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
+ await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
+
+ const savedGoalCopy=await page.evaluate(()=>{
+   const terminal=document.createElement('div');
+   const card=document.createElement('article');
+   const savedPlan={processId:'packaging_studio',subtasks:[
+     {id:'compete_judges',title:'Compete — judge the spines, steal the best beats',artifactId:'stage-judges'},
+     {id:'compete_choice',title:'Choose the winning spine',role:'human_checkpoint',dependsOn:['compete_judges']}
+   ]};
+   const savedCheckpoint={stageId:'compete_choice',question:"Which of the founder's VERBATIM words should shape the deck?",options:[]};
+   goalCardRenderCheckpoint(terminal,card,{id:'saved-packaging-goal'},savedPlan,savedCheckpoint);
+   document.body.appendChild(terminal);
+   return {
+     question:terminal.querySelector('.goalcard__checkpoint-question')?.textContent,
+     door:terminal.querySelector('.goalcard__terminal-actions .goalcard__link')?.textContent
+   };
+ });
+ assert.deepEqual(savedGoalCopy,{question:'Scout evaluated three narrative directions. Which one should shape the deck?',door:'review · Choose the strongest story'});
 
  const external=page.locator('.pd1-primary-nav__external');
  await external.waitFor({state:'visible'});
@@ -171,7 +210,7 @@ const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date()
  await page.evaluate(()=>openArtifactStage('stage-red','Red-team'));
  const dialog=page.locator('.artifact-stage');
  await dialog.waitFor({state:'visible'});
- assert.match(await dialog.locator('.artifact-stage__kicker').textContent(),/packaging studio · Red-team · Blocking verdict/);
+ assert.match(await dialog.locator('.artifact-stage__kicker').textContent(),/packaging studio · Stress-test the brief · Blocking verdict/);
  assert.equal(await dialog.locator('.artifact-stage-activity__state').getAttribute('data-tone'),'attention');
  assert.match(await dialog.locator('.artifact-stage-activity__summary').textContent(),/BLOCKED FOR PRODUCTION/);
  assert.equal(await dialog.locator('.artifact-stage-activity__record').getAttribute('open'),null);
@@ -195,7 +234,7 @@ const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date()
  for(const fixture of fixtures.slice(1)){
    await page.evaluate(id=>openArtifactStage(id,id),fixture.id);
    await page.locator('.artifact-stage').waitFor({state:'visible'});
-   assert.match(await page.locator('.artifact-stage__kicker').textContent(),new RegExp(fixture.metadata.title.split(' — ')[0].replace('Compete','Compete')));
+   assert.match(await page.locator('.artifact-stage__kicker').textContent(),new RegExp(fixture.display));
    await page.locator('.artifact-stage__close').click();
  }
 

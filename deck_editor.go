@@ -602,7 +602,7 @@ func validDeckColor(value string) bool {
 func artifactAssetRefSet(artifact meetingMemoryEntry) map[string]struct{} {
 	refs := map[string]struct{}{}
 	for _, asset := range artifactAssets(artifact) {
-		if strings.HasPrefix(strings.ToLower(asset.Mime), "image/") || asset.Kind == "image" {
+		if artifactAssetIsEditableImage(asset) {
 			refs[asset.Ref] = struct{}{}
 		}
 	}
@@ -777,7 +777,8 @@ func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string
 	var slideNodes []*xhtml.Node
 	var walk func(*xhtml.Node)
 	walk = func(node *xhtml.Node) {
-		if node.Type == xhtml.ElementNode && (node.Data == "section" || legacyNodeHasClass(node, "pg") || legacyNodeHasClass(node, "slide")) {
+		isStageChild := node.Type == xhtml.ElementNode && node.Data == "section" && node.Parent != nil && legacyNodeAttr(node.Parent, "id") == "stage"
+		if node.Type == xhtml.ElementNode && (legacyNodeHasClass(node, "pg") || legacyNodeHasClass(node, "slide") || isStageChild) {
 			slideNodes = append(slideNodes, node)
 			return
 		}
@@ -1134,7 +1135,7 @@ func legacyFigAsset(node *xhtml.Node, assets []artifactAsset) (string, string, b
 		if figPattern.MatchString(className) {
 			prefix := strings.ToLower(className + ".")
 			for _, asset := range assets {
-				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Name)), prefix) && validBlobRef(asset.Ref) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Mime)), "image/") {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(asset.Name)), prefix) && validBlobRef(asset.Ref) && artifactAssetIsEditableImage(asset) {
 					return asset.Ref, asset.Name, true
 				}
 			}

@@ -64,7 +64,10 @@ const (
 	defaultRenderCanaryTimeout      = 45 * time.Second
 	defaultRenderExecTimeout        = 3 * time.Minute
 	defaultRenderMaxPDFBytes        = 64 << 20
-	defaultRenderMaxHTMLBytes       = 8 << 20
+	// A self-contained deck may carry up to six generated images as data URIs.
+	// Keep the queue bounded while leaving enough headroom for that authored
+	// contract plus HTML/CSS and presenter notes.
+	defaultRenderMaxHTMLBytes       = 32 << 20
 )
 
 type renderRunnerJob struct {
