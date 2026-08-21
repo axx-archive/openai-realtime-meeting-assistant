@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 147 serves exact release `8bd0ea783bd7633b0cac8a8e383a6651c165c0fe` with the source-complete Like A Farmer run parked at final deck review after its bounded rebuild. Build 69 was uploaded to Apple from web/mobile release `9b2a04a8` and is awaiting processing/group proof; later changes are web-only. The corrected renderer produced all ten pages and the three-seat jury saw all ten, but its verdict identified authored text overlap/clipping on slides 1, 2, 4, 5, 9, and 10. The current local candidate therefore makes that verdict a structured, run-specific final-review warning, removes the unsafe send-back fallback after the revision budget is spent, imports generated presenter chrome without making the deck read-only, preserves/editable presenter notes, and adds native font, leading, and alignment controls. The current final review remains parked; the deck is not approved.
+Current phase: generation 151 serves exact release `ed81417897928f17fea5d39ad7713773ce037598` as `verified-local-unsigned`. The source-complete Like A Farmer deck is now a ten-slide native Deck Studio artifact: all clipping was repaired, two Scout-generated images were placed, notes and product copy were cleaned, and the deck was saved, reopened, presented, and rendered. Final approval remains parked because production inspection exposed a result-surfacing regression: web/mobile still show generic workflow cards instead of one rich deck card, and isolated export/mobile preview omit protected image refs. The current candidate resolves one explicit concrete result per goal, renders one responsive 16:9 Edit/Present surface on web and iOS, exposes checkpoint choices in native chat, and expands authoritative deck imagery across presenter/export/mobile boundaries. Because this includes native changes after Build 69, the final TestFlight lane is Build 70 from the exact combined release SHA.
 
 ## Invariants
 
@@ -23,15 +23,15 @@ Current phase: generation 147 serves exact release `8bd0ea783bd7633b0cac8a8e383a
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
 | W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress on generation 147; 10-page render/jury complete, native repair candidate under test |
-| W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Uploaded from `9b2a04a8`; Apple processing/groups pending |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Native deck edited on generation 151; rich feed card and image-complete re-export pending candidate release |
+| W7 | Publish the final combined native SHA as Build 70 to TestFlight | Final web/mobile release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Build 69 uploaded from `9b2a04a8`; Build 70 required for current native result/preview fixes |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
 
 ## Current Wave
 
-- Root owner: commit the integrated, critic-approved web delta; combine it with Mobile Build 69; push the exact main SHA; execute the receipted VPS release and live browser QA.
-- Production owner: rerun the Like A Farmer request against the exact authorized reply/PDF snapshot, answer only genuine checkpoints, then edit and verify the generated deck.
-- Mobile owner: build and submit only the final combined main SHA as Build 69, then verify Apple processing and intended groups.
+- Root owner: commit/push the web/native result-surfacing and image-expansion candidate; execute the receipted VPS release; verify the current production deck in the actual feed and renderer.
+- Production owner: re-export the already-edited Like A Farmer deck, inspect all ten pages with both Scout images present, approve final review, and confirm one channel delivery surface.
+- Mobile owner: increment to Build 70, build/submit only the final combined main SHA, then verify Apple processing and intended groups.
 
 ## Completed Evidence
 
@@ -93,16 +93,22 @@ Current phase: generation 147 serves exact release `8bd0ea783bd7633b0cac8a8e383a
 - Generation 150 serves exact `e4263cbfabd27d5241b93670330383ae93f73553` as `verified-local-unsigned`, and the exact live artifact finally exposes enabled `Edit deck` actions. Full-screen production inspection then found a shell-only dark-theme defect: the main editor canvas forced black instead of honoring each slide's document background, while thumbnails were correct. The candidate restores document-authoritative backgrounds in dark mode and adds a rendered computed-color regression.
 - The final focused normal gate covers importer, native typography/notes, rendered Deck Studio, legacy checkpoint truth, jury quorum/coverage, Packaging Studio, and spent-rebuild hold behavior. The focused race gate covers the corresponding persistence/import/jury seams; `git diff --check` is clean. The known broad-suite baseline static failures were reproduced separately and are not in the touched focused surface.
 
+- Generation 151 serves exact `ed81417897928f17fea5d39ad7713773ce037598` as `verified-local-unsigned`; app image `sha256:811c9bda7928b49d0dba4d6b0e88edee46a1e8f47ccb4ca9b6becd58fc6326`, render image `sha256:887e666c941b91a0ffc302c46776ba6238a470c9deb51e3be15f3a3685c2de6d`, and generation 150 remains retained rollback.
+- Production artifact `os-artifact-artifacts-1787303409669546304` is the ten-slide native `html_deck` titled `Like A Farmer — Optimization Insights`, version 11, with ten completed render pages. Native edit/save/reopen/present passed; all ten slide notes were cleaned of internal founder/verbatim language, and Scout imagery was added to slides 1 and 7.
+- Visual inspection of the generation-151 exported contact sheet found the two new images absent even though the native editor/presenter showed them. Root cause: native scene HTML intentionally stores attached `/artifacts/blob?ref=...` refs, but PDF enqueue and the iOS inline WebView consumed raw HTML outside the authenticated blob boundary. The candidate now uses the same authoritative `artifactRenderBody` data-URI expansion for PDF/background render and mints the protected presenter URL for native inline preview.
+- Existing and future goal messages receive an exact `resultArtifactId`, `resultArtifactType`, and `resultTitle` only when the server can conjunctively bind the goal to its own Packaging Studio ship deck. Web collapses duplicate stage receipts into one responsive 16:9 `renderArtifactDeck` card with Edit and Present; iOS uses the same result identity and exposes the exact opaque checkpoint choices in both the channel and reply sheet.
+- Focused gates pass: result projection and cross-goal isolation; lock-safe lost-response recovery; native-image export expansion; rich web deck routing; rendered checkpoint/chat/Deck Studio journeys with bundled Playwright; TypeScript; and all 587 mobile tests. The broad repository run additionally revealed and closed a candidate-introduced memory re-entry deadlock; the lock-sensitive recovery test now passes. Remaining broad failures are the documented baseline/static suite drift and missing default Playwright module path, not accepted as candidate evidence.
+
 ## Pending Dependencies
 
-- Completion of the active source-complete production run, editor/presenter proof, Apple processing/groups, and safe cleanup remain pending.
+- Exact candidate release, current-deck feed/render acceptance, final approval, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
-- Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; rerun and edit the production deck; verify the already-uploaded Build 69 in TestFlight.
-- Not yet executed: source-complete deck completion, editor/presenter acceptance, Apple processing/group verification, final repository cleanup.
-- Rollback: retain production generation 147 (`8bd0ea78`) and generation 146 images until the follow-up live deck/editor journey passes.
+- Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; re-export/approve the current production deck; build and submit exact Build 70; verify TestFlight.
+- Not yet executed: rich production feed acceptance, image-complete re-export, final approval/channel completion, Build 70 processing/group verification, final repository cleanup.
+- Rollback: retain production generation 150 (`e4263cbf`) and generation 151 images until the follow-up live feed/export journey passes.
 
 ## Risks And Decisions
 
@@ -113,9 +119,9 @@ Current phase: generation 147 serves exact release `8bd0ea783bd7633b0cac8a8e383a
 
 ## Resume Here
 
-1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 147 before trusting any status above.
-2. Finish focused/full/editor-render tests and independent critic review, commit/push the exact candidate, deploy the next receipted release, and verify serving identity plus retained generation-147 rollback.
-3. Reload goal `os-artifact-workflow-1787294011307003318`; open the latest deck in native Deck Studio and apply the jury's concrete fixes to slides 1, 2, 4, 5, 9, and 10. Do not spend another Request changes action or approve the defective source version.
-4. Use Scout imagery once in edit mode, exercise layer/shape/opacity controls without degrading the story, save, reopen, present, export ten pages, visually inspect all slides, and only then approve and confirm channel completion.
-5. Verify Apple Build 69 processing and intended TestFlight groups without implying later web-only commits are in that mobile binary.
+1. Verify `git status`, `git diff --check`, focused Go/browser/native gates, `axx/main`, and generation 151.
+2. Commit/push the exact candidate, deploy the next receipted release, and verify serving identity plus retained generation-150 rollback.
+3. Reload Like A Farmer in the signed-in production browser. Require one rich 16:9 deck card with Edit and Present, no duplicate generic deck/process cards, and a visually bounded final decision surface.
+4. Re-export artifact `os-artifact-artifacts-1787303409669546304`; inspect all ten rendered pages and require the Scout images on slides 1 and 7. Reopen editor/presenter, then approve final review and confirm the completion/channel receipt.
+5. Increment iOS to Build 70, build/submit the exact final main SHA by explicit EAS build ID, and verify Apple processing plus intended groups.
 6. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

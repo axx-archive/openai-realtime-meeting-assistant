@@ -35,6 +35,13 @@ import {
  * Does NOT infer kind from title/summary keywords alone — mode must be explicit.
  */
 function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
+  const resultType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
+  if (/^(html_deck|deck|presentation|slides?)$/u.test(resultType)) return 'html_deck';
+  if (/^(table|data_table|spreadsheet)$/u.test(resultType)) return 'table';
+  if (/^(ideation|ideas|brainstorm)$/u.test(resultType)) return 'ideation';
+  if (/^(research|deep_research|report|analysis)$/u.test(resultType)) return 'research';
+  if (/^(document|doc|memo|brief)$/u.test(resultType)) return 'document';
+
   // Live path: kind=thread uses message.thread.mode
   const threadMode = String(message.thread?.mode ?? '').toLowerCase();
   if (threadMode) {
@@ -117,6 +124,7 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onResolveWorkCheckpoint?: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject?: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
   proposalObjective?: string;
@@ -156,7 +164,7 @@ function timeOf(message: ScoutMessage): string {
 
 function workThreadRef(message: ScoutMessage): { ref: ScoutWorkThreadRef; governedRecord: boolean } | null {
   const kind = String(message.kind ?? '').toLowerCase();
-  if (kind === 'thread' && message.thread) return { ref: message.thread, governedRecord: false };
+  if ((kind === 'thread' || kind === 'artifact') && message.thread) return { ref: message.thread, governedRecord: false };
   if ((kind !== 'work_result' && kind !== 'work_record') || !message.work) return null;
   return {
     governedRecord: true,
@@ -281,6 +289,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetryReply,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onResolveWorkCheckpoint,
   onChangeWorkProject,
   onResolveProposal,
   proposalObjective,
@@ -537,18 +546,42 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : workThread
             && !(String(workThread.ref.projectTitle ?? '').trim() && workThread.family === 'Research')
             && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
-            <InlineArtifactPreview
-              kind={detectInlineArtifactKind(message) ?? 'html_deck'}
-              title={String(workThread.ref.resultTitle ?? '').trim() || 'Work'}
-              text={String(workThread.ref.resultPreview ?? '')}
-              agentName={workThread.agentName}
-              loading={!workThread.complete}
-              artifactId={workThread.complete ? String(workThread.ref.artifactId ?? '').trim() : undefined}
-              sessionToken={sessionToken}
-              onEdit={workThread.complete && !workThread.governedRecord ? () => onRegenerateWorkArtifact?.(message) : undefined}
-              onPresent={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
-              onExpand={workThread.complete ? () => onViewArtifactFullscreen?.(message) : undefined}
-            />
+            <View style={styles.richWorkResult}>
+              <InlineArtifactPreview
+                kind={detectInlineArtifactKind(message) ?? 'html_deck'}
+                title={String(workThread.ref.resultTitle ?? '').trim() || 'Presentation'}
+                text={String(workThread.ref.resultPreview ?? '')}
+                agentName={workThread.agentName}
+                loading={workThread.active && !String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim()}
+                artifactId={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() || undefined}
+                sessionToken={sessionToken}
+                onEdit={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onOpenWorkArtifact?.(message) : undefined}
+                onPresent={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onExpand={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onViewArtifactFullscreen?.(message) : undefined}
+              />
+              {workThread.needsInput && workThread.ref.checkpoint?.question ? (
+                <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
+                  <View style={styles.checkpointStatusRow}>
+                    <SymbolView name="questionmark.circle.fill" tintColor={colors.emberText} size={14} />
+                    <Text style={styles.checkpointKicker}>Scout needs your decision</Text>
+                  </View>
+                  <Text style={styles.checkpointQuestion}>{workThread.ref.checkpoint.question}</Text>
+                  <View style={styles.checkpointChoices}>
+                    {(workThread.ref.checkpoint.options ?? []).map((option) => (
+                      <Pressable
+                        key={option.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={option.label}
+                        onPress={() => onResolveWorkCheckpoint?.(message, option)}
+                        style={({ pressed }) => [styles.checkpointChoice, pressed && styles.workResultPressed]}
+                      >
+                        <Text style={styles.checkpointChoiceText}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+            </View>
           ) : workThread ? (
             <View style={styles.workCard}>
               <View style={styles.workHead}>
@@ -941,7 +974,15 @@ const styles = StyleSheet.create({
   stackWork: { width: '100%', maxWidth: '100%', alignSelf: 'stretch' },
   stackOwn: { alignItems: 'flex-end' },
   bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
-  bubbleWork: { width: '100%', maxWidth: 372, alignSelf: 'stretch' },
+  bubbleWork: { width: '100%', maxWidth: 720, alignSelf: 'stretch' },
+  richWorkResult: { width: '100%', gap: space[3] },
+  checkpointCard: { gap: space[3], padding: space[4], borderRadius: radius.lg, backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember },
+  checkpointStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  checkpointKicker: { ...type.captionMedium, color: colors.emberText },
+  checkpointQuestion: { ...type.body, color: colors.text1 },
+  checkpointChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
+  checkpointChoice: { minHeight: 42, justifyContent: 'center', paddingHorizontal: space[4], paddingVertical: space[2], borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  checkpointChoiceText: { ...type.captionMedium, color: colors.emberText },
   bubbleOther: { backgroundColor: colors.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, borderBottomLeftRadius: radius.sm },
   bubbleOwn: { backgroundColor: colors.accent, borderBottomRightRadius: radius.sm },
   bubbleScout: { backgroundColor: colors.surface1, borderColor: colors.ember },

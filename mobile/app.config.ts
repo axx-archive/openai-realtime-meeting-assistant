@@ -43,12 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 69 carries bounded auth transport deadlines and safe errors,
-      // the direct launch handoff, adaptive shell icon rendering, governed
-      // Research/Presentation work-card routing, and Expo 57 patch alignment.
+      // Build 70 adds the exact finished-deck result contract, authenticated
+      // rich preview, native Edit/Present routing, and in-channel checkpoint
+      // choices on top of the Build 69 stability and Expo 57 alignment work.
       // It retains the existing Project attachment/reply compatibility.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '69',
+      buildNumber: '70',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

@@ -1590,7 +1590,15 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 }
 
 func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail string, thread scoutChatThreadRecord, episodeID string) scoutChatThreadRecord {
+	return app.projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail, thread, episodeID, true)
+}
+
+func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail string, thread scoutChatThreadRecord, episodeID string, includeArtifactResults bool) scoutChatThreadRecord {
 	projected := thread
+	var resultIndex scoutChatResultProjectionIndex
+	if includeArtifactResults {
+		resultIndex = app.scoutChatResultIndex()
+	}
 	if thread.Riff != nil {
 		projected.ConversationKind = "channel_riff"
 	}
@@ -1674,6 +1682,9 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail st
 	}
 	for messageIndex := range projected.Messages {
 		original := projected.Messages[messageIndex]
+		if includeArtifactResults {
+			projectScoutChatResultRef(&projected.Messages[messageIndex], resultIndex)
+		}
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
 		projected.Messages[messageIndex].RiffAuthority = nil
@@ -1740,6 +1751,71 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail st
 	return projected
 }
 
+type scoutChatResultProjectionIndex struct {
+	byID       map[string]meetingMemoryEntry
+	deckByGoal map[string]meetingMemoryEntry
+}
+
+func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex {
+	index := scoutChatResultProjectionIndex{
+		byID:       map[string]meetingMemoryEntry{},
+		deckByGoal: map[string]meetingMemoryEntry{},
+	}
+	if app == nil {
+		return index
+	}
+	// One store snapshot per thread projection keeps a large channel O(A+M),
+	// rather than scanning every artifact once for every work message.
+	for _, artifact := range app.osArtifactsSnapshot(0) {
+		index.byID[artifact.ID] = artifact
+		if strings.TrimSpace(artifact.Metadata["source"]) != "packaging_studio_ship" ||
+			strings.TrimSpace(artifact.Metadata["artifactContract"]) != packagingStudioDeckContract {
+			continue
+		}
+		goalID := strings.TrimSpace(artifact.Metadata["goalId"])
+		if goalID != "" {
+			index.deckByGoal[goalID] = artifact
+		}
+	}
+	return index
+}
+
+// projectScoutChatResultRef upgrades old and new work messages at the read
+// boundary with the concrete presentation they produced. The binding is
+// server-owned and conjunctive: a direct ref must itself be a deck, while a
+// goal ref may resolve only the Packaging Studio deck filed for that exact
+// goal. No title/body sniffing and no cross-goal artifact search is allowed.
+func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
+	if message == nil || message.Thread == nil {
+		return
+	}
+	projectedRef := *message.Thread
+	message.Thread = &projectedRef
+	ref := message.Thread
+	ref.ResultArtifactID = ""
+	ref.ResultArtifactType = ""
+	ref.ResultTitle = ""
+	artifact, found := index.byID[strings.TrimSpace(ref.ArtifactID)]
+	if !found {
+		return
+	}
+	result := artifact
+	if strings.TrimSpace(artifact.Metadata["mode"]) == "goal" {
+		deck, ok := index.deckByGoal[artifact.ID]
+		if !ok || strings.TrimSpace(deck.Metadata["goalId"]) != artifact.ID ||
+			strings.TrimSpace(deck.Metadata["source"]) != "packaging_studio_ship" {
+			return
+		}
+		result = deck
+	}
+	if artifactType(result) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(result) {
+		return
+	}
+	ref.ResultArtifactID = result.ID
+	ref.ResultArtifactType = artifactTypeHTMLDeck
+	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Presentation")
+}
+
 func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) scoutChatMessageRecord {
 	// Publication revocation is batch-wide, but ordinary message events retain
 	// the historical O(1-message) projection. Only a v2 publication scans its
@@ -1756,10 +1832,14 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, 
 		publication.ContextSources = nil
 		message.Publication = &publication
 	}
-	projected := app.projectScoutChatThreadForViewerEpisode(viewerEmail, scoutChatThreadRecord{
+	// Live append broadcasts can run while the memory store is committing the
+	// artifact that caused them. Do not re-enter that store to backfill a result
+	// link here; the durable GET projection performs that lookup after commit.
+	// Newly persisted explicit Result* fields still pass through unchanged.
+	projected := app.projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail, scoutChatThreadRecord{
 		ID: thread.ID, OwnerEmail: thread.OwnerEmail, Visibility: thread.Visibility, ConversationKind: thread.ConversationKind,
 		Riff: thread.Riff, Messages: []scoutChatMessageRecord{message},
-	}, message.RiffEpisodeID)
+	}, message.RiffEpisodeID, false)
 	if len(projected.Messages) == 0 {
 		return scoutChatMessageRecord{ID: message.ID, Kind: message.Kind, Role: message.Role, CreatedAt: message.CreatedAt,
 			RiffEpisodeID: message.RiffEpisodeID, RiffCheckpointID: message.RiffCheckpointID}

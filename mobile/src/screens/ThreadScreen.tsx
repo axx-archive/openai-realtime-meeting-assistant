@@ -264,6 +264,7 @@ type ThreadMessageRowProps = {
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onResolveWorkCheckpoint: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onOpenThread: (message: ScoutMessage) => void;
 };
@@ -300,6 +301,7 @@ const ThreadMessageRow = React.memo(
     onOpenCatchUp,
     onOpenLongMessage,
     onOpenWorkArtifact,
+    onResolveWorkCheckpoint,
     onChangeWorkProject,
     onOpenThread,
   }: ThreadMessageRowProps) {
@@ -368,6 +370,7 @@ const ThreadMessageRow = React.memo(
           resolvingProposal={resolvingProposal}
           onOpenLongMessage={onOpenLongMessage}
           onOpenWorkArtifact={onOpenWorkArtifact}
+          onResolveWorkCheckpoint={onResolveWorkCheckpoint}
           onChangeWorkProject={onChangeWorkProject}
           retryingReply={retryingReply}
           savingImage={savingImage}
@@ -412,6 +415,7 @@ const ThreadMessageRow = React.memo(
     previous.onOpenCatchUp === next.onOpenCatchUp &&
     previous.onOpenLongMessage === next.onOpenLongMessage &&
     previous.onOpenWorkArtifact === next.onOpenWorkArtifact &&
+    previous.onResolveWorkCheckpoint === next.onResolveWorkCheckpoint &&
     previous.onChangeWorkProject === next.onChangeWorkProject &&
     previous.onOpenThread === next.onOpenThread,
 );
@@ -2691,6 +2695,15 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openWorkArtifact = useCallback(
     async (message: ScoutMessage, returnFocusHandle?: number) => {
       expandedMessageReturnFocusHandleRef.current = returnFocusHandle ?? null;
+      const resultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+      const resultArtifactType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
+      if (resultArtifactId && /^(html_deck|deck|presentation|slides?)$/u.test(resultArtifactType)) {
+        navigation.navigate('OSWeb', {
+          path: `/artifacts/deck?id=${encodeURIComponent(resultArtifactId)}`,
+          title: String(message.thread?.resultTitle ?? 'Presentation').trim() || 'Presentation',
+        });
+        return;
+      }
       const governedWork = message.work;
       if (["work_result", "work_record"].includes(String(message.kind ?? "").toLowerCase()) && governedWork) {
         if (!sessionToken) return;
@@ -2793,7 +2806,48 @@ export function ThreadScreen({ route, navigation }: Props) {
         );
       }
     },
-    [sessionToken],
+    [navigation, sessionToken],
+  );
+
+  const resolveWorkCheckpoint = useCallback(
+    (message: ScoutMessage, option: { id: string; label: string; action: string }) => {
+      const artifactId = String(message.thread?.artifactId ?? '').trim();
+      const checkpointId = String(message.thread?.checkpoint?.id ?? '').trim();
+      if (!sessionToken || !artifactId || !checkpointId || !option.id) {
+        setError('That decision is no longer available. Refresh the channel and try again.');
+        return;
+      }
+      const submit = async (checkpointNote = '') => {
+        try {
+          await api.artifactCheckpointAction(sessionToken, {
+            id: artifactId,
+            checkpointId,
+            checkpointOptionId: option.id,
+            checkpointNote,
+          });
+          await load();
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : 'Could not record that decision.');
+        }
+      };
+      if (option.action === 'revise') {
+        Alert.prompt(
+          'Changes for Scout',
+          'Say what should improve and what must stay unchanged.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Send changes', onPress: (note?: string) => { if (String(note ?? '').trim()) void submit(String(note).trim()); } },
+          ],
+          'plain-text',
+        );
+        return;
+      }
+      Alert.alert('Confirm decision', option.label, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: option.label, onPress: () => void submit() },
+      ]);
+    },
+    [load, sessionToken],
   );
 
   const beginSaveWorkArtifact = useCallback(
@@ -2824,8 +2878,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const viewArtifactFullscreen = useCallback(
     (message: ScoutMessage) => {
-      const artifactId = String(message.thread?.artifactId ?? "").trim();
-      const mode = String(message.thread?.mode ?? "").toLowerCase();
+      const artifactId = String(message.thread?.resultArtifactId ?? message.thread?.artifactId ?? "").trim();
+      const mode = String(message.thread?.resultArtifactType ?? message.thread?.mode ?? "").toLowerCase();
       const title = String(message.thread?.resultTitle ?? "Deliverable").trim();
       
       if (!artifactId) {
@@ -3054,6 +3108,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onOpenCatchUp={openCatchUp}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
         onOpenThread={openThreadContext}
       />
@@ -3069,6 +3124,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       openMessageActions,
       openLongMessage,
       openWorkArtifact,
+      resolveWorkCheckpoint,
       openWorkstreamCorrection,
       openSavedWorkArtifact,
       openThreadContext,
@@ -3540,6 +3596,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
         onSaveWorkArtifact={beginSaveWorkArtifact}
         onOpenSavedWorkArtifact={openSavedWorkArtifact}

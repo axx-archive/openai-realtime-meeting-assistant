@@ -44,6 +44,44 @@ func TestIndexScoutChatMessageRoutesGoalRefsAndStageArtifacts(t *testing.T) {
 	}
 }
 
+func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
+	html := readIndexForGoalThreadCards(t)
+	router := functionBody(html, "function scoutChatMessageRecordNode(message)")
+	deck := functionBody(html, "function scoutHTMLDeckRefRecordNode(message, artifact)")
+	stage := functionBody(html, "function scoutStageArtifactNode(message)")
+	if router == "" || deck == "" || stage == "" {
+		t.Fatal("could not extract concrete deck feed functions")
+	}
+	for _, want := range []string{
+		"message.thread?.resultArtifactId",
+		"artifactIsHTMLDeck(resultArtifact)",
+		"group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))",
+		"packagingStudioStagePresentationFor(run.artifact)",
+	} {
+		if !strings.Contains(router, want) {
+			t.Errorf("deck result router missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"scout-chat-deck-result",
+		"renderArtifactDeck(result, artifact)",
+		"candidate?.thread?.resultArtifactId",
+		"['thread', 'artifact'].includes",
+	} {
+		if !strings.Contains(deck, want) {
+			t.Errorf("rich deck result function missing %q", want)
+		}
+	}
+	if !strings.Contains(stage, "scoutHTMLDeckRefRecordNode(message, resultArtifact)") || !strings.Contains(stage, "scoutHTMLDeckRefRecordNode(message, artifact)") {
+		t.Error("stage receipts must converge on the same deduplicated rich deck card")
+	}
+	for _, want := range []string{".chat-deck__btn--secondary", ".chat-deck__btn--primary", "Edit", "Present"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rich deck feed lost %q", want)
+		}
+	}
+}
+
 // Generic workstreams also carry goalStatus for lifecycle reporting. That
 // field must not classify research/design work as a goal or desktop will hide
 // the report card behind the compact goal transcript path.

@@ -405,9 +405,22 @@ export type ScoutWorkThreadRef = {
   startedAt?: string;
   projectId?: string;
   projectTitle?: string;
+  /** Concrete deliverable produced by the run; artifactId remains the lifecycle owner. */
+  resultArtifactId?: string;
+  resultArtifactType?: string;
   resultTitle?: string;
   resultPreview?: string;
   provenance?: string;
+  checkpoint?: {
+    id: string;
+    stageId: string;
+    question: string;
+    options?: Array<{
+      id: string;
+      label: string;
+      action: 'proceed' | 'revise' | 'hold' | string;
+    }>;
+  };
 };
 
 export type ScoutWorkRecordRef = {

@@ -159,8 +159,9 @@ func TestResearchReportPrintHTMLMastheadSectionsAndFooter(t *testing.T) {
 }
 
 // The export trigger routes a markdown artifact to the paper kind with the
-// converted print document as the job HTML — and the deck path is untouched:
-// a deck job still carries the artifact body byte-for-byte.
+// converted print document as the job HTML. Legacy self-contained decks stay
+// byte-for-byte; native scene decks expand their attached image refs before
+// crossing the isolated render boundary.
 func TestArtifactExportPDFMarkdownRoutesToPaperDeckUnchanged(t *testing.T) {
 	_, member := shareLinkTestEnv(t)
 	queueDir := setupRenderSidecarEnv(t)
@@ -211,6 +212,39 @@ func TestArtifactExportPDFMarkdownRoutesToPaperDeckUnchanged(t *testing.T) {
 	}
 	if deckJob.HTML != deckBody {
 		t.Fatalf("deck job HTML changed:\n got %q\nwant %q", deckJob.HTML, deckBody)
+	}
+
+	setupIsolatedBlobStore(t)
+	imageRef, err := putBlob([]byte("native deck image"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scene := deckDocument{SchemaVersion: 1, Width: 1920, Height: 1080, Slides: []deckSlide{{
+		ID: "slide-1", Elements: []deckElement{{ID: "hero", Type: "image", X: 0, Y: 0, Width: 1920, Height: 1080, Z: 1, Opacity: 1, Ref: imageRef, Name: "hero.png", Fit: "cover"}},
+	}}}
+	sceneBytes, err := json.Marshal(scene)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sceneRef, err := putBlob(sceneBytes, "application/vnd.bonfire.deck+json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := json.Marshal([]artifactAsset{{Ref: imageRef, Mime: "image/png", Name: "hero.png", Kind: "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := seedShareArtifact(t, "draft", `<!doctype html><html><body><img src="/artifacts/blob?ref=`+imageRef+`"></body></html>`, map[string]string{
+		"type": artifactTypeHTMLDeck, deckSceneRefMetadataKey: sceneRef, artifactAssetsMetadataKey: string(assets),
+	})
+	recorder = shareLinkRequest(t, http.MethodPost, "/artifacts/export-pdf", fmt.Sprintf(`{"artifactId":%q}`, native.ID), member)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("native deck export status=%d body=%s, want 202", recorder.Code, recorder.Body.String())
+	}
+	nativePayload := decodeJSON(t, recorder)
+	nativeJob := readRenderJobForTest(t, queueDir, fmt.Sprint(nativePayload["jobId"]))
+	if !strings.Contains(nativeJob.HTML, "data:image/png;base64,") || strings.Contains(nativeJob.HTML, "/artifacts/blob") {
+		t.Fatalf("native deck export did not inline its attached image: %s", nativeJob.HTML)
 	}
 }
 

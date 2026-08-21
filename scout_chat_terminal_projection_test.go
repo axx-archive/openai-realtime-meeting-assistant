@@ -140,6 +140,44 @@ func TestScoutTerminalProjectionUsesCurrentMetadataAndIsRestartStable(t *testing
 	}
 }
 
+func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIdentity(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Like A Farmer work", "goal record", "AJ", map[string]string{
+		"mode": "goal", "status": "approval_required", "threadStatus": "approval_required",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deck, _, err := app.createOSArtifactWithMetadata("workflow", "Like A Farmer deck", "<!doctype html><html><body><section class=\"pg\">deck</section></body></html>", "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "packaging_studio_ship", "goalId": goal.ID, "artifactContract": packagingStudioDeckContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
+		ID: "goal-card", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "run-1", Mode: "goal", Status: "approval_required", ArtifactID: goal.ID},
+	}}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	ref := projected.Messages[0].Thread
+	if ref.ArtifactID != goal.ID || ref.ResultArtifactID != deck.ID || ref.ResultArtifactType != artifactTypeHTMLDeck || ref.ResultTitle != "Like A Farmer deck" {
+		t.Fatalf("projected ref=%+v, want lifecycle goal plus explicit deck result", ref)
+	}
+	if thread.Messages[0].Thread.ResultArtifactID != "" {
+		t.Fatal("read projection mutated persisted thread")
+	}
+
+	other, _, err := app.createOSArtifactWithMetadata("workflow", "Wrong goal deck", "<!doctype html><html><body>wrong</body></html>", "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "packaging_studio_ship", "goalId": "another-goal", "artifactContract": packagingStudioDeckContract,
+	})
+	if err != nil || other.ID == "" {
+		t.Fatal(err)
+	}
+	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != deck.ID {
+		t.Fatalf("cross-goal sibling changed result to %q", got)
+	}
+}
+
 func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MEETING_MEMORY_PATH", dir+"/memory.jsonl")

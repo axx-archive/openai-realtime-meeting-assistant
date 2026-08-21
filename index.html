@@ -12118,8 +12118,8 @@
         width: 100%;
         /* min-width ensures intrinsic size even if parent has no used width.
            Prevents width:100% + aspect-ratio computing to 0×0 in flex contexts. */
-        min-width: min(480px, calc(100vw - 48px));
-        max-width: 480px;
+        min-width: min(560px, calc(100vw - 48px));
+        max-width: 720px;
         aspect-ratio: 16 / 9;
         border-radius: var(--r-lg);
         overflow: hidden;
@@ -12249,6 +12249,18 @@
           0 16px 40px rgba(0, 0, 0, 0.32),
           0 2px 4px rgba(0, 0, 0, 0.2),
           inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+      .scout-chat-deck-result {
+        width: min(100%, 720px);
+        margin: 14px 0 18px;
+      }
+      .scout-chat-deck-result .chat-deck {
+        min-width: 0;
+        max-width: none;
+      }
+      @media (max-width: 640px) {
+        .chat-deck { min-width: 0; max-width: 100%; }
+        .scout-chat-deck-result { width: 100%; }
       }
 
       /* ---------- Deck Studio ----------
@@ -64546,7 +64558,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -65118,10 +65130,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (recordKind === 'thread' && message.thread) {
 	          feedPrevMsgKey = ''
 	          const run = scoutThreadFromChatMessage(message)
+	          const resultArtifactId = String(message.thread?.resultArtifactId || '').trim()
+	          const resultArtifact = artifactEntries.find(candidate => String(candidate?.id || '') === resultArtifactId)
 	          // P0-1: a goal ref mounts the live goalcard in the thread — for
 	          // everyone, across reloads — instead of the research run card
 	          if (run.artifact && (String(message.intentOutcome || '') === 'start_private_work' || String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
-	            return scoutGoalRefRecordNode(message, run.artifact)
+	            const goalNode = scoutGoalRefRecordNode(message, run.artifact)
+	            if (!resultArtifact || !artifactIsHTMLDeck(resultArtifact)) return goalNode
+	            const group = document.createDocumentFragment()
+	            group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))
+	            return group
+	          }
+	          if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) {
+	            return scoutHTMLDeckRefRecordNode(message, resultArtifact)
+	          }
+	          if (run.artifact && artifactIsHTMLDeck(run.artifact)) {
+	            return scoutHTMLDeckRefRecordNode(message, run.artifact)
+	          }
+	          // Process children already have a single authored run-log row.
+	          // Rendering their worker receipt as a second full report card is
+	          // the feed clutter seen in production, so fold the exact bound
+	          // artifact into the same stage spine.
+	          if (run.artifact && String(run.artifact?.metadata?.goalParentId || '').trim() && packagingStudioStagePresentationFor(run.artifact)) {
+	            return scoutStageArtifactNode({ ...message, kind: 'artifact' })
 	          }
 	          runlogMarkerGoalId = ''
 	          const card = scoutChatResearchNode(run)
@@ -68082,6 +68113,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
+	      // One concrete deck result earns one rich 16:9 feed surface. Work
+	      // orchestration can emit both a child completion and a stage receipt;
+	      // latest-wins prevents those durable receipts from becoming duplicate
+	      // deck cards while preserving the underlying audit trail in activity.
+	      function scoutHTMLDeckRefRecordNode(message, artifact) {
+	        const resultId = String(message?.thread?.resultArtifactId || artifact?.id || '').trim()
+	        if (!resultId || !artifact || !artifactIsHTMLDeck(artifact)) return document.createDocumentFragment()
+	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        let latestId = ''
+	        for (const candidate of messages) {
+	          if (!['thread', 'artifact'].includes(String(candidate?.kind || ''))) continue
+	          const candidateResultId = String(candidate?.thread?.resultArtifactId || candidate?.thread?.artifactId || '').trim()
+	          if (candidateResultId === resultId) latestId = String(candidate?.id || '')
+	        }
+	        if (latestId && String(message?.id || '') !== latestId) return document.createDocumentFragment()
+	        runlogOpen = null
+	        const result = document.createElement('article')
+	        result.className = 'scout-chat-deck-result'
+	        result.dataset.resultArtifactId = resultId
+	        result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation`)
+	        renderArtifactDeck(result, artifact)
+	        return result
+	      }
+
 	      // §1 the run log (P0 signature): consecutive kind:"artifact" stage
 	      // messages merge into ONE .runlog container — the run gets a spine
 	      // instead of emitting every landed stage as an orphan. The render-pass
@@ -68093,6 +68148,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const artifactId = String(message?.thread?.artifactId || '')
 	        const line = String(message?.text || '')
 	        const artifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+	        const resultArtifactId = String(message?.thread?.resultArtifactId || '').trim()
+	        const resultArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === resultArtifactId)
+	        if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) return scoutHTMLDeckRefRecordNode(message, resultArtifact)
+	        if (artifact && artifactIsHTMLDeck(artifact)) return scoutHTMLDeckRefRecordNode(message, artifact)
 	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
 	        const dedupKey = String(stagePresentation?.label || message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
 	        // goalStageMessageLine grammar: "<title> is in — <note> (revision N)"

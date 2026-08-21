@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
 import { api } from '../api/client';
+import { API_BASE_URL } from '../config';
+import { buildApiUrl } from '../api/requestHelpers';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
 import { ScoutRichText } from './ScoutRichText';
@@ -62,16 +64,12 @@ export function InlineArtifactPreview({
   onPresent,
   onExpand,
 }: Props) {
-  const { width: screenWidth } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const [deckHtml, setDeckHtml] = useState<string | null>(null);
+  const [deckUrl, setDeckUrl] = useState<string | null>(null);
   const [deckLoading, setDeckLoading] = useState(false);
   const [deckError, setDeckError] = useState(false);
   const isPresentable = kind === 'html_deck';
-
-  // Explicit 16:9 dimensions - not flex leftover
-  const containerWidth = Math.min(screenWidth - 48, 440);
-  const containerHeight = containerWidth * (9 / 16);
 
   // Live path: use htmlContent directly (bypasses API fetch)
   // Work-thread path: fetch from API via artifactId
@@ -79,6 +77,7 @@ export function InlineArtifactPreview({
     // If htmlContent is provided, use it directly (live path)
     if (kind === 'html_deck' && htmlContent) {
       setDeckHtml(htmlContent);
+      setDeckUrl(null);
       setDeckLoading(false);
       setDeckError(false);
       return;
@@ -86,19 +85,22 @@ export function InlineArtifactPreview({
 
     // Work-thread path: fetch from API
     if (kind !== 'html_deck' || !artifactId || !sessionToken || loading) {
-      if (!htmlContent) setDeckHtml(null);
+      if (!htmlContent) {
+        setDeckHtml(null);
+        setDeckUrl(null);
+      }
       return;
     }
     let active = true;
     setDeckLoading(true);
     setDeckError(false);
-    api.artifact(sessionToken, artifactId)
+    api.artifactRenderToken(sessionToken, artifactId)
       .then((response) => {
         if (!active) return;
-        const artifact = response.artifacts?.[0];
-        const html = String(artifact?.text ?? '').trim();
-        if (html && html.includes('<')) {
-          setDeckHtml(html);
+        const path = String(response.url ?? '').trim();
+        if (path.startsWith('/artifacts/render?')) {
+          setDeckUrl(buildApiUrl(API_BASE_URL, path));
+          setDeckHtml(null);
         } else {
           setDeckError(true);
         }
@@ -117,7 +119,7 @@ export function InlineArtifactPreview({
     // Loading state during creation
     if (loading) {
       return (
-        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+        <View style={styles.deckContainer}>
           <Glass radius={radius.lg} style={styles.deckGlass}>
             <View style={styles.deckLoadingCenter}>
               <ActivityIndicator color={colors.emberText} size="large" />
@@ -131,7 +133,7 @@ export function InlineArtifactPreview({
     // Loading deck HTML
     if (deckLoading && artifactId) {
       return (
-        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+        <View style={styles.deckContainer}>
           <Glass radius={radius.lg} style={styles.deckGlass}>
             <View style={styles.deckLoadingCenter}>
               <ActivityIndicator color={colors.emberText} size="large" />
@@ -143,9 +145,9 @@ export function InlineArtifactPreview({
     }
 
     // Error or missing content - no ScoutRichText fallback
-    if (deckError || !deckHtml) {
+    if (deckError || (!deckHtml && !deckUrl)) {
       return (
-        <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+        <View style={styles.deckContainer}>
           <Glass radius={radius.lg} style={styles.deckGlass}>
             <View style={styles.deckLoadingCenter}>
               <SymbolView name="exclamationmark.triangle" size={32} tintColor={colors.text3} />
@@ -168,10 +170,10 @@ export function InlineArtifactPreview({
 
     // Real deck: WebView fills the glass, artifact HTML is THE document
     return (
-      <View style={[styles.deckContainer, { width: containerWidth, height: containerHeight }]}>
+      <View style={styles.deckContainer}>
         <View style={styles.deckWebViewWrapper}>
           <WebView
-            source={{ html: deckHtml }}
+            source={deckUrl ? { uri: deckUrl } : { html: deckHtml ?? '' }}
             style={styles.deckWebViewFill}
             scrollEnabled={false}
             originWhitelist={['*']}
@@ -300,6 +302,9 @@ const DECK_FIRST_SLIDE_JS = `
 const styles = StyleSheet.create({
   // Deck-specific styles (16:9 IS the slide)
   deckContainer: {
+    width: '100%',
+    maxWidth: 680,
+    aspectRatio: 16 / 9,
     borderRadius: radius.lg,
     overflow: 'hidden',
     backgroundColor: colors.surface1,

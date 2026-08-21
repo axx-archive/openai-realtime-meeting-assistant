@@ -64,6 +64,7 @@ type Props = {
   resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  onResolveWorkCheckpoint: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onSaveWorkArtifact: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
@@ -109,6 +110,7 @@ export function ThreadDetailSheet({
   resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onResolveWorkCheckpoint,
   onChangeWorkProject,
   onSaveWorkArtifact,
   onOpenSavedWorkArtifact,
@@ -336,6 +338,7 @@ export function ThreadDetailSheet({
                       resolvingProposal={resolvingProposalID === String(message.id)}
                       onOpenLongMessage={onOpenLongMessage}
                       onOpenWorkArtifact={onOpenWorkArtifact}
+                      onResolveWorkCheckpoint={onResolveWorkCheckpoint}
                       onChangeWorkProject={onChangeWorkProject}
                       onSaveWorkArtifact={onSaveWorkArtifact}
                       onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}

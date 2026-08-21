@@ -655,6 +655,31 @@ export const api = {
     });
   },
 
+  artifactRenderToken(
+    sessionToken: string,
+    artifactId: string,
+  ): Promise<{ ok: boolean; url: string; expiresAt?: string }> {
+    return request(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, {
+      sessionToken,
+    });
+  },
+
+  artifactCheckpointAction(
+    sessionToken: string,
+    body: {
+      id: string;
+      checkpointId: string;
+      checkpointOptionId: string;
+      checkpointNote?: string;
+    },
+  ): Promise<{ ok: boolean; replayed?: boolean }> {
+    return request('/artifacts/action', {
+      method: 'POST',
+      body: { ...body, action: 'approve' },
+      sessionToken,
+    });
+  },
+
   artifactDisposition(
     sessionToken: string,
     body: {

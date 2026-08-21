@@ -1653,6 +1653,17 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	markdownReport := !artifactIsHTMLDocument(artifact)
 	if markdownReport {
 		printHTML = renderResearchReportPrintHTML(artifact)
+	} else if strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) != "" {
+		// Native Deck Studio bodies stay byte-light by referencing attached
+		// blobs. The isolated renderer admits only data: images, so expand the
+		// same authoritative scene used by Present before enqueueing the PDF.
+		// This keeps editor, presenter, export, and mobile preview visually equal.
+		expanded, expandErr := artifactRenderBody(artifact)
+		if expandErr != nil {
+			writeAuthError(w, http.StatusUnprocessableEntity, "deck images could not be prepared for export")
+			return
+		}
+		printHTML = string(expanded)
 	}
 	if !renderSidecarAvailable() {
 		writeAuthError(w, http.StatusServiceUnavailable, "render sidecar not available — start the render-runner container (or run with -render-runner) to export PDFs")

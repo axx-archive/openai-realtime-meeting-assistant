@@ -97,4 +97,26 @@ test('Project-bound Research uses governed actions while Project presentations k
   assert.equal(deck.props.artifactId, 'artifact-project-presentation');
   await act(async () => { deck.props.onPresent(); });
   assert.equal(presented, 1);
+
+  const goalWithDeck = {
+    id: 'goal-with-deck', kind: 'thread', role: 'scout', text: 'Ready for your decision.', createdAt: '2026-08-13T18:10:00Z',
+    thread: {
+      id: 'run-goal-deck', mode: 'goal', query: 'Build the Like A Farmer deck', status: 'approval_required', artifactId: 'goal-artifact',
+      resultArtifactId: 'deck-artifact', resultArtifactType: 'html_deck', resultTitle: 'Like A Farmer — Optimization Insights',
+      checkpoint: { id: 'checkpoint-final', stageId: 'ship', question: 'Is this ready to share?', options: [{ id: 'approve-final', label: 'Approve and share', action: 'approve' }] },
+    },
+  };
+  let checkpointChoice = '';
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: goalWithDeck, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+      onResolveWorkCheckpoint: (_message: unknown, option: { id: string }) => { checkpointChoice = option.id; },
+    } as any));
+  });
+  const resultDeck = renderer!.root.findByType('InlineArtifactPreview' as any);
+  assert.equal(resultDeck.props.artifactId, 'deck-artifact');
+  assert.equal(resultDeck.props.title, 'Like A Farmer — Optimization Insights');
+  const approve = renderer!.root.findByProps({ accessibilityLabel: 'Approve and share' });
+  await act(async () => { approve.props.onPress(); });
+  assert.equal(checkpointChoice, 'approve-final');
 });

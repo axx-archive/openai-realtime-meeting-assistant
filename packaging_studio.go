@@ -1294,7 +1294,15 @@ func (app *kanbanBoardApp) enqueueStudioRender(artifact meetingMemoryEntry, side
 		return "", "the deck artifact is not self-contained HTML — nothing for the render runner to print"
 	}
 	kind := serverRenderKindForArtifact(artifact)
-	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, artifact.Text, artifact.Metadata["title"])
+	printHTML := artifact.Text
+	if strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) != "" {
+		expanded, expandErr := artifactRenderBody(artifact)
+		if expandErr != nil {
+			return "", "render export enqueue failed: deck images could not be prepared"
+		}
+		printHTML = string(expanded)
+	}
+	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, printHTML, artifact.Metadata["title"])
 	if err != nil {
 		return "", "render export enqueue failed: " + compactAssistantLine(err.Error())
 	}

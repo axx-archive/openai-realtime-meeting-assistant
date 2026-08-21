@@ -203,23 +203,31 @@ type scoutChatFileAttachment struct {
 }
 
 type scoutChatThreadRef struct {
-	ID              string                      `json:"id"`
-	Mode            string                      `json:"mode"`
-	Query           string                      `json:"query"`
-	Status          string                      `json:"status"`
-	ArtifactID      string                      `json:"artifactId,omitempty"`
-	AgentID         string                      `json:"agentId,omitempty"`
-	AgentName       string                      `json:"agentName,omitempty"`
-	DelegatedBy     string                      `json:"delegatedBy,omitempty"`
-	CurrentStage    string                      `json:"currentStage,omitempty"`
-	ProgressPercent float64                     `json:"progressPercent,omitempty"`
-	ProgressNote    string                      `json:"progressNote,omitempty"`
-	FollowUpStatus  string                      `json:"followUpStatus,omitempty"`
-	AttentionReason string                      `json:"attentionReason,omitempty"`
-	StartedAt       string                      `json:"startedAt,omitempty"`
-	ProjectID       string                      `json:"projectId,omitempty"`
-	ProjectTitle    string                      `json:"projectTitle,omitempty"`
-	Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	ID              string  `json:"id"`
+	Mode            string  `json:"mode"`
+	Query           string  `json:"query"`
+	Status          string  `json:"status"`
+	ArtifactID      string  `json:"artifactId,omitempty"`
+	AgentID         string  `json:"agentId,omitempty"`
+	AgentName       string  `json:"agentName,omitempty"`
+	DelegatedBy     string  `json:"delegatedBy,omitempty"`
+	CurrentStage    string  `json:"currentStage,omitempty"`
+	ProgressPercent float64 `json:"progressPercent,omitempty"`
+	ProgressNote    string  `json:"progressNote,omitempty"`
+	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
+	AttentionReason string  `json:"attentionReason,omitempty"`
+	StartedAt       string  `json:"startedAt,omitempty"`
+	ProjectID       string  `json:"projectId,omitempty"`
+	ProjectTitle    string  `json:"projectTitle,omitempty"`
+	// Result* names the concrete deliverable produced by a durable work run.
+	// ArtifactID above remains the run/goal record that owns lifecycle and
+	// checkpoint state; clients must not infer the output from its title or
+	// mode. This explicit projection lets web and native render the same deck
+	// while the parent is still parked at final review.
+	ResultArtifactID   string                      `json:"resultArtifactId,omitempty"`
+	ResultArtifactType string                      `json:"resultArtifactType,omitempty"`
+	ResultTitle        string                      `json:"resultTitle,omitempty"`
+	Checkpoint         *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
 }
 
 // scoutChatWorkCheckpointRef is the bounded, display-safe checkpoint carried
