@@ -28,7 +28,8 @@ func TestChannelWorkCardOwnsCheckpointDecision(t *testing.T) {
 		"checkpointId: String(checkpointId || '').trim()",
 		"checkpointOptionId: String(checkpointOptionId || '').trim()",
 		"function desktopCheckpointChoiceLabel(label)",
-		"const retry = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')",
+		"function desktopWorkRecoveryControl(artifact, plan, ref, options = {})",
+		"const control = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')",
 		"postAuthJSON('/artifacts/action', { id: artifact.id, action: 'resume' })",
 		"Resuming at the blocker…",
 		"This work remains held.",
@@ -146,6 +147,7 @@ const server=http.createServer((req,res)=>{
 	  const plan={state:'needs_attention',processId:'packaging_studio',subtasks:[{id:'voice',title:'Voice',status:'blocked'}]};
 	  const artifact={id:'goal-channel-blocked',kind:'os_artifact',text:'# Saved deck draft',metadata:{mode:'goal',title:'Like A Farmer deck',status:'needs_attention',threadStatus:'needs_attention',goalPlan:JSON.stringify(plan)}};
 	  const message={id:'work-message-blocked',thread:{id:'goal-channel-blocked',artifactId:'goal-channel-blocked',status:'needs_attention',mode:'goal',agentName:'Scout',query:'Finish the Like A Farmer deck'}};
+	  addArtifactEntry(artifact,{select:false});
 	  const fixture=document.createElement('div');fixture.id='channel-blocked-fixture';fixture.appendChild(scoutDesktopGoalWorkCardNode(message,artifact));chatTool.appendChild(fixture);
 	});
 	const blockedCard=page.locator('#channel-blocked-fixture .scout-chat-work-card');
@@ -155,6 +157,16 @@ const server=http.createServer((req,res)=>{
 	await page.waitForFunction(()=>document.querySelector('#channel-blocked-fixture .chat-context-action:last-child')?.textContent==='Resuming at the blocker…');
 	assert.deepEqual(requests[3],{id:'goal-channel-blocked',action:'resume'});
 	assert.equal(requests.length,4);
+	await page.setViewportSize({width:1440,height:900});
+	await blockedCard.getByRole('button',{name:/View .* activity/}).click();
+	const contextPanel=page.getByRole('complementary',{name:'Conversation context'});
+	const desktopRetry=contextPanel.getByRole('button',{name:'Retry from here'});
+	assert.equal(await desktopRetry.count(),1);
+	await desktopRetry.click();
+	await page.waitForFunction(()=>[...document.querySelectorAll('.chat-context-action')].some(node=>node.textContent==='Resuming at the blocker…'));
+	assert.deepEqual(requests[4],{id:'goal-channel-blocked',action:'resume'});
+	assert.equal(requests.length,5);
+	await page.setViewportSize({width:390,height:844});
 	await page.evaluate(()=>{
 	  const mount=(id,status,plan)=>{const artifact={id,kind:'os_artifact',text:'# Saved work',metadata:{mode:'goal',title:id,status,threadStatus:status,goalPlan:JSON.stringify(plan)}};const message={id:'message-'+id,thread:{id,artifactId:id,status,mode:'goal',agentName:'Scout',query:'Continue this work'}};const fixture=document.createElement('div');fixture.id='fixture-'+id;fixture.appendChild(scoutDesktopGoalWorkCardNode(message,artifact));chatTool.appendChild(fixture)};
 	  mount('goal-channel-rejected','rejected',{state:'approval_required',processId:'packaging_studio',subtasks:[]});
@@ -165,7 +177,7 @@ const server=http.createServer((req,res)=>{
 	  await candidate.getByRole('button',{name:/View .* activity/}).click();
 	  assert.equal(await candidate.getByRole('button',{name:'Retry from here'}).count(),0);
 	  await candidate.getByRole('button',{name:'Ask Scout'}).click();
-	  assert.equal(requests.length,4);
+	  assert.equal(requests.length,5);
 	}
 	await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`

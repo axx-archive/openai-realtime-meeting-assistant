@@ -66801,6 +66801,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        })
 	      }
 
+	      function desktopWorkRecoveryControl(artifact, plan, ref, options = {}) {
+	        if (!artifact?.id) return null
+	        const canResumeProcess = String(plan?.state || '').toLowerCase() === 'needs_attention' && Boolean(plan?.processId || plan?.toolTemplate)
+	        const control = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')
+	        control.type = 'button'
+	        control.addEventListener('click', async () => {
+	          if (canResumeProcess) {
+	            control.disabled = true
+	            control.textContent = 'Retrying…'
+	            try {
+	              const result = await postAuthJSON('/artifacts/action', { id: artifact.id, action: 'resume' })
+	              if (!result?.ok) throw new Error(result?.data?.error || 'Could not resume this work.')
+	              control.textContent = 'Resuming at the blocker…'
+	              goalCardScheduleSync()
+	              options.onResume?.()
+	            } catch (error) {
+	              control.disabled = false
+	              control.textContent = 'Retry from here'
+	              showToast(error?.message || 'Could not resume this work. Try again.')
+	            }
+	            return
+	          }
+	          armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref?.query || ''), prefill: true })
+	          options.onFollowUp?.()
+	          scoutChatInput?.focus()
+	        })
+	        return control
+	      }
+
 	      function renderDesktopWorkContext(message, artifact) {
 	        if (chatContextState?.mode !== 'work' || String(chatContextState.messageId) !== String(message?.id || '')) return
 	        if (chatContextParent) {
@@ -66837,6 +66866,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          actions.appendChild(view)
+	        }
+	        if (terminalError) {
+	          const recovery = desktopWorkRecoveryControl(artifact, goalPlanFromArtifact(artifact), ref, {
+	            onFollowUp: () => closeDesktopChatContext({ restoreFocus: false })
+	          })
+	          if (recovery) actions.appendChild(recovery)
 	        }
 	        if (terminalComplete) {
 	          const save = desktopSaveToDriveControl(artifact)
@@ -67688,33 +67723,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // still stalled visually but remains at approval_required server-
 	          // side, so promising a retry there would deterministically fail.
 	          if (isStalled) {
-	            const canResumeProcess = String(plan?.state || '').toLowerCase() === 'needs_attention' && Boolean(plan?.processId || plan?.toolTemplate)
-	            const retry = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')
-	            retry.type = 'button'
-	            retry.addEventListener('click', async () => {
-	              // A blocked process must resume through its durable goal door.
-	              // Prefilling a conversational follow-up creates a new ask and
-	              // leaves the scheduled process blocked—the exact opposite of
-	              // what this action promises.
-	              if (canResumeProcess) {
-	                retry.disabled = true
-	                retry.textContent = 'Retrying…'
-	                try {
-	                  const result = await postAuthJSON('/artifacts/action', { id: artifact.id, action: 'resume' })
-	                  if (!result?.ok) throw new Error(result?.data?.error || 'Could not resume this work.')
-	                  retry.textContent = 'Resuming at the blocker…'
-	                  goalCardScheduleSync()
-	                } catch (error) {
-	                  retry.disabled = false
-	                  retry.textContent = 'Retry from here'
-	                  showToast(error?.message || 'Could not resume this work. Try again.')
-	                }
-	                return
-	              }
-	              armScoutFollowUpTarget(artifact.id, { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })
-	              scoutChatInput?.focus()
-	            })
-	            compactActions.appendChild(retry)
+	            const recovery = desktopWorkRecoveryControl(artifact, plan, ref)
+	            if (recovery) compactActions.appendChild(recovery)
 	          }
 	          details.appendChild(compactActions)
 	        }
