@@ -146,9 +146,16 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 - The final independent adversarial UI gate is PASS. It caught and closed six release-material issues before commit: an `about:blank` iframe load could reveal an empty preview; mobile hid Save a copy; write named two different copy schemas; generic advisory percentages became fake presentation progress; Document Studio was outside the call-PiP focus/z composite; and Brain excerpts lacked durable source IDs. Fresh-frame hydration, a mobile save dock, one `deck_copy_v2` contract, status-only presentation pills, editor-aware PiP at the top layer, and destination-authorized artifact/decision/memory IDs plus revision/digest now have rendered or backend regressions.
 - Final candidate gate: focused rendered/static suite passed; focused race suite passed; Sports Car journey passed 3/3; `git diff --check` is clean. The broad `go test ./...` was run for 595 seconds and surfaced the documented baseline/static/provider-noise group plus candidate-specific inventory/test-contract failures; every candidate-specific failure was fixed and re-run green before the independent PASS.
 
+## Generation 161 Production Acceptance And Follow-up
+
+- Production generation 161 serves exact `cba989cc2a21e191ac6d9ece103bdf87847d2484`, bundle `cb61b572fcdefcea8fce7a656137fa115df958e2a7766246ba167e3677ac02b4`, app image `sha256:5829bcfb9043e55c6948313686cca966043f8fbc5a2a972a38d7de674cfaba15`, and render image `sha256:e816d2385dbf02b5458a21b429059fed0d2b35ae9c5d35d90e1abe7a26210835`; verifier, ledger, serving images, and public health/readiness agree, with generation 160 retained rollback.
+- Signed-in cold-channel instrumentation sampled the canonical deck every 80-100 ms. Its shell was 720x405 from the first observed frame, the renderer remained at opacity 0 until ready at approximately 1.6 seconds, then crossfaded to opacity 1 without any geometry change. The reported zoom/resize flash is closed on the live release.
+- That same browser pass caught a separate scroll-flow defect: `.manifest-card--deck-first` computed to zero height inside the vertical flex log while its 405 px deck child overflowed below the maximum scroll boundary. The bottom anchor was correct, but the final deck was literally outside the reachable scroll extent.
+- The follow-up makes the deck-first handoff a non-shrinking flex item with visible overflow, suppresses redundant package/title/subline chrome, and centers the deck plus its quiet supporting-files row. A static regression pins the sizing and clutter contract; the focused manifest/deck suite and `git diff --check` pass. This fix must supersede generation 161 before Build 70 is cut.
+
 ## Pending Dependencies
 
-- Independent final critique, the next exact release, signed-in production workshop of W9-W11, Build 70 processing/groups, and safe cleanup remain pending.
+- The deck-first scroll-flow follow-up critique/release, remaining signed-in Deck Studio/Document Studio production workshop, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
@@ -166,8 +173,8 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 
 ## Resume Here
 
-1. Run the full proportional backend/race/rendered gate and an independent final design/quality critique; close only candidate-caused findings.
-2. Commit and push one clean exact SHA, deploy through the receipted DigitalOcean release path, and verify ledger/images/public health/readiness agree.
-3. Workshop the signed-in production Like A Farmer channel: cold/cached load stability, quiet Activity flow, deck edit/image/layer/save/copy/present, Document Studio save/copy, and PiP continuity.
+1. Close the deck-first flex-flow critique, commit/push the follow-up, and supersede generation 161 through the receipted exact-release path.
+2. Recheck the signed-in Like A Farmer bottom anchor, quiet Activity flow, and centered rich deck; then finish Deck Studio/Document Studio/PiP production acceptance.
+3. Keep the generation-161 cold-load measurement as the preview-stability evidence; do not reopen it unless the superseding release changes the preview shell.
 4. Build/submit iOS Build 70 from that exact final main SHA by explicit EAS build ID, verify phone/iPad rich-preview behavior plus Apple processing and intended groups.
 5. Preserve receipts and synchronize local `main`, `axx/main`, and safe worktrees without overwriting user work.

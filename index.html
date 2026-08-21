@@ -11190,13 +11190,29 @@
       .manifest-card--deck-first {
         max-width: 920px;
         padding: 0;
-        overflow: hidden;
+        /* The chat log is a vertical flex scroller. A tall deck-first card
+           with overflow:hidden was allowed to flex-shrink all the way to
+           zero, leaving its 16:9 child painted below the scroll boundary.
+           Keep the completed artifact in normal flow from the first frame. */
+        flex: 0 0 auto;
+        overflow: visible;
         border: 0;
         background: transparent;
       }
 
+      .manifest-card--deck-first > .manifest-card__head,
+      .manifest-card--deck-first > .manifest-card__title,
+      .manifest-card--deck-first > .manifest-card__subline {
+        display: none;
+      }
+
       .manifest-card--deck-first .manifest-card__deck-result {
-        margin: 0;
+        margin: 0 auto;
+      }
+
+      .manifest-card--deck-first .manifest-card__supporting {
+        max-width: 720px;
+        margin: 8px auto 0;
       }
 
       .manifest-card__supporting {

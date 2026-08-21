@@ -64,6 +64,28 @@ func TestIndexManifestCardComponentContract(t *testing.T) {
 	}
 }
 
+// A deck-first handoff is the deck, not a package receipt. It must retain its
+// intrinsic height inside the vertical flex scroller so the bottom anchor can
+// actually reach it, and it suppresses the redundant package/title preamble.
+func TestIndexDeckFirstManifestStaysInChatFlow(t *testing.T) {
+	html := readIndexForManifest(t)
+	for _, want := range []string{
+		".manifest-card--deck-first {",
+		"flex: 0 0 auto;",
+		"overflow: visible;",
+		".manifest-card--deck-first > .manifest-card__head",
+		".manifest-card--deck-first > .manifest-card__title",
+		".manifest-card--deck-first > .manifest-card__subline",
+		"display: none;",
+		"margin: 0 auto;",
+		"max-width: 720px;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing deck-first flow guard %q", want)
+		}
+	}
+}
+
 // The pdf action is a DIRECT download off the session-gated blob route: the
 // ref is validated to the 64-hex sha256 shape before any url is built, the
 // href comes from the shared artifactBlobUrl helper, and the anchor downloads.
