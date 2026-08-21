@@ -140,7 +140,7 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		id := strings.TrimSpace(r.URL.Query().Get("id"))
 		artifact, ok := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent)
-		if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+		if !ok || !artifactIsDeckEditorDocument(artifact) {
 			writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 			return
 		}
@@ -171,7 +171,7 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLWrite)
-	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+	if !ok || !artifactIsDeckEditorDocument(artifact) {
 		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 		return
 	}
@@ -243,7 +243,7 @@ func deckEditorImageGenerationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
-	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+	if !ok || !artifactIsDeckEditorDocument(artifact) {
 		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 		return
 	}
@@ -364,7 +364,7 @@ func deckEditorAssetUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	artifact, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLWrite)
-	if !ok || artifactType(artifact) != artifactTypeHTMLDeck {
+	if !ok || !artifactIsDeckEditorDocument(artifact) {
 		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 		return
 	}
@@ -410,6 +410,10 @@ func deckEditorAssetUploadHandler(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "updated": true, "artifact": deckArtifactViewFromEntry(updated), "deck": deck,
 		"image": map[string]any{"ref": ref, "mime": mime, "name": name}, "element": element,
 	})
+}
+
+func artifactIsDeckEditorDocument(artifact meetingMemoryEntry) bool {
+	return artifactType(artifact) == artifactTypeHTMLDeck || artifactIsHTMLDocument(artifact)
 }
 
 func deckAssetsMetadataWith(artifact meetingMemoryEntry, additions ...artifactAsset) (string, error) {

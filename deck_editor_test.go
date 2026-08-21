@@ -387,6 +387,31 @@ func TestLegacyPresenterChromeIsIgnoredButSlideNotesRemainEditable(t *testing.T)
 	}
 }
 
+func TestDeckEndpointTreatsStaleMarkdownStampOnHTMLDeckAsEditableDeck(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	updated, _, err := kanbanApp.updateOSArtifactWithMetadata(artifact.ID, "", faithfulDeckHTML, "AJ", map[string]string{"type": artifactTypeMarkdown})
+	if err != nil {
+		t.Fatalf("stamp legacy markdown metadata: %v", err)
+	}
+	if artifactType(updated) != artifactTypeMarkdown || !artifactIsDeckEditorDocument(updated) {
+		t.Fatalf("artifactType=%q deckEditorDocument=%v, want scoped editor override for stale markdown stamp", artifactType(updated), artifactIsDeckEditorDocument(updated))
+	}
+	request := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+updated.ID, "", cookies, deckEditorHandler)
+	if request.Code != http.StatusOK {
+		t.Fatalf("GET stale-stamped deck status=%d body=%s", request.Code, request.Body.String())
+	}
+	var payload struct {
+		CanWrite      bool   `json:"canWrite"`
+		ImportQuality string `json:"importQuality"`
+	}
+	if err := json.Unmarshal(request.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode deck response: %v", err)
+	}
+	if !payload.CanWrite || payload.ImportQuality != "faithful" {
+		t.Fatalf("payload=%+v, want editable faithful deck", payload)
+	}
+}
+
 func TestLegacyBehaviorAndUnrepresentedVisualsStayReadOnlyWithoutLoss(t *testing.T) {
 	cases := []struct {
 		name string
