@@ -204,6 +204,8 @@ func TestIndexStageArtifactRunlogContract(t *testing.T) {
 	for _, want := range []string{
 		// the dedup key strips the revision marker so a redo updates in place
 		`replace(/\s*\(revision \d+\)\s*/g, ' ')`,
+		"candidateGoalId !== stageGoalId",
+		"latestStageMessageId !== String(message?.id || '')",
 		"runlogOpen",
 		"runlog__entry",
 		"openArtifactStage(entry.dataset.artifactId, entry.querySelector('.runlog__title')?.textContent || '')",

@@ -68167,6 +68167,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (artifact && artifactIsHTMLDeck(artifact)) return scoutHTMLDeckRefRecordNode(message, artifact)
 	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
 	        const dedupKey = String(stagePresentation?.label || message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
+	        const stageGoalId = String(artifact?.metadata?.goalParentId || artifact?.metadata?.goalId || '').trim()
+	        if (stageGoalId && dedupKey) {
+	          const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	          let latestStageMessageId = ''
+	          for (const candidate of messages) {
+	            if (!['thread', 'artifact'].includes(String(candidate?.kind || ''))) continue
+	            const candidateArtifactId = String(candidate?.thread?.artifactId || '').trim()
+	            const candidateArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === candidateArtifactId)
+	            const candidateGoalId = String(candidateArtifact?.metadata?.goalParentId || candidateArtifact?.metadata?.goalId || '').trim()
+	            if (candidateGoalId !== stageGoalId) continue
+	            const candidateStage = packagingStudioStagePresentationFor(candidateArtifact)
+	            const candidateKey = String(candidateStage?.label || candidate?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
+	            if (candidateKey === dedupKey) latestStageMessageId = String(candidate?.id || '')
+	          }
+	          // Retries remain visible in View activity, but one goal/stage gets
+	          // one latest authored row in the conversation feed.
+	          if (latestStageMessageId && latestStageMessageId !== String(message?.id || '')) return document.createDocumentFragment()
+	        }
 	        // goalStageMessageLine grammar: "<title> is in — <note> (revision N)"
 	        const revMatch = /\(revision (\d+)\)\s*$/.exec(line)
 	        const rev = revMatch ? Number(revMatch[1]) + 1 : 1
