@@ -15,28 +15,46 @@ package main
 // html.EscapeString-ed BEFORE it is wrapped in a tag (the
 // renderDealRoomBinderHTML law), so injected HTML/script can never execute in
 // the print sandbox. The converter mirrors the SAME markdown subset the
-// client reader supports (appendArtifactBodyNodes/appendArtifactInlineNodes
-// in index.html): headings, pipe tables, lists, blockquotes, lone --- rules,
-// [label](https://…) links, **bold**, and `inline code` — link hrefs are
-// https?:// only by construction, so a javascript: URI stays literal text.
-// All CSS is inline and light-only: this is a print deliverable, not a
-// themed surface.
+// native document editor supports: headings, escaped-pipe tables, mixed
+// nested lists, blockquotes, lone --- rules, safe links, bold/italic/strike,
+// inline code, hard breaks, and images. Links are http(s)/mailto only, while
+// images are either bounded data bytes, an artifact-bound local blob expanded
+// to data:, or a non-fetching semantic reference for an external URL. A
+// javascript: URI therefore stays literal text and PDF creation never becomes
+// an SSRF/exfiltration path. All CSS is inline and light-only: this is a print
+// deliverable, not a themed surface.
 
 import (
+	"encoding/base64"
 	"html"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var (
-	// The client reader's inline grammar, verbatim: link + bold + code, no
-	// bare-URL group (appendArtifactInlineNodes).
-	reportPrintInlinePattern = regexp.MustCompile("\\[([^\\]\\n]{1,140})\\]\\((https?://[^\\s)]+)\\)|\\*\\*([^*\\n]+)\\*\\*|`([^`\\n]+)`")
+	// Document Studio's safe inline Markdown grammar. Images deliberately
+	// accept only the schemes the native editor can create, plus bounded data
+	// images for already-self-contained artifacts. The renderer below never
+	// fetches a URL: attached/data images become data URIs and web images become
+	// a semantic source card.
+	reportPrintInlinePattern = regexp.MustCompile(`!\[(?P<image_alt>[^\]\n]{0,500})\]\((?P<image_src>(?:(?:https?://|/)[^\s<>)]+|data:image/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+))\)|\[(?P<link_label>[^\]\n]{1,140})\]\((?P<link_href>(?:https?://|mailto:)[^\s)]+)\)|\*\*(?P<strong_star>[^*\n]+)\*\*|__(?P<strong_under>[^_\n]+)__|\*(?P<em_star>[^*\n]+)\*|_(?P<em_under>[^_\n]+)_|\x60(?P<code>[^\x60\n]+)\x60|~~(?P<strike>[^~\n]+)~~`)
+
+	reportPrintImageAltGroup   = reportPrintInlinePattern.SubexpIndex("image_alt")
+	reportPrintImageSrcGroup   = reportPrintInlinePattern.SubexpIndex("image_src")
+	reportPrintLinkLabelGroup  = reportPrintInlinePattern.SubexpIndex("link_label")
+	reportPrintLinkHrefGroup   = reportPrintInlinePattern.SubexpIndex("link_href")
+	reportPrintStrongStarGroup = reportPrintInlinePattern.SubexpIndex("strong_star")
+	reportPrintStrongUndGroup  = reportPrintInlinePattern.SubexpIndex("strong_under")
+	reportPrintEmStarGroup     = reportPrintInlinePattern.SubexpIndex("em_star")
+	reportPrintEmUndGroup      = reportPrintInlinePattern.SubexpIndex("em_under")
+	reportPrintCodeGroup       = reportPrintInlinePattern.SubexpIndex("code")
+	reportPrintStrikeGroup     = reportPrintInlinePattern.SubexpIndex("strike")
 
 	reportPrintHeadingPattern  = regexp.MustCompile(`^\s*(#{1,6})\s+(.+)$`)
-	reportPrintListPattern     = regexp.MustCompile(`^\s*(?:[-*]|\d+\.)\s+(.+)$`)
-	reportPrintOrderedPattern  = regexp.MustCompile(`^\s*\d+\.`)
+	reportPrintListPattern     = regexp.MustCompile(`^(\s*)([-+*]|(\d+)[.)])\s+(.+)$`)
 	reportPrintQuotePattern    = regexp.MustCompile(`^\s*>\s?(.*)$`)
 	reportPrintQuoteStart      = regexp.MustCompile(`^\s*>\s*\S`)
 	reportPrintRulePattern     = regexp.MustCompile(`^\s*-{3,}\s*$`)
@@ -50,12 +68,45 @@ var (
 	reportPrintTagsPattern = regexp.MustCompile(`(?i)^\s*(?:\*\*)?search tags:?(?:\*\*)?:?\s*(.+?)\s*$`)
 )
 
+const (
+	reportPrintMaxInlineImageBytes = 8 << 20
+	reportPrintMaxImageBytes       = 16 << 20
+	reportPrintMaxImages           = 24
+)
+
+var reportPrintSafeImageMIME = map[string]bool{
+	"image/gif":  true,
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+}
+
+// reportPrintRenderer owns the one stateful part of Markdown conversion:
+// the bounded allowance for image bytes. Every source remains local and
+// artifact-bound; no print conversion path has a network client.
+type reportPrintRenderer struct {
+	images         map[string]artifactAsset
+	expandedBytes  int
+	expandedImages int
+}
+
+func newReportPrintRenderer(artifact meetingMemoryEntry) *reportPrintRenderer {
+	renderer := &reportPrintRenderer{images: map[string]artifactAsset{}}
+	for _, asset := range artifactAssets(artifact) {
+		if artifactAssetIsEditableImage(asset) {
+			renderer.images[asset.Ref] = asset
+		}
+	}
+	return renderer
+}
+
 // renderResearchReportPrintHTML assembles the complete branded print document
 // for one markdown research artifact: Stride masthead
 // mark + wordmark + mono kicker), title, meta line (date · requested by ·
 // model/worker), gate-result strip, search-tag chips, the converted sections,
 // and the Scout colophon footer.
 func renderResearchReportPrintHTML(artifact meetingMemoryEntry) string {
+	renderer := newReportPrintRenderer(artifact)
 	title := firstNonEmptyString(artifact.Metadata["title"], "Research brief")
 	created := artifact.CreatedAt
 	if created.IsZero() {
@@ -91,7 +142,7 @@ func renderResearchReportPrintHTML(artifact meetingMemoryEntry) string {
 	}
 	page.WriteString("</div>")
 	if gateResult != "" {
-		page.WriteString("<div class=\"gate\"><span class=\"gate-label\">Gate result</span>" + reportPrintInlineHTML(gateResult) + "</div>")
+		page.WriteString("<div class=\"gate\"><span class=\"gate-label\">Gate result</span>" + renderer.inlineHTML(gateResult) + "</div>")
 	}
 	if len(searchTags) > 0 {
 		page.WriteString("<div class=\"tags\">")
@@ -102,7 +153,7 @@ func renderResearchReportPrintHTML(artifact meetingMemoryEntry) string {
 	}
 	page.WriteString("</header>")
 
-	page.WriteString("<main class=\"report\">" + renderResearchReportBodyHTML(body) + "</main>")
+	page.WriteString("<main class=\"report\">" + renderer.bodyHTML(body) + "</main>")
 
 	page.WriteString("<footer class=\"colophon\">Generated by Scout · Stride · workinstride.xyz · " + html.EscapeString(date) + "</footer>")
 	page.WriteString("</body></html>")
@@ -145,6 +196,10 @@ func splitResearchReportPreamble(body string) (remaining string, gateResult stri
 // Block grammar mirrors the client reader exactly (table before rule, rule
 // before list, list before quote, heading, paragraph).
 func renderResearchReportBodyHTML(body string) string {
+	return newReportPrintRenderer(meetingMemoryEntry{}).bodyHTML(body)
+}
+
+func (renderer *reportPrintRenderer) bodyHTML(body string) string {
 	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n"), "\n")
 
 	var out strings.Builder
@@ -169,7 +224,7 @@ func renderResearchReportBodyHTML(body string) string {
 			return
 		}
 		openSection()
-		out.WriteString("<p>" + reportPrintInlineHTML(value) + "</p>")
+		out.WriteString("<p>" + renderer.inlineHTML(value) + "</p>")
 	}
 
 	index := 0
@@ -188,7 +243,7 @@ func renderResearchReportBodyHTML(body string) string {
 				index++
 			}
 			openSection()
-			out.WriteString(reportPrintTableHTML(tableLines))
+			out.WriteString(renderer.tableHTML(tableLines))
 			continue
 		}
 		if reportPrintRulePattern.MatchString(line) {
@@ -198,24 +253,12 @@ func renderResearchReportBodyHTML(body string) string {
 			index++
 			continue
 		}
-		if match := reportPrintListPattern.FindStringSubmatch(line); match != nil {
+		if _, ok := parseReportPrintListLine(line); ok {
 			flushParagraph()
-			ordered := reportPrintOrderedPattern.MatchString(line)
-			tag := "ul"
-			if ordered {
-				tag = "ol"
-			}
 			openSection()
-			out.WriteString("<" + tag + ">")
-			for index < len(lines) {
-				next := reportPrintListPattern.FindStringSubmatch(lines[index])
-				if next == nil || reportPrintOrderedPattern.MatchString(lines[index]) != ordered {
-					break
-				}
-				out.WriteString("<li>" + reportPrintInlineHTML(strings.TrimSpace(next[1])) + "</li>")
-				index++
-			}
-			out.WriteString("</" + tag + ">")
+			listHTML, nextIndex := renderer.listHTML(lines, index)
+			out.WriteString(listHTML)
+			index = nextIndex
 			continue
 		}
 		if reportPrintQuoteStart.MatchString(line) {
@@ -230,7 +273,7 @@ func renderResearchReportBodyHTML(body string) string {
 				index++
 			}
 			openSection()
-			out.WriteString("<blockquote>" + reportPrintInlineHTML(strings.TrimSpace(strings.Join(quoteLines, "\n"))) + "</blockquote>")
+			out.WriteString("<blockquote>" + renderer.inlineHTML(strings.TrimSpace(strings.Join(quoteLines, "\n"))) + "</blockquote>")
 			continue
 		}
 		if match := reportPrintHeadingPattern.FindStringSubmatch(line); match != nil {
@@ -244,7 +287,7 @@ func renderResearchReportBodyHTML(body string) string {
 			case 3:
 				tag = "h3"
 			}
-			out.WriteString("<" + tag + ">" + reportPrintInlineHTML(strings.TrimSuffix(strings.TrimSpace(match[2]), ":")) + "</" + tag + ">")
+			out.WriteString("<" + tag + ">" + renderer.inlineHTML(strings.TrimSuffix(strings.TrimSpace(match[2]), ":")) + "</" + tag + ">")
 			index++
 			continue
 		}
@@ -256,20 +299,87 @@ func renderResearchReportBodyHTML(body string) string {
 	return out.String()
 }
 
+type reportPrintListItem struct {
+	indent  int
+	ordered bool
+	start   int
+	body    string
+}
+
+func parseReportPrintListLine(line string) (reportPrintListItem, bool) {
+	match := reportPrintListPattern.FindStringSubmatch(line)
+	if match == nil {
+		return reportPrintListItem{}, false
+	}
+	indent := len(strings.ReplaceAll(match[1], "\t", "    "))
+	start := 1
+	ordered := strings.TrimSpace(match[3]) != ""
+	if ordered {
+		parsed, err := strconv.Atoi(match[3])
+		if err != nil || parsed < 1 {
+			return reportPrintListItem{}, false
+		}
+		start = parsed
+	}
+	return reportPrintListItem{indent: indent, ordered: ordered, start: start, body: match[4]}, true
+}
+
+// listHTML renders one contiguous list tree. Indentation establishes nesting,
+// while a marker change at the same indentation starts a sibling list. This
+// matches Document Studio's mixed OL/UL parse/serialize contract instead of
+// flattening every item into the first list type.
+func (renderer *reportPrintRenderer) listHTML(lines []string, startIndex int) (string, int) {
+	first, ok := parseReportPrintListLine(lines[startIndex])
+	if !ok {
+		return "", startIndex
+	}
+	tag := "ul"
+	if first.ordered {
+		tag = "ol"
+	}
+	var out strings.Builder
+	out.WriteString("<" + tag)
+	if first.ordered && first.start != 1 {
+		out.WriteString(` start="` + strconv.Itoa(first.start) + `"`)
+	}
+	out.WriteString(">")
+	index := startIndex
+	for index < len(lines) {
+		item, found := parseReportPrintListLine(lines[index])
+		if !found || item.indent != first.indent || item.ordered != first.ordered {
+			break
+		}
+		out.WriteString("<li>" + renderer.inlineHTML(strings.TrimSpace(item.body)))
+		index++
+		for index < len(lines) {
+			nested, nestedFound := parseReportPrintListLine(lines[index])
+			if !nestedFound || nested.indent <= first.indent {
+				break
+			}
+			nestedHTML, nextIndex := renderer.listHTML(lines, index)
+			if nextIndex <= index {
+				break
+			}
+			out.WriteString(nestedHTML)
+			index = nextIndex
+		}
+		out.WriteString("</li>")
+	}
+	out.WriteString("</" + tag + ">")
+	return out.String(), index
+}
+
 // reportPrintTableHTML renders one pipe table: first row is the header, the
 // second (separator) row is skipped, and every body row follows the header's
 // cell count — exactly the client's artifactTableNode.
 func reportPrintTableHTML(lines []string) string {
+	return newReportPrintRenderer(meetingMemoryEntry{}).tableHTML(lines)
+}
+
+func (renderer *reportPrintRenderer) tableHTML(lines []string) string {
 	rows := make([][]string, 0, len(lines))
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		trimmed = strings.TrimPrefix(trimmed, "|")
-		trimmed = strings.TrimSuffix(trimmed, "|")
-		cells := strings.Split(trimmed, "|")
-		for i := range cells {
-			cells[i] = strings.TrimSpace(cells[i])
-		}
-		rows = append(rows, cells)
+		rows = append(rows, splitReportPrintTableRow(line))
 	}
 	if len(rows) == 0 {
 		return ""
@@ -279,7 +389,7 @@ func reportPrintTableHTML(lines []string) string {
 	var out strings.Builder
 	out.WriteString("<table><thead><tr>")
 	for _, header := range headers {
-		out.WriteString("<th>" + reportPrintInlineHTML(header) + "</th>")
+		out.WriteString("<th>" + renderer.inlineHTML(header) + "</th>")
 	}
 	out.WriteString("</tr></thead><tbody>")
 	if len(rows) > 2 {
@@ -290,7 +400,7 @@ func reportPrintTableHTML(lines []string) string {
 				if cellIndex < len(row) {
 					cell = row[cellIndex]
 				}
-				out.WriteString("<td>" + reportPrintInlineHTML(cell) + "</td>")
+				out.WriteString("<td>" + renderer.inlineHTML(cell) + "</td>")
 			}
 			out.WriteString("</tr>")
 		}
@@ -299,27 +409,193 @@ func reportPrintTableHTML(lines []string) string {
 	return out.String()
 }
 
-// reportPrintInlineHTML renders one span of model text: the raw text is
-// scanned for the client reader's inline grammar and EVERY emitted segment —
-// plain runs, labels, hrefs, bold, code — is html.EscapeString-ed before it
-// gets structure. The href group only ever matches https?:// by construction.
+// splitReportPrintTableRow treats \| as cell text, not a delimiter. Pairs of
+// backslashes remain one literal backslash, so `\\|` still separates cells
+// while `\\\|` prints a backslash and a pipe in the same cell.
+func splitReportPrintTableRow(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "|") {
+		trimmed = trimmed[1:]
+	}
+	if strings.HasSuffix(trimmed, "|") && !strings.HasSuffix(trimmed, `\|`) {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	var cells []string
+	var cell strings.Builder
+	for index := 0; index < len(trimmed); index++ {
+		switch trimmed[index] {
+		case '\\':
+			if index+1 < len(trimmed) && (trimmed[index+1] == '|' || trimmed[index+1] == '\\') {
+				cell.WriteByte(trimmed[index+1])
+				index++
+				continue
+			}
+			cell.WriteByte(trimmed[index])
+		case '|':
+			cells = append(cells, strings.TrimSpace(cell.String()))
+			cell.Reset()
+		default:
+			cell.WriteByte(trimmed[index])
+		}
+	}
+	cells = append(cells, strings.TrimSpace(cell.String()))
+	return cells
+}
+
+// reportPrintInlineHTML is the stateless compatibility seam used by focused
+// tests and preamble callers. Artifact export uses the renderer method so
+// attached images can be verified against the artifact's exact asset set.
 func reportPrintInlineHTML(text string) string {
+	return newReportPrintRenderer(meetingMemoryEntry{}).inlineHTML(text)
+}
+
+// inlineHTML renders one span of model text. Every emitted text segment and
+// attribute is escaped before structure is added. Image tokens delegate to
+// imageHTML, which can only produce a data: image from bounded local bytes or
+// a non-fetching semantic reference card.
+func (renderer *reportPrintRenderer) inlineHTML(text string) string {
 	var out strings.Builder
 	last := 0
 	for _, match := range reportPrintInlinePattern.FindAllStringSubmatchIndex(text, -1) {
-		out.WriteString(html.EscapeString(text[last:match[0]]))
+		out.WriteString(reportPrintEscapedText(text[last:match[0]]))
 		switch {
-		case match[2] >= 0 && match[4] >= 0:
-			out.WriteString("<a href=\"" + html.EscapeString(text[match[4]:match[5]]) + "\">" + html.EscapeString(text[match[2]:match[3]]) + "</a>")
-		case match[6] >= 0:
-			out.WriteString("<strong>" + html.EscapeString(text[match[6]:match[7]]) + "</strong>")
-		case match[8] >= 0:
-			out.WriteString("<code>" + html.EscapeString(text[match[8]:match[9]]) + "</code>")
+		case reportPrintMatchPresent(match, reportPrintImageAltGroup):
+			out.WriteString(renderer.imageHTML(
+				reportPrintMatchText(text, match, reportPrintImageAltGroup),
+				reportPrintMatchText(text, match, reportPrintImageSrcGroup),
+			))
+		case reportPrintMatchPresent(match, reportPrintLinkLabelGroup):
+			label := reportPrintMatchText(text, match, reportPrintLinkLabelGroup)
+			href := reportPrintMatchText(text, match, reportPrintLinkHrefGroup)
+			out.WriteString("<a href=\"" + html.EscapeString(href) + "\">" + html.EscapeString(label) + "</a>")
+		case reportPrintMatchPresent(match, reportPrintStrongStarGroup):
+			out.WriteString("<strong>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintStrongStarGroup)) + "</strong>")
+		case reportPrintMatchPresent(match, reportPrintStrongUndGroup):
+			out.WriteString("<strong>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintStrongUndGroup)) + "</strong>")
+		case reportPrintMatchPresent(match, reportPrintEmStarGroup):
+			out.WriteString("<em>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintEmStarGroup)) + "</em>")
+		case reportPrintMatchPresent(match, reportPrintEmUndGroup):
+			out.WriteString("<em>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintEmUndGroup)) + "</em>")
+		case reportPrintMatchPresent(match, reportPrintCodeGroup):
+			out.WriteString("<code>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintCodeGroup)) + "</code>")
+		case reportPrintMatchPresent(match, reportPrintStrikeGroup):
+			out.WriteString("<s>" + html.EscapeString(reportPrintMatchText(text, match, reportPrintStrikeGroup)) + "</s>")
 		}
 		last = match[1]
 	}
-	out.WriteString(html.EscapeString(text[last:]))
+	out.WriteString(reportPrintEscapedText(text[last:]))
 	return out.String()
+}
+
+func reportPrintMatchPresent(match []int, group int) bool {
+	return group > 0 && group*2+1 < len(match) && match[group*2] >= 0
+}
+
+func reportPrintMatchText(text string, match []int, group int) string {
+	if !reportPrintMatchPresent(match, group) {
+		return ""
+	}
+	return text[match[group*2]:match[group*2+1]]
+}
+
+// Markdown's two-space newline is a deliberate hard break. Ordinary newlines
+// remain whitespace and collapse naturally in print paragraphs.
+func reportPrintEscapedText(text string) string {
+	parts := strings.Split(text, "  \n")
+	if len(parts) == 1 {
+		return html.EscapeString(text)
+	}
+	for index := range parts {
+		parts[index] = html.EscapeString(parts[index])
+	}
+	return strings.Join(parts, "<br>")
+}
+
+func (renderer *reportPrintRenderer) imageHTML(alt string, source string) string {
+	alt = strings.TrimSpace(alt)
+	if alt == "" {
+		alt = "Document image"
+	}
+	if dataURI, ok := renderer.localImageDataURI(source); ok {
+		return `<span class="report-image"><img src="` + html.EscapeString(dataURI) + `" alt="` + html.EscapeString(alt) + `"><span class="report-image__caption">` + html.EscapeString(alt) + `</span></span>`
+	}
+
+	// A web URL is authored content, but fetching it while exporting would
+	// disclose renderer traffic and create an SSRF surface. Keep its intent and
+	// provenance in the PDF without ever assigning the URL to img.src.
+	sourceLabel := "Available in the native document"
+	sourceHTML := html.EscapeString(sourceLabel)
+	if parsed, err := url.Parse(strings.TrimSpace(source)); err == nil && parsed.IsAbs() && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != "" {
+		host := parsed.Hostname()
+		sourceHTML = `<a href="` + html.EscapeString(source) + `">Source · ` + html.EscapeString(host) + `</a>`
+	}
+	return `<span class="report-image report-image--reference"><span class="report-image__reference" role="img" aria-label="` + html.EscapeString(alt) + `"><span class="report-image__eyebrow">Image</span><span class="report-image__title">` + html.EscapeString(alt) + `</span></span><span class="report-image__caption">` + sourceHTML + `</span></span>`
+}
+
+func (renderer *reportPrintRenderer) localImageDataURI(source string) (string, bool) {
+	source = strings.TrimSpace(source)
+	if dataURI, bytes, ok := reportPrintDataImage(source); ok {
+		if renderer.reserveImageBytes(bytes, len(dataURI)) {
+			return dataURI, true
+		}
+		return "", false
+	}
+
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Path != "/artifacts/blob" {
+		return "", false
+	}
+	for key := range parsed.Query() {
+		if key != "ref" && key != "name" {
+			return "", false
+		}
+	}
+	ref := strings.TrimSpace(parsed.Query().Get("ref"))
+	asset, attached := renderer.images[ref]
+	if !attached || !validBlobRef(ref) {
+		return "", false
+	}
+	stat, err := blobStatForRef(ref)
+	statMIME := strings.ToLower(strings.TrimSpace(stat.Mime))
+	if err != nil || stat.Size < 1 || stat.Size > reportPrintMaxInlineImageBytes || !reportPrintSafeImageMIME[statMIME] || (strings.TrimSpace(asset.Mime) != "" && !strings.EqualFold(strings.TrimSpace(asset.Mime), statMIME)) {
+		return "", false
+	}
+	data, metadata, err := getBlob(ref)
+	mime := strings.ToLower(strings.TrimSpace(metadata.Mime))
+	if err != nil || len(data) > reportPrintMaxInlineImageBytes || mime != statMIME || !reportPrintSafeImageMIME[mime] || (strings.TrimSpace(asset.Mime) != "" && !strings.EqualFold(strings.TrimSpace(asset.Mime), mime)) {
+		return "", false
+	}
+	encodedSize := base64.StdEncoding.EncodedLen(len(data)) + len("data:;base64,") + len(mime)
+	if !renderer.reserveImageBytes(len(data), encodedSize) {
+		return "", false
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), true
+}
+
+func reportPrintDataImage(source string) (string, int, bool) {
+	header, payload, found := strings.Cut(source, ",")
+	if !found || !strings.HasPrefix(strings.ToLower(header), "data:image/") || !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return "", 0, false
+	}
+	mime := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(header), "data:"), ";base64"))
+	if !reportPrintSafeImageMIME[mime] || len(payload) == 0 || base64.StdEncoding.DecodedLen(len(payload)) > reportPrintMaxInlineImageBytes {
+		return "", 0, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil || len(decoded) == 0 || len(decoded) > reportPrintMaxInlineImageBytes {
+		return "", 0, false
+	}
+	canonical := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(decoded)
+	return canonical, len(decoded), true
+}
+
+func (renderer *reportPrintRenderer) reserveImageBytes(decodedBytes int, encodedBytes int) bool {
+	if renderer == nil || decodedBytes < 1 || decodedBytes > reportPrintMaxInlineImageBytes || encodedBytes < 1 || renderer.expandedImages >= reportPrintMaxImages || encodedBytes > reportPrintMaxImageBytes-renderer.expandedBytes {
+		return false
+	}
+	renderer.expandedImages++
+	renderer.expandedBytes += encodedBytes
+	return true
 }
 
 // reportPrintCSS is the whole print stylesheet, inline in the document (the
@@ -352,9 +628,16 @@ body{font-family:"Google Sans Flex",-apple-system,"Segoe UI",sans-serif;font-siz
 .report p{margin:0 0 7pt}
 .report ul,.report ol{margin:0 0 8pt;padding-left:16pt}
 .report li{margin:0 0 3pt}
+.report li>ul,.report li>ol{margin:3pt 0 2pt;padding-left:15pt}
 .report blockquote{margin:0 0 8pt;padding:3pt 10pt;border-left:1.5pt solid #d8dce4;color:#4c5261}
 .report code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:9.5pt;background:#f1f3f7;border-radius:2pt;padding:.5pt 3pt}
 .report a{color:#1a1d23;text-decoration:underline;text-decoration-thickness:.5pt;text-underline-offset:2pt}
+.report-image{display:block;width:100%;margin:8pt 0 11pt;page-break-inside:avoid;break-inside:avoid}
+.report-image img{display:block;max-width:100%;max-height:122mm;width:auto;height:auto;margin:0 auto;border-radius:4pt;object-fit:contain}
+.report-image__caption{display:block;margin-top:4pt;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;line-height:1.4;color:#6a7180}
+.report-image__reference{display:flex;min-height:42mm;padding:12pt;flex-direction:column;justify-content:flex-end;border:.5pt solid #d8dce4;border-radius:4pt;background:#f7f8fa}
+.report-image__eyebrow{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7pt;letter-spacing:.16em;text-transform:uppercase;color:#6a7180}
+.report-image__title{display:block;max-width:42ch;margin-top:3pt;font-size:13pt;line-height:1.25;font-weight:700;color:#1a1d23}
 .report hr{border:0;border-top:.5pt solid #d8dce4;margin:12pt 0}
 .report table{border-collapse:collapse;width:100%;font-size:9pt;line-height:1.45;margin:2pt 0 10pt;page-break-inside:avoid;break-inside:avoid;font-variant-numeric:tabular-nums}
 .report th{text-align:left;font-size:7.5pt;letter-spacing:.06em;text-transform:uppercase;color:#6a7180;border-bottom:1pt solid #1a1d23;padding:3pt 8pt 3pt 0}

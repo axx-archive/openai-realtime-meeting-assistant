@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  packagingStudioCustomerPhases,
+  packagingStudioPhase,
   safeWorkProgressNote,
   workFamilyLabel,
+  workHasDecisionCard,
+  workNeedsInput,
   workPhaseLabel,
+  workProgressPresentation,
 } from '../messaging/workPresentation';
 
 /**
@@ -39,7 +44,8 @@ test('work phases translate server stages into a small stable product grammar', 
   assert.equal(workPhaseLabel({ status: 'running', currentStage: 'ship_deck' }), 'Delivering');
   assert.equal(workPhaseLabel({ status: 'running', currentStage: 'gate_before_shipping' }), 'Verifying');
   assert.equal(workPhaseLabel({ status: 'running', currentStage: 'assemble_package' }), 'Building');
-  assert.equal(workPhaseLabel({ status: 'approval_required' }), 'Needs input');
+  assert.equal(workPhaseLabel({ status: 'approval_required' }), 'Working');
+  assert.equal(workPhaseLabel({ status: 'approval_required', checkpoint: { question: 'Choose one', options: [{ id: 'one', label: 'One' }] } }), 'Needs input');
   assert.equal(workPhaseLabel({ status: 'complete' }), 'Delivered');
 });
 
@@ -54,4 +60,51 @@ test('activity notes keep human progress and suppress runtime/process vocabulary
   assert.equal(safeWorkProgressNote('tool web_search', 'Working'), 'Working');
   assert.equal(safeWorkProgressNote('Sol max reasoning', 'Working'), 'Working');
   assert.equal(safeWorkProgressNote('an unreviewed but natural-sounding update', 'Working'), 'Working');
+});
+
+test('Packaging Studio projects the same five customer phases as web Activity', () => {
+  assert.deepEqual(
+    packagingStudioCustomerPhases.map(({ id, label }) => ({ id, label })),
+    [
+      { id: 'frame', label: 'Frame the decision' },
+      { id: 'ground', label: 'Ground the recommendation' },
+      { id: 'story', label: 'Build the story' },
+      { id: 'design', label: 'Design the presentation' },
+      { id: 'finish', label: 'Finish the presentation' },
+    ],
+  );
+  const parent = { mode: 'goal', processId: 'packaging_studio', status: 'running', currentStage: 'execute', progressPercent: 11 };
+  assert.equal(workFamilyLabel(parent), 'Presentation');
+  assert.deepEqual(packagingStudioPhase(parent), {
+    id: 'ground',
+    label: 'Ground the recommendation',
+    number: 2,
+    count: 5,
+    displayLabel: 'Phase 2 of 5 · Ground the recommendation',
+  });
+  assert.equal(workPhaseLabel(parent), 'Phase 2 of 5 · Ground the recommendation');
+  assert.equal(workProgressPresentation(parent).percent, 11, 'the server parent percent remains canonical');
+  assert.equal(
+    packagingStudioPhase({ ...parent, currentStage: 'ship_deck', progressPercent: 11 })?.id,
+    'finish',
+    'an explicit durable stage outranks the percent fallback',
+  );
+});
+
+test('decision status only appears when native can render a real choice card', () => {
+  const parked = { mode: 'goal', processId: 'packaging_studio', status: 'approval_required', progressPercent: 24 };
+  assert.equal(workHasDecisionCard(parked), false);
+  assert.equal(workNeedsInput(parked), false);
+  assert.equal(workPhaseLabel(parked), 'Phase 3 of 5 · Build the story');
+  const decision = {
+    ...parked,
+    checkpoint: {
+      question: 'Which direction should shape the presentation?',
+      options: [{ id: 'direction-a', label: 'Lead with the audience shift' }],
+    },
+  };
+  assert.equal(workHasDecisionCard(decision), true);
+  assert.equal(workNeedsInput(decision), true);
+  assert.equal(workProgressPresentation(decision).needsInput, true);
+  assert.equal(workPhaseLabel({ status: 'approval_required' }), 'Working');
 });

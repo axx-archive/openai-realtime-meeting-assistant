@@ -29,7 +29,7 @@ test('Project-bound Research uses governed actions while Project presentations k
         'project-work-card-stub:./messageGestures': `export const messageLongPressDelayMs=350;`,
         'project-work-card-stub:./scoutReplyLifecycle': `export const scoutReplyLifecyclePresentation=()=>null;`,
         'project-work-card-stub:./messagePresentation': `export const extractHttpUrls=()=>[]; export const groupMessageReactions=()=>[]; export const parseMessageTextSegments=()=>[];`,
-        'project-work-card-stub:./workPresentation': `export const safeWorkProgressNote=(value,fallback)=>String(value||fallback); export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'?'Presentation':'Research'; export const workPhaseLabel=()=> 'Delivered';`,
+        'project-work-card-stub:./workPresentation': `export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'?'Presentation':'Research'; export const workProgressPresentation=ref=>({phase:null,phaseLabel:'Delivered',percent:Number(ref?.progressPercent||0),needsInput:Boolean(ref?.checkpoint),progressCopy:'Delivered'});`,
         'project-work-card-stub:./InlineArtifactPreview': `export const InlineArtifactPreview='InlineArtifactPreview';`,
   });
   (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;

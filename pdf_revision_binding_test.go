@@ -124,4 +124,7 @@ func TestFrontendPDFSelectionIsRevisionBound(t *testing.T) {
 	if !strings.Contains(waiter, "renderStatus === 'failed' || renderStatus === 'stale'") {
 		t.Fatal("PDF waiter does not fail fast for a stale source render")
 	}
+	if !strings.Contains(waiter, "fetchArtifactEntryById(artifactId, { refresh: true })") {
+		t.Fatal("PDF waiter does not poll an older or cached artifact by exact id")
+	}
 }

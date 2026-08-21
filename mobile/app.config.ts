@@ -43,12 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 71 adds authoritative multi-slide preview navigation for fresh
-      // Scout decks on iPhone and iPad. It retains Build 70's finished-deck
-      // result contract, authenticated Edit/Present routing, checkpoint choices,
-      // Project attachment/reply compatibility, and Expo 57 stability work.
+      // Build 72 adds durable five-phase presentation activity plus the final
+      // phone/iPad Deck and Document Studio polish. It retains Build 71's
+      // multi-slide result contract, authenticated Edit/Present routing,
+      // checkpoint choices, and Expo 57 stability work.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '71',
+      buildNumber: '72',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

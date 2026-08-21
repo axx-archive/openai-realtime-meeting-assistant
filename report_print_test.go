@@ -9,6 +9,7 @@ package main
 // stays byte-for-byte.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -155,6 +156,141 @@ func TestResearchReportPrintHTMLMastheadSectionsAndFooter(t *testing.T) {
 		if strings.Contains(doc, banned) {
 			t.Fatalf("print document must be self-contained, found %q", banned)
 		}
+	}
+}
+
+func TestResearchReportPrintHTMLPreservesDocumentFormatting(t *testing.T) {
+	body := strings.Join([]string{
+		"## Activation plan",
+		"",
+		"The opportunity is *culturally specific*, _human led_, and ~~mass blasted~~ community powered.  ",
+		"This line is intentionally next.",
+		"",
+		"1. Recruit",
+		"  - Rodeo creators",
+		"    3. Verify audience fit",
+		"    4. Brief the cohort",
+		"  - Music creators",
+		"2. Activate",
+		"  1. Launch the first batch",
+		"  2. Measure participation",
+		"",
+		"| Segment | Signal |",
+		"| --- | --- |",
+		`| Rodeo \| western sport | High intent |`,
+	}, "\n")
+
+	doc := renderResearchReportPrintHTML(meetingMemoryEntry{Text: body})
+	for _, want := range []string{
+		"<em>culturally specific</em>",
+		"<em>human led</em>",
+		"<s>mass blasted</s>",
+		"community powered.<br>This line is intentionally next.",
+		"<ol><li>Recruit<ul><li>Rodeo creators<ol start=\"3\"><li>Verify audience fit</li><li>Brief the cohort</li></ol></li><li>Music creators</li></ul></li><li>Activate<ol><li>Launch the first batch</li><li>Measure participation</li></ol></li></ol>",
+		"<td>Rodeo | western sport</td><td>High intent</td>",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("feature-faithful print document missing %q:\n%s", want, doc)
+		}
+	}
+	if strings.Count(doc, "<td>") != 2 {
+		t.Fatalf("escaped table pipe created an extra cell:\n%s", doc)
+	}
+}
+
+func TestResearchReportPrintHTMLInlinesOnlyBoundedLocalImages(t *testing.T) {
+	setupIsolatedBlobStore(t)
+	png := tinyPNG(t)
+	attachedRef, err := putBlob(png, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unattachedRef, err := putBlob([]byte("private but unattached"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := json.Marshal([]artifactAsset{{Ref: attachedRef, Mime: "image/png", Name: "field.png", Kind: "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inline := base64.StdEncoding.EncodeToString([]byte("small inline image"))
+	body := strings.Join([]string{
+		"## Field evidence",
+		"",
+		"![Attached field](/artifacts/blob?ref=" + attachedRef + "&name=field.png)",
+		"",
+		"![Inline diagram](data:image/webp;base64," + inline + ")",
+		"",
+		"![Remote campaign](https://images.example.test/campaign.jpg?view=wide&v=2)",
+		"",
+		"![Unattached image](/artifacts/blob?ref=" + unattachedRef + ")",
+	}, "\n")
+	doc := renderResearchReportPrintHTML(meetingMemoryEntry{
+		Text:     body,
+		Metadata: map[string]string{artifactAssetsMetadataKey: string(assets)},
+	})
+
+	attachedData := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	inlineData := "data:image/webp;base64," + inline
+	for _, want := range []string{
+		`<img src="` + attachedData + `" alt="Attached field">`,
+		`<img src="` + inlineData + `" alt="Inline diagram">`,
+		`role="img" aria-label="Remote campaign"`,
+		`href="https://images.example.test/campaign.jpg?view=wide&amp;v=2">Source · images.example.test</a>`,
+		`role="img" aria-label="Unattached image"`,
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("safe image export missing %q:\n%s", want, doc)
+		}
+	}
+	if strings.Contains(doc, `src="http`) || strings.Contains(doc, base64.StdEncoding.EncodeToString([]byte("private but unattached"))) {
+		t.Fatalf("remote or unattached bytes entered an image src:\n%s", doc)
+	}
+	for _, banned := range []string{"<script", `src="/artifacts/blob`, `src="https://`} {
+		if strings.Contains(doc, banned) {
+			t.Fatalf("network-closed print document contains %q:\n%s", banned, doc)
+		}
+	}
+}
+
+func TestArtifactExportPDFMarkdownQueuesLocalImageBytesWithoutRemoteFetch(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	queueDir := setupRenderSidecarEnv(t)
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-runner"); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+
+	png := tinyPNG(t)
+	ref, err := putBlob(png, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := json.Marshal([]artifactAsset{{Ref: ref, Mime: "image/png", Name: "proof.png", Kind: "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := seedShareArtifact(t, "draft", strings.Join([]string{
+		"## Proof",
+		"",
+		"![Attached proof](/artifacts/blob?ref=" + ref + "&name=proof.png)",
+		"",
+		"![Remote context](https://images.example.test/context.jpg)",
+	}, "\n"), map[string]string{artifactAssetsMetadataKey: string(assets)})
+
+	recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/export-pdf", fmt.Sprintf(`{"artifactId":%q}`, report.ID), member)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("markdown image export status=%d body=%s, want 202", recorder.Code, recorder.Body.String())
+	}
+	payload := decodeJSON(t, recorder)
+	job := readRenderJobForTest(t, queueDir, fmt.Sprint(payload["jobId"]))
+	if !strings.Contains(job.HTML, "data:image/png;base64,"+base64.StdEncoding.EncodeToString(png)) {
+		t.Fatalf("queued PDF job did not inline the attached image: %s", job.HTML)
+	}
+	if strings.Contains(job.HTML, `img src="https://`) || strings.Contains(job.HTML, `img src="/artifacts/`) {
+		t.Fatalf("queued PDF job retained a network-capable image source: %s", job.HTML)
+	}
+	if !strings.Contains(job.HTML, "Source · images.example.test") {
+		t.Fatalf("queued PDF job lost the remote image's semantic reference: %s", job.HTML)
 	}
 }
 

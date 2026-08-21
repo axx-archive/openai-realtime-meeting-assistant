@@ -328,6 +328,11 @@ type goalSubtask struct {
 	Attempts   int                `json:"attempts"`
 	Revisions  int                `json:"revisions,omitempty"`
 	Review     *goalSubtaskReview `json:"review"`
+	// FailureClass is a server-authored durable retry hint copied from the exact
+	// child terminal record. It is never accepted from the model. In particular,
+	// a source-valid external-evidence syntax failure blocks instead of launching
+	// the same hosted research two more times.
+	FailureClass string `json:"failureClass,omitempty"`
 	// Protect is the accumulated protect list: everything a reviewer explicitly
 	// praised (strengths_to_keep) across review rounds. It lives on the subtask
 	// — persisted with the plan in the goal artifact metadata — so later rounds
@@ -1397,6 +1402,7 @@ func (e *goalEngine) dispatchReady(plan *goalPlan, parentID string) {
 			continue
 		}
 		st.Status = subtaskRunning
+		st.FailureClass = ""
 		st.Attempts++
 		if err := e.launchSubtask(plan, st, parentID); err != nil {
 			log.Errorf("goal %s subtask %s launch failed: %v", parentID, st.ID, err)
@@ -1707,6 +1713,7 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	}
 	if complete {
 		st.Status = subtaskComplete
+		st.FailureClass = ""
 		// A dispatched writer stage's deliverable lands in the origin thread as
 		// it folds (P0-2) — the inline-stage twin lives in completeProcessStage.
 		// Role-gated inside the reporter, so free-form subtasks (no role) skip.
@@ -1722,6 +1729,7 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 		}
 	} else {
 		st.Status = subtaskFailed
+		st.FailureClass = strings.TrimSpace(child.Metadata["failureClass"])
 		if st.Review == nil {
 			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "subtask worker returned an error", By: "worker"}
 		}
@@ -3248,6 +3256,11 @@ func (e *goalEngine) reviewSubtasks(ctx context.Context, plan *goalPlan) goalRev
 			return goalReviewOutcomeBlocked
 		}
 		if st.Status == subtaskFailed {
+			if st.FailureClass == agentThreadFailureClassExternalEvidenceSyntax {
+				st.Status = subtaskBlocked
+				plan.Blocker = fmt.Sprintf("subtask %q stopped after an external-evidence format failure; the source gate stayed closed and automatic hosted-research retries were suppressed", st.ID)
+				return goalReviewOutcomeBlocked
+			}
 			if !e.requeueOrBlock(plan, st, "the subtask worker returned an error") {
 				return goalReviewOutcomeBlocked
 			}
@@ -4657,6 +4670,11 @@ func (e *goalEngine) recoverCheckpointDrive(plan *goalPlan, parentID string) (bo
 				return false, fmt.Errorf("saved goal child authority is unavailable")
 			}
 			st.Status = childStatus
+			if childStatus == subtaskFailed {
+				st.FailureClass = strings.TrimSpace(child.Metadata["failureClass"])
+			} else {
+				st.FailureClass = ""
+			}
 			continue
 		}
 		if childFound && strings.TrimSpace(child.Metadata["goalChildActivationState"]) == goalChildActivationReserved {
@@ -5037,13 +5055,29 @@ func buildGoalCommitScaffold(plan *goalPlan, command string) string {
 // rejects empty text, so the current body is loaded).
 func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meetingMemoryEntry {
 	status, gate, percent := goalStateDisplay(plan)
+	processPercent, processCeiling, processProgress := e.processDisplayProgress(plan)
+	if processProgress {
+		percent = processPercent
+	}
 	// Monotonic advisory percent: a revision re-queue legitimately lowers the raw
 	// execute-phase percent (a verified subtask reverts to running), which reads
 	// as the goal running backwards. Hold a high-water mark for non-terminal
 	// states so the card only ever advances; a terminal state keeps its canonical
 	// percent (verified 100 / needs_attention 72). Computed before the marshal
 	// below so MaxProgress survives in the persisted plan across fold re-drives.
-	if !isTerminalGoalState(plan.State) {
+	if !isTerminalGoalState(plan.State) && processProgress {
+		// Process progress is bounded by the authored stages currently reached.
+		// Clamp a historical generic high-water mark (notably review=82) to the
+		// current stage ceiling, while retaining legitimate within-stage progress
+		// across a repair/retry.
+		if plan.MaxProgress > percent {
+			percent = plan.MaxProgress
+		}
+		if percent > processCeiling {
+			percent = processCeiling
+		}
+		plan.MaxProgress = percent
+	} else if !isTerminalGoalState(plan.State) {
 		if percent < plan.MaxProgress {
 			percent = plan.MaxProgress
 		} else {
@@ -5342,8 +5376,10 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 			}
 			if childStatus == subtaskComplete {
 				st.Status = subtaskComplete
+				st.FailureClass = ""
 			} else {
 				st.Status = subtaskFailed
+				st.FailureClass = strings.TrimSpace(child.Metadata["failureClass"])
 			}
 			continue
 		}
@@ -5439,6 +5475,104 @@ func goalStateDisplay(plan *goalPlan) (goalStatus string, reviewGate string, per
 	default:
 		return "running", "pending", goalStagePercent(plan.State)
 	}
+}
+
+const goalProcessStageProgressCeiling = 94
+
+// processDisplayProgress is the canonical whole-pipeline progress contract for
+// an authored process. The authored stages own 94% of the run; the final goal
+// review/gate/report/verification own the remaining 5%, and only verified is
+// 100. A running or failed child contributes its LOCAL percentage to one stage
+// slice. Inline stages have no invented fractional progress and advance only
+// when they complete.
+func (e *goalEngine) processDisplayProgress(plan *goalPlan) (percent int, ceiling int, ok bool) {
+	if plan == nil || strings.TrimSpace(plan.ProcessID) == "" {
+		return 0, 0, false
+	}
+	switch plan.State {
+	case goalStateVerified:
+		return 100, 100, true
+	case goalStateIdentify:
+		return 1, 1, true
+	case goalStateDecompose:
+		return 2, 2, true
+	case goalStateAssign:
+		return 3, 3, true
+	case goalStateCoordinate:
+		return 4, 4, true
+	case goalStateCommit:
+		return 99, 99, true
+	}
+	if len(plan.Subtasks) == 0 {
+		return 4, 4, true
+	}
+	if goalAllComplete(plan) {
+		switch plan.State {
+		case goalStateReview:
+			return 95, 95, true
+		case goalStateGate:
+			return 96, 96, true
+		case goalStateSave:
+			return 97, 97, true
+		case goalStateReport:
+			return 98, 98, true
+		case goalStateVerify, goalStateApproval:
+			return 99, 99, true
+		default:
+			return goalProcessStageProgressCeiling, goalProcessStageProgressCeiling, true
+		}
+	}
+
+	// Basis points of stage completion: 100 means one complete stage. Failed or
+	// blocked stages remain the currently reached slice while review decides a
+	// repair. A ready stage counts as reached only after at least one attempt, so
+	// a revision cannot shrink the ceiling while untouched future work remains
+	// excluded.
+	completedBasis := 0
+	reachedBasis := 0
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		switch st.Status {
+		case subtaskComplete:
+			completedBasis += 100
+			reachedBasis += 100
+		case subtaskRunning, subtaskFailed, subtaskBlocked:
+			reachedBasis += 100
+			localPercent := 0
+			if e != nil && e.app != nil && strings.TrimSpace(st.ArtifactID) != "" {
+				if artifact, found := e.app.osArtifactByID(st.ArtifactID); found {
+					if parsed, err := strconv.Atoi(strings.TrimSpace(artifact.Metadata["progressPercent"])); err == nil {
+						if parsed < 0 {
+							parsed = 0
+						}
+						if parsed > 99 {
+							parsed = 99
+						}
+						localPercent = parsed
+					}
+				}
+			}
+			completedBasis += localPercent
+		case subtaskReady:
+			if st.Attempts > 0 {
+				reachedBasis += 100
+			}
+		}
+	}
+	totalBasis := len(plan.Subtasks) * 100
+	// Integer half-up rounding keeps the persisted/ref/mobile value stable.
+	percent = (goalProcessStageProgressCeiling*completedBasis + totalBasis/2) / totalBasis
+	ceiling = (goalProcessStageProgressCeiling*reachedBasis + totalBasis/2) / totalBasis
+	if percent < 4 {
+		percent = 4
+	}
+	if ceiling < percent {
+		ceiling = percent
+	}
+	if ceiling < 4 {
+		ceiling = 4
+	}
+	return percent, ceiling, true
 }
 
 // goalExecutePercent reserves 25..80 for subtask completion so review/gate/verify

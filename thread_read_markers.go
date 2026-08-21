@@ -291,15 +291,17 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 			var projected struct {
 				CreatedAt string `json:"createdAt"`
 				Thread    struct {
-					ID              string  `json:"id"`
-					Mode            string  `json:"mode"`
-					Status          string  `json:"status"`
-					ArtifactID      string  `json:"artifactId,omitempty"`
-					AgentName       string  `json:"agentName,omitempty"`
-					CurrentStage    string  `json:"currentStage,omitempty"`
-					ProgressPercent float64 `json:"progressPercent,omitempty"`
-					ProgressNote    string  `json:"progressNote,omitempty"`
-					StartedAt       string  `json:"startedAt,omitempty"`
+					ID              string                      `json:"id"`
+					Mode            string                      `json:"mode"`
+					ProcessID       string                      `json:"processId,omitempty"`
+					Status          string                      `json:"status"`
+					ArtifactID      string                      `json:"artifactId,omitempty"`
+					AgentName       string                      `json:"agentName,omitempty"`
+					CurrentStage    string                      `json:"currentStage,omitempty"`
+					ProgressPercent float64                     `json:"progressPercent,omitempty"`
+					ProgressNote    string                      `json:"progressNote,omitempty"`
+					StartedAt       string                      `json:"startedAt,omitempty"`
+					Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
 				} `json:"thread"`
 			}
 			if json.Unmarshal([]byte(activeWork), &projected) == nil && strings.TrimSpace(projected.Thread.ID) != "" {

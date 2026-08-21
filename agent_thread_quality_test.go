@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func completeResearchArtifactForTest() string {
@@ -102,6 +105,133 @@ func TestExternalEvidenceContractRejectsUnreceiptedOrUnboundSources(t *testing.T
 	tampered := strings.Replace(body, "https://example.org/creator-program | 2026", "https://unfetched.example/claim | 2026", 1)
 	if err := validateAgentThreadTerminalArtifact(thread, tampered); err == nil || !strings.Contains(err.Error(), "absent from the provider citation receipt") {
 		t.Fatalf("ledger URL absent from receipt passed: %v", err)
+	}
+}
+
+func focusedExternalEvidenceJSONForTest() string {
+	raw, _ := json.Marshal(externalEvidenceEnvelope{
+		ResearchQuestions: []string{"What current official figure best establishes the reachable creator audience?"},
+		Evidence: []externalEvidenceEnvelopeRow{{
+			ResearchQuestion:   "What current official figure best establishes the reachable creator audience?",
+			SourceFact:         "The official program reports 4,200 opted-in creators | all currently active.",
+			SourceTitle:        "Official creator program",
+			URL:                "https://example.org/creator-program",
+			PublishedOrUpdated: "2026-08-20",
+			Units:              "creators",
+			Confidence:         "High",
+			DeckImplication:    "Use 4,200 as the sourced ceiling, not as a forecast.",
+		}},
+		ExcludedOrUnverified: []string{"An unsourced social post claiming 10,000 creators."},
+	})
+	return string(raw)
+}
+
+func TestExternalEvidenceV2NormalizesStrictJSONIntoEscapedCanonicalMarkdown(t *testing.T) {
+	body := appendOpenAIResponseWebSources(focusedExternalEvidenceJSONForTest(), openAIResponseWebEvidence{
+		ResponseID:  "resp_external_evidence_v2",
+		SearchCalls: 1,
+		Citations:   []openAIResponseWebCitation{{Title: "Official creator program", URL: "https://example.org/creator-program"}},
+	})
+	normalized, err := normalizeExternalEvidenceArtifact(body)
+	if err != nil {
+		t.Fatalf("normalize external evidence: %v", err)
+	}
+	if strings.HasPrefix(strings.TrimSpace(normalized), "{") || !strings.Contains(normalized, `creators \| all currently active`) {
+		t.Fatalf("normalized artifact was not canonical escaped Markdown:\n%s", normalized)
+	}
+	rows, err := externalEvidenceLedgerRows(stripOpenAIWebCitationReceipt(normalized))
+	if err != nil || len(rows) != 1 || len(rows[0]) != 8 || rows[0][1] != "The official program reports 4,200 opted-in creators | all currently active." {
+		t.Fatalf("canonical rows=%#v err=%v", rows, err)
+	}
+	if err := validateExternalEvidenceArtifact(normalized); err != nil {
+		t.Fatalf("canonical normalized artifact failed final gate: %v", err)
+	}
+}
+
+func TestExternalEvidenceV2RejectsMissingFactsAndUnreceiptedURLs(t *testing.T) {
+	receiptBody := appendOpenAIResponseWebSources("candidate", openAIResponseWebEvidence{
+		ResponseID: "resp_external_evidence_v2_rejection", SearchCalls: 1,
+		Citations: []openAIResponseWebCitation{{URL: "https://example.org/creator-program"}},
+	})
+	receipt, err := verifiedResearchCitationReceipt(receiptBody)
+	if err != nil {
+		t.Fatalf("fixture receipt: %v", err)
+	}
+	envelope, err := decodeExternalEvidenceEnvelope(focusedExternalEvidenceJSONForTest())
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	envelope.Evidence[0].Units = ""
+	if err := validateExternalEvidenceEnvelope(envelope, receipt); err == nil || !strings.Contains(err.Error(), "units") || isExternalEvidenceSyntaxFailure(err) {
+		t.Fatalf("missing fact error=%v, want semantic rejection", err)
+	}
+	envelope.Evidence[0].Units = "creators"
+	envelope.Evidence[0].URL = "https://unfetched.example/claim"
+	if err := validateExternalEvidenceEnvelope(envelope, receipt); err == nil || !strings.Contains(err.Error(), "absent from the provider citation receipt") {
+		t.Fatalf("unreceipted URL error=%v", err)
+	}
+	envelope.Evidence[0].URL = "https://example.org/creator-program"
+	row := envelope.Evidence[0]
+	for len(envelope.Evidence) < 13 {
+		envelope.Evidence = append(envelope.Evidence, row)
+	}
+	if err := validateExternalEvidenceEnvelope(envelope, receipt); err == nil || !strings.Contains(err.Error(), "1 to 12 decision-useful rows") {
+		t.Fatalf("oversized evidence ledger error=%v", err)
+	}
+}
+
+func TestExternalEvidenceLegacyColumnDriftIsSyntaxClassAndNeverAccepted(t *testing.T) {
+	body := focusedExternalEvidenceArtifactForTest()
+	seven := strings.Replace(body, " | creators | High |", " | High |", 1)
+	if err := validateExternalEvidenceArtifact(seven); err == nil || !isExternalEvidenceSyntaxFailure(err) || !strings.Contains(err.Error(), "7 columns") {
+		t.Fatalf("seven-column error=%v, want typed syntax rejection", err)
+	} else {
+		wrapped := &openAIOutputRejection{reason: "output_validation_error: " + err.Error(), cause: err}
+		if got := agentThreadFailureClass(wrapped); got != agentThreadFailureClassExternalEvidenceSyntax {
+			t.Fatalf("wrapped syntax failure class=%q", got)
+		}
+	}
+	nine := strings.Replace(body, "Official creator program", "Official creator | program", 1)
+	if err := validateExternalEvidenceArtifact(nine); err == nil || !isExternalEvidenceSyntaxFailure(err) || !strings.Contains(err.Error(), "9 columns") {
+		t.Fatalf("nine-column error=%v, want typed syntax rejection", err)
+	}
+}
+
+func TestAgentThreadFailureClassCannotBeAssertedByWorkerMetadata(t *testing.T) {
+	metadata := map[string]string{"failureClass": agentThreadFailureClassExternalEvidenceSyntax}
+	stampAgentThreadFailureClass(metadata, errors.New("ordinary provider failure"))
+	if got := metadata["failureClass"]; got != "" {
+		t.Fatalf("ordinary error retained worker-asserted failure class %q", got)
+	}
+	syntaxErr := &externalEvidenceSyntaxError{err: errors.New("bad evidence envelope")}
+	stampAgentThreadFailureClass(metadata, syntaxErr)
+	if got := metadata["failureClass"]; got != agentThreadFailureClassExternalEvidenceSyntax {
+		t.Fatalf("server-derived syntax class=%q", got)
+	}
+	stampAgentThreadFailureClass(metadata, nil)
+	if got := metadata["failureClass"]; got != "" {
+		t.Fatalf("successful result retained failure class %q", got)
+	}
+}
+
+func TestExternalEvidenceV2RequestUsesBoundedStrictSchemaAndNormalizer(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread := focusedExternalEvidenceThreadForTest()
+	request := app.buildAgentThreadOpenAIRequest(thread, app.newAgentJob(thread), time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC))
+	if request.JSONSchema == nil || request.JSONSchema.Name != packagingStudioExternalEvidenceContract || request.NormalizeOutput == nil || !request.EnableWebSearch {
+		t.Fatalf("external evidence request missing v2 schema/normalizer/search: %#v", request)
+	}
+	properties, _ := request.JSONSchema.Schema["properties"].(map[string]any)
+	evidence, _ := properties["evidence"].(map[string]any)
+	if evidence["minItems"] != 1 || evidence["maxItems"] != 12 {
+		t.Fatalf("evidence bounds=%#v, want 1..12", evidence)
+	}
+	if !strings.Contains(request.Instructions, "at most 12 decision-useful evidence items") {
+		t.Fatalf("v2 instructions lost synthesis cap:\n%s", request.Instructions)
+	}
+	restored := durableOpenAIRequest(request).request(thread)
+	if restored.JSONSchema == nil || restored.NormalizeOutput == nil {
+		t.Fatal("durable request replay lost v2 schema or server normalizer")
 	}
 }
 

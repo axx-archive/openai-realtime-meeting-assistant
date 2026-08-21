@@ -74,9 +74,10 @@ func TestIndexOpenAgentArtifactDeepLink(t *testing.T) {
 			t.Errorf("fetchArtifactByIdAndSelect body missing %q", want)
 		}
 	}
-	exactFetch := functionBody(html, "async function fetchArtifactEntryById(id)")
+	exactFetch := functionBody(html, "async function fetchArtifactEntryById(id, options)")
 	for _, want := range []string{
 		"/artifacts?id=", "artifactEntryFetchesInFlight",
+		"options.refresh !== true",
 		"addArtifactEntry(artifact, { select: false })",
 	} {
 		if !strings.Contains(exactFetch, want) {

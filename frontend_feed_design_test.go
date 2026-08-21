@@ -87,9 +87,10 @@ func TestIndexArtifactStageContract(t *testing.T) {
 			t.Errorf("openArtifactStage body missing %q", want)
 		}
 	}
-	fetchBody := functionBody(html, "async function fetchArtifactEntryById(id)")
+	fetchBody := functionBody(html, "async function fetchArtifactEntryById(id, options)")
 	for _, want := range []string{
 		"fetch(`/artifacts?id=${encodeURIComponent(want)}`",
+		"cached && options.refresh !== true",
 		"if (!response.ok) return null",
 		"if (!artifact?.id || String(artifact.id) !== want) return null",
 		"addArtifactEntry(artifact, { select: false })",

@@ -548,7 +548,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 		}
 		liveWebSearch := agentThreadUsesLiveWebSearch(run.thread)
-		raw, responderErr = responder(ctx, apiKey, openAITextRequest{
+		request := openAITextRequest{
 			Model:           agentThreadTextModel(run.thread),
 			Seat:            seatFollowup,
 			Workflow:        firstNonEmptyString(strings.TrimSpace(run.thread.Artifact.Metadata["toolTemplate"]), "agent_thread_followup_"+normalizeAgentThreadMode(run.thread.Mode)),
@@ -562,7 +562,9 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			ValidateOutput: func(text string) error {
 				return validateAgentThreadTerminalArtifact(run.thread, text)
 			},
-		})
+		}
+		request = configureExternalEvidenceV2Request(run.thread, request)
+		raw, responderErr = responder(ctx, apiKey, request)
 		if responderErr != nil {
 			return "", responderErr
 		}

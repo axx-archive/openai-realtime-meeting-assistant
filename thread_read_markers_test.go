@@ -272,7 +272,10 @@ func TestScoutChatThreadsIndexClearsTerminalWorkAndDeletedActivity(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread.Messages = []scoutChatMessageRecord{{ID: "work", Role: "scout", CreatedAt: "2026-08-12T19:00:00Z", Thread: &scoutChatThreadRef{ID: "run", Status: "running", Query: "private request body"}}}
+	thread.Messages = []scoutChatMessageRecord{{ID: "work", Role: "scout", CreatedAt: "2026-08-12T19:00:00Z", Thread: &scoutChatThreadRef{
+		ID: "run", Mode: "goal", ProcessID: packagingStudioProcessID, Status: "needs_input", Query: "private request body",
+		Checkpoint: &scoutChatWorkCheckpointRef{ID: "decision", StageID: "gate", Question: "Which direction should Scout use?", Options: []scoutChatWorkCheckpointOptionRef{{ID: "approve", Label: "Use this direction", Action: "proceed"}}},
+	}}}
 	if err := app.saveScoutChatThread(thread); err != nil {
 		t.Fatal(err)
 	}
@@ -283,6 +286,9 @@ func TestScoutChatThreadsIndexClearsTerminalWorkAndDeletedActivity(t *testing.T)
 	encoded, _ := json.Marshal(rows[0]["activeWork"])
 	if bytes.Contains(encoded, []byte("private request body")) || bytes.Contains(encoded, []byte(`"query"`)) {
 		t.Fatalf("active-work projection leaked request body: %s", encoded)
+	}
+	if !bytes.Contains(encoded, []byte(`"processId":"packaging_studio"`)) || !bytes.Contains(encoded, []byte(`"checkpoint":{"id":"decision"`)) {
+		t.Fatalf("active-work projection dropped process or actionable checkpoint identity: %s", encoded)
 	}
 	thread.Messages[0].Thread.Status = "complete"
 	if err := app.saveScoutChatThread(thread); err != nil {

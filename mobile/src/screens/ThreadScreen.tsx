@@ -2787,8 +2787,13 @@ export function ThreadScreen({ route, navigation }: Props) {
         ).trim();
         const phase = workPhaseLabel({
           status,
+          processId:
+            artifact?.metadata?.processId ?? message.thread?.processId,
           currentStage:
             artifact?.metadata?.currentStage ?? message.thread?.currentStage,
+          progressPercent:
+            artifact?.metadata?.progressPercent ?? message.thread?.progressPercent,
+          checkpoint: message.thread?.checkpoint,
         });
         setExpandedMessage({
           text: safeWorkProgressNote(note, phase),

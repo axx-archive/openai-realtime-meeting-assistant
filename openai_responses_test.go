@@ -441,6 +441,47 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 	}
 }
 
+func TestCreateOpenAITextResponseRetainsWebReceiptForStructuredEvidence(t *testing.T) {
+	var payload map[string]any
+	rawEvidence := strings.ReplaceAll(focusedExternalEvidenceJSONForTest(), `"`, `\"`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_, _ = fmt.Fprintf(w, `{
+			"id":"resp_structured_web_evidence",
+			"model":"gpt-5.5",
+			"status":"completed",
+			"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"%s","annotations":[
+				{"type":"url_citation","url":"https://example.org/creator-program","title":"Official creator program"}
+			]}]}]
+		}`, rawEvidence)
+	}))
+	defer server.Close()
+	routeOpenAIResponsesToTestServer(t, server.URL)
+
+	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model: "gpt-5.5", Input: "verify the proof points", EnableWebSearch: true,
+		JSONSchema: externalEvidenceJSONSchema(), NormalizeOutput: normalizeExternalEvidenceArtifact,
+		ValidateOutput: func(text string) error { return validateExternalEvidenceArtifact(text) },
+	})
+	if err != nil {
+		t.Fatalf("create structured evidence response: %v", err)
+	}
+	format, _ := payload["text"].(map[string]any)
+	strict, _ := format["format"].(map[string]any)
+	if strict["type"] != "json_schema" || strict["name"] != packagingStudioExternalEvidenceContract {
+		t.Fatalf("structured format=%#v", strict)
+	}
+	if !strings.Contains(text, "## Verified evidence ledger") || !strings.Contains(text, "stride-web-citation-receipt:v1") || strings.HasPrefix(strings.TrimSpace(text), "{") {
+		t.Fatalf("structured evidence was not normalized with its provider receipt:\n%s", text)
+	}
+	if rows, rowErr := externalEvidenceLedgerRows(stripOpenAIWebCitationReceipt(text)); rowErr != nil || len(rows) != 1 || len(rows[0]) != 8 {
+		t.Fatalf("canonical rows=%#v err=%v", rows, rowErr)
+	}
+}
+
 func TestOpenAIResponsesRequestTimeoutIsScopedToWorkShape(t *testing.T) {
 	if got := openAIResponsesRequestTimeout(openAITextRequest{}); got != 45*time.Second {
 		t.Fatalf("compact timeout=%s, want 45s", got)

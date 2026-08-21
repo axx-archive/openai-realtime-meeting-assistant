@@ -391,6 +391,7 @@ export type ScoutReplyLifecycle = {
 export type ScoutWorkThreadRef = {
   id: string;
   mode: string;
+  processId?: string;
   query: string;
   status: string;
   artifactId?: string;

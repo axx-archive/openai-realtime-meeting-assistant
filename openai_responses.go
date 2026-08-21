@@ -70,7 +70,11 @@ type openAITextRequest struct {
 	// ValidateOutput runs before a wire response is accepted. It is deliberately
 	// request-local so strict lanes can book wire success separately from a
 	// parse/schema rejection while ordinary text callers remain unchanged.
-	ValidateOutput func(string) error
+	// NormalizeOutput is the matching server-owned presentation seam. It may
+	// turn a strict structured response into a canonical artifact, but it must
+	// preserve and revalidate any provider evidence receipt before returning.
+	NormalizeOutput func(string) (string, error)
+	ValidateOutput  func(string) error
 }
 
 type openAIInputContent struct {
@@ -205,10 +209,18 @@ func (capture *openAIResponseReceiptCapture) snapshot() (string, string, openAIR
 // structured output like a transport outage.
 type openAIOutputRejection struct {
 	reason string
+	cause  error
 }
 
 func (failure *openAIOutputRejection) Error() string {
 	return "OpenAI output rejected: " + failure.reason
+}
+
+func (failure *openAIOutputRejection) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.cause
 }
 
 func (failure *openAIOutputRejection) providerOutputRejection() {}
@@ -449,8 +461,17 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 
 	text := extractOpenAIResponseText(body)
-	if request.EnableWebSearch && request.JSONSchema == nil {
+	if request.EnableWebSearch {
 		text = appendOpenAIResponseWebSources(text, extractOpenAIResponseWebEvidence(body))
+	}
+	if request.NormalizeOutput != nil {
+		normalized, err := request.NormalizeOutput(text)
+		if err != nil {
+			validationErr := &openAIOutputRejection{reason: "output_validation_error: " + err.Error(), cause: err}
+			recordWire(body.Usage, true, false, "output_validation_error", body.ServiceTier, validationErr)
+			return "", validationErr
+		}
+		text = strings.TrimSpace(normalized)
 	}
 	if text == "" {
 		emptyErr := &openAIOutputRejection{reason: "empty_output"}
@@ -459,7 +480,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 	if request.ValidateOutput != nil {
 		if err := request.ValidateOutput(text); err != nil {
-			validationErr := &openAIOutputRejection{reason: "output_validation_error: " + err.Error()}
+			validationErr := &openAIOutputRejection{reason: "output_validation_error: " + err.Error(), cause: err}
 			recordWire(body.Usage, true, false, "output_validation_error", body.ServiceTier, validationErr)
 			return "", validationErr
 		}

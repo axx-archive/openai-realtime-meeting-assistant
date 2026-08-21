@@ -12444,11 +12444,6 @@
         display: flex;
         flex-direction: column;
         background: var(--bg-app);
-        animation: deck-editor-in var(--dur-slow) var(--ease);
-      }
-      @keyframes deck-editor-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
       }
       .deck-editor[hidden] { display: none; }
       .deck-editor__toolbar {
@@ -12485,6 +12480,7 @@
         align-items: center;
         gap: 8px;
       }
+      .deck-editor__mobile-more { display: none; position: relative; }
       .deck-editor__title {
         margin: 0 12px 0 4px;
         font: var(--type-body);
@@ -12527,6 +12523,13 @@
         border-color: var(--line-2);
       }
       .deck-editor__btn:active { transform: scale(0.96); }
+      .deck-editor__btn:disabled,
+      .deck-editor__popover button:disabled,
+      .deck-editor__zorder button:disabled {
+        opacity: .4;
+        cursor: default;
+        transform: none;
+      }
       .deck-editor__btn--icon {
         width: 40px;
         padding: 0;
@@ -12624,6 +12627,12 @@
         border-top: 1px solid var(--line-1);
       }
       .deck-editor__slide-actions .deck-editor__btn { min-width: 0; padding-inline: 8px; }
+      .deck-editor__slide-actions-label {
+        align-self: center;
+        padding-inline: 8px;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
       .deck-editor__thumb {
         position: relative;
         aspect-ratio: 16 / 9;
@@ -12786,6 +12795,8 @@
         width: 100%;
         height: 100%;
         z-index: 2;
+        overflow: hidden;
+        white-space: pre-wrap;
       }
       /* Properties panel (right side) */
       .deck-editor__props {
@@ -12803,9 +12814,17 @@
       .deck-editor__inspector-head {
         flex: none;
         display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 3px;
         padding: 16px 16px 13px;
         border-bottom: 1px solid var(--line-1);
+      }
+      .deck-editor__inspector-head > :not(.deck-editor__inspector-close) { grid-column: 1; }
+      .deck-editor__inspector-close {
+        display: none;
+        grid-column: 2;
+        grid-row: 1 / span 3;
+        align-self: start;
       }
       .deck-editor__inspector-eyebrow {
         color: var(--text-3);
@@ -13008,46 +13027,6 @@
       [data-theme="dark"] .deck-editor__canvas {
         background: var(--deck-background, #111);
       }
-      /* Tablet responsive deck editor (iPad) */
-      @media (max-width: 1024px) {
-        .deck-editor__sidebar {
-          width: 140px;
-        }
-        .deck-editor__canvas-wrap {
-          padding: 16px;
-        }
-        .deck-editor__props {
-          width: 288px;
-        }
-        .deck-editor__toolbar-center {
-          gap: 2px;
-        }
-        .deck-editor__divider {
-          display: none;
-        }
-      }
-      @media (max-width: 768px) {
-        .deck-editor__sidebar {
-          width: 100px;
-        }
-        .deck-editor__props {
-          width: 276px;
-        }
-        .deck-editor__title {
-          max-width: 100px;
-        }
-        .deck-editor__btn--icon span {
-          display: none;
-        }
-        /* Hide some center toolbar items on smaller screens */
-        .deck-editor__toolbar-center [data-action="add-text"],
-        .deck-editor__toolbar-center [data-action="add-image"],
-        .deck-editor__toolbar-center [data-action="add-rectangle"],
-        .deck-editor__toolbar-center [data-action="add-ellipse"],
-        .deck-editor__toolbar-center [data-action="arrange"] {
-          display: none;
-        }
-      }
       .deck-editor__mobile-inspector { display: none; }
       .deck-editor__download { position: relative; }
       .deck-editor__popover {
@@ -13083,6 +13062,28 @@
       .deck-editor__popover button:hover,
       .deck-editor__popover a:hover { background: var(--surface-2); }
       .deck-editor__popover small { color: var(--text-3); font: var(--type-caption); }
+      .deck-editor__menu-separator {
+        height: 1px;
+        margin: 3px 5px;
+        background: var(--line-1);
+      }
+      .deck-editor__mobile-more .deck-editor__popover {
+        width: min(280px, calc(100vw - 20px));
+        max-height: min(70vh, 560px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .deck-editor__sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
       .deck-editor__zoom {
         display: inline-flex;
         align-items: center;
@@ -13093,20 +13094,75 @@
         font-variant-numeric: tabular-nums;
       }
       .deck-editor__zoom input { width: 72px; }
-      /* Phone: the inspector becomes a real bottom command sheet instead of
-         silently removing editing controls. */
-      @media (max-width: 640px) {
-        .deck-editor__sidebar {
-          width: 80px;
+
+      /* Tablet: keep every command reachable without forcing the title,
+         creation tools, and document actions into one clipped row. */
+      @media (max-width: 1024px) {
+        .deck-editor__toolbar {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          grid-template-areas:
+            "left right"
+            "center center";
+          row-gap: 8px;
+          padding: 8px 12px;
         }
+        .deck-editor__toolbar-left { grid-area: left; }
+        .deck-editor__toolbar-center {
+          grid-area: center;
+          justify-content: flex-start;
+          gap: 4px;
+          overflow-x: auto;
+        }
+        .deck-editor__toolbar-right { grid-area: right; }
+        .deck-editor__sidebar { width: 140px; }
+        .deck-editor__slide-actions {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .deck-editor__slide-actions > [data-action="add-slide"],
+        .deck-editor__slide-actions-label { grid-column: 1 / -1; }
+        .deck-editor__slide-actions .deck-editor__btn--icon { width: auto; }
+        .deck-editor__canvas-wrap { padding: 16px; }
+        .deck-editor__props { width: 288px; }
+        .deck-editor__divider { display: none; }
+      }
+
+      /* Compact tablet and phone: creation and secondary document actions live
+         in a labeled More menu; navigation, Inspector, and Save remain direct. */
+      @media (max-width: 768px) {
+        .deck-editor__toolbar {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-areas:
+            "left"
+            "right";
+          gap: 6px;
+          padding: 7px 10px;
+        }
+        .deck-editor__toolbar-center { display: none; }
+        .deck-editor__toolbar-left { width: 100%; }
+        .deck-editor__toolbar-right {
+          width: 100%;
+          display: flex;
+          justify-content: space-between;
+          gap: 6px;
+        }
+        .deck-editor__toolbar-right > .deck-editor__zoom,
+        .deck-editor__toolbar-right > .deck-editor__download,
+        .deck-editor__toolbar-right > [data-action="present"],
+        .deck-editor__toolbar-right > [data-action="save-copy"] { display: none; }
+        .deck-editor__mobile-more { display: block; }
+        .deck-editor__mobile-inspector { display: inline-flex; }
+        .deck-editor__title { max-width: min(46vw, 260px); }
+        .deck-editor__sidebar { width: 100px; }
+        .deck-editor__slide-actions { display: none; }
         .deck-editor__props {
-          position: fixed;
-          left: 80px;
+          position: absolute;
+          left: 100px;
           right: 0;
           bottom: 0;
           z-index: 5;
           width: auto;
-          max-height: min(68vh, 620px);
+          max-height: min(72vh, 680px);
           border-top: 1px solid var(--line-1);
           border-left: 1px solid var(--line-1);
           border-radius: var(--r-lg) 0 0 0;
@@ -13123,22 +13179,24 @@
           pointer-events: auto;
           transform: translateY(0);
         }
-        .deck-editor__mobile-inspector { display: inline-flex; }
-        .deck-editor__title {
-          max-width: 80px;
+        .deck-editor__inspector-close { display: inline-flex; }
+      }
+
+      /* Phone: thumbnails collapse into the direct slide counter, leaving the
+         full width for touch editing. Slide management remains in More. */
+      @media (max-width: 640px) {
+        .deck-editor__sidebar { display: none; }
+        .deck-editor__canvas-wrap { padding: 12px; }
+        .deck-editor__props {
+          left: 0;
+          border-left: 0;
+          border-radius: var(--r-lg) var(--r-lg) 0 0;
         }
-        /* Hide center tools on phone, keep only slide nav */
-        .deck-editor__toolbar-center [data-action="add-text"],
-        .deck-editor__toolbar-center [data-action="add-image"],
-        .deck-editor__toolbar-center [data-action="add-rectangle"],
-        .deck-editor__toolbar-center [data-action="add-ellipse"],
-        .deck-editor__toolbar-right [data-action="save-copy"] {
-          display: none;
-        }
-        /* Compact Present button on phone */
-        .deck-editor__toolbar-right [data-action="present"] span {
-          display: none;
-        }
+        .deck-editor__title { max-width: calc(100vw - 80px); }
+      }
+      @media (pointer: coarse) {
+        .deck-editor__handle::after { inset: -16px; }
+        .deck-editor__slide-actions .deck-editor__btn { min-height: 44px; }
       }
 
       /* ---------- Document Studio ---------- */
@@ -13161,6 +13219,22 @@
       }
       .document-editor__group { display: flex; align-items: center; gap: 7px; min-width: 0; }
       .document-editor__group--right { justify-content: flex-end; }
+      .document-editor__mobile-status {
+        display: none;
+        flex: none;
+        min-height: 28px;
+        align-items: center;
+        padding: 0 9px;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-3);
+        font: var(--type-caption);
+        white-space: nowrap;
+        border: 0;
+        cursor: pointer;
+      }
+      .document-editor__mobile-status[data-state="error"] { color: var(--danger); }
+      .document-editor__mobile-status[data-state="saved"] { color: var(--live); }
       .document-editor__title {
         min-width: 0;
         max-width: 360px;
@@ -13184,6 +13258,15 @@
       }
       .document-editor__outline { border-right: 1px solid var(--line-1); }
       .document-editor__inspector { border-left: 1px solid var(--line-1); }
+      .document-editor__inspector-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 11px;
+      }
+      .document-editor__inspector-head .document-editor__side-label { margin: 0; }
+      .document-editor__inspector-close { display: none; }
       .document-editor__side-label {
         display: block;
         margin: 0 0 11px;
@@ -13333,17 +13416,55 @@
       .document-editor__meta strong { display: block; color: var(--text-1); font: var(--type-caption-medium); }
       .document-editor__status[data-state="error"] { color: var(--danger); }
       .document-editor__status[data-state="saved"] { color: var(--live); }
-      @media (max-width: 900px) {
+      @media (max-width: 1100px) {
         .document-editor__toolbar { grid-template-columns: minmax(0, 1fr) auto; }
-        .document-editor__toolbar > .document-editor__group:nth-child(2) { grid-row: 2; grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; }
+        .document-editor__toolbar > .document-editor__group:nth-child(2) {
+          grid-row: 2;
+          grid-column: 1 / -1;
+          justify-content: flex-start;
+          overflow-x: auto;
+          overscroll-behavior-x: contain;
+          scrollbar-width: thin;
+          padding-right: 28px;
+        }
+        .document-editor__toolbar > .document-editor__group:nth-child(2) > * { flex: none; }
         .document-editor { grid-template-rows: auto minmax(0, 1fr); }
         .document-editor__main { grid-template-columns: 160px minmax(0, 1fr); }
-        .document-editor__inspector { display: none; }
+        .document-editor__inspector {
+          position: fixed;
+          top: 12px;
+          right: 12px;
+          bottom: 12px;
+          z-index: 9;
+          display: block;
+          width: min(360px, calc(100vw - 24px));
+          border: 1px solid var(--line-1);
+          border-radius: var(--r-lg);
+          box-shadow: var(--shadow-3);
+          opacity: 0;
+          visibility: hidden;
+          pointer-events: none;
+          transform: translateX(24px);
+          transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
+        }
+        .document-editor[data-inspector-open="true"] .document-editor__inspector {
+          opacity: 1;
+          visibility: visible;
+          pointer-events: auto;
+          transform: translateX(0);
+          transition-delay: 0s;
+        }
+        .document-editor__inspector-close { display: inline-flex; }
+        .document-editor__mobile-status { display: inline-flex; }
       }
-      @media (max-width: 640px) {
+      @media (max-width: 768px) {
         .document-editor__outline { display: none; }
         .document-editor__main { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 640px) {
         .document-editor__toolbar { padding-inline: 8px; }
+        .document-editor__title { flex: 1; max-width: none; }
+        .document-editor__mobile-status { padding-inline: 8px; }
         .document-editor__group--right {
           position: fixed;
           right: 12px;
@@ -13358,12 +13479,26 @@
         }
         .document-editor__toolbar [data-doc-action="save-copy"] { font-size: 0; padding-inline: 10px; }
         .document-editor__toolbar [data-doc-action="save-copy"]::after { content: 'Copy'; font-size: 12px; }
-        .document-editor__workspace { padding: 16px 10px 64px; }
+        .document-editor__workspace { padding: 16px 10px calc(84px + env(safe-area-inset-bottom)); }
         .document-editor__paper { padding: 34px 24px; }
         .document-editor__rich { min-height: calc(100vh - 260px); font-size: 16px; }
+        .document-editor__inspector {
+          top: auto;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          width: auto;
+          max-height: min(72vh, 620px);
+          padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
+          border-width: 1px 0 0;
+          border-radius: var(--r-lg) var(--r-lg) 0 0;
+          transform: translateY(calc(100% + 16px));
+        }
+        .document-editor[data-inspector-open="true"] .document-editor__inspector { transform: translateY(0); }
       }
       @media (prefers-reduced-motion: reduce) {
         .document-editor__paper { animation: none; }
+        .document-editor__inspector { transition: none; }
       }
 
       .deck-presenter {
@@ -15389,6 +15524,116 @@
           font: var(--type-label);
           letter-spacing: var(--track-label);
           font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-phase-list {
+          display: grid;
+          gap: 6px;
+        }
+
+        #chatTool .chat-context-phase-entry {
+          display: grid;
+          grid-template-columns: 26px minmax(0, 1fr);
+          gap: 10px;
+          align-items: start;
+          min-height: 44px;
+          padding: 10px 11px;
+          border-radius: 14px;
+          color: var(--text-2);
+        }
+
+        #chatTool .chat-context-phase-entry.is-current {
+          background: var(--surface-3);
+          color: var(--text-1);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 8px 22px rgba(0, 0, 0, 0.045);
+        }
+
+        #chatTool .chat-context-phase-entry__index {
+          width: 24px;
+          height: 24px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          background: var(--surface-2);
+          color: var(--text-3);
+          box-shadow: 0 0 0 1px var(--line-1);
+          font: var(--type-numeric);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-phase-entry.is-current .chat-context-phase-entry__index {
+          background: var(--ember);
+          color: var(--on-accent);
+          box-shadow: 0 0 0 4px color-mix(in srgb, var(--ember) 13%, transparent);
+        }
+
+        #chatTool .chat-context-phase-entry.is-complete .chat-context-phase-entry__index {
+          background: var(--text-1);
+          color: var(--surface-1);
+        }
+
+        #chatTool .chat-context-phase-entry__copy {
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+
+        #chatTool .chat-context-phase-entry__topline {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        #chatTool .chat-context-phase-entry__title {
+          color: var(--text-1);
+          font: 600 12.5px/1.35 var(--font-sans);
+          text-wrap: balance;
+        }
+
+        #chatTool .chat-context-phase-entry__state {
+          flex: none;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          text-transform: uppercase;
+        }
+
+        #chatTool .chat-context-phase-entry__sentence {
+          margin: 0;
+          color: var(--text-2);
+          font: var(--type-caption);
+          text-wrap: pretty;
+        }
+
+        #chatTool .chat-context-technical {
+          margin-top: 14px;
+          border-top: 1px solid var(--line-1);
+        }
+
+        #chatTool .chat-context-technical > summary {
+          min-height: 44px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          color: var(--text-2);
+          cursor: pointer;
+          font: var(--type-caption-medium);
+          list-style: none;
+        }
+
+        #chatTool .chat-context-technical > summary::-webkit-details-marker { display: none; }
+
+        #chatTool .chat-context-technical__count {
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-technical__list {
+          padding-top: 4px;
         }
 
         #chatTool .chat-context-source-list {
@@ -29666,6 +29911,17 @@
       .goalcard__working { display: none; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
       .goalcard.is-working-open .goalcard__working { display: flex; animation: comment-preview-open var(--dur-med) var(--ease); }
       .goalcard__work-line { font: var(--type-caption); color: var(--text-2); text-wrap: pretty; }
+      .goalcard__phase-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 7px; align-items: baseline; padding: 3px 0; }
+      .goalcard__phase-line[data-state="current"] { color: var(--text-1); }
+      .goalcard__phase-index { color: var(--text-3); font: var(--type-numeric); font-variant-numeric: tabular-nums; }
+      .goalcard__phase-copy { display: grid; gap: 1px; }
+      .goalcard__phase-title { font: var(--type-caption-medium); }
+      .goalcard__phase-note { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); text-wrap: pretty; }
+      .goalcard__technical { margin-top: 5px; border-top: 1px solid var(--line-1); }
+      .goalcard__technical > summary { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-3); cursor: pointer; font: var(--type-label); letter-spacing: var(--track-label); list-style: none; }
+      .goalcard__technical > summary::-webkit-details-marker { display: none; }
+      .goalcard__technical-count { font-variant-numeric: tabular-nums; }
+      .goalcard__technical-body { display: grid; gap: 4px; padding: 2px 0 6px 25px; }
       .goalcard__result { font: var(--type-body); color: var(--text-1); text-wrap: pretty; }
       /* §4 the trust line is a hairline footer, not a warm blob — the score
          reads numeric, the ASSUMED flag reads warn, everything else is quiet */
@@ -43289,7 +43545,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         compete_architects: { label: 'Explore narrative directions', note: 'three story directions developed' },
         compete_judges: { label: 'Choose the strongest story', note: 'story directions compared' },
         compete_choice: { label: 'Lock the narrative direction', note: 'story locked' },
-        write: { label: 'Build the 10-slide story', note: 'deck story drafted' },
+        write: { label: 'Write the deck', note: 'deck story drafted' },
         gate: { label: 'Check the story against the brief', note: 'content review complete' },
         voice: { label: 'Add presenter notes', note: 'presenter notes ready' },
         founder_pass: { label: 'Make the copy sound human', note: 'copy locked' },
@@ -43301,6 +43557,136 @@ Wrap the entire export in one code block. After the code block, say whether the 
         ship_compile: { label: 'Assemble the presentation package', note: 'package assembled' },
         slide_jury: { label: 'Review every rendered slide', note: 'visual review complete' },
         ship_approval: { label: 'Final deck review', note: 'final decision recorded' }
+      }
+
+      // Packaging Studio keeps a detailed, durable execution graph, but a
+      // customer should only have to understand the five outcomes that graph
+      // advances. This is the single web presentation contract: the channel
+      // card, legacy goal card, and right-side Activity rail all project from
+      // this map while preserving every raw stage under Technical details.
+      const packagingStudioCustomerPhases = [
+        {
+          id: 'frame', label: 'Frame the decision',
+          stages: ['intake', 'context_snapshot'],
+          working: 'Scout is aligning the request, audience, and company context.',
+          complete: 'The audience, decision, and constraints are set.',
+          recovering: 'Scout is reconciling the brief before the work moves forward.'
+        },
+        {
+          id: 'ground', label: 'Ground the recommendation',
+          stages: ['external_research', 'evidence'],
+          working: 'Scout is verifying the proof points that can change the recommendation.',
+          complete: 'The recommendation is grounded in verified company context and evidence.',
+          recovering: 'Scout is recovering from an evidence check before the story moves forward.'
+        },
+        {
+          id: 'story', label: 'Build the story',
+          stages: ['red_team', 'story_architects', 'compete_architects', 'compete_judges', 'compete_choice', 'write', 'gate', 'voice', 'founder_pass', 'copy_edit'],
+          working: 'Scout is shaping the argument, slide copy, and presenter notes.',
+          complete: 'The story and copy passed their content review.',
+          recovering: 'Scout is revising the story against the brief.'
+        },
+        {
+          id: 'design', label: 'Design the presentation',
+          stages: ['identity', 'imagery_direction', 'imagery_generate', 'layout_plan'],
+          working: 'Scout is creating the visual system, imagery, and slide compositions.',
+          complete: 'The visual system and slide compositions are locked.',
+          recovering: 'Scout is repairing the visual plan before building the slides.'
+        },
+        {
+          id: 'finish', label: 'Finish the presentation',
+          stages: ['ship_deck', 'draft_compile', 'ship_compile', 'slide_jury', 'quality_gate', 'ship_approval'],
+          working: 'Scout is building, rendering, and reviewing the editable presentation.',
+          complete: 'The editable presentation and downloads are ready.',
+          recovering: 'Scout is repairing issues found in the rendered slides.'
+        }
+      ]
+
+      function packagingStudioCanonicalProgress(artifact, ref) {
+        for (const candidate of [ref?.progressPercent, artifact?.metadata?.progressPercent]) {
+          if (candidate === '' || candidate === null || candidate === undefined) continue
+          const value = Number(candidate)
+          if (Number.isFinite(value)) return Math.max(0, Math.min(100, Math.round(value)))
+        }
+        return null
+      }
+
+      function packagingStudioCustomerProgress(plan, artifact, ref, status) {
+        const subtasks = Array.isArray(plan?.subtasks) ? plan.subtasks : []
+        const byId = new Map(subtasks.map(task => [String(task?.id || '').trim(), task]))
+        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
+        const terminal = ['complete', 'completed', 'published'].includes(String(status || artifact?.metadata?.status || '').toLowerCase())
+        const stalled = ['error', 'failed', 'needs_attention', 'rejected'].includes(String(status || artifact?.metadata?.status || '').toLowerCase())
+        const phases = packagingStudioCustomerPhases.map((definition, index) => {
+          const tasks = definition.stages.map(stageId => byId.get(stageId)).filter(Boolean)
+          const taskStatuses = tasks.map(task => String(task?.status || 'pending').toLowerCase())
+          const ownsCheckpoint = Boolean(checkpoint && definition.stages.includes(String(checkpoint.stageId || '').trim()))
+          const hasFailure = taskStatuses.some(value => ['failed', 'blocked', 'needs_attention', 'rejected', 'error'].includes(value))
+          const hasWork = taskStatuses.some(value => ['running', 'ready', 'in_progress', 'queued'].includes(value))
+          const complete = tasks.length > 0 && taskStatuses.every(value => ['complete', 'completed', 'skipped'].includes(value))
+          let phaseStatus = complete ? 'complete' : ownsCheckpoint ? 'needs_decision' : hasWork ? 'working' : hasFailure ? (stalled ? 'blocked' : 'recovering') : 'pending'
+          if (terminal && index === packagingStudioCustomerPhases.length - 1) phaseStatus = 'complete'
+          const sentence = phaseStatus === 'complete'
+            ? definition.complete
+            : phaseStatus === 'needs_decision'
+              ? packagingStudioCheckpointQuestion(plan, checkpoint) || 'Scout needs your decision before continuing.'
+              : phaseStatus === 'recovering' || phaseStatus === 'blocked'
+                ? definition.recovering
+                : definition.working
+          return { ...definition, index, tasks, status: phaseStatus, sentence }
+        })
+        let current = phases.find(phase => phase.status === 'needs_decision')
+          || phases.find(phase => phase.status === 'working')
+          || phases.find(phase => phase.status === 'recovering' || phase.status === 'blocked')
+          || phases.find(phase => phase.status !== 'complete')
+          || phases[phases.length - 1]
+        if (terminal) current = phases[phases.length - 1]
+        return {
+          phases,
+          current,
+          currentNumber: Math.max(1, (current?.index || 0) + 1),
+          count: phases.length,
+          percent: packagingStudioCanonicalProgress(artifact, ref),
+          checkpoint
+        }
+      }
+
+      function packagingStudioPhaseStateLabel(phase) {
+        if (!phase) return ''
+        return ({
+          complete: 'Complete',
+          working: 'Working',
+          recovering: 'Recovering',
+          blocked: 'Blocked',
+          needs_decision: 'Your decision',
+          pending: 'Up next'
+        })[phase.status] || 'Up next'
+      }
+
+      function packagingStudioPhaseListNode(progress) {
+        const list = bfEl('div', 'chat-context-phase-list')
+        for (const phase of progress?.phases || []) {
+          const current = phase === progress.current
+          const row = bfEl('section', `chat-context-phase-entry${current ? ' is-current' : ''}${phase.status === 'complete' ? ' is-complete' : ''}`)
+          row.dataset.phase = phase.id
+          row.dataset.phaseState = phase.status
+          row.appendChild(bfEl('span', 'chat-context-phase-entry__index', phase.status === 'complete' ? '✓' : String(phase.index + 1)))
+          const copy = bfEl('span', 'chat-context-phase-entry__copy')
+          const topline = bfEl('span', 'chat-context-phase-entry__topline')
+          topline.append(
+            bfEl('span', 'chat-context-phase-entry__title', phase.label),
+            bfEl('span', 'chat-context-phase-entry__state', packagingStudioPhaseStateLabel(phase))
+          )
+          copy.appendChild(topline)
+          // Pending phases remain title-only. Completed phases collapse to one
+          // outcome line; the active phase expands with one human sentence.
+          if (phase.status === 'complete' || current) {
+            copy.appendChild(bfEl('p', 'chat-context-phase-entry__sentence', phase.sentence))
+          }
+          row.appendChild(copy)
+          list.appendChild(row)
+        }
+        return list
       }
 
       const packagingStudioCheckpointQuestions = {
@@ -43333,28 +43719,52 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return options
       }
 
+      function packagingStudioRequestedSlideCount(plan) {
+        const objective = String(plan?.objective || '')
+        const digits = objective.match(/\b([0-9]{1,2})\s*(?:-|\s)\s*slides?\b/i)
+        if (digits) {
+          const count = Number(digits[1])
+          if (Number.isInteger(count) && count >= 1 && count <= 40) return count
+        }
+        const words = {
+          one: 1, two: 2, three: 3, four: 4, five: 5,
+          six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+          eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+          sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20
+        }
+        const spelled = objective.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:-|\s)\s*slides?\b/i)
+        return spelled ? words[String(spelled[1]).toLowerCase()] || 0 : 0
+      }
+
+      function packagingStudioStagePresentationForPlan(plan, stageId) {
+        const presentation = packagingStudioStagePresentation[String(stageId || '').trim()] || null
+        if (!presentation || String(stageId || '').trim() !== 'write') return presentation
+        const count = packagingStudioRequestedSlideCount(plan)
+        return { ...presentation, label: count ? `Write the ${count}-slide deck` : presentation.label }
+      }
+
       function packagingStudioStagePresentationFor(entry) {
         const metadata = entry?.metadata || {}
-		const presentation = packagingStudioStagePresentation[String(metadata.processStage || metadata.goalSubtaskId || '').trim()] || null
-		if (!presentation) return null
-		if (String(metadata.processId || '').trim() === 'packaging_studio') return presentation
+		const stageId = String(metadata.processStage || metadata.goalSubtaskId || '').trim()
+		if (!packagingStudioStagePresentation[stageId]) return null
 		// Older writer outputs predate the direct processId stamp. Their saved
-		// goal parent still owns the process identity, so resolve through it rather
-		// than exposing the retired writer prompt as product copy.
+		// goal parent still owns the process identity and direct request, so resolve
+		// through it both for process authority and request-aware stage language.
 		const parentId = String(metadata.goalParentId || metadata.parentGoalId || metadata.goalId || '').trim()
 		const parent = parentId && typeof artifactEntries !== 'undefined'
 		  ? artifactEntries.find(candidate => String(candidate?.id || '') === parentId)
 		  : null
 		const parentPlan = parent ? goalPlanFromArtifact(parent) : null
-		return String(parent?.metadata?.processId || parentPlan?.processId || parentPlan?.toolTemplate || '').trim() === 'packaging_studio'
-		  ? presentation
+		const processId = String(metadata.processId || parent?.metadata?.processId || parentPlan?.processId || parentPlan?.toolTemplate || '').trim()
+		return processId === 'packaging_studio'
+		  ? packagingStudioStagePresentationForPlan(parentPlan, stageId)
 		  : null
       }
 
       function packagingStudioTaskDisplayTitle(plan, task) {
         const processId = String(plan?.processId || plan?.toolTemplate || '').trim()
         if (processId === 'packaging_studio') {
-          return packagingStudioStagePresentation[String(task?.id || '').trim()]?.label || String(task?.title || task?.id || '')
+          return packagingStudioStagePresentationForPlan(plan, String(task?.id || '').trim())?.label || String(task?.title || task?.id || '')
         }
         return String(task?.title || task?.id || '')
       }
@@ -45341,6 +45751,127 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderCanvas()
       }
 
+      function deckRichTextEscape(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/'/g, '&#39;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&#34;')
+      }
+
+      function deckRichTextStyleDeclarations(source, deckHeight = 1080, renderedUnits = false) {
+        const allowed = new Set(['color', 'font-size', 'font-weight', 'font-style', 'font-family', 'letter-spacing', 'line-height', 'text-decoration', 'display', 'margin', 'margin-top', 'margin-bottom'])
+        const styles = new Map()
+        let rejected = false
+        const height = Math.max(1, Number(deckHeight) || 1080)
+        const canonicalNumber = value => {
+          const rounded = Math.round(Number(value) * 10000) / 10000
+          return Number.isFinite(rounded) ? String(Object.is(rounded, -0) ? 0 : rounded) : ''
+        }
+        const restoreRenderedLength = value => renderedUnits
+          ? String(value || '').replace(/(-?(?:\d+(?:\.\d+)?|\.\d+))cqh\b/gi, (_, number) => `${canonicalNumber(Number(number) / 100 * height)}px`)
+          : String(value || '')
+        for (const declaration of String(source || '').split(';')) {
+          if (!declaration.trim()) continue
+          const split = declaration.indexOf(':')
+          if (split < 1) { rejected = true; continue }
+          const property = declaration.slice(0, split).trim().toLowerCase()
+          let value = restoreRenderedLength(declaration.slice(split + 1).trim())
+          if (!allowed.has(property) || !value || /[{};]/.test(value) || /url\s*\(/i.test(value)) { rejected = true; continue }
+          let valid = false
+          if (property === 'color') {
+            const rgb = value.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i)
+            if (rgb && rgb.slice(1, 4).every(channel => Number(channel) <= 255)) {
+              const hex = rgb.slice(1, 4).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
+              const alpha = rgb[4] === undefined || Number(rgb[4]) === 1 ? '' : Math.round(Number(rgb[4]) * 255).toString(16).padStart(2, '0')
+              value = `#${hex}${alpha}`
+            }
+            valid = /^(?:transparent|white|black|#[0-9a-f]{3,4}(?:[0-9a-f]{3,4})?)$/i.test(value)
+          }
+          else if (property === 'font-size') {
+            const number = Number(value.replace(/px$/i, ''))
+            valid = /^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/i.test(value) && number >= 8 && number <= 400
+          } else if (property === 'font-weight') {
+            const normalized = value.toLowerCase()
+            const weight = normalized === 'normal' ? 400 : ['bold', 'bolder'].includes(normalized) ? 700 : Number(value)
+            valid = Number.isInteger(weight) && weight >= 100 && weight <= 900
+          } else if (property === 'font-family') valid = /^[A-Za-z0-9 ,_"'-]{1,84}$/.test(value) && /^[A-Za-z0-9 ,_-]{1,80}$/.test(value.replace(/["']/g, ''))
+          else if (property === 'letter-spacing') valid = /^(?:normal|-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem)?)$/i.test(value)
+          else if (property === 'line-height') {
+            const number = Number(value.replace(/px$/i, ''))
+            valid = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/i.test(value) && number > 0 && number <= 4
+          } else if (property === 'display') valid = /^(?:inline|inline-block|block)$/i.test(value)
+          else if (property === 'margin' || property === 'margin-top' || property === 'margin-bottom') valid = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%)?(?:\s+-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%)?){0,3}$/i.test(value)
+          else if (property === 'font-style') valid = /^(?:normal|italic|oblique)$/i.test(value)
+          else if (property === 'text-decoration') valid = /^(?:none|underline|line-through)$/i.test(value)
+          if (!valid) { rejected = true; continue }
+          styles.set(property, value.trim())
+        }
+        return { styles, rejected }
+      }
+
+      // Keep the client projection byte-compatible with deckRichTextSafe on the
+      // server: the same inline tags, the same style values, sorted declarations,
+      // and Go-compatible escaping. Unknown markup is flattened; active/media
+      // nodes are dropped with their contents instead of ever reaching innerHTML.
+      function sanitizeDeckRichText(value, deckHeight = 1080, renderedUnits = false) {
+        const parsed = new DOMParser().parseFromString(`<div>${String(value || '')}</div>`, 'text/html')
+        const root = parsed.body.firstElementChild
+        const allowed = new Set(['span', 'strong', 'b', 'em', 'i', 'small', 'sup', 'sub', 'br'])
+        const discard = new Set(['script', 'style', 'svg', 'math', 'iframe', 'object', 'embed', 'img', 'picture', 'video', 'audio', 'canvas', 'form', 'input', 'button'])
+        let hasMarkup = false
+        const write = node => {
+          if (node.nodeType === Node.TEXT_NODE) return deckRichTextEscape(node.nodeValue || '')
+          if (node.nodeType !== Node.ELEMENT_NODE) return ''
+          const tag = node.tagName.toLowerCase()
+          if (discard.has(tag)) return ''
+          if (!allowed.has(tag)) {
+            const body = Array.from(node.childNodes).map(write).join('')
+            if ((tag === 'div' || tag === 'p') && body) { hasMarkup = true; return `${body}<br>` }
+            return body
+          }
+          hasMarkup = true
+          if (tag === 'br') return '<br>'
+          const { styles } = deckRichTextStyleDeclarations(node.getAttribute('style'), deckHeight, renderedUnits)
+          const style = [...styles.keys()].sort().map(property => `${property}:${deckRichTextEscape(styles.get(property))}`).join(';')
+          const body = Array.from(node.childNodes).map(write).join('')
+          return `<${tag}${style ? ` style="${style}"` : ''}>${body}</${tag}>`
+        }
+        let result = root ? Array.from(root.childNodes).map(write).join('') : ''
+        result = result.replace(/(?:<br>)+$/, match => match.length > 4 ? '<br>' : match)
+        return hasMarkup ? result : ''
+      }
+
+      function deckRichTextPlainText(value) {
+        const parsed = new DOMParser().parseFromString(`<div>${String(value || '')}</div>`, 'text/html')
+        const root = parsed.body.firstElementChild
+        const read = node => {
+          if (node.nodeType === Node.TEXT_NODE) return String(node.nodeValue || '')
+          if (node.nodeType !== Node.ELEMENT_NODE) return ''
+          if (node.tagName === 'BR') return '\n'
+          return Array.from(node.childNodes).map(read).join('')
+        }
+        return root ? Array.from(root.childNodes).map(read).join('') : ''
+      }
+
+      function deckRichTextEditingHTML(value, deckHeight) {
+        const holder = document.createElement('div')
+        holder.innerHTML = sanitizeDeckRichText(value, deckHeight)
+        scaleDeckRichText(holder, deckHeight)
+        return holder.innerHTML
+      }
+
+      function deckRichTextEditorHasUnsafeMarkup(root, deckHeight) {
+        const allowed = new Set(['SPAN', 'STRONG', 'B', 'EM', 'I', 'SMALL', 'SUP', 'SUB', 'BR'])
+        return Array.from(root.querySelectorAll('*')).some(node => {
+          if (node.tagName === 'DIV' || node.tagName === 'P') return node.attributes.length > 0
+          if (!allowed.has(node.tagName)) return true
+          if (Array.from(node.attributes).some(attribute => attribute.name.toLowerCase() !== 'style')) return true
+          return deckRichTextStyleDeclarations(node.getAttribute('style'), deckHeight, true).rejected
+        })
+      }
+
       function scaleDeckRichText(root, deckHeight) {
         const height = Math.max(1, Number(deckHeight) || 1080)
         const scaleLength = value => String(value || '').replace(/(-?(?:\d+(?:\.\d+)?|\.\d+))(px|rem)\b/gi, (_, number, unit) => {
@@ -45369,22 +45900,112 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function appendDocumentInlineMarkdown(parent, value) {
         const text = String(value || '')
-        const token = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|~~([^~]+)~~)/g
+        const token = /(!\[([^\]\n]*)\]\(((?:https?:\/\/|\/)[^\s<>)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|~~([^~]+)~~)/g
         let cursor = 0
         for (const match of text.matchAll(token)) {
           if (match.index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, match.index)))
           let node
           let content = ''
-          if (match[2] || match[3]) { node = document.createElement('strong'); content = match[2] || match[3] }
-          else if (match[4] || match[5]) { node = document.createElement('em'); content = match[4] || match[5] }
-          else if (match[6]) { node = document.createElement('code'); content = match[6] }
-          else if (match[7]) { node = document.createElement('a'); node.href = match[8]; node.target = '_blank'; node.rel = 'noreferrer noopener'; content = match[7] }
-          else { node = document.createElement('s'); content = match[9] || '' }
-          node.textContent = content
+          if (match[2] !== undefined) {
+            const src = safeDocumentImageSource(match[3])
+            if (!src) { parent.appendChild(document.createTextNode(match[0])); cursor = match.index + match[0].length; continue }
+            node = document.createElement('img')
+            node.src = src
+            node.alt = sanitizeDocumentImageAlt(match[2])
+            node.loading = 'lazy'
+            node.decoding = 'async'
+          } else if (match[4] || match[5]) { node = document.createElement('strong'); content = match[4] || match[5] }
+          else if (match[6] || match[7]) { node = document.createElement('em'); content = match[6] || match[7] }
+          else if (match[8]) { node = document.createElement('code'); content = match[8] }
+          else if (match[9]) { node = document.createElement('a'); node.href = match[10]; node.target = '_blank'; node.rel = 'noreferrer noopener'; content = match[9] }
+          else { node = document.createElement('s'); content = match[11] || '' }
+          if (node.tagName !== 'IMG') node.textContent = content
           parent.appendChild(node)
           cursor = match.index + match[0].length
         }
         if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)))
+      }
+
+      function safeDocumentImageSource(value) {
+        const source = String(value || '').trim()
+        if (!source || /[\s<>"']/.test(source) || source.includes(')')) return ''
+        if (/^https?:\/\//i.test(source)) {
+          try {
+            const parsed = new URL(source)
+            return ['http:', 'https:'].includes(parsed.protocol) ? source : ''
+          } catch (_) { return '' }
+        }
+        if (source.startsWith('/') && !source.startsWith('//')) return source
+        return ''
+      }
+
+      function sanitizeDocumentImageAlt(value) {
+        return String(value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+      }
+
+      function documentListLine(value) {
+        const match = String(value || '').match(/^(\s*)([-+*]|(\d+)[.)])\s+(.+)$/)
+        if (!match) return null
+        const indent = match[1].replace(/\t/g, '    ').length
+        return { indent, ordered: Boolean(match[3]), start: Number(match[3] || 1), body: match[4] }
+      }
+
+      function parseDocumentMarkdownList(lines, startIndex) {
+        const first = documentListLine(lines[startIndex])
+        if (!first) return null
+        const list = document.createElement(first.ordered ? 'ol' : 'ul')
+        if (first.ordered && first.start !== 1) list.start = first.start
+        let index = startIndex
+        while (index < lines.length) {
+          const item = documentListLine(lines[index])
+          if (!item || item.indent !== first.indent || item.ordered !== first.ordered) break
+          const li = document.createElement('li')
+          appendDocumentInlineMarkdown(li, item.body)
+          list.appendChild(li)
+          index++
+          while (index < lines.length) {
+            const nested = documentListLine(lines[index])
+            if (!nested || nested.indent <= first.indent) break
+            const parsed = parseDocumentMarkdownList(lines, index)
+            if (!parsed) break
+            li.appendChild(parsed.list)
+            index = parsed.index
+          }
+        }
+        return { list, index }
+      }
+
+      function splitDocumentMarkdownTableRow(row) {
+        let value = String(row || '').trim()
+        if (value.startsWith('|')) value = value.slice(1)
+        if (value.endsWith('|')) value = value.slice(0, -1)
+        const cells = []
+        let cell = ''
+        for (let index = 0; index < value.length; index++) {
+          const character = value[index]
+          if (character === '\\' && value[index + 1] === '|') {
+            cell += '|'
+            index++
+            continue
+          }
+          if (character === '|') {
+            cells.push(cell.trim())
+            cell = ''
+            continue
+          }
+          cell += character
+        }
+        cells.push(cell.trim())
+        return cells
+      }
+
+      function appendDocumentParagraphMarkdown(parent, lines) {
+        lines.forEach((rawLine, index) => {
+          const hardBreak = / {2,}$/.test(rawLine)
+          appendDocumentInlineMarkdown(parent, rawLine.replace(/ {2,}$/, '').trim())
+          if (index >= lines.length - 1) return
+          parent.appendChild(hardBreak ? document.createElement('br') : document.createTextNode(' '))
+        })
       }
 
       function markdownIntoDocumentEditor(root, markdown) {
@@ -45394,7 +46015,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const flushParagraph = () => {
           if (!paragraph.length) return
           const node = document.createElement('p')
-          appendDocumentInlineMarkdown(node, paragraph.join(' ').trim())
+          appendDocumentParagraphMarkdown(node, paragraph)
           root.appendChild(node)
           paragraph.length = 0
         }
@@ -45436,29 +46057,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const p = document.createElement('p'); appendDocumentInlineMarkdown(p, quoteLines.join(' ')); quote.appendChild(p); root.appendChild(quote)
             continue
           }
-          const listMatch = line.match(/^\s*(?:([-*+])|(\d+)[.)])\s+(.+)$/)
+          const listMatch = documentListLine(line)
           if (listMatch) {
             flushParagraph()
-            const ordered = Boolean(listMatch[2])
-            const list = document.createElement(ordered ? 'ol' : 'ul')
-            while (index < lines.length) {
-              const item = lines[index].match(/^\s*(?:([-*+])|(\d+)[.)])\s+(.+)$/)
-              if (!item || Boolean(item[2]) !== ordered) break
-              const li = document.createElement('li')
-              appendDocumentInlineMarkdown(li, item[3])
-              list.appendChild(li)
-              index++
-            }
-            root.appendChild(list)
+            const parsed = parseDocumentMarkdownList(lines, index)
+            root.appendChild(parsed.list)
+            index = parsed.index
             continue
           }
           const tableHeader = line.trim().startsWith('|') && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])
           if (tableHeader) {
             flushParagraph()
-            const splitRow = row => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
-            const rows = [splitRow(line)]
+            const rows = [splitDocumentMarkdownTableRow(line)]
             index += 2
-            while (index < lines.length && lines[index].includes('|') && lines[index].trim()) rows.push(splitRow(lines[index++]))
+            while (index < lines.length && lines[index].includes('|') && lines[index].trim()) rows.push(splitDocumentMarkdownTableRow(lines[index++]))
             const table = document.createElement('table')
             rows.forEach((cells, rowIndex) => {
               const tr = document.createElement('tr')
@@ -45468,7 +46080,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             root.appendChild(table)
             continue
           }
-          paragraph.push(line.trim())
+          paragraph.push(line.trimStart())
           index++
         }
         flushParagraph()
@@ -45476,7 +46088,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function documentInlineToMarkdown(node) {
-        if (node.nodeType === Node.TEXT_NODE) return String(node.nodeValue || '')
+        if (node.nodeType === Node.TEXT_NODE) {
+          const source = String(node.nodeValue || '')
+          return source.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (match, _alt, src, offset, whole) => {
+            if (offset > 0 && whole[offset - 1] === '\\') return match
+            return safeDocumentImageSource(src) ? match : `\\${match}`
+          })
+        }
         if (node.nodeType !== Node.ELEMENT_NODE) return ''
         const tag = node.tagName.toLowerCase()
         const body = Array.from(node.childNodes).map(documentInlineToMarkdown).join('')
@@ -45486,10 +46104,35 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (tag === 's' || tag === 'strike') return `~~${body}~~`
         if (tag === 'a') {
           const href = String(node.getAttribute('href') || '').trim()
-          return href ? `[${body}](${href})` : body
+          return /^(?:https?:|mailto:)/i.test(href) ? `[${body}](${href})` : body
         }
-        if (tag === 'br') return '\n'
+        if (tag === 'img') {
+          const src = safeDocumentImageSource(node.getAttribute('src'))
+          if (!src) return ''
+          const alt = sanitizeDocumentImageAlt(node.getAttribute('alt')).replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
+          return `![${alt}](${src})`
+        }
+        if (tag === 'br') return '  \n'
         return body
+      }
+
+      function documentListItemInlineMarkdown(item) {
+        return Array.from(item.childNodes)
+          .filter(node => node.nodeType !== Node.ELEMENT_NODE || !['UL', 'OL'].includes(node.tagName))
+          .map(documentInlineToMarkdown).join('').trim()
+      }
+
+      function documentListToMarkdown(list, indent = '') {
+        const ordered = list.tagName === 'OL'
+        const start = ordered ? Math.max(1, Number(list.getAttribute('start') || 1)) : 1
+        const lines = []
+        Array.from(list.children).filter(item => item.tagName === 'LI').forEach((item, index) => {
+          lines.push(`${indent}${ordered ? `${start + index}.` : '-'} ${documentListItemInlineMarkdown(item)}`.trimEnd())
+          Array.from(item.children).filter(child => ['UL', 'OL'].includes(child.tagName)).forEach(child => {
+            lines.push(documentListToMarkdown(child, `${indent}  `))
+          })
+        })
+        return lines.join('\n')
       }
 
       function documentEditorToMarkdown(root) {
@@ -45500,8 +46143,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (tag === 'p' || tag === 'div') blocks.push(documentInlineToMarkdown(node).trim())
           else if (tag === 'blockquote') blocks.push(documentInlineToMarkdown(node).split('\n').map(line => `> ${line}`).join('\n'))
           else if (tag === 'ul' || tag === 'ol') {
-            const ordered = tag === 'ol'
-            blocks.push(Array.from(node.children).map((item, index) => `${ordered ? `${index + 1}.` : '-'} ${documentInlineToMarkdown(item).trim()}`).join('\n'))
+            blocks.push(documentListToMarkdown(node))
           } else if (tag === 'pre') {
             const code = node.querySelector('code')
             blocks.push(`\`\`\`${String(code?.dataset?.language || '')}\n${String(code?.textContent || node.textContent || '')}\n\`\`\``)
@@ -45520,17 +46162,32 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function sanitizedDocumentPasteHTML(raw) {
         const parsed = new DOMParser().parseFromString(String(raw || ''), 'text/html')
-        const allowed = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'S', 'A', 'H1', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE', 'CODE', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD'])
+        const allowed = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'S', 'A', 'IMG', 'H1', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE', 'CODE', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD'])
         const clean = document.createElement('div')
         const copy = (source, target) => {
           source.childNodes.forEach(child => {
             if (child.nodeType === Node.TEXT_NODE) { target.appendChild(document.createTextNode(child.nodeValue || '')); return }
             if (child.nodeType !== Node.ELEMENT_NODE) return
             const tag = allowed.has(child.tagName) ? child.tagName.toLowerCase() : 'span'
+            if (tag === 'img') {
+              const src = safeDocumentImageSource(child.getAttribute('src'))
+              if (!src) return
+              const image = document.createElement('img')
+              image.src = src
+              image.alt = sanitizeDocumentImageAlt(child.getAttribute('alt'))
+              image.loading = 'lazy'
+              image.decoding = 'async'
+              target.appendChild(image)
+              return
+            }
             const next = document.createElement(tag)
             if (tag === 'a') {
               const href = String(child.getAttribute('href') || '')
               if (/^(https?:|mailto:)/i.test(href)) next.setAttribute('href', href)
+            }
+            if (tag === 'ol') {
+              const start = Number(child.getAttribute('start'))
+              if (Number.isInteger(start) && start > 1 && start < 1000000) next.setAttribute('start', String(start))
             }
             copy(child, next)
             target.appendChild(next)
@@ -45568,6 +46225,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           title: String(payload?.artifact?.title || title || 'Untitled document'),
           markdown: String(payload.document.markdown || ''),
           dirty: false,
+          bodyDirty: false,
           saving: false,
           sourceMode: false,
           savedToFiles: payload?.artifact?.savedToFiles === true
@@ -45582,8 +46240,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="document-editor__group">
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="close" aria-label="Close Document Studio">×</button>
               <input class="document-editor__title" data-doc-title maxlength="160" aria-label="Document name">
+              <button type="button" class="document-editor__mobile-status" data-doc-mobile-status data-doc-action="status" aria-label="Open document status" aria-controls="document-studio-inspector" aria-expanded="false" aria-live="polite" aria-atomic="true" data-state="saved">Saved</button>
             </div>
-            <div class="document-editor__group" aria-label="Document formatting">
+            <div class="document-editor__group" role="toolbar" aria-label="Document formatting. Scroll horizontally for more tools.">
               <button type="button" class="deck-editor__btn" data-doc-action="undo">Undo</button>
               <button type="button" class="deck-editor__btn" data-doc-action="redo">Redo</button>
               <span class="deck-editor__divider"></span>
@@ -45592,12 +46251,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn" data-doc-action="italic" aria-pressed="false" aria-label="Italic"><em>I</em></button>
               <button type="button" class="deck-editor__btn" data-doc-action="bullet" aria-pressed="false">Bullets</button>
               <button type="button" class="deck-editor__btn" data-doc-action="ordered" aria-pressed="false">Numbered</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="outdent" aria-label="Decrease list indent" title="Decrease list indent">⇤</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="indent" aria-label="Increase list indent" title="Increase list indent">⇥</button>
               <button type="button" class="deck-editor__btn" data-doc-action="link">Link</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="image" aria-label="Insert image">Image</button>
               <button type="button" class="deck-editor__btn" data-doc-action="table">Table</button>
               <button type="button" class="deck-editor__btn" data-doc-action="divider">Divider</button>
               <button type="button" class="deck-editor__btn" data-doc-action="source" aria-pressed="false">Source</button>
             </div>
-            <div class="document-editor__group document-editor__group--right">
+            <div class="document-editor__group document-editor__group--right" aria-label="Document actions">
               <button type="button" class="deck-editor__btn" data-doc-action="pdf">PDF</button>
               <button type="button" class="deck-editor__btn" data-doc-action="save-copy" aria-label="Save a copy…">Save a copy…</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-doc-action="save">Save</button>
@@ -45606,7 +46268,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           <div class="document-editor__main">
             <aside class="document-editor__outline"><span class="document-editor__side-label">Outline</span><nav class="document-editor__outline-list" data-doc-outline></nav></aside>
             <main class="document-editor__workspace"><article class="document-editor__paper"><div class="document-editor__rich" data-doc-rich contenteditable="true" role="textbox" aria-multiline="true" aria-label="Document body" spellcheck="true"></div><textarea class="document-editor__source" data-doc-source spellcheck="false" aria-label="Markdown source" hidden></textarea></article></main>
-            <aside class="document-editor__inspector"><span class="document-editor__side-label">Document</span><div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>Changes use revision-safe saving.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div></aside>
+            <aside class="document-editor__inspector" id="document-studio-inspector" aria-label="Document status and revision">
+              <div class="document-editor__inspector-head"><span class="document-editor__side-label">Document</span><button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__inspector-close" data-doc-action="close-status" aria-label="Close document status">×</button></div>
+              <div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>Changes use revision-safe saving.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div>
+            </aside>
           </div>`
         const source = editor.querySelector('[data-doc-source]')
         const rich = editor.querySelector('[data-doc-rich]')
@@ -45615,17 +46280,46 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const status = editor.querySelector('[data-doc-status]')
         const saveButton = editor.querySelector('[data-doc-action="save"]')
         const copyButton = editor.querySelector('[data-doc-action="save-copy"]')
+        const inspectorPanel = editor.querySelector('.document-editor__inspector')
+        const inspectorTrigger = editor.querySelector('[data-doc-mobile-status]')
+        const responsiveDocumentMedia = matchMedia('(max-width: 1100px)')
         source.value = state.markdown
         markdownIntoDocumentEditor(rich, state.markdown)
         titleInput.value = state.title
 
+        function setDocumentInspectorOpen(open, focusInspector = false) {
+          const responsive = responsiveDocumentMedia.matches
+          const expanded = responsive && Boolean(open)
+          editor.dataset.inspectorOpen = String(expanded)
+          inspectorTrigger?.setAttribute('aria-expanded', String(expanded))
+          inspectorPanel.inert = responsive && !expanded
+          if (responsive && !expanded) inspectorPanel.setAttribute('aria-hidden', 'true')
+          else inspectorPanel.removeAttribute('aria-hidden')
+          if (focusInspector && expanded) requestAnimationFrame(() => editor.querySelector('[data-doc-action="close-status"]')?.focus())
+        }
+        function syncResponsiveDocumentStudio() {
+          if (!responsiveDocumentMedia.matches) setDocumentInspectorOpen(false)
+          else setDocumentInspectorOpen(editor.dataset.inspectorOpen === 'true')
+        }
         function setStatus(text, tone = '') {
           status.textContent = text
           status.dataset.state = tone
+          const compactStatus = editor.querySelector('[data-doc-mobile-status]')
+          if (compactStatus) {
+            compactStatus.textContent = tone === 'saved' ? 'Saved' : tone === 'error' ? 'Needs attention' : text === 'Unsaved changes' ? 'Unsaved' : text
+            compactStatus.dataset.state = tone
+          }
+          if (tone === 'error' && responsiveDocumentMedia.matches) setDocumentInspectorOpen(true)
+        }
+        function currentDocumentMarkdown() {
+          if (state.sourceMode) return source.value
+          if (!state.bodyDirty) return state.markdown
+          const markdown = documentEditorToMarkdown(rich)
+          source.value = markdown
+          return markdown
         }
         function updateDocumentChrome() {
-          const body = state.sourceMode ? source.value : documentEditorToMarkdown(rich)
-          if (!state.sourceMode) source.value = body
+          const body = currentDocumentMarkdown()
           editor.querySelector('[data-doc-words]').textContent = `${(body.trim().match(/\S+/g) || []).length} words`
           editor.querySelector('[data-doc-chars]').textContent = `${body.length} characters`
           editor.querySelector('[data-doc-revision]').textContent = `Revision ${state.version}`
@@ -45655,7 +46349,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!outline.childElementCount) outline.appendChild(bfEl('span', 'document-editor__outline-item', 'Add headings to build an outline'))
         }
         function syncMode() {
-          if (state.sourceMode) source.value = documentEditorToMarkdown(rich)
+          if (state.sourceMode) source.value = state.bodyDirty ? documentEditorToMarkdown(rich) : state.markdown
           else markdownIntoDocumentEditor(rich, source.value)
           source.hidden = !state.sourceMode
           rich.hidden = state.sourceMode
@@ -45663,12 +46357,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
           toggle.setAttribute('aria-pressed', String(state.sourceMode))
           toggle.textContent = state.sourceMode ? 'Visual' : 'Source'
           editor.querySelector('[data-doc-block]').disabled = state.sourceMode
-          editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="link"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
+          editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="outdent"],[data-doc-action="indent"],[data-doc-action="link"],[data-doc-action="image"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
           updateDocumentChrome()
           ;(state.sourceMode ? source : rich).focus()
         }
-        function markDirty() {
+        function markDirty(bodyChanged = true) {
           state.dirty = true
+          if (bodyChanged) state.bodyDirty = true
           if (!state.sourceMode) source.value = documentEditorToMarkdown(rich)
           setStatus('Unsaved changes')
           updateDocumentChrome()
@@ -45683,6 +46378,79 @@ Wrap the entire export in one code block. After the code block, say whether the 
           document.execCommand(command, false, value)
           markDirty()
           updateFormatState()
+        }
+        function selectedDocumentListItem() {
+          const anchorNode = window.getSelection()?.anchorNode
+          const anchor = anchorNode?.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode?.parentElement
+          const item = anchor?.closest?.('li')
+          return item && rich.contains(item) ? item : null
+        }
+        function adjustDocumentListIndent(outdent = false) {
+          if (state.sourceMode) return false
+          const item = selectedDocumentListItem()
+          const list = item?.parentElement
+          if (!item || !list || !['UL', 'OL'].includes(list.tagName)) return false
+          if (outdent) {
+            const parentItem = list.parentElement
+            const outerList = parentItem?.parentElement
+            if (parentItem?.tagName !== 'LI' || !outerList || !['UL', 'OL'].includes(outerList.tagName)) return false
+            outerList.insertBefore(item, parentItem.nextSibling)
+            if (!Array.from(list.children).some(child => child.tagName === 'LI')) list.remove()
+          } else {
+            const previousItem = item.previousElementSibling
+            if (previousItem?.tagName !== 'LI') return false
+            let nested = Array.from(previousItem.children).reverse().find(child => child.tagName === list.tagName)
+            if (!nested) {
+              nested = document.createElement(list.tagName.toLowerCase())
+              previousItem.appendChild(nested)
+            }
+            nested.appendChild(item)
+          }
+          rich.focus()
+          const ownText = Array.from(item.childNodes).find(node => node.nodeType === Node.TEXT_NODE && String(node.nodeValue || '').length)
+          const range = document.createRange()
+          range.selectNodeContents(ownText || item)
+          range.collapse(false)
+          const selection = window.getSelection()
+          selection.removeAllRanges()
+          selection.addRange(range)
+          markDirty()
+          updateFormatState()
+          return true
+        }
+        function selectedDocumentImage() {
+          const selection = window.getSelection()
+          const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement
+          const image = anchor?.closest?.('img') || (anchor?.tagName === 'IMG' ? anchor : null)
+          return image && rich.contains(image) ? image : null
+        }
+        function insertOrEditDocumentImage() {
+          if (state.sourceMode) return
+          const existing = selectedDocumentImage()
+          const requestedSource = window.prompt(existing ? 'Image URL' : 'Image URL (https://)', existing?.getAttribute('src') || 'https://')
+          if (requestedSource === null) return
+          const src = safeDocumentImageSource(requestedSource)
+          if (!src) {
+            showToast({ text: 'Use a secure http(s) or app-relative image URL.', kind: 'error' })
+            return
+          }
+          const requestedAlt = window.prompt('Describe this image for people using screen readers', existing?.getAttribute('alt') || '')
+          if (requestedAlt === null) return
+          const alt = sanitizeDocumentImageAlt(requestedAlt)
+          if (existing) {
+            existing.src = src
+            existing.alt = alt
+            existing.loading = 'lazy'
+            existing.decoding = 'async'
+            markDirty()
+            return
+          }
+          const image = document.createElement('img')
+          image.src = src
+          image.alt = alt
+          image.loading = 'lazy'
+          image.decoding = 'async'
+          runRichCommand('insertHTML', image.outerHTML)
         }
         function updateFormatState() {
           if (state.sourceMode || !editor.isConnected) return
@@ -45714,9 +46482,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           saveButton.disabled = true
           saveButton.textContent = 'Saving…'
           try {
+            const markdown = currentDocumentMarkdown()
             const response = await fetch('/artifacts/document', {
               method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: titleInput.value.trim(), document: { schemaVersion: 1, markdown: source.value } })
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: titleInput.value.trim(), document: { schemaVersion: 1, markdown } })
             })
             const result = await response.json().catch(() => ({}))
             if (!response.ok || !result?.document) throw new Error(result?.error || 'Document save failed')
@@ -45724,6 +46493,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.markdown = String(result.document.markdown || '')
             state.title = String(result?.artifact?.title || titleInput.value)
             state.dirty = false
+            state.bodyDirty = false
             const entry = { ...(options.entry || {}), id: state.artifactId, text: state.markdown, metadata: { ...(options.entry?.metadata || {}), title: state.title, type: 'markdown', artifactVersion: String(state.version) } }
             let filingError = null
             if (destination) {
@@ -45758,9 +46528,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           copyButton.disabled = true
           copyButton.textContent = 'Saving copy…'
           try {
+            const markdown = currentDocumentMarkdown()
             const response = await fetch('/artifacts/document/copies', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, document: { schemaVersion: 1, markdown: source.value } })
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, document: { schemaVersion: 1, markdown } })
             })
             const result = await response.json().catch(() => ({}))
             if (!response.ok && result?.partialSuccess && result?.artifact?.id) {
@@ -45802,6 +46573,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           markdownIntoDocumentEditor(rich, state.markdown)
           titleInput.value = state.title
           state.dirty = false
+          state.bodyDirty = false
           state.sourceMode = false
           syncMode()
           setStatus('Current version loaded', 'saved')
@@ -45837,6 +46609,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const action = event.target.closest('[data-doc-action]')?.dataset.docAction
           if (!action) return
           if (action === 'close') requestDocumentClose()
+          else if (action === 'status') setDocumentInspectorOpen(editor.dataset.inspectorOpen !== 'true', true)
+          else if (action === 'close-status') { setDocumentInspectorOpen(false); inspectorTrigger?.focus() }
           else if (action === 'save') saveDocument(false)
           else if (action === 'save-copy') saveCopy()
           else if (action === 'reload') reloadDocument()
@@ -45847,14 +46621,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'italic') runRichCommand('italic')
           else if (action === 'bullet') runRichCommand('insertUnorderedList')
           else if (action === 'ordered') runRichCommand('insertOrderedList')
+          else if (action === 'outdent') adjustDocumentListIndent(true)
+          else if (action === 'indent') adjustDocumentListIndent(false)
           else if (action === 'link') {
             const href = window.prompt('Link URL', 'https://')
             if (href && /^(https?:|mailto:)/i.test(href.trim())) runRichCommand('createLink', href.trim())
           }
+          else if (action === 'image') insertOrEditDocumentImage()
           else if (action === 'table') runRichCommand('insertHTML', '<table><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr></table><p><br></p>')
           else if (action === 'divider') runRichCommand('insertHorizontalRule')
         })
         editor.querySelector('[data-doc-block]').addEventListener('change', event => runRichCommand('formatBlock', event.target.value))
+        const formattingToolbar = editor.querySelector('[role="toolbar"]')
+        formattingToolbar.addEventListener('keydown', event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || event.target.tagName === 'SELECT') return
+          event.preventDefault()
+          const controls = Array.from(formattingToolbar.querySelectorAll('button:not([disabled]), select:not([disabled])'))
+          const index = controls.indexOf(document.activeElement)
+          const nextIndex = event.key === 'Home' ? 0
+            : event.key === 'End' ? controls.length - 1
+              : (Math.max(0, index) + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length
+          controls[nextIndex]?.focus()
+        })
         rich.addEventListener('input', markDirty)
         rich.addEventListener('paste', event => {
           event.preventDefault()
@@ -45865,6 +46653,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
         rich.addEventListener('keydown', event => {
           if (event.key !== 'Tab') return
+          if (selectedDocumentListItem()) {
+            event.preventDefault()
+            adjustDocumentListIndent(event.shiftKey)
+            return
+          }
           const cell = event.target.closest?.('td,th') || window.getSelection()?.anchorNode?.parentElement?.closest?.('td,th')
           if (!cell || !rich.contains(cell)) return
           event.preventDefault()
@@ -45883,22 +46676,37 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (next) { const range = document.createRange(); range.selectNodeContents(next); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range) }
         })
         source.addEventListener('input', markDirty)
-        titleInput.addEventListener('input', markDirty)
+        titleInput.addEventListener('input', () => markDirty(false))
         const selectionChange = () => { if (editor.isConnected && !state.sourceMode) updateFormatState() }
         document.addEventListener('selectionchange', selectionChange)
         const keydown = event => {
-          if (event.key === 'Escape') requestDocumentClose()
+          if (event.defaultPrevented || !editor.contains(event.target)) return
+          if (event.key === 'Tab') {
+            const focusable = Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"], [tabindex="0"]')).filter(node => !node.hidden && !node.closest('[inert]') && node.getClientRects().length)
+            const index = focusable.indexOf(document.activeElement)
+            if (focusable.length && event.shiftKey && index <= 0) { event.preventDefault(); focusable[focusable.length - 1].focus(); return }
+            if (focusable.length && !event.shiftKey && index === focusable.length - 1) { event.preventDefault(); focusable[0].focus(); return }
+          }
+          if (event.key === 'Escape' && responsiveDocumentMedia.matches && editor.dataset.inspectorOpen === 'true') {
+            event.preventDefault()
+            setDocumentInspectorOpen(false)
+            inspectorTrigger?.focus()
+          }
+          else if (event.key === 'Escape') requestDocumentClose()
           else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDocument(false) }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); runRichCommand('bold') }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') { event.preventDefault(); runRichCommand('italic') }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); editor.querySelector('[data-doc-action="link"]')?.click() }
         }
+        const responsiveDocumentChange = () => syncResponsiveDocumentStudio()
+        responsiveDocumentMedia.addEventListener?.('change', responsiveDocumentChange)
         document.addEventListener('keydown', keydown)
-        activeDocumentEditor = { element: editor, returnFocus, cleanup: () => { document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange) } }
+        activeDocumentEditor = { element: editor, returnFocus, cleanup: () => { document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange); responsiveDocumentMedia.removeEventListener?.('change', responsiveDocumentChange) } }
         document.body.appendChild(editor)
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
+        syncResponsiveDocumentStudio()
         updateDocumentChrome()
         rich.focus()
       }
@@ -45976,7 +46784,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 <button type="button" data-action="next-slide" aria-label="Next slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button>
               </div>
               <label class="deck-editor__zoom" title="Canvas zoom"><input type="range" min="50" max="140" step="5" value="100" data-zoom><span data-zoom-output>100%</span></label>
-              <button type="button" class="deck-editor__btn deck-editor__mobile-inspector" data-action="toggle-inspector" aria-expanded="false">Inspector</button>
+              <button type="button" class="deck-editor__btn deck-editor__mobile-inspector" data-action="toggle-inspector" aria-expanded="false" aria-controls="deck-slide-inspector">Inspector</button>
+              <div class="deck-editor__mobile-more">
+                <button type="button" class="deck-editor__btn" data-action="mobile-tools-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="deck-mobile-tools-menu">More</button>
+                <div class="deck-editor__popover" id="deck-mobile-tools-menu" data-mobile-tools-menu role="menu" aria-label="More deck actions" hidden>
+                  <button type="button" role="menuitem" data-action="undo">Undo</button>
+                  <button type="button" role="menuitem" data-action="redo">Redo</button>
+                  <span class="deck-editor__menu-separator" role="separator"></span>
+                  <button type="button" role="menuitem" data-action="add-text">Add text</button>
+                  <button type="button" role="menuitem" data-action="add-image">Upload image</button>
+                  <button type="button" role="menuitem" data-action="add-rectangle">Add rectangle</button>
+                  <button type="button" role="menuitem" data-action="add-ellipse">Add ellipse</button>
+                  <span class="deck-editor__menu-separator" role="separator"></span>
+                  <button type="button" role="menuitem" data-action="add-slide">Add slide</button>
+                  <button type="button" role="menuitem" data-action="duplicate-slide">Duplicate slide</button>
+                  <button type="button" role="menuitem" data-action="move-slide-earlier">Move slide earlier</button>
+                  <button type="button" role="menuitem" data-action="move-slide-later">Move slide later</button>
+                  <button type="button" role="menuitem" data-action="delete-slide">Delete slide</button>
+                  <span class="deck-editor__menu-separator" role="separator"></span>
+                  <button type="button" role="menuitem" data-action="export-pptx"><span>Download PowerPoint</span><small>.pptx</small></button>
+                  <button type="button" role="menuitem" data-action="export-pdf"><span>Download PDF</span><small>.pdf</small></button>
+                  <button type="button" role="menuitem" data-action="present">Present</button>
+                  <button type="button" role="menuitem" data-action="save-copy">Save a copy…</button>
+                </div>
+              </div>
               <div class="deck-editor__download">
                 <button type="button" class="deck-editor__btn" data-action="download-menu" aria-haspopup="menu" aria-expanded="false">Download</button>
                 <div class="deck-editor__popover" data-download-menu role="menu" hidden>
@@ -45990,29 +46821,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
             </div>
           </div>
           <div class="deck-editor__main">
-            <aside class="deck-editor__sidebar">
+            <aside class="deck-editor__sidebar" aria-label="Slides">
               <div class="deck-editor__slide-list" data-slide-list></div>
               <div class="deck-editor__slide-actions">
                 <button type="button" class="deck-editor__btn" data-action="add-slide">+ Slide</button>
                 <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="duplicate-slide" aria-label="Duplicate slide" title="Duplicate slide">⧉</button>
                 <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="delete-slide" aria-label="Delete slide" title="Delete slide">⌫</button>
+                <span class="deck-editor__slide-actions-label">Reorder</span>
+                <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="move-slide-earlier" aria-label="Move slide earlier" title="Move slide earlier">↑</button>
+                <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="move-slide-later" aria-label="Move slide later" title="Move slide later">↓</button>
               </div>
             </aside>
             <div class="deck-editor__canvas-wrap" data-canvas-wrap>
-              <div class="deck-editor__canvas" data-canvas><div class="deck-editor__scene" data-scene></div></div>
+              <div class="deck-editor__canvas" data-canvas role="group" aria-label="Slide canvas"><div class="deck-editor__scene" data-scene></div></div>
             </div>
-            <aside class="deck-editor__props" aria-label="Slide inspector">
+            <aside class="deck-editor__props" id="deck-slide-inspector" aria-label="Slide inspector">
               <header class="deck-editor__inspector-head">
                 <span class="deck-editor__inspector-eyebrow" data-inspector-eyebrow>Slide 1</span>
                 <h3 class="deck-editor__inspector-title" data-inspector-title>Slide design</h3>
                 <p class="deck-editor__inspector-hint" data-inspector-hint>Select an object to edit its properties.</p>
+                <button type="button" class="deck-editor__btn deck-editor__btn--icon deck-editor__inspector-close" data-action="close-inspector" aria-label="Close slide inspector">×</button>
               </header>
-              <div class="deck-editor__tabs" role="tablist" aria-label="Inspector panels">
-                <button type="button" class="deck-editor__tab" role="tab" aria-selected="true" data-inspector-tab="design">Design</button>
-                <button type="button" class="deck-editor__tab" role="tab" aria-selected="false" data-inspector-tab="notes">Notes</button>
-                <button type="button" class="deck-editor__tab" role="tab" aria-selected="false" data-inspector-tab="scout">Scout</button>
+              <div class="deck-editor__tabs" role="tablist" aria-label="Inspector panels" aria-orientation="horizontal">
+                <button type="button" class="deck-editor__tab" id="deck-inspector-tab-design" role="tab" aria-selected="true" aria-controls="deck-inspector-panel-design" tabindex="0" data-inspector-tab="design">Design</button>
+                <button type="button" class="deck-editor__tab" id="deck-inspector-tab-notes" role="tab" aria-selected="false" aria-controls="deck-inspector-panel-notes" tabindex="-1" data-inspector-tab="notes">Notes</button>
+                <button type="button" class="deck-editor__tab" id="deck-inspector-tab-scout" role="tab" aria-selected="false" aria-controls="deck-inspector-panel-scout" tabindex="-1" data-inspector-tab="scout">Scout</button>
               </div>
-              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="design">
+              <div class="deck-editor__panel" id="deck-inspector-panel-design" role="tabpanel" aria-labelledby="deck-inspector-tab-design" data-inspector-panel="design">
                 <div class="deck-editor__prop-section" data-slide-controls>
                   <span class="deck-editor__prop-label">Slide</span>
                   <label class="deck-editor__field">Background<input type="color" class="deck-editor__color" data-slide-background></label>
@@ -46070,13 +46905,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
                   </div>
                 </div>
               </div>
-              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="notes" hidden>
+              <div class="deck-editor__panel" id="deck-inspector-panel-notes" role="tabpanel" aria-labelledby="deck-inspector-tab-notes" data-inspector-panel="notes" hidden>
                 <div class="deck-editor__prop-section">
                   <span class="deck-editor__prop-label">Presenter notes</span>
                   <textarea class="deck-editor__notes" data-slide-notes placeholder="What should the presenter say on this slide?"></textarea>
                 </div>
               </div>
-              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="scout" hidden>
+              <div class="deck-editor__panel" id="deck-inspector-panel-scout" role="tabpanel" aria-labelledby="deck-inspector-tab-scout" data-inspector-panel="scout" hidden>
                 <div class="deck-editor__prop-section deck-editor__scout">
                   <span class="deck-editor__prop-label">Create imagery with Scout</span>
                   <p class="deck-editor__inspector-hint">Describe the composition, subject, mood, and whether the image should support text or carry the whole slide.</p>
@@ -46089,7 +46924,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 </div>
               </div>
             </aside>
-          </div>`
+          </div>
+          <p class="deck-editor__sr-only" id="deck-canvas-keyboard-help">Press Enter or Space to select a slide object. Use arrow keys to move it, Shift plus arrow keys for larger moves, and Alt plus arrow keys to resize it.</p>`
 
         const canvas = editor.querySelector('[data-canvas]')
         const scene = editor.querySelector('[data-scene]')
@@ -46100,6 +46936,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const copyButton = editor.querySelector('[data-action="save-copy"]')
         const imageStatus = editor.querySelector('[data-image-status]')
         const downloadMenu = editor.querySelector('[data-download-menu]')
+        const mobileToolsMenu = editor.querySelector('[data-mobile-tools-menu]')
+        const mobileToolsButton = editor.querySelector('[data-action="mobile-tools-menu"]')
+        const propsPanel = editor.querySelector('.deck-editor__props')
+        const inspectorButton = editor.querySelector('[data-action="toggle-inspector"]')
+        const compactStudioMedia = matchMedia('(max-width: 768px)')
         const zoomInput = editor.querySelector('[data-zoom]')
         const zoomOutput = editor.querySelector('[data-zoom-output]')
 
@@ -46113,12 +46954,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             slide.id = String(slide.id || `slide-${slideIndex + 1}`)
             slide.notes = String(slide.notes || '')
             slide.elements = Array.isArray(slide.elements) ? slide.elements : []
-            slide.elements.forEach((element, elementIndex) => normalizeElement(element, slideIndex, elementIndex))
+            slide.elements.forEach((element, elementIndex) => normalizeElement(element, slideIndex, elementIndex, deck.height))
           })
           return deck
         }
 
-        function normalizeElement(element, slideIndex, elementIndex) {
+        function normalizeElement(element, slideIndex, elementIndex, deckHeight = 1080) {
           element.id = String(element.id || `element-${slideIndex + 1}-${elementIndex + 1}`)
           element.type = ['text', 'image', 'shape'].includes(element.type) ? element.type : 'text'
           element.x = Number.isFinite(Number(element.x)) ? Number(element.x) : 160
@@ -46133,7 +46974,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           element.strokeWidth = Math.max(0, Number(element.strokeWidth) || 0)
           element.shape = element.shape === 'ellipse' ? 'ellipse' : 'rectangle'
           element.text = String(element.text || '')
-          element.richText = String(element.richText || '')
+          element.richText = sanitizeDeckRichText(String(element.richText || ''), deckHeight)
           element.fontSize = Math.max(8, Number(element.fontSize) || 48)
           element.fontFamily = String(element.fontFamily || 'Arial')
           element.fontWeight = Number(element.fontWeight) || 600
@@ -46204,10 +47045,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             box.setAttribute('role', 'button')
             box.setAttribute('aria-label', `${element.type === 'shape' ? 'Shape' : element.type === 'image' ? 'Image' : 'Text'}: ${objectName || 'Untitled'}`)
             box.setAttribute('aria-pressed', element.id === state.selectedId ? 'true' : 'false')
+            box.setAttribute('aria-describedby', 'deck-canvas-keyboard-help')
           }
           if (element.type === 'text') {
             const content = document.createElement('div')
             content.className = 'deck-editor__element-content deck-editor__element-content--text'
+            element.richText = sanitizeDeckRichText(element.richText, state.deck.height)
             if (element.richText) { content.innerHTML = element.richText; scaleDeckRichText(content, state.deck.height) }
             else content.textContent = element.text || 'Text'
             content.style.color = element.color
@@ -46237,6 +47080,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           if (!miniature) {
             box.addEventListener('pointerdown', event => beginTransform(event, element, 'move'))
+            box.addEventListener('keydown', event => {
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              event.stopPropagation()
+              const wasSelected = state.selectedId === element.id
+              state.selectedId = element.id
+              renderCanvas()
+              requestAnimationFrame(() => {
+                const live = scene.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`)
+                live?.focus()
+                if (wasSelected && event.key === 'Enter' && element.type === 'text' && live) beginTextEdit(live, element)
+              })
+            })
             box.addEventListener('dblclick', event => {
               event.stopPropagation()
               if (element.type === 'text') beginTextEdit(box, element)
@@ -46312,21 +47168,58 @@ Wrap the entire export in one code block. After the code block, say whether the 
           canvas.style.height = `${width * state.deck.height / state.deck.width}px`
         }
 
+        function setDeckMenuOpen(menu, trigger, open, focusMenu = false) {
+          if (!menu || !trigger) return
+          menu.hidden = !open
+          trigger.setAttribute('aria-expanded', String(open))
+          if (open && focusMenu) requestAnimationFrame(() => menu.querySelector('[role="menuitem"]:not([disabled])')?.focus())
+        }
+
+        function closeDeckMenus(returnFocus = false) {
+          const activeMenu = document.activeElement?.closest?.('[role="menu"]')
+          const activeTrigger = activeMenu === mobileToolsMenu ? mobileToolsButton : editor.querySelector('[data-action="download-menu"]')
+          setDeckMenuOpen(downloadMenu, editor.querySelector('[data-action="download-menu"]'), false)
+          setDeckMenuOpen(mobileToolsMenu, mobileToolsButton, false)
+          if (returnFocus) activeTrigger?.focus()
+        }
+
+        function setInspectorOpen(open, focusInspector = false) {
+          const compact = compactStudioMedia.matches
+          const expanded = compact && Boolean(open)
+          editor.dataset.inspectorOpen = String(expanded)
+          inspectorButton?.setAttribute('aria-expanded', String(expanded))
+          propsPanel.inert = compact && !expanded
+          if (compact && !expanded) propsPanel.setAttribute('aria-hidden', 'true')
+          else propsPanel.removeAttribute('aria-hidden')
+          if (focusInspector && expanded) requestAnimationFrame(() => editor.querySelector('[data-action="close-inspector"]')?.focus())
+        }
+
+        function syncResponsiveDeckStudio() {
+          if (!compactStudioMedia.matches) setInspectorOpen(false)
+          else setInspectorOpen(editor.dataset.inspectorOpen === 'true')
+          fitCanvas()
+        }
+
         function renderAll() {
           fitCanvas()
           renderCanvas()
           renderThumbs()
           indicator.textContent = `${state.slideIndex + 1} / ${state.deck.slides.length}`
-          editor.querySelector('[data-action="prev-slide"]').disabled = state.slideIndex === 0
-          editor.querySelector('[data-action="next-slide"]').disabled = state.slideIndex === state.deck.slides.length - 1
-          editor.querySelector('[data-action="undo"]').disabled = state.history.length === 0
-          editor.querySelector('[data-action="redo"]').disabled = state.future.length === 0
+          editor.querySelectorAll('[data-action="prev-slide"], [data-action="move-slide-earlier"]').forEach(button => { button.disabled = state.slideIndex === 0 })
+          editor.querySelectorAll('[data-action="next-slide"], [data-action="move-slide-later"]').forEach(button => { button.disabled = state.slideIndex === state.deck.slides.length - 1 })
+          editor.querySelectorAll('[data-action="undo"]').forEach(button => { button.disabled = state.history.length === 0 })
+          editor.querySelectorAll('[data-action="redo"]').forEach(button => { button.disabled = state.future.length === 0 })
+          editor.querySelectorAll('[data-action="delete-slide"]').forEach(button => { button.disabled = state.deck.slides.length <= 1 })
         }
 
         function setInspectorTab(tab) {
           const next = ['design', 'notes', 'scout'].includes(tab) ? tab : 'design'
           state.inspectorTab = next
-          editor.querySelectorAll('[data-inspector-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.inspectorTab === next)))
+          editor.querySelectorAll('[data-inspector-tab]').forEach(button => {
+            const selected = button.dataset.inspectorTab === next
+            button.setAttribute('aria-selected', String(selected))
+            button.tabIndex = selected ? 0 : -1
+          })
           editor.querySelectorAll('[data-inspector-panel]').forEach(panel => { panel.hidden = panel.dataset.inspectorPanel !== next })
         }
 
@@ -46362,12 +47255,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         function beginTextEdit(box, element) {
           if (!requireDeckWrite()) return
-          if (box.querySelector('textarea')) return
-          checkpoint()
-          const input = document.createElement('textarea')
+          if (box.querySelector('.deck-editor__text-input')) return
+          const input = document.createElement('div')
           state.textEditingId = element.id
           input.className = 'deck-editor__text-input'
-          input.value = element.text
+          input.contentEditable = 'true'
+          input.setAttribute('role', 'textbox')
+          input.setAttribute('aria-multiline', 'true')
+          input.setAttribute('aria-label', `Edit ${String(element.text || 'slide text').trim().slice(0, 80) || 'slide text'}`)
+          const initialRichText = sanitizeDeckRichText(element.richText, state.deck.height)
+          if (initialRichText) input.innerHTML = deckRichTextEditingHTML(initialRichText, state.deck.height)
+          else input.textContent = element.text
           input.style.color = element.color
           input.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
           input.style.fontFamily = element.fontFamily
@@ -46376,13 +47274,40 @@ Wrap the entire export in one code block. After the code block, say whether the 
           input.style.lineHeight = String(element.lineHeight)
           input.style.letterSpacing = element.letterSpacing
           box.appendChild(input)
-          input.addEventListener('input', () => { element.text = input.value; element.richText = '' })
+          let textCheckpointed = false
+          const syncText = () => {
+            const richText = sanitizeDeckRichText(input.innerHTML, state.deck.height, true)
+            const text = richText ? deckRichTextPlainText(richText) : String(input.innerText || input.textContent || '').replace(/\n$/, '')
+            if (!textCheckpointed && (richText !== element.richText || text !== element.text)) {
+              checkpoint()
+              textCheckpointed = true
+            }
+            element.richText = richText
+            element.text = text
+            if (deckRichTextEditorHasUnsafeMarkup(input, state.deck.height)) {
+              if (richText) input.innerHTML = deckRichTextEditingHTML(richText, state.deck.height)
+              else input.textContent = element.text
+            }
+          }
+          input.addEventListener('input', syncText)
+          input.addEventListener('paste', event => {
+            event.preventDefault()
+            const html = event.clipboardData?.getData('text/html')
+            const plain = event.clipboardData?.getData('text/plain') || ''
+            const safe = html ? sanitizeDeckRichText(html, state.deck.height) : ''
+            document.execCommand(safe ? 'insertHTML' : 'insertText', false, safe ? deckRichTextEditingHTML(safe, state.deck.height) : plain)
+            syncText()
+          })
           input.addEventListener('keydown', event => {
             if (event.key === 'Escape') { event.stopPropagation(); input.blur() }
           })
-          input.addEventListener('blur', () => { state.textEditingId = ''; renderAll() }, { once: true })
+          input.addEventListener('blur', () => { syncText(); state.textEditingId = ''; renderAll() }, { once: true })
           input.focus()
-          input.select()
+          const selection = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(input)
+          selection.removeAllRanges()
+          selection.addRange(range)
         }
 
         function beginTransform(event, element, mode) {
@@ -46391,7 +47316,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
           event.preventDefault()
           event.stopPropagation()
           state.selectedId = element.id
-          checkpoint()
           renderCanvas()
           const origin = { x: event.clientX, y: event.clientY, ex: element.x, ey: element.y, ew: element.width, eh: element.height, rotation: element.rotation }
           const rect = canvas.getBoundingClientRect()
@@ -46399,6 +47323,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const sy = state.deck.height / rect.height
           const liveBox = scene.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`)
           let frame = 0
+          let transformed = false
           const renderLive = () => {
             frame = 0
             if (!liveBox?.isConnected) return
@@ -46423,6 +47348,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
           }
           const move = next => {
+            if (!transformed) {
+              if (Math.hypot(next.clientX - origin.x, next.clientY - origin.y) < 3) return
+              checkpoint()
+              transformed = true
+            }
             const dx = (next.clientX - origin.x) * sx
             const dy = (next.clientY - origin.y) * sy
             let snapX = false
@@ -46581,7 +47511,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         function requestDeckClose() {
           if (state.textEditingId) {
-            editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] textarea`)?.blur()
+            editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] .deck-editor__text-input`)?.blur()
             return
           }
           if (state.dirty && !window.confirm('Discard unsaved deck changes?')) return
@@ -46685,6 +47615,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
           renderAll()
         }
 
+        function moveSlide(delta) {
+          if (!requireDeckWrite()) return
+          const nextIndex = state.slideIndex + Number(delta || 0)
+          if (nextIndex < 0 || nextIndex >= state.deck.slides.length || nextIndex === state.slideIndex) return
+          checkpoint()
+          const [moved] = state.deck.slides.splice(state.slideIndex, 1)
+          state.deck.slides.splice(nextIndex, 0, moved)
+          state.slideIndex = nextIndex
+          state.selectedId = ''
+          renderAll()
+        }
+
         function deleteSlide() {
           if (!requireDeckWrite()) return
           if (state.deck.slides.length <= 1) {
@@ -46705,7 +47647,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return null
           }
           const deck = clone(state.deck)
-          deck.slides.forEach(item => item.elements.forEach(element => delete element.dataUrl))
+          deck.slides.forEach(item => item.elements.forEach(element => {
+            delete element.dataUrl
+            if (element.type === 'text') {
+              element.richText = sanitizeDeckRichText(element.richText, deck.height)
+              if (element.richText) element.text = deckRichTextPlainText(element.richText)
+            }
+          }))
           return deck
         }
 
@@ -46844,33 +47792,76 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
 
+        editor.querySelector('.deck-editor__tabs').addEventListener('keydown', event => {
+          const current = event.target.closest('[data-inspector-tab]')
+          if (!current || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          const tabs = Array.from(editor.querySelectorAll('[data-inspector-tab]'))
+          const index = tabs.indexOf(current)
+          const nextIndex = event.key === 'Home' ? 0
+            : event.key === 'End' ? tabs.length - 1
+              : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+          const next = tabs[nextIndex]
+          setInspectorTab(next.dataset.inspectorTab)
+          next.focus()
+        })
+
+        editor.addEventListener('keydown', event => {
+          const menu = event.target.closest('[role="menu"]')
+          if (!menu) return
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            closeDeckMenus(true)
+            return
+          }
+          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          event.stopPropagation()
+          const items = Array.from(menu.querySelectorAll('[role="menuitem"]:not([disabled])'))
+          const index = items.indexOf(document.activeElement)
+          const nextIndex = event.key === 'Home' ? 0
+            : event.key === 'End' ? items.length - 1
+              : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+          items[nextIndex]?.focus()
+        })
+
         editor.addEventListener('click', event => {
           const inspectorTab = event.target.closest('[data-inspector-tab]')?.dataset.inspectorTab
           if (inspectorTab) {
             setInspectorTab(inspectorTab)
-            editor.dataset.inspectorOpen = 'true'
-            editor.querySelector('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', 'true')
+            if (compactStudioMedia.matches) setInspectorOpen(true)
             return
           }
-          const action = event.target.closest('[data-action]')?.dataset.action
+          const actionNode = event.target.closest('[data-action]')
+          const action = actionNode?.dataset.action
           if (!action) {
+            if (!event.target.closest('.deck-editor__popover')) closeDeckMenus()
             if (event.target === canvas || event.target === scene) { state.selectedId = ''; renderCanvas() }
             return
           }
+          if (action !== 'mobile-tools-menu' && actionNode.closest('[role="menu"]')) closeDeckMenus()
           if (action === 'close') requestDeckClose()
-          else if (action === 'save') saveDeck(true)
+          else if (action === 'save') saveDeck(false)
           else if (action === 'save-copy') saveDeckCopy()
+          else if (action === 'mobile-tools-menu') {
+            const open = mobileToolsMenu.hidden
+            setDeckMenuOpen(downloadMenu, editor.querySelector('[data-action="download-menu"]'), false)
+            setDeckMenuOpen(mobileToolsMenu, mobileToolsButton, open, open)
+          }
           else if (action === 'download-menu') {
-            downloadMenu.hidden = !downloadMenu.hidden
-            event.target.closest('[data-action="download-menu"]')?.setAttribute('aria-expanded', String(!downloadMenu.hidden))
+            const trigger = event.target.closest('[data-action="download-menu"]')
+            const open = downloadMenu.hidden
+            setDeckMenuOpen(mobileToolsMenu, mobileToolsButton, false)
+            setDeckMenuOpen(downloadMenu, trigger, open, open)
           }
           else if (action === 'export-pptx') exportPowerPoint(event.target.closest('[data-action="export-pptx"]'))
           else if (action === 'export-pdf') exportPDF(event.target.closest('[data-action="export-pdf"]'))
           else if (action === 'toggle-inspector') {
             const open = editor.dataset.inspectorOpen !== 'true'
-            editor.dataset.inspectorOpen = String(open)
-            event.target.closest('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', String(open))
+            setInspectorOpen(open, open)
           }
+          else if (action === 'close-inspector') { setInspectorOpen(false); inspectorButton?.focus() }
           else if (action === 'present') {
             openDeckPresentation(state.artifactId, title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true })
               .then(opened => { if (!opened) options.present?.() })
@@ -46889,6 +47880,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'delete-element') deleteSelectedElement()
           else if (action === 'add-slide') addSlide()
           else if (action === 'duplicate-slide') duplicateSlide()
+          else if (action === 'move-slide-earlier') moveSlide(-1)
+          else if (action === 'move-slide-later') moveSlide(1)
           else if (action === 'delete-slide') deleteSlide()
           else if (action === 'prev-slide' && state.slideIndex > 0) { state.slideIndex--; state.selectedId = ''; renderAll() }
           else if (action === 'next-slide' && state.slideIndex < state.deck.slides.length - 1) { state.slideIndex++; state.selectedId = ''; renderAll() }
@@ -46930,13 +47923,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
 
         const handleKey = event => {
+          if (event.defaultPrevented) return
+          if (!editor.contains(event.target)) return
           const targetIsEditorField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable
           if (event.key === 'Escape') {
-            if (!downloadMenu.hidden) { downloadMenu.hidden = true; editor.querySelector('[data-action="download-menu"]')?.setAttribute('aria-expanded', 'false'); return }
-            if (state.textEditingId) { editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] textarea`)?.blur(); return }
-            if (editor.dataset.inspectorOpen === 'true' && matchMedia('(max-width: 640px)').matches) {
-              editor.dataset.inspectorOpen = 'false'
-              editor.querySelector('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', 'false')
+            if (!downloadMenu.hidden || !mobileToolsMenu.hidden) { closeDeckMenus(true); return }
+            if (state.textEditingId) { editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] .deck-editor__text-input`)?.blur(); return }
+            if (editor.dataset.inspectorOpen === 'true' && compactStudioMedia.matches) {
+              setInspectorOpen(false)
+              inspectorButton?.focus()
               return
             }
             if (state.selectedId) { state.selectedId = ''; renderCanvas(); return }
@@ -46944,7 +47939,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return
           }
           if (event.key === 'Tab') {
-            const focusable = Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')).filter(node => !node.hidden && node.getClientRects().length)
+            const focusable = Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')).filter(node => !node.hidden && !node.closest('[inert]') && node.getClientRects().length)
             if (focusable.length) {
               const index = focusable.indexOf(document.activeElement)
               if (event.shiftKey && index <= 0) { event.preventDefault(); focusable[focusable.length - 1].focus() }
@@ -47001,6 +47996,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
               if (event.key === 'ArrowDown') element.y = Math.min(state.deck.height - element.height, element.y + step)
             }
             renderAll()
+            requestAnimationFrame(() => {
+              // renderAll replaces the focused canvas node. Restore it only
+              // while focus is still stranded on the document; never steal
+              // focus back from a toolbar or inspector control the person
+              // intentionally reached before this frame ran.
+              if (document.activeElement === document.body || !document.activeElement) {
+                scene.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`)?.focus()
+              }
+            })
             return
           }
           if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedId && !targetIsEditorField) {
@@ -47009,11 +48013,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const resizeObserver = new ResizeObserver(fitCanvas)
         resizeObserver.observe(canvasWrap)
+        const responsiveDeckChange = () => syncResponsiveDeckStudio()
+        compactStudioMedia.addEventListener?.('change', responsiveDeckChange)
         document.addEventListener('keydown', handleKey)
 
         activeDeckEditor = {
           element: editor,
-          cleanup: () => { document.removeEventListener('keydown', handleKey); resizeObserver.disconnect() },
+          cleanup: () => {
+            document.removeEventListener('keydown', handleKey)
+            compactStudioMedia.removeEventListener?.('change', responsiveDeckChange)
+            resizeObserver.disconnect()
+          },
           getDeck: () => clone(state.deck),
           returnFocus
         }
@@ -47021,6 +48031,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
+        syncResponsiveDeckStudio()
         renderAll()
         setInspectorTab('design')
         editor.querySelector('[data-action="close"]')?.focus()
@@ -48315,8 +49326,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
       async function waitForArtifactPdfAsset(artifactId, tries = 40) {
         for (let attempt = 0; attempt < tries; attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, 3000))
-          if (typeof loadArtifacts === 'function') await loadArtifacts()
-          const fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+          // A deck/document may have fallen outside the newest-100 library
+          // window. Poll its authorized exact-id view, and force a refresh so a
+          // cached pending entry cannot hide the render callback that just
+          // attached the PDF.
+          let fresh = null
+          if (typeof fetchArtifactEntryById === 'function') {
+            fresh = await fetchArtifactEntryById(artifactId, { refresh: true })
+          } else {
+            if (typeof loadArtifacts === 'function') await loadArtifacts()
+            fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+          }
           if (!fresh) continue
           const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
           if (renderStatus === 'failed' || renderStatus === 'stale') {
@@ -62731,11 +63751,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // artifact. Concurrent card/deep-link opens share the same request and
       // the returned entry is inserted without changing the user's selection.
       const artifactEntryFetchesInFlight = new Map()
-      async function fetchArtifactEntryById(id) {
+      async function fetchArtifactEntryById(id, options) {
+        options = options || {}
         const want = String(id || '').trim()
         if (!want || !authedUser) return null
         const cached = artifactEntries.find(entry => String(entry?.id || '') === want)
-        if (cached) return cached
+        if (cached && options.refresh !== true) return cached
         if (!artifactEntryFetchesInFlight.has(want)) {
           artifactEntryFetchesInFlight.set(want, (async () => {
             try {
@@ -62941,6 +63962,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const m = artifact.metadata || {}
         const plan = goalPlanFromArtifact(artifact)
         const state = goalCardStateFor(artifact, plan)
+        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || m.processId || '').trim() === 'packaging_studio'
+        const customerProgress = isPackagingStudio ? packagingStudioCustomerProgress(plan, artifact, null, m.goalStatus || m.status) : null
         const prevState = card.dataset.state
         card.dataset.state = state
         // sheet 3a: the state badge carries the verdict (ring → check/x),
@@ -62989,7 +64012,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         card.dataset.held = state === 'gate' && pendingCheckpoint?.held ? '1' : ''
         const detail = (state === 'gate' && pendingCheckpoint)
           ? packagingStudioCheckpointQuestion(plan, pendingCheckpoint)
-          : (state === 'running' && revisionNote) ? revisionNote : (running ? packagingStudioTaskDisplayTitle(plan, running) : (plan?.report?.headline || ''))
+          : isPackagingStudio && customerProgress?.current
+            ? customerProgress.current.sentence
+            : (state === 'running' && revisionNote) ? revisionNote : (running ? packagingStudioTaskDisplayTitle(plan, running) : (plan?.report?.headline || ''))
         const normalizedStage = normalizedGoalStage(currentStage)
         const indexedStage = (goalStageDefs[Math.min(currentIndex, goalStageDefs.length - 1)] || [])[0]
         const label = state === 'complete'
@@ -63021,7 +64046,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const subtasks = plan?.subtasks || []
         const doneCount = subtasks.filter(task => task.status === 'complete').length
         const metaBits = []
-        if (subtasks.length && state !== 'error') metaBits.push(`${doneCount} of ${subtasks.length}`)
+        if (isPackagingStudio && state !== 'error') metaBits.push(`Phase ${customerProgress.currentNumber} of ${customerProgress.count}`)
+        else if (subtasks.length && state !== 'error') metaBits.push(`${doneCount} of ${subtasks.length}`)
         card.__goalStartedAt = card.__goalStartedAt || Date.parse(artifact.createdAt || m.createdAt || '') || Date.now()
         metaBits.push(state === 'error' ? 'Needs attention' : state === 'cancelled' ? 'stopped' : goalElapsedLabel(card.__goalStartedAt))
         card.querySelector('[data-goal-meta]').textContent = metaBits.join(' · ')
@@ -63077,7 +64103,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // disclosure line each (skips, export status, gate scores, choices)
         const working = card.querySelector('[data-goal-working]')
         working.replaceChildren()
-        for (const task of subtasks) {
+        if (isPackagingStudio) {
+          for (const phase of customerProgress.phases) {
+            const current = phase === customerProgress.current
+            const row = bfEl('div', 'goalcard__phase-line')
+            row.dataset.state = current ? 'current' : phase.status
+            row.appendChild(bfEl('span', 'goalcard__phase-index', phase.status === 'complete' ? '✓' : String(phase.index + 1)))
+            const copy = bfEl('span', 'goalcard__phase-copy')
+            copy.appendChild(bfEl('span', 'goalcard__phase-title', phase.label))
+            if (phase.status === 'complete' || current) copy.appendChild(bfEl('span', 'goalcard__phase-note', phase.sentence))
+            row.appendChild(copy)
+            working.appendChild(row)
+          }
+          const technical = document.createElement('details')
+          technical.className = 'goalcard__technical'
+          const summary = document.createElement('summary')
+          summary.append(bfEl('span', '', 'Technical details'), bfEl('span', 'goalcard__technical-count', `${subtasks.length} internal steps`))
+          technical.appendChild(summary)
+          const body = bfEl('div', 'goalcard__technical-body')
+          for (const task of subtasks) {
+            const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : ['failed', 'blocked'].includes(task.status) ? '✕' : '○'
+            body.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${packagingStudioTaskDisplayTitle(plan, task)}`))
+            const stageDetail = goalProcessStageDetail(task, plan)
+            if (stageDetail) body.appendChild(bfEl('div', 'goalcard__work-line goalcard__work-line--detail', stageDetail))
+          }
+          technical.appendChild(body)
+          working.appendChild(technical)
+        } else for (const task of subtasks) {
           const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : task.status === 'failed' ? '✕' : '○'
           working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${packagingStudioTaskDisplayTitle(plan, task)}`))
           const stageDetail = goalProcessStageDetail(task, plan)
@@ -66192,18 +67244,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        window.clearTimeout(chatChannelActivityHideTimer)
 	        const popover = ensureChatChannelActivityPopover()
 	        const phase = desktopWorkPhase(work.artifact, work.status, work.message?.thread)
+	        const workPlan = goalPlanFromArtifact(work.artifact)
+	        const packaging = String(workPlan?.processId || workPlan?.toolTemplate || work.artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const customerProgress = packaging ? packagingStudioCustomerProgress(workPlan, work.artifact, work.message?.thread, work.status) : null
 	        const eyebrow = bfEl('span', 'chat-channel-activity-popover__eyebrow', 'Channel activity')
 	        const agent = bfEl('div', 'chat-channel-activity-popover__agent')
 	        const avatar = bfEl('span', 'chat-channel-activity-popover__avatar', String(work.agentName || 'S').slice(0, 1).toUpperCase())
 	        const copy = bfEl('span', 'chat-channel-activity-popover__agent-copy')
 	        copy.append(
 	          bfEl('strong', 'chat-channel-activity-popover__name', work.agentName),
-	          bfEl('span', 'chat-channel-activity-popover__phase', phase.label)
+	          bfEl('span', 'chat-channel-activity-popover__phase', packaging ? `Phase ${customerProgress.currentNumber} of ${customerProgress.count} · ${customerProgress.current.label}` : phase.label)
 	        )
 	        const elapsed = bfEl('span', 'chat-channel-activity-popover__elapsed', chatWorkElapsedLabel(work.startedAt))
 	        elapsed.dataset.chatWorkStartedAt = work.startedAt
 	        agent.append(avatar, copy, elapsed)
-	        const note = bfEl('p', 'chat-channel-activity-popover__note', work.note || `${work.agentName} is working. The next update and finished deliverable will land in this conversation.`)
+	        const note = bfEl('p', 'chat-channel-activity-popover__note', packaging ? customerProgress.current.sentence : work.note || `${work.agentName} is working. The next update and finished deliverable will land in this conversation.`)
 	        const open = bfEl('button', 'chat-channel-activity-popover__open', 'View activity')
 	        open.type = 'button'
 	        open.addEventListener('click', event => {
@@ -66226,7 +67281,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        timer.type = 'button'
 	        timer.className = 'chat-thread-item__work-timer'
 	        timer.setAttribute('aria-label', `${work.agentName} is working in ${chatThreadDisplayTitle(thread)}. View activity.`)
-	        timer.title = `${work.agentName} · ${desktopWorkPhase(work.artifact, work.status, work.message?.thread).label}`
+	        const workPlan = goalPlanFromArtifact(work.artifact)
+	        const packaging = String(workPlan?.processId || workPlan?.toolTemplate || work.artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const customerProgress = packaging ? packagingStudioCustomerProgress(workPlan, work.artifact, work.message?.thread, work.status) : null
+	        timer.title = packaging
+	          ? `${work.agentName} · Phase ${customerProgress.currentNumber} of ${customerProgress.count} · ${customerProgress.current.label}`
+	          : `${work.agentName} · ${desktopWorkPhase(work.artifact, work.status, work.message?.thread).label}`
 	        const elapsed = bfEl('span', '', chatWorkElapsedLabel(work.startedAt))
 	        elapsed.dataset.chatWorkStartedAt = work.startedAt
 	        timer.appendChild(elapsed)
@@ -69169,10 +70229,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const phase = desktopWorkPhase(artifact, status, ref)
 	        const agentName = desktopWorkAgentName(message, artifact)
 	        const family = desktopWorkFamily(ref, artifact)
+	        const plan = goalPlanFromArtifact(artifact)
+	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const activityPlan = isPackagingStudio && String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio'
+	          ? { ...plan, processId: 'packaging_studio' }
+	          : plan
+	        const customerProgress = isPackagingStudio ? packagingStudioCustomerProgress(activityPlan, artifact, ref, status) : null
+	        const customerCheckpoint = isPackagingStudio ? (ref?.checkpoint || goalPendingCheckpoint(artifact, activityPlan)) : null
 	        const terminalError = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
 	        const terminalComplete = ['complete', 'completed', 'published'].includes(status)
 	        const deliveredResult = Boolean(String(ref.resultArtifactId || '').trim() || String(artifact?.metadata?.deliveredAt || '').trim())
-	        const note = terminalError
+	        const note = isPackagingStudio
+	          ? customerCheckpoint
+	            ? packagingStudioCheckpointQuestion(activityPlan, customerCheckpoint)
+	            : customerProgress.current?.sentence || 'Scout is building the presentation.'
+	          : terminalError
 	          ? (deliveredResult ? `${agentName} delivered the package; a follow-up check needs attention.` : desktopWorkAttentionCopy(ref.attentionReason, agentName))
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
@@ -69181,14 +70252,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const title = desktopWorkTitle(ref, artifact, family)
         chatContextKicker.textContent = `${agentName} · ${family}`
         chatContextTitle.textContent = title || `${family} workstream`
-	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label), sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
+	        chatContextMeta.textContent = isPackagingStudio
+	          ? [`Phase ${customerProgress.currentNumber} of ${customerProgress.count}`, customerProgress.percent === null ? '' : `${customerProgress.percent}%`, sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
+	          : [terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label), sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
 	        const summary = document.createElement('section')
 	        summary.className = 'chat-context-event'
 	        summary.append(
-	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label)}`),
+	          bfEl('strong', 'chat-context-event__phase', isPackagingStudio ? `${agentName} · ${customerProgress.current.label}` : `${agentName} · ${terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label)}`),
 	          bfEl('p', 'chat-context-event__note', note)
 	        )
-	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${family} · ${terminalComplete ? 'Complete' : (deliveredResult && terminalError ? 'Delivered with review note' : phase.label)}`))
+	        summary.appendChild(bfEl('span', 'chat-context-event__meta', isPackagingStudio ? `Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count}` : `${family} · ${terminalComplete ? 'Complete' : (deliveredResult && terminalError ? 'Delivered with review note' : phase.label)}`))
 	        const actions = bfEl('div', 'chat-context-actions')
 	        if (artifact?.id && artifact?.text) {
 	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : 'Inspect work')
@@ -69228,14 +70301,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (actions.childNodes.length) summary.appendChild(actions)
 	        const worklog = document.createElement('section')
 	        worklog.className = 'chat-context-worklog'
-	        const plan = goalPlanFromArtifact(artifact)
-	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
-	        const activityPlan = isPackagingStudio && String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio'
-	          ? { ...plan, processId: 'packaging_studio' }
-	          : plan
 	        if (isPackagingStudio && Array.isArray(plan?.subtasks) && plan.subtasks.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Presentation activity'))
-	          const activityList = bfEl('div', 'chat-context-activity-list')
+	          worklog.appendChild(packagingStudioPhaseListNode(customerProgress))
+	          const technical = document.createElement('details')
+	          technical.className = 'chat-context-technical'
+	          const technicalSummary = document.createElement('summary')
+	          technicalSummary.append(
+	            bfEl('span', '', 'Technical details'),
+	            bfEl('span', 'chat-context-technical__count', `${plan.subtasks.length} internal steps`)
+	          )
+	          technical.appendChild(technicalSummary)
+	          const activityList = bfEl('div', 'chat-context-activity-list chat-context-technical__list')
 	          for (const task of plan.subtasks) {
 	            const taskState = String(task?.status || 'pending').toLowerCase()
 	            const row = bfEl('div', `chat-context-log-entry${taskState === 'complete' ? ' is-complete' : taskState === 'running' || taskState === 'ready' ? ' is-current' : ''}`)
@@ -69257,7 +70334,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            row.appendChild(rowCopy)
 	            activityList.appendChild(row)
 	          }
-	          worklog.appendChild(activityList)
+	          technical.appendChild(activityList)
+	          worklog.appendChild(technical)
 	        }
 	        if (sources.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Sources'))
@@ -69371,13 +70449,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const phase = desktopWorkPhase(artifact, status, message.thread)
 	        const agent = desktopWorkAgentName(message, artifact)
 	        const family = desktopWorkFamily(message.thread, artifact)
-	        const pct = Number(artifact?.metadata?.progressPercent)
-	        const update = desktopSafeWorkNote(artifact?.metadata?.progressNote || message.thread.progressNote, phase.label)
+	        const plan = goalPlanFromArtifact(artifact)
+	        const packaging = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const customerProgress = packaging ? packagingStudioCustomerProgress(plan, artifact, message.thread, status) : null
+	        const pct = packaging ? customerProgress.percent : Number(artifact?.metadata?.progressPercent)
+	        const update = packaging
+	          ? customerProgress.current.sentence
+	          : desktopSafeWorkNote(artifact?.metadata?.progressNote || message.thread.progressNote, phase.label)
 	        const title = compactArtifactPreview(desktopWorkTitle(message.thread, artifact, family))
 	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
 	        chatWorkIndicatorText.textContent = complete
 	          ? `${agent} delivered ${family.toLowerCase()} · ${event}`
-	          : `${agent} · ${family} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
+	          : packaging
+	            ? `${agent} · Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count} · ${event}${pct === null ? '' : ` · ${pct}%`}`
+	            : `${agent} · ${family} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
 	        chatWorkIndicator.dataset.messageId = String(message.id || '')
 	        chatWorkIndicator.dataset.workState = complete ? 'complete' : normalizedStatus
 	        if (chatWorkIndicatorActions) {
@@ -70071,10 +71156,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const agent = String(ref.agentName || artifact?.metadata?.agentName || 'Scout').trim() || 'Scout'
         const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
         const phase = desktopWorkPhase(artifact, status, ref)
-        const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
 	        const plan = goalPlanFromArtifact(artifact)
 	        const isPresentationWorkflow = family === 'Presentation'
 	        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
+        const customerProgress = isPresentationWorkflow ? packagingStudioCustomerProgress(plan, artifact, ref, status) : null
+        const progress = isPresentationWorkflow
+          ? customerProgress.current?.sentence || 'Scout is building the presentation.'
+          : desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
         // One status: Draft is the thing, Blocked stays blocked, no fake percents
 	        const state = checkpoint
 	          ? 'Needs input'
@@ -70103,21 +71191,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
         eyebrow.setAttribute('aria-live', 'polite')
         eyebrow.setAttribute('aria-atomic', 'true')
-	        if (isPresentationWorkflow) eyebrow.textContent = `Presentation · ${state}`
+	        if (isPresentationWorkflow && !checkpoint) eyebrow.textContent = `Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count}`
 	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
-	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
+	        const customerPercent = customerProgress?.percent
+	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', isPresentationWorkflow
+	          ? `${step}${customerPercent === null ? '' : ` · ${customerPercent}%`}`
+	          : `${agent} · ${step}`))
 	        // No progress bar with fake percents — one status is the product
 	        const open = bfEl('button', 'scout-chat-work-card__open', 'View activity')
 	        open.type = 'button'
-	        open.setAttribute('aria-label', `View ${family} activity, ${phase.label}`)
+	        open.setAttribute('aria-label', isPresentationWorkflow
+	          ? `View Presentation activity, Phase ${customerProgress.currentNumber} of ${customerProgress.count}, ${customerProgress.current.label}`
+	          : `View ${family} activity, ${phase.label}`)
 	        const details = bfEl('div', 'scout-chat-work-card__details')
 	        details.hidden = !expandedWorkDetails.has(workCardID)
 	        open.textContent = details.hidden ? 'View activity' : 'Hide activity'
 	        open.setAttribute('aria-expanded', String(!details.hidden))
 	        details.append(
 	          bfEl('strong', '', `${agent} · ${family}`),
-	          bfEl('span', '', phase.label)
+	          bfEl('span', '', isPresentationWorkflow ? `Phase ${customerProgress.currentNumber} of ${customerProgress.count} · ${customerProgress.current.label}` : phase.label)
 	        )
 	        // Simplified actions — draft is the thing, no CTA zoo
 	        if (artifact?.id) {

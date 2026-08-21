@@ -265,8 +265,8 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
 });
 
-test('the checked-in iOS build number matches the Build 71 source line', () => {
+test('the checked-in iOS build number matches the Build 72 source line', () => {
   const appConfig = text('app.config.ts');
-  assert.match(appConfig, /buildNumber:\s*'71'/);
-  assert.doesNotMatch(appConfig, /buildNumber:\s*'(?:66|68|70)'/);
+  assert.match(appConfig, /buildNumber:\s*'72'/);
+  assert.doesNotMatch(appConfig, /buildNumber:\s*'(?:66|68|70|71)'/);
 });

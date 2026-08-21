@@ -16,9 +16,21 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 	html := string(body)
 	for _, want := range []string{
 		"const packagingStudioStagePresentation",
+		"const packagingStudioCustomerPhases",
+		"function packagingStudioCustomerProgress(plan, artifact, ref, status)",
+		"function packagingStudioPhaseListNode(progress)",
+		"Frame the decision",
+		"Ground the recommendation",
+		"Build the story",
+		"Design the presentation",
+		"Finish the presentation",
+		"Phase ${customerProgress.currentNumber} of ${customerProgress.count}",
+		"Technical details",
+		"internal steps",
 		"function packagingStudioTaskDisplayTitle(plan, task)",
 		"function packagingStudioCheckpointQuestion(plan, checkpoint)",
-		"Build the 10-slide story",
+		"Write the deck",
+		"packagingStudioRequestedSlideCount",
 		"Add presenter notes",
 		"Build the editable presentation",
 		"const packagingStudioJudgmentStages",
@@ -39,6 +51,15 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("packaging stage drawer contract missing %q", want)
 		}
+	}
+	phaseMapStart := strings.Index(html, "const packagingStudioCustomerPhases = [")
+	phaseMapEnd := strings.Index(html[phaseMapStart:], "function packagingStudioCanonicalProgress")
+	if phaseMapStart < 0 || phaseMapEnd < 0 {
+		t.Fatal("Packaging Studio customer phase map boundaries missing")
+	}
+	phaseMap := html[phaseMapStart : phaseMapStart+phaseMapEnd]
+	if got := strings.Count(phaseMap, "id: '"); got != 5 {
+		t.Errorf("customer phase map has %d phases, want 5", got)
 	}
 	stageCSSStart := strings.Index(html, ".artifact-stage-activity {")
 	stageCSSEnd := strings.Index(html[stageCSSStart:], ".artifact-stage__body--deck")
@@ -115,11 +136,31 @@ const fixtures=[
  {id:'stage-identity',stage:'identity',title:'Identity — develop the visual system',display:'Build the visual system',role:'judges',text:'# Identity direction\n\n## Decision\n\nDirection B wins because the panel recorded the strongest audience fit.\n\n## Tokens\n\n'+tick+tick+tick+'css\n:root {\n  --ink: #151513;\n  --paper: #f5f0e7;\n  --heat: #e45d32;\n}\n'+tick+tick+tick+'\n\n## Sources\n\n- [OpenAI API](https://api.openai.com/v1)'},
  {id:'stage-architects',stage:'compete_architects',title:'Compete — three rival narrative architects',display:'Explore narrative directions',role:'panel',text:'# Narrative competition\n\n## Spine matrix\n\n| beat | cultural moment | franchise playbook | leadership conviction |\n|---|---|---|---|\n| opening | The shift | The machine | The earned insight |\n| ask | Move now | Build the flywheel | Back the team |\n\n## Cultural moment\n\n'+('A complete slide-by-slide spine. '.repeat(85))+'\n\n## Franchise playbook\n\n'+('A distinct expandable narrative. '.repeat(85))},
  {id:'stage-judges',stage:'compete_judges',title:'Compete — judge the spines',display:'Choose the strongest story',role:'judges',text:'# Jury verdict\n\n## Winner\n\nLeadership conviction wins unanimously, 4–0.\n\n## Scorecard\n\n| spine | excitement | coherence | credibility |\n|---|---:|---:|---:|\n| leadership conviction | 9 | 9 | 9 |\n| cultural moment | 8 | 7 | 8 |'},
- {id:'stage-write',stage:'write',title:'Write — graft the winning spine',display:'Build the 10-slide story',role:'synthesizer',text:'# Deck manuscript\n\n## Slide 1 — The opening\n\nThe recorded opening line.\n\n## Slide 2 — The shift\n\nThe recorded argument.\n\n## Speaker notes\n\n[BEAT] The recorded delivery note.\n\n## Composition\n\n| slide | layout | source note |\n|---|---|---|\n| 1 | full bleed | source brief |'}
+ {id:'stage-write',stage:'write',title:'Write — graft the winning spine',display:'Write the 8-slide deck',role:'synthesizer',text:'# Deck manuscript\n\n## Slide 1 — The opening\n\nThe recorded opening line.\n\n## Slide 2 — The shift\n\nThe recorded argument.\n\n## Speaker notes\n\n[BEAT] The recorded delivery note.\n\n## Composition\n\n| slide | layout | source note |\n|---|---|---|\n| 1 | full bleed | source brief |'}
 ].map(entry=>({id:entry.id,display:entry.display,text:entry.text,createdAt:new Date().toISOString(),metadata:{title:entry.title,type:'markdown',status:'complete',threadStatus:'complete',source:'process_stage',processId:'packaging_studio',processStage:entry.stage,goalSubtaskId:entry.stage,goalParentId:'packaging-goal',processRole:entry.role}}));
 const checkpoint={id:'checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',stageId:'compete_choice',question:'Which narrative spine should become the deck backbone?',options:[{id:'option-111111111111111111111111',label:'Founder conviction',action:'proceed'},{id:'option-222222222222222222222222',label:'Cultural moment',action:'revise'},{id:'option-333333333333333333333333',label:'Hold for founder review',action:'hold'}]};
-const parentPlan={state:'approval_required',checkpoint,subtasks:[{id:'compete_judges',title:'Compete — judge the spines',role:'judges',status:'complete',artifactId:'stage-judges'},{id:'compete_choice',title:'Choose the winning spine',role:'human_checkpoint',status:'running',dependsOn:['compete_judges']}]};
-const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date().toISOString(),metadata:{title:'Packaging Studio',mode:'goal',processId:'packaging_studio',status:'approval_required',threadStatus:'approval_required',goalPlan:JSON.stringify(parentPlan),checkpoint:JSON.stringify(checkpoint)}};
+const parentPlan={processId:'packaging_studio',state:'execute',objective:'Create an 8-slide presentation for the operating team',subtasks:[
+ {id:'context_snapshot',title:'Understand the brief',role:'synthesizer',status:'complete',artifactId:'stage-identity'},
+ {id:'external_research',title:'Verify the facts that matter',role:'writer',status:'running'},
+ {id:'evidence',title:'Lock the evidence',role:'synthesizer',status:'pending'},
+ {id:'story_architects',title:'Find the strongest story',role:'panel',status:'pending'},
+ {id:'write',title:'Build the 10-slide story',role:'synthesizer',status:'pending'},
+ {id:'gate',title:'Stress-test the story and copy',role:'gate',status:'pending'},
+ {id:'voice',title:'Write presenter notes',role:'writer',status:'pending'},
+ {id:'identity',title:'Create the visual identity',role:'judges',status:'pending'},
+ {id:'imagery_direction',title:'Direct the imagery',role:'writer',status:'pending'},
+ {id:'imagery_generate',title:'Generate selected imagery',role:'compile',status:'pending'},
+ {id:'layout_plan',title:'Compose every slide',role:'writer',status:'pending'},
+ {id:'ship_deck',title:'Build the editable presentation',role:'writer',status:'pending'},
+ {id:'draft_compile',title:'Render the draft for review',role:'compile',status:'pending'},
+ {id:'slide_jury',title:'Review every rendered slide',role:'compile',status:'pending'},
+ {id:'quality_gate',title:'Hold or repair the presentation',role:'gate',status:'pending'},
+ {id:'ship_compile',title:'Presentation ready',role:'compile',status:'pending'}
+]};
+const parent={id:'packaging-goal',text:'# Packaging Studio',createdAt:new Date().toISOString(),metadata:{title:'Packaging Studio',mode:'goal',processId:'packaging_studio',status:'running',threadStatus:'running',currentStage:'execute',progressPercent:'11',goalPlan:JSON.stringify(parentPlan)}};
+const checkpointParentPlan={processId:'packaging_studio',state:'approval_required',objective:'Create an 8-slide presentation for the operating team',checkpoint,subtasks:[{id:'compete_judges',title:'Compete — judge the spines',role:'judges',status:'complete',artifactId:'stage-judges'},{id:'compete_choice',title:'Choose the winning spine',role:'human_checkpoint',status:'running',dependsOn:['compete_judges']}]};
+const checkpointParent={id:'packaging-checkpoint-goal',text:'# Packaging Studio checkpoint',createdAt:new Date().toISOString(),metadata:{title:'Packaging Studio',mode:'goal',processId:'packaging_studio',status:'approval_required',threadStatus:'approval_required',goalPlan:JSON.stringify(checkpointParentPlan),checkpoint:JSON.stringify(checkpoint)}};
+fixtures.find(entry=>entry.id==='stage-judges').metadata.goalParentId=checkpointParent.id;
 fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdAt:new Date().toISOString(),metadata:{title:'Ship — the self-contained presenter deck',source:'agent_thread',goalParentId:'packaging-goal',goalSubtaskId:'ship_deck',processStage:'ship_deck',status:'complete'}});
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -128,7 +169,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  await page.route('https://kino.grok.me/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>KINO</title><main>KINO fixture</main>'}));
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.evaluate(({entries,parent})=>{artifactEntries=[...entries,parent];const trigger=document.createElement('button');trigger.id='stage-return-focus';trigger.textContent='Open stage';document.body.appendChild(trigger);trigger.focus();},{entries:fixtures,parent});
+ await page.evaluate(({entries,parent,checkpointParent})=>{document.getElementById('appShell').dataset.tool='chat';artifactEntries=[...entries,parent,checkpointParent];const trigger=document.createElement('button');trigger.id='stage-return-focus';trigger.textContent='Open stage';document.body.appendChild(trigger);trigger.focus();},{entries:fixtures,parent,checkpointParent});
 
  const customerStage=await page.evaluate(()=>{
    runlogOpen=null;
@@ -141,7 +182,9 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
      artifactTitle:artifactDisplayTitle(artifact)
    };
  });
- assert.deepEqual(customerStage,{runlogs:0,threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
+ assert.deepEqual(customerStage,{runlogs:0,threadQuery:'Write the 8-slide deck',artifactTitle:'Write the 8-slide deck'});
+ const neutralWrite=await page.evaluate(()=>packagingStudioTaskDisplayTitle({processId:'packaging_studio',objective:'Build a concise presentation'},{id:'write',title:'Build the 10-slide story'}));
+ assert.equal(neutralWrite,'Write the deck');
  const legacyWriter=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');return {title:artifactDisplayTitle(artifact),query:scoutThreadFromArtifact(artifact).query};});
  assert.deepEqual(legacyWriter,{title:'Build the editable presentation',query:'Build the editable presentation'});
  const legacyResearchCard=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');const card=scoutChatResearchNode({id:'legacy-run',mode:'artifacts',query:'Ship — the self-contained presenter deck — raw writer prompt',status:'complete',artifact});return card.querySelector('.scout-chat-research__title').textContent;});
@@ -168,31 +211,69 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
 
  const quietChannel=await page.evaluate(parent=>{
-   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:parent.id,status:'approval_required',query:'Like A Farmer presentation'}};
+   document.getElementById('appShell').dataset.tool='chat';
+   document.getElementById('chatTool').style.display='flex';
+   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:parent.id,status:'running',progressPercent:11,query:'Like A Farmer presentation'}};
    const card=scoutDesktopGoalWorkCardNode(message,parent);
    document.body.appendChild(card);
    return {
      title:card.querySelector('.scout-chat-work-card__title')?.textContent,
      eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,
+     meta:card.querySelector('.scout-chat-work-card__meta')?.textContent,
+     checkpoints:card.querySelectorAll('.scout-chat-work-card__checkpoint').length,
      runlogs:document.querySelectorAll('.runlog').length,
      progressbars:card.querySelectorAll('[role="progressbar"]').length
    };
  },parent);
- assert.deepEqual(quietChannel,{title:'Packaging Studio',eyebrow:'Presentation · Needs input',runlogs:0,progressbars:0});
+ assert.equal(quietChannel.title,'Packaging Studio');
+ assert.equal(quietChannel.eyebrow,'Presentation · Phase 2 of 5');
+ assert.match(quietChannel.meta,/verifying the proof points/i);
+ assert.match(quietChannel.meta,/11%/);
+ assert.equal(quietChannel.checkpoints,0);
+ assert.doesNotMatch(quietChannel.eyebrow+quietChannel.meta,/Needs input/i);
+ assert.equal(quietChannel.runlogs,0);
+ assert.equal(quietChannel.progressbars,0);
  await page.locator('.scout-chat-work-card--presentation').getByRole('button',{name:/View .* activity/}).click();
  const activityDrawer=page.locator('#chatContextRail');
  await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false);
  assert.equal(await activityDrawer.locator('.chat-context-section-title').filter({hasText:'Presentation activity'}).count(),1);
- assert.ok(await activityDrawer.locator('.chat-context-log-entry').count()>=2);
- const activityState=await activityDrawer.locator('.chat-context-log-entry').evaluateAll(nodes=>nodes.map(node=>({text:node.textContent,actionable:node.classList.contains('is-actionable')})));
- assert.ok(activityState.some(row=>row.actionable&&row.text.includes('Choose the strongest story')),JSON.stringify(activityState));
- const juryActivity=activityDrawer.locator('.chat-context-log-entry.is-actionable').first();
- await juryActivity.evaluate(node=>node.click());
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry').count(),5);
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry.is-current').getAttribute('data-phase'),'ground');
+ assert.match(await activityDrawer.locator('.chat-context-phase-entry.is-current').textContent(),/Ground the recommendation.*verifying the proof points/is);
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry[data-phase="design"] .chat-context-phase-entry__sentence').count(),0);
+ assert.match(await activityDrawer.locator('#chatContextMeta').textContent(),/Phase 2 of 5.*11%/);
+ const technical=activityDrawer.locator('.chat-context-technical');
+ assert.equal(await technical.getAttribute('open'),null);
+ assert.match(await technical.locator('summary').textContent(),/Technical details.*16 internal steps/);
+ const technicalGeometry=await technical.locator('summary').evaluate(node=>{const rect=node.getBoundingClientRect();const style=getComputedStyle(node);return {height:rect.height,width:rect.width,display:style.display,visibility:style.visibility};});
+ assert.ok(technicalGeometry.height>=40&&technicalGeometry.width>0&&technicalGeometry.display!=='none'&&technicalGeometry.visibility!=='hidden',JSON.stringify(technicalGeometry));
+ await technical.locator('summary').click();
+ assert.equal(await technical.locator('.chat-context-log-entry').count(),16);
+ const activityState=await technical.locator('.chat-context-log-entry').evaluateAll(nodes=>nodes.map(node=>({text:node.textContent,actionable:node.classList.contains('is-actionable')})));
+ assert.ok(activityState.some(row=>row.actionable&&row.text.includes('Understand the request and company context')),JSON.stringify(activityState));
+ const contextActivity=technical.locator('.chat-context-log-entry.is-actionable').first();
+ await contextActivity.evaluate(node=>node.click());
  await page.locator('.artifact-stage').waitFor({state:'visible'});
- assert.match(await page.locator('.artifact-stage__kicker').textContent(),/Choose the strongest story/);
+ assert.match(await page.locator('.artifact-stage__kicker').textContent(),/Build the visual system/);
  await page.locator('.artifact-stage__close').click();
  await page.locator('#chatContextClose').evaluate(node=>node.click());
  await page.locator('.scout-chat-work-card--presentation').evaluate(node=>node.remove());
+
+ const blockedWithoutDecision=await page.evaluate(parent=>{
+   const plan=JSON.parse(parent.metadata.goalPlan);
+   plan.state='needs_attention';
+   plan.subtasks=plan.subtasks.map(task=>task.id==='external_research'?{...task,status:'blocked'}:task);
+   const artifact={...parent,id:'packaging-blocked',metadata:{...parent.metadata,status:'needs_attention',threadStatus:'needs_attention',progressPercent:'12',goalPlan:JSON.stringify(plan)}};
+   const message={id:'goal-blocked-message',kind:'thread',role:'scout',thread:{id:'packaging-blocked-run',mode:'goal',artifactId:artifact.id,status:'needs_attention',progressPercent:12,query:'Like A Farmer presentation'}};
+   const card=scoutDesktopGoalWorkCardNode(message,artifact);
+   document.body.appendChild(card);
+   return {text:card.textContent,eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,meta:card.querySelector('.scout-chat-work-card__meta')?.textContent,checkpoints:card.querySelectorAll('.scout-chat-work-card__checkpoint').length};
+ },parent);
+ assert.equal(blockedWithoutDecision.eyebrow,'Presentation · Phase 2 of 5');
+ assert.match(blockedWithoutDecision.meta,/recovering from an evidence check/i);
+ assert.equal(blockedWithoutDecision.checkpoints,0);
+ assert.doesNotMatch(blockedWithoutDecision.text,/Needs input/i);
+ await page.locator('[data-work-artifact-id="packaging-blocked-run"]').evaluate(node=>node.remove());
 
  const savedGoalCopy=await page.evaluate(()=>{
    const terminal=document.createElement('div');
@@ -291,7 +372,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  await page.evaluate(()=>openArtifactStage('stage-judges','Compete judges'));
  const checkpointPanel=page.locator('.artifact-stage-activity__checkpoint');
  await checkpointPanel.waitFor({state:'visible'});
- assert.equal(await checkpointPanel.locator('.scout-chat-work-card__checkpoint-question').textContent(),'Which narrative spine should become the deck backbone?');
+ assert.equal(await checkpointPanel.locator('.scout-chat-work-card__checkpoint-question').textContent(),'Scout evaluated three narrative directions. Which one should shape the deck?');
  assert.equal(await checkpointPanel.locator('.scout-chat-work-card__checkpoint-choice').count(),3);
  assert.equal(await checkpointPanel.locator('[role="group"]').getAttribute('aria-labelledby'),await checkpointPanel.locator('.scout-chat-work-card__checkpoint-question').getAttribute('id'));
  await page.locator('.artifact-stage__close').click();

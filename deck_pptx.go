@@ -26,6 +26,7 @@ import (
 	"unicode"
 
 	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 const (
@@ -75,6 +76,15 @@ type deckPPTXRelationship struct {
 func compileDeckDocumentPPTX(deck deckDocument, allowedImageRefs map[string]struct{}, resolve deckPPTXImageResolver, title string) ([]byte, error) {
 	if err := validateDeckDocument(deck, allowedImageRefs); err != nil {
 		return nil, err
+	}
+	for _, slide := range deck.Slides {
+		for _, element := range slide.Elements {
+			if element.Type == "text" && strings.TrimSpace(element.RichText) != "" {
+				if _, ok := deckPPTXRichTextParagraphs(element.RichText, element); !ok {
+					return nil, fmt.Errorf("PowerPoint rich text is not canonical Deck Studio content")
+				}
+			}
+		}
 	}
 	if resolve == nil {
 		return nil, fmt.Errorf("PowerPoint image resolver is unavailable")
@@ -363,46 +373,384 @@ func deckPPTXTextShapeXML(id int, element deckElement) string {
 	builder.WriteString(`<p:sp><p:nvSpPr><p:cNvPr id="` + strconv.Itoa(id) + `" name="` + name + `"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>`)
 	builder.WriteString(deckPPTXTransformXML(element))
 	builder.WriteString(`<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"/><a:lstStyle/>`)
-	text := element.Text
-	if strings.TrimSpace(text) == "" && strings.TrimSpace(element.RichText) != "" {
-		text = deckPPTXRichTextPlainText(element.RichText)
-	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	if len(lines) == 0 {
-		lines = []string{""}
-	}
-	for _, line := range lines {
-		builder.WriteString(deckPPTXParagraphXML(line, element))
+	if paragraphs, ok := deckPPTXRichTextParagraphs(element.RichText, element); ok {
+		for _, paragraph := range paragraphs {
+			builder.WriteString(deckPPTXStyledParagraphXML(paragraph, element))
+		}
+	} else {
+		lines := strings.Split(strings.ReplaceAll(element.Text, "\r\n", "\n"), "\n")
+		if len(lines) == 0 {
+			lines = []string{""}
+		}
+		for _, line := range lines {
+			builder.WriteString(deckPPTXParagraphXML(line, element))
+		}
 	}
 	builder.WriteString(`</p:txBody></p:sp>`)
 	return builder.String()
 }
 
-func deckPPTXParagraphXML(text string, element deckElement) string {
+// deckPPTXTextRunStyle is the DrawingML projection of the canonical inline
+// rich-text subset accepted by deckRichTextSafe. Keeping this projection on
+// the validated scene graph (rather than parsing the rendered HTML deck) makes
+// each run editable in PowerPoint without broadening the save/export contract.
+type deckPPTXTextRunStyle struct {
+	FontSize      float64
+	FontFamily    string
+	FontWeight    int
+	Color         string
+	Opacity       float64
+	LetterSpacing string
+	LineHeight    float64
+	Italic        bool
+	Underline     bool
+	Strike        bool
+	Baseline      int
+}
+
+type deckPPTXTextRun struct {
+	Text  string
+	Style deckPPTXTextRunStyle
+}
+
+type deckPPTXTextParagraph struct {
+	Runs        []deckPPTXTextRun
+	LineHeight  float64
+	SpaceBefore float64
+	SpaceAfter  float64
+}
+
+type deckPPTXRichTextBuilder struct {
+	paragraphs []deckPPTXTextParagraph
+}
+
+func newDeckPPTXRichTextBuilder() *deckPPTXRichTextBuilder {
+	return &deckPPTXRichTextBuilder{paragraphs: []deckPPTXTextParagraph{{}}}
+}
+
+func (builder *deckPPTXRichTextBuilder) current() *deckPPTXTextParagraph {
+	return &builder.paragraphs[len(builder.paragraphs)-1]
+}
+
+func (builder *deckPPTXRichTextBuilder) boundary() {
+	if len(builder.current().Runs) > 0 {
+		builder.paragraphs = append(builder.paragraphs, deckPPTXTextParagraph{})
+	}
+}
+
+func (builder *deckPPTXRichTextBuilder) hardBreak() {
+	builder.paragraphs = append(builder.paragraphs, deckPPTXTextParagraph{})
+}
+
+func (builder *deckPPTXRichTextBuilder) append(text string, style deckPPTXTextRunStyle) {
+	if text == "" {
+		return
+	}
+	paragraph := builder.current()
+	if style.LineHeight > paragraph.LineHeight {
+		paragraph.LineHeight = style.LineHeight
+	}
+	if len(paragraph.Runs) > 0 && paragraph.Runs[len(paragraph.Runs)-1].Style == style {
+		paragraph.Runs[len(paragraph.Runs)-1].Text += text
+		return
+	}
+	paragraph.Runs = append(paragraph.Runs, deckPPTXTextRun{Text: text, Style: style})
+}
+
+func deckPPTXBaseTextRunStyle(element deckElement) deckPPTXTextRunStyle {
+	return deckPPTXTextRunStyle{
+		FontSize:      element.FontSize,
+		FontFamily:    element.FontFamily,
+		FontWeight:    element.FontWeight,
+		Color:         element.Color,
+		Opacity:       element.Opacity,
+		LetterSpacing: element.LetterSpacing,
+		LineHeight:    element.LineHeight,
+	}
+}
+
+// deckPPTXRichTextParagraphs converts only byte-canonical, server-approved
+// rich text. An unsafe or non-canonical fragment never reaches DrawingML and
+// falls back to the already validated plain-text field at the caller.
+func deckPPTXRichTextParagraphs(fragment string, element deckElement) ([]deckPPTXTextParagraph, bool) {
+	if strings.TrimSpace(fragment) == "" || !deckRichTextSafe(fragment) {
+		return nil, false
+	}
+	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(fragment), context)
+	if err != nil {
+		return nil, false
+	}
+	output := newDeckPPTXRichTextBuilder()
+	var walk func(*xhtml.Node, deckPPTXTextRunStyle)
+	walk = func(node *xhtml.Node, inherited deckPPTXTextRunStyle) {
+		if node == nil {
+			return
+		}
+		if node.Type == xhtml.TextNode {
+			output.append(node.Data, inherited)
+			return
+		}
+		if node.Type != xhtml.ElementNode {
+			return
+		}
+		tag := strings.ToLower(node.Data)
+		if tag == "br" {
+			output.hardBreak()
+			return
+		}
+		style, block, before, after := deckPPTXRichTextNodeStyle(node, inherited)
+		blockStart := -1
+		if block {
+			output.boundary()
+			blockStart = len(output.paragraphs) - 1
+			paragraph := output.current()
+			paragraph.LineHeight = style.LineHeight
+			paragraph.SpaceBefore = before
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, style)
+		}
+		if block {
+			for index := len(output.paragraphs) - 1; index >= blockStart; index-- {
+				if len(output.paragraphs[index].Runs) > 0 {
+					output.paragraphs[index].SpaceAfter = after
+					break
+				}
+			}
+			output.boundary()
+		}
+	}
+	base := deckPPTXBaseTextRunStyle(element)
+	for _, node := range nodes {
+		walk(node, base)
+	}
+	for len(output.paragraphs) > 1 && len(output.paragraphs[len(output.paragraphs)-1].Runs) == 0 {
+		output.paragraphs = output.paragraphs[:len(output.paragraphs)-1]
+	}
+	if len(output.paragraphs) == 0 {
+		output.paragraphs = []deckPPTXTextParagraph{{}}
+	}
+	return output.paragraphs, true
+}
+
+func deckPPTXRichTextNodeStyle(node *xhtml.Node, inherited deckPPTXTextRunStyle) (deckPPTXTextRunStyle, bool, float64, float64) {
+	style := inherited
+	switch strings.ToLower(node.Data) {
+	case "strong", "b":
+		if style.FontWeight < 700 {
+			style.FontWeight = 700
+		}
+	case "em", "i":
+		style.Italic = true
+	case "small":
+		style.FontSize *= 5.0 / 6.0
+	case "sup":
+		style.FontSize *= 0.75
+		style.Baseline = 30000
+	case "sub":
+		style.FontSize *= 0.75
+		style.Baseline = -25000
+	}
+	styles := legacyStyleMap(node)
+	if value := styles["font-size"]; value != "" {
+		if number, ok := legacyDeckNumber(value); ok {
+			style.FontSize = number
+		}
+	}
+	if value := styles["font-family"]; value != "" {
+		style.FontFamily = value
+	}
+	if value := styles["font-weight"]; value != "" {
+		style.FontWeight = legacyFontWeight(value)
+	}
+	if value := styles["color"]; value != "" {
+		style.Color = value
+	}
+	if value := styles["letter-spacing"]; value != "" {
+		style.LetterSpacing = value
+	}
+	if value := styles["line-height"]; value != "" {
+		if number, ok := legacyDeckNumber(value); ok {
+			if strings.HasSuffix(strings.ToLower(strings.TrimSpace(value)), "px") && style.FontSize > 0 {
+				style.LineHeight = number / style.FontSize
+			} else {
+				style.LineHeight = number
+			}
+		}
+	}
+	if value := strings.ToLower(strings.TrimSpace(styles["font-style"])); value != "" {
+		style.Italic = value == "italic" || value == "oblique"
+	}
+	if value := strings.ToLower(strings.TrimSpace(styles["text-decoration"])); value != "" {
+		switch value {
+		case "none":
+			style.Underline = false
+			style.Strike = false
+		case "underline":
+			style.Underline = true
+			style.Strike = false
+		case "line-through":
+			style.Underline = false
+			style.Strike = true
+		}
+	}
+	block := strings.EqualFold(strings.TrimSpace(styles["display"]), "block")
+	before, after := deckPPTXRichTextVerticalMargins(styles, style.FontSize)
+	return style, block, before, after
+}
+
+func deckPPTXRichTextVerticalMargins(styles map[string]string, fontSize float64) (float64, float64) {
+	var before, after float64
+	if shorthand := strings.Fields(styles["margin"]); len(shorthand) > 0 && len(shorthand) <= 4 {
+		top := shorthand[0]
+		bottom := shorthand[0]
+		if len(shorthand) == 3 || len(shorthand) == 4 {
+			bottom = shorthand[2]
+		}
+		before, _ = deckPPTXCSSLengthPixels(top, fontSize)
+		after, _ = deckPPTXCSSLengthPixels(bottom, fontSize)
+	}
+	if value := styles["margin-top"]; value != "" {
+		before, _ = deckPPTXCSSLengthPixels(value, fontSize)
+	}
+	if value := styles["margin-bottom"]; value != "" {
+		after, _ = deckPPTXCSSLengthPixels(value, fontSize)
+	}
+	return math.Max(0, before), math.Max(0, after)
+}
+
+func deckPPTXCSSLengthPixels(value string, fontSize float64) (float64, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	unit := ""
+	for _, candidate := range []string{"rem", "px", "em", "%"} {
+		if strings.HasSuffix(value, candidate) {
+			unit = candidate
+			value = strings.TrimSpace(strings.TrimSuffix(value, candidate))
+			break
+		}
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, false
+	}
+	switch unit {
+	case "em":
+		number *= fontSize
+	case "rem":
+		number *= 16
+	case "%":
+		number *= fontSize / 100
+	}
+	return number, true
+}
+
+func deckPPTXStyledParagraphXML(paragraph deckPPTXTextParagraph, element deckElement) string {
 	align := map[string]string{"left": "l", "center": "ctr", "right": "r"}[element.TextAlign]
 	if align == "" {
 		align = "l"
 	}
-	lineSpacing := ""
-	if element.LineHeight > 0 {
-		lineSpacing = `<a:lnSpc><a:spcPct val="` + strconv.Itoa(int(math.Round(element.LineHeight*100000))) + `"/></a:lnSpc>`
+	lineHeight := paragraph.LineHeight
+	if lineHeight <= 0 {
+		lineHeight = element.LineHeight
 	}
-	fontSize := int(math.Round(element.FontSize * 75))
-	fontName := deckPPTXFontName(element.FontFamily)
-	bold := "0"
-	if element.FontWeight >= 600 {
-		bold = "1"
+	properties := `<a:pPr algn="` + align + `">`
+	if lineHeight > 0 {
+		properties += `<a:lnSpc><a:spcPct val="` + strconv.Itoa(int(math.Round(lineHeight*100000))) + `"/></a:lnSpc>`
 	}
-	color, alpha, ok := deckPPTXColor(element.Color, element.Opacity)
+	if paragraph.SpaceBefore > 0 {
+		properties += `<a:spcBef><a:spcPts val="` + strconv.Itoa(deckPPTXTextPointValue(paragraph.SpaceBefore)) + `"/></a:spcBef>`
+	}
+	if paragraph.SpaceAfter > 0 {
+		properties += `<a:spcAft><a:spcPts val="` + strconv.Itoa(deckPPTXTextPointValue(paragraph.SpaceAfter)) + `"/></a:spcAft>`
+	}
+	properties += `</a:pPr>`
+	var builder strings.Builder
+	builder.WriteString(`<a:p>` + properties)
+	lastStyle := deckPPTXBaseTextRunStyle(element)
+	for _, run := range paragraph.Runs {
+		if run.Text == "" {
+			continue
+		}
+		lastStyle = run.Style
+		builder.WriteString(`<a:r>` + deckPPTXTextRunPropertiesXML(run.Style) + `<a:t xml:space="preserve">` + html.EscapeString(run.Text) + `</a:t></a:r>`)
+	}
+	builder.WriteString(`<a:endParaRPr lang="en-US" sz="` + strconv.Itoa(deckPPTXFontSize(lastStyle.FontSize)) + `"/></a:p>`)
+	return builder.String()
+}
+
+func deckPPTXTextRunPropertiesXML(style deckPPTXTextRunStyle) string {
+	fontName := deckPPTXFontName(style.FontFamily)
+	attributes := ` lang="en-US" sz="` + strconv.Itoa(deckPPTXFontSize(style.FontSize)) + `"`
+	if style.FontWeight >= 600 {
+		attributes += ` b="1"`
+	} else {
+		attributes += ` b="0"`
+	}
+	if style.Italic {
+		attributes += ` i="1"`
+	}
+	if style.Underline {
+		attributes += ` u="sng"`
+	}
+	if style.Strike {
+		attributes += ` strike="sngStrike"`
+	}
+	if style.Baseline != 0 {
+		attributes += ` baseline="` + strconv.Itoa(style.Baseline) + `"`
+	}
+	if spacing, ok := deckPPTXCharacterSpacing(style.LetterSpacing, style.FontSize); ok {
+		attributes += ` spc="` + strconv.Itoa(spacing) + `"`
+	}
 	fill := `<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>`
-	if ok {
+	if strings.EqualFold(strings.TrimSpace(style.Color), "transparent") {
+		fill = `<a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill>`
+	} else if color, alpha, ok := deckPPTXColor(style.Color, style.Opacity); ok {
 		fill = `<a:solidFill>` + deckPPTXColorXML(color, alpha) + `</a:solidFill>`
 	}
-	runProps := `<a:rPr lang="en-US" sz="` + strconv.Itoa(fontSize) + `" b="` + bold + `" dirty="0">` + fill + `<a:latin typeface="` + html.EscapeString(fontName) + `"/><a:ea typeface="` + html.EscapeString(fontName) + `"/><a:cs typeface="` + html.EscapeString(fontName) + `"/></a:rPr>`
-	if text == "" {
-		return `<a:p><a:pPr algn="` + align + `">` + lineSpacing + `</a:pPr><a:endParaRPr lang="en-US" sz="` + strconv.Itoa(fontSize) + `"/></a:p>`
+	return `<a:rPr` + attributes + ` dirty="0">` + fill + `<a:latin typeface="` + html.EscapeString(fontName) + `"/><a:ea typeface="` + html.EscapeString(fontName) + `"/><a:cs typeface="` + html.EscapeString(fontName) + `"/></a:rPr>`
+}
+
+func deckPPTXFontSize(fontSize float64) int {
+	return int(math.Round(math.Max(1, fontSize) * 75))
+}
+
+func deckPPTXCharacterSpacing(value string, fontSize float64) (int, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || value == "normal" {
+		return 0, false
 	}
-	return `<a:p><a:pPr algn="` + align + `">` + lineSpacing + `</a:pPr><a:r>` + runProps + `<a:t xml:space="preserve">` + html.EscapeString(text) + `</a:t></a:r><a:endParaRPr lang="en-US" sz="` + strconv.Itoa(fontSize) + `"/></a:p>`
+	pixels, ok := deckPPTXCSSLengthPixels(value, fontSize)
+	if !ok {
+		return 0, false
+	}
+	// DrawingML stores character spacing in hundredths of a point. Clamp to
+	// the schema's practical range so a syntactically safe CSS number cannot
+	// produce a PowerPoint repair dialog.
+	scaled := pixels * 75
+	if math.IsNaN(scaled) {
+		return 0, false
+	}
+	scaled = math.Max(-400000, math.Min(400000, scaled))
+	spacing := int(math.Round(scaled))
+	return spacing, true
+}
+
+func deckPPTXTextPointValue(pixels float64) int {
+	scaled := pixels * 75
+	if math.IsNaN(scaled) || scaled <= 0 {
+		return 0
+	}
+	scaled = math.Min(400000, scaled)
+	return int(math.Round(scaled))
+}
+
+func deckPPTXParagraphXML(text string, element deckElement) string {
+	paragraph := deckPPTXTextParagraph{LineHeight: element.LineHeight}
+	if text != "" {
+		paragraph.Runs = []deckPPTXTextRun{{Text: text, Style: deckPPTXBaseTextRunStyle(element)}}
+	}
+	return deckPPTXStyledParagraphXML(paragraph, element)
 }
 
 func deckPPTXShapeXML(id int, element deckElement) string {
@@ -621,30 +969,6 @@ func deckPPTXColorXML(color string, alpha int) string {
 		return `<a:srgbClr val="` + color + `"/>`
 	}
 	return `<a:srgbClr val="` + color + `"><a:alpha val="` + strconv.Itoa(alpha) + `"/></a:srgbClr>`
-}
-
-func deckPPTXRichTextPlainText(fragment string) string {
-	nodes, err := xhtml.ParseFragment(strings.NewReader(fragment), &xhtml.Node{Type: xhtml.ElementNode, Data: "div"})
-	if err != nil {
-		return ""
-	}
-	var builder strings.Builder
-	var walk func(*xhtml.Node)
-	walk = func(node *xhtml.Node) {
-		if node.Type == xhtml.TextNode {
-			builder.WriteString(node.Data)
-		}
-		if node.Type == xhtml.ElementNode && (node.Data == "br" || node.Data == "p" || node.Data == "div") && builder.Len() > 0 && !strings.HasSuffix(builder.String(), "\n") {
-			builder.WriteByte('\n')
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-		}
-	}
-	for _, node := range nodes {
-		walk(node)
-	}
-	return strings.TrimSpace(builder.String())
 }
 
 func deckPPTXImageExtension(imageMime string) (string, error) {

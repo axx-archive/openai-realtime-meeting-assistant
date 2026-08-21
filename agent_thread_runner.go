@@ -1094,6 +1094,9 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 			metadata[key] = value
 		}
 	}
+	// Retry suppression is derived only from the exact terminal error below;
+	// no runner/model metadata may self-assert this durable control class.
+	stampAgentThreadFailureClass(metadata, err)
 	if err == nil {
 		for key, value := range researchArtifactEvidenceMetadata(thread, output) {
 			metadata[key] = value
@@ -1909,7 +1912,8 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 	if len(metadata) == 0 {
 		return
 	}
-	if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata); err != nil {
+	_, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata)
+	if err != nil {
 		log.Errorf("Failed to persist thread %s progress: %v", thread.ID, err)
 		return
 	}
@@ -2043,13 +2047,14 @@ func durableOpenAIRequest(request openAITextRequest) durableOpenAITextRequest {
 }
 
 func (snapshot durableOpenAITextRequest) request(thread scoutAgentThread) openAITextRequest {
-	return openAITextRequest{
+	request := openAITextRequest{
 		Model: snapshot.Model, Instructions: snapshot.Instructions, Input: snapshot.Input, IdempotencyKey: snapshot.IdempotencyKey,
 		Attachments: snapshot.Attachments, ReasoningEffort: snapshot.ReasoningEffort, Verbosity: snapshot.Verbosity,
 		MaxOutputTokens: snapshot.MaxOutputTokens, Seat: snapshot.Seat, Workflow: snapshot.Workflow,
 		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch, LongRunning: snapshot.LongRunning,
 		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
 	}
+	return configureExternalEvidenceV2Request(thread, request)
 }
 
 func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread, job AgentJob, now time.Time) openAITextRequest {
@@ -2058,7 +2063,7 @@ func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread
 	if liveWebSearch {
 		instructions += "\n\nLive research authority: Use the hosted web-search tool for every current or externally verifiable claim. Prefer primary or official sources, distinguish sourced fact from inference, and include the exact source URL for each material claim. If a claim cannot be verified with the tool in this run, label it unverified rather than filling the gap from recall."
 	}
-	return openAITextRequest{
+	request := openAITextRequest{
 		Model:           agentThreadTextModel(thread),
 		Seat:            seatAgentThreadText,
 		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
@@ -2072,6 +2077,15 @@ func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread
 		LongRunning:     agentThreadUsesGroundedDeliverableContract(thread),
 		ValidateOutput:  func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
 	}
+	return configureExternalEvidenceV2Request(thread, request)
+}
+
+func configureExternalEvidenceV2Request(thread scoutAgentThread, request openAITextRequest) openAITextRequest {
+	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		request.JSONSchema = externalEvidenceJSONSchema()
+		request.NormalizeOutput = normalizeExternalEvidenceArtifact
+	}
+	return request
 }
 
 func decodeDurablePublicConversationProviderRequest(thread scoutAgentThread, currentMemory []meetingMemoryEntry) (openAITextRequest, bool, error) {
@@ -2266,6 +2280,14 @@ func agentThreadUsesImageDirectionContract(thread scoutAgentThread) bool {
 }
 
 func agentThreadUsesExternalEvidenceContract(thread scoutAgentThread) bool {
+	if !agentThreadUsesGroundedDeliverableContract(thread) {
+		return false
+	}
+	contract := strings.TrimSpace(thread.Artifact.Metadata["outputContract"])
+	return contract == packagingStudioExternalEvidenceContract || contract == packagingStudioExternalEvidenceContractV1
+}
+
+func agentThreadUsesExternalEvidenceV2Contract(thread scoutAgentThread) bool {
 	return agentThreadUsesGroundedDeliverableContract(thread) &&
 		strings.TrimSpace(thread.Artifact.Metadata["outputContract"]) == packagingStudioExternalEvidenceContract
 }
@@ -2388,6 +2410,9 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 	// The conditional deck-research stage produces a compact evidence input,
 	// not the standalone research report imposed by the generic research mode.
 	// Only a parent/subtask-bound server contract can select this override.
+	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		return strings.TrimSpace(externalEvidenceV2ContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
+	}
 	if agentThreadUsesExternalEvidenceContract(thread) {
 		return strings.TrimSpace(externalEvidenceContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
 	}

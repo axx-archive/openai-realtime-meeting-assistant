@@ -200,6 +200,7 @@ func (app *kanbanBoardApp) postGoalCheckpointMessage(parentID string, question s
 		Thread: &scoutChatThreadRef{
 			ID:         threadID,
 			Mode:       "goal",
+			ProcessID:  parent.Metadata["processId"],
 			Query:      firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadQuery"]), strings.TrimSpace(parent.Metadata["objective"])),
 			Status:     codexJobStatusApprovalRequired,
 			ArtifactID: parent.ID,

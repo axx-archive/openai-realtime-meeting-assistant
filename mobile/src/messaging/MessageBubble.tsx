@@ -19,9 +19,8 @@ import {
   parseMessageTextSegments,
 } from './messagePresentation';
 import {
-  safeWorkProgressNote,
   workFamilyLabel,
-  workPhaseLabel,
+  workProgressPresentation,
 } from './workPresentation';
 import {
   InlineArtifactPreview,
@@ -192,16 +191,18 @@ function workThreadPresentation(message: ScoutMessage) {
   if (!work) return null;
   const ref = work.ref;
   const status = String(ref.status ?? 'running').toLowerCase();
-  const active = status === 'queued' || status === 'running';
   const complete = status === 'complete' || status === 'completed' || status === 'published';
 	const followUpStatus = String(ref.followUpStatus ?? '').toLowerCase();
   const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(ref.progressNote ?? ''))));
   const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
-  const needsInput = status === 'approval_required' || status === 'needs_input' || status === 'parked';
-  const progressPercent = Math.max(0, Math.min(100, Math.round(Number(ref.progressPercent ?? 0))));
+  const progress = workProgressPresentation(ref);
+  const needsInput = progress.needsInput;
+  const decisionStatus = status === 'approval_required' || status === 'needs_input' || status === 'parked';
+  const active = status === 'queued' || status === 'running' || (decisionStatus && !needsInput);
+  const progressPercent = progress.percent;
   const attentionReason = String(ref.attentionReason ?? '').toLowerCase();
   const family = workFamilyLabel(ref);
-  const basePhase = workPhaseLabel(ref);
+  const basePhase = progress.phaseLabel;
   const phase = complete
     ? revisionNeedsAttention ? 'Delivered · revision needs attention' : 'Delivered'
     : basePhase;
@@ -217,7 +218,8 @@ function workThreadPresentation(message: ScoutMessage) {
     delegatedBy: String(ref.delegatedBy ?? '').trim(),
     family,
     phase,
-    progressCopy: safeWorkProgressNote(ref.progressNote, phase),
+    customerPhase: progress.phase,
+    progressCopy: progress.progressCopy,
     mode: String(ref.mode ?? 'work').trim() || 'work',
     query: String(ref.query ?? '').trim() || 'Scout workstream',
     progressPercent,
@@ -696,7 +698,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                   ref={workDetailsTriggerRef}
                   style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
                 >
-                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`}</Text>
+                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.customerPhase?.displayLabel ?? (workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`)}</Text>
                   <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>View activity</Text>
                 </Pressable>
               )}

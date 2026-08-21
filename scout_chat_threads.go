@@ -205,6 +205,7 @@ type scoutChatFileAttachment struct {
 type scoutChatThreadRef struct {
 	ID              string  `json:"id"`
 	Mode            string  `json:"mode"`
+	ProcessID       string  `json:"processId,omitempty"`
 	Query           string  `json:"query"`
 	Status          string  `json:"status"`
 	ArtifactID      string  `json:"artifactId,omitempty"`
@@ -369,7 +370,8 @@ func scoutChatThreadRefForAgent(thread scoutAgentThread, profile STRIDEProductAg
 	progress, _ := strconv.ParseFloat(strings.TrimSpace(thread.Artifact.Metadata["progressPercent"]), 64)
 	return &scoutChatThreadRef{
 		ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: thread.Status, ArtifactID: thread.Artifact.ID,
-		AgentID: profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
+		ProcessID: strings.TrimSpace(thread.Artifact.Metadata["processId"]),
+		AgentID:   profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
 		CurrentStage: thread.Artifact.Metadata["currentStage"], ProgressPercent: progress,
 		ProgressNote: thread.Artifact.Metadata["progressNote"], AttentionReason: scoutChatThreadAttentionReason(thread.Artifact.Metadata), StartedAt: thread.Artifact.Metadata["startedAt"],
 		ProjectID: thread.Artifact.Metadata["projectWorkId"], ProjectTitle: thread.Artifact.Metadata["projectWorkTitle"],
@@ -2117,7 +2119,7 @@ func conversationWorkReplayCard(userMessage scoutChatMessageRecord, launched sco
 		IntentOutcome: string(conversationIntentStartPrivateWork), CausedByMessageID: userMessage.ID,
 		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
-		Thread:    &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID},
+		Thread:    &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID},
 	}
 }
 
@@ -2992,6 +2994,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				Thread: &scoutChatThreadRef{
 					ID:         goalThread.ID,
 					Mode:       goalThread.Mode,
+					ProcessID:  process.ID,
 					Query:      goalThread.Query,
 					Status:     goalThread.Status,
 					ArtifactID: goalThread.Artifact.ID,
@@ -5251,6 +5254,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatusWithContext(ctx context
 		ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
 		ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
 		ref.CurrentStage = artifact.Metadata["currentStage"]
+		ref.ProcessID = firstNonBlank(artifact.Metadata["processId"], ref.ProcessID)
 		ref.ProgressNote = artifact.Metadata["progressNote"]
 		ref.Checkpoint = scoutChatCheckpointRefForArtifact(artifact)
 		ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
@@ -5353,6 +5357,7 @@ func (app *kanbanBoardApp) reconcileScoutChatTerminalProjection(user *userAccoun
 	ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
 	ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
 	ref.CurrentStage = artifact.Metadata["currentStage"]
+	ref.ProcessID = firstNonBlank(artifact.Metadata["processId"], ref.ProcessID)
 	ref.ProgressNote = artifact.Metadata["progressNote"]
 	ref.Checkpoint = scoutChatCheckpointRefForArtifact(artifact)
 	ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
@@ -5407,6 +5412,7 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 	refQuery := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])
 	refArtifactID := artifact.ID
 	refStatus := firstNonEmptyString(agentThreadStatusValue(artifact), "complete")
+	refProcessID := strings.TrimSpace(artifact.Metadata["processId"])
 	droppedTitle := firstNonEmptyString(refQuery, "deliverable")
 	if goalID := artifactGoalParentID(artifact); goalID != "" {
 		refMode = "goal"
@@ -5416,6 +5422,7 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 			refID = firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadId"]), goalID)
 			refQuery = firstNonEmptyString(strings.TrimSpace(parent.Metadata["title"]), refQuery)
 			refStatus = firstNonEmptyString(agentThreadStatusValue(parent), refStatus)
+			refProcessID = firstNonEmptyString(strings.TrimSpace(parent.Metadata["processId"]), refProcessID)
 		}
 	}
 	return scoutChatMessageRecord{
@@ -5427,6 +5434,7 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 		Thread: &scoutChatThreadRef{
 			ID:         refID,
 			Mode:       refMode,
+			ProcessID:  refProcessID,
 			Query:      refQuery,
 			Status:     refStatus,
 			ArtifactID: refArtifactID,

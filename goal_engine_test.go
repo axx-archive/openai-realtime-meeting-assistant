@@ -2050,6 +2050,94 @@ func TestGoalPersistProgressIsMonotonicWithRevisionNote(t *testing.T) {
 	}
 }
 
+func TestProcessProgressWeightsChildWithinAuthoredStage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	child, _, err := app.createOSArtifactWithMetadata("research", "verify the facts", "research in progress", "Scout", map[string]string{
+		"progressPercent": "82", "status": "running", "threadStatus": "running",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, State: goalStateExecute}
+	for index := 0; index < 16; index++ {
+		status := subtaskPending
+		artifactID := ""
+		if index == 0 {
+			status = subtaskComplete
+		}
+		if index == 1 {
+			status = subtaskRunning
+			artifactID = child.ID
+		}
+		plan.Subtasks = append(plan.Subtasks, goalSubtask{ID: fmt.Sprintf("stage-%02d", index+1), Status: status, ArtifactID: artifactID})
+	}
+
+	percent, ceiling, ok := newGoalEngine(app).processDisplayProgress(plan)
+	if !ok || percent != 11 || ceiling != 12 {
+		t.Fatalf("process progress=(%d,%d,%v), want child 82%% scaled to (11,12,true) across 16 stages", percent, ceiling, ok)
+	}
+}
+
+func TestProcessProgressClampsLegacyReviewHighWaterToReachedStage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	child, _, err := app.createOSArtifactWithMetadata("research", "verify the facts", "research needs repair", "Scout", map[string]string{
+		"progressPercent": "72", "status": "error", "threadStatus": "error",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	plan := goalPlan{
+		PlanVersion: goalPlanVersion, GoalID: "process-progress-repair", Objective: "Create an 8-slide presentation",
+		ProcessID: packagingStudioProcessID, State: goalStateReview, MaxProgress: 82,
+		Gate: goalGate{Status: "pending"}, Verification: goalVerification{Verdict: "pending"},
+	}
+	for index := 0; index < 16; index++ {
+		status := subtaskPending
+		artifactID := ""
+		if index == 0 {
+			status = subtaskComplete
+		}
+		if index == 1 {
+			status = subtaskFailed
+			artifactID = child.ID
+		}
+		plan.Subtasks = append(plan.Subtasks, goalSubtask{ID: fmt.Sprintf("stage-%02d", index+1), Status: status, ArtifactID: artifactID})
+	}
+	raw, _ := json.Marshal(plan)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", plan.Objective, "process goal", "AJ", map[string]string{
+		"mode": "goal", "processId": packagingStudioProcessID, "goalPlan": string(raw), "currentStage": goalStateReview,
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	newGoalEngine(app).persist(&plan, parent.ID, "")
+	stored := mustArtifact(t, app, parent.ID)
+	if stored.Metadata["progressPercent"] != "12" {
+		t.Fatalf("progressPercent=%q, want the reached stage ceiling 12 rather than inherited review 82", stored.Metadata["progressPercent"])
+	}
+	persisted, ok := decodeGoalPlan(stored.Metadata["goalPlan"])
+	if !ok || persisted.MaxProgress != 12 {
+		t.Fatalf("persisted max progress=(%d,%v), want the repaired high-water 12", persisted.MaxProgress, ok)
+	}
+
+	// Review requeues the attempted stage as ready before dispatching its repair.
+	// That transition must retain the reached-stage ceiling rather than briefly
+	// moving the customer-facing progress bar backwards.
+	plan.State = goalStateExecute
+	plan.Subtasks[1].Status = subtaskReady
+	plan.Subtasks[1].Attempts = 1
+	newGoalEngine(app).persist(&plan, parent.ID, "")
+	stored = mustArtifact(t, app, parent.ID)
+	if stored.Metadata["progressPercent"] != "12" {
+		t.Fatalf("requeued progressPercent=%q, want monotonic 12", stored.Metadata["progressPercent"])
+	}
+	persisted, ok = decodeGoalPlan(stored.Metadata["goalPlan"])
+	if !ok || persisted.MaxProgress != 12 {
+		t.Fatalf("requeued max progress=(%d,%v), want monotonic 12", persisted.MaxProgress, ok)
+	}
+}
+
 // A whole goal fires exactly ONE creator notification (on the terminal state),
 // not one per subtask/revision.
 func TestGoalEngineNotifiesCreatorOnceOnTerminal(t *testing.T) {
@@ -4536,5 +4624,25 @@ func TestGoalEngineShipGateMalformedJSONEmitsParseFailure(t *testing.T) {
 	gateResults := goalEvalEventFields(t, evalPath, evalKindGateResult)
 	if len(gateResults) != 1 || gateResults[0]["verdict"] != subtaskBlocked || gateResults[0]["runner"] != agentRunnerAnthropicFable {
 		t.Fatalf("gate_result events=%v, want one blocked verdict tagged anthropic_fable", gateResults)
+	}
+}
+
+func TestGoalReviewDoesNotRetryExternalEvidenceSyntaxFailure(t *testing.T) {
+	engine := &goalEngine{}
+	plan := &goalPlan{Subtasks: []goalSubtask{{
+		ID: "external_research", Status: subtaskFailed, Revisions: 0,
+		FailureClass: agentThreadFailureClassExternalEvidenceSyntax,
+	}}}
+	if outcome := engine.reviewSubtasks(context.Background(), plan); outcome != goalReviewOutcomeBlocked {
+		t.Fatalf("review outcome=%v, want blocked", outcome)
+	}
+	stage := plan.subtaskByID("external_research")
+	if stage.Status != subtaskBlocked || stage.Revisions != 0 || !strings.Contains(plan.Blocker, "automatic hosted-research retries were suppressed") {
+		t.Fatalf("stage=%+v blocker=%q, want no requeue or revision spend", stage, plan.Blocker)
+	}
+
+	ordinary := &goalPlan{Subtasks: []goalSubtask{{ID: "writer", Status: subtaskFailed}}}
+	if outcome := engine.reviewSubtasks(context.Background(), ordinary); outcome != goalReviewOutcomeRequeue || ordinary.Subtasks[0].Revisions != 1 || ordinary.Subtasks[0].Status != subtaskReady {
+		t.Fatalf("ordinary failure lost bounded retry behavior: outcome=%v stage=%+v", outcome, ordinary.Subtasks[0])
 	}
 }

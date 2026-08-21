@@ -182,6 +182,101 @@ func TestCompileDeckDocumentPPTXProducesEditableBoundedOOXML(t *testing.T) {
 	}
 }
 
+func deckPPTXRunPropertiesForText(t *testing.T, slide, value string) string {
+	t.Helper()
+	textXML := `<a:t xml:space="preserve">` + value + `</a:t>`
+	textIndex := strings.Index(slide, textXML)
+	if textIndex < 0 {
+		t.Fatalf("PPTX slide is missing editable text run %q: %s", value, slide)
+	}
+	runStart := strings.LastIndex(slide[:textIndex], `<a:rPr`)
+	if runStart < 0 {
+		t.Fatalf("PPTX text %q is not backed by editable run properties: %s", value, slide)
+	}
+	runEndOffset := strings.Index(slide[runStart:textIndex], `</a:rPr>`)
+	if runEndOffset < 0 {
+		t.Fatalf("PPTX text %q is not backed by editable run properties: %s", value, slide)
+	}
+	return slide[runStart : runStart+runEndOffset+len(`</a:rPr>`)]
+}
+
+func TestCompileDeckDocumentPPTXPreservesCanonicalMixedRichTextRunsAndHierarchy(t *testing.T) {
+	richText := `OBSERVED <span style="color:#C79B4D;display:block;font-family:Georgia,serif;font-size:75px;font-weight:700;letter-spacing:.04em;line-height:.92;margin:9px 0">6.1M</span><span style="color:#B84F32"><strong>You</strong><em>Tube</em></span><br><span style="text-decoration:underline">trusted</span> <span style="text-decoration:line-through">old</span> H<sub>2</sub>O<sup>+</sup>`
+	element := deckElement{
+		ID: "score", Type: "text", X: 100, Y: 100, Width: 900, Height: 600, Z: 1, Opacity: .8,
+		Text: "FLATTENED FALLBACK MUST NOT WIN", RichText: richText, FontSize: 24, FontFamily: "Arial, sans-serif",
+		FontWeight: 400, Color: "#ffffff", TextAlign: "left", LineHeight: 1.2, LetterSpacing: "normal",
+	}
+	deck := deckDocument{SchemaVersion: 1, Width: 1920, Height: 1080, Slides: []deckSlide{{
+		ID: "proof", Background: "#111111", Elements: []deckElement{element},
+	}}}
+	if err := validateDeckDocument(deck, nil); err != nil {
+		t.Fatalf("rich-text fixture must obey the Deck Studio save contract: %v", err)
+	}
+	pptx, err := compileDeckDocumentPPTX(deck, nil, func(string) ([]byte, string, error) {
+		return nil, "", fmt.Errorf("image resolver must not run for a text-only deck")
+	}, "Rich text proof")
+	if err != nil {
+		t.Fatalf("compile rich-text PPTX: %v", err)
+	}
+	slide := string(deckPPTXZipParts(t, pptx)["ppt/slides/slide1.xml"])
+	if strings.Contains(slide, "FLATTENED FALLBACK") {
+		t.Fatalf("PPTX preferred the flat compatibility text over canonical rich text: %s", slide)
+	}
+	orderedText := []string{"OBSERVED ", "6.1M", "You", "Tube", "trusted", "old", " H", "2", "O", "+"}
+	previous := -1
+	for _, value := range orderedText {
+		index := strings.Index(slide, `<a:t xml:space="preserve">`+value+`</a:t>`)
+		if index < 0 || index <= previous {
+			t.Fatalf("editable rich-text run %q is missing or out of order: %s", value, slide)
+		}
+		previous = index
+	}
+	if got := strings.Count(slide, "<a:p>"); got != 4 {
+		t.Fatalf("rich block and hard-break hierarchy produced %d paragraphs, want 4: %s", got, slide)
+	}
+
+	blockText := strings.Index(slide, `>6.1M</a:t>`)
+	if blockText < 0 {
+		t.Fatalf("rich block text is missing: %s", slide)
+	}
+	blockStart := strings.LastIndex(slide[:blockText], "<a:p>")
+	if blockStart < 0 {
+		t.Fatalf("rich block did not produce an editable paragraph: %s", slide)
+	}
+	blockEnd := strings.Index(slide[blockStart:], "</a:p>")
+	if blockEnd < 0 {
+		t.Fatalf("rich block did not produce an editable paragraph: %s", slide)
+	}
+	blockParagraph := slide[blockStart : blockStart+blockEnd]
+	for _, want := range []string{`<a:spcPct val="92000"/>`, `<a:spcBef><a:spcPts val="675"/>`, `<a:spcAft><a:spcPts val="675"/>`} {
+		if !strings.Contains(blockParagraph, want) {
+			t.Errorf("rich block paragraph missing %q: %s", want, blockParagraph)
+		}
+	}
+
+	assertRun := func(value string, wants ...string) {
+		t.Helper()
+		properties := deckPPTXRunPropertiesForText(t, slide, value)
+		for _, want := range wants {
+			if !strings.Contains(properties, want) {
+				t.Errorf("run %q properties missing %q: %s", value, want, properties)
+			}
+		}
+	}
+	assertRun("6.1M", `sz="5625"`, `b="1"`, `spc="225"`, `val="C79B4D"`, `<a:alpha val="80000"/>`, `typeface="Georgia"`)
+	assertRun("You", `b="1"`, `val="B84F32"`)
+	assertRun("Tube", `b="0"`, `i="1"`, `val="B84F32"`)
+	assertRun("trusted", `u="sng"`)
+	assertRun("old", `strike="sngStrike"`)
+	assertRun("2", `baseline="-25000"`)
+	assertRun("+", `baseline="30000"`)
+
+	if _, ok := deckPPTXRichTextParagraphs(`<span onclick="alert(1)">unsafe</span>`, element); ok {
+		t.Fatal("PPTX rich-text projection accepted markup rejected by the Deck Studio sanitizer")
+	}
+}
+
 func TestCompileDeckDocumentPPTXFailsClosedForUnattachedOrInvalidImage(t *testing.T) {
 	deck, imageRef, imageBytes := deckPPTXFixture(t)
 	if _, err := compileDeckDocumentPPTX(deck, nil, func(string) ([]byte, string, error) { return imageBytes, "image/png", nil }, ""); err == nil || !strings.Contains(err.Error(), "not attached") {
@@ -205,6 +300,9 @@ func TestCompileDeckDocumentPPTXOpensInLibreOfficeWhenAvailable(t *testing.T) {
 		t.Skip("LibreOffice is unavailable")
 	}
 	deck, imageRef, imageBytes := deckPPTXFixture(t)
+	// Exercise editable mixed runs in the real office-suite smoke test, not
+	// only in structural XML assertions.
+	deck.Slides[0].Elements[2].RichText = `<strong>Farmers</strong> &lt; <em>founders</em>`
 	pptx, err := compileDeckDocumentPPTX(deck, map[string]struct{}{imageRef: {}}, func(string) ([]byte, string, error) {
 		return imageBytes, "image/png", nil
 	}, "Like a Farmer")

@@ -157,18 +157,69 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs(richSmall.marginTop/richSmall.canvasHeight-9/1080)<0.002,JSON.stringify(richSmall));
  await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
 
- const inspectorGeometry=await page.locator('.deck-editor__props').evaluate(node=>({clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));
- assert.ok(inspectorGeometry.scrollWidth<=inspectorGeometry.clientWidth,JSON.stringify(inspectorGeometry));
- if(process.env.DECK_STUDIO_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_SCREENSHOT,fullPage:true});}
+	 const inspectorGeometry=await page.locator('.deck-editor__props').evaluate(node=>({clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));
+	 assert.ok(inspectorGeometry.scrollWidth<=inspectorGeometry.clientWidth,JSON.stringify(inspectorGeometry));
+	 if(process.env.DECK_STUDIO_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_SCREENSHOT,fullPage:true});}
 
- const downloadPromise=page.waitForEvent('download');
+	 // iPad landscape keeps every group in view by moving creation tools to a
+	 // second toolbar row, rather than silently clipping them.
+	 await page.setViewportSize({width:1024,height:768});await page.waitForTimeout(80);
+	 const ipad=await page.evaluate(()=>{const rect=node=>node.getBoundingClientRect();const toolbar=rect(document.querySelector('.deck-editor__toolbar'));const right=rect(document.querySelector('.deck-editor__toolbar-right'));const center=document.querySelector('.deck-editor__toolbar-center');const canvas=rect(document.querySelector('.deck-editor__canvas'));const sidebar=document.querySelector('.deck-editor__sidebar');const sidebarRect=rect(sidebar);const controls=Array.from(sidebar.querySelectorAll('.deck-editor__slide-actions > *')).map(node=>({rect:rect(node).toJSON(),clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));return {toolbar:{right:toolbar.right,bottom:toolbar.bottom},right:{left:right.left,right:right.right,bottom:right.bottom},center:{clientWidth:center.clientWidth,scrollWidth:center.scrollWidth,bottom:rect(center).bottom},canvas:{left:canvas.left,right:canvas.right,width:canvas.width},sidebar:{rect:sidebarRect.toJSON(),clientWidth:sidebar.clientWidth,scrollWidth:sidebar.scrollWidth,controls}};});
+	 assert.ok(ipad.right.left>=0&&ipad.right.right<=1024&&ipad.center.scrollWidth<=ipad.center.clientWidth,JSON.stringify(ipad));
+	 assert.ok(ipad.center.bottom<=ipad.toolbar.bottom&&ipad.canvas.left>=0&&ipad.canvas.right<=1024,JSON.stringify(ipad));
+	 assert.ok(ipad.sidebar.scrollWidth<=ipad.sidebar.clientWidth,JSON.stringify(ipad.sidebar));
+	 ipad.sidebar.controls.forEach(control=>{assert.ok(control.rect.left>=ipad.sidebar.rect.left&&control.rect.right<=ipad.sidebar.rect.right&&control.clientWidth>=control.scrollWidth,JSON.stringify(ipad.sidebar));});
+
+	 // Compact tablet keeps direct navigation, Inspector, More, and Save visible;
+	 // the inspector is inert while closed and fully on-screen when opened.
+	 await page.setViewportSize({width:768,height:1024});await page.waitForTimeout(80);
+	 const compact=await page.evaluate(()=>{const visible=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};const direct=[document.querySelector('.deck-editor__slide-nav'),document.querySelector('[data-action="toggle-inspector"]'),document.querySelector('[data-action="mobile-tools-menu"]'),document.querySelector('.deck-editor__toolbar-right > [data-action="save"]')].map(visible);const props=document.querySelector('.deck-editor__props');return {direct,propsHidden:props.getAttribute('aria-hidden'),propsInert:props.inert,slideActions:getComputedStyle(document.querySelector('.deck-editor__slide-actions')).display,scrollWidth:document.documentElement.scrollWidth};});
+	 compact.direct.forEach(rect=>assert.ok(rect.left>=0&&rect.right<=768&&rect.width>0,JSON.stringify(compact)));
+	 assert.equal(compact.propsHidden,'true');assert.equal(compact.propsInert,true);assert.equal(compact.slideActions,'none');assert.ok(compact.scrollWidth<=768,JSON.stringify(compact));
+	 await page.getByRole('button',{name:'Inspector',exact:true}).click();
+	 await page.waitForFunction(()=>document.querySelector('.deck-editor__props')?.getBoundingClientRect().bottom<=innerHeight);
+	 const openInspector=await page.locator('.deck-editor__props').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),hidden:node.getAttribute('aria-hidden'),inert:node.inert}));
+	 assert.ok(openInspector.rect.left>=0&&openInspector.rect.right<=768&&openInspector.rect.bottom<=1024,JSON.stringify(openInspector));
+	 assert.equal(openInspector.hidden,null);assert.equal(openInspector.inert,false);
+	 await page.getByRole('button',{name:'Close slide inspector'}).click();
+	 await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
+
+	 const downloadPromise=page.waitForEvent('download');
  await page.getByRole('button',{name:'Download',exact:true}).click();
  await page.getByRole('menuitem',{name:/PowerPoint/}).click();
- const downloaded=await downloadPromise;
- assert.match(downloaded.suggestedFilename(),/\.pptx$/);
- assert.deepEqual(pptxRequests,[{artifactId,expectedVersion:version,sceneRef}]);
+	 const downloaded=await downloadPromise;
+	 assert.match(downloaded.suggestedFilename(),/\.pptx$/);
+	 assert.deepEqual(pptxRequests,[{artifactId,expectedVersion:version,sceneRef}]);
 
- await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
+	 // Keyboard users can select and manipulate canvas objects, use the inspector
+	 // tablist, and remain contained inside the modal surface.
+	 const keyboardObject=page.locator('[data-scene] [data-element-id="headline"]');
+	 await keyboardObject.focus();
+	 await page.keyboard.press('Enter');
+	 await page.waitForFunction(()=>document.querySelector('[data-scene] [data-element-id="headline"]')?.getAttribute('aria-pressed')==='true');
+	 await keyboardObject.focus();
+	 const keyboardX=Number(await page.locator('[data-prop="x"]').inputValue());
+	 const keyboardWidth=Number(await page.locator('[data-prop="width"]').inputValue());
+	 await page.keyboard.press('ArrowRight');
+	 assert.equal(Number(await page.locator('[data-prop="x"]').inputValue()),keyboardX+1);
+	 await keyboardObject.focus();
+	 await page.keyboard.press('Alt+ArrowRight');
+	 assert.equal(Number(await page.locator('[data-prop="width"]').inputValue()),keyboardWidth+1);
+	 await page.keyboard.press('Escape');
+	 const designTab=page.getByRole('tab',{name:'Design'});
+	 await designTab.focus();
+	 await page.keyboard.press('ArrowRight');
+	 assert.equal(await page.getByRole('tab',{name:'Notes'}).getAttribute('aria-selected'),'true');
+	 await page.keyboard.press('End');
+	 assert.equal(await page.getByRole('tab',{name:'Scout'}).getAttribute('aria-selected'),'true');
+	 await page.keyboard.press('Home');
+	 assert.equal(await designTab.getAttribute('aria-selected'),'true');
+	 await page.evaluate(()=>{const editor=document.querySelector('.deck-editor');const focusable=Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')).filter(node=>!node.hidden&&!node.closest('[inert]')&&node.getClientRects().length);focusable.at(-1).dataset.deckLastFocus='true';});
+	 await page.locator('[data-deck-last-focus="true"]').focus();
+	 await page.keyboard.press('Tab');
+	 assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Close Deck Studio');
+
+	 await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
  await page.locator('.deck-editor__text-input').waitFor({state:'visible'});
  await page.getByRole('button',{name:'Rectangle'}).focus();
 
@@ -198,11 +249,12 @@ const server=http.createServer((req,res)=>{
  await page.mouse.move(resizeHandle.x+resizeHandle.width/2,resizeHandle.y+resizeHandle.height/2);
  await page.mouse.down();await page.mouse.move(resizeHandle.x+resizeHandle.width/2+45,resizeHandle.y+resizeHandle.height/2+28);await page.mouse.up();
  await page.getByRole('button',{name:'Bring to front',exact:true}).click();
- await page.getByRole('button',{name:'Undo'}).click();
- await page.getByRole('button',{name:'Redo'}).click();
- await page.getByRole('button',{name:'Save',exact:true}).click();
- await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
- assert.equal(patches.length,1);
+	 await page.getByRole('button',{name:'Undo'}).click();
+	 await page.getByRole('button',{name:'Redo'}).click();
+	 await page.getByRole('button',{name:'Save',exact:true}).click();
+	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save"]');return button&&!button.disabled&&button.textContent==='Save';});
+	 assert.equal(await page.locator('.deck-editor').count(),1,'Save must keep Deck Studio open');
+	 assert.equal(patches.length,1);
  assert.equal(patches[0].artifactId,artifactId);
  const savedShape=patches[0].deck.slides[0].elements.find(element=>element.type==='shape'&&element.shape==='rectangle');
  assert.ok(savedShape);
@@ -214,8 +266,10 @@ const server=http.createServer((req,res)=>{
  assert.equal(savedHeadline.fontFamily,'Georgia, Times New Roman, serif');
  assert.equal(savedHeadline.textAlign,'center');
  assert.equal(savedHeadline.lineHeight,1.2);
- assert.equal(savedHeadline.letterSpacing,'.04em');
- assert.equal(patches[0].deck.slides[0].notes,'Revised opening note [BEAT]');
+	 assert.equal(savedHeadline.letterSpacing,'.04em');
+	 assert.equal(patches[0].deck.slides[0].notes,'Revised opening note [BEAT]');
+	 await page.getByRole('button',{name:'Close Deck Studio'}).click();
+	 await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
 
  await page.evaluate(async id=>{await openDeckPresentation(id,'Studio proof')},artifactId);
  await page.waitForSelector('.deck-presenter');
@@ -267,14 +321,17 @@ const server=http.createServer((req,res)=>{
  assert.equal(copies[0].title,'Studio proof — team copy');
  assert.equal(copies[0].deck.slides[0].elements.find(element=>element.id==='uploaded-image').fit,'contain');
 
- await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
- await page.locator('.deck-editor__text-input').fill('Edited plain text');
- await page.getByRole('button',{name:'Save',exact:true}).click();
- await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
- assert.equal(patches.length,2);
- const flattenedRich=patches[1].deck.slides[0].elements.find(element=>element.id==='rich-proof');
- assert.equal(flattenedRich.text,'Edited plain text');
- assert.equal(flattenedRich.richText,'');
+	 await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
+	 await page.locator('.deck-editor__text-input').fill('Edited plain text');
+	 await page.getByRole('button',{name:'Save',exact:true}).click();
+	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save"]');return button&&!button.disabled&&button.textContent==='Save';});
+	 assert.equal(await page.locator('.deck-editor').count(),1,'subsequent saves must also stay in Deck Studio');
+	 assert.equal(patches.length,2);
+	 const flattenedRich=patches[1].deck.slides[0].elements.find(element=>element.id==='rich-proof');
+	 assert.equal(flattenedRich.text,'Edited plain text');
+	 assert.equal(flattenedRich.richText,'');
+	 await page.getByRole('button',{name:'Close Deck Studio'}).click();
+	 await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
 
  canWrite=false;
  deck.slides.push({id:'slide-two',background:'#f2eee5',elements:[{id:'second-title',type:'text',x:180,y:160,width:1300,height:180,z:1,opacity:1,text:'The second slide',fontSize:72,fontWeight:700,color:'#151515'}]});
@@ -342,5 +399,160 @@ const server=http.createServer((req,res)=>{
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("rendered Deck Studio harness: %v\n%s", err, output)
+	}
+}
+
+func TestDeckStudioRenderedPhoneTouchControls(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
+const artifactId='deck-phone-touch';
+const deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[
+  {id:'one',background:'#10141c',elements:[{id:'headline',type:'text',x:120,y:160,width:1200,height:220,z:1,opacity:1,text:'Touch the canvas',fontSize:76,fontWeight:700,color:'#fff'}]},
+  {id:'two',background:'#f2eee5',elements:[{id:'second',type:'text',x:120,y:160,width:1200,height:220,z:1,opacity:1,text:'Move this slide',fontSize:76,fontWeight:700,color:'#111'}]}
+]};
+const server=http.createServer((req,res)=>{
+  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
+  if(req.url==='/artifacts/deck?id='+artifactId){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:artifactId,title:'Phone proof',version:1,sceneRef:'e'.repeat(64),metadata:{savedToFiles:'true'}},deck,canWrite:true}));}
+  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const browser=await chromium.launch({headless:true});
+ const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});
+ const page=await context.newPage();
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ await page.evaluate(id=>openDeckStudio(id,'Phone proof',{}),artifactId);
+ await page.waitForSelector('.deck-editor');
+ assert.equal(await page.evaluate(()=>matchMedia('(pointer: coarse)').matches),true);
+ const firstFrame=await page.locator('.deck-editor').evaluate(node=>({background:getComputedStyle(node).backgroundColor,animation:getComputedStyle(node).animationName,animations:node.getAnimations().length}));
+ assert.notEqual(firstFrame.background,'rgba(0, 0, 0, 0)',JSON.stringify(firstFrame));
+ assert.equal(firstFrame.animation,'none',JSON.stringify(firstFrame));
+ assert.equal(firstFrame.animations,0,JSON.stringify(firstFrame));
+ const phone=await page.evaluate(()=>{const rect=node=>node.getBoundingClientRect().toJSON();const direct=[document.querySelector('.deck-editor__slide-nav'),document.querySelector('[data-action="toggle-inspector"]'),document.querySelector('[data-action="mobile-tools-menu"]'),document.querySelector('.deck-editor__toolbar-right > [data-action="save"]')].map(rect);const canvas=rect(document.querySelector('.deck-editor__canvas'));return {direct,canvas,sidebar:getComputedStyle(document.querySelector('.deck-editor__sidebar')).display,scrollWidth:document.documentElement.scrollWidth};});
+ phone.direct.forEach(value=>assert.ok(value.left>=0&&value.right<=390&&value.width>=40&&value.height>=40,JSON.stringify(phone)));
+ assert.equal(phone.sidebar,'none');
+ assert.ok(phone.canvas.left>=0&&phone.canvas.right<=390&&phone.canvas.width>340,JSON.stringify(phone));
+ assert.ok(Math.abs(phone.canvas.width/phone.canvas.height-16/9)<.01,JSON.stringify(phone));
+ assert.ok(phone.scrollWidth<=390,JSON.stringify(phone));
+
+ const headline=page.locator('[data-scene] [data-element-id="headline"]');
+ await headline.tap();
+ assert.equal(await headline.getAttribute('aria-pressed'),'true');
+ const handleInset=await page.locator('[data-scene] [data-handle="se"]').evaluate(node=>getComputedStyle(node,'::after').inset);
+ assert.equal(handleInset,'-16px');
+
+ // Selecting an object is navigation, not an edit. A simple tap followed by
+ // Close must never manufacture an unsaved-changes confirmation.
+ await page.evaluate(()=>{window.__deckConfirmCalls=0;window.confirm=()=>{window.__deckConfirmCalls++;return false;};});
+ await page.getByRole('button',{name:'Close Deck Studio'}).tap();
+ await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
+ assert.equal(await page.evaluate(()=>window.__deckConfirmCalls),0);
+ await page.evaluate(id=>openDeckStudio(id,'Phone proof',{}),artifactId);
+ await page.waitForSelector('.deck-editor');
+
+ await page.getByRole('button',{name:'Inspector',exact:true}).tap();
+ await page.waitForFunction(()=>document.querySelector('.deck-editor__props')?.getBoundingClientRect().bottom<=innerHeight);
+ const inspector=await page.locator('.deck-editor__props').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),inert:node.inert,hidden:node.getAttribute('aria-hidden')}));
+ assert.ok(inspector.rect.left>=0&&inspector.rect.right<=390&&inspector.rect.bottom<=844,JSON.stringify(inspector));
+ assert.equal(inspector.inert,false);assert.equal(inspector.hidden,null);
+ await page.getByRole('button',{name:'Close slide inspector'}).tap();
+ await page.waitForFunction(()=>document.querySelector('.deck-editor__props')?.inert===true);
+
+ await page.getByRole('button',{name:'Next slide'}).tap();
+ assert.equal(await page.locator('[data-slide-indicator]').textContent(),'2 / 2');
+ await page.getByRole('button',{name:'More'}).tap();
+ const menu=page.getByRole('menu',{name:'More deck actions'});
+ await menu.waitFor({state:'visible'});
+ const menuRect=await menu.evaluate(node=>node.getBoundingClientRect().toJSON());
+ assert.ok(menuRect.left>=0&&menuRect.right<=390&&menuRect.top>=0&&menuRect.bottom<=844,JSON.stringify(menuRect));
+ await menu.getByRole('menuitem',{name:'Move slide earlier'}).tap();
+ assert.equal(await page.locator('[data-slide-indicator]').textContent(),'1 / 2');
+ await page.getByRole('button',{name:'More'}).tap();
+ await page.getByRole('menuitem',{name:'Move slide later'}).tap();
+ assert.equal(await page.locator('[data-slide-indicator]').textContent(),'2 / 2');
+ await context.close();await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	cmd.Env = append(os.Environ(), "DECK_STUDIO_INDEX="+indexPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered Deck Studio phone touch harness: %v\n%s", err, output)
+	}
+}
+
+func TestDeckStudioRenderedRichTextEditPreservesSafeInlineRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
+const artifactId='deck-rich-text-artifact';
+let version=1;
+let saved=null;
+const original='Lead <span style="color:#ff6600;font-family:Georgia;font-size:64px;font-weight:700">Proof</span> <em style="font-style:italic">now</em>';
+let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',elements:[{id:'mixed-runs',type:'text',x:140,y:180,width:1200,height:260,z:1,opacity:1,rotation:0,text:'Lead Proof now',richText:original,fontSize:40,fontFamily:'Arial',fontWeight:600,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
+const artifact=()=>({id:artifactId,title:'Rich text proof',version,sceneRef:'d'.repeat(64),metadata:{type:'html_deck',artifactVersion:String(version),savedToFiles:'true'}});
+const server=http.createServer((req,res)=>{
+  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
+  if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite:true}));}
+  if(req.url==='/artifacts/deck'&&req.method==='PATCH'){
+    let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{const body=JSON.parse(raw);saved=body.deck.slides[0].elements[0];deck=body.deck;version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,artifact:artifact(),deck}));});return;
+  }
+  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1440,height:900}});
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ await page.evaluate(id=>openDeckStudio(id,'Rich text proof',{}),artifactId);
+ await page.locator('[data-scene] [data-element-id="mixed-runs"]').dispatchEvent('dblclick');
+ const editor=page.locator('.deck-editor__text-input');
+ await editor.waitFor({state:'visible'});
+ assert.equal(await editor.getAttribute('contenteditable'),'true');
+ await editor.evaluate(node=>{const span=node.querySelector('span');span.firstChild.nodeValue='Proof point';node.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));});
+ assert.equal(await editor.locator('span').count(),1);
+ assert.equal(await editor.locator('em').count(),1);
+ await editor.evaluate(node=>{node.querySelector('span').setAttribute('onclick','window.__unsafe=true');const image=document.createElement('img');image.src='x';image.setAttribute('onerror','window.__unsafe=true');node.appendChild(image);node.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromPaste'}));});
+ assert.equal(await editor.locator('img').count(),0);
+ assert.equal(await editor.locator('[onclick],[onerror]').count(),0);
+ await page.getByRole('button',{name:'Save',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.deck-editor [data-action="save"]')?.textContent==='Save'&&!document.querySelector('.deck-editor [data-action="save"]')?.disabled);
+ assert.ok(saved);
+ assert.equal(saved.text,'Lead Proof point now');
+ assert.equal(saved.richText,'Lead <span style="color:#ff6600;font-family:Georgia;font-size:64px;font-weight:700">Proof point</span> <em style="font-style:italic">now</em>');
+ assert.doesNotMatch(saved.richText,/(?:onclick|onerror|<img|javascript:)/i);
+ await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	cmd.Env = append(os.Environ(), "DECK_STUDIO_INDEX="+indexPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered Deck Studio rich-text harness: %v\n%s", err, output)
 	}
 }

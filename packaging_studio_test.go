@@ -413,6 +413,10 @@ func TestPackagingStudioV3IsInvisibleConditionalAndFailClosed(t *testing.T) {
 			t.Errorf("%s must repair then hold, never force-accept: %+v", id, stage.GateSpec)
 		}
 	}
+	identity := packagingStudioStage(t, def, "identity")
+	if !containsString(identity.InputFrom, "gate") {
+		t.Fatalf("identity inputFrom=%v, must wait for the story/copy gate before designing against locked copy", identity.InputFrom)
+	}
 	compile := packagingStudioStage(t, def, "ship_compile")
 	if len(compile.InputFrom) != 2 || !containsString(compile.InputFrom, "quality_gate") || compile.Internal {
 		t.Fatalf("final delivery is not gated and visible: %+v", compile)

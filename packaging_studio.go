@@ -100,13 +100,14 @@ func packagingPlanSlideCount(app *kanbanBoardApp, plan *goalPlan) (int, bool) {
 // The studio's output contracts. The deck is the process deliverable contract
 // (processDeliverableContract picks the LAST writer stage's contract → ship_deck).
 const (
-	packagingStudioDeckContract             = "packaging_deck_v1"
-	packagingStudioExternalEvidenceContract = "external_evidence_v1"
-	packagingStudioImageryDirectionContract = "imagery_direction_v1"
-	packagingStudioWallContract             = "packaging_wall_v1"
-	packagingStudioTalkContract             = "packaging_talk_v1"
-	packagingStudioRigorContract            = "packaging_rigor_v1"
-	packagingStudioFindingsContract         = "packaging_findings_v1"
+	packagingStudioDeckContract               = "packaging_deck_v1"
+	packagingStudioExternalEvidenceContractV1 = "external_evidence_v1"
+	packagingStudioExternalEvidenceContract   = "external_evidence_v2"
+	packagingStudioImageryDirectionContract   = "imagery_direction_v1"
+	packagingStudioWallContract               = "packaging_wall_v1"
+	packagingStudioTalkContract               = "packaging_talk_v1"
+	packagingStudioRigorContract              = "packaging_rigor_v1"
+	packagingStudioFindingsContract           = "packaging_findings_v1"
 )
 
 // studioSourceLanguageLaw keeps quoted source language faithful downstream
@@ -288,7 +289,7 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID: "identity", Title: "Create the visual identity", Role: processRoleJudges, Internal: internal,
-				InputFrom: []string{"context_snapshot", "write", "story_architects"}, Personas: studioIdentityJudges(),
+				InputFrom: []string{"context_snapshot", "write", "gate", "story_architects"}, Personas: studioIdentityJudges(),
 				PromptBody:     "Now that story and copy are locked, develop the visual system around their actual emotional arc. Extend supplied brand assets when present; otherwise audition 2-3 distinctive systems on the same cover, evidence, and image-led slides. Choose one and define palette, type, spacing, grid, graphic motif, image treatment, data-viz treatment, and refusals. The cover is one powerful idea with one focal hierarchy, not a subtitle pile or generic AI gradient.",
 				OutputContract: "identity_direction_v2",
 			},
