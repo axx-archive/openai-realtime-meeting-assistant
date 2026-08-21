@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: integrated web implementation and independent critic are green; cut the final release SHA, deploy it, then rerun the production deck and ship Mobile Build 69.
+Current phase: combined web and Mobile Build 69 source is green at `d96fc89b`; record the release checkpoint, push the exact reviewed tree, deploy it, then rerun the production deck and submit Mobile Build 69.
 
 ## Invariants
 
@@ -20,9 +20,9 @@ Current phase: integrated web implementation and independent critic are green; c
 | --- | --- | --- | --- | --- |
 | W1 | Reply-root context, scheduled public work, outline-to-deck flow, structured Deck Studio | Existing Scout/chat/goal authority contracts | Focused normal and race tests; independent critic | Complete in `5fe9e469` |
 | W2 | Durable channel checkpoint choices on the existing root card | W1 | Focused normal/race tests, production exact-release verifier, live two-checkpoint journey | Complete and live in `25bf7248` |
-| W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete locally; final gate green |
-| W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete locally; final gate green |
-| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete locally; integration gate green |
+| W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
+| W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
+| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete in combined release tree; integration gate green |
 | W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Pending |
 | W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Pending |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Pending |
@@ -48,16 +48,17 @@ Current phase: integrated web implementation and independent critic are green; c
 - W3 drawer gate includes the five production artifact shapes plus a custom 121 KB, 102-row, 1,000-line hostile artifact at desktop and 390px mobile widths.
 - W4 Content Studio uses the canonical `https://kino.grok.me`, background inerting, cross-origin focus sentinels, fallback/external escape, and a web-only rail item. W4 PiP hit-tests above Stage/KINO, remains operable as a truthful composite, docks away from actions, routes Return to `/video`, and disappears only on canonical hangup.
 - Final independent critic verdict: PASS after critical normal/race, PiP/Studio/stage, 230-event chat stress, and canonical cold-index browser suites.
+- Combined release tree `d96fc89bdbb3372bfa57e2cdbbcc0f5ea288f5c8` contains web commit `712f2dce` plus Mobile Build 69 commit `d96fc89b`; the exact combined focused Go/browser gate passed in 19.119s, all 587 mobile tests passed, TypeScript passed, and `git diff --check` was clean. A clean `npm ci` reproduced the known eight high transitive Expo/Metro advisories without changing the lockfile.
 
 ## Pending Dependencies
 
-- W3-W5 are green in the integrated shared web shell; their exact focused gates must remain green at the committed release SHA.
+- W3-W5 and Mobile Build 69 are green in the exact combined release tree; GitHub, VPS, production deck, EAS, Apple, and cleanup proof remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed integrated source to `axx/main`; deploy the exact web release to the DigitalOcean VPS; rerun and edit the production deck; build and submit the exact Mobile Build 69 to TestFlight.
-- Not yet executed: final web commit/push/deploy, production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
+- Not yet executed: final ledger checkpoint commit, push/deploy, production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
 - Rollback: retain production release `25bf7248` and its images until the replacement passes the retained verifier and live canaries.
 
 ## Risks And Decisions
@@ -70,7 +71,7 @@ Current phase: integrated web implementation and independent critic are green; c
 ## Resume Here
 
 1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, and `axx/main` before trusting any status above.
-2. Commit the integrated web delta, cherry-pick mobile commit `275946a2`, and rerun the combined focused release gates at that exact SHA.
-3. Fetch and compare `axx/main`; push only if it remains the expected ancestor, then verify local/remote exact parity.
+2. Commit this release checkpoint, fetch and compare `axx/main`, and push only if it remains the expected ancestor; verify local/remote exact parity.
+3. Preserve the combined source receipt: web `712f2dce`, mobile `d96fc89b`, and the final ledger-only release commit.
 4. Deploy and verify the exact VPS release, rerun the production deck workflow, and start the exact-SHA EAS Build 69 in parallel.
 5. Verify the deck save/reopen/present/channel receipts and TestFlight processing/groups before cleaning preserved worktrees and stale refs.
