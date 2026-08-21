@@ -141,6 +141,7 @@ func TestIndexGoalcardFailureIsACompactRecoveryBrief(t *testing.T) {
 	for _, want := range []string{
 		"goalcard__failure-copy",
 		"Stopped before delivery",
+		"Delivered · follow-up needs attention",
 		"goalcard__failure-activity",
 		"Retry keeps completed stages and resumes at the blocker.",
 		"view activity",

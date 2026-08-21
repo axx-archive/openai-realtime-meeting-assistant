@@ -66,6 +66,8 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 		"scout-chat-deck-result",
 		"renderArtifactDeck(result, artifact)",
 		"candidate?.thread?.resultArtifactId",
+		"deliveredInManifest",
+		"candidate?.manifest?.deliverables",
 		"metadata.goalParentId",
 		"metadata.goalId",
 		"sourceMetadata.goalParentId",

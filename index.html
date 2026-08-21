@@ -11177,6 +11177,16 @@
         opacity: 0.82;
       }
 
+      .manifest-card__deck-result {
+        width: 100%;
+        margin: 14px 0 10px;
+      }
+
+      .manifest-card__deck-result .chat-deck {
+        max-width: none;
+        min-width: 0;
+      }
+
       .manifest-card__head {
         display: flex;
         align-items: baseline;
@@ -61443,11 +61453,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // one obvious continuation and two quieter alternatives.
         const m = artifact.metadata || {}
         const message = plan?.blocker || m.blocker || 'The goal stopped before finishing.'
+		const deliveredBeforeFailure = Boolean(
+		  scoutChatThread?.querySelector(`.manifest-card[data-goal-id="${selectorEscape(String(artifact?.id || ''))}"]:not(.manifest-card--held)`)
+		)
         const failure = bfEl('section', 'goalcard__failure')
         failure.setAttribute('aria-label', 'Goal recovery')
         const copy = bfEl('div', 'goalcard__failure-copy')
         copy.appendChild(bfEl('div', 'goalcard__failure-eyebrow', 'Recovery'))
-        copy.appendChild(bfEl('div', 'goalcard__failure-title', 'Stopped before delivery'))
+		copy.appendChild(bfEl('div', 'goalcard__failure-title', deliveredBeforeFailure ? 'Delivered · follow-up needs attention' : 'Stopped before delivery'))
         copy.appendChild(bfEl('div', 'goalcard__failure-note', message))
         failure.appendChild(copy)
         // Salvage last mile: when the run fell short but the engine saved its best
@@ -67119,8 +67132,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const family = desktopWorkFamily(ref, artifact)
 	        const terminalError = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
 	        const terminalComplete = ['complete', 'completed', 'published'].includes(status)
+	        const deliveredResult = Boolean(String(ref.resultArtifactId || '').trim() || String(artifact?.metadata?.deliveredAt || '').trim())
 	        const note = terminalError
-	          ? desktopWorkAttentionCopy(ref.attentionReason, agentName)
+	          ? (deliveredResult ? `${agentName} delivered the package; a follow-up check needs attention.` : desktopWorkAttentionCopy(ref.attentionReason, agentName))
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
 	            : desktopSafeWorkNote(artifact?.metadata?.progressNote || ref.progressNote, `${agentName} is ${phase.label.toLowerCase()}.`)
@@ -67128,14 +67142,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const title = desktopWorkTitle(ref, artifact, family)
         chatContextKicker.textContent = `${agentName} · ${family}`
         chatContextTitle.textContent = title || `${family} workstream`
-	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
+	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label), sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : 'Private work'].filter(Boolean).join(' · ')
 	        const summary = document.createElement('section')
 	        summary.className = 'chat-context-event'
 	        summary.append(
-	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${terminalComplete ? 'Delivered' : phase.label}`),
+	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${terminalComplete ? 'Delivered' : (deliveredResult && terminalError ? 'Delivered · Follow-up needs attention' : phase.label)}`),
 	          bfEl('p', 'chat-context-event__note', note)
 	        )
-	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${family} · ${terminalComplete ? 'Complete' : phase.label}`))
+	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${family} · ${terminalComplete ? 'Complete' : (deliveredResult && terminalError ? 'Delivered with review note' : phase.label)}`))
 	        const actions = bfEl('div', 'chat-context-actions')
 	        if (artifact?.id && artifact?.text) {
 	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : 'Inspect work')
@@ -68121,6 +68135,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultId = String(message?.thread?.resultArtifactId || artifact?.id || '').trim()
 	        if (!resultId || !artifact || !artifactIsHTMLDeck(artifact)) return document.createDocumentFragment()
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        const deliveredInManifest = messages.some(candidate => {
+	          if (String(candidate?.kind || '') !== 'manifest' || String(candidate?.manifest?.status || '') === 'held') return false
+	          return (Array.isArray(candidate?.manifest?.deliverables) ? candidate.manifest.deliverables : [])
+	            .some(deliverable => String(deliverable?.artifactId || '').trim() === resultId)
+	        })
+	        // Before handoff, the canonical card shows progress in place. Once a
+	        // shipped package owns this exact deck, the same rich card moves into
+	        // the manifest at the current delivery point instead of remaining
+	        // buried earlier in the run history.
+	        if (deliveredInManifest) return document.createDocumentFragment()
 	        const metadata = artifact?.metadata || {}
 	        // Older generated deck bodies may predate result-level goal metadata.
 	        // Their durable chat receipt still points at the stage/goal artifact,
@@ -68790,26 +68814,48 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (manifest.title) card.appendChild(bfEl('div', 'manifest-card__title', String(manifest.title)))
 	        if (manifest.subline) card.appendChild(bfEl('div', 'manifest-card__subline', String(manifest.subline)))
 
+	        const deckDeliverable = !held
+	          ? deliverables.find(deliverable => {
+	              const artifactId = String(deliverable?.artifactId || '').trim()
+	              const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+	              return entry && artifactIsHTMLDeck(entry)
+	            })
+	          : null
+	        const deliveredDeckArtifact = deckDeliverable
+	          ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === String(deckDeliverable.artifactId || '').trim())
+	          : null
+	        if (deliveredDeckArtifact) {
+	          const deckResult = document.createElement('article')
+	          deckResult.className = 'manifest-card__deck-result scout-chat-deck-result'
+	          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
+	          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
+	          renderArtifactDeck(deckResult, deliveredDeckArtifact)
+	          card.appendChild(deckResult)
+	        }
+
 	        // deliverable rows: badge · title + facts · pill actions
 	        const rows = bfEl('div', 'manifest-card__rows')
 	        for (const deliverable of deliverables) {
 	          const row = bfEl('div', 'manifest-card__row')
 	          row.appendChild(bfEl('span', 'manifest-card__badge', String(deliverable.badge || 'doc')))
 	          const main = bfEl('span', 'manifest-card__row-main')
-	          main.appendChild(bfEl('span', 'manifest-card__row-title', String(deliverable.title || '')))
-	          if (deliverable.facts) main.appendChild(bfEl('span', 'manifest-card__row-facts', String(deliverable.facts)))
+	          const artifactId = String(deliverable.artifactId || '')
+	          const richDeckRow = Boolean(deliveredDeckArtifact && String(deliveredDeckArtifact.id || '') === artifactId)
+	          main.appendChild(bfEl('span', 'manifest-card__row-title', richDeckRow ? 'Deck files & feedback' : String(deliverable.title || '')))
+	          if (deliverable.facts || richDeckRow) main.appendChild(bfEl('span', 'manifest-card__row-facts', richDeckRow ? 'The editable deck is above.' : String(deliverable.facts)))
 	          row.appendChild(main)
 	          const actions = bfEl('span', 'manifest-card__row-actions')
-	          const artifactId = String(deliverable.artifactId || '')
 	          // a deck deliverable leads with its cover hero (DD-1); the context
 	          // rides in so the hero stands even before the deck artifact loads
 	          const deckHero = deckHeroContextFromManifest(deliverable, manifest)
-	          const open = bfEl('button', 'manifest-card__pill manifest-card__pill--primary', 'open')
-	          open.type = 'button'
-	          open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), deckHero ? { deck: deckHeroContextFromManifest(deliverable, manifest) } : undefined))
-	          actions.appendChild(open)
+	          if (!richDeckRow) {
+	            const open = bfEl('button', 'manifest-card__pill manifest-card__pill--primary', 'open')
+	            open.type = 'button'
+	            open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), deckHero ? { deck: deckHeroContextFromManifest(deliverable, manifest) } : undefined))
+	            actions.appendChild(open)
+	          }
 	          // held quieting: open is the ONLY door — present and pdf recede
-	          if (!held && deliverable.present) {
+	          if (!held && deliverable.present && !richDeckRow) {
 	            const present = bfEl('button', 'manifest-card__pill manifest-card__pill--outline', 'present')
 	            present.type = 'button'
 	            present.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), { present: true }))

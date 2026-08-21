@@ -623,6 +623,8 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		"function syncDesktopOpenChatContext()",
 		"syncDesktopOpenChatContext()",
 		"run stopped before delivery",
+		"delivered the package; a follow-up check needs attention",
+		"Delivered · Follow-up needs attention",
 		"compactArtifactPreview(String(artifact?.text",
 		"researchArtifactSources(artifact)",
 		"desktopWorkFamily",
