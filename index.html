@@ -68170,6 +68170,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const stageGoalId = String(artifact?.metadata?.goalParentId || artifact?.metadata?.goalId || '').trim()
 	        if (stageGoalId && dedupKey) {
 	          const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	          let latestGoalId = ''
+	          for (const candidate of messages) {
+	            if (String(candidate?.kind || '') !== 'thread') continue
+	            const candidateArtifactId = String(candidate?.thread?.artifactId || '').trim()
+	            const candidateArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === candidateArtifactId)
+	            if (String(candidate?.thread?.mode || '') === 'goal' || isGoalArtifact(candidateArtifact)) latestGoalId = candidateArtifactId
+	          }
+	          // Earlier attempts remain available through their goal activity,
+	          // but only the latest channel goal contributes process rows beside
+	          // the current result.
+	          if (latestGoalId && latestGoalId !== stageGoalId) return document.createDocumentFragment()
 	          let latestStageMessageId = ''
 	          for (const candidate of messages) {
 	            if (!['thread', 'artifact'].includes(String(candidate?.kind || ''))) continue
