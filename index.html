@@ -68121,6 +68121,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultId = String(message?.thread?.resultArtifactId || artifact?.id || '').trim()
 	        if (!resultId || !artifact || !artifactIsHTMLDeck(artifact)) return document.createDocumentFragment()
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        const metadata = artifact?.metadata || {}
+	        const goalId = String(metadata.goalParentId || metadata.goalId || '').trim()
+	        if (goalId) {
+	          let canonicalResultId = ''
+	          for (const candidate of messages) {
+	            if (String(candidate?.thread?.artifactId || '').trim() !== goalId) continue
+	            const candidateResultId = String(candidate?.thread?.resultArtifactId || '').trim()
+	            if (candidateResultId) canonicalResultId = candidateResultId
+	          }
+	          // Keep superseded attempts in activity/history, but only the exact
+	          // server-projected result gets a full feed card.
+	          if (canonicalResultId && canonicalResultId !== resultId) return document.createDocumentFragment()
+	        }
 	        let latestId = ''
 	        for (const candidate of messages) {
 	          if (!['thread', 'artifact'].includes(String(candidate?.kind || ''))) continue

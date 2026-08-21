@@ -66,6 +66,8 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 		"scout-chat-deck-result",
 		"renderArtifactDeck(result, artifact)",
 		"candidate?.thread?.resultArtifactId",
+		"metadata.goalParentId || metadata.goalId",
+		"canonicalResultId !== resultId",
 		"['thread', 'artifact'].includes",
 	} {
 		if !strings.Contains(deck, want) {

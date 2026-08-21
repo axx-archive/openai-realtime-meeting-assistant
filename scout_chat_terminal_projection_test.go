@@ -154,12 +154,21 @@ func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIden
 	if err != nil {
 		t.Fatal(err)
 	}
+	finalDeck, _, err := app.createOSArtifactWithMetadata("workflow", "Like A Farmer — Optimization Insights", "<!doctype html><html><body><section class=\"pg\">edited deck</section></body></html>", "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "goalParentId": goal.ID, "status": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deck.ID == finalDeck.ID {
+		t.Fatal("final edited deck must be a distinct durable result")
+	}
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
 		ID: "goal-card", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "run-1", Mode: "goal", Status: "approval_required", ArtifactID: goal.ID},
 	}}}
 	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	ref := projected.Messages[0].Thread
-	if ref.ArtifactID != goal.ID || ref.ResultArtifactID != deck.ID || ref.ResultArtifactType != artifactTypeHTMLDeck || ref.ResultTitle != "Like A Farmer deck" {
+	if ref.ArtifactID != goal.ID || ref.ResultArtifactID != finalDeck.ID || ref.ResultArtifactType != artifactTypeHTMLDeck || ref.ResultTitle != "Like A Farmer — Optimization Insights" {
 		t.Fatalf("projected ref=%+v, want lifecycle goal plus explicit deck result", ref)
 	}
 	if thread.Messages[0].Thread.ResultArtifactID != "" {
@@ -173,7 +182,7 @@ func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIden
 		t.Fatal(err)
 	}
 	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
-	if got := projected.Messages[0].Thread.ResultArtifactID; got != deck.ID {
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != finalDeck.ID {
 		t.Fatalf("cross-goal sibling changed result to %q", got)
 	}
 }

@@ -1768,12 +1768,20 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 	// rather than scanning every artifact once for every work message.
 	for _, artifact := range app.osArtifactsSnapshot(0) {
 		index.byID[artifact.ID] = artifact
-		if strings.TrimSpace(artifact.Metadata["source"]) != "packaging_studio_ship" ||
-			strings.TrimSpace(artifact.Metadata["artifactContract"]) != packagingStudioDeckContract {
+		if artifactType(artifact) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(artifact) {
 			continue
 		}
-		goalID := strings.TrimSpace(artifact.Metadata["goalId"])
+		goalID := ""
+		if strings.TrimSpace(artifact.Metadata["source"]) == "packaging_studio_ship" &&
+			strings.TrimSpace(artifact.Metadata["artifactContract"]) == packagingStudioDeckContract {
+			goalID = strings.TrimSpace(artifact.Metadata["goalId"])
+		} else if strings.TrimSpace(artifact.Metadata["source"]) == "scout_thread" {
+			goalID = strings.TrimSpace(artifact.Metadata["goalParentId"])
+		}
 		if goalID != "" {
+			// Artifacts are oldest-first. A later native edit/regeneration inside
+			// the exact goal supersedes its compiled ship draft without rewriting
+			// history or guessing from titles.
 			index.deckByGoal[goalID] = artifact
 		}
 	}
@@ -1783,8 +1791,9 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 // projectScoutChatResultRef upgrades old and new work messages at the read
 // boundary with the concrete presentation they produced. The binding is
 // server-owned and conjunctive: a direct ref must itself be a deck, while a
-// goal ref may resolve only the Packaging Studio deck filed for that exact
-// goal. No title/body sniffing and no cross-goal artifact search is allowed.
+// goal ref may resolve only a declared HTML deck filed by Packaging Studio or
+// a later Scout artifact whose goalParentId is that exact goal. No title
+// sniffing and no cross-goal artifact search is allowed.
 func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
 	if message == nil || message.Thread == nil {
 		return
@@ -1802,8 +1811,14 @@ func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatR
 	result := artifact
 	if strings.TrimSpace(artifact.Metadata["mode"]) == "goal" {
 		deck, ok := index.deckByGoal[artifact.ID]
-		if !ok || strings.TrimSpace(deck.Metadata["goalId"]) != artifact.ID ||
-			strings.TrimSpace(deck.Metadata["source"]) != "packaging_studio_ship" {
+		if !ok {
+			return
+		}
+		shipForGoal := strings.TrimSpace(deck.Metadata["source"]) == "packaging_studio_ship" &&
+			strings.TrimSpace(deck.Metadata["goalId"]) == artifact.ID
+		childForGoal := strings.TrimSpace(deck.Metadata["source"]) == "scout_thread" &&
+			strings.TrimSpace(deck.Metadata["goalParentId"]) == artifact.ID
+		if !shipForGoal && !childForGoal {
 			return
 		}
 		result = deck
