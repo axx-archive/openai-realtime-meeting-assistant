@@ -251,7 +251,7 @@ func TestArtifactRenderBodyExpandsAttachedDeckImagesAndFailsClosed(t *testing.T)
 	if err != nil {
 		t.Fatalf("artifactRenderBody: %v", err)
 	}
-	if got := string(body); !strings.Contains(got, "data:image/png;base64,") || strings.Contains(got, "/artifacts/blob") || strings.Contains(got, "attacker.example") || !strings.Contains(got, `data-slide-id="slide-2"`) || !strings.Contains(got, `data-deck-navigation="trusted"`) || !strings.Contains(got, "ArrowRight") {
+	if got := string(body); !strings.Contains(got, "data:image/png;base64,") || strings.Contains(got, "/artifacts/blob") || strings.Contains(got, "attacker.example") || !strings.Contains(got, `data-slide-id="slide-2"`) || !strings.Contains(got, `data-deck-navigation="trusted"`) || !strings.Contains(got, "ArrowRight") || !strings.Contains(got, "#stage{position:static!important;left:auto!important;top:auto!important;transform:none!important}") {
 		t.Fatalf("expanded body=%s, want authoritative two-slide scene with trusted navigation", got)
 	}
 
