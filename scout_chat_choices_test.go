@@ -224,8 +224,8 @@ func TestScoutChatChoicePillToolArmCommitsProposal(t *testing.T) {
 	if proposal.Kind != scoutRouterProposalKindToolRun || proposal.ToolID != "packaging_studio" {
 		t.Fatalf("proposal=%#v, want a packaging_studio tool_run", proposal)
 	}
-	if proposal.ToolName != "Packaging Studio" || proposal.GroupLabel != "End-to-end" {
-		t.Fatalf("proposal name/group=%q/%q, want the process registry values", proposal.ToolName, proposal.GroupLabel)
+	if proposal.ToolName != "Packaging Studio" || proposal.GroupLabel != "Presentation" {
+		t.Fatalf("proposal name/group=%q/%q, want the customer-facing presentation values", proposal.ToolName, proposal.GroupLabel)
 	}
 	if proposal.Objective != "build the deck end to end from the existing outline" {
 		t.Fatalf("objective=%q, want the pill's crafted reply", proposal.Objective)
@@ -233,8 +233,8 @@ func TestScoutChatChoicePillToolArmCommitsProposal(t *testing.T) {
 	if proposal.Query != "we need to work on the deck for the WME meeting" {
 		t.Fatalf("query=%q, want the originating ask as the Tier-0 escape", proposal.Query)
 	}
-	if !strings.Contains(proposal.Summary, "human checkpoint") {
-		t.Fatalf("summary=%q, want the process checkpoint sentence", proposal.Summary)
+	if !strings.Contains(proposal.Summary, "editable presentation") || strings.Contains(strings.ToLower(proposal.Summary), "human checkpoint") {
+		t.Fatalf("summary=%q, want the deck outcome without process theater", proposal.Summary)
 	}
 
 	saved := response["thread"].(scoutChatThreadRecord)

@@ -636,6 +636,28 @@ export const MessageBubble = React.memo(function MessageBubble({
               {workThread.failed && workThread.attentionCopy ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workAttentionCopy}>{workThread.attentionCopy}</Text> : null}
               {String(workThread.ref.resultPreview ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={3} style={styles.workPreview}>{String(workThread.ref.resultPreview)}</Text> : null}
               {String(workThread.ref.provenance ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={2} style={styles.workProvenance}>{String(workThread.ref.provenance)}</Text> : null}
+              {workThread.needsInput && workThread.ref.checkpoint?.question ? (
+                <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
+                  <View style={styles.checkpointStatusRow}>
+                    <SymbolView name="questionmark.circle.fill" tintColor={colors.emberText} size={14} />
+                    <Text style={styles.checkpointKicker}>Scout needs your decision</Text>
+                  </View>
+                  <Text style={styles.checkpointQuestion}>{workThread.ref.checkpoint.question}</Text>
+                  <View style={styles.checkpointChoices}>
+                    {(workThread.ref.checkpoint.options ?? []).map((option) => (
+                      <Pressable
+                        key={option.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={option.label}
+                        onPress={() => onResolveWorkCheckpoint?.(message, option)}
+                        style={({ pressed }) => [styles.checkpointChoice, pressed && styles.workResultPressed]}
+                      >
+                        <Text style={styles.checkpointChoiceText}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
               {workThread.complete ? (
                 <View style={styles.workResultActions}>
                   <Pressable ref={workDetailsTriggerRef} accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
@@ -667,10 +689,16 @@ export const MessageBubble = React.memo(function MessageBubble({
                   </Pressable>
                 </View>
               ) : (
-                <View style={styles.workFoot}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open live work details"
+                  onPress={() => onOpenWorkArtifact?.(message, findNodeHandle(workDetailsTriggerRef.current) ?? undefined)}
+                  ref={workDetailsTriggerRef}
+                  style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
+                >
                   <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`}</Text>
-                  <ActivityIndicator color={colors.emberText} size="small" />
-                </View>
+                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>View activity</Text>
+                </Pressable>
               )}
             </View>
           ) : null}

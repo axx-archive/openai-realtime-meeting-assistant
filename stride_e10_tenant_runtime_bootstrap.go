@@ -44,9 +44,44 @@ func (a *strideE10TenantProductionLegacyIDs) WithMappedLegacyPerson(_ context.Co
 }
 
 type strideE10TenantFileReceiptSink struct {
-	mu   sync.Mutex
-	path string
-	key  StrideE10TenantReceiptKey
+	mu       sync.Mutex
+	path     string
+	key      StrideE10TenantReceiptKey
+	seen     map[string]struct{}
+	seenRing []string
+	seenNext int
+}
+
+// A receipt ID is a keyed commitment over the principal, authority
+// generation, surface, and comparison result. Repeating the same receipt for
+// every WebSocket heartbeat adds no audit evidence; it only turns shadow mode
+// into a synchronous disk-write loop. Keep a bounded recent set so one stable
+// observation is durable while later authority generations and genuinely
+// different surfaces still land.
+const strideE10TenantReceiptRecentLimit = 16 * 1024
+
+func (s *strideE10TenantFileReceiptSink) alreadyRecordedLocked(receiptID string) bool {
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
+	}
+	_, ok := s.seen[receiptID]
+	return ok
+}
+
+func (s *strideE10TenantFileReceiptSink) rememberRecordedLocked(receiptID string) {
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
+	}
+	if len(s.seenRing) < strideE10TenantReceiptRecentLimit {
+		s.seen[receiptID] = struct{}{}
+		s.seenRing = append(s.seenRing, receiptID)
+		return
+	}
+	old := s.seenRing[s.seenNext]
+	delete(s.seen, old)
+	s.seen[receiptID] = struct{}{}
+	s.seenRing[s.seenNext] = receiptID
+	s.seenNext = (s.seenNext + 1) % strideE10TenantReceiptRecentLimit
 }
 
 func (s *strideE10TenantFileReceiptSink) RecordStrideE10TenantDiscrepancy(_ context.Context, receipt StrideE10TenantDiscrepancyReceipt) error {
@@ -59,6 +94,9 @@ func (s *strideE10TenantFileReceiptSink) RecordStrideE10TenantDiscrepancy(_ cont
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.alreadyRecordedLocked(receipt.ReceiptID) {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
@@ -73,7 +111,11 @@ func (s *strideE10TenantFileReceiptSink) RecordStrideE10TenantDiscrepancy(_ cont
 	if _, err := file.Write(append(body, '\n')); err != nil {
 		return err
 	}
-	return file.Sync()
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	s.rememberRecordedLocked(receipt.ReceiptID)
+	return nil
 }
 
 type strideE10TenantManagedEnvelopeKeyring struct {

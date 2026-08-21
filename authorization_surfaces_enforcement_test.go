@@ -169,6 +169,7 @@ func TestEnforcedArtifactSurfaceRegistryMatchesHandlerContracts(t *testing.T) {
 		"http.artifacts.blob":              {ACLReadContent},
 		"http.artifacts.share":             {ACLReadMetadata, ACLReadContent, ACLShare},
 		"http.artifacts.export_pdf":        {ACLExport},
+		"http.artifacts.export_pptx":       {ACLExport},
 		"http.signals.survey":              {ACLReadContent, ACLWrite},
 	}
 	registered := map[string]AuthorizationSurface{}

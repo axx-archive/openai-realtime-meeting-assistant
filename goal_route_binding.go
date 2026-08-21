@@ -51,10 +51,16 @@ func goalRouteChildBindingMetadata(plan *goalPlan) map[string]string {
 	}
 	receipt := plan.RouteReceipt
 	return map[string]string{
-		"goalRouteDigest":     receipt.Digest,
-		"requestedBy":         receipt.Requester,
-		"originKind":          receipt.OriginKind,
-		"originId":            receipt.OriginID,
+		"goalRouteDigest": receipt.Digest,
+		"requestedBy":     receipt.Requester,
+		"originKind":      receipt.OriginKind,
+		"originId":        receipt.OriginID,
+		// Goal routes are authenticated only for Scout conversations (private
+		// threads or public channels). Keep the exact chat surface on every
+		// downstream artifact: appendOSArtifact resolves that durable thread and
+		// projects its current private owner/public audience instead of falling
+		// through to the organization-wide default.
+		"originSurface":       "chat:" + receipt.OriginID,
 		"sourceMessageId":     receipt.SourceMessageID,
 		"sourceMessageDigest": receipt.SourceMessageDigest,
 		"sourceWindowDigest":  receipt.SourceWindowDigest,

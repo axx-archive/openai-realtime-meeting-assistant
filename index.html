@@ -12221,6 +12221,54 @@
       .chat-deck__frame.is-ready {
         opacity: 1;
       }
+      .chat-deck__native-preview {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        opacity: 0;
+        container-type: size;
+        transition: opacity 120ms var(--ease-out);
+      }
+      .chat-deck__native-preview.is-ready { opacity: 1; }
+      .chat-deck__native-scene { position: absolute; inset: 0; overflow: hidden; }
+      .chat-deck__native-element { position: absolute; transform-origin: center; overflow: hidden; }
+      .chat-deck__native-text { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; }
+      .chat-deck__native-image { width: 100%; height: 100%; display: block; outline: 1px solid rgba(255,255,255,.1); outline-offset: -1px; }
+      .chat-deck__native-shape { width: 100%; height: 100%; border-style: solid; box-sizing: border-box; }
+      .chat-deck__nav {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 40px;
+        padding: 4px;
+        border: 1px solid rgba(255,255,255,.2);
+        border-radius: 999px;
+        background: rgba(18,18,20,.72);
+        box-shadow: 0 10px 30px rgba(0,0,0,.24);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+      .chat-deck__nav button {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+      }
+      .chat-deck__nav button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+      .chat-deck__nav button:disabled { opacity: .34; cursor: default; }
+      .chat-deck__nav-count { min-width: 42px; color: #fff; font: var(--type-caption); text-align: center; font-variant-numeric: tabular-nums; }
       .chat-deck__frame:fullscreen {
         width: 100vw;
         height: 100vh;
@@ -12228,7 +12276,8 @@
         border-radius: 0;
       }
       @media (prefers-reduced-motion: reduce) {
-        .chat-deck__frame { transition: none; }
+        .chat-deck__frame,
+        .chat-deck__native-preview { transition: none; }
       }
       /* Glass chrome overlay at bottom — title + controls */
       .chat-deck__chrome {
@@ -12264,6 +12313,38 @@
         gap: 8px;
         flex-shrink: 0;
       }
+      .chat-deck__download { position: relative; }
+      .chat-deck__download-menu {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 8px);
+        display: grid;
+        gap: 3px;
+        width: 184px;
+        padding: 6px;
+        border: 1px solid rgba(255,255,255,.18);
+        border-radius: 14px;
+        background: rgba(18,18,20,.94);
+        box-shadow: 0 16px 44px rgba(0,0,0,.34);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+      .chat-deck__download-menu[hidden] { display: none; }
+      .chat-deck__download-menu button {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 40px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: #fff;
+        font: var(--type-body-sm);
+        cursor: pointer;
+      }
+      .chat-deck__download-menu button:hover { background: rgba(255,255,255,.1); }
+      .chat-deck__download-menu small { color: rgba(255,255,255,.58); font: var(--type-caption); }
       /* Pill buttons on the cover — glass style */
       .chat-deck__btn {
         display: inline-flex;
@@ -12428,7 +12509,7 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
-        height: 34px;
+        min-height: 40px;
         padding: 0 12px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
@@ -12446,16 +12527,8 @@
         border-color: var(--line-2);
       }
       .deck-editor__btn:active { transform: scale(0.96); }
-      .deck-editor__btn::after {
-        content: "";
-        position: absolute;
-        inset: 50% auto auto 50%;
-        width: 40px;
-        height: 40px;
-        transform: translate(-50%, -50%);
-      }
       .deck-editor__btn--icon {
-        width: 34px;
+        width: 40px;
         padding: 0;
       }
       .deck-editor__btn--primary {
@@ -12488,8 +12561,8 @@
       }
       .deck-editor__slide-nav button {
         position: relative;
-        width: 34px;
-        height: 34px;
+        width: 40px;
+        height: 40px;
         padding: 0;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
@@ -12502,14 +12575,6 @@
         transition-property: background-color, color, box-shadow, transform;
         transition-duration: var(--dur-fast);
         transition-timing-function: var(--ease);
-      }
-      .deck-editor__slide-nav button::after {
-        content: "";
-        position: absolute;
-        inset: 50% auto auto 50%;
-        width: 40px;
-        height: 40px;
-        transform: translate(-50%, -50%);
       }
       .deck-editor__slide-nav button:active { transform: scale(0.96); }
       .deck-editor__slide-nav button:hover {
@@ -12553,7 +12618,7 @@
       .deck-editor__slide-actions {
         flex: none;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 34px 34px;
+        grid-template-columns: minmax(0, 1fr) 40px 40px;
         gap: 6px;
         padding-top: 10px;
         border-top: 1px solid var(--line-1);
@@ -12601,7 +12666,7 @@
         justify-content: center;
         padding: 24px;
         background: var(--surface-3);
-        overflow: hidden;
+        overflow: auto;
         min-width: 0;
         min-height: 0;
       }
@@ -12666,21 +12731,48 @@
       }
       .deck-editor__handle {
         position: absolute;
-        width: 10px;
-        height: 10px;
+        width: 12px;
+        height: 12px;
         background: #fff;
         border: 2px solid #4285f4;
-        border-radius: 2px;
+        border-radius: 3px;
         pointer-events: auto;
       }
-      .deck-editor__handle--nw { top: -5px; left: -5px; cursor: nwse-resize; }
-      .deck-editor__handle--ne { top: -5px; right: -5px; cursor: nesw-resize; }
-      .deck-editor__handle--sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
-      .deck-editor__handle--se { bottom: -5px; right: -5px; cursor: nwse-resize; }
-      .deck-editor__handle--n { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-      .deck-editor__handle--s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-      .deck-editor__handle--w { top: 50%; left: -5px; transform: translateY(-50%); cursor: ew-resize; }
-      .deck-editor__handle--e { top: 50%; right: -5px; transform: translateY(-50%); cursor: ew-resize; }
+      .deck-editor__handle::after { content: ""; position: absolute; inset: -7px; }
+      .deck-editor__handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
+      .deck-editor__handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+      .deck-editor__handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+      .deck-editor__handle--se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+      .deck-editor__handle--n { top: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+      .deck-editor__handle--s { bottom: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+      .deck-editor__handle--w { top: 50%; left: -6px; transform: translateY(-50%); cursor: ew-resize; }
+      .deck-editor__handle--e { top: 50%; right: -6px; transform: translateY(-50%); cursor: ew-resize; }
+      .deck-editor__handle--rotate {
+        top: -34px;
+        left: 50%;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        transform: translateX(-50%);
+        cursor: grab;
+      }
+      .deck-editor__handle--rotate::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 12px;
+        width: 1px;
+        height: 20px;
+        background: #4285f4;
+      }
+      .deck-editor__guide {
+        position: absolute;
+        z-index: 9999;
+        pointer-events: none;
+        background: #4285f4;
+      }
+      .deck-editor__guide--x { top: 0; bottom: 0; width: 1px; }
+      .deck-editor__guide--y { left: 0; right: 0; height: 1px; }
       /* Element-specific editors */
       .deck-editor__text-input {
         position: absolute;
@@ -12698,21 +12790,86 @@
       /* Properties panel (right side) */
       .deck-editor__props {
         flex: none;
-        width: 272px;
+        width: 320px;
+        min-width: 0;
         background: var(--surface-1);
         border-left: 1px solid var(--line-1);
-        overflow-y: auto;
-        padding: 16px;
+        overflow: hidden;
+        padding: 0;
         display: flex;
         flex-direction: column;
-        gap: 16px;
       }
       .deck-editor__props[hidden] { display: none; }
+      .deck-editor__inspector-head {
+        flex: none;
+        display: grid;
+        gap: 3px;
+        padding: 16px 16px 13px;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .deck-editor__inspector-eyebrow {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .deck-editor__inspector-title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        text-wrap: balance;
+      }
+      .deck-editor__inspector-hint {
+        margin: 0;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+      .deck-editor__tabs {
+        flex: none;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        padding: 8px;
+        border-bottom: 1px solid var(--line-1);
+        background: var(--surface-2);
+      }
+      .deck-editor__tab {
+        min-width: 0;
+        min-height: 36px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-label);
+        cursor: pointer;
+        transition-property: background-color, color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .deck-editor__tab:hover { color: var(--text-1); background: var(--surface-3); }
+      .deck-editor__tab:active { transform: scale(.97); }
+      .deck-editor__tab[aria-selected="true"] {
+        color: var(--text-1);
+        background: var(--surface-1);
+        box-shadow: 0 1px 2px rgba(0,0,0,.08);
+      }
+      .deck-editor__panel {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .deck-editor__panel[hidden] { display: none; }
       .deck-editor__prop-section {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
+        min-width: 0;
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--line-1);
       }
+      .deck-editor__prop-section[hidden] { display: none; }
       .deck-editor__prop-label {
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -12723,6 +12880,27 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        min-width: 0;
+      }
+      .deck-editor__prop-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        min-width: 0;
+      }
+      .deck-editor__field {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+      .deck-editor__field--wide { grid-column: 1 / -1; }
+      .deck-editor__field-inline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
       }
       .deck-editor__prop-row output {
         min-width: 34px;
@@ -12731,8 +12909,10 @@
         font-variant-numeric: tabular-nums;
       }
       .deck-editor__prop-input {
-        flex: 1;
-        height: 32px;
+        flex: 1 1 0;
+        width: 100%;
+        min-width: 0;
+        height: 40px;
         padding: 0 10px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
@@ -12746,7 +12926,7 @@
       }
       .deck-editor__notes {
         width: 100%;
-        min-height: 112px;
+        min-height: 220px;
         resize: vertical;
         padding: 10px;
         border: 1px solid var(--line-1);
@@ -12758,8 +12938,9 @@
       }
       .deck-editor__notes:focus { outline: none; border-color: var(--accent); }
       .deck-editor__color {
-        width: 42px;
-        height: 32px;
+        width: 100%;
+        min-width: 0;
+        height: 40px;
         padding: 2px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
@@ -12770,13 +12951,15 @@
         min-width: 0;
       }
       .deck-editor__scout {
-        margin-top: auto;
-        padding-top: 16px;
-        border-top: 1px solid var(--line-1);
+        min-height: 100%;
+        border-bottom: 0;
+        background:
+          radial-gradient(circle at 100% 0, color-mix(in srgb, var(--ember) 10%, transparent), transparent 42%),
+          var(--surface-1);
       }
       .deck-editor__scout textarea {
         width: 100%;
-        min-height: 76px;
+        min-height: 132px;
         resize: vertical;
       }
       .deck-editor__scout-status {
@@ -12798,12 +12981,14 @@
       }
       /* Z-order buttons */
       .deck-editor__zorder {
-        display: flex;
-        gap: 4px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
       }
       .deck-editor__zorder button {
         flex: 1;
-        height: 32px;
+        min-width: 0;
+        min-height: 40px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
         background: var(--surface-2);
@@ -12832,7 +13017,7 @@
           padding: 16px;
         }
         .deck-editor__props {
-          width: 228px;
+          width: 288px;
         }
         .deck-editor__toolbar-center {
           gap: 2px;
@@ -12846,8 +13031,7 @@
           width: 100px;
         }
         .deck-editor__props {
-          width: 196px;
-          padding: 12px;
+          width: 276px;
         }
         .deck-editor__title {
           max-width: 100px;
@@ -12860,19 +13044,86 @@
         .deck-editor__toolbar-center [data-action="add-image"],
         .deck-editor__toolbar-center [data-action="add-rectangle"],
         .deck-editor__toolbar-center [data-action="add-ellipse"],
-        .deck-editor__toolbar-center [data-action="send-backward"],
-        .deck-editor__toolbar-center [data-action="bring-forward"] {
+        .deck-editor__toolbar-center [data-action="arrange"] {
           display: none;
         }
       }
-      /* Phone: collapse sidebar into bottom sheet (not full editor on phone) */
+      .deck-editor__mobile-inspector { display: none; }
+      .deck-editor__download { position: relative; }
+      .deck-editor__popover {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        z-index: 12;
+        display: grid;
+        gap: 4px;
+        width: 220px;
+        padding: 7px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-3);
+      }
+      .deck-editor__popover[hidden] { display: none; }
+      .deck-editor__popover button,
+      .deck-editor__popover a {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 40px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .deck-editor__popover button:hover,
+      .deck-editor__popover a:hover { background: var(--surface-2); }
+      .deck-editor__popover small { color: var(--text-3); font: var(--type-caption); }
+      .deck-editor__zoom {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 78px;
+        color: var(--text-3);
+        font: var(--type-label);
+        font-variant-numeric: tabular-nums;
+      }
+      .deck-editor__zoom input { width: 72px; }
+      /* Phone: the inspector becomes a real bottom command sheet instead of
+         silently removing editing controls. */
       @media (max-width: 640px) {
         .deck-editor__sidebar {
           width: 80px;
         }
         .deck-editor__props {
-          display: none;
+          position: fixed;
+          left: 80px;
+          right: 0;
+          bottom: 0;
+          z-index: 5;
+          width: auto;
+          max-height: min(68vh, 620px);
+          border-top: 1px solid var(--line-1);
+          border-left: 1px solid var(--line-1);
+          border-radius: var(--r-lg) 0 0 0;
+          box-shadow: 0 -18px 52px rgba(0,0,0,.18);
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(calc(100% + 16px));
+          transition-property: opacity, transform;
+          transition-duration: var(--dur-slow);
+          transition-timing-function: var(--ease);
         }
+        .deck-editor[data-inspector-open="true"] .deck-editor__props {
+          opacity: 1;
+          pointer-events: auto;
+          transform: translateY(0);
+        }
+        .deck-editor__mobile-inspector { display: inline-flex; }
         .deck-editor__title {
           max-width: 80px;
         }
@@ -12881,10 +13132,6 @@
         .deck-editor__toolbar-center [data-action="add-image"],
         .deck-editor__toolbar-center [data-action="add-rectangle"],
         .deck-editor__toolbar-center [data-action="add-ellipse"],
-        .deck-editor__toolbar-center [data-action="bring-front"],
-        .deck-editor__toolbar-center [data-action="send-back"],
-        .deck-editor__toolbar-center [data-action="send-backward"],
-        .deck-editor__toolbar-center [data-action="bring-forward"],
         .deck-editor__toolbar-right [data-action="save-copy"] {
           display: none;
         }
@@ -12902,7 +13149,6 @@
         display: grid;
         grid-template-rows: 58px minmax(0, 1fr);
         background: var(--bg-app);
-        animation: deck-editor-in var(--dur-slow) var(--ease);
       }
       .document-editor__toolbar {
         display: grid;
@@ -12970,6 +13216,11 @@
         border-radius: 6px;
         background: var(--surface-1);
         box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 18px 60px rgba(0,0,0,.09);
+        animation: document-paper-in var(--dur-med) var(--ease) both;
+      }
+      @keyframes document-paper-in {
+        from { opacity: .72; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
       }
       .document-editor__source {
         width: 100%;
@@ -12979,12 +13230,105 @@
         outline: 0;
         background: transparent;
         color: var(--text-1);
-        font: 400 17px/1.7 var(--font-sans);
+        font: 400 14px/1.65 var(--font-mono);
         letter-spacing: -.006em;
         tab-size: 2;
       }
-      .document-editor__preview { display: grid; gap: 16px; }
-      .document-editor__preview[hidden], .document-editor__source[hidden] { display: none; }
+      .document-editor__rich {
+        width: 100%;
+        min-height: calc(100vh - 350px);
+        outline: 0;
+        color: var(--text-1);
+        font: 400 17px/1.68 var(--font-sans);
+        letter-spacing: -.006em;
+        caret-color: var(--ember);
+      }
+      .document-editor__rich:focus-visible {
+        outline: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .document-editor__paper:focus-within {
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--ember) 38%, transparent), 0 18px 60px rgba(0,0,0,.09);
+      }
+      .document-editor__rich:empty::before {
+        content: 'Start writing…';
+        color: var(--text-3);
+        pointer-events: none;
+      }
+      .document-editor__rich > :first-child { margin-top: 0; }
+      .document-editor__rich > :last-child { margin-bottom: 0; }
+      .document-editor__rich h1,
+      .document-editor__rich h2,
+      .document-editor__rich h3 {
+        margin: 1.45em 0 .45em;
+        color: var(--text-1);
+        font-family: var(--font-display, var(--font-sans));
+        line-height: 1.12;
+        letter-spacing: -.025em;
+        text-wrap: balance;
+      }
+      .document-editor__rich h1 { font-size: clamp(30px, 4vw, 44px); }
+      .document-editor__rich h2 { font-size: 28px; }
+      .document-editor__rich h3 { font-size: 21px; }
+      .document-editor__rich p { margin: 0 0 1em; }
+      .document-editor__rich ul,
+      .document-editor__rich ol { margin: 0 0 1em; padding-left: 1.5em; }
+      .document-editor__rich li { margin: .22em 0; }
+      .document-editor__rich blockquote {
+        margin: 1.2em 0;
+        padding: .1em 0 .1em 18px;
+        border-left: 3px solid var(--ember);
+        color: var(--text-2);
+        font-size: 1.08em;
+      }
+      .document-editor__rich code {
+        padding: .08em .32em;
+        border-radius: 5px;
+        background: var(--surface-3);
+        font-family: var(--font-mono);
+        font-size: .9em;
+      }
+      .document-editor__rich a { color: var(--ember-text); text-underline-offset: 3px; }
+      .document-editor__rich hr { margin: 2em 0; border: 0; border-top: 1px solid var(--line-2); }
+      .document-editor__rich table {
+        width: 100%;
+        margin: 1.25em 0;
+        border-collapse: separate;
+        border-spacing: 0;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-md);
+        overflow: hidden;
+      }
+      .document-editor__rich th,
+      .document-editor__rich td {
+        min-width: 90px;
+        padding: 9px 10px;
+        border-right: 1px solid var(--line-1);
+        border-bottom: 1px solid var(--line-1);
+        text-align: left;
+        vertical-align: top;
+      }
+      .document-editor__rich th { background: var(--surface-2); font-weight: 650; }
+      .document-editor__rich tr:last-child > * { border-bottom: 0; }
+      .document-editor__rich tr > *:last-child { border-right: 0; }
+      .document-editor__rich img { max-width: 100%; height: auto; outline: 1px solid var(--line-1); outline-offset: -1px; }
+      .document-editor__rich[hidden], .document-editor__source[hidden] { display: none; }
+      .document-editor__block-select {
+        min-width: 126px;
+        height: 40px;
+        padding: 0 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-body-sm);
+      }
+      .document-editor__toolbar .deck-editor__btn[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line-1));
+        color: var(--accent);
+      }
       .document-editor__meta { display: grid; gap: 12px; color: var(--text-2); font: var(--type-caption); }
       .document-editor__meta strong { display: block; color: var(--text-1); font: var(--type-caption-medium); }
       .document-editor__status[data-state="error"] { color: var(--danger); }
@@ -13016,6 +13360,10 @@
         .document-editor__toolbar [data-doc-action="save-copy"]::after { content: 'Copy'; font-size: 12px; }
         .document-editor__workspace { padding: 16px 10px 64px; }
         .document-editor__paper { padding: 34px 24px; }
+        .document-editor__rich { min-height: calc(100vh - 260px); font-size: 16px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .document-editor__paper { animation: none; }
       }
 
       .deck-presenter {
@@ -43580,8 +43928,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry }))
 	          headActions.appendChild(editDocument)
 	        }
-        const pdfAssets = artifactAssetEntries(entry).filter(asset =>
-          String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
+        const currentPdfAsset = artifactNewestPdfAsset(entry)
+        const pdfAssets = currentPdfAsset ? [currentPdfAsset] : []
         if (deckContext) {
           // DD-1: lead with the deck cover; present swaps in the sandboxed deck
           // iframe below, and the run-log demotes to a "run details" disclosure
@@ -44278,8 +44626,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }))
 
         // Build editor UI
-        const editor = document.createElement('div')
+        const editor = document.createElement('section')
         editor.className = 'deck-editor'
+        editor.setAttribute('role', 'dialog')
+        editor.setAttribute('aria-modal', 'true')
+        editor.setAttribute('aria-label', `Deck Studio — ${title || 'Untitled deck'}`)
         editor.innerHTML = `
           <div class="deck-editor__toolbar">
             <div class="deck-editor__toolbar-left">
@@ -45006,12 +45357,187 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function closeDocumentStudio() {
         if (!activeDocumentEditor) return
+        const returnFocus = activeDocumentEditor.returnFocus
         activeDocumentEditor.cleanup?.()
         activeDocumentEditor.element?.remove()
         activeDocumentEditor = null
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
+        if (returnFocus?.isConnected) returnFocus.focus()
+      }
+
+      function appendDocumentInlineMarkdown(parent, value) {
+        const text = String(value || '')
+        const token = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|~~([^~]+)~~)/g
+        let cursor = 0
+        for (const match of text.matchAll(token)) {
+          if (match.index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, match.index)))
+          let node
+          let content = ''
+          if (match[2] || match[3]) { node = document.createElement('strong'); content = match[2] || match[3] }
+          else if (match[4] || match[5]) { node = document.createElement('em'); content = match[4] || match[5] }
+          else if (match[6]) { node = document.createElement('code'); content = match[6] }
+          else if (match[7]) { node = document.createElement('a'); node.href = match[8]; node.target = '_blank'; node.rel = 'noreferrer noopener'; content = match[7] }
+          else { node = document.createElement('s'); content = match[9] || '' }
+          node.textContent = content
+          parent.appendChild(node)
+          cursor = match.index + match[0].length
+        }
+        if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)))
+      }
+
+      function markdownIntoDocumentEditor(root, markdown) {
+        root.replaceChildren()
+        const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n')
+        const paragraph = []
+        const flushParagraph = () => {
+          if (!paragraph.length) return
+          const node = document.createElement('p')
+          appendDocumentInlineMarkdown(node, paragraph.join(' ').trim())
+          root.appendChild(node)
+          paragraph.length = 0
+        }
+        for (let index = 0; index < lines.length;) {
+          const line = lines[index]
+          if (!line.trim()) { flushParagraph(); index++; continue }
+          const fence = line.match(/^```\s*([^\s`]*)\s*$/)
+          if (fence) {
+            flushParagraph()
+            const body = []
+            index++
+            while (index < lines.length && !/^```\s*$/.test(lines[index])) body.push(lines[index++])
+            if (index < lines.length) index++
+            const pre = document.createElement('pre')
+            const code = document.createElement('code')
+            if (fence[1]) code.dataset.language = fence[1]
+            code.textContent = body.join('\n')
+            pre.appendChild(code)
+            root.appendChild(pre)
+            continue
+          }
+          const heading = line.match(/^(#{1,3})\s+(.+)$/)
+          if (heading) {
+            flushParagraph()
+            const node = document.createElement(`h${heading[1].length}`)
+            appendDocumentInlineMarkdown(node, heading[2])
+            root.appendChild(node)
+            index++
+            continue
+          }
+          if (/^\s*(?:---+|\*\*\*+)\s*$/.test(line)) {
+            flushParagraph(); root.appendChild(document.createElement('hr')); index++; continue
+          }
+          if (/^\s*>\s?/.test(line)) {
+            flushParagraph()
+            const quote = document.createElement('blockquote')
+            const quoteLines = []
+            while (index < lines.length && /^\s*>\s?/.test(lines[index])) quoteLines.push(lines[index++].replace(/^\s*>\s?/, ''))
+            const p = document.createElement('p'); appendDocumentInlineMarkdown(p, quoteLines.join(' ')); quote.appendChild(p); root.appendChild(quote)
+            continue
+          }
+          const listMatch = line.match(/^\s*(?:([-*+])|(\d+)[.)])\s+(.+)$/)
+          if (listMatch) {
+            flushParagraph()
+            const ordered = Boolean(listMatch[2])
+            const list = document.createElement(ordered ? 'ol' : 'ul')
+            while (index < lines.length) {
+              const item = lines[index].match(/^\s*(?:([-*+])|(\d+)[.)])\s+(.+)$/)
+              if (!item || Boolean(item[2]) !== ordered) break
+              const li = document.createElement('li')
+              appendDocumentInlineMarkdown(li, item[3])
+              list.appendChild(li)
+              index++
+            }
+            root.appendChild(list)
+            continue
+          }
+          const tableHeader = line.trim().startsWith('|') && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])
+          if (tableHeader) {
+            flushParagraph()
+            const splitRow = row => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
+            const rows = [splitRow(line)]
+            index += 2
+            while (index < lines.length && lines[index].includes('|') && lines[index].trim()) rows.push(splitRow(lines[index++]))
+            const table = document.createElement('table')
+            rows.forEach((cells, rowIndex) => {
+              const tr = document.createElement('tr')
+              cells.forEach(cell => { const td = document.createElement(rowIndex === 0 ? 'th' : 'td'); appendDocumentInlineMarkdown(td, cell); tr.appendChild(td) })
+              table.appendChild(tr)
+            })
+            root.appendChild(table)
+            continue
+          }
+          paragraph.push(line.trim())
+          index++
+        }
+        flushParagraph()
+        if (!root.childNodes.length) root.appendChild(document.createElement('p'))
+      }
+
+      function documentInlineToMarkdown(node) {
+        if (node.nodeType === Node.TEXT_NODE) return String(node.nodeValue || '')
+        if (node.nodeType !== Node.ELEMENT_NODE) return ''
+        const tag = node.tagName.toLowerCase()
+        const body = Array.from(node.childNodes).map(documentInlineToMarkdown).join('')
+        if (tag === 'strong' || tag === 'b') return `**${body}**`
+        if (tag === 'em' || tag === 'i') return `*${body}*`
+        if (tag === 'code') return `\`${body.replace(/`/g, '\\`')}\``
+        if (tag === 's' || tag === 'strike') return `~~${body}~~`
+        if (tag === 'a') {
+          const href = String(node.getAttribute('href') || '').trim()
+          return href ? `[${body}](${href})` : body
+        }
+        if (tag === 'br') return '\n'
+        return body
+      }
+
+      function documentEditorToMarkdown(root) {
+        const blocks = []
+        for (const node of root.children) {
+          const tag = node.tagName.toLowerCase()
+          if (/^h[1-3]$/.test(tag)) blocks.push(`${'#'.repeat(Number(tag[1]))} ${documentInlineToMarkdown(node).trim()}`)
+          else if (tag === 'p' || tag === 'div') blocks.push(documentInlineToMarkdown(node).trim())
+          else if (tag === 'blockquote') blocks.push(documentInlineToMarkdown(node).split('\n').map(line => `> ${line}`).join('\n'))
+          else if (tag === 'ul' || tag === 'ol') {
+            const ordered = tag === 'ol'
+            blocks.push(Array.from(node.children).map((item, index) => `${ordered ? `${index + 1}.` : '-'} ${documentInlineToMarkdown(item).trim()}`).join('\n'))
+          } else if (tag === 'pre') {
+            const code = node.querySelector('code')
+            blocks.push(`\`\`\`${String(code?.dataset?.language || '')}\n${String(code?.textContent || node.textContent || '')}\n\`\`\``)
+          } else if (tag === 'hr') blocks.push('---')
+          else if (tag === 'table') {
+            const rows = Array.from(node.rows).map(row => Array.from(row.cells).map(cell => documentInlineToMarkdown(cell).replace(/\|/g, '\\|').trim()))
+            if (rows.length) {
+              const width = Math.max(...rows.map(row => row.length))
+              const normalized = rows.map(row => [...row, ...Array(Math.max(0, width - row.length)).fill('')])
+              blocks.push([`| ${normalized[0].join(' | ')} |`, `| ${Array(width).fill('---').join(' | ')} |`, ...normalized.slice(1).map(row => `| ${row.join(' | ')} |`)].join('\n'))
+            }
+          } else blocks.push(documentInlineToMarkdown(node).trim())
+        }
+        return blocks.filter((block, index, list) => block || (index > 0 && index < list.length - 1)).join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+      }
+
+      function sanitizedDocumentPasteHTML(raw) {
+        const parsed = new DOMParser().parseFromString(String(raw || ''), 'text/html')
+        const allowed = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'S', 'A', 'H1', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE', 'CODE', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD'])
+        const clean = document.createElement('div')
+        const copy = (source, target) => {
+          source.childNodes.forEach(child => {
+            if (child.nodeType === Node.TEXT_NODE) { target.appendChild(document.createTextNode(child.nodeValue || '')); return }
+            if (child.nodeType !== Node.ELEMENT_NODE) return
+            const tag = allowed.has(child.tagName) ? child.tagName.toLowerCase() : 'span'
+            const next = document.createElement(tag)
+            if (tag === 'a') {
+              const href = String(child.getAttribute('href') || '')
+              if (/^(https?:|mailto:)/i.test(href)) next.setAttribute('href', href)
+            }
+            copy(child, next)
+            target.appendChild(next)
+          })
+        }
+        copy(parsed.body, clean)
+        return clean.innerHTML
       }
 
       // Native Document Studio keeps Markdown as the durable source while
@@ -45034,6 +45560,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         if (activeDocumentEditor) closeDocumentStudio()
+        const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 
         const state = {
           artifactId,
@@ -45042,7 +45569,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           markdown: String(payload.document.markdown || ''),
           dirty: false,
           saving: false,
-          previewing: false,
+          sourceMode: false,
           savedToFiles: payload?.artifact?.savedToFiles === true
         }
         const editor = document.createElement('section')
@@ -45060,32 +45587,36 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn" data-doc-action="undo">Undo</button>
               <button type="button" class="deck-editor__btn" data-doc-action="redo">Redo</button>
               <span class="deck-editor__divider"></span>
-              <button type="button" class="deck-editor__btn" data-doc-action="heading">Heading</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="bold"><strong>B</strong></button>
-              <button type="button" class="deck-editor__btn" data-doc-action="italic"><em>I</em></button>
-              <button type="button" class="deck-editor__btn" data-doc-action="bullet">List</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="quote">Quote</button>
+              <select class="document-editor__block-select" data-doc-block aria-label="Text style"><option value="p">Paragraph</option><option value="h1">Title</option><option value="h2">Heading</option><option value="h3">Subheading</option><option value="blockquote">Quote</option></select>
+              <button type="button" class="deck-editor__btn" data-doc-action="bold" aria-pressed="false" aria-label="Bold"><strong>B</strong></button>
+              <button type="button" class="deck-editor__btn" data-doc-action="italic" aria-pressed="false" aria-label="Italic"><em>I</em></button>
+              <button type="button" class="deck-editor__btn" data-doc-action="bullet" aria-pressed="false">Bullets</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="ordered" aria-pressed="false">Numbered</button>
               <button type="button" class="deck-editor__btn" data-doc-action="link">Link</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="preview" aria-pressed="false">Preview</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="table">Table</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="divider">Divider</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="source" aria-pressed="false">Source</button>
             </div>
             <div class="document-editor__group document-editor__group--right">
+              <button type="button" class="deck-editor__btn" data-doc-action="pdf">PDF</button>
               <button type="button" class="deck-editor__btn" data-doc-action="save-copy" aria-label="Save a copy…">Save a copy…</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-doc-action="save">Save</button>
             </div>
           </header>
           <div class="document-editor__main">
             <aside class="document-editor__outline"><span class="document-editor__side-label">Outline</span><nav class="document-editor__outline-list" data-doc-outline></nav></aside>
-            <main class="document-editor__workspace"><article class="document-editor__paper"><textarea class="document-editor__source" data-doc-source spellcheck="true" aria-label="Document body"></textarea><div class="document-editor__preview artifact-stage__read" data-doc-preview hidden></div></article></main>
-            <aside class="document-editor__inspector"><span class="document-editor__side-label">Document</span><div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div></aside>
+            <main class="document-editor__workspace"><article class="document-editor__paper"><div class="document-editor__rich" data-doc-rich contenteditable="true" role="textbox" aria-multiline="true" aria-label="Document body" spellcheck="true"></div><textarea class="document-editor__source" data-doc-source spellcheck="false" aria-label="Markdown source" hidden></textarea></article></main>
+            <aside class="document-editor__inspector"><span class="document-editor__side-label">Document</span><div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>Changes use revision-safe saving.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div></aside>
           </div>`
         const source = editor.querySelector('[data-doc-source]')
+        const rich = editor.querySelector('[data-doc-rich]')
         const titleInput = editor.querySelector('[data-doc-title]')
         const outline = editor.querySelector('[data-doc-outline]')
-        const preview = editor.querySelector('[data-doc-preview]')
         const status = editor.querySelector('[data-doc-status]')
         const saveButton = editor.querySelector('[data-doc-action="save"]')
         const copyButton = editor.querySelector('[data-doc-action="save-copy"]')
         source.value = state.markdown
+        markdownIntoDocumentEditor(rich, state.markdown)
         titleInput.value = state.title
 
         function setStatus(text, tone = '') {
@@ -45093,62 +45624,77 @@ Wrap the entire export in one code block. After the code block, say whether the 
           status.dataset.state = tone
         }
         function updateDocumentChrome() {
-          const body = source.value
+          const body = state.sourceMode ? source.value : documentEditorToMarkdown(rich)
+          if (!state.sourceMode) source.value = body
           editor.querySelector('[data-doc-words]').textContent = `${(body.trim().match(/\S+/g) || []).length} words`
           editor.querySelector('[data-doc-chars]').textContent = `${body.length} characters`
+          editor.querySelector('[data-doc-revision]').textContent = `Revision ${state.version}`
           outline.replaceChildren()
-          const headings = Array.from(body.matchAll(/^(#{1,3})\s+(.+)$/gm))
-          headings.forEach((match, index) => {
-            const button = bfEl('button', 'document-editor__outline-item', match[2].replace(/[*_`]/g, '').trim())
+          const richHeadings = state.sourceMode ? [] : Array.from(rich.querySelectorAll('h1,h2,h3'))
+          const sourceHeadings = state.sourceMode ? Array.from(body.matchAll(/^(#{1,3})\s+(.+)$/gm)) : []
+          const headings = state.sourceMode ? sourceHeadings : richHeadings
+          headings.forEach((item) => {
+            const level = state.sourceMode ? item[1].length : Number(item.tagName.slice(1))
+            const label = state.sourceMode ? item[2].replace(/[*_`]/g, '').trim() : String(item.textContent || '').trim()
+            const button = bfEl('button', 'document-editor__outline-item', label)
             button.type = 'button'
-            button.style.paddingLeft = `${9 + (match[1].length - 1) * 12}px`
+            button.style.paddingLeft = `${9 + (level - 1) * 12}px`
             button.addEventListener('click', () => {
-              state.previewing = false
-              syncMode()
-              source.focus()
-              source.setSelectionRange(match.index, match.index + match[0].length)
-              source.scrollTop = Math.max(0, source.scrollHeight * (index / Math.max(1, headings.length)) - source.clientHeight / 3)
+              if (state.sourceMode) {
+                source.focus()
+                source.setSelectionRange(item.index, item.index + item[0].length)
+              } else {
+                item.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+                const range = document.createRange(); range.selectNodeContents(item); range.collapse(true)
+                const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+                rich.focus()
+              }
             })
             outline.appendChild(button)
           })
           if (!outline.childElementCount) outline.appendChild(bfEl('span', 'document-editor__outline-item', 'Add headings to build an outline'))
         }
         function syncMode() {
-          source.hidden = state.previewing
-          preview.hidden = !state.previewing
-          const toggle = editor.querySelector('[data-doc-action="preview"]')
-          toggle.setAttribute('aria-pressed', String(state.previewing))
-          toggle.textContent = state.previewing ? 'Edit' : 'Preview'
-          if (state.previewing) {
-            renderArtifactRead(preview, { id: state.artifactId, text: source.value, metadata: { title: titleInput.value, type: 'markdown' } }, { forceSafe: true })
-          }
+          if (state.sourceMode) source.value = documentEditorToMarkdown(rich)
+          else markdownIntoDocumentEditor(rich, source.value)
+          source.hidden = !state.sourceMode
+          rich.hidden = state.sourceMode
+          const toggle = editor.querySelector('[data-doc-action="source"]')
+          toggle.setAttribute('aria-pressed', String(state.sourceMode))
+          toggle.textContent = state.sourceMode ? 'Visual' : 'Source'
+          editor.querySelector('[data-doc-block]').disabled = state.sourceMode
+          editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="link"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
+          updateDocumentChrome()
+          ;(state.sourceMode ? source : rich).focus()
         }
         function markDirty() {
           state.dirty = true
+          if (!state.sourceMode) source.value = documentEditorToMarkdown(rich)
           setStatus('Unsaved changes')
           updateDocumentChrome()
-          if (state.previewing) syncMode()
         }
         function requestDocumentClose() {
           if (state.dirty && !window.confirm('Discard unsaved changes?')) return
           closeDocumentStudio()
         }
-        function replaceSelection(prefix, suffix = prefix, placeholder = '') {
-          const start = source.selectionStart
-          const end = source.selectionEnd
-          const selected = source.value.slice(start, end) || placeholder
-          source.setRangeText(`${prefix}${selected}${suffix}`, start, end, 'end')
-          source.focus()
+        function runRichCommand(command, value = null) {
+          if (state.sourceMode) return
+          rich.focus()
+          document.execCommand(command, false, value)
           markDirty()
+          updateFormatState()
         }
-        function prefixLines(prefix) {
-          const start = source.value.lastIndexOf('\n', Math.max(0, source.selectionStart - 1)) + 1
-          const endLine = source.value.indexOf('\n', source.selectionEnd)
-          const end = endLine < 0 ? source.value.length : endLine
-          const selected = source.value.slice(start, end).split('\n').map(line => `${prefix}${line}`).join('\n')
-          source.setRangeText(selected, start, end, 'select')
-          source.focus()
-          markDirty()
+        function updateFormatState() {
+          if (state.sourceMode || !editor.isConnected) return
+          for (const [action, command] of [['bold', 'bold'], ['italic', 'italic'], ['bullet', 'insertUnorderedList'], ['ordered', 'insertOrderedList']]) {
+            editor.querySelector(`[data-doc-action="${action}"]`)?.setAttribute('aria-pressed', String(document.queryCommandState(command)))
+          }
+          const selection = window.getSelection()
+          const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement
+          if (!anchor || !rich.contains(anchor)) return
+          const block = anchor.closest?.('h1,h2,h3,blockquote,p,div')
+          const value = block?.tagName?.toLowerCase()
+          if (['h1', 'h2', 'h3', 'blockquote', 'p'].includes(value)) editor.querySelector('[data-doc-block]').value = value
         }
         async function saveToFiles(destination) {
           const response = await fetch('/assistant/files/save', {
@@ -45179,10 +45725,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.title = String(result?.artifact?.title || titleInput.value)
             state.dirty = false
             const entry = { ...(options.entry || {}), id: state.artifactId, text: state.markdown, metadata: { ...(options.entry?.metadata || {}), title: state.title, type: 'markdown', artifactVersion: String(state.version) } }
-            if (destination) { await saveToFiles(destination); entry.metadata.savedToFiles = 'true' }
+            let filingError = null
+            if (destination) {
+              try { await saveToFiles(destination); entry.metadata.savedToFiles = 'true' }
+              catch (error) { filingError = error }
+            }
             addArtifactEntry(entry, { select: false })
-            setStatus('Saved', 'saved')
-            showToast({ text: 'Document saved', kind: 'done' })
+            updateDocumentChrome()
+            if (filingError) {
+              setStatus('Document saved. Adding it to Files failed; Save will retry the filing step.', 'error')
+              showToast({ text: 'Document saved, but Files is temporarily unavailable.', kind: 'note' })
+            } else {
+              setStatus('Saved', 'saved')
+              showToast({ text: 'Document saved', kind: 'done' })
+            }
             if (closeAfter) closeDocumentStudio()
             return true
           } catch (error) {
@@ -45207,7 +45763,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
               body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, document: { schemaVersion: 1, markdown: source.value } })
             })
             const result = await response.json().catch(() => ({}))
-            if (!response.ok || !result?.artifact || !result?.file) throw new Error(result?.error || 'Document copy could not be saved')
+            if (!response.ok && result?.partialSuccess && result?.artifact?.id) {
+              addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'false', status: 'complete' } }, { select: false })
+              const retry = await fetch('/assistant/files/save', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId: result.artifact.id, fileName: destination.fileName, folderId: destination.folderId })
+              })
+              const retried = await retry.json().catch(() => ({}))
+              if (!retry.ok || !retried?.file) {
+                setStatus(`Copy created as “${destination.fileName}”; Files is unavailable. Open the copy from your artifacts to retry.`, 'error')
+                return true
+              }
+              result.file = retried.file
+            } else if (!response.ok || !result?.artifact || !result?.file) {
+              throw new Error(result?.error || 'Document copy could not be saved')
+            }
             addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'true', status: 'complete' } }, { select: false })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
             setStatus(`Saved “${destination.fileName}” to Files`, 'saved')
@@ -45221,6 +45791,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
         async function reloadDocument() {
+          if (state.dirty && !window.confirm('Replace your unsaved draft with the current saved revision?')) return
           const response = await fetch(`/artifacts/document?id=${encodeURIComponent(state.artifactId)}`, { cache: 'no-store' })
           const result = await response.json().catch(() => ({}))
           if (!response.ok || !result?.document) { setStatus(result?.error || 'Reload failed', 'error'); return }
@@ -45228,11 +45799,39 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.markdown = String(result.document.markdown || '')
           state.title = String(result.artifact.title || state.title)
           source.value = state.markdown
+          markdownIntoDocumentEditor(rich, state.markdown)
           titleInput.value = state.title
           state.dirty = false
-          updateDocumentChrome()
+          state.sourceMode = false
           syncMode()
           setStatus('Current version loaded', 'saved')
+        }
+        async function exportDocumentPDF(button) {
+          if (state.dirty && !(await saveDocument(false))) return
+          const label = button.textContent
+          button.disabled = true
+          button.textContent = 'Rendering…'
+          try {
+            const response = await fetch('/artifacts/export-pdf', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok) throw new Error(result?.error || 'PDF export failed')
+            const landed = await waitForArtifactPdfAsset(state.artifactId)
+            if (!landed?.pdf) throw new Error('PDF is still rendering and will remain attached to this document when ready.')
+            state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
+            const link = document.createElement('a')
+            link.href = artifactBlobUrl(landed.pdf)
+            link.download = String(landed.pdf.name || `${state.title}.pdf`)
+            document.body.appendChild(link); link.click(); link.remove()
+            showToast({ text: 'PDF downloaded', kind: 'done' })
+          } catch (error) {
+            showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+          } finally {
+            button.disabled = false
+            button.textContent = label
+          }
         }
         editor.addEventListener('click', event => {
           const action = event.target.closest('[data-doc-action]')?.dataset.docAction
@@ -45241,32 +45840,67 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'save') saveDocument(false)
           else if (action === 'save-copy') saveCopy()
           else if (action === 'reload') reloadDocument()
-          else if (action === 'preview') { state.previewing = !state.previewing; syncMode() }
-          else if (action === 'undo' || action === 'redo') { source.focus(); document.execCommand(action); markDirty() }
-          else if (action === 'heading') prefixLines('## ')
-          else if (action === 'bold') replaceSelection('**', '**', 'bold text')
-          else if (action === 'italic') replaceSelection('_', '_', 'emphasis')
-          else if (action === 'bullet') prefixLines('- ')
-          else if (action === 'quote') prefixLines('> ')
-          else if (action === 'link') replaceSelection('[', '](https://)', 'link text')
+          else if (action === 'pdf') exportDocumentPDF(event.target.closest('[data-doc-action="pdf"]'))
+          else if (action === 'source') { state.sourceMode = !state.sourceMode; syncMode() }
+          else if (action === 'undo' || action === 'redo') { (state.sourceMode ? source : rich).focus(); document.execCommand(action); markDirty() }
+          else if (action === 'bold') runRichCommand('bold')
+          else if (action === 'italic') runRichCommand('italic')
+          else if (action === 'bullet') runRichCommand('insertUnorderedList')
+          else if (action === 'ordered') runRichCommand('insertOrderedList')
+          else if (action === 'link') {
+            const href = window.prompt('Link URL', 'https://')
+            if (href && /^(https?:|mailto:)/i.test(href.trim())) runRichCommand('createLink', href.trim())
+          }
+          else if (action === 'table') runRichCommand('insertHTML', '<table><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr></table><p><br></p>')
+          else if (action === 'divider') runRichCommand('insertHorizontalRule')
+        })
+        editor.querySelector('[data-doc-block]').addEventListener('change', event => runRichCommand('formatBlock', event.target.value))
+        rich.addEventListener('input', markDirty)
+        rich.addEventListener('paste', event => {
+          event.preventDefault()
+          const html = event.clipboardData?.getData('text/html')
+          const plain = event.clipboardData?.getData('text/plain') || ''
+          document.execCommand(html ? 'insertHTML' : 'insertText', false, html ? sanitizedDocumentPasteHTML(html) : plain)
+          markDirty()
+        })
+        rich.addEventListener('keydown', event => {
+          if (event.key !== 'Tab') return
+          const cell = event.target.closest?.('td,th') || window.getSelection()?.anchorNode?.parentElement?.closest?.('td,th')
+          if (!cell || !rich.contains(cell)) return
+          event.preventDefault()
+          const cells = Array.from(cell.closest('table').querySelectorAll('th,td'))
+          let index = cells.indexOf(cell) + (event.shiftKey ? -1 : 1)
+          if (index >= cells.length) {
+            const table = cell.closest('table')
+            const row = table.insertRow()
+            const columns = table.rows[0]?.cells.length || 1
+            for (let column = 0; column < columns; column++) row.insertCell().textContent = 'Cell'
+            index = cells.length
+            cells.push(...Array.from(row.cells))
+            markDirty()
+          }
+          const next = cells[Math.max(0, index)]
+          if (next) { const range = document.createRange(); range.selectNodeContents(next); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range) }
         })
         source.addEventListener('input', markDirty)
         titleInput.addEventListener('input', markDirty)
+        const selectionChange = () => { if (editor.isConnected && !state.sourceMode) updateFormatState() }
+        document.addEventListener('selectionchange', selectionChange)
         const keydown = event => {
           if (event.key === 'Escape') requestDocumentClose()
           else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDocument(false) }
-          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); replaceSelection('**', '**', 'bold text') }
-          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') { event.preventDefault(); replaceSelection('_', '_', 'emphasis') }
-          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); replaceSelection('[', '](https://)', 'link text') }
+          else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); runRichCommand('bold') }
+          else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') { event.preventDefault(); runRichCommand('italic') }
+          else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); editor.querySelector('[data-doc-action="link"]')?.click() }
         }
         document.addEventListener('keydown', keydown)
-        activeDocumentEditor = { element: editor, cleanup: () => document.removeEventListener('keydown', keydown) }
+        activeDocumentEditor = { element: editor, returnFocus, cleanup: () => { document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange) } }
         document.body.appendChild(editor)
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
         updateDocumentChrome()
-        source.focus()
+        rich.focus()
       }
 
       // Structured Deck Studio. The server owns legacy-HTML import and HTML
@@ -45291,11 +45925,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         if (activeDeckEditor) closeDeckEditor()
+        const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 
         const clone = value => JSON.parse(JSON.stringify(value))
         const state = {
           artifactId,
           version: Number(payload?.artifact?.version || 1),
+          sceneRef: String(payload?.artifact?.sceneRef || '').trim(),
           deck: normalizeDeckDocument(payload.deck),
           slideIndex: 0,
           selectedId: '',
@@ -45304,17 +45940,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
           dirty: false,
           saving: false,
           imageGenerating: false,
+          inspectorTab: 'design',
+          zoom: 1,
+          elementClipboard: null,
+          textEditingId: '',
           canWrite: true,
           savedToFiles: payload?.artifact?.savedToFiles === true || String(payload?.artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true',
           options
         }
 
-        const editor = document.createElement('div')
+        const editor = document.createElement('section')
         editor.className = 'deck-editor'
+        editor.setAttribute('role', 'dialog')
+        editor.setAttribute('aria-modal', 'true')
+        editor.setAttribute('aria-label', `Deck Studio — ${title || payload?.artifact?.title || 'Untitled deck'}`)
         editor.innerHTML = `
           <div class="deck-editor__toolbar">
             <div class="deck-editor__toolbar-left">
-              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close editor">×</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close Deck Studio">×</button>
               <h2 class="deck-editor__title">${escapeHtml(title || payload?.artifact?.title || 'Untitled deck')}</h2>
             </div>
             <div class="deck-editor__toolbar-center">
@@ -45325,17 +45968,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn" data-action="add-image">Upload</button>
               <button type="button" class="deck-editor__btn" data-action="add-rectangle">Rectangle</button>
               <button type="button" class="deck-editor__btn" data-action="add-ellipse">Ellipse</button>
-              <span class="deck-editor__divider"></span>
-              <button type="button" class="deck-editor__btn" data-action="send-back">Back</button>
-              <button type="button" class="deck-editor__btn" data-action="send-backward">Backward</button>
-              <button type="button" class="deck-editor__btn" data-action="bring-forward">Forward</button>
-              <button type="button" class="deck-editor__btn" data-action="bring-front">Front</button>
             </div>
             <div class="deck-editor__toolbar-right">
               <div class="deck-editor__slide-nav">
                 <button type="button" data-action="prev-slide" aria-label="Previous slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12 6 8l4-4"/></svg></button>
                 <span data-slide-indicator></span>
                 <button type="button" data-action="next-slide" aria-label="Next slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button>
+              </div>
+              <label class="deck-editor__zoom" title="Canvas zoom"><input type="range" min="50" max="140" step="5" value="100" data-zoom><span data-zoom-output>100%</span></label>
+              <button type="button" class="deck-editor__btn deck-editor__mobile-inspector" data-action="toggle-inspector" aria-expanded="false">Inspector</button>
+              <div class="deck-editor__download">
+                <button type="button" class="deck-editor__btn" data-action="download-menu" aria-haspopup="menu" aria-expanded="false">Download</button>
+                <div class="deck-editor__popover" data-download-menu role="menu" hidden>
+                  <button type="button" role="menuitem" data-action="export-pptx"><span>PowerPoint</span><small>.pptx</small></button>
+                  <button type="button" role="menuitem" data-action="export-pdf"><span>PDF</span><small>.pdf</small></button>
+                </div>
               </div>
               <button type="button" class="deck-editor__btn" data-action="present">Present</button>
               <button type="button" class="deck-editor__btn" data-action="save-copy">Save a copy…</button>
@@ -45354,44 +46001,92 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="deck-editor__canvas-wrap" data-canvas-wrap>
               <div class="deck-editor__canvas" data-canvas><div class="deck-editor__scene" data-scene></div></div>
             </div>
-            <aside class="deck-editor__props">
-              <div class="deck-editor__prop-section">
-                <span class="deck-editor__prop-label">Position</span>
-                <div class="deck-editor__prop-row"><label>X</label><input type="number" class="deck-editor__prop-input" data-prop="x"><label>Y</label><input type="number" class="deck-editor__prop-input" data-prop="y"></div>
+            <aside class="deck-editor__props" aria-label="Slide inspector">
+              <header class="deck-editor__inspector-head">
+                <span class="deck-editor__inspector-eyebrow" data-inspector-eyebrow>Slide 1</span>
+                <h3 class="deck-editor__inspector-title" data-inspector-title>Slide design</h3>
+                <p class="deck-editor__inspector-hint" data-inspector-hint>Select an object to edit its properties.</p>
+              </header>
+              <div class="deck-editor__tabs" role="tablist" aria-label="Inspector panels">
+                <button type="button" class="deck-editor__tab" role="tab" aria-selected="true" data-inspector-tab="design">Design</button>
+                <button type="button" class="deck-editor__tab" role="tab" aria-selected="false" data-inspector-tab="notes">Notes</button>
+                <button type="button" class="deck-editor__tab" role="tab" aria-selected="false" data-inspector-tab="scout">Scout</button>
               </div>
-              <div class="deck-editor__prop-section">
-                <span class="deck-editor__prop-label">Size</span>
-                <div class="deck-editor__prop-row"><label>W</label><input type="number" class="deck-editor__prop-input" data-prop="width"><label>H</label><input type="number" class="deck-editor__prop-input" data-prop="height"></div>
-                <div class="deck-editor__prop-row"><label>Rotation</label><input type="number" min="-360" max="360" class="deck-editor__prop-input" data-prop="rotation"></div>
-                <div class="deck-editor__prop-row"><label>Opacity</label><input type="range" class="deck-editor__range" min="0" max="1" step="0.05" data-prop="opacity"><output data-opacity-output></output></div>
-              </div>
-              <div class="deck-editor__prop-section" data-text-controls hidden>
-                <span class="deck-editor__prop-label">Typography</span>
-                <div class="deck-editor__prop-row"><label>Color</label><input type="color" class="deck-editor__color" data-prop="color"><label>Size</label><input type="number" min="8" max="400" class="deck-editor__prop-input" data-prop="fontSize"></div>
-                <div class="deck-editor__prop-row"><label>Font</label><input type="text" class="deck-editor__prop-input" data-prop="fontFamily" placeholder="Font family or stack"></div>
-                <div class="deck-editor__prop-row"><label>Weight</label><select class="deck-editor__prop-input" data-prop="fontWeight"><option value="400">Regular</option><option value="600">Semibold</option><option value="700">Bold</option><option value="800">Heavy</option></select><label>Align</label><select class="deck-editor__prop-input" data-prop="textAlign"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></div>
-                <div class="deck-editor__prop-row"><label>Leading</label><input type="number" min="0.7" max="4" step="0.05" class="deck-editor__prop-input" data-prop="lineHeight"><label>Tracking</label><input type="text" class="deck-editor__prop-input" data-prop="letterSpacing" placeholder="normal or .04em"></div>
-              </div>
-              <div class="deck-editor__prop-section" data-shape-controls hidden>
-                <span class="deck-editor__prop-label">Appearance</span>
-                <div class="deck-editor__prop-row"><label>Fill</label><input type="color" class="deck-editor__color" data-prop="fill"><label>Stroke</label><input type="color" class="deck-editor__color" data-prop="stroke"></div>
-              </div>
-              <div class="deck-editor__prop-section" data-image-controls hidden>
-                <span class="deck-editor__prop-label">Image crop</span>
-                <div class="deck-editor__prop-row"><label>Frame</label><select class="deck-editor__prop-input" data-prop="fit"><option value="cover">Fill frame</option><option value="contain">Fit inside</option></select></div>
-              </div>
-              <div class="deck-editor__prop-section">
-                <span class="deck-editor__prop-label">Presenter notes</span>
-                <textarea class="deck-editor__notes" data-slide-notes placeholder="What the presenter should say on this slide"></textarea>
-              </div>
-              <div class="deck-editor__prop-section deck-editor__scout">
-                <span class="deck-editor__prop-label">Scout imagery</span>
-                <textarea class="deck-editor__prop-input" data-image-prompt placeholder="Describe an image for this slide"></textarea>
-                <div class="deck-editor__prop-row">
-                  <select class="deck-editor__prop-input" data-image-placement aria-label="Image placement"><option value="image">Place image</option><option value="full_bleed">Full bleed</option></select>
-                  <button type="button" class="deck-editor__btn" data-action="generate-image">Generate</button>
+              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="design">
+                <div class="deck-editor__prop-section" data-slide-controls>
+                  <span class="deck-editor__prop-label">Slide</span>
+                  <label class="deck-editor__field">Background<input type="color" class="deck-editor__color" data-slide-background></label>
                 </div>
-                <div class="deck-editor__scout-status" data-image-status aria-live="polite">Scout will add the finished image to this slide.</div>
+                <div data-element-controls hidden>
+                  <div class="deck-editor__prop-section">
+                    <span class="deck-editor__prop-label">Transform</span>
+                    <div class="deck-editor__prop-grid">
+                      <label class="deck-editor__field">X<input type="number" class="deck-editor__prop-input" data-prop="x"></label>
+                      <label class="deck-editor__field">Y<input type="number" class="deck-editor__prop-input" data-prop="y"></label>
+                      <label class="deck-editor__field">Width<input type="number" class="deck-editor__prop-input" data-prop="width"></label>
+                      <label class="deck-editor__field">Height<input type="number" class="deck-editor__prop-input" data-prop="height"></label>
+                      <label class="deck-editor__field">Rotation<input type="number" min="-360" max="360" class="deck-editor__prop-input" data-prop="rotation"></label>
+                      <label class="deck-editor__field">Opacity<span class="deck-editor__field-inline"><input type="range" class="deck-editor__range" min="0" max="1" step="0.01" data-prop="opacity"><output data-opacity-output></output></span></label>
+                    </div>
+                  </div>
+                  <div class="deck-editor__prop-section" data-text-controls hidden>
+                    <span class="deck-editor__prop-label">Typography</span>
+                    <div class="deck-editor__prop-grid">
+                      <label class="deck-editor__field">Color<input type="color" class="deck-editor__color" data-prop="color"></label>
+                      <label class="deck-editor__field">Size<input type="number" min="8" max="400" class="deck-editor__prop-input" data-prop="fontSize"></label>
+                      <label class="deck-editor__field deck-editor__field--wide">Font<input type="text" class="deck-editor__prop-input" data-prop="fontFamily" placeholder="Font family"></label>
+                      <label class="deck-editor__field">Weight<select class="deck-editor__prop-input" data-prop="fontWeight"><option value="400">Regular</option><option value="600">Semibold</option><option value="700">Bold</option><option value="800">Heavy</option></select></label>
+                      <label class="deck-editor__field">Align<select class="deck-editor__prop-input" data-prop="textAlign"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+                      <label class="deck-editor__field">Leading<input type="number" min="0.7" max="4" step="0.05" class="deck-editor__prop-input" data-prop="lineHeight"></label>
+                      <label class="deck-editor__field">Tracking<input type="text" class="deck-editor__prop-input" data-prop="letterSpacing" placeholder="normal or .04em"></label>
+                    </div>
+                  </div>
+                  <div class="deck-editor__prop-section" data-shape-controls hidden>
+                    <span class="deck-editor__prop-label">Appearance</span>
+                    <div class="deck-editor__prop-grid">
+                      <label class="deck-editor__field">Fill<input type="color" class="deck-editor__color" data-prop="fill"></label>
+                      <label class="deck-editor__field">Stroke<input type="color" class="deck-editor__color" data-prop="stroke"></label>
+                      <label class="deck-editor__field deck-editor__field--wide">Stroke width<input type="number" min="0" max="80" step="1" class="deck-editor__prop-input" data-prop="strokeWidth"></label>
+                    </div>
+                  </div>
+                  <div class="deck-editor__prop-section" data-image-controls hidden>
+                    <span class="deck-editor__prop-label">Image</span>
+                    <div class="deck-editor__prop-grid">
+                      <label class="deck-editor__field deck-editor__field--wide">Frame<select class="deck-editor__prop-input" data-prop="fit"><option value="cover">Fill frame</option><option value="contain">Fit inside</option></select></label>
+                    </div>
+                  </div>
+                  <div class="deck-editor__prop-section">
+                    <span class="deck-editor__prop-label">Arrange</span>
+                    <div class="deck-editor__zorder">
+                      <button type="button" data-action="send-back">Send to back</button>
+                      <button type="button" data-action="bring-front">Bring to front</button>
+                      <button type="button" data-action="send-backward">Back one</button>
+                      <button type="button" data-action="bring-forward">Forward one</button>
+                      <button type="button" data-action="align-center">Center horizontally</button>
+                      <button type="button" data-action="align-middle">Center vertically</button>
+                      <button type="button" data-action="duplicate-element">Duplicate</button>
+                      <button type="button" data-action="delete-element">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="notes" hidden>
+                <div class="deck-editor__prop-section">
+                  <span class="deck-editor__prop-label">Presenter notes</span>
+                  <textarea class="deck-editor__notes" data-slide-notes placeholder="What should the presenter say on this slide?"></textarea>
+                </div>
+              </div>
+              <div class="deck-editor__panel" role="tabpanel" data-inspector-panel="scout" hidden>
+                <div class="deck-editor__prop-section deck-editor__scout">
+                  <span class="deck-editor__prop-label">Create imagery with Scout</span>
+                  <p class="deck-editor__inspector-hint">Describe the composition, subject, mood, and whether the image should support text or carry the whole slide.</p>
+                  <textarea class="deck-editor__prop-input" data-image-prompt placeholder="Golden-hour field correspondent at a county fair, editorial documentary photography, generous dark sky for white headline…"></textarea>
+                  <div class="deck-editor__prop-row">
+                    <select class="deck-editor__prop-input" data-image-placement aria-label="Image placement"><option value="image">Add as an image</option><option value="full_bleed">Fill the slide</option></select>
+                    <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="generate-image">Generate</button>
+                  </div>
+                  <div class="deck-editor__scout-status" data-image-status aria-live="polite">The finished image will land directly on this slide, ready to crop, resize, and layer.</div>
+                </div>
               </div>
             </aside>
           </div>`
@@ -45404,6 +46099,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const saveButton = editor.querySelector('[data-action="save"]')
         const copyButton = editor.querySelector('[data-action="save-copy"]')
         const imageStatus = editor.querySelector('[data-image-status]')
+        const downloadMenu = editor.querySelector('[data-download-menu]')
+        const zoomInput = editor.querySelector('[data-zoom]')
+        const zoomOutput = editor.querySelector('[data-zoom-output]')
 
         function normalizeDeckDocument(input) {
           const deck = input && typeof input === 'object' ? clone(input) : {}
@@ -45498,6 +46196,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
           box.style.zIndex = String(element.z)
           box.style.opacity = String(element.opacity)
           box.style.transform = `rotate(${element.rotation}deg)`
+          if (!miniature) {
+            const objectName = element.type === 'text'
+              ? String(element.text || 'Text').trim().slice(0, 80)
+              : String(element.name || element.prompt || (element.type === 'shape' ? element.shape : 'Image')).trim().slice(0, 80)
+            box.tabIndex = 0
+            box.setAttribute('role', 'button')
+            box.setAttribute('aria-label', `${element.type === 'shape' ? 'Shape' : element.type === 'image' ? 'Image' : 'Text'}: ${objectName || 'Untitled'}`)
+            box.setAttribute('aria-pressed', element.id === state.selectedId ? 'true' : 'false')
+          }
           if (element.type === 'text') {
             const content = document.createElement('div')
             content.className = 'deck-editor__element-content deck-editor__element-content--text'
@@ -45535,10 +46242,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
               if (element.type === 'text') beginTextEdit(box, element)
             })
             if (element.id === state.selectedId) {
-              for (const handle of ['nw', 'ne', 'sw', 'se']) {
+              for (const handle of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'rotate']) {
                 const node = document.createElement('span')
                 node.className = `deck-editor__handle deck-editor__handle--${handle}`
                 node.dataset.handle = handle
+                node.setAttribute('aria-hidden', 'true')
                 node.addEventListener('pointerdown', event => beginTransform(event, element, handle))
                 box.appendChild(node)
               }
@@ -45564,6 +46272,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
             thumb.type = 'button'
             thumb.className = 'deck-editor__thumb'
             thumb.setAttribute('aria-selected', index === state.slideIndex ? 'true' : 'false')
+            const heading = (item.elements || []).find(element => element.type === 'text' && String(element.text || '').trim())
+            thumb.setAttribute('aria-label', `Slide ${index + 1}${heading ? `: ${String(heading.text).trim().slice(0, 72)}` : ''}`)
+            thumb.draggable = true
+            thumb.dataset.slideIndex = String(index)
             const stage = document.createElement('div')
             stage.className = 'deck-editor__thumb-stage'
             stage.style.setProperty('--deck-background', typeof item?.background === 'string' ? item.background : (item?.background?.color || state.deck?.theme?.background || '#111111'))
@@ -45571,6 +46283,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const number = bfEl('span', 'deck-editor__thumb-num', String(index + 1))
             thumb.append(stage, number)
             thumb.addEventListener('click', () => { state.slideIndex = index; state.selectedId = ''; renderAll() })
+            thumb.addEventListener('dragstart', event => {
+              event.dataTransfer?.setData('text/plain', String(index))
+              if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+            })
+            thumb.addEventListener('dragover', event => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move' })
+            thumb.addEventListener('drop', event => {
+              event.preventDefault()
+              const from = Number(event.dataTransfer?.getData('text/plain'))
+              if (!Number.isInteger(from) || from < 0 || from >= state.deck.slides.length || from === index) return
+              checkpoint()
+              const [moved] = state.deck.slides.splice(from, 1)
+              state.deck.slides.splice(index, 0, moved)
+              state.slideIndex = index
+              state.selectedId = ''
+              renderAll()
+            })
             slideList.appendChild(thumb)
           })
         }
@@ -45578,7 +46306,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         function fitCanvas() {
           const rect = canvasWrap.getBoundingClientRect()
           if (!rect.width || !rect.height) return
-          const width = Math.max(1, Math.min(rect.width - 48, (rect.height - 48) * state.deck.width / state.deck.height))
+          const base = Math.max(1, Math.min(rect.width - 48, (rect.height - 48) * state.deck.width / state.deck.height))
+          const width = base * Math.max(.5, Math.min(1.4, state.zoom || 1))
           canvas.style.width = `${width}px`
           canvas.style.height = `${width * state.deck.height / state.deck.width}px`
         }
@@ -45594,16 +46323,36 @@ Wrap the entire export in one code block. After the code block, say whether the 
           editor.querySelector('[data-action="redo"]').disabled = state.future.length === 0
         }
 
+        function setInspectorTab(tab) {
+          const next = ['design', 'notes', 'scout'].includes(tab) ? tab : 'design'
+          state.inspectorTab = next
+          editor.querySelectorAll('[data-inspector-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.inspectorTab === next)))
+          editor.querySelectorAll('[data-inspector-panel]').forEach(panel => { panel.hidden = panel.dataset.inspectorPanel !== next })
+        }
+
         function updateProperties() {
           const element = selected()
           const notes = editor.querySelector('[data-slide-notes]')
           if (notes) notes.value = String(slide()?.notes || '')
+          const background = editor.querySelector('[data-slide-background]')
+          const slideBackground = typeof slide()?.background === 'string' ? slide().background : (slide()?.background?.color || state.deck?.theme?.background || '#111111')
+          if (background && /^#[0-9a-f]{6}$/i.test(slideBackground)) background.value = slideBackground
+          const eyebrow = editor.querySelector('[data-inspector-eyebrow]')
+          const heading = editor.querySelector('[data-inspector-title]')
+          const hint = editor.querySelector('[data-inspector-hint]')
+          if (eyebrow) eyebrow.textContent = `Slide ${state.slideIndex + 1}`
+          if (heading) heading.textContent = element ? (element.type === 'text' ? 'Text' : element.type === 'image' ? 'Image' : 'Shape') : 'Slide design'
+          if (hint) hint.textContent = element
+            ? (element.type === 'text' ? String(element.text || 'Edit this text object').trim().slice(0, 92) : String(element.name || element.prompt || 'Edit the selected object').trim().slice(0, 92))
+            : 'Select an object to edit its properties.'
           editor.querySelectorAll('[data-prop]').forEach(input => { input.disabled = !element })
+          const elementControls = editor.querySelector('[data-element-controls]')
+          if (elementControls) elementControls.hidden = !element
           editor.querySelector('[data-text-controls]').hidden = element?.type !== 'text'
           editor.querySelector('[data-shape-controls]').hidden = element?.type !== 'shape'
           editor.querySelector('[data-image-controls]').hidden = element?.type !== 'image'
           if (!element) return
-          for (const prop of ['x', 'y', 'width', 'height', 'rotation', 'fill', 'stroke', 'opacity', 'fit', 'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'lineHeight', 'letterSpacing']) {
+          for (const prop of ['x', 'y', 'width', 'height', 'rotation', 'fill', 'stroke', 'strokeWidth', 'opacity', 'fit', 'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'lineHeight', 'letterSpacing']) {
             const input = editor.querySelector(`[data-prop="${prop}"]`)
             if (input) input.value = element[prop]
           }
@@ -45616,6 +46365,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (box.querySelector('textarea')) return
           checkpoint()
           const input = document.createElement('textarea')
+          state.textEditingId = element.id
           input.className = 'deck-editor__text-input'
           input.value = element.text
           input.style.color = element.color
@@ -45627,7 +46377,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           input.style.letterSpacing = element.letterSpacing
           box.appendChild(input)
           input.addEventListener('input', () => { element.text = input.value; element.richText = '' })
-          input.addEventListener('blur', () => renderAll(), { once: true })
+          input.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.stopPropagation(); input.blur() }
+          })
+          input.addEventListener('blur', () => { state.textEditingId = ''; renderAll() }, { once: true })
           input.focus()
           input.select()
         }
@@ -45640,31 +46393,74 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.selectedId = element.id
           checkpoint()
           renderCanvas()
-          const origin = { x: event.clientX, y: event.clientY, ex: element.x, ey: element.y, ew: element.width, eh: element.height }
+          const origin = { x: event.clientX, y: event.clientY, ex: element.x, ey: element.y, ew: element.width, eh: element.height, rotation: element.rotation }
           const rect = canvas.getBoundingClientRect()
           const sx = state.deck.width / rect.width
           const sy = state.deck.height / rect.height
+          const liveBox = scene.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`)
+          let frame = 0
+          const renderLive = () => {
+            frame = 0
+            if (!liveBox?.isConnected) return
+            liveBox.style.left = `${element.x / state.deck.width * 100}%`
+            liveBox.style.top = `${element.y / state.deck.height * 100}%`
+            liveBox.style.width = `${element.width / state.deck.width * 100}%`
+            liveBox.style.height = `${element.height / state.deck.height * 100}%`
+            liveBox.style.transform = `rotate(${element.rotation}deg)`
+          }
+          const scheduleLive = () => { if (!frame) frame = requestAnimationFrame(renderLive) }
+          const showGuides = (snapX, snapY) => {
+            scene.querySelectorAll('.deck-editor__guide').forEach(node => node.remove())
+            if (snapX) {
+              const guide = bfEl('span', 'deck-editor__guide deck-editor__guide--x')
+              guide.style.left = '50%'
+              scene.appendChild(guide)
+            }
+            if (snapY) {
+              const guide = bfEl('span', 'deck-editor__guide deck-editor__guide--y')
+              guide.style.top = '50%'
+              scene.appendChild(guide)
+            }
+          }
           const move = next => {
             const dx = (next.clientX - origin.x) * sx
             const dy = (next.clientY - origin.y) * sy
-            if (mode === 'move') {
+            let snapX = false
+            let snapY = false
+            if (mode === 'rotate') {
+              const centerX = rect.left + (element.x + element.width / 2) / state.deck.width * rect.width
+              const centerY = rect.top + (element.y + element.height / 2) / state.deck.height * rect.height
+              const angle = Math.atan2(next.clientY - centerY, next.clientX - centerX) * 180 / Math.PI + 90
+              element.rotation = Math.round(angle / (next.shiftKey ? 1 : 5)) * (next.shiftKey ? 1 : 5)
+            } else if (mode === 'move') {
               element.x = Math.max(0, Math.min(state.deck.width - element.width, origin.ex + dx))
               element.y = Math.max(0, Math.min(state.deck.height - element.height, origin.ey + dy))
+              const snapDistance = 12
+              const centeredX = (state.deck.width - element.width) / 2
+              const centeredY = (state.deck.height - element.height) / 2
+              if (Math.abs(element.x - centeredX) <= snapDistance) { element.x = centeredX; snapX = true }
+              if (Math.abs(element.y - centeredY) <= snapDistance) { element.y = centeredY; snapY = true }
             } else {
               if (mode.includes('e')) element.width = Math.max(24, Math.min(state.deck.width - element.x, origin.ew + dx))
               if (mode.includes('s')) element.height = Math.max(24, Math.min(state.deck.height - element.y, origin.eh + dy))
               if (mode.includes('w')) { element.x = Math.max(0, Math.min(origin.ex + origin.ew - 24, origin.ex + dx)); element.width = origin.ew + origin.ex - element.x }
               if (mode.includes('n')) { element.y = Math.max(0, Math.min(origin.ey + origin.eh - 24, origin.ey + dy)); element.height = origin.eh + origin.ey - element.y }
             }
-            renderCanvas()
+            showGuides(snapX, snapY)
+            scheduleLive()
           }
           const up = () => {
             document.removeEventListener('pointermove', move)
             document.removeEventListener('pointerup', up)
+            document.removeEventListener('pointercancel', up)
+            if (frame) cancelAnimationFrame(frame)
+            scene.querySelectorAll('.deck-editor__guide').forEach(node => node.remove())
+            renderCanvas()
             renderThumbs()
           }
           document.addEventListener('pointermove', move)
           document.addEventListener('pointerup', up, { once: true })
+          document.addEventListener('pointercancel', up, { once: true })
         }
 
         function addElement(type, overrides = {}) {
@@ -45709,6 +46505,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
               if (!response.ok || !result?.deck) throw new Error(result?.error || 'Image upload failed')
               state.deck = normalizeDeckDocument(result.deck)
               state.version = Number(result?.artifact?.version || state.version + 1)
+              state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
               state.selectedId = String(result?.element?.id || '')
               state.history = []
               state.future = []
@@ -45745,6 +46542,124 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const ordered = stack
           ordered.forEach((item, index) => { item.z = index + 1 })
           renderAll()
+        }
+
+        function deleteSelectedElement() {
+          if (!requireDeckWrite()) return
+          const element = selected()
+          if (!element) return
+          checkpoint()
+          slide().elements = slide().elements.filter(item => item.id !== element.id)
+          state.selectedId = ''
+          renderAll()
+        }
+
+        function duplicateSelectedElement() {
+          if (!requireDeckWrite()) return
+          const element = selected()
+          if (!element) return
+          checkpoint()
+          const copy = clone(element)
+          copy.id = `element-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+          copy.x = Math.max(0, Math.min(state.deck.width - copy.width, copy.x + 32))
+          copy.y = Math.max(0, Math.min(state.deck.height - copy.height, copy.y + 32))
+          copy.z = Math.max(0, ...slide().elements.map(item => item.z || 0)) + 1
+          slide().elements.push(copy)
+          state.selectedId = copy.id
+          renderAll()
+        }
+
+        function alignSelectedElement(axis) {
+          if (!requireDeckWrite()) return
+          const element = selected()
+          if (!element) return
+          checkpoint()
+          if (axis === 'center') element.x = (state.deck.width - element.width) / 2
+          if (axis === 'middle') element.y = (state.deck.height - element.height) / 2
+          renderAll()
+        }
+
+        function requestDeckClose() {
+          if (state.textEditingId) {
+            editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] textarea`)?.blur()
+            return
+          }
+          if (state.dirty && !window.confirm('Discard unsaved deck changes?')) return
+          closeDeckEditor()
+        }
+
+        function triggerBlobDownload(blob, name) {
+          const href = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = href
+          link.download = name
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          window.setTimeout(() => URL.revokeObjectURL(href), 2000)
+        }
+
+        async function ensureExportRevision() {
+          if (!state.dirty) return true
+          return saveDeck(false)
+        }
+
+        async function exportPowerPoint(button) {
+          if (!(await ensureExportRevision())) return
+          const original = button.innerHTML
+          button.disabled = true
+          button.innerHTML = '<span>Preparing PowerPoint…</span><small>.pptx</small>'
+          try {
+            const response = await fetch('/artifacts/export-pptx', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
+            })
+            if (!response.ok) {
+              const result = await response.json().catch(() => ({}))
+              throw new Error(result?.error || 'PowerPoint export failed')
+            }
+            const blob = await response.blob()
+            const fileName = `${String(payload?.artifact?.title || title || 'presentation').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'presentation'}.pptx`
+            triggerBlobDownload(blob, fileName)
+            showToast({ text: 'PowerPoint downloaded', kind: 'done' })
+            downloadMenu.hidden = true
+          } catch (error) {
+            showToast({ text: error?.message || 'PowerPoint export failed', kind: 'error' })
+          } finally {
+            button.disabled = false
+            button.innerHTML = original
+          }
+        }
+
+        async function exportPDF(button) {
+          if (!(await ensureExportRevision())) return
+          const original = button.innerHTML
+          button.disabled = true
+          button.innerHTML = '<span>Rendering PDF…</span><small>.pdf</small>'
+          try {
+            const response = await fetch('/artifacts/export-pdf', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok) throw new Error(result?.error || 'PDF export failed')
+            const landed = await waitForArtifactPdfAsset(state.artifactId)
+            if (!landed?.pdf) throw new Error('PDF is still rendering. It will stay attached to this deck when ready.')
+            state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
+            const link = document.createElement('a')
+            link.href = artifactBlobUrl(landed.pdf)
+            link.download = String(landed.pdf.name || 'presentation.pdf')
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            showToast({ text: 'PDF downloaded', kind: 'done' })
+            downloadMenu.hidden = true
+          } catch (error) {
+            showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+          } finally {
+            button.disabled = false
+            button.innerHTML = original
+          }
         }
 
         function addSlide() {
@@ -45825,6 +46740,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (!response.ok || !result?.deck) throw new Error(result?.error || (response.status === 409 ? 'This deck changed elsewhere. Reopen it before saving.' : 'Deck save failed'))
             state.deck = normalizeDeckDocument(result.deck)
             state.version = Number(result?.artifact?.version || state.version + 1)
+            state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
             state.history = []
             state.future = []
             state.dirty = false
@@ -45907,6 +46823,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (!response.ok || !result?.deck) throw new Error(result?.error || 'Scout image generation failed')
             state.deck = normalizeDeckDocument(result.deck)
             state.version = Number(result?.artifact?.version || state.version + 1)
+            state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
             state.selectedId = String(result?.element?.id || '')
             state.history = []
             state.future = []
@@ -45928,14 +46845,32 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         editor.addEventListener('click', event => {
+          const inspectorTab = event.target.closest('[data-inspector-tab]')?.dataset.inspectorTab
+          if (inspectorTab) {
+            setInspectorTab(inspectorTab)
+            editor.dataset.inspectorOpen = 'true'
+            editor.querySelector('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', 'true')
+            return
+          }
           const action = event.target.closest('[data-action]')?.dataset.action
           if (!action) {
             if (event.target === canvas || event.target === scene) { state.selectedId = ''; renderCanvas() }
             return
           }
-          if (action === 'close') closeDeckEditor()
+          if (action === 'close') requestDeckClose()
           else if (action === 'save') saveDeck(true)
           else if (action === 'save-copy') saveDeckCopy()
+          else if (action === 'download-menu') {
+            downloadMenu.hidden = !downloadMenu.hidden
+            event.target.closest('[data-action="download-menu"]')?.setAttribute('aria-expanded', String(!downloadMenu.hidden))
+          }
+          else if (action === 'export-pptx') exportPowerPoint(event.target.closest('[data-action="export-pptx"]'))
+          else if (action === 'export-pdf') exportPDF(event.target.closest('[data-action="export-pdf"]'))
+          else if (action === 'toggle-inspector') {
+            const open = editor.dataset.inspectorOpen !== 'true'
+            editor.dataset.inspectorOpen = String(open)
+            event.target.closest('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', String(open))
+          }
           else if (action === 'present') {
             openDeckPresentation(state.artifactId, title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true })
               .then(opened => { if (!opened) options.present?.() })
@@ -45948,6 +46883,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'send-back') changeLayer('back')
           else if (action === 'bring-forward') changeLayer('forward')
           else if (action === 'send-backward') changeLayer('backward')
+          else if (action === 'align-center') alignSelectedElement('center')
+          else if (action === 'align-middle') alignSelectedElement('middle')
+          else if (action === 'duplicate-element') duplicateSelectedElement()
+          else if (action === 'delete-element') deleteSelectedElement()
           else if (action === 'add-slide') addSlide()
           else if (action === 'duplicate-slide') duplicateSlide()
           else if (action === 'delete-slide') deleteSlide()
@@ -45956,6 +46895,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'undo' && state.history.length) { state.future.push(clone(state.deck)); restore(state.history.pop()) }
           else if (action === 'redo' && state.future.length) { state.history.push(clone(state.deck)); restore(state.future.pop()) }
           else if (action === 'generate-image') generateImage()
+        })
+
+        editor.querySelector('[data-slide-background]').addEventListener('change', event => {
+          if (!requireDeckWrite()) return
+          checkpoint()
+          slide().background = String(event.target.value || '#111111')
+          renderAll()
+        })
+
+        zoomInput.addEventListener('input', event => {
+          state.zoom = Math.max(.5, Math.min(1.4, Number(event.target.value || 100) / 100))
+          zoomOutput.textContent = `${Math.round(state.zoom * 100)}%`
+          fitCanvas()
         })
 
         editor.querySelector('.deck-editor__props').addEventListener('change', event => {
@@ -45972,23 +46924,87 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const element = selected()
           if (!prop || !element) return
           checkpoint()
-          element[prop] = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontWeight', 'lineHeight'].includes(prop) ? Number(event.target.value) : event.target.value
+          element[prop] = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontWeight', 'lineHeight', 'strokeWidth'].includes(prop) ? Number(event.target.value) : event.target.value
           if (prop === 'opacity') element.opacity = Math.max(0, Math.min(1, element.opacity))
           renderAll()
         })
 
         const handleKey = event => {
-          if (event.key === 'Escape') closeDeckEditor()
+          const targetIsEditorField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable
+          if (event.key === 'Escape') {
+            if (!downloadMenu.hidden) { downloadMenu.hidden = true; editor.querySelector('[data-action="download-menu"]')?.setAttribute('aria-expanded', 'false'); return }
+            if (state.textEditingId) { editor.querySelector(`[data-element-id="${CSS.escape(state.textEditingId)}"] textarea`)?.blur(); return }
+            if (editor.dataset.inspectorOpen === 'true' && matchMedia('(max-width: 640px)').matches) {
+              editor.dataset.inspectorOpen = 'false'
+              editor.querySelector('[data-action="toggle-inspector"]')?.setAttribute('aria-expanded', 'false')
+              return
+            }
+            if (state.selectedId) { state.selectedId = ''; renderCanvas(); return }
+            requestDeckClose()
+            return
+          }
+          if (event.key === 'Tab') {
+            const focusable = Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')).filter(node => !node.hidden && node.getClientRects().length)
+            if (focusable.length) {
+              const index = focusable.indexOf(document.activeElement)
+              if (event.shiftKey && index <= 0) { event.preventDefault(); focusable[focusable.length - 1].focus() }
+              else if (!event.shiftKey && index === focusable.length - 1) { event.preventDefault(); focusable[0].focus() }
+            }
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault()
+            saveDeck(false)
+            return
+          }
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
             event.preventDefault()
             editor.querySelector(`[data-action="${event.shiftKey ? 'redo' : 'undo'}"]`)?.click()
+            return
           }
-          if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedId && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) {
+          if (!targetIsEditorField && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c' && selected()) {
+            state.elementClipboard = clone(selected())
+            return
+          }
+          if (!targetIsEditorField && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v' && state.elementClipboard) {
+            event.preventDefault()
             if (!requireDeckWrite()) return
             checkpoint()
-            slide().elements = slide().elements.filter(element => element.id !== state.selectedId)
-            state.selectedId = ''
+            const pasted = clone(state.elementClipboard)
+            pasted.id = `element-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+            pasted.x = Math.max(0, Math.min(state.deck.width - pasted.width, pasted.x + 36))
+            pasted.y = Math.max(0, Math.min(state.deck.height - pasted.height, pasted.y + 36))
+            pasted.z = Math.max(0, ...slide().elements.map(item => item.z || 0)) + 1
+            slide().elements.push(pasted)
+            state.selectedId = pasted.id
             renderAll()
+            return
+          }
+          if (!targetIsEditorField && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd' && selected()) {
+            event.preventDefault()
+            duplicateSelectedElement()
+            return
+          }
+          if (!targetIsEditorField && selected() && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault()
+            const element = selected()
+            const step = event.shiftKey ? 10 : 1
+            checkpoint()
+            if (event.altKey) {
+              if (event.key === 'ArrowLeft') element.width = Math.max(24, element.width - step)
+              if (event.key === 'ArrowRight') element.width = Math.min(state.deck.width - element.x, element.width + step)
+              if (event.key === 'ArrowUp') element.height = Math.max(24, element.height - step)
+              if (event.key === 'ArrowDown') element.height = Math.min(state.deck.height - element.y, element.height + step)
+            } else {
+              if (event.key === 'ArrowLeft') element.x = Math.max(0, element.x - step)
+              if (event.key === 'ArrowRight') element.x = Math.min(state.deck.width - element.width, element.x + step)
+              if (event.key === 'ArrowUp') element.y = Math.max(0, element.y - step)
+              if (event.key === 'ArrowDown') element.y = Math.min(state.deck.height - element.height, element.y + step)
+            }
+            renderAll()
+            return
+          }
+          if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedId && !targetIsEditorField) {
+            deleteSelectedElement()
           }
         }
         const resizeObserver = new ResizeObserver(fitCanvas)
@@ -45998,17 +47014,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
         activeDeckEditor = {
           element: editor,
           cleanup: () => { document.removeEventListener('keydown', handleKey); resizeObserver.disconnect() },
-          getDeck: () => clone(state.deck)
+          getDeck: () => clone(state.deck),
+          returnFocus
         }
         document.body.appendChild(editor)
+        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
         renderAll()
+        setInspectorTab('design')
+        editor.querySelector('[data-action="close"]')?.focus()
       }
 
       function closeDeckEditor() {
         if (!activeDeckEditor) return
+        const returnFocus = activeDeckEditor.returnFocus
         activeDeckEditor.cleanup?.()
         activeDeckEditor.element?.remove()
         activeDeckEditor = null
+        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
+        if (returnFocus?.isConnected) returnFocus.focus()
       }
 
       var activeDeckPresenter = null
@@ -46216,6 +47243,101 @@ Wrap the entire export in one code block. After the code block, say whether the 
           node.title = 'deck preview'
           return node
         }
+        const createNativePreview = (access) => {
+          const documentModel = access?.deck
+          const slides = Array.isArray(documentModel?.slides) ? documentModel.slides : []
+          if (!documentModel || !slides.length) return null
+          const node = document.createElement('div')
+          node.className = 'chat-deck__native-preview'
+          node.setAttribute('role', 'region')
+          node.setAttribute('aria-label', `${title} presentation preview`)
+          const scene = document.createElement('div')
+          scene.className = 'chat-deck__native-scene'
+          const nav = document.createElement('div')
+          nav.className = 'chat-deck__nav'
+          nav.setAttribute('aria-label', 'Slide navigation')
+          const previous = document.createElement('button')
+          previous.type = 'button'
+          previous.setAttribute('aria-label', 'Previous slide')
+          previous.textContent = '←'
+          const count = document.createElement('span')
+          count.className = 'chat-deck__nav-count'
+          const next = document.createElement('button')
+          next.type = 'button'
+          next.setAttribute('aria-label', 'Next slide')
+          next.textContent = '→'
+          nav.append(previous, count, next)
+          let slideIndex = 0
+          const paintElement = element => {
+            const box = document.createElement('div')
+            box.className = 'chat-deck__native-element'
+            box.style.left = `${Number(element.x || 0) / Number(documentModel.width || 1920) * 100}%`
+            box.style.top = `${Number(element.y || 0) / Number(documentModel.height || 1080) * 100}%`
+            box.style.width = `${Number(element.width || 1) / Number(documentModel.width || 1920) * 100}%`
+            box.style.height = `${Number(element.height || 1) / Number(documentModel.height || 1080) * 100}%`
+            box.style.zIndex = String(Number(element.z || 0))
+            box.style.opacity = String(Math.max(0, Math.min(1, Number(element.opacity ?? 1))))
+            box.style.transform = `rotate(${Number(element.rotation || 0)}deg)`
+            if (element.type === 'text') {
+              const text = document.createElement('div')
+              text.className = 'chat-deck__native-text'
+              if (element.richText) { text.innerHTML = String(element.richText); scaleDeckRichText(text, documentModel.height) }
+              else text.textContent = String(element.text || '')
+              text.style.color = String(element.color || '#fff')
+              text.style.fontFamily = String(element.fontFamily || 'Arial, sans-serif')
+              text.style.fontSize = `${Number(element.fontSize || 48) / Number(documentModel.height || 1080) * 100}cqh`
+              text.style.fontWeight = String(Number(element.fontWeight || 600))
+              text.style.textAlign = ['left', 'center', 'right'].includes(element.textAlign) ? element.textAlign : 'left'
+              text.style.lineHeight = String(Math.max(.7, Math.min(4, Number(element.lineHeight) || 1.08)))
+              text.style.letterSpacing = String(element.letterSpacing || 'normal')
+              box.appendChild(text)
+            } else if (element.type === 'image' && /^[0-9a-f]{64}$/.test(String(element.ref || ''))) {
+              const image = document.createElement('img')
+              image.className = 'chat-deck__native-image'
+              image.alt = ''
+              image.src = artifactBlobUrl({ ref: element.ref, name: element.name })
+              image.style.objectFit = element.fit === 'contain' ? 'contain' : 'cover'
+              box.appendChild(image)
+            } else if (element.type === 'shape') {
+              const shape = document.createElement('div')
+              shape.className = 'chat-deck__native-shape'
+              shape.style.background = String(element.fill || 'transparent')
+              shape.style.borderColor = String(element.stroke || 'transparent')
+              shape.style.borderWidth = `${Math.max(0, Number(element.strokeWidth || 0))}px`
+              shape.style.borderRadius = element.shape === 'ellipse' ? '50%' : '0'
+              box.appendChild(shape)
+            }
+            return box
+          }
+          const renderSlide = () => {
+            const slide = slides[slideIndex]
+            const background = typeof slide.background === 'string' ? slide.background : (slide.background?.color || '#111111')
+            node.style.background = background
+            scene.replaceChildren(...[...(slide.elements || [])]
+              .sort((a, b) => Number(a.z || 0) - Number(b.z || 0))
+              .map(paintElement))
+            count.textContent = `${slideIndex + 1} / ${slides.length}`
+            previous.disabled = slideIndex === 0
+            next.disabled = slideIndex === slides.length - 1
+            previous.hidden = slides.length < 2
+            next.hidden = slides.length < 2
+            nav.hidden = slides.length < 2
+            node.setAttribute('aria-label', `${title}, slide ${slideIndex + 1} of ${slides.length}`)
+          }
+          previous.addEventListener('click', event => {
+            event.stopPropagation()
+            slideIndex = Math.max(0, slideIndex - 1)
+            renderSlide()
+          })
+          next.addEventListener('click', event => {
+            event.stopPropagation()
+            slideIndex = Math.min(slides.length - 1, slideIndex + 1)
+            renderSlide()
+          })
+          node.append(scene, nav)
+          renderSlide()
+          return node
+        }
         let frame = createPreviewFrame()
 
         // Glass chrome overlay at bottom — title + action buttons
@@ -46243,7 +47365,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
         presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
         presentBtn.disabled = true
 
-        actions.append(editBtn, presentBtn)
+        const downloadWrap = document.createElement('div')
+        downloadWrap.className = 'chat-deck__download'
+        const downloadBtn = document.createElement('button')
+        downloadBtn.type = 'button'
+        downloadBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
+        downloadBtn.textContent = 'Download'
+        downloadBtn.setAttribute('aria-haspopup', 'menu')
+        downloadBtn.setAttribute('aria-expanded', 'false')
+        downloadBtn.disabled = true
+        const downloadMenu = document.createElement('div')
+        downloadMenu.className = 'chat-deck__download-menu'
+        downloadMenu.setAttribute('role', 'menu')
+        downloadMenu.hidden = true
+        downloadMenu.innerHTML = `<button type="button" role="menuitem" data-deck-download="pptx"><span>PowerPoint</span><small>.pptx</small></button><button type="button" role="menuitem" data-deck-download="pdf"><span>PDF</span><small>.pdf</small></button>`
+        downloadWrap.append(downloadBtn, downloadMenu)
+
+        actions.append(editBtn, downloadWrap, presentBtn)
         chrome.append(titleEl, actions)
         deck.append(frame, chrome)
 
@@ -46301,6 +47439,62 @@ Wrap the entire export in one code block. After the code block, say whether the 
           })
         })
         presentBtn.addEventListener('click', present)
+        downloadBtn.addEventListener('click', () => {
+          if (downloadBtn.disabled) return
+          downloadMenu.hidden = !downloadMenu.hidden
+          downloadBtn.setAttribute('aria-expanded', String(!downloadMenu.hidden))
+        })
+        downloadMenu.addEventListener('click', async event => {
+          const format = event.target.closest('[data-deck-download]')?.dataset.deckDownload
+          const button = event.target.closest('[data-deck-download]')
+          if (!format || !button || !deckAccess?.artifact?.version) return
+          const original = button.innerHTML
+          button.disabled = true
+          try {
+            if (format === 'pptx') {
+              button.innerHTML = '<span>Preparing…</span><small>.pptx</small>'
+              const response = await fetch('/artifacts/export-pptx', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId, expectedVersion: Number(deckAccess.artifact.version), sceneRef: String(deckAccess.artifact.sceneRef || '') })
+              })
+              if (!response.ok) {
+                const result = await response.json().catch(() => ({}))
+                throw new Error(result?.error || 'PowerPoint export failed')
+              }
+              const blob = await response.blob()
+              const href = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = href
+              link.download = `${title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'presentation'}.pptx`
+              document.body.appendChild(link); link.click(); link.remove()
+              window.setTimeout(() => URL.revokeObjectURL(href), 2000)
+              showToast({ text: 'PowerPoint downloaded', kind: 'done' })
+            } else {
+              button.innerHTML = '<span>Rendering…</span><small>.pdf</small>'
+              const response = await fetch('/artifacts/export-pdf', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId, expectedVersion: Number(deckAccess.artifact.version), sceneRef: String(deckAccess.artifact.sceneRef || '') })
+              })
+              const result = await response.json().catch(() => ({}))
+              if (!response.ok) throw new Error(result?.error || 'PDF export failed')
+              const landed = await waitForArtifactPdfAsset(artifactId)
+              if (!landed?.pdf) throw new Error('PDF is still rendering and will remain attached to this deck when ready.')
+              deckAccess.artifact.version = Number(landed.entry?.metadata?.artifactVersion || deckAccess.artifact.version)
+              const link = document.createElement('a')
+              link.href = artifactBlobUrl(landed.pdf)
+              link.download = String(landed.pdf.name || 'presentation.pdf')
+              document.body.appendChild(link); link.click(); link.remove()
+              showToast({ text: 'PDF downloaded', kind: 'done' })
+            }
+            downloadMenu.hidden = true
+            downloadBtn.setAttribute('aria-expanded', 'false')
+          } catch (error) {
+            showToast({ text: error?.message || `${format.toUpperCase()} export failed`, kind: 'error' })
+          } finally {
+            button.disabled = false
+            button.innerHTML = original
+          }
+        })
 
         async function loadPreview() {
           if (loading || !artifactId) return
@@ -46318,26 +47512,34 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 return response.ok && result?.deck ? result : null
               })
               .catch(() => null)
-            const response = await fetch(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
-            const payload = await response.json().catch(() => ({}))
-            if (!response.ok || !payload.url) {
-              throw new Error(payload.error || 'render token unavailable')
-            }
-            if (!deck.isConnected) return // the pane moved on while we minted
-            const nextFrame = createPreviewFrame()
-            nextFrame.src = payload.url
-            nextFrame.addEventListener('load', () => {
-              if (attempt !== previewAttempt || frame !== nextFrame) return
-              requestAnimationFrame(() => {
-                if (attempt === previewAttempt && frame === nextFrame) nextFrame.classList.add('is-ready')
-              })
-            }, { once: true })
-            frame.replaceWith(nextFrame)
-            frame = nextFrame
-            presentBtn.disabled = false
             deckAccess = await deckAccessPromise
+            if (!deck.isConnected) return
+            const nativePreview = createNativePreview(deckAccess)
+            if (nativePreview) {
+              frame.replaceWith(nativePreview)
+              frame = nativePreview
+              requestAnimationFrame(() => {
+                if (attempt === previewAttempt && frame === nativePreview) nativePreview.classList.add('is-ready')
+              })
+            } else {
+              const response = await fetch(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+	              const payload = await response.json().catch(() => ({}))
+	              if (!response.ok || !payload.url) throw new Error(payload.error || 'render token unavailable')
+	              const nextFrame = createPreviewFrame()
+	              nextFrame.src = payload.url
+              nextFrame.addEventListener('load', () => {
+                if (attempt !== previewAttempt || frame !== nextFrame) return
+                requestAnimationFrame(() => {
+                  if (attempt === previewAttempt && frame === nextFrame) nextFrame.classList.add('is-ready')
+                })
+              }, { once: true })
+              frame.replaceWith(nextFrame)
+              frame = nextFrame
+            }
+            presentBtn.disabled = false
             const canEdit = deckAccess?.canWrite === true
             editBtn.disabled = !canEdit
+            downloadBtn.disabled = !deckAccess?.deck
             editBtn.title = canEdit ? 'Edit deck' : String(deckAccess?.writeBlockedReason || 'View-only deck')
             deck.dataset.previewState = 'ready'
 
@@ -46772,12 +47974,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return `/artifacts/blob?ref=${encodeURIComponent(asset.ref)}&name=${encodeURIComponent(String(asset.name || ''))}`
       }
 
-      // newest pdf asset on the artifact, or null — the same sniff the stage's
-      // pdf-embed branch and the deck hero use
+      // Current revision-bound PDF, or null. New callbacks stamp the exact
+      // post-attachment artifact version, source scene, and asset ref. Legacy
+      // version-one artifacts remain readable; once an artifact has lineage,
+      // an unbound PDF fails closed instead of masquerading as the latest edit.
       function artifactNewestPdfAsset(entry) {
         const pdfs = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
-        return pdfs.length ? pdfs[pdfs.length - 1] : null
+        if (!pdfs.length) return null
+        const metadata = entry?.metadata || {}
+        const currentVersion = Math.max(1, Number(metadata.artifactVersion || 1) || 1)
+        const declaredType = String(metadata.type || '').trim().toLowerCase()
+        const currentSceneRef = String(metadata.deckSceneRef || '').trim()
+        const boundVersion = Number(metadata.renderPdfArtifactVersion || 0)
+        const boundSceneRef = String(metadata.renderPdfSourceSceneRef || '').trim()
+        const boundRef = String(metadata.renderPdfAssetRef || '').trim()
+        const pending = String(metadata.renderJobId || '').trim() && ['queued', 'running'].includes(String(metadata.renderStatus || '').trim().toLowerCase())
+        if (pending) return null
+        if (boundVersion > 0 || boundRef || boundSceneRef) {
+          if (boundVersion !== currentVersion || boundSceneRef !== currentSceneRef || !/^[0-9a-f]{64}$/.test(boundRef)) return null
+          return pdfs.find(asset => String(asset.ref || '') === boundRef) || null
+        }
+        // A standalone PDF artifact's asset is its source document, not an
+        // asynchronous derivative of editable deck/document content.
+        if (declaredType === 'pdf') return pdfs[pdfs.length - 1]
+        return currentVersion === 1 ? pdfs[pdfs.length - 1] : null
       }
 
       /* ---------- Save to Files (explicit-save gate, card-110) ----------
@@ -47061,7 +48282,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const response = await fetch('/artifacts/export-pdf', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId })
+              body: JSON.stringify({
+                artifactId,
+                expectedVersion: Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1),
+                sceneRef: String(entry?.metadata?.deckSceneRef || '')
+              })
             })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok) {
@@ -47093,11 +48318,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (typeof loadArtifacts === 'function') await loadArtifacts()
           const fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
           if (!fresh) continue
+          const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
+          if (renderStatus === 'failed' || renderStatus === 'stale') {
+            throw new Error(String(fresh?.metadata?.renderError || '').trim() || (renderStatus === 'stale'
+              ? 'The artifact changed while the PDF was rendering. Export the current version again.'
+              : 'PDF render failed'))
+          }
           const pdf = artifactNewestPdfAsset(fresh)
           if (pdf) return { entry: fresh, pdf }
-          if (String(fresh?.metadata?.renderStatus || '').trim().toLowerCase() === 'failed') {
-            throw new Error(String(fresh?.metadata?.renderError || '').trim() || 'PDF render failed')
-          }
         }
         return null
       }
@@ -47108,8 +48336,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
          other kind is download-only. DOM-built, never innerHTML. */
       function renderArtifactAssets(container, entry) {
 		// Flattened page JPEGs are internal visual-QA evidence for the slide
-		// jury, not customer assets. Keep them out of download/image galleries.
-        const assets = artifactAssetEntries(entry).filter(asset => !artifactAssetIsRenderedPage(asset))
+		// jury, not customer assets. A superseded PDF is likewise internal
+		// history, never a current preview/download affordance.
+        const currentPdf = artifactNewestPdfAsset(entry)
+        const assets = artifactAssetEntries(entry).filter(asset => {
+          if (artifactAssetIsRenderedPage(asset)) return false
+          const isPdf = String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf'
+          return !isPdf || String(asset.ref || '') === String(currentPdf?.ref || '')
+        })
         if (!assets.length) return
         const wrap = bfEl('section', 'artifact-assets')
         wrap.appendChild(bfEl('h4', 'artifact-assets__title', `assets (${assets.length})`))
@@ -60528,11 +61762,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        // Riff thread
 	        if (privateRiffThread(thread)) return isPhone ? 'riff with Scout…' : `riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
-	        // Direct agent thread
+	        // Direct/private Scout threads accept ordinary questions and durable
+	        // work in the same natural-language composer. Routing decides the
+	        // amount of process; the placeholder never makes the person choose.
 	        const directAgent = scoutChatDirectAgentName(thread)
-	        if (directAgent) return isPhone ? `message ${directAgent}…` : `message ${directAgent}`
-	        // Private thread: work-oriented, not generic LLM copy
-	        return isPhone ? 'start work…' : 'describe the work'
+	        return isPhone ? `ask ${directAgent || 'Scout'} anything…` : `ask ${directAgent || 'Scout'} anything`
 	      }
 
 	      function scoutChatDirectAgentName(thread) {
@@ -65437,7 +66671,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const title = bfEl('h2', 'scout-chat-empty__title', 'Riff from this checkpoint')
 	          inner.append(eyebrow, title)
 	        } else {
-	          // Private thread: one continuity row of last real work (not void, not lecture)
+	          const eyebrow = bfEl('span', 'scout-chat-empty__eyebrow', 'private with Scout')
+	          const title = bfEl('h2', 'scout-chat-empty__title', 'What do you want to accomplish?')
+	          const body = bfEl('p', 'scout-chat-empty__body', 'Scout can answer, start private work, or ask for approval when it actually matters.')
+	          inner.append(eyebrow, title, body)
+	          // Keep one continuity row of recent real work beneath the simple
+	          // invitation. It is a useful resume door, not an alternate mode.
 	          const continuityItem = homeSnapshot?.items?.find(item => item?.kind !== 'live-meeting')
 	          if (continuityItem) {
 	            const continuityRow = privateChatContinuityNode(continuityItem)
@@ -65448,6 +66687,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          empty.append(inner)
 	        }
 	        scoutChatThread.querySelector('.scout-starters')?.remove()
+	        if (!isChannel && !isRiff) empty.after(buildScoutStarterRow())
 	        if (isRiff) {
 	          const checkpoint = scoutChatThread.querySelector('.private-riff-checkpoint--conversation')
 	          if (checkpoint && scoutChatThread.firstChild !== checkpoint) scoutChatThread.insertBefore(checkpoint, scoutChatThread.firstChild)
@@ -66501,7 +67741,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !chatThreadIsChannel(thread)
 	      }
 
-	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate, onShareAll, onShareReply } = {}) {
+	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {}) {
+	        const { onShareAll, onShareReply } = arguments[0] || {}
 	        const wrap = bfEl('span', 'desktop-chat-more')
 	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
 	        trigger.type = 'button'
@@ -67798,10 +69039,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (/\b(code|implementation|repository|pull request|execution handoff|deployment handoff)\b/.test(description)) return 'Build'
 	        if (/\b(project plan|task board|operating plan|roadmap|work breakdown)\b/.test(description)) return 'Project plan'
 	        if (/\b(financial model|forecast|budget|valuation|cap table|cash flow|waterfall|xlsx|workbook|spreadsheet)\b/.test(description)) return 'Financial model'
-	        if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/.test(description)) {
-          const artifactType = String(artifact?.metadata?.type || '').trim()
-          return artifactType === 'html_deck' ? 'Presentation' : 'Outline'
-        }
+		        if (/\b(deck|presentation|slides?|pitch deck|powerpoint|pptx)\b/.test(description)) {
+	          // The requested outcome owns the work family. A presentation does
+	          // not become an "Outline" merely because its durable deck artifact
+	          // has not landed yet; that fallback made active deck runs look like
+	          // the wrong product in the private-thread rail.
+	          return 'Presentation'
+	        }
 	        if (/\b(image|images|design|visual|logo|brand|mockup|illustration|render|creative)\b/.test(description)) return 'Design'
 	        if (/\b(research|investigate|compare|market scan|sources?|due diligence)\b/.test(description)) return 'Research'
 	        if (/\b(document|memo|brief|one-pager|report)\b/.test(description)) return 'Document'
@@ -68829,7 +70073,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const phase = desktopWorkPhase(artifact, status, ref)
         const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
 	        const plan = goalPlanFromArtifact(artifact)
-	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const isPresentationWorkflow = family === 'Presentation'
 	        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
         // One status: Draft is the thing, Blocked stays blocked, no fake percents
 	        const state = checkpoint
@@ -68849,7 +70093,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const card = document.createElement('article')
         card.className = 'scout-chat-work-card'
-	        if (isPackagingStudio) card.classList.add('scout-chat-work-card--presentation')
+	        if (isPresentationWorkflow) card.classList.add('scout-chat-work-card--presentation')
         card.dataset.state = status
         card.dataset.workArtifactId = workCardID
 	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${checkpoint ? `. Question: ${packagingStudioCheckpointQuestion(plan, checkpoint)}` : ''}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
@@ -68859,7 +70103,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
         eyebrow.setAttribute('aria-live', 'polite')
         eyebrow.setAttribute('aria-atomic', 'true')
-	        if (isPackagingStudio) eyebrow.textContent = `Presentation · ${state}`
+	        if (isPresentationWorkflow) eyebrow.textContent = `Presentation · ${state}`
 	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
 	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
@@ -76406,7 +77650,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const response = await fetch('/artifacts/export-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ artifactId: artifact.id, kind: 'deck' })
+            body: JSON.stringify({
+              artifactId: artifact.id,
+              kind: 'deck',
+              expectedVersion: Math.max(1, Number(artifact?.metadata?.artifactVersion || 1) || 1),
+              sceneRef: String(artifact?.metadata?.deckSceneRef || '')
+            })
           })
           const payload = await response.json().catch(() => ({}))
           if (!response.ok) {

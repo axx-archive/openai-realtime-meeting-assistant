@@ -278,7 +278,7 @@ func TestPD1RecurringWorkAccessibilityAndLiveFocusContract(t *testing.T) {
 			t.Errorf("work-card live-rerender focus restore missing %q", want)
 		}
 	}
-	activeRender := functionBody(html, "function renderActiveScoutThread(")
+	activeRender := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	for _, want := range []string{"scoutWorkCardFocusSnapshot()", "restoreScoutWorkCardFocus(focusedWorkCardId)"} {
 		if !strings.Contains(activeRender, want) {
 			t.Errorf("active thread render does not preserve focused work control: missing %q", want)

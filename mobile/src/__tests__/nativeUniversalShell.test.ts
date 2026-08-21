@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   NATIVE_SHELL_SIDEBAR_MIN_WIDTH,
@@ -14,6 +13,7 @@ import {
   nativeShellSelectionAnnouncement,
   nativeShellVisibleForRoute,
 } from '../navigation/nativeShellModel';
+import { registerTestStubModules } from './support/registerTestStubModules';
 
 const mobileRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...parts), 'utf8');
@@ -53,25 +53,13 @@ test('mounted shell press preserves its navigator child through destination, ful
     __nativeShellFontScale?: number;
     __nativeShellAnnouncements?: string[];
   };
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      if (['react-native', 'react-native-svg', 'expo-symbols', 'react-native-safe-area-context', 'expo-blur', 'expo-glass-effect'].includes(specifier)) {
-        return { url: `native-shell-stub:${specifier}`, shortCircuit: true };
-      }
-      return nextResolve(specifier, context);
-    },
-    load(url, context, nextLoad) {
-      const modules: Record<string, string> = {
+  registerTestStubModules('native-shell-stub:', {
         'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>({dynamic:value}); export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
         'native-shell-stub:react-native-svg': `const Svg='Svg'; export default Svg; export const Path='Path'; export const Circle='Circle'; export const Ellipse='Ellipse';`,
         'native-shell-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'native-shell-stub:react-native-safe-area-context': `export const useSafeAreaInsets=()=>globalThis.__nativeShellInsets||({top:0,right:0,bottom:0,left:0});`,
         'native-shell-stub:expo-blur': `export const BlurView='BlurView';`,
         'native-shell-stub:expo-glass-effect': `export const GlassView='GlassView'; export const isLiquidGlassAvailable=()=>false;`,
-      };
-      if (modules[url]) return { format: 'module', source: modules[url], shortCircuit: true };
-      return nextLoad(url, context);
-    },
   });
   testGlobal.__nativeShellWidth = 390;
   testGlobal.__nativeShellFontScale = 1;
@@ -80,7 +68,6 @@ test('mounted shell press preserves its navigator child through destination, ful
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const React = (await import('react')).default;
   const { act, create } = await import('react-test-renderer');
-  const { AccessibilityInfo } = await import('react-native');
   const { NativeUniversalShell } = await import('../navigation/NativeUniversalShell');
 
   let pushThread = () => {};
@@ -103,7 +90,7 @@ test('mounted shell press preserves its navigator child through destination, ful
   const navigator = React.createElement(NavigationContainerProbe);
   let requestedRoute: string | undefined;
   let requestedParams: unknown;
-  const coordinator = createNativeShellSelectionCoordinator(message => AccessibilityInfo.announceForAccessibility(message));
+  const coordinator = createNativeShellSelectionCoordinator(message => testGlobal.__nativeShellAnnouncements?.push(message));
   const onSelect = (destination: (typeof nativeShellDestinations)[number]) => coordinator.select(destination, (route, params) => { requestedRoute = route; requestedParams = params; });
   const shell = (active: Parameters<typeof NativeUniversalShell>[0]['active'], visible: boolean, access: 'core' | 'full' = 'full') =>
     React.createElement(NativeUniversalShell, { active, access, visible, onSelect, children: navigator });

@@ -108,6 +108,7 @@ type deckArtifactView struct {
 	Title        string `json:"title"`
 	Type         string `json:"type"`
 	Version      int    `json:"version"`
+	SceneRef     string `json:"sceneRef,omitempty"`
 	UpdatedAt    string `json:"updatedAt,omitempty"`
 	SavedToFiles bool   `json:"savedToFiles"`
 }
@@ -115,7 +116,7 @@ type deckArtifactView struct {
 func deckArtifactViewFromEntry(entry meetingMemoryEntry) deckArtifactView {
 	return deckArtifactView{
 		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
-		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
+		Version: artifactVersion(entry), SceneRef: strings.TrimSpace(entry.Metadata[deckSceneRefMetadataKey]), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
 		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
 }

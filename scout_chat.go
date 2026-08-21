@@ -309,7 +309,7 @@ const (
 
 	// Weight labels — the card's honest cost line (§2: the card is also the
 	// cost gate while concurrency limits are global).
-	scoutProposalWeightGoalLoop  = "multi-agent goal loop, ~5-15 min"
+	scoutProposalWeightGoalLoop  = "runs in the background"
 	scoutProposalWeightQuickPass = "quick single pass"
 	// scoutProposalWeightImageRender is the concept-render card's cost line: one
 	// gpt-image-2 call, back in under a minute.
@@ -828,6 +828,38 @@ func scoutChatDeckRequestDetected(text string) bool {
 	return false
 }
 
+// scoutInsightsReportRequestDetected recognizes an action-shaped request for
+// the durable Insights & Opportunities artifact. Questions about the format
+// remain ordinary conversation; public threads keep their separate Suggested
+// Work contract before the shared router is invoked.
+func scoutInsightsReportRequestDetected(text string) bool {
+	return isSTRIDEInsightsOutcomeRequest(text)
+}
+
+func scoutInsightsReportObjective(text string) string {
+	directAsk := polishedWorkstreamObjective(text)
+	return strings.Join([]string{
+		"Create a private, editable Markdown Insights & Opportunities report from this direct request: " + directAsk,
+		"Use authorized conversation and Company Brain context, with the direct request taking precedence. Decide whether current external research could materially change the market or credibility analysis; when it can, prefer primary and current sources and include clickable citations. Never invent a source or turn an inference into a fact.",
+		"Build a decision-worthy human narrative, not an AI-shaped list. Include an executive thesis, market evidence and counterevidence, audience or participant segments, the operating and activation loops, business-model opportunities, risks and opt-in guardrails, 30/60/90-day tests with owners and success metrics, confidence by major conclusion, and explicit open questions. Separate sourced facts, company-grounded observations, inferences, and recommendations.",
+		"If the request uses the phrase engagement army, treat it as an opt-in ambassador and creator community, never coercive mobilization. Give the document a specific title and make the final artifact polished enough to circulate internally without rewriting.",
+	}, "\n\n")
+}
+
+func scoutInsightsReportDecision(text string) (conversationIntentDecision, bool) {
+	if !scoutInsightsReportRequestDetected(text) {
+		return conversationIntentDecision{}, false
+	}
+	work := conversationWorkDecision{
+		Kind: conversationWorkWorkstream, Mode: "research",
+		Objective: scoutInsightsReportObjective(text), Authority: toolAuthorityReadOnly,
+	}
+	if err := work.validatePrivate(); err != nil {
+		return conversationIntentDecision{}, false
+	}
+	return conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: proposalSourceDeterministicGuard}, true
+}
+
 // scoutChatDeckConfirmationDetected returns true when the message is a short
 // confirmation (like "yes", "looks good", "proceed") AND there's a deck request
 // earlier in history AND the last Scout message was a direction pass.
@@ -1200,6 +1232,19 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
+	// An explicit I&O report is one durable document, not a multi-artifact goal
+	// loop and not the public synthetic Insights product. Route the private
+	// reversible ask to one source-bound research writer; the public caller
+	// intercepts the same language at its Suggested Work boundary.
+	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
+		if decision, ok := scoutInsightsReportDecision(intentText); ok {
+			if !scoutAgentWorkerAvailable() {
+				decision = unavailableConversationDecision("agent_worker_unavailable", "The private report writer is unavailable right now, so nothing started.", proposalSourceDeterministicGuard)
+			}
+			recordConversationIntentOutcome(decision, map[string]any{"guard": "insights_report_output"})
+			return decision
+		}
+	}
 	// A direct deck ask is already a complete output decision. Route it before
 	// the model so channel history can never turn "make the actual deck" into an
 	// outline or a conversational HTML blob. Direct-agent chats remain model
@@ -1420,11 +1465,15 @@ func scoutRouterProposalForToolID(toolID string, objective string, query string)
 		return nil
 	}
 	objective = firstNonEmptyString(strings.TrimSpace(objective), strings.TrimSpace(query), tool.Name)
+	groupLabel := toolGroupLabels[tool.Group]
+	if tool.ID == packagingStudioProcessID {
+		groupLabel = "Presentation"
+	}
 	return &scoutRouterProposal{
 		Kind:        scoutRouterProposalKindToolRun,
 		ToolID:      tool.ID,
 		ToolName:    tool.Name,
-		GroupLabel:  toolGroupLabels[tool.Group],
+		GroupLabel:  groupLabel,
 		Objective:   objective,
 		Query:       strings.TrimSpace(query),
 		Authority:   tool.Authority,
@@ -1703,7 +1752,7 @@ func scoutRouterGoalProposal(objective string, authorityHint string, packageID s
 // gate (one explicit tap).
 func scoutRouterGoalRunSummary(objective string) string {
 	objective = strings.TrimRight(strings.TrimSpace(objective), ".")
-	return "this launches the multi-step goal loop — " + objective + ". Scout decomposes it, runs the subtasks, reviews against the goal, and gates before anything ships; nothing runs until you tap Run."
+	return "Scout will take this on and keep progress here — " + objective + ". You can keep working while it runs."
 }
 
 // scoutRouterImageSummary is the concept-render card's one legible sentence:
@@ -1723,7 +1772,10 @@ func scoutRouterToolRunSummary(tool packagingTool, objective string) string {
 	// ". gate:…" / ". it parks…" ships a double period the reader sees.
 	objective = strings.TrimRight(strings.TrimSpace(objective), ".")
 	if tool.Group == toolGroupProcesses {
-		return "this is the " + tool.Name + " staged process — " + objective + ". it parks at each human checkpoint; nothing ships without your approval."
+		if tool.ID == packagingStudioProcessID {
+			return "Scout will create a researched-when-needed, editable presentation — " + objective + ". The finished deck will land here ready to edit or present."
+		}
+		return "Scout will create the finished deliverable and keep progress here — " + objective + "."
 	}
 	return "this is a " + tool.Name + " run — " + objective + ". gate: rubric-scored (" + tool.Rubric.Ref + "), kill condition: " + tool.KillCondition()
 }

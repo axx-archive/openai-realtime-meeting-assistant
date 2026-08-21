@@ -83,10 +83,12 @@ type blobMeta struct {
 // artifactAsset is one content-addressed attachment on an os_artifact:
 // the blob ref plus the display facts the viewer needs without a disk read.
 type artifactAsset struct {
-	Ref  string `json:"ref"`
-	Mime string `json:"mime,omitempty"`
-	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"` // pdf | image | page_image | export
+	Ref                   string `json:"ref"`
+	Mime                  string `json:"mime,omitempty"`
+	Name                  string `json:"name,omitempty"`
+	Kind                  string `json:"kind,omitempty"` // pdf | image | page_image | export
+	SourceArtifactVersion int    `json:"sourceArtifactVersion,omitempty"`
+	SourceSceneRef        string `json:"sourceSceneRef,omitempty"`
 }
 
 // artifactAssetIsPageImage identifies flattened render output, including the
@@ -304,6 +306,7 @@ func (app *kanbanBoardApp) appendArtifactAsset(artifactID string, asset artifact
 	asset.Mime = strings.TrimSpace(asset.Mime)
 	asset.Name = strings.TrimSpace(asset.Name)
 	asset.Kind = strings.ToLower(strings.TrimSpace(asset.Kind))
+	asset.SourceSceneRef = strings.TrimSpace(asset.SourceSceneRef)
 	if asset.Kind != "" && !artifactAssetKinds[asset.Kind] {
 		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, page_image, or export")
 	}
@@ -360,6 +363,7 @@ func (app *kanbanBoardApp) replaceArtifactAssetsOfKind(artifactID string, kind s
 		asset.Mime = strings.TrimSpace(asset.Mime)
 		asset.Name = strings.TrimSpace(asset.Name)
 		asset.Kind = strings.ToLower(strings.TrimSpace(asset.Kind))
+		asset.SourceSceneRef = strings.TrimSpace(asset.SourceSceneRef)
 		if asset.Kind != kind {
 			return meetingMemoryEntry{}, fmt.Errorf("asset kind %q does not match the replaced kind %q", asset.Kind, kind)
 		}

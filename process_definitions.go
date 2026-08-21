@@ -79,6 +79,25 @@ type ProcessGateSpec struct {
 	Floor       float64 `json:"floor,omitempty"`
 	MaxRounds   int     `json:"maxRounds,omitempty"`
 	ForceAccept bool    `json:"forceAccept,omitempty"`
+	// RepairTarget names the authored stage a failed round should revise. When
+	// empty, the historical behavior revises the gate's first input. This lets a
+	// rendered review consume both the draft and its review record while still
+	// sending repair notes back to the draft writer.
+	RepairTarget string `json:"repairTarget,omitempty"`
+	// HoldOnFailure is the fail-closed delivery posture: after repair rounds are
+	// spent, keep the work internal instead of offering "proceed with gaps".
+	HoldOnFailure bool `json:"holdOnFailure,omitempty"`
+}
+
+// ProcessStageCondition is a deliberately small conditional seam for authored
+// processes, not a workflow DSL. The stage runs only when the named earlier
+// stage's JSON string field equals Equals (case-insensitive). Missing or
+// malformed decisions fail open to running the stage, so a credibility check
+// is never silently skipped.
+type ProcessStageCondition struct {
+	StageID string `json:"stageId"`
+	Field   string `json:"field"`
+	Equals  string `json:"equals"`
 }
 
 // ProcessCompileFunc is a compile stage's assembler: authored, deterministic
@@ -155,6 +174,11 @@ type ProcessStage struct {
 	OutputContract string                 `json:"outputContract,omitempty"`
 	GateSpec       *ProcessGateSpec       `json:"gateSpec,omitempty"`
 	CheckpointSpec *ProcessCheckpointSpec `json:"checkpointSpec,omitempty"`
+	RunIf          *ProcessStageCondition `json:"runIf,omitempty"`
+	// Internal suppresses routine stage-completion messages in the channel. The
+	// durable artifacts and progress state remain available in the activity
+	// surface; final deliverables and genuine decision boundaries stay visible.
+	Internal bool `json:"internal,omitempty"`
 	// Compile is the compile role's authored assembler (required for that
 	// role, refused elsewhere by validation). It is code, not data — never
 	// serialized; a restart re-resolves it from the registered definition.
@@ -318,6 +342,25 @@ func validateProcessDefinition(def ProcessDefinition) error {
 				return fmt.Errorf("process %q stage %q inputFrom %q does not name an earlier stage", id, stageID, from)
 			}
 		}
+		if condition := stage.RunIf; condition != nil {
+			conditionStage := strings.TrimSpace(condition.StageID)
+			if !earlier[conditionStage] {
+				return fmt.Errorf("process %q stage %q runIf stage %q does not name an earlier stage", id, stageID, conditionStage)
+			}
+			if strings.TrimSpace(condition.Field) == "" || strings.TrimSpace(condition.Equals) == "" {
+				return fmt.Errorf("process %q stage %q runIf must name a non-empty field and equals value", id, stageID)
+			}
+			conditionIsInput := false
+			for _, from := range stage.InputFrom {
+				if strings.TrimSpace(from) == conditionStage {
+					conditionIsInput = true
+					break
+				}
+			}
+			if !conditionIsInput {
+				return fmt.Errorf("process %q stage %q runIf stage %q must also be listed in inputFrom", id, stageID, conditionStage)
+			}
+		}
 		switch stage.Role {
 		case processRoleWriter:
 			if normalizeAgentThreadMode(processStageThreadMode(stage)) == "" {
@@ -335,6 +378,18 @@ func validateProcessDefinition(def ProcessDefinition) error {
 		case processRoleGate:
 			if len(stage.InputFrom) == 0 {
 				return fmt.Errorf("process %q gate stage %q has no inputFrom — a gate must name the work it scores", id, stageID)
+			}
+			if stage.GateSpec != nil && strings.TrimSpace(stage.GateSpec.RepairTarget) != "" {
+				targetFound := false
+				for _, from := range stage.InputFrom {
+					if strings.TrimSpace(from) == strings.TrimSpace(stage.GateSpec.RepairTarget) {
+						targetFound = true
+						break
+					}
+				}
+				if !targetFound {
+					return fmt.Errorf("process %q gate stage %q repairTarget %q is not one of its inputFrom stages", id, stageID, stage.GateSpec.RepairTarget)
+				}
 			}
 		case processRoleRender:
 			if len(stage.InputFrom) == 0 {

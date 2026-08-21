@@ -101,8 +101,8 @@ func TestDesktopChatChromeKeepsOneUsefulConversationIdentity(t *testing.T) {
 			t.Errorf("desktop chat chrome contract missing %q", want)
 		}
 	}
-	if !strings.Contains(html, `<span class="wordmark topbar__wordmark" aria-hidden="true"></span>`) {
-		t.Fatal("the desktop rail should be anchored by the Stride wordmark")
+	if !strings.Contains(html, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
+		t.Fatal("the desktop header should carry the Stride wordmark once")
 	}
 }
 
@@ -284,8 +284,8 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		"label: 'More reply actions'",
 		"reply.setAttribute('aria-label', 'Reply in this thread')",
 		"chatContextReplyInput?.focus()",
-		"onEdit: () => beginDesktopContextMessageEdit(thread, message, card)",
-		"onDelete: remove => deleteDesktopContextMessage(thread, message, remove)",
+		"onEdit: isOwn ? () => beginDesktopContextMessageEdit(thread, message, card) : null",
+		"onDelete: isOwn ? remove => deleteDesktopContextMessage(thread, message, remove) : null",
 		"menu.setAttribute('role', 'menu')",
 		"pressTimer = window.setTimeout(() => {",
 		"if (moreControl) moreControl.open()",

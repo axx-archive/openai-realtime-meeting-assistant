@@ -121,6 +121,7 @@ type agentThreadGoalSpec struct {
 	RequestedBy         string
 	Authority           string
 	Visibility          string
+	WorkLabel           string
 	PackageID           string
 	AgentID             string
 	AgentName           string
@@ -197,6 +198,7 @@ func (spec agentThreadGoalSpec) metadata() map[string]string {
 		"requestedBy":                 spec.RequestedBy,
 		"authority":                   spec.Authority,
 		"visibility":                  spec.Visibility,
+		"workLabel":                   spec.WorkLabel,
 		"packageId":                   spec.PackageID,
 		"agentId":                     spec.AgentID,
 		"agentName":                   spec.AgentName,
@@ -379,6 +381,14 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 		if value := strings.TrimSpace(origin[key]); value != "" {
 			metadata[key] = value
 		}
+	}
+	// originSurface is the artifact authorization boundary for chat-origin
+	// work. It intentionally remains outside the coarse delivery-key allowlist,
+	// but a verified goal child may supply it through its bound origin map.
+	// Persist it explicitly so the memory store can project the source thread's
+	// exact private owner or public-channel visibility.
+	if surface := strings.TrimSpace(origin["originSurface"]); surface != "" {
+		metadata["originSurface"] = surface
 	}
 	if strings.TrimSpace(reservedRunID) != "" && strings.TrimSpace(origin["originKind"]) == agentThreadOriginRoom {
 		metadata[roomWorkActivationMetadataKey] = roomWorkActivationReserved
@@ -2255,6 +2265,11 @@ func agentThreadUsesImageDirectionContract(thread scoutAgentThread) bool {
 		strings.TrimSpace(thread.Artifact.Metadata["outputContract"]) == packagingStudioImageryDirectionContract
 }
 
+func agentThreadUsesExternalEvidenceContract(thread scoutAgentThread) bool {
+	return agentThreadUsesGroundedDeliverableContract(thread) &&
+		strings.TrimSpace(thread.Artifact.Metadata["outputContract"]) == packagingStudioExternalEvidenceContract
+}
+
 const (
 	defaultAgentThreadMaxOutputTokens         = 8000
 	defaultResearchAgentThreadMaxOutputTokens = 24000
@@ -2369,6 +2384,12 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 			"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
 			"Write in a practical operator voice. Keep it useful as a saved artifact, not a chat reply.",
 		}, "\n")
+	}
+	// The conditional deck-research stage produces a compact evidence input,
+	// not the standalone research report imposed by the generic research mode.
+	// Only a parent/subtask-bound server contract can select this override.
+	if agentThreadUsesExternalEvidenceContract(thread) {
+		return strings.TrimSpace(externalEvidenceContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
 	}
 	// A raw-document contract REPLACES the generic workflow instructions: the
 	// child's response is the deliverable file itself, and "start with a

@@ -1,0 +1,193 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import vm from 'node:vm';
+import {
+  DECK_PREVIEW_NAVIGATION_JS,
+  deckPreviewNavigationCommand,
+  deckPreviewNavigationTarget,
+  initialDeckPreviewNavigationState,
+  parseDeckPreviewNavigationMessage,
+} from '../messaging/deckPreviewNavigation';
+import { registerTestStubModules } from './support/registerTestStubModules';
+
+test('deck preview navigation accepts only bounded authoritative state', () => {
+  assert.deepEqual(initialDeckPreviewNavigationState(), {
+    status: 'loading',
+    currentIndex: 0,
+    slideCount: 0,
+  });
+  assert.equal(parseDeckPreviewNavigationMessage('not-json'), null);
+  assert.equal(parseDeckPreviewNavigationMessage(JSON.stringify({
+    kind: 'other-message',
+    status: 'ready',
+    currentIndex: 0,
+    slideCount: 3,
+  })), null);
+  assert.equal(parseDeckPreviewNavigationMessage(JSON.stringify({
+    kind: 'bonfire:deck-preview-navigation',
+    status: 'ready',
+    currentIndex: 3,
+    slideCount: 3,
+  })), null);
+  const secondOfThree = parseDeckPreviewNavigationMessage(JSON.stringify({
+    kind: 'bonfire:deck-preview-navigation',
+    status: 'ready',
+    currentIndex: 1,
+    slideCount: 3,
+  }));
+  assert.deepEqual(secondOfThree, { status: 'ready', currentIndex: 1, slideCount: 3 });
+  assert.equal(deckPreviewNavigationTarget(secondOfThree!, 'previous'), 0);
+  assert.equal(deckPreviewNavigationTarget(secondOfThree!, 'next'), 2);
+  assert.equal(deckPreviewNavigationTarget({ status: 'ready', currentIndex: 0, slideCount: 3 }, 'previous'), null);
+  assert.equal(deckPreviewNavigationTarget({ status: 'ready', currentIndex: 2, slideCount: 3 }, 'next'), null);
+  assert.equal(deckPreviewNavigationTarget(initialDeckPreviewNavigationState(), 'next'), null);
+  assert.match(deckPreviewNavigationCommand(2), /controller\.show\(2\)/u);
+});
+
+test('injected controller navigates only top-level pages and reports stable position', () => {
+  class FakeStyle {
+    readonly values = new Map<string, { value: string; priority: string }>();
+    overflow = '';
+    getPropertyValue(name: string) { return this.values.get(name)?.value ?? ''; }
+    getPropertyPriority(name: string) { return this.values.get(name)?.priority ?? ''; }
+    setProperty(name: string, value: string, priority = '') { this.values.set(name, { value, priority }); }
+    removeProperty(name: string) { this.values.delete(name); }
+  }
+  class FakeClassList {
+    readonly values: Set<string>;
+    constructor(values: string[]) { this.values = new Set(values); }
+    contains(value: string) { return this.values.has(value); }
+    add(value: string) { this.values.add(value); }
+    remove(value: string) { this.values.delete(value); }
+  }
+  function page(classes: string[]) {
+    const attributes = new Map<string, string>();
+    return {
+      style: new FakeStyle(),
+      classList: new FakeClassList(classes),
+      matches: () => true,
+      setAttribute: (name: string, value: string) => { attributes.set(name, value); },
+      attributes,
+    };
+  }
+  const pages = [page(['pg', 'on']), page(['pg']), page(['pg'])];
+  const nestedSection = page(['slide']);
+  const embeddedNavigation = { style: new FakeStyle() };
+  const posted: Array<Record<string, unknown>> = [];
+  const context = vm.createContext({
+    document: {
+      body: { style: new FakeStyle() },
+      getElementById: (id: string) => id === 'stage' ? { children: pages } : null,
+      querySelectorAll: () => [nestedSection],
+      querySelector: () => embeddedNavigation,
+    },
+    window: {
+      ReactNativeWebView: {
+        postMessage: (value: string) => { posted.push(JSON.parse(value) as Record<string, unknown>); },
+      },
+      getComputedStyle: (candidate: ReturnType<typeof page>) => ({
+        display: candidate.style.getPropertyValue('display') || (candidate.classList.contains('on') ? 'block' : 'none'),
+      }),
+    },
+  });
+  vm.runInContext(DECK_PREVIEW_NAVIGATION_JS, context);
+  assert.deepEqual(posted.at(-1), {
+    kind: 'bonfire:deck-preview-navigation',
+    status: 'ready',
+    currentIndex: 0,
+    slideCount: 3,
+  });
+  assert.equal(embeddedNavigation.style.getPropertyValue('display'), 'none');
+  assert.equal(pages[0].attributes.get('aria-hidden'), 'false');
+  assert.equal(pages[1].attributes.get('aria-hidden'), 'true');
+  assert.equal(nestedSection.style.getPropertyValue('display'), '');
+
+  vm.runInContext(deckPreviewNavigationCommand(1), context);
+  assert.deepEqual(posted.at(-1), {
+    kind: 'bonfire:deck-preview-navigation',
+    status: 'ready',
+    currentIndex: 1,
+    slideCount: 3,
+  });
+  assert.equal(pages[0].style.getPropertyValue('display'), 'none');
+  assert.equal(pages[1].style.getPropertyValue('display'), '');
+  assert.equal(pages[1].classList.contains('on'), true);
+  assert.doesNotMatch(DECK_PREVIEW_NAVIGATION_JS, /\[class\*=["']slide/u);
+});
+
+test('native preview keeps deck navigation top-right and actions separate from non-deck cards', async () => {
+  registerTestStubModules('deck-preview-stub:', {
+        'deck-preview-stub:react-native': `
+          export const ActivityIndicator='ActivityIndicator'; export const Pressable='Pressable'; export const ScrollView='ScrollView'; export const Text='Text'; export const View='View';
+          export const StyleSheet={create:value=>value};
+        `,
+        'deck-preview-stub:react-native-webview': `
+          const React=globalThis.__deckPreviewReact;
+          export const injectedScripts=[];
+          export const WebView=React.forwardRef(function WebView(props, ref) {
+            React.useImperativeHandle(ref, ()=>({injectJavaScript:script=>injectedScripts.push(script), reload:()=>{}}));
+            return React.createElement('WebViewHost', props);
+          });
+        `,
+        'deck-preview-stub:expo-symbols': `export const SymbolView='SymbolView';`,
+        'deck-preview-stub:../api/client': `export const api={artifactRenderToken:async()=>({url:'/artifacts/render?id=deck'})};`,
+        'deck-preview-stub:../config': `export const API_BASE_URL='https://example.test';`,
+        'deck-preview-stub:../api/requestHelpers': `export const buildApiUrl=(base,path)=>base+path;`,
+        'deck-preview-stub:../theme/glass': `export const Glass='Glass';`,
+        'deck-preview-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const space=proxy; export const type=proxy;`,
+        'deck-preview-stub:./ScoutRichText': `export const ScoutRichText='ScoutRichText';`,
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const React = (await import('react')).default;
+  (globalThis as typeof globalThis & { __deckPreviewReact?: typeof React }).__deckPreviewReact = React;
+  const { act, create } = await import('react-test-renderer');
+  const { InlineArtifactPreview } = await import('../messaging/InlineArtifactPreview');
+  let edited = 0;
+  let presented = 0;
+  let renderer: import('react-test-renderer').ReactTestRenderer;
+  await act(async () => {
+    renderer = create(React.createElement(InlineArtifactPreview, {
+      kind: 'html_deck', title: 'Field network', text: '', htmlContent: '<html><body></body></html>',
+      onEdit: () => { edited += 1; }, onPresent: () => { presented += 1; },
+    }));
+  });
+  const previous = renderer!.root.findByProps({ accessibilityLabel: 'Previous slide' });
+  const next = renderer!.root.findByProps({ accessibilityLabel: 'Next slide' });
+  assert.equal(previous.props.disabled, true);
+  assert.equal(next.props.disabled, true);
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Deck preview loading' }).children.join(''), '— / —');
+
+  const webView = renderer!.root.findByType('WebViewHost' as any);
+  await act(async () => {
+    webView.props.onMessage({ nativeEvent: { data: JSON.stringify({
+      kind: 'bonfire:deck-preview-navigation', status: 'ready', currentIndex: 0, slideCount: 3,
+    }) } });
+  });
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Slide 1 of 3' }).children.join(''), '1 / 3');
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Previous slide' }).props.disabled, true);
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Next slide' }).props.disabled, false);
+  await act(async () => {
+    webView.props.onMessage({ nativeEvent: { data: JSON.stringify({
+      kind: 'bonfire:deck-preview-navigation', status: 'ready', currentIndex: 1, slideCount: 3,
+    }) } });
+  });
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Slide 2 of 3' }).children.join(''), '2 / 3');
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Edit presentation' }).props.onPress(); });
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Present' }).props.onPress(); });
+  assert.deepEqual({ edited, presented }, { edited: 1, presented: 1 });
+
+  await act(async () => { webView.props.onError(); });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Previous slide' }).length, 0);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Retry deck preview' }).length, 1);
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Retry deck preview' }).props.onPress(); });
+  assert.equal(renderer!.root.findAllByType('WebViewHost' as any).length, 1);
+
+  await act(async () => {
+    renderer!.update(React.createElement(InlineArtifactPreview, {
+      kind: 'research', title: 'Research brief', text: 'Evidence',
+    }));
+  });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Previous slide' }).length, 0);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Next slide' }).length, 0);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Presentation slide navigation' }).length, 0);
+});

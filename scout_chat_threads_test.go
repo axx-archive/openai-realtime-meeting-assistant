@@ -1572,21 +1572,21 @@ func seedScoutChatProposalCard(t *testing.T, threadID string, ownerEmail string,
 	return messageID
 }
 
-// Accepting a tool_run records the positive signal and nothing else — the
-// launch rides POST /assistant/goal with the identical palette spec, so this
-// route must never fork a second launch door for Tier 2. The signal payload
-// comes from the STORED proposal, not the request body.
-func TestScoutChatProposalAcceptToolRunRecordsSignalOnly(t *testing.T) {
+// Accepting a private tool_run launches the stored registry contract exactly
+// once. Client-supplied kind/tool fields cannot redirect it, and a retry
+// reconciles the durable operation rather than starting another run.
+func TestScoutChatProposalAcceptToolRunLaunchesStoredContractExactlyOnce(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "private-tool-accept-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "private-tool-accept-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-		t.Fatal("a tool_run accept must not launch here — /assistant/goal is the only door")
-	}
-	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	starts := 0
+	previousRunner := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) { starts++ }
+	t.Cleanup(func() { startGoalThreadAsync = previousRunner })
 
 	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
@@ -1617,17 +1617,19 @@ func TestScoutChatProposalAcceptToolRunRecordsSignalOnly(t *testing.T) {
 	if response["ok"] != true {
 		t.Fatalf("response=%#v, want ok", response)
 	}
-	if _, launched := response["agentThread"]; launched {
-		t.Fatalf("response keys=%v, want no launch from the proposal route for tool runs", responseKeys(response))
+	launched, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || starts != 1 || launched.Artifact.Metadata["toolTemplate"] != "comps_precedent" {
+		t.Fatalf("response=%#v starts=%d, want one launch of the stored tool", response, starts)
 	}
 	assertRouterSignal(t, signalEventRouterProposalAccepted, signalValencePositive, "comps_precedent", "comps for the rodeo doc")
 
-	// A replayed accept is rejected: the card was already claimed.
-	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+	// A replayed accept reconciles the exact launch.
+	replayed, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
 		Action:    "accepted",
 		MessageID: messageID,
-	}); err == nil || !strings.Contains(err.Error(), "already") {
-		t.Fatalf("replayed tool accept err=%v, want already-resolved rejection", err)
+	})
+	if err != nil || starts != 1 || replayed["reconciled"] != true || replayed["agentThread"].(scoutAgentThread).ID != launched.ID {
+		t.Fatalf("replayed tool accept err=%v starts=%d response=%#v", err, starts, replayed)
 	}
 }
 

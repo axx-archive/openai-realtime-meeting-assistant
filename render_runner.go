@@ -56,6 +56,17 @@ const (
 	renderJobStatusRunning  = "running"
 	renderJobStatusComplete = "complete"
 	renderJobStatusFailed   = "failed"
+	renderJobStatusStale    = "stale"
+
+	// The enqueue-side binding is server-owned metadata on the artifact. The
+	// runner may echo its queue metadata, but callbacks never get to choose the
+	// source revision or native scene they attach to.
+	renderSourceArtifactVersionMetadataKey = "renderSourceArtifactVersion"
+	renderSourceSceneRefMetadataKey        = "renderSourceSceneRef"
+	renderPDFArtifactVersionMetadataKey    = "renderPdfArtifactVersion"
+	renderPDFSourceVersionMetadataKey      = "renderPdfSourceArtifactVersion"
+	renderPDFSourceSceneRefMetadataKey     = "renderPdfSourceSceneRef"
+	renderPDFAssetRefMetadataKey           = "renderPdfAssetRef"
 
 	defaultRenderRunnerPollInterval = 2 * time.Second
 	defaultRenderRunnerStaleAfter   = 2 * time.Minute
@@ -67,7 +78,7 @@ const (
 	// A self-contained deck may carry up to six generated images as data URIs.
 	// Keep the queue bounded while leaving enough headroom for that authored
 	// contract plus HTML/CSS and presenter notes.
-	defaultRenderMaxHTMLBytes       = 32 << 20
+	defaultRenderMaxHTMLBytes = 32 << 20
 )
 
 type renderRunnerJob struct {
@@ -190,6 +201,21 @@ func normalizeRenderJobKind(value string) string {
 		return renderJobKindPaper
 	default:
 		return renderJobKindDeck
+	}
+}
+
+// queuedRenderMetadata is the one enqueue-time contract every PDF producer
+// stamps on its source artifact. Job identity prevents one render from
+// impersonating another; the source version and native scene prevent that
+// legitimate job from landing after its input changed.
+func queuedRenderMetadata(artifact meetingMemoryEntry, jobID string, kind string) map[string]string {
+	return map[string]string{
+		"renderJobId":                          strings.TrimSpace(jobID),
+		"renderStatus":                         renderJobStatusQueued,
+		"renderKind":                           normalizeRenderJobKind(kind),
+		renderSourceArtifactVersionMetadataKey: strconv.Itoa(artifactVersion(artifact)),
+		renderSourceSceneRefMetadataKey:        strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]),
+		"renderError":                          "",
 	}
 }
 

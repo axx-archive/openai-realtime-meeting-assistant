@@ -79,13 +79,10 @@ const renderPageImageAssetCap = 100
 // symlink, and be a regular file no larger than the blob cap, or it is skipped
 // and logged — a hostile holder of the runner token can never make the OS read
 // an arbitrary file. Per-page failures degrade to fewer pages, never a failed
-// callback. A fresh export REPLACES the artifact's previous page images in one
-// metadata write (replaceArtifactAssetsOfKind), so a re-export after edits
-// never leaves the jury scoring stale interleaved pages.
-func persistRenderPageImageAssets(app *kanbanBoardApp, artifactID string, payload renderRunnerCallbackPayload) int {
-	if app == nil || app.memory == nil {
-		return 0
-	}
+// callback. collectRenderPageImageAssets lets the callback land PDF + pages in
+// one revision-bound CAS; persistRenderPageImageAssets keeps the standalone
+// test/maintenance seam and replaces prior pages in one metadata write.
+func collectRenderPageImageAssets(artifactID string, payload renderRunnerCallbackPayload) []artifactAsset {
 	paths := payload.PageJPEGPaths
 	if len(paths) > renderPageImageAssetCap {
 		log.Warnf("Render callback for %s carries %d page images — truncated to the %d-page cap", artifactID, len(paths), renderPageImageAssetCap)
@@ -119,6 +116,14 @@ func persistRenderPageImageAssets(app *kanbanBoardApp, artifactID string, payloa
 			Kind: "page_image",
 		})
 	}
+	return pages
+}
+
+func persistRenderPageImageAssets(app *kanbanBoardApp, artifactID string, payload renderRunnerCallbackPayload) int {
+	if app == nil || app.memory == nil {
+		return 0
+	}
+	pages := collectRenderPageImageAssets(artifactID, payload)
 	if len(pages) == 0 {
 		return 0
 	}
@@ -169,7 +174,7 @@ func renderedDeckSlideCount(source string) int {
 }
 
 // waitForDeckPageImages polls the deck artifact until page-image assets exist
-// (the render callback landed), the render is marked failed, or the wait
+// (the render callback landed), the render is marked failed/stale, or the wait
 // window closes. Returns the freshest artifact snapshot and whether pages
 // exist — false is the studio stage's disclosed-skip signal, never an error.
 func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEntry, bool) {
@@ -192,7 +197,8 @@ func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEnt
 			app.slideJuryDeckObserved(deck)
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(deck.Metadata["renderStatus"]), renderJobStatusFailed) {
+		renderStatus := strings.ToLower(strings.TrimSpace(deck.Metadata["renderStatus"]))
+		if renderStatus == renderJobStatusFailed || renderStatus == renderJobStatusStale {
 			return deck, false
 		}
 		if time.Now().After(deadline) {

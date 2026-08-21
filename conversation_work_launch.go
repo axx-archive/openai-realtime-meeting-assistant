@@ -104,7 +104,14 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		return nil, fmt.Errorf("the addressed agent is not admitted for this work; ask Scout to coordinate it or choose an eligible agent capability")
 	}
 	if strings.TrimSpace(work.ApprovedProposalID) != "" {
-		if work.ApprovedProposalID != userMessage.ID || !conversationApprovedEffectMatches(work, work.ApprovedEffectClass) {
+		if work.ApprovedProposalID != userMessage.ID {
+			return nil, fmt.Errorf("approved work does not match the exact held effect")
+		}
+		requiredEffect := conversationWorkRequiredEffectClass(work, "")
+		if requiredEffect != "" && !conversationApprovedEffectMatches(work, work.ApprovedEffectClass) {
+			return nil, fmt.Errorf("approved work does not match the exact held effect")
+		}
+		if requiredEffect == "" && strings.TrimSpace(work.ApprovedEffectClass) != "" && !conversationApprovedEffectMatches(work, work.ApprovedEffectClass) {
 			return nil, fmt.Errorf("approved work does not match the exact held effect")
 		}
 		if err := work.validateRoute(); err != nil {
@@ -171,6 +178,9 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 			OriginSurface: originSurface, RequestedBy: normalizeAccountEmail(user.Email),
 			Authority: work.Authority, Visibility: scoutChatVisibilityPrivate,
 			Launch: launchFunnelLineage{Source: source, ProposalID: work.ApprovedProposalID, Path: launchPath, Proposer: normalizeAccountEmail(user.Email)},
+		}
+		if conversationWorkVisibleLabel(work, "") == "Insights & Opportunities report" {
+			spec.WorkLabel = "Insights & Opportunities report"
 		}
 		if work.Mode == "research" && userMessage.Project != nil {
 			projectBinding, bindingErr := app.projectWorkBindingForLaunch(ctx, currentSourceThread, userMessage)
@@ -338,6 +348,9 @@ func conversationWorkVisibleLabel(work conversationWorkDecision, fallback string
 		return "Design direction"
 	}
 	if work.Kind == conversationWorkWorkstream {
+		if strings.Contains(strings.ToLower(work.Objective), "insights & opportunities report") {
+			return "Insights & Opportunities report"
+		}
 		switch strings.ToLower(strings.TrimSpace(work.Mode)) {
 		case "research":
 			return "Research"
@@ -365,6 +378,7 @@ func conversationWorkerSpec(identity agentThreadGoalSpec, request agentThreadGoa
 	identity.RequestedBy = request.RequestedBy
 	identity.Authority = request.Authority
 	identity.Visibility = request.Visibility
+	identity.WorkLabel = request.WorkLabel
 	identity.PackageID = request.PackageID
 	identity.ProjectWorkBinding = request.ProjectWorkBinding
 	identity.ProjectWorkID = request.ProjectWorkID

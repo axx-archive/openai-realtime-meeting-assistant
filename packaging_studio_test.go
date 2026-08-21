@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +33,179 @@ func packagingStudioStage(t *testing.T, def ProcessDefinition, id string) Proces
 		t.Fatalf("packaging_studio has no stage %q", id)
 	}
 	return stage
+}
+
+func launchStudioShipChildAndCompileForScopeTest(t *testing.T, app *kanbanBoardApp, work scoutAgentThread) (meetingMemoryEntry, meetingMemoryEntry) {
+	t.Helper()
+	plan := mustGoalPlan(t, app, work.Artifact.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, work.Artifact.ID); err != nil {
+		t.Fatalf("prepare packaging route: %v", err)
+	}
+	definition, ok := engine.resolvedProcess(&plan)
+	if !ok {
+		t.Fatal("packaging process did not resolve")
+	}
+	stage := packagingStudioStage(t, definition, "ship_deck")
+	plan.Subtasks = []goalSubtask{{
+		ID: stage.ID, Title: stage.Title, Detail: stage.PromptBody, Mode: processStageThreadMode(stage),
+		Authority: normalizeCodexJobAuthority(plan.Authority), Runner: agentRunnerOpenAIText, Role: stage.Role,
+		Status: subtaskRunning, Attempts: 1,
+	}}
+	if err := engine.launchSubtask(&plan, &plan.Subtasks[0], work.Artifact.ID); err != nil {
+		t.Fatalf("launch packaging child: %v", err)
+	}
+	child, ok := app.osArtifactByID(plan.Subtasks[0].ArtifactID)
+	if !ok {
+		t.Fatal("packaging child was not persisted")
+	}
+	deckHTML := studioTestDeckHTML()
+	child, _, err := app.updateOSArtifactWithMetadata(child.ID, "", deckHTML, scoutParticipantName, map[string]string{
+		"status": codexJobStatusComplete, "threadStatus": codexJobStatusComplete,
+	})
+	if err != nil {
+		t.Fatalf("complete packaging child: %v", err)
+	}
+	_, extra, err := compilePackagingStudioShip(app, &plan, work.Artifact.ID, ProcessStage{})
+	if err != nil {
+		t.Fatalf("compile packaging deck: %v", err)
+	}
+	deck, ok := app.osArtifactByID(extra["deckArtifactId"])
+	if !ok {
+		t.Fatal("compiled packaging deck was not persisted")
+	}
+	return child, deck
+}
+
+func TestPackagingStudioPrivateChildAndDeckRemainOwnerPrivate(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-private-studio-scope-test"
+	previousGoalStart := startGoalThreadAsync
+	previousAgentStart := startAgentThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() {
+		startGoalThreadAsync = previousGoalStart
+		startAgentThreadAsync = previousAgentStart
+	})
+
+	work, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Build a private leadership deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, deck := launchStudioShipChildAndCompileForScopeTest(t, app, work)
+	wantSurface := work.Artifact.Metadata["originSurface"]
+	for label, artifact := range map[string]meetingMemoryEntry{"child": child, "deck": deck} {
+		if artifact.Metadata["originSurface"] != wantSurface || artifact.Metadata["visibility"] != scoutChatVisibilityPrivate || normalizeAccountEmail(artifact.Metadata["ownerEmail"]) != "aj@shareability.com" {
+			t.Fatalf("%s scope=%q/%q/%q, want %q/private/aj@shareability.com", label, artifact.Metadata["originSurface"], artifact.Metadata["visibility"], artifact.Metadata["ownerEmail"], wantSurface)
+		}
+	}
+}
+
+func TestPackagingStudioPublicChildAndDeckRemainOnPublicChannel(t *testing.T) {
+	app, user, thread, source, binding := newAcceptedPublicWorkFixture(t)
+	previousGoalStart := startGoalThreadAsync
+	previousAgentStart := startAgentThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() {
+		startGoalThreadAsync = previousGoalStart
+		startAgentThreadAsync = previousAgentStart
+	})
+
+	proposal := scoutRouterProposalForToolID(packagingStudioProcessID, "Build the public launch deck", source.Text)
+	if proposal == nil {
+		t.Fatal("packaging studio proposal unavailable")
+	}
+	proposal.IntentOutcome = string(conversationIntentApprovalRequired)
+	proposal.EffectClass = "expanded_audience"
+	proposal.Status = "accepted"
+	const proposalID = "proposal-public-scope-deck"
+	var err error
+	thread, err = app.commitScoutChatThreadMessages(user.Email, thread.ID, scoutChatMessageRecord{
+		ID: proposalID, Kind: scoutChatMessageKindProposal, Role: "scout", Proposal: proposal,
+		CausedByMessageID: source.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := app.startAcceptedPublicScoutWork(context.Background(), user, thread, proposalID, *proposal, nil, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := response["agentThread"].(scoutAgentThread)
+	child, deck := launchStudioShipChildAndCompileForScopeTest(t, app, work)
+	wantSurface := "chat:" + thread.ID
+	for label, artifact := range map[string]meetingMemoryEntry{"child": child, "deck": deck} {
+		if artifact.Metadata["originSurface"] != wantSurface || artifact.Metadata["visibility"] != work.Artifact.Metadata["visibility"] || artifact.Metadata["ownerEmail"] != work.Artifact.Metadata["ownerEmail"] {
+			t.Fatalf("%s scope=%q/%q/%q, want root scope %q/%q/%q", label, artifact.Metadata["originSurface"], artifact.Metadata["visibility"], artifact.Metadata["ownerEmail"], wantSurface, work.Artifact.Metadata["visibility"], work.Artifact.Metadata["ownerEmail"])
+		}
+	}
+}
+
+func TestPackagingStudioDeliveredDeckIsImmediatelyNativePreviewableAndPPTXExportable(t *testing.T) {
+	setupAuthTestEnv(t)
+	setupIsolatedBlobStore(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-native-studio-delivery-test"
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	previousGoalStart := startGoalThreadAsync
+	previousAgentStart := startAgentThreadAsync
+	kanbanApp = app
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		artifactObjectAuthorizer = previousAuthorizer
+		startGoalThreadAsync = previousGoalStart
+		startAgentThreadAsync = previousAgentStart
+	})
+
+	work, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Build the delivered leadership deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, deckArtifact := launchStudioShipChildAndCompileForScopeTest(t, app, work)
+	sceneRef := strings.TrimSpace(deckArtifact.Metadata[deckSceneRefMetadataKey])
+	if !validBlobRef(sceneRef) || deckArtifact.Metadata[deckSchemaMetadataKey] != strconv.Itoa(deckDocumentSchemaVersion) {
+		t.Fatalf("delivered deck has no native scene binding: %+v", deckArtifact.Metadata)
+	}
+	nativeDeck, imported, quality, err := loadDeckDocument(deckArtifact)
+	if err != nil || imported || quality != "native" || len(nativeDeck.Slides) != 2 {
+		t.Fatalf("delivered scene imported=%v quality=%q slides=%d err=%v", imported, quality, len(nativeDeck.Slides), err)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	preview := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+deckArtifact.ID, "", cookies, deckEditorHandler)
+	var previewPayload struct {
+		Artifact      deckArtifactView `json:"artifact"`
+		Deck          deckDocument     `json:"deck"`
+		Imported      bool             `json:"imported"`
+		ImportQuality string           `json:"importQuality"`
+		CanWrite      bool             `json:"canWrite"`
+	}
+	if preview.Code != http.StatusOK || json.Unmarshal(preview.Body.Bytes(), &previewPayload) != nil || previewPayload.Imported || previewPayload.ImportQuality != "native" || !previewPayload.CanWrite || previewPayload.Artifact.SceneRef != sceneRef || len(previewPayload.Deck.Slides) != 2 {
+		t.Fatalf("fresh deck endpoint status=%d payload=%s", preview.Code, preview.Body.String())
+	}
+
+	pptx := deckPPTXRequest(t, deckArtifact, cookies, nil)
+	if pptx.Code != http.StatusOK || pptx.Header().Get("Content-Type") != deckPPTXContentType {
+		t.Fatalf("fresh PPTX status=%d content-type=%q body=%s", pptx.Code, pptx.Header().Get("Content-Type"), pptx.Body.String())
+	}
+	if _, ok := deckPPTXZipParts(t, pptx.Body.Bytes())["ppt/slides/slide2.xml"]; !ok {
+		t.Fatal("fresh PPTX export lost the second generated slide")
+	}
+	after, ok := app.osArtifactByID(deckArtifact.ID)
+	if !ok || artifactVersion(after) != artifactVersion(deckArtifact) || after.Metadata[deckSceneRefMetadataKey] != sceneRef {
+		t.Fatalf("read-only preview/export mutated the delivered deck: before=%+v after=%+v", deckArtifact.Metadata, after.Metadata)
+	}
 }
 
 // --- The whole definition validates + serves --------------------------------
@@ -76,8 +251,8 @@ func TestPackagingStudioDefinitionValidates(t *testing.T) {
 
 // --- Stage wiring: the nine phases, in order, on the right roles -------------
 
-func TestPackagingStudioStageWiring(t *testing.T) {
-	def := packagingStudioDefinition()
+func TestLegacyPackagingStudioV2StageWiring(t *testing.T) {
+	def := legacyPackagingStudioDefinition()
 
 	// The pipeline's spine: the ordered phases mapped to runtime roles. INTAKE
 	// is the FIRST stage and a human checkpoint; SHIP ends writer → compile →
@@ -200,6 +375,248 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 	}
 }
 
+func TestPackagingStudioV3IsInvisibleConditionalAndFailClosed(t *testing.T) {
+	def := packagingStudioDefinition()
+	if def.Version != 3 {
+		t.Fatalf("version=%d, want 3", def.Version)
+	}
+	if def.Stages[0].ID != "context_snapshot" || def.Stages[len(def.Stages)-1].ID != "ship_compile" {
+		t.Fatalf("unexpected v3 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
+	}
+	for _, stage := range def.Stages {
+		if stage.Role == processRoleHumanCheckpoint {
+			t.Fatalf("routine human checkpoint %q remains after the proposal boundary", stage.ID)
+		}
+		if stage.ID != "ship_compile" && !stage.Internal {
+			t.Errorf("internal stage %q would clutter the channel", stage.ID)
+		}
+	}
+	research := packagingStudioStage(t, def, "external_research")
+	if research.RunIf == nil || research.RunIf.StageID != "context_snapshot" || research.RunIf.Field != "research_mode" || research.RunIf.Equals != "external" {
+		t.Fatalf("external research is not conditional on the brief: %+v", research.RunIf)
+	}
+	index := map[string]int{}
+	for i, stage := range def.Stages {
+		index[stage.ID] = i
+	}
+	for before, after := range map[string]string{
+		"story_architects": "write", "write": "identity", "identity": "imagery_direction",
+		"ship_deck": "draft_compile", "draft_compile": "slide_jury", "slide_jury": "quality_gate", "quality_gate": "ship_compile",
+	} {
+		if index[before] >= index[after] {
+			t.Errorf("stage order broken: %s must precede %s", before, after)
+		}
+	}
+	for _, id := range []string{"gate", "quality_gate"} {
+		stage := packagingStudioStage(t, def, id)
+		if stage.GateSpec == nil || stage.GateSpec.ForceAccept || !stage.GateSpec.HoldOnFailure || stage.GateSpec.RepairTarget == "" {
+			t.Errorf("%s must repair then hold, never force-accept: %+v", id, stage.GateSpec)
+		}
+	}
+	compile := packagingStudioStage(t, def, "ship_compile")
+	if len(compile.InputFrom) != 2 || !containsString(compile.InputFrom, "quality_gate") || compile.Internal {
+		t.Fatalf("final delivery is not gated and visible: %+v", compile)
+	}
+}
+
+func TestPackagingStudioProposalCopyDescribesOutcomeNotOrchestration(t *testing.T) {
+	tool, ok := routerToolByID(packagingStudioProcessID)
+	if !ok {
+		t.Fatal("Packaging Studio missing from router")
+	}
+	summary := scoutRouterToolRunSummary(tool, "Build a five-slide Like A Farmer deck")
+	lower := strings.ToLower(summary + " " + scoutProposalWeightGoalLoop)
+	for _, forbidden := range []string{"goal loop", "multi-agent", "staged process", "human checkpoint", "spends tokens", "5-15 min"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("proposal copy leaks internal orchestration %q: %s", forbidden, summary)
+		}
+	}
+	for _, want := range []string{"editable presentation", "edit or present", "runs in the background"} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("proposal copy missing user outcome %q: %s (%s)", want, summary, scoutProposalWeightGoalLoop)
+		}
+	}
+	proposal := scoutRouterProposalForToolID(packagingStudioProcessID, "Build a five-slide Like A Farmer deck", "")
+	if proposal == nil || proposal.GroupLabel != "Presentation" {
+		t.Fatalf("deck proposal group label=%+v, want customer-facing Presentation", proposal)
+	}
+}
+
+func TestPackagingRequestedSlideCount(t *testing.T) {
+	for _, tc := range []struct {
+		objective string
+		want      int
+		ok        bool
+	}{
+		{"build the actual 5-slide deck", 5, true},
+		{"make a five slide presentation", 5, true},
+		{"create 12 slides for the board", 12, true},
+		{"make a deck for the 90-day plan", 0, false},
+		{"make 99 slides", 0, false},
+	} {
+		got, ok := packagingRequestedSlideCount(tc.objective)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%q: got (%d,%v), want (%d,%v)", tc.objective, got, ok, tc.want, tc.ok)
+		}
+	}
+	app := newIsolatedKanbanBoardApp(t)
+	snapshot, _, err := app.createOSArtifactWithMetadata("workflow", "Brief", `{"slide_count":7}`, scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{Objective: "Build the presentation", Subtasks: []goalSubtask{{ID: "context_snapshot", ArtifactID: snapshot.ID, Status: subtaskComplete}}}
+	if got, ok := packagingPlanSlideCount(app, plan); !ok || got != 7 {
+		t.Fatalf("context snapshot slide count=(%d,%v), want (7,true)", got, ok)
+	}
+}
+
+func TestPackagingStudioConditionalResearchSkipsCleanly(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Conditional research goal", "Build the deck", scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Brief", `{"research_mode":"internal"}`, scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := packagingStudioDefinition()
+	plan := &goalPlan{PlanVersion: goalPlanVersion, GoalID: parent.ID, Objective: "Build the deck", ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, routeVerified: true}
+	if err := instantiateProcessPlan(def, plan); err != nil {
+		t.Fatal(err)
+	}
+	contextStage := plan.subtaskByID("context_snapshot")
+	contextStage.Status, contextStage.ArtifactID = subtaskComplete, contextArtifact.ID
+	engine := newGoalEngine(app)
+	engine.skipInactiveProcessStages(plan, parent.ID)
+	research := plan.subtaskByID("external_research")
+	if research.Status != subtaskComplete {
+		t.Fatalf("conditional research status=%q, want complete skip", research.Status)
+	}
+	record, ok := app.osArtifactByID(research.ArtifactID)
+	if !ok || record.Metadata["conditionSkipped"] != "true" {
+		t.Fatalf("conditional skip was not durable: %+v", record.Metadata)
+	}
+}
+
+func TestPackagingStudioPrivateGroundingUsesAuthenticatedRequester(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	seedTasteProfileArtifact(t, app, "AJ", "Requester-specific taste: lead with the earned insight.")
+	engine := newGoalEngine(app)
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, CreatedBy: "AJ", RequestedBy: "aj@shareability.com"}
+	context := engine.processStageCompanyContext(plan)
+	if !strings.Contains(context, "Requester-specific taste") {
+		t.Fatalf("private grounding used display-name creator instead of authenticated requester:\n%s", context)
+	}
+}
+
+func TestPackagingStudioV3CompileFilesOnlyTheDeck(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	deck, _, err := app.createOSArtifactWithMetadata("workflow", "Authored deck", studioTestDeckHTML(), scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{
+		ProcessID: packagingStudioProcessID, Objective: "Build the actual 2-slide deck", CreatedBy: "AJ",
+		Subtasks: []goalSubtask{{ID: "ship_deck", Status: subtaskComplete, ArtifactID: deck.ID}},
+	}
+	body, metadata, err := compilePackagingStudioShip(app, plan, "goal-deck-only", ProcessStage{})
+	if err != nil {
+		t.Fatalf("deck-only compile: %v", err)
+	}
+	ids := strings.Split(metadata["shipArtifactIds"], ",")
+	if len(ids) != 1 || strings.TrimSpace(ids[0]) == "" {
+		t.Fatalf("shipArtifactIds=%q, want exactly one deck", metadata["shipArtifactIds"])
+	}
+	filed, ok := app.osArtifactByID(strings.TrimSpace(ids[0]))
+	if !ok || filed.Metadata["artifactContract"] != packagingStudioDeckContract {
+		t.Fatalf("filed deliverable is not the deck: %+v", filed.Metadata)
+	}
+	if strings.Contains(strings.ToLower(body), "five interlocking") {
+		t.Fatalf("v3 compile leaked the retired five-artifact package:\n%s", body)
+	}
+}
+
+func TestPackagingStudioQualityGateRepairsDeckAndRerunsRenderedReview(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "quality-repair-test"
+	t.Setenv("OPENAI_API_KEY", "quality-repair-test")
+	previousStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStart })
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"dimensions":[{"name":"Text fit","score":4,"gap":"shorten slide 2 and restore safe margins"}],"reasons":"the rendered deck needs repair"}`, nil
+	})
+	run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the actual 2-slide deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, app, run.Artifact.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	def := packagingStudioDefinition()
+	if err := instantiateProcessPlan(def, &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury"} {
+		body := "completed " + id
+		if id == "ship_deck" {
+			body = studioTestDeckHTML()
+		}
+		artifact, _, createErr := app.createOSArtifactWithMetadata("workflow", id, body, scoutParticipantName, map[string]string{})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		stage := plan.subtaskByID(id)
+		stage.Status, stage.ArtifactID = subtaskComplete, artifact.ID
+	}
+	quality := plan.subtaskByID("quality_gate")
+	quality.Status = subtaskRunning
+	stage := packagingStudioStage(t, def, "quality_gate")
+	engine.runProcessGateStage(context.Background(), &plan, run.Artifact.ID, quality, stage)
+
+	if quality.Status != subtaskPending || quality.Revisions != 1 {
+		t.Fatalf("quality gate did not re-arm for repair: %+v", quality)
+	}
+	if ship := plan.subtaskByID("ship_deck"); ship.Status != subtaskReady || ship.Review == nil || !strings.Contains(ship.Review.Reasons, "safe margins") {
+		t.Fatalf("repair notes did not reach ship_deck: %+v", ship)
+	}
+	for _, id := range []string{"draft_compile", "slide_jury"} {
+		if got := plan.subtaskByID(id); got.Status != subtaskPending {
+			t.Fatalf("%s status=%q, want pending so the repaired deck is re-rendered and re-reviewed", id, got.Status)
+		}
+	}
+
+	holdRun, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the actual 2-slide deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holdPlan := mustGoalPlan(t, app, holdRun.Artifact.ID)
+	if err := engine.prepareGoalRoute(&holdPlan, holdRun.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := instantiateProcessPlan(def, &holdPlan); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ship_deck", "slide_jury"} {
+		artifact, _, createErr := app.createOSArtifactWithMetadata("workflow", id+" hold", "blocking rendered review", scoutParticipantName, map[string]string{})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		subtask := holdPlan.subtaskByID(id)
+		subtask.Status, subtask.ArtifactID = subtaskComplete, artifact.ID
+	}
+	holdGate := holdPlan.subtaskByID("quality_gate")
+	holdGate.Status, holdGate.Revisions = subtaskRunning, 2
+	engine.runProcessGateStage(context.Background(), &holdPlan, holdRun.Artifact.ID, holdGate, stage)
+	if holdPlan.State != goalStateBlocked || holdPlan.Checkpoint != nil || holdGate.Status != subtaskFailed || !strings.Contains(holdPlan.Blocker, "held before delivery") {
+		t.Fatalf("spent quality gate did not hold fail-closed: state=%q checkpoint=%+v gate=%+v blocker=%q", holdPlan.State, holdPlan.Checkpoint, holdGate, holdPlan.Blocker)
+	}
+}
+
 // ship_deck must hand the writer the REQUIRED print chassis so the exported PDF
 // contains every slide, not just the on-screen frame — the fix for the
 // one-page-deck defect. The prompt carries the @page/@media-print contract, the
@@ -262,7 +679,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 		t.Fatalf("imagery_generate must be an authored compile stage (role=%q, hasCompile=%v)", gen.Role, gen.Compile != nil)
 	}
 
-	for _, need := range []string{"identity", "write", "voice", "founder_pass"} {
+	for _, need := range []string{"identity", "write", "voice"} {
 		if !containsString(direction.InputFrom, need) {
 			t.Errorf("imagery_direction inputFrom=%v, missing %q", direction.InputFrom, need)
 		}
@@ -281,7 +698,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 	for i, s := range def.Stages {
 		idx[s.ID] = i
 	}
-	order := []string{"identity", "founder_pass", "imagery_direction", "imagery_generate", "ship_deck"}
+	order := []string{"write", "identity", "imagery_direction", "imagery_generate", "ship_deck"}
 	for i := 1; i < len(order); i++ {
 		if idx[order[i-1]] >= idx[order[i]] {
 			t.Fatalf("stage order broken: %s(%d) must precede %s(%d)", order[i-1], idx[order[i-1]], order[i], idx[order[i]])
@@ -298,7 +715,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 		t.Fatalf("last writer stage=%q, want ship_deck (the deck must stay the deliverable)", lastWriter)
 	}
 
-	for _, need := range []string{"EDITORIAL", "full-bleed", "crescendo", "typographic", "```json"} {
+	for _, need := range []string{"emotional", "full bleeds", "crescendo", "typographic", "JSON"} {
 		if !strings.Contains(direction.PromptBody, need) {
 			t.Errorf("imagery_direction prompt missing the art-direction/chassis cue %q", need)
 		}
@@ -372,7 +789,7 @@ func TestApplyDeckImageryPlacesAndDiscloses(t *testing.T) {
 // declares no brand assets, and disclose a skip when assets exist. It reads the
 // INTAKE choice to pick the branch.
 func TestPackagingStudioIdentityConditionalBothBranches(t *testing.T) {
-	def := packagingStudioDefinition()
+	def := legacyPackagingStudioDefinition()
 	identity := packagingStudioStage(t, def, "identity")
 
 	if !containsString(identity.InputFrom, "intake") {
@@ -401,7 +818,7 @@ func TestPackagingStudioIdentityConditionalBothBranches(t *testing.T) {
 // COMPETE choice card reads its options from the judges' verdict (OptionsFrom),
 // and the founder pass offers the ship/send-back taste decision.
 func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
-	def := packagingStudioDefinition()
+	def := legacyPackagingStudioDefinition()
 
 	intake := packagingStudioStage(t, def, "intake")
 	if intake.Title != "Intake — source, audience, and visual direction" {
@@ -826,6 +1243,7 @@ func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, package
 }
 
 func TestPackagingStudioShipFinalizationRecoversAfterCommittedCrash(t *testing.T) {
+	t.Skip("v2 ship-approval recovery contract; v3 delivers private artifacts without a routine final checkpoint")
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
@@ -905,6 +1323,7 @@ func TestPackagingStudioShipFinalizationRecoversAfterCommittedCrash(t *testing.T
 // boot re-drives the exact reset deck stage, re-parks a fresh ship checkpoint,
 // and finalizes the old receipt without ever filing a manifest.
 func TestPackagingStudioShipReviseRedrivesAfterPreDriveCrash(t *testing.T) {
+	t.Skip("v2 ship-approval send-back contract; v3 uses the pre-delivery repair gate")
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
@@ -989,6 +1408,7 @@ func TestPackagingStudioShipReviseRedrivesAfterPreDriveCrash(t *testing.T) {
 // honestly replay the provider. It must fail closed and finalize the choice
 // receipt without projecting a shipped manifest.
 func TestPackagingStudioShipReviseMidDriveCrashFailsClosedWithoutManifest(t *testing.T) {
+	t.Skip("v2 ship-approval send-back contract; v3 uses the pre-delivery repair gate")
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
@@ -1127,6 +1547,7 @@ var studioWantContracts = []string{
 // server-side), carries the founder's do_not_touch mark into the ship_deck
 // prompt, and reaches verified after the explicit ship approval.
 func TestPackagingStudioShipFilesFiveArtifactsAndEnqueuesRenders(t *testing.T) {
+	t.Skip("v2 five-artifact default retired; v3 files one deck by default")
 	app := newIsolatedKanbanBoardApp(t)
 	// A live render sidecar: a fresh heartbeat on the shared volume makes
 	// renderSidecarAvailable() true, so the export jobs enqueue into the fake
@@ -1313,6 +1734,7 @@ func TestPackagingStudioShipFilesFiveArtifactsAndEnqueuesRenders(t *testing.T) {
 // record — the ship never blocks, and a goal without a package discloses that
 // too instead of failing.
 func TestPackagingStudioShipDisclosesSkipWithoutSidecar(t *testing.T) {
+	t.Skip("v2 checkpoint harness retired; deck-only compiler coverage lives in v3 focused tests")
 	app := newIsolatedKanbanBoardApp(t)
 	// No heartbeat written → renderSidecarAvailable() is false.
 	if renderSidecarAvailable() {
@@ -1379,6 +1801,7 @@ func TestPackagingStudioShipDisclosesSkipWithoutSidecar(t *testing.T) {
 // slide_jury_v1, and the findings record gains the revision-notes section —
 // with NOTHING auto-revised (the founder decides at ship approval).
 func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
+	t.Skip("v2 checkpoint harness retired; v3 jury runs before the delivery gate")
 	app := newIsolatedKanbanBoardApp(t)
 	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-render-runner"); err != nil {
 		t.Fatalf("write render heartbeat: %v", err)
@@ -1561,6 +1984,7 @@ func anthropicRequestText(request anthropicMessagesRequest) string {
 // the ship approval to verified — the send-back label finally does what it
 // says, without costing the goal.
 func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
+	t.Skip("v2 founder checkpoint retired; v3 applies automatic bounded repair")
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{
 		fallback:  "Objection: the plan assumes distribution it has not earned. strengths_to_keep: the founder's voice.",
@@ -1716,6 +2140,7 @@ func studioManifestMessages(t *testing.T, app *kanbanBoardApp, channelID string)
 // share eligibility, so the card's share door points at the deck. The manifest
 // is DATA persisted ON the message.
 func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
+	t.Skip("v2 approval manifest retired for reversible private deck creation")
 	app := newIsolatedKanbanBoardApp(t)
 	pkg, err := app.createVenturePackage("Station Tenn", "the country culture studio", "aj@shareability.com")
 	if err != nil {
@@ -1864,6 +2289,7 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 // the share door dark, the deliverables NOT approved — and an explicit proceed
 // afterwards posts the shipped card, share now live.
 func TestPackagingStudioShipManifestHeldVariant(t *testing.T) {
+	t.Skip("v2 approval manifest retired; v3 quality gate holds before delivery")
 	app := newIsolatedKanbanBoardApp(t)
 	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", scoutChatVisibilityPrivate)
 	if err != nil {
@@ -1958,7 +2384,7 @@ func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
 	inputs := studioShipInputs{
 		GoalID:    "os-artifact-workflow-reship-probe",
 		CreatedBy: "AJ",
-		DeckHTML:  "<!doctype html><html><body><section class=\"pg\">v1 deck</section></body></html>",
+		DeckHTML:  strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — v1 deck", 1),
 		Wall:      "wall v1",
 		Talk:      "talk v1",
 		Rigor:     "rigor v1",
@@ -1976,8 +2402,14 @@ func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
 	for _, deliverable := range first {
 		firstIDs[deliverable.Contract] = deliverable.ArtifactID
 	}
+	firstDeck, ok := app.osArtifactByID(firstIDs[packagingStudioDeckContract])
+	if !ok || !validBlobRef(firstDeck.Metadata[deckSceneRefMetadataKey]) {
+		t.Fatalf("first shipped deck has no native scene: %+v", firstDeck.Metadata)
+	}
+	firstSceneRef := firstDeck.Metadata[deckSceneRefMetadataKey]
+	firstVersion := artifactVersion(firstDeck)
 
-	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">v2 deck — revised close</section></body></html>"
+	inputs.DeckHTML = strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — v2 deck — revised close", 1)
 	inputs.Wall = "wall v2"
 	inputs.Talk = "talk v2"
 	inputs.Rigor = "rigor v2"
@@ -2001,6 +2433,14 @@ func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
 			t.Fatalf("contract %q body=%q, want the revised v2 body", deliverable.Contract, stored.Text)
 		}
 	}
+	secondDeck, ok := app.osArtifactByID(firstIDs[packagingStudioDeckContract])
+	if !ok || secondDeck.Metadata[deckSceneRefMetadataKey] == firstSceneRef || artifactVersion(secondDeck) != firstVersion+1 {
+		t.Fatalf("re-ship did not atomically version body+scene: first=%d/%s second=%d/%s", firstVersion, firstSceneRef, artifactVersion(secondDeck), secondDeck.Metadata[deckSceneRefMetadataKey])
+	}
+	loaded, imported, quality, err := loadDeckDocument(secondDeck)
+	if err != nil || imported || quality != "native" || len(loaded.Slides) != 2 {
+		t.Fatalf("re-shipped native scene imported=%v quality=%q slides=%d err=%v", imported, quality, len(loaded.Slides), err)
+	}
 
 	// A goal-less studio run (no re-open path) still files fresh artifacts.
 	inputs.GoalID = ""
@@ -2015,6 +2455,21 @@ func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
 	}
 }
 
+func TestFileStudioShipDeliverablesRejectsUnfaithfulDeckBeforeFiling(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	before := len(app.osArtifactsSnapshot(0))
+	_, err := app.fileStudioShipDeliverables(studioShipInputs{
+		GoalID: "unfaithful-goal", CreatedBy: "AJ", DeckOnly: true,
+		DeckHTML: "<!doctype html><html><body><section class=\"pg\"><h1>Unannotated deck</h1></section></body></html>",
+	})
+	if err == nil || !strings.Contains(err.Error(), "faithful native-importable scene") {
+		t.Fatalf("unfaithful deck error=%v", err)
+	}
+	if after := len(app.osArtifactsSnapshot(0)); after != before {
+		t.Fatalf("unfaithful deck filed a partial artifact: before=%d after=%d", before, after)
+	}
+}
+
 func TestFileStudioShipDeliverablesPreservesAcceptedDeckAndVersionsRetryCandidate(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Accepted deck retry", "goal", "AJ", map[string]string{
@@ -2025,7 +2480,7 @@ func TestFileStudioShipDeliverablesPreservesAcceptedDeckAndVersionsRetryCandidat
 	}
 	inputs := studioShipInputs{
 		GoalID: parent.ID, CreatedBy: "AJ", DeckTitle: "Accepted deck retry",
-		DeckHTML: "<!doctype html><html><body><section class=\"pg\">approved deck</section></body></html>",
+		DeckHTML: strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — approved deck", 1),
 		Wall:     "wall v1", Talk: "talk v1", Rigor: "rigor v1", Findings: "findings v1",
 	}
 	first, err := app.fileStudioShipDeliverables(inputs)
@@ -2043,7 +2498,7 @@ func TestFileStudioShipDeliverablesPreservesAcceptedDeckAndVersionsRetryCandidat
 		t.Fatalf("stamp accepted deck: %v", err)
 	}
 
-	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">retry candidate v2</section></body></html>"
+	inputs.DeckHTML = strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — retry candidate v2", 1)
 	inputs.Wall, inputs.Talk, inputs.Rigor, inputs.Findings = "wall v2", "talk v2", "rigor v2", "findings v2"
 	second, err := app.fileStudioShipDeliverables(inputs)
 	if err != nil {
@@ -2066,7 +2521,7 @@ func TestFileStudioShipDeliverablesPreservesAcceptedDeckAndVersionsRetryCandidat
 		t.Fatalf("approved artifact bytes changed: %q", approved.Text)
 	}
 
-	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">retry candidate v3</section></body></html>"
+	inputs.DeckHTML = strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — retry candidate v3", 1)
 	third, err := app.fileStudioShipDeliverables(inputs)
 	if err != nil {
 		t.Fatalf("candidate recompile: %v", err)

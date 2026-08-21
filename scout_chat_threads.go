@@ -2106,15 +2106,7 @@ func (app *kanbanBoardApp) conversationWorkForOperation(viewerEmail string, thre
 }
 
 func conversationWorkReplayCard(userMessage scoutChatMessageRecord, launched scoutAgentThread) scoutChatMessageRecord {
-	label := assistantToolLabel(launched.Mode)
-	toolID := strings.TrimSpace(launched.Artifact.Metadata["toolTemplate"])
-	if process, ok := processByID(launched.Artifact.Metadata["processId"]); ok {
-		label = process.Title
-		toolID = process.ID
-	} else if tool, ok := toolByID(toolID); ok {
-		label = tool.Name
-	}
-	label = conversationWorkVisibleLabel(conversationWorkDecision{ToolID: toolID, Mode: launched.Mode, Kind: conversationWorkKind(firstNonEmptyString(launched.Artifact.Metadata["workKind"], string(conversationWorkGoal)))}, label)
+	label := scoutChatWorkLabel(launched.Artifact.Metadata)
 	createdAt := launched.Artifact.CreatedAt.UTC()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -4176,8 +4168,10 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 	if !accepted {
 		return nil, false, nil
 	}
-	if acceptedProposal.IntentOutcome != string(conversationIntentApprovalRequired) &&
-		!strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) {
+	privateProposalWork := strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) ||
+		strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindToolRun) ||
+		strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindGoalRun)
+	if acceptedProposal.IntentOutcome != string(conversationIntentApprovalRequired) && !privateProposalWork {
 		return nil, false, nil
 	}
 	if workMatches > 1 {
@@ -4195,11 +4189,7 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 		response["reconciled"] = true
 		return response, true, nil
 	}
-	if workMatches == 0 && scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate &&
-		(strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindWorkstream) ||
-			(acceptedProposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
-				(strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindToolRun) ||
-					strings.EqualFold(strings.TrimSpace(acceptedProposal.Kind), scoutRouterProposalKindGoalRun)))) {
+	if workMatches == 0 && scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate && privateProposalWork {
 		operation, operationErr := conversationApprovedWorkOperation(threadID, user.Email, proposalMessageID, acceptedProposal)
 		if operationErr != nil {
 			return nil, true, operationErr
@@ -4225,10 +4215,11 @@ func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount,
 			if workErr != nil {
 				return nil, true, workErr
 			}
-			if acceptedProposal.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(acceptedProposal.EffectClass) != "" {
-				work.ApprovedProposalID = proposalMessageID
-				work.ApprovedEffectClass = strings.TrimSpace(acceptedProposal.EffectClass)
-			}
+			// The accepted proposal itself is the launch authority for reversible
+			// private work. Governed effects additionally carry their exact effect
+			// class and remain subject to the stricter match below.
+			work.ApprovedProposalID = proposalMessageID
+			work.ApprovedEffectClass = strings.TrimSpace(acceptedProposal.EffectClass)
 			proposalMessage := scoutChatMessageRecord{
 				ID: proposalMessageID, Kind: scoutChatMessageKindProposal, Role: "scout",
 				IntentOutcome: string(conversationIntentApprovalRequired),
@@ -4398,19 +4389,16 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 		if threadErr != nil {
 			return nil, threadErr
 		}
-		if scoutChatThreadVisibility(proposalThread) == scoutChatVisibilityPrivate &&
-			(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) ||
-				(proposal.IntentOutcome == string(conversationIntentApprovalRequired) &&
-					(strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) ||
-						strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun)))) {
+		privateProposalWork := strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) ||
+			strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindToolRun) ||
+			strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindGoalRun)
+		if scoutChatThreadVisibility(proposalThread) == scoutChatVisibilityPrivate && privateProposalWork {
 			work, workErr := conversationWorkFromScoutProposal(&proposal)
 			if workErr != nil {
 				return nil, workErr
 			}
-			if proposal.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(proposal.EffectClass) != "" {
-				work.ApprovedProposalID = messageID
-				work.ApprovedEffectClass = strings.TrimSpace(proposal.EffectClass)
-			}
+			work.ApprovedProposalID = messageID
+			work.ApprovedEffectClass = strings.TrimSpace(proposal.EffectClass)
 			operation, operationErr := conversationApprovedWorkOperation(threadID, user.Email, messageID, proposal)
 			if operationErr != nil {
 				return nil, operationErr
@@ -4966,6 +4954,9 @@ func scoutChatThreadHasArtifactRef(thread scoutChatThreadRecord, artifactID stri
 }
 
 func scoutChatWorkLabel(metadata map[string]string) string {
+	if strings.TrimSpace(metadata["workLabel"]) == "Insights & Opportunities report" {
+		return "Insights & Opportunities report"
+	}
 	toolID := firstNonEmptyString(strings.TrimSpace(metadata["processId"]), strings.TrimSpace(metadata["toolTemplate"]))
 	if toolID != "" {
 		fallback := "Work"

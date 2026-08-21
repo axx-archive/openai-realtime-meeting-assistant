@@ -1,21 +1,9 @@
 import assert from 'node:assert/strict';
-import { registerHooks } from 'node:module';
 import test from 'node:test';
+import { registerTestStubModules } from './support/registerTestStubModules';
 
 test('Project-bound Research uses governed actions while Project presentations keep the deck viewer', async () => {
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      const stubs = new Set([
-        'react-native', 'react-native-webview', 'expo-image', 'expo-symbols', 'expo-linking', 'expo-blur', 'expo-glass-effect', '@shopify/flash-list',
-        '../api/client', '../files/fileActions', '../theme/glass', '../theme/tokens', './LinkPreviewCard', './ScoutRichText',
-        './ChatAvatar', './messageGestures', './scoutReplyLifecycle', './messagePresentation',
-        './workPresentation', './InlineArtifactPreview',
-      ]);
-      if (stubs.has(specifier)) return { url: `project-work-card-stub:${specifier}`, shortCircuit: true };
-      return nextResolve(specifier, context);
-    },
-    load(url, context, nextLoad) {
-      const modules: Record<string, string> = {
+  registerTestStubModules('project-work-card-stub:', {
         'project-work-card-stub:react-native': `
           export const ActivityIndicator='ActivityIndicator';
           export const Animated={View:'AnimatedView'};
@@ -43,10 +31,6 @@ test('Project-bound Research uses governed actions while Project presentations k
         'project-work-card-stub:./messagePresentation': `export const extractHttpUrls=()=>[]; export const groupMessageReactions=()=>[]; export const parseMessageTextSegments=()=>[];`,
         'project-work-card-stub:./workPresentation': `export const safeWorkProgressNote=(value,fallback)=>String(value||fallback); export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'?'Presentation':'Research'; export const workPhaseLabel=()=> 'Delivered';`,
         'project-work-card-stub:./InlineArtifactPreview': `export const InlineArtifactPreview='InlineArtifactPreview';`,
-      };
-      if (modules[url]) return { format: 'module', source: modules[url], shortCircuit: true };
-      return nextLoad(url, context);
-    },
   });
   (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

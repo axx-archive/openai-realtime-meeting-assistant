@@ -1126,6 +1126,11 @@ func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string)
 
 		case goalStateExecute:
 			recomputeGoalReadiness(plan)
+			// An authored condition may complete a ready stage as an explicit
+			// no-op (for example external research when the brief says it is not
+			// warranted). The skip remains durable in the activity record while
+			// downstream dependencies continue normally.
+			e.skipInactiveProcessStages(plan, parentID)
 			// Process-driven goals run their ready INLINE stages (panel, judges,
 			// synthesizer, gate, render) here, inside the engine step; a
 			// human_checkpoint parks the goal and stops the drive.
@@ -1475,13 +1480,7 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 		spec.OperationID = receipt.OperationID
 		spec.OperationBodyDigest = receipt.OperationBodyDigest
 		spec.ParentGoalRouteDigest = receipt.Digest
-		childOrigin = map[string]string{
-			"originKind": receipt.OriginKind, "originId": receipt.OriginID,
-			"requestedBy": receipt.Requester, "sourceMessageId": receipt.SourceMessageID,
-			"sourceMessageDigest": receipt.SourceMessageDigest, "sourceWindowDigest": receipt.SourceWindowDigest,
-			"operationId": receipt.OperationID, "operationBodyDigest": receipt.OperationBodyDigest,
-			"approvedProposalId": receipt.ApprovedProposalID, "approvedEffectClass": receipt.ApprovedEffectClass,
-		}
+		childOrigin = goalRouteChildBindingMetadata(plan)
 	}
 	// The deliverable-producing subtask carries the tool template so the model
 	// that actually WRITES the artifact receives the tool's full A++ prompt
@@ -1711,8 +1710,16 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 		// A dispatched writer stage's deliverable lands in the origin thread as
 		// it folds (P0-2) — the inline-stage twin lives in completeProcessStage.
 		// Role-gated inside the reporter, so free-form subtasks (no role) skip.
-		app.postGoalStageMessage(parentID, st.Title, st.Role, st.ArtifactID,
-			goalStageMessageLine(st.Title, "", st.Revisions))
+		publish := true
+		if def, ok := engine.resolvedProcess(&plan); ok {
+			if stage, found := def.stageByID(st.ID); found && stage.Internal {
+				publish = false
+			}
+		}
+		if publish {
+			app.postGoalStageMessage(parentID, st.Title, st.Role, st.ArtifactID,
+				goalStageMessageLine(st.Title, "", st.Revisions))
+		}
 	} else {
 		st.Status = subtaskFailed
 		if st.Review == nil {
@@ -2054,6 +2061,66 @@ func (e *goalEngine) runInlineProcessStages(ctx context.Context, plan *goalPlan,
 	return false
 }
 
+// skipInactiveProcessStages resolves the intentionally small RunIf contract.
+// A false condition becomes a completed, source-linked skip record. Missing or
+// malformed condition input runs the stage: spending a research pass is safer
+// than silently omitting one because a model returned imperfect JSON.
+func (e *goalEngine) skipInactiveProcessStages(plan *goalPlan, parentID string) {
+	def, ok := e.resolvedProcess(plan)
+	if !ok {
+		return
+	}
+	for iteration := 0; iteration < len(plan.Subtasks); iteration++ {
+		recomputeGoalReadiness(plan)
+		skipped := false
+		for index := range plan.Subtasks {
+			st := &plan.Subtasks[index]
+			if st.Status != subtaskReady {
+				continue
+			}
+			stage, found := def.stageByID(st.ID)
+			if !found || stage.RunIf == nil || e.processStageConditionMatches(plan, *stage.RunIf) {
+				continue
+			}
+			st.Status = subtaskRunning
+			st.Attempts++
+			condition := stage.RunIf
+			body := fmt.Sprintf("Stage skipped by the approved brief: %s.%s did not equal %q.", condition.StageID, condition.Field, condition.Equals)
+			e.completeProcessStage(plan, parentID, st, stage, body, "not required by the brief", map[string]string{"conditionSkipped": "true"})
+			e.persist(plan, parentID, "")
+			skipped = true
+			break
+		}
+		if !skipped {
+			return
+		}
+	}
+}
+
+func (e *goalEngine) processStageConditionMatches(plan *goalPlan, condition ProcessStageCondition) bool {
+	source := plan.subtaskByID(strings.TrimSpace(condition.StageID))
+	if source == nil || strings.TrimSpace(source.ArtifactID) == "" {
+		return true
+	}
+	artifact, ok := e.app.osArtifactByID(source.ArtifactID)
+	if !ok {
+		return true
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(extractJSONObject(artifact.Text)), &object); err != nil {
+		return true
+	}
+	value, ok := object[strings.TrimSpace(condition.Field)]
+	if !ok {
+		return true
+	}
+	actual, ok := value.(string)
+	if !ok {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(actual), strings.TrimSpace(condition.Equals))
+}
+
 // nextReadyInlineSubtask returns the first ready inline-role subtask in plan
 // order, or nil.
 func nextReadyInlineSubtask(plan *goalPlan) *goalSubtask {
@@ -2096,6 +2163,11 @@ func (e *goalEngine) processStageInputs(plan *goalPlan, stage ProcessStage) stri
 func (e *goalEngine) processStageTask(plan *goalPlan, st *goalSubtask, stage ProcessStage) string {
 	var builder strings.Builder
 	builder.WriteString("Goal: " + plan.Objective)
+	if plan.ProcessID == packagingStudioProcessID {
+		if count, ok := packagingRequestedSlideCount(plan.Objective); ok {
+			builder.WriteString(fmt.Sprintf("\nDirect-request slide count: exactly %d slides. This is authoritative; do not substitute a house default.", count))
+		}
+	}
 	builder.WriteString("\nProcess stage: " + stage.Title + " (" + stage.ID + ")")
 	if body := strings.TrimSpace(stage.PromptBody); body != "" {
 		builder.WriteString("\n\nStage instructions:\n" + body)
@@ -2259,7 +2331,9 @@ func (e *goalEngine) processStageCompanyContext(plan *goalPlan) string {
 	if sharedDestination {
 		artifacts, decisions, recent, memory = e.app.goalGroundingSlots(plan.PackageID)
 	} else {
-		artifacts, decisions, recent, memory = e.app.goalGroundingSlotsForRequester(plan.PackageID, plan.CreatedBy)
+		// Private grounding is authorized against the authenticated requester,
+		// not the display name that happened to create the goal artifact.
+		artifacts, decisions, recent, memory = e.app.goalGroundingSlotsForRequester(plan.PackageID, goalPlanRequestedBy(*plan))
 	}
 	if strings.TrimSpace(artifacts+decisions+recent+memory) == "" {
 		return ""
@@ -2316,8 +2390,14 @@ func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *g
 	st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: note, By: "process_stage"}
 	// The deliverable lands in the origin thread AS IT COMPLETES (P0-2), not
 	// only at the goal's terminal delivery. Role-gated inside the reporter.
-	e.app.postGoalStageMessage(parentID, stage.Title, stage.Role, artifact.ID,
-		goalStageMessageLine(stage.Title, note, st.Revisions))
+	if !stage.Internal {
+		messageArtifactID := artifact.ID
+		if deliverableID := strings.TrimSpace(extraMetadata["deckArtifactId"]); deliverableID != "" {
+			messageArtifactID = deliverableID
+		}
+		e.app.postGoalStageMessage(parentID, stage.Title, stage.Role, messageArtifactID,
+			goalStageMessageLine(stage.Title, note, st.Revisions))
+	}
 }
 
 // failProcessStage marks an inline stage failed with the reason on record; the
@@ -2424,7 +2504,11 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		e.completeProcessStage(plan, parentID, st, stage, body, "gate "+decision.Outcome+": "+compactAssistantLine(reasons), nil)
 		st.Review.Score = decision.Score
 	case goalGateOutcomeRevise:
-		target := plan.subtaskByID(strings.TrimSpace(stage.InputFrom[0]))
+		targetID := strings.TrimSpace(spec.RepairTarget)
+		if targetID == "" {
+			targetID = strings.TrimSpace(stage.InputFrom[0])
+		}
+		target := plan.subtaskByID(targetID)
 		if target == nil {
 			failProcessStage(st, "gate revise has no input stage to re-queue")
 			return
@@ -2437,6 +2521,10 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		target.Revisions++
 		target.Status = subtaskReady
 		target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reasons, By: "process_gate"}
+		// A rendered quality gate may sit several stages after the authored
+		// draft. Reset every completed dependent between the draft and this gate
+		// so repair produces a fresh render and a fresh jury verdict.
+		resetGoalDependents(plan, target.ID, st.ID)
 	case goalGateOutcomeTerminal:
 		st.Status = subtaskFailed
 		st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: reasons, By: "process_gate"}
@@ -2448,6 +2536,13 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		blocker := fmt.Sprintf("process gate %q could not make a quality judgment: %s. %s; this failure cannot be overridden or accepted with gaps", stage.ID, compactAssistantLine(reasons), action)
 		e.fail(plan, parentID, blocker)
 	case goalGateOutcomeBlocked:
+		if spec.HoldOnFailure {
+			st.Status = subtaskFailed
+			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Score: decision.Score, Reasons: reasons, By: "process_gate"}
+			plan.Checkpoint = nil
+			e.fail(plan, parentID, fmt.Sprintf("%s held before delivery after %d repair round(s): %s", stage.Title, st.Revisions, compactAssistantLine(reasons)))
+			return
+		}
 		st.Status = subtaskRunning
 		st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Score: decision.Score, Reasons: reasons, By: "process_gate"}
 		plan.Blocker = fmt.Sprintf("process gate %q blocked: %s", stage.ID, compactAssistantLine(reasons))
@@ -2576,11 +2671,7 @@ func (e *goalEngine) runProcessRenderStage(plan *goalPlan, parentID string, st *
 	}
 	// Job-identity stamp on the SOURCE artifact, mirroring the export route,
 	// so the render callback verifies and lands the PDF asset there.
-	if _, _, err := e.app.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{
-		"renderJobId":  job.ID,
-		"renderStatus": renderJobStatusQueued,
-		"renderKind":   kind,
-	}); err != nil {
+	if _, _, err := e.app.memory.updateOSArtifactMetadata(artifact.ID, queuedRenderMetadata(artifact, job.ID, kind)); err != nil {
 		log.Errorf("goal %s render stage %s: renderJobId stamp failed: %v", parentID, stage.ID, err)
 	}
 	body := strings.Join([]string{
@@ -2611,7 +2702,11 @@ func (e *goalEngine) runProcessCompileStage(plan *goalPlan, parentID string, st 
 		failProcessStage(st, "compile stage failed: "+err.Error())
 		return
 	}
-	e.completeProcessStage(plan, parentID, st, stage, body, "compiled the process deliverables", extra)
+	note := "compiled the process deliverables"
+	if strings.TrimSpace(extra["deckArtifactId"]) != "" {
+		note = "editable deck ready"
+	}
+	e.completeProcessStage(plan, parentID, st, stage, body, note, extra)
 }
 
 // parkProcessCheckpoint stops the engine at a human_checkpoint: the plan

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
@@ -8,6 +8,14 @@ import { buildApiUrl } from '../api/requestHelpers';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
 import { ScoutRichText } from './ScoutRichText';
+import {
+  DECK_PREVIEW_NAVIGATION_JS,
+  deckPreviewNavigationCommand,
+  deckPreviewNavigationTarget,
+  initialDeckPreviewNavigationState,
+  parseDeckPreviewNavigationMessage,
+  type DeckPreviewNavigationState,
+} from './deckPreviewNavigation';
 
 export type InlineArtifactKind = 'html_deck' | 'table' | 'ideation' | 'research' | 'document';
 
@@ -69,7 +77,20 @@ export function InlineArtifactPreview({
   const [deckUrl, setDeckUrl] = useState<string | null>(null);
   const [deckLoading, setDeckLoading] = useState(false);
   const [deckError, setDeckError] = useState(false);
+  const [deckRetryNonce, setDeckRetryNonce] = useState(0);
+  const [deckNavigation, setDeckNavigation] = useState<DeckPreviewNavigationState>(initialDeckPreviewNavigationState);
+  const deckNavigationRef = useRef(deckNavigation);
+  const deckWebViewRef = useRef<WebView>(null);
   const isPresentable = kind === 'html_deck';
+
+  const updateDeckNavigation = useCallback((next: DeckPreviewNavigationState) => {
+    deckNavigationRef.current = next;
+    setDeckNavigation(next);
+  }, []);
+
+  const resetDeckNavigation = useCallback(() => {
+    updateDeckNavigation(initialDeckPreviewNavigationState());
+  }, [updateDeckNavigation]);
 
   // Live path: use htmlContent directly (bypasses API fetch)
   // Work-thread path: fetch from API via artifactId
@@ -80,6 +101,7 @@ export function InlineArtifactPreview({
       setDeckUrl(null);
       setDeckLoading(false);
       setDeckError(false);
+      resetDeckNavigation();
       return;
     }
 
@@ -89,11 +111,13 @@ export function InlineArtifactPreview({
         setDeckHtml(null);
         setDeckUrl(null);
       }
+      resetDeckNavigation();
       return;
     }
     let active = true;
     setDeckLoading(true);
     setDeckError(false);
+    resetDeckNavigation();
     api.artifactRenderToken(sessionToken, artifactId)
       .then((response) => {
         if (!active) return;
@@ -112,7 +136,22 @@ export function InlineArtifactPreview({
         setDeckLoading(false);
       });
     return () => { active = false; };
-  }, [kind, artifactId, sessionToken, loading, htmlContent]);
+  }, [kind, artifactId, sessionToken, loading, htmlContent, deckRetryNonce, resetDeckNavigation]);
+
+  const navigateDeck = useCallback((direction: 'previous' | 'next') => {
+    const target = deckPreviewNavigationTarget(deckNavigationRef.current, direction);
+    const webView = deckWebViewRef.current;
+    if (target === null || !webView) return;
+    const next = { ...deckNavigationRef.current, currentIndex: target };
+    updateDeckNavigation(next);
+    webView.injectJavaScript(deckPreviewNavigationCommand(target));
+  }, [updateDeckNavigation]);
+
+  const retryDeck = useCallback(() => {
+    setDeckError(false);
+    resetDeckNavigation();
+    setDeckRetryNonce((current) => current + 1);
+  }, [resetDeckNavigation]);
 
   // html_deck: the 16:9 IS the slide
   if (isPresentable) {
@@ -152,16 +191,28 @@ export function InlineArtifactPreview({
             <View style={styles.deckLoadingCenter}>
               <SymbolView name="exclamationmark.triangle" size={32} tintColor={colors.text3} />
               <Text style={styles.deckErrorText}>Could not load deck</Text>
-              {onPresent ? (
+              <View style={styles.deckErrorActions}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Open in browser"
-                  onPress={onPresent}
+                  accessibilityLabel="Retry deck preview"
+                  hitSlop={4}
+                  onPress={retryDeck}
                   style={({ pressed }) => [styles.deckRetryButton, pressed && styles.deckRetryPressed]}
                 >
-                  <Text style={styles.deckRetryText}>Open in browser</Text>
+                  <Text style={styles.deckRetryText}>Retry</Text>
                 </Pressable>
-              ) : null}
+                {onPresent ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open presentation"
+                    hitSlop={4}
+                    onPress={onPresent}
+                    style={({ pressed }) => [styles.deckRetryButton, pressed && styles.deckRetryPressed]}
+                  >
+                    <Text style={styles.deckRetryText}>Open</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </Glass>
         </View>
@@ -173,6 +224,7 @@ export function InlineArtifactPreview({
       <View style={styles.deckContainer}>
         <View style={styles.deckWebViewWrapper}>
           <WebView
+            ref={deckWebViewRef}
             source={deckUrl ? { uri: deckUrl } : { html: deckHtml ?? '' }}
             style={styles.deckWebViewFill}
             scrollEnabled={false}
@@ -181,9 +233,73 @@ export function InlineArtifactPreview({
             domStorageEnabled
             showsHorizontalScrollIndicator={false}
             showsVerticalScrollIndicator={false}
-            injectedJavaScript={DECK_FIRST_SLIDE_JS}
-            onMessage={() => {}}
+            injectedJavaScript={DECK_PREVIEW_NAVIGATION_JS}
+            onLoadStart={resetDeckNavigation}
+            onMessage={(event) => {
+              const next = parseDeckPreviewNavigationMessage(event.nativeEvent.data);
+              if (!next) return;
+              updateDeckNavigation(next);
+              if (next.status === 'error') setDeckError(true);
+            }}
+            onError={() => {
+              updateDeckNavigation({ status: 'error', currentIndex: 0, slideCount: 0 });
+              setDeckError(true);
+            }}
+            onHttpError={(event) => {
+              if (event.nativeEvent.statusCode < 400) return;
+              updateDeckNavigation({ status: 'error', currentIndex: 0, slideCount: 0 });
+              setDeckError(true);
+            }}
+            onContentProcessDidTerminate={() => {
+              updateDeckNavigation({ status: 'error', currentIndex: 0, slideCount: 0 });
+              setDeckError(true);
+            }}
           />
+        </View>
+        <View style={styles.deckNavigation} accessibilityLabel="Presentation slide navigation">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Previous slide"
+            accessibilityHint={deckNavigation.status === 'ready' ? `Currently slide ${deckNavigation.currentIndex + 1} of ${deckNavigation.slideCount}` : 'Deck preview is loading'}
+            accessibilityState={{ disabled: deckNavigation.status !== 'ready' || deckNavigation.currentIndex === 0 }}
+            disabled={deckNavigation.status !== 'ready' || deckNavigation.currentIndex === 0}
+            hitSlop={4}
+            onPress={() => navigateDeck('previous')}
+            style={({ pressed }) => [
+              styles.deckNavigationButton,
+              (deckNavigation.status !== 'ready' || deckNavigation.currentIndex === 0) && styles.deckNavigationDisabled,
+              pressed && styles.deckNavigationPressed,
+            ]}
+          >
+            <SymbolView name="chevron.left" size={15} tintColor={colors.onAccent} />
+          </Pressable>
+          <Text
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={deckNavigation.status === 'ready'
+              ? `Slide ${deckNavigation.currentIndex + 1} of ${deckNavigation.slideCount}`
+              : 'Deck preview loading'}
+            style={styles.deckNavigationCount}
+          >
+            {deckNavigation.status === 'ready'
+              ? `${deckNavigation.currentIndex + 1} / ${deckNavigation.slideCount}`
+              : '— / —'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Next slide"
+            accessibilityHint={deckNavigation.status === 'ready' ? `Currently slide ${deckNavigation.currentIndex + 1} of ${deckNavigation.slideCount}` : 'Deck preview is loading'}
+            accessibilityState={{ disabled: deckNavigation.status !== 'ready' || deckNavigation.currentIndex >= deckNavigation.slideCount - 1 }}
+            disabled={deckNavigation.status !== 'ready' || deckNavigation.currentIndex >= deckNavigation.slideCount - 1}
+            hitSlop={4}
+            onPress={() => navigateDeck('next')}
+            style={({ pressed }) => [
+              styles.deckNavigationButton,
+              (deckNavigation.status !== 'ready' || deckNavigation.currentIndex >= deckNavigation.slideCount - 1) && styles.deckNavigationDisabled,
+              pressed && styles.deckNavigationPressed,
+            ]}
+          >
+            <SymbolView name="chevron.right" size={15} tintColor={colors.onAccent} />
+          </Pressable>
         </View>
         {/* Floating actions over the slide */}
         <View style={styles.deckOverlayActions}>
@@ -191,6 +307,7 @@ export function InlineArtifactPreview({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Edit presentation"
+              hitSlop={4}
               onPress={onEdit}
               style={({ pressed }) => [styles.deckActionButton, pressed && styles.deckActionPressed]}
             >
@@ -202,6 +319,7 @@ export function InlineArtifactPreview({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Present"
+              hitSlop={4}
               onPress={onPresent}
               style={({ pressed }) => [styles.deckActionButton, styles.deckActionPrimary, pressed && styles.deckActionPressed]}
             >
@@ -284,21 +402,6 @@ export function InlineArtifactPreview({
   );
 }
 
-/**
- * JS injected into WebView to show only the first slide.
- * Runs after document load to hide subsequent slides.
- */
-const DECK_FIRST_SLIDE_JS = `
-(function() {
-  var slides = document.querySelectorAll('.slide, section, [class*="slide"]');
-  for (var i = 1; i < slides.length; i++) {
-    slides[i].style.display = 'none';
-  }
-  document.body.style.overflow = 'hidden';
-  true;
-})();
-`;
-
 const styles = StyleSheet.create({
   // Deck-specific styles (16:9 IS the slide)
   deckContainer: {
@@ -342,11 +445,18 @@ const styles = StyleSheet.create({
     color: colors.text3,
   },
   deckRetryButton: {
-    marginTop: space[2],
+    minHeight: 36,
+    justifyContent: 'center',
     paddingHorizontal: space[4],
     paddingVertical: space[2],
     borderRadius: radius.full,
+    borderCurve: 'continuous',
     backgroundColor: colors.surface3,
+  },
+  deckErrorActions: {
+    marginTop: space[2],
+    flexDirection: 'row',
+    gap: space[2],
   },
   deckRetryPressed: {
     opacity: 0.7,
@@ -369,6 +479,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: space[3],
     borderRadius: radius.full,
+    borderCurve: 'continuous',
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   deckActionPrimary: {
@@ -381,6 +492,40 @@ const styles = StyleSheet.create({
   deckActionText: {
     ...type.captionMedium,
     color: colors.onAccent,
+  },
+  deckNavigation: {
+    position: 'absolute',
+    top: space[3],
+    right: space[3],
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[1],
+    paddingHorizontal: 4,
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  deckNavigationButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+  },
+  deckNavigationPressed: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  deckNavigationDisabled: {
+    opacity: 0.36,
+  },
+  deckNavigationCount: {
+    minWidth: 48,
+    textAlign: 'center',
+    ...type.captionMedium,
+    color: colors.onAccent,
+    fontVariant: ['tabular-nums'],
   },
 
   // Non-deck styles (badge + title + text)

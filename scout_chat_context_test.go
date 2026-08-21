@@ -275,7 +275,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
 		t.Fatalf("instantiate accepted Studio plan: %v", err)
 	}
-	for _, stageID := range []string{"red_team", "identity", "compete_architects", "compete_judges", "write", "gate"} {
+	for _, stageID := range []string{"context_snapshot", "evidence", "story_architects", "write", "gate"} {
 		stage := packagingStudioStage(t, packagingStudioDefinition(), stageID)
 		st := plan.subtaskByID(stageID)
 		task, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, st, stage)
@@ -301,9 +301,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		providerMu.Unlock()
 		return "Grounded objection and synthesis from the supplied source.", nil
 	})
-	redTeamProviderStage := plan.subtaskByID("red_team")
+	redTeamProviderStage := plan.subtaskByID("story_architects")
 	redTeamProviderStage.Status = subtaskRunning
-	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeamProviderStage, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeamProviderStage, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if redTeamProviderStage.Status != subtaskComplete || len(redTeamProviderInputs) < 2 {
 		t.Fatalf("production Red-team provider stage did not execute: stage=%+v calls=%d", redTeamProviderStage, len(redTeamProviderInputs))
 	}
@@ -352,10 +352,10 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	}
 	preFixPlan.RouteReceipt = &preFixReceipt
 	preFixPlan.routeVerified = true
-	preFixStage := *preFixPlan.subtaskByID("red_team")
+	preFixStage := *preFixPlan.subtaskByID("story_architects")
 	preFixStage.Status = subtaskRunning
 	providerCallsBeforePreFix := len(redTeamProviderInputs)
-	engine.runProcessPanelStage(context.Background(), &preFixPlan, run.Artifact.ID, &preFixStage, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	engine.runProcessPanelStage(context.Background(), &preFixPlan, run.Artifact.ID, &preFixStage, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if len(redTeamProviderInputs) != providerCallsBeforePreFix || preFixStage.Status != subtaskFailed || preFixStage.Review == nil ||
 		!strings.Contains(preFixStage.Review.Reasons, "outside the source topology") || strings.Contains(preFixStage.Review.Reasons, "PRODUCTION_SIBLING_PDF_SECRET") {
 		t.Fatalf("pre-fix sibling receipt reached provider or leaked source: before=%d after=%d stage=%+v", providerCallsBeforePreFix, len(redTeamProviderInputs), preFixStage)
@@ -412,7 +412,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if legacyPlan.RouteReceipt.SourceSelectionDigest == "" || mustGoalPlan(t, kanbanApp, run.Artifact.ID).RouteReceipt.SourceSelectionDigest == "" {
 		t.Fatal("legacy source selection upgrade was not durably bound on the parent")
 	}
-	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, legacyPlan.subtaskByID("red_team"), packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, legacyPlan.subtaskByID("story_architects"), packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if err != nil || !strings.Contains(legacyTask, "PRODUCTION_PDF_SENTINEL") {
 		t.Fatalf("pre-contextRefs live receipt did not rehydrate its exact accepted proposal source: err=%v task=%s", err, legacyTask)
 	}
@@ -446,9 +446,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		blockedProviderCalls++
 		return "must not run", nil
 	})
-	redTeam := plan.subtaskByID("red_team")
+	redTeam := plan.subtaskByID("story_architects")
 	redTeam.Status = subtaskRunning
-	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeam, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeam, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if blockedProviderCalls != 0 || redTeam.Status != subtaskFailed || redTeam.Review == nil ||
 		(!strings.Contains(redTeam.Review.Reasons, "changed") && !strings.Contains(redTeam.Review.Reasons, "readable")) {
 		t.Fatalf("revoked source did not fail closed before provider admission: calls=%d reason=%q stage=%+v", blockedProviderCalls, firstNonBlank(redTeam.Review.Reasons, "none"), redTeam)
@@ -501,9 +501,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		}
 	}
 	beforeTOCTOU := blockedProviderCalls
-	toctouCandidate := *plan.subtaskByID("red_team")
+	toctouCandidate := *plan.subtaskByID("story_architects")
 	toctouCandidate.Status = subtaskRunning
-	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &toctouCandidate, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &toctouCandidate, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	engine.sourceSelectionAfterSnapshotProbe = nil
 	if blockedProviderCalls != beforeTOCTOU || toctouCandidate.Status != subtaskFailed || toctouCandidate.Review == nil || !strings.Contains(toctouCandidate.Review.Reasons, "changed") {
 		t.Fatalf("mutation between selected snapshot and route verification reached provider: before=%d after=%d stage=%+v", beforeTOCTOU, blockedProviderCalls, toctouCandidate)
@@ -519,9 +519,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 			t.Fatal(saveErr)
 		}
 		before := blockedProviderCalls
-		candidate := *plan.subtaskByID("red_team")
+		candidate := *plan.subtaskByID("story_architects")
 		candidate.Status = subtaskRunning
-		engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &candidate, packagingStudioStage(t, packagingStudioDefinition(), "red_team"))
+		engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &candidate, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 		if blockedProviderCalls != before || candidate.Status != subtaskFailed || candidate.Review == nil || !strings.Contains(candidate.Review.Reasons, "changed") {
 			t.Fatalf("%s old-branch mutation reached provider or lacked truthful classification: before=%d after=%d stage=%+v", label, before, blockedProviderCalls, candidate)
 		}

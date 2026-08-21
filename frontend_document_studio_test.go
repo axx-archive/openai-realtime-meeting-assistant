@@ -21,6 +21,11 @@ func TestDocumentStudioFrontendContract(t *testing.T) {
 		"fetch('/artifacts/document/copies'",
 		"document-editor__outline",
 		"document-editor__paper",
+		"document-editor__rich",
+		"contenteditable=\"true\"",
+		"data-doc-action=\"table\"",
+		"data-doc-action=\"source\"",
+		"data-doc-action=\"pdf\"",
 		"data-doc-action=\"save-copy\"",
 		"openDocumentStudio(entry.id, stageTitle, { entry })",
 	} {
@@ -77,20 +82,24 @@ const server=http.createServer((req,res)=>{
  assert.ok(geometry.editor.width>=1439&&geometry.editor.height>=899,JSON.stringify(geometry));
  assert.ok(geometry.paper.width>600&&geometry.paper.left>160,JSON.stringify(geometry));
  assert.equal(await editor.locator('.document-editor__outline-item').count(),2);
+ if(process.env.DOCUMENT_STUDIO_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_SCREENSHOT,fullPage:true});}
 
  const source=editor.getByRole('textbox',{name:'Document body'});
- await source.evaluate(node=>{const start=node.value.indexOf('useful');node.focus();node.setSelectionRange(start,start+'useful'.length);});
- await editor.getByRole('button',{name:'B',exact:true}).click();
- await source.press('End');
- await source.type('\n\n## Recommendation\n\nShip the stronger story.');
+ await source.evaluate(node=>{node.focus();const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while(text=walker.nextNode()){const start=text.nodeValue.indexOf('useful');if(start>=0){const range=document.createRange();range.setStart(text,start);range.setEnd(text,start+'useful'.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}}throw new Error('selection text missing');});
+ await editor.getByRole('button',{name:'Bold',exact:true}).click();
+ await source.evaluate(node=>{const heading=document.createElement('h2');heading.textContent='Recommendation';const paragraph=document.createElement('p');paragraph.textContent='Ship the stronger story.';node.append(heading,paragraph);node.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));node.focus();const range=document.createRange();range.selectNodeContents(paragraph);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+ await editor.getByRole('button',{name:'Table',exact:true}).click();
+ assert.equal(await source.locator('table').count(),1);
  assert.match(await editor.locator('[data-doc-status]').textContent(),/Unsaved changes/);
  assert.equal(await editor.locator('.document-editor__outline-item').count(),3);
- await editor.getByRole('button',{name:'Preview',exact:true}).click();
- await editor.locator('[data-doc-preview]').waitFor({state:'visible'});
- const renderedPreview=await editor.locator('[data-doc-preview]').textContent();
- assert.match(renderedPreview,/Recommendation/);
- assert.match(renderedPreview,/useful/);
- await editor.getByRole('button',{name:'Edit',exact:true}).click();
+ await editor.getByRole('button',{name:'Source',exact:true}).click();
+ const markdownSource=editor.getByRole('textbox',{name:'Markdown source'});
+ await markdownSource.waitFor({state:'visible'});
+ assert.match(await markdownSource.inputValue(),/## Recommendation/);
+ assert.match(await markdownSource.inputValue(),/\| Column 1 \| Column 2 \| Column 3 \|/);
+ await editor.getByRole('button',{name:'Visual',exact:true}).click();
+ assert.match(await source.textContent(),/Recommendation/);
+ assert.match(await source.textContent(),/useful/);
  await editor.getByRole('textbox',{name:'Document name'}).fill('Field Notes — final');
  await editor.getByRole('button',{name:'Save',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('[data-doc-status]')?.textContent==='Saved');
@@ -98,6 +107,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(patches[0].title,'Field Notes — final');
  assert.match(patches[0].document.markdown,/\*\*useful\*\*/);
  assert.match(patches[0].document.markdown,/## Recommendation/);
+ assert.match(patches[0].document.markdown,/\| Column 1 \| Column 2 \| Column 3 \|/);
 
  await editor.getByRole('button',{name:'Save a copy…',exact:true}).click();
  const copyDialog=page.locator('.drive-save-dialog');

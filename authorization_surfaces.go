@@ -146,6 +146,7 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.artifacts.blob", AuthorizationHTTP, "/artifacts/blob", []string{"blob", "artifact", "revision", "file"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.share", AuthorizationHTTP, "/artifacts/share", []string{"artifact", "revision", "capability"}, []ACLAction{ACLReadMetadata, ACLReadContent, ACLShare}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.export_pdf", AuthorizationHTTP, "/artifacts/export-pdf", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.export_pptx", AuthorizationHTTP, "/artifacts/export-pptx", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.archives", AuthorizationHTTP, "/archives/", []string{"archive", "meeting", "blob"}, []ACLAction{ACLReadContent, ACLExport}, []string{"public_capability"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.participants", AuthorizationHTTP, "/participants", []string{"room", "membership"}, []ACLAction{ACLReadMetadata}, []string{"anonymous", "user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.rooms", AuthorizationHTTP, "/rooms", []string{"room", "membership"}, []ACLAction{ACLReadMetadata, ACLCreateChild}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),

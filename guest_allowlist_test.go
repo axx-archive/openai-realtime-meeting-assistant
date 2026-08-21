@@ -245,6 +245,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/artifacts/deck/assets":                         {handler: deckEditorAssetUploadHandler, memberGated: true},
 		"/artifacts/share":                               {handler: artifactShareHandler, memberGated: true},
 		"/artifacts/export-pdf":                          {handler: artifactExportPDFHandler, memberGated: true},
+		"/artifacts/export-pptx":                         {handler: deckPPTXExportHandler, memberGated: true},
 		"/calendar/event.ics":                            {handler: calendarICSHandler, memberGated: true},
 		"/signals/survey":                                {handler: signalSurveyHandler, memberGated: true},
 		"/client-config":                                 {handler: clientConfigHandler, memberGated: true},

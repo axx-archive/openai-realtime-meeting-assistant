@@ -35,6 +35,14 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"data-action=\"add-ellipse\"",
 		"data-action=\"undo\"",
 		"data-action=\"redo\"",
+		"data-action=\"export-pptx\"",
+		"data-action=\"export-pdf\"",
+		"data-inspector-tab=\"design\"",
+		"data-inspector-tab=\"notes\"",
+		"data-inspector-tab=\"scout\"",
+		"data-action=\"duplicate-element\"",
+		"data-action=\"align-center\"",
+		"data-slide-background",
 		"data-slide-notes",
 		"data-prop=\"fontFamily\"",
 		"data-prop=\"textAlign\"",
@@ -92,10 +100,11 @@ const assert=require('assert/strict');
 const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
+const sceneRef='c'.repeat(64);
 let version=4;let canWrite=true;
 let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'},{id:'rich-proof',type:'text',x:150,y:360,width:900,height:260,z:4,opacity:1,rotation:0,text:'OBSERVED 6.1M',richText:'OBSERVED <span style="display:block;font-family:Georgia;font-size:75px;letter-spacing:.13em;margin:9px 0">6.1M</span>',fontSize:24,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
-let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];
-const artifact=()=>({id:artifactId,title:'Studio proof',version,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version)}});
+let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];let pptxRequests=[];
+const artifact=()=>({id:artifactId,title:'Studio proof',version,sceneRef,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version),deckSceneRef:sceneRef}});
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
@@ -113,6 +122,9 @@ const server=http.createServer((req,res)=>{
   }
   if(req.url==='/artifacts/deck/copies'&&req.method==='POST'){
     let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);copies.push(body);res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,artifact:{id:'deck-copy',title:body.title,type:'html_deck',version:1,savedToFiles:true},deck:body.deck,file:{id:'deck-copy',name:body.fileName,folderId:body.folderId}}));});return;
+  }
+  if(req.url==='/artifacts/export-pptx'&&req.method==='POST'){
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{pptxRequests.push(JSON.parse(raw));res.writeHead(200,{'content-type':'application/vnd.openxmlformats-officedocument.presentationml.presentation'});res.end(Buffer.from('mock-pptx'));});return;
   }
   if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
@@ -145,11 +157,23 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs(richSmall.marginTop/richSmall.canvasHeight-9/1080)<0.002,JSON.stringify(richSmall));
  await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
 
+ const inspectorGeometry=await page.locator('.deck-editor__props').evaluate(node=>({clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));
+ assert.ok(inspectorGeometry.scrollWidth<=inspectorGeometry.clientWidth,JSON.stringify(inspectorGeometry));
+ if(process.env.DECK_STUDIO_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_SCREENSHOT,fullPage:true});}
+
+ const downloadPromise=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Download',exact:true}).click();
+ await page.getByRole('menuitem',{name:/PowerPoint/}).click();
+ const downloaded=await downloadPromise;
+ assert.match(downloaded.suggestedFilename(),/\.pptx$/);
+ assert.deepEqual(pptxRequests,[{artifactId,expectedVersion:version,sceneRef}]);
+
  await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
  await page.locator('.deck-editor__text-input').waitFor({state:'visible'});
  await page.getByRole('button',{name:'Rectangle'}).focus();
 
  await page.locator('[data-scene] [data-element-id="headline"]').click();
+ if(process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT,fullPage:true});}
  await page.locator('[data-prop="fontFamily"]').fill('Georgia, Times New Roman, serif');
  await page.locator('[data-prop="fontFamily"]').dispatchEvent('change');
  await page.locator('[data-prop="textAlign"]').selectOption('center');
@@ -157,9 +181,11 @@ const server=http.createServer((req,res)=>{
  await page.locator('[data-prop="lineHeight"]').dispatchEvent('change');
  await page.locator('[data-prop="letterSpacing"]').fill('.04em');
  await page.locator('[data-prop="letterSpacing"]').dispatchEvent('change');
+ await page.getByRole('tab',{name:'Notes'}).click();
  await page.locator('[data-slide-notes]').fill('Revised opening note [BEAT]');
  await page.locator('[data-slide-notes]').dispatchEvent('change');
 
+ await page.getByRole('tab',{name:'Design'}).click();
  await page.getByRole('button',{name:'Rectangle'}).click();
  await page.locator('[data-prop="fill"]').fill('#3366ff');
  await page.locator('[data-prop="opacity"]').fill('0.55');
@@ -171,7 +197,7 @@ const server=http.createServer((req,res)=>{
  const resizeHandle=await page.locator('[data-scene] .deck-editor__element[data-selected="true"] [data-handle="se"]').boundingBox();
  await page.mouse.move(resizeHandle.x+resizeHandle.width/2,resizeHandle.y+resizeHandle.height/2);
  await page.mouse.down();await page.mouse.move(resizeHandle.x+resizeHandle.width/2+45,resizeHandle.y+resizeHandle.height/2+28);await page.mouse.up();
- await page.getByRole('button',{name:'Front',exact:true}).click();
+ await page.getByRole('button',{name:'Bring to front',exact:true}).click();
  await page.getByRole('button',{name:'Undo'}).click();
  await page.getByRole('button',{name:'Redo'}).click();
  await page.getByRole('button',{name:'Save',exact:true}).click();
@@ -207,6 +233,7 @@ const server=http.createServer((req,res)=>{
 
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
+ await page.getByRole('tab',{name:'Scout'}).click();
  await page.locator('[data-image-prompt]').fill('Documentary wide image of a working farm at first light');
  await page.getByRole('button',{name:'Generate'}).click();
  await page.waitForFunction(()=>document.querySelector('[data-image-status]')?.textContent.includes('added'));
@@ -216,6 +243,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(await page.locator('[data-scene] [data-element-id="generated-image"]').count(),1);
  assert.equal(await page.locator('.deck-editor__scout-status').textContent(),'Image generated and added to this slide.');
 
+ await page.getByRole('tab',{name:'Design'}).click();
  const chooserPromise=page.waitForEvent('filechooser');
  await page.getByRole('button',{name:'Upload',exact:true}).click();
  const chooser=await chooserPromise;
@@ -227,8 +255,8 @@ const server=http.createServer((req,res)=>{
  assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1);
 
  await page.locator('[data-prop="fit"]').selectOption('contain');
- await page.getByRole('button',{name:'Backward',exact:true}).click();
- await page.getByRole('button',{name:'Forward',exact:true}).click();
+ await page.getByRole('button',{name:'Back one',exact:true}).click();
+ await page.getByRole('button',{name:'Forward one',exact:true}).click();
  await page.getByRole('button',{name:'Save a copy…',exact:true}).click();
  const copyDialog=page.locator('.drive-save-dialog');
  await copyDialog.waitFor({state:'visible'});
@@ -253,19 +281,38 @@ const server=http.createServer((req,res)=>{
  await page.evaluate(id=>openDeckStudio(id,'Read-only proof',{}),artifactId);
  await page.waitForTimeout(50);
  assert.equal(await page.locator('.deck-editor').count(),0);
- await page.evaluate(id=>{const host=document.createElement('div');host.id='readonly-deck-host';document.body.appendChild(host);renderArtifactDeck(host,{id,kind:'os_artifact',text:'<!doctype html>',metadata:{type:'html_deck',title:'Read-only proof',savedToFiles:'true'}},{autoPresent:true});const frame=host.querySelector('.chat-deck__frame').getBoundingClientRect();window.__deckPreviewInitial={width:frame.width,height:frame.height};},artifactId);
+ await page.evaluate(id=>{const host=document.createElement('div');host.id='readonly-deck-host';document.body.appendChild(host);renderArtifactDeck(host,{id,kind:'os_artifact',text:'<!doctype html>',metadata:{type:'html_deck',title:'Read-only proof',savedToFiles:'true'}},{});},artifactId);
  const readonlyHost=page.locator('#readonly-deck-host');
  await readonlyHost.getByRole('button',{name:'Present'}).waitFor({state:'visible'});
- await readonlyHost.locator('.chat-deck__frame.is-ready').waitFor({state:'attached'});
+ await readonlyHost.locator('.chat-deck__native-preview.is-ready').waitFor({state:'attached'});
+ assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'1 / 2');
+ const nativeNext=readonlyHost.getByRole('button',{name:'Next slide'});
+ const nativePrevious=readonlyHost.getByRole('button',{name:'Previous slide'});
+ assert.equal(await nativePrevious.isDisabled(),true);
+ await nativeNext.click();
+ assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'2 / 2');
+ assert.equal(await readonlyHost.locator('.chat-deck__native-element').filter({hasText:'The second slide'}).count(),1);
+ const nativeChromeGeometry=await readonlyHost.evaluate(host=>{const shell=host.querySelector('.chat-deck').getBoundingClientRect();const nav=host.querySelector('.chat-deck__nav').getBoundingClientRect();const actions=host.querySelector('.chat-deck__actions').getBoundingClientRect();return {shell:shell.toJSON(),nav:nav.toJSON(),actions:actions.toJSON()};});
+ assert.ok(nativeChromeGeometry.nav.top<nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
+ assert.ok(nativeChromeGeometry.actions.top>nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
+ await nativePrevious.click();
+ assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'1 / 2');
+ const cardDownload=page.waitForEvent('download');
+ await readonlyHost.getByRole('button',{name:'Download',exact:true}).click();
+ await readonlyHost.getByRole('menuitem',{name:/PowerPoint/}).click();
+ assert.match((await cardDownload).suggestedFilename(),/\.pptx$/);
+ assert.deepEqual(pptxRequests.at(-1),{artifactId,expectedVersion:version,sceneRef});
+ const previewBefore=await readonlyHost.locator('.chat-deck__native-preview').boundingBox();
  await page.waitForTimeout(160);
- const stablePreview=await page.evaluate(()=>{const frame=document.querySelector('#readonly-deck-host .chat-deck__frame').getBoundingClientRect();const iframe=document.querySelector('#readonly-deck-host iframe');return {before:window.__deckPreviewInitial,after:{width:frame.width,height:frame.height},opacity:getComputedStyle(iframe).opacity};});
+ const stablePreview=await page.evaluate(before=>{const frame=document.querySelector('#readonly-deck-host .chat-deck__native-preview').getBoundingClientRect();return {before,after:{width:frame.width,height:frame.height},opacity:getComputedStyle(document.querySelector('#readonly-deck-host .chat-deck__native-preview')).opacity};},previewBefore);
  assert.ok(Math.abs(stablePreview.before.width-stablePreview.after.width)<0.5&&Math.abs(stablePreview.before.height-stablePreview.after.height)<0.5,JSON.stringify(stablePreview));
  assert.equal(stablePreview.opacity,'1');
  await page.waitForFunction(()=>{const host=document.querySelector('#readonly-deck-host');return host?.querySelector('button')?.disabled===true&&Array.from(host.querySelectorAll('button')).some(button=>button.textContent.includes('Present')&&!button.disabled)});
  const readonlyEdit=readonlyHost.getByRole('button',{name:'Edit'});
  assert.equal(await readonlyEdit.isDisabled(),true);
- await page.evaluate(()=>document.querySelector('#readonly-deck-host button')?.click());
+ await readonlyEdit.evaluate(node=>node.click());
  assert.equal(await page.locator('.deck-editor').count(),0);
+ await readonlyHost.getByRole('button',{name:'Present'}).click();
  await page.waitForSelector('.deck-presenter');
  assert.equal(await page.locator('[data-present-counter]').textContent(),'1 / 2');
  await page.getByRole('button',{name:'Close'}).click();
@@ -281,7 +328,7 @@ const server=http.createServer((req,res)=>{
  const notesRail=await page.locator('[data-present-notes]').boundingBox();
  assert.ok(stageWithNotes.width<stageBeforeNotes.width,JSON.stringify({stageBeforeNotes,stageWithNotes,notesRail}));
  assert.ok(stageWithNotes.x+stageWithNotes.width<=notesRail.x+1,JSON.stringify({stageWithNotes,notesRail}));
- await page.getByRole('button',{name:'Next slide'}).click();
+ await page.locator('.deck-presenter').getByRole('button',{name:'Next slide'}).click();
  assert.equal(await page.locator('[data-present-counter]').textContent(),'2 / 2');
  assert.equal(await page.locator('[data-present-element-id="second-title"]').textContent(),'The second slide');
  await page.keyboard.press('ArrowLeft');

@@ -164,6 +164,7 @@ func scoutRouterInstructions() string {
 		"- build a deck from an existing outline -> tool_run packaging_studio; clarify_once only when outline revision versus full deck is genuinely ambiguous.",
 		"- end to end / full packaging run / 0 to 100 -> tool_run packaging_studio.",
 		"- compile only already-finished artifacts -> tool_run package_assembly.",
+		"- an explicit Insights & Opportunities report -> one research workstream that returns a private editable Markdown report; decide whether external research materially improves the answer and cite it when used. Do not route this private request to the public Insights product or a multi-deliverable goal.",
 		"- ground truth / market digging -> deep_research; sale comps/pricing -> comps_precedent; landscape/whitespace -> market_map; hostile-room prep -> grill_pressure_test; economics/projections -> economics_waterfall.",
 		"",
 		"Internal route grammar: app_action for one native operation; tool_run for one registry contract; workstream for a bounded research/design/grill/workflow pass; goal_run for a multi-step objective; image for one private concept render.",

@@ -1222,6 +1222,7 @@ func main() {
 	http.HandleFunc("/artifacts/share", artifactShareHandler)
 	http.HandleFunc("/a/", shareLinkPublicHandler)
 	http.HandleFunc("/artifacts/export-pdf", artifactExportPDFHandler)
+	http.HandleFunc("/artifacts/export-pptx", deckPPTXExportHandler)
 	http.HandleFunc("/calendar/event.ics", calendarICSHandler)
 	http.HandleFunc("/internal/render/jobs/result", internalRenderRunnerResultHandler)
 	http.HandleFunc("/signals/survey", signalSurveyHandler)
@@ -1608,7 +1609,7 @@ func renderSidecarAvailable() bool {
 }
 
 // artifactExportPDFHandler serves POST /artifacts/export-pdf
-// {artifactId, kind} (packaging OS §4 item 14b) — session-gated exactly like
+// {artifactId, kind, expectedVersion?, sceneRef?} (packaging OS §4 item 14b) — session-gated exactly like
 // its /artifacts neighbors. It enqueues an export_pdf job for the
 // render-runner sidecar (enqueueRenderExportPDFJob) and stamps renderJobId on
 // the artifact so the callback can verify job identity, mirroring the codex
@@ -1633,8 +1634,10 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := struct {
-		ArtifactID string `json:"artifactId"`
-		Kind       string `json:"kind"`
+		ArtifactID      string `json:"artifactId"`
+		Kind            string `json:"kind"`
+		ExpectedVersion int    `json:"expectedVersion"`
+		SceneRef        string `json:"sceneRef"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read PDF export request")
@@ -1644,6 +1647,24 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	artifact, found := authorizedArtifactByID(r.Context(), user, ACLExport, strings.TrimSpace(payload.ArtifactID))
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	payload.SceneRef = strings.TrimSpace(payload.SceneRef)
+	sourceVersion := artifactVersion(artifact)
+	sourceSceneRef := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
+	// Older callers may omit the optimistic revision and are safely bound to
+	// whatever the server authorized now. Editors send it and get an immediate
+	// conflict instead of quietly exporting a revision they are no longer on.
+	if payload.ExpectedVersion > 0 && payload.ExpectedVersion != sourceVersion {
+		writeAuthJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "error": "the artifact changed; reopen it before exporting PDF", "currentVersion": sourceVersion,
+		})
+		return
+	}
+	if payload.SceneRef != "" && payload.SceneRef != sourceSceneRef {
+		writeAuthJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "error": "the deck scene changed; reopen it before exporting PDF", "currentVersion": sourceVersion,
+		})
 		return
 	}
 	// Decks and paper-kit documents print their own HTML (deck: flatten law;
@@ -1691,21 +1712,25 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Bookkeeping stamp via the metadata-only path (the openedAt precedent):
-	// a failure loses the job-identity check, never the queued job — log and
-	// continue.
-	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{
-		"renderJobId":  job.ID,
-		"renderStatus": renderJobStatusQueued,
-		"renderKind":   kind,
-	}); err != nil {
-		log.Errorf("Failed to stamp renderJobId on artifact %s: %v", artifact.ID, err)
+	// Stamp job + source binding only while the artifact is still the exact
+	// authorized revision used to build printHTML. The queue write necessarily
+	// happens first because it mints the job id; a losing race leaves an
+	// unattachable orphan job, never a stale PDF on the artifact.
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	if _, changed, stampErr := kanbanApp.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, queuedRenderMetadata(artifact, job.ID, kind)); stampErr != nil || !changed {
+		log.Warnf("PDF export job %s could not bind to artifact %s revision %d: %v", job.ID, artifact.ID, sourceVersion, stampErr)
+		writeAuthJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "error": "the artifact changed while PDF export was starting; try again", "currentVersion": sourceVersion,
+		})
+		return
 	}
 
 	writeAuthJSON(w, http.StatusAccepted, map[string]any{
-		"ok":    true,
-		"jobId": job.ID,
-		"kind":  kind,
+		"ok":            true,
+		"jobId":         job.ID,
+		"kind":          kind,
+		"sourceVersion": sourceVersion,
+		"sceneRef":      sourceSceneRef,
 	})
 }
 
@@ -1783,12 +1808,70 @@ func renderCallbackPDFBytes(payload renderRunnerCallbackPayload) ([]byte, error)
 	return data, nil
 }
 
+func renderSourceVersion(entry meetingMemoryEntry) (int, bool) {
+	value, err := strconv.Atoi(strings.TrimSpace(entry.Metadata[renderSourceArtifactVersionMetadataKey]))
+	return value, err == nil && value >= 1
+}
+
+func renderSourceBindingCurrent(entry meetingMemoryEntry) bool {
+	version, ok := renderSourceVersion(entry)
+	return ok && version == artifactVersion(entry) &&
+		strings.TrimSpace(entry.Metadata[renderSourceSceneRefMetadataKey]) == strings.TrimSpace(entry.Metadata[deckSceneRefMetadataKey])
+}
+
+func renderJobStillBoundToSource(entry meetingMemoryEntry, jobID string) bool {
+	return strings.TrimSpace(entry.Metadata["renderJobId"]) == strings.TrimSpace(jobID) && renderSourceBindingCurrent(entry)
+}
+
+// retireStaleRenderJob closes a legitimate job whose input revision moved.
+// It never clears a newer job: both the current authorization header and the
+// exact pending job id are compared under the metadata-store lock.
+func retireStaleRenderJob(artifactID string, jobID string) (bool, error) {
+	current, found := kanbanApp.osArtifactByID(artifactID)
+	if !found || strings.TrimSpace(current.Metadata["renderJobId"]) != strings.TrimSpace(jobID) {
+		return false, nil
+	}
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(current))
+	_, changed, err := kanbanApp.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
+		"renderJobId": strings.TrimSpace(jobID),
+	}, artifactID, map[string]string{
+		"renderJobId":  "",
+		"renderStatus": renderJobStatusStale,
+		"renderError":  "The artifact changed while this PDF was rendering. Export the current version again.",
+	})
+	return changed, err
+}
+
+func renderCompletionAssets(existing meetingMemoryEntry, pdf artifactAsset, pages []artifactAsset) ([]artifactAsset, string, int, error) {
+	assets := make([]artifactAsset, 0, len(artifactAssets(existing))+1+len(pages))
+	for _, asset := range artifactAssets(existing) {
+		if strings.EqualFold(strings.TrimSpace(asset.Kind), "pdf") || artifactAssetIsPageImage(asset) {
+			continue
+		}
+		assets = append(assets, asset)
+	}
+	assets = append(assets, pdf)
+	assets = append(assets, pages...)
+	encoded, err := json.Marshal(assets)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("encode rendered assets: %w", err)
+	}
+	boundVersion := artifactVersion(existing)
+	if string(encoded) != strings.TrimSpace(existing.Metadata[artifactAssetsMetadataKey]) {
+		// assets is capability-bearing metadata, so this one atomic write mints
+		// exactly one new artifact version.
+		boundVersion++
+	}
+	return assets, string(encoded), boundVersion, nil
+}
+
 // internalRenderRunnerResultHandler serves POST /internal/render/jobs/result —
 // the render sidecar's authenticated callback (Bearer BONFIRE_RUNNER_TOKEN,
 // the internalCodexRunnerResultHandler twin). A complete job stores the PDF
-// in the blob store, appends a {kind: pdf} asset on the artifact, and records
-// the pdf_exported signal; running/failed callbacks only stamp status
-// metadata so the viewer can narrate progress.
+// in the blob store, atomically replaces the artifact's revision-bound PDF
+// and rendered-page assets, and records the pdf_exported signal. A callback
+// whose source version or native scene moved is retired as stale without an
+// attachment or signal; running/failed callbacks only stamp status metadata.
 func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1864,6 +1947,15 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	sourceVersion, sourceVersionOK := renderSourceVersion(existing)
+	sourceSceneRef := strings.TrimSpace(existing.Metadata[renderSourceSceneRefMetadataKey])
+	if !sourceVersionOK || !renderSourceBindingCurrent(existing) {
+		_, _ = retireStaleRenderJob(artifactID, callbackJobID)
+		writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
+			"ok": true, "attached": false, "stale": true,
+		})
+		return
+	}
 
 	status := strings.ToLower(strings.TrimSpace(payload.Status))
 	// Kind comes from the server's own enqueue-time stamp, never the callback
@@ -1874,18 +1966,41 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	// export trigger is its only setter, so a callback can never re-point the
 	// stamp the identity check above depends on. (The success path below does
 	// clear it server-side, closing the completed-job replay window.)
-	metadata := map[string]string{
-		"renderStatus": status,
-	}
+	metadata := map[string]string{"renderStatus": status}
 	if payload.Error != "" {
 		metadata["renderError"] = payload.Error
 	}
 
 	if status != renderJobStatusComplete {
-		if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, metadata); err != nil {
+		// Failed work is spent just like completed work. Running keeps the job
+		// open for its final callback. Both transitions are a CAS against the
+		// exact source header so an edit between the check above and this write
+		// cannot receive even misleading progress metadata.
+		if status == renderJobStatusFailed {
+			metadata["renderJobId"] = ""
+		}
+		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(existing))
+		_, changed, updateErr := kanbanApp.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
+			"renderJobId":                          callbackJobID,
+			renderSourceArtifactVersionMetadataKey: strconv.Itoa(sourceVersion),
+			renderSourceSceneRefMetadataKey:        sourceSceneRef,
+		}, artifactID, metadata)
+		if updateErr != nil || !changed {
+			fresh, found := kanbanApp.osArtifactByID(artifactID)
+			if !found || !renderJobStillBoundToSource(fresh, callbackJobID) {
+				_, _ = retireStaleRenderJob(artifactID, callbackJobID)
+				writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{"ok": true, "attached": false, "stale": true})
+				return
+			}
+			// A repeated running callback is an intentional no-op. A real store
+			// error while the same source remains current is still an error.
+			if updateErr == nil {
+				writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{"ok": true})
+				return
+			}
 			writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
 				"ok":    false,
-				"error": err.Error(),
+				"error": updateErr.Error(),
 			})
 			return
 		}
@@ -1920,41 +2035,63 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	assetName := firstNonEmptyString(strings.TrimSpace(existing.Metadata["title"]), "artifact") + ".pdf"
-	if _, err := kanbanApp.appendArtifactAsset(artifactID, artifactAsset{
-		Ref:  ref,
-		Mime: "application/pdf",
-		Name: assetName,
-		Kind: "pdf",
-	}); err != nil {
-		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
-			"ok":    false,
-			"error": err.Error(),
-		})
+	pdfAsset := artifactAsset{
+		Ref: ref, Mime: "application/pdf", Name: assetName, Kind: "pdf",
+		SourceArtifactVersion: sourceVersion, SourceSceneRef: sourceSceneRef,
+	}
+	// Read and content-address rendered pages first, but attach nothing yet.
+	// PDF, pages, completion metadata, and job retirement land in one CAS below.
+	pages := collectRenderPageImageAssets(artifactID, payload)
+	for index := range pages {
+		pages[index].SourceArtifactVersion = sourceVersion
+		pages[index].SourceSceneRef = sourceSceneRef
+	}
+	_, encodedAssets, boundVersion, assetErr := renderCompletionAssets(existing, pdfAsset, pages)
+	if assetErr != nil {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{"ok": false, "error": assetErr.Error()})
 		return
 	}
-	if payload.PageCount > 0 {
-		metadata["renderPageCount"] = strconv.Itoa(payload.PageCount)
-	}
-	// Wave 5 item 21: the page JPEGs (previously dropped here) persist as
-	// {kind: image} assets — the rendered pages the vision slide juries see.
-	// Same path-trust rule as the PDF above; per-page failures degrade to
-	// fewer pages inside the helper, never a failed callback.
-	if persisted := persistRenderPageImageAssets(kanbanApp, artifactID, payload); persisted > 0 {
-		metadata["renderPageImages"] = strconv.Itoa(persisted)
-	}
+	metadata[artifactAssetsMetadataKey] = encodedAssets
+	metadata["renderPageCount"] = strconv.Itoa(payload.PageCount)
+	metadata["renderPageImages"] = strconv.Itoa(len(pages))
 	metadata["renderFlattened"] = strconv.FormatBool(payload.Flattened)
 	// Disclosure guard: a deck that flattened to a single page did not paginate
 	// (dropped print CSS, or a genuinely one-slide deck). Stamp it and warn so
 	// it surfaces instead of shipping silently as a valid multi-slide export.
+	metadata["renderDeckSinglePage"] = strconv.FormatBool(payload.DeckSinglePage)
 	if payload.DeckSinglePage {
-		metadata["renderDeckSinglePage"] = "true"
 		log.Warnf("Render callback: deck artifact %s flattened to a single page — the exported PDF did not paginate (missing print CSS or a one-slide deck)", artifactID)
 	}
 	// A completed job is spent: clearing the stamp makes the identity check
 	// above reject any replay of this callback.
 	metadata["renderJobId"] = ""
-	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, metadata); err != nil {
-		log.Errorf("Failed to stamp render completion on artifact %s: %v", artifactID, err)
+	metadata["renderError"] = ""
+	metadata[renderPDFAssetRefMetadataKey] = ref
+	metadata[renderPDFSourceVersionMetadataKey] = strconv.Itoa(sourceVersion)
+	metadata[renderPDFSourceSceneRefMetadataKey] = sourceSceneRef
+	metadata[renderPDFArtifactVersionMetadataKey] = strconv.Itoa(boundVersion)
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(existing))
+	updated, changed, updateErr := kanbanApp.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
+		"renderJobId":                          callbackJobID,
+		renderSourceArtifactVersionMetadataKey: strconv.Itoa(sourceVersion),
+		renderSourceSceneRefMetadataKey:        sourceSceneRef,
+	}, artifactID, metadata)
+	if updateErr != nil || !changed {
+		fresh, found := kanbanApp.osArtifactByID(artifactID)
+		if !found || !renderJobStillBoundToSource(fresh, callbackJobID) {
+			_, _ = retireStaleRenderJob(artifactID, callbackJobID)
+			writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{"ok": true, "attached": false, "stale": true})
+			return
+		}
+		if updateErr == nil {
+			writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{"ok": true, "attached": false})
+			return
+		}
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{"ok": false, "error": updateErr.Error()})
+		return
+	}
+	if artifactVersion(updated) != boundVersion {
+		log.Errorf("Render callback bound PDF %s to artifact %s version %d but store landed version %d", ref, artifactID, boundVersion, artifactVersion(updated))
 	}
 
 	// §5 capture: the export is a deliverable landing, one signal.
@@ -1970,8 +2107,7 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	broadcastSignedInKanbanEvent("memory", nil)
 
 	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
-		"ok":  true,
-		"ref": ref,
+		"ok": true, "attached": true, "ref": ref, "artifactVersion": artifactVersion(updated),
 	})
 }
 

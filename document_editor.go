@@ -17,6 +17,16 @@ import (
 
 const documentStudioMaxBytes = 1 << 20
 
+const (
+	documentStudioEmptyMetadataKey = "documentEmpty"
+	// The shared artifact store deliberately rejects blank bodies. Document
+	// Studio represents an intentional empty document with an invisible body
+	// plus an explicit marker, then projects it back to an empty Markdown string
+	// at this boundary. The marker prevents a genuine zero-width character in a
+	// legacy document from being mistaken for an empty document.
+	documentStudioEmptyBodySentinel = "\u200b"
+)
+
 type documentStudioDocument struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Markdown      string `json:"markdown"`
@@ -37,6 +47,21 @@ func documentStudioView(entry meetingMemoryEntry) documentStudioArtifactView {
 		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
 		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
+}
+
+func documentStudioDocumentFromEntry(entry meetingMemoryEntry) documentStudioDocument {
+	markdown := entry.Text
+	if strings.EqualFold(strings.TrimSpace(entry.Metadata[documentStudioEmptyMetadataKey]), "true") && markdown == documentStudioEmptyBodySentinel {
+		markdown = ""
+	}
+	return documentStudioDocument{SchemaVersion: 1, Markdown: markdown}
+}
+
+func documentStudioStoredBody(markdown string) (string, string) {
+	if markdown == "" {
+		return documentStudioEmptyBodySentinel, "true"
+	}
+	return markdown, "false"
 }
 
 func artifactIsDocumentStudioDocument(entry meetingMemoryEntry) bool {
@@ -85,7 +110,7 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		_, canWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "artifact": documentStudioView(artifact),
-			"document": documentStudioDocument{SchemaVersion: 1, Markdown: artifact.Text}, "canWrite": canWrite,
+			"document": documentStudioDocumentFromEntry(artifact), "canWrite": canWrite,
 		})
 		return
 	}
@@ -117,23 +142,34 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	title := firstNonEmptyString(payload.Title, strings.TrimSpace(prior.Metadata["title"]), "Untitled document")
 	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior))
+	storedBody, emptyMarker := documentStudioStoredBody(payload.Document.Markdown)
 	var updated meetingMemoryEntry
 	var changed bool
 	err := kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
 		var updateErr error
 		updated, changed, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(
-			header, prior.ID, title, payload.Document.Markdown, user.Name,
-			map[string]string{"type": artifactTypeMarkdown, "documentSchemaVersion": "1"},
+			header, prior.ID, title, storedBody, user.Name,
+			map[string]string{"type": artifactTypeMarkdown, "documentSchemaVersion": "1", documentStudioEmptyMetadataKey: emptyMarker},
 		)
 		return updateErr
 	})
 	if err != nil {
-		writeDocumentVersionConflict(w, prior)
+		current, found := kanbanApp.osArtifactByID(prior.ID)
+		if !found || !artifactAuthorizationHeaderEqual(header, resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(current))) {
+			writeDocumentVersionConflict(w, current)
+			return
+		}
+		writeAuthError(w, http.StatusInternalServerError, "document could not be saved")
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": documentStudioView(updated),
-		"document": documentStudioDocument{SchemaVersion: 1, Markdown: updated.Text},
+		"document": documentStudioDocumentFromEntry(updated),
+		"receipt": map[string]any{
+			"outcome": "document_saved", "artifactId": updated.ID,
+			"artifactVersion": artifactVersion(updated), "contentSaved": true,
+			"savedToFiles": strings.EqualFold(strings.TrimSpace(updated.Metadata["savedToFiles"]), "true"),
+		},
 	})
 }
 
@@ -187,7 +223,7 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "document artifact not found")
 		return
 	}
-	if artifactVersion(prior) != payload.ExpectedVersion {
+	if payload.ExpectedVersion < 1 || payload.ExpectedVersion > artifactVersion(prior) {
 		writeDocumentVersionConflict(w, prior)
 		return
 	}
@@ -195,27 +231,58 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, errFileFolderNotFound.Error())
 		return
 	}
+	storedBody, emptyMarker := documentStudioStoredBody(payload.Document.Markdown)
+	currentSourceVersion := artifactVersion(prior)
+	staleBranch := payload.ExpectedVersion != currentSourceVersion
 	metadata := map[string]string{
 		"title": payload.Title, "type": artifactTypeMarkdown, "source": "scout_thread",
 		"status": artifactStatusComplete, "threadStatus": artifactStatusComplete,
-		"copiedFromArtifactId": prior.ID, "copiedFromArtifactVersion": strconv.Itoa(artifactVersion(prior)),
-		"documentSchemaVersion": "1", "tenantId": strings.TrimSpace(prior.Metadata["tenantId"]),
-		"visibility": firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
-		"ownerEmail": normalizeAccountEmail(user.Email),
+		"copiedFromArtifactId": prior.ID, "copiedFromArtifactVersion": strconv.Itoa(payload.ExpectedVersion),
+		"copiedFromCurrentArtifactVersion": strconv.Itoa(currentSourceVersion),
+		"documentSchemaVersion":            "1", "tenantId": strings.TrimSpace(prior.Metadata["tenantId"]),
+		documentStudioEmptyMetadataKey: emptyMarker,
+		"visibility":                   firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
+		"ownerEmail":                   normalizeAccountEmail(user.Email),
 	}
-	copyEntry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", payload.Title, payload.Document.Markdown, firstNonEmptyString(user.Name, user.Email), metadata)
+	if staleBranch {
+		metadata["copiedFromStaleRevision"] = "true"
+	}
+	copyEntry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", payload.Title, storedBody, firstNonEmptyString(user.Name, user.Email), metadata)
 	if err != nil || !appended {
 		writeAuthError(w, http.StatusInternalServerError, "document copy could not be created")
 		return
 	}
 	file, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, fileName, firstNonEmptyString(user.Name, user.Email))
 	if err != nil {
-		writeAuthError(w, fileSaveErrorStatus(err), "document copy was created, but Files is unavailable")
+		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
+		storedView := documentStudioView(stored)
+		writeAuthJSON(w, fileSaveErrorStatus(err), map[string]any{
+			"ok": false, "partialSuccess": true,
+			"error":    "document copy was created, but Files filing failed",
+			"artifact": storedView, "document": documentStudioDocumentFromEntry(stored),
+			"receipt": map[string]any{
+				"outcome": "copy_created_files_failed", "artifactId": stored.ID,
+				"artifactVersion": artifactVersion(stored), "contentSaved": true,
+				"filingCompleted": false, "savedToFiles": storedView.SavedToFiles,
+				"branchedFromArtifactVersion": payload.ExpectedVersion,
+				"sourceCurrentVersion":        currentSourceVersion, "staleBranch": staleBranch,
+				"retryable": true, "retryUrl": "/assistant/files/save", "retryMethod": http.MethodPost,
+				"fileName": fileName, "folderId": payload.FolderID,
+			},
+		})
 		return
 	}
 	stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 	broadcastSignedInKanbanEvent("file", file)
-	writeAuthJSON(w, http.StatusCreated, map[string]any{"ok": true, "artifact": documentStudioView(stored), "document": payload.Document, "file": file})
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"ok": true, "artifact": documentStudioView(stored), "document": documentStudioDocumentFromEntry(stored), "file": file,
+		"receipt": map[string]any{
+			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
+			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
+			"branchedFromArtifactVersion": payload.ExpectedVersion,
+			"sourceCurrentVersion":        currentSourceVersion, "staleBranch": staleBranch,
+		},
+	})
 }
 
 func writeDocumentVersionConflict(w http.ResponseWriter, artifact meetingMemoryEntry) {

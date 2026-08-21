@@ -34,6 +34,96 @@ func completeResearchArtifactForTest() string {
 	})
 }
 
+func focusedExternalEvidenceThreadForTest() scoutAgentThread {
+	return scoutAgentThread{
+		Mode:  "research",
+		Query: "Verify the one credibility-critical audience benchmark in the approved deck brief.",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{
+			"goalDeliverable": "true",
+			"goalParentId":    "goal-private-deck",
+			"goalSubtaskId":   "external_research",
+			"outputContract":  packagingStudioExternalEvidenceContract,
+			"originKind":      agentThreadOriginPrivateThread,
+			"originId":        "private-aj",
+			"originSurface":   "chat:private-aj",
+			"visibility":      scoutChatVisibilityPrivate,
+			"ownerEmail":      "aj@shareability.com",
+			"requestedBy":     "aj@shareability.com",
+		}},
+	}
+}
+
+func focusedExternalEvidenceArtifactForTest() string {
+	body := strings.Join([]string{
+		"## Research questions",
+		"- What current official figure best establishes the reachable creator audience?",
+		"## Verified evidence ledger",
+		"| Research question | Source fact | Source title | URL | Published / updated | Units | Confidence | Deck implication |",
+		"|---|---|---|---|---|---|---|---|",
+		"| Reachable creator audience | The official program reports 4,200 opted-in creators. | Official creator program | https://example.org/creator-program | 2026-08-20 | creators | High | Use 4,200 as the sourced ceiling, not as a forecast. |",
+		"## Excluded or unverified",
+		"- Excluded an unsourced social post claiming 10,000 creators.",
+	}, "\n\n")
+	return appendOpenAIResponseWebSources(body, openAIResponseWebEvidence{
+		ResponseID:  "resp_focused_external_evidence",
+		SearchCalls: 1,
+		Citations: []openAIResponseWebCitation{
+			{Title: "Official creator program", URL: "https://example.org/creator-program"},
+		},
+	})
+}
+
+func TestExternalEvidenceContractAcceptsFocusedProviderBackedLedger(t *testing.T) {
+	thread := focusedExternalEvidenceThreadForTest()
+	body := focusedExternalEvidenceArtifactForTest()
+	if len(strings.Fields(body)) >= minimumResearchArtifactWords {
+		t.Fatalf("focused fixture unexpectedly reached the generic %d-word floor", minimumResearchArtifactWords)
+	}
+	if err := validateAgentThreadTerminalArtifact(thread, body); err != nil {
+		t.Fatalf("focused external evidence was rejected: %v", err)
+	}
+
+	// A client cannot self-assert the contract to weaken an ordinary research
+	// thread; the parent/subtask/deliverable binding is the authority boundary.
+	spoofed := thread
+	spoofed.Artifact.Metadata = map[string]string{"outputContract": packagingStudioExternalEvidenceContract}
+	if err := validateAgentThreadTerminalArtifact(spoofed, body); err == nil || !strings.Contains(err.Error(), "shorter than") {
+		t.Fatalf("unbound outputContract bypassed the generic research gate: %v", err)
+	}
+}
+
+func TestExternalEvidenceContractRejectsUnreceiptedOrUnboundSources(t *testing.T) {
+	thread := focusedExternalEvidenceThreadForTest()
+	body := focusedExternalEvidenceArtifactForTest()
+	if err := validateAgentThreadTerminalArtifact(thread, stripOpenAIWebCitationReceipt(body)); err == nil || !strings.Contains(err.Error(), "provider web-search citation receipt") {
+		t.Fatalf("unreceipted evidence passed: %v", err)
+	}
+
+	tampered := strings.Replace(body, "https://example.org/creator-program | 2026", "https://unfetched.example/claim | 2026", 1)
+	if err := validateAgentThreadTerminalArtifact(thread, tampered); err == nil || !strings.Contains(err.Error(), "absent from the provider citation receipt") {
+		t.Fatalf("ledger URL absent from receipt passed: %v", err)
+	}
+}
+
+func TestExternalEvidenceContractInstructionsStayFocusedAndPrivateBound(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread := focusedExternalEvidenceThreadForTest()
+	instructions := app.agentThreadInstructionsForThread(thread)
+	for _, want := range []string{"focused external-evidence contract", "Verified evidence ledger", "One decisive source", "server appends"} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("focused instructions missing %q:\n%s", want, instructions)
+		}
+	}
+	for _, forbidden := range []string{"Comparable Companies", "at least five actually used sources", "1,000-word"} {
+		if strings.Contains(instructions, forbidden) {
+			t.Errorf("focused instructions inherited generic requirement %q:\n%s", forbidden, instructions)
+		}
+	}
+	if thread.Artifact.Metadata["visibility"] != scoutChatVisibilityPrivate || thread.Artifact.Metadata["ownerEmail"] != "aj@shareability.com" || thread.Artifact.Metadata["originSurface"] != "chat:private-aj" {
+		t.Fatalf("contract fixture lost private ACL binding: %+v", thread.Artifact.Metadata)
+	}
+}
+
 func TestResearchTerminalQualityGateRejectsTheProductionFailureShape(t *testing.T) {
 	thread := scoutAgentThread{Mode: "research", Query: "compare the company and write an elevator pitch"}
 	body := "# Vision\n\nThe supplied thread context does not identify the company.\n\n## Executive Summary\nBLOCKED — target company is undefined.\n\n## Next Checks\nTell me the company name."

@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -64,6 +65,62 @@ func TestScoutChatRouterStartsPrivateGoalRun(t *testing.T) {
 	saved := response["thread"].(scoutChatThreadRecord)
 	if len(saved.Messages) != 2 || saved.Messages[1].Kind != "thread" || saved.Messages[1].Thread == nil || saved.Messages[1].IntentOutcome != string(conversationIntentStartPrivateWork) {
 		t.Fatalf("persisted messages=%#v, want user turn + work card", saved.Messages)
+	}
+}
+
+func TestAcceptedPrivateToolRunReconcilesLostCardWithoutDuplicateLaunch(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "private-proposal-test")
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "private-proposal-test"
+	starts := 0
+	previousGoalStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) { starts++ }
+	previousProbe := conversationWorkBeforeCardCommitProbe
+	crashed := false
+	conversationWorkBeforeCardCommitProbe = func(scoutAgentThread) error {
+		if !crashed {
+			crashed = true
+			return errors.New("simulated restart before private tool card projection")
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		startGoalThreadAsync = previousGoalStarter
+		conversationWorkBeforeCardCommitProbe = previousProbe
+	})
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Private tool proposal", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	source := scoutChatMessageRecord{ID: "private-tool-source", Kind: "message", Role: "user", AuthorName: user.Name, AuthorEmail: user.Email, Text: "Build the actual five-slide deck", CreatedAt: "2026-08-21T12:00:00Z"}
+	proposal := scoutRouterProposalForToolID(packagingStudioProcessID, "Build the actual five-slide deck", source.Text)
+	if proposal == nil || proposal.IntentOutcome != "" {
+		t.Fatalf("fixture must be a normal private proposal: %+v", proposal)
+	}
+	card := scoutChatMessageRecord{ID: "private-tool-proposal", Kind: scoutChatMessageKindProposal, Role: "scout", Text: proposal.Summary, Proposal: proposal, CausedByMessageID: source.ID, CreatedAt: "2026-08-21T12:00:01Z"}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, source, card); err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.resolveScoutChatProposal(context.Background(), user, thread.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID})
+	var pending *conversationWorkProjectionPendingError
+	if !errors.As(err, &pending) || starts != 1 {
+		t.Fatalf("first accept err=%v starts=%d, want one launched run with pending projection", err, starts)
+	}
+	before, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil || len(before.Messages) != 2 || before.Messages[1].Proposal.Status != "accepted" {
+		t.Fatalf("accepted pending thread=%#v err=%v", before.Messages, err)
+	}
+	conversationWorkBeforeCardCommitProbe = nil // simulate the restarted process
+	recovered, handled, err := app.reconcileAcceptedScoutChatProposal(user, thread.ID, card.ID)
+	if err != nil || !handled || recovered["reconciled"] != true || starts != 1 {
+		t.Fatalf("recovery handled=%v err=%v starts=%d response=%#v", handled, err, starts, recovered)
+	}
+	work, ok := recovered["agentThread"].(scoutAgentThread)
+	saved := recovered["thread"].(scoutChatThreadRecord)
+	if !ok || work.Artifact.Metadata["processId"] != packagingStudioProcessID || len(saved.Messages) != 3 || saved.Messages[2].Thread == nil || saved.Messages[2].Thread.ID != work.ID {
+		t.Fatalf("recovered work=%#v messages=%#v", recovered["agentThread"], saved.Messages)
 	}
 }
 
@@ -129,24 +186,21 @@ func TestScoutChatGoalProposalFromToolUse(t *testing.T) {
 	}
 }
 
-// Accepting a goal_run card is signal-only: like tool_run, the launch is the
-// card's Run button (runGoalPipeline -> POST /assistant/goal), so the accept
-// route records the acceptance signal — carrying the lane — and launches
-// nothing. First verdict wins; a replay rejects.
-func TestScoutChatGoalRunAcceptIsSignalOnly(t *testing.T) {
+// Accepting a private goal_run card is the launch authority. It creates one
+// durable work card/provider run; retries reconcile that exact operation and
+// never silently succeed or create a duplicate.
+func TestScoutChatGoalRunAcceptLaunchesExactlyOnce(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "private-proposal-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "private-proposal-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	startAgentThreadAsyncPrev := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
-		t.Fatal("accepting a goal_run card must never launch an agent thread")
-	}
-	t.Cleanup(func() { startAgentThreadAsync = startAgentThreadAsyncPrev })
+	launches := 0
 	startGoalThreadAsyncPrev := startGoalThreadAsync
 	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {
-		t.Fatal("accepting a goal_run card must never launch a goal pipeline server-side")
+		launches++
 	}
 	t.Cleanup(func() { startGoalThreadAsync = startGoalThreadAsyncPrev })
 
@@ -177,8 +231,9 @@ func TestScoutChatGoalRunAcceptIsSignalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve goal_run accept: %v", err)
 	}
-	if _, launched := response["agentThread"]; launched {
-		t.Fatalf("response keys=%v — goal_run accept is signal-only", responseKeys(response))
+	launched, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || launched.Mode != "goal" || launches != 1 {
+		t.Fatalf("response=%#v launches=%d, want one private goal launch", response, launches)
 	}
 
 	// The acceptance signal carries the lane so acceptance is measurable per lane.
@@ -186,12 +241,17 @@ func TestScoutChatGoalRunAcceptIsSignalOnly(t *testing.T) {
 		t.Fatalf("no %s signal carrying lane=%q was recorded", signalEventRouterProposalAccepted, approvalLaneStandard)
 	}
 
-	// First verdict wins.
-	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, thread.ID, scoutChatProposalAction{
+	// A retry recovers the accepted operation rather than launching again.
+	replayed, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, thread.ID, scoutChatProposalAction{
 		Action:    "accepted",
 		MessageID: card.ID,
-	}); err == nil {
-		t.Fatal("a replayed accept must reject — the card was already resolved")
+	})
+	if err != nil || launches != 1 || replayed["reconciled"] != true {
+		t.Fatalf("replayed accept err=%v launches=%d response=%#v, want exact reconciliation", err, launches, replayed)
+	}
+	replayedThread, ok := replayed["agentThread"].(scoutAgentThread)
+	if !ok || replayedThread.ID != launched.ID {
+		t.Fatalf("replayed work=%#v, want original %s", replayed["agentThread"], launched.ID)
 	}
 }
 

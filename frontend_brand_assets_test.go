@@ -90,8 +90,11 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got != 1 {
 		t.Fatalf("only the sign-in tile should use the Stride Signal app icon, got %d references", got)
 	}
-	if !strings.Contains(index, `<span class="wordmark topbar__wordmark" aria-hidden="true"></span>`) {
-		t.Fatal("the desktop rail must use the quiet Stride wordmark instead of a second app-icon tile")
+	if !strings.Contains(index, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
+		t.Fatal("the authenticated desktop header must carry the quiet Stride wordmark")
+	}
+	if strings.Contains(index, `<span class="wordmark topbar__wordmark" aria-hidden="true"></span>`) {
+		t.Fatal("the slim icon rail must not duplicate the Stride wordmark")
 	}
 	for _, legacy := range []string{"bonfireRailLogCutout", "M553 92", "M553 98"} {
 		if strings.Contains(index, legacy) {

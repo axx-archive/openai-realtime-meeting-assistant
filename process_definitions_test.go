@@ -125,6 +125,18 @@ func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 			d.Stages[0].InputFrom = []string{"w1"}
 		}), "does not name an earlier stage"},
 		{"unknown role", mutate(func(d *ProcessDefinition) { d.Stages[0].Role = "director" }), "unknown role"},
+		{"valid authored condition", mutate(func(d *ProcessDefinition) {
+			d.Stages[1].RunIf = &ProcessStageCondition{StageID: "w1", Field: "research_mode", Equals: "external"}
+		}), ""},
+		{"condition source must be earlier", mutate(func(d *ProcessDefinition) {
+			d.Stages[1].RunIf = &ProcessStageCondition{StageID: "missing", Field: "research_mode", Equals: "external"}
+		}), "runIf stage"},
+		{"condition source must be an input", mutate(func(d *ProcessDefinition) {
+			d.Stages = append(d.Stages, ProcessStage{ID: "w2", Title: "Conditional", Role: processRoleWriter, InputFrom: []string{"g1"}, RunIf: &ProcessStageCondition{StageID: "w1", Field: "research_mode", Equals: "external"}})
+		}), "must also be listed in inputFrom"},
+		{"condition field cannot be empty", mutate(func(d *ProcessDefinition) {
+			d.Stages[1].RunIf = &ProcessStageCondition{StageID: "w1", Equals: "external"}
+		}), "non-empty field"},
 		{"writer with bad mode", mutate(func(d *ProcessDefinition) { d.Stages[0].Mode = "interpretive_dance" }), "invalid mode"},
 		{"panel without personas", mutate(func(d *ProcessDefinition) {
 			d.Stages[0] = ProcessStage{ID: "w1", Title: "Panel", Role: processRolePanel}
@@ -133,6 +145,12 @@ func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 			d.Stages[0] = ProcessStage{ID: "w1", Title: "Panel", Role: processRolePanel, Personas: []ProcessPersona{{Name: "Judge"}}}
 		}), "missing name/system"},
 		{"gate without inputFrom", mutate(func(d *ProcessDefinition) { d.Stages[1].InputFrom = nil }), "gate"},
+		{"valid gate repair target", mutate(func(d *ProcessDefinition) {
+			d.Stages[1].GateSpec = &ProcessGateSpec{RepairTarget: "w1", HoldOnFailure: true}
+		}), ""},
+		{"gate repair target must be scored", mutate(func(d *ProcessDefinition) {
+			d.Stages[1].GateSpec = &ProcessGateSpec{RepairTarget: "missing", HoldOnFailure: true}
+		}), "repairTarget"},
 		{"render without inputFrom", mutate(func(d *ProcessDefinition) {
 			d.Stages[1] = ProcessStage{ID: "g1", Title: "Render", Role: processRoleRender}
 		}), "render"},
@@ -488,24 +506,19 @@ func TestProcessStageLawSweepRejectsDeckBeyondNativeSlideBound(t *testing.T) {
 	}
 }
 
-// ship_approval carries a send-back option targeting ship_deck (the first
-// live run proved a bad deck could reach the final park with no way back).
-func TestPackagingStudioShipApprovalHasSendBack(t *testing.T) {
+// The rendered quality gate sends executable repairs back to ship_deck and
+// fails closed after its bounded rounds; a bad deck never reaches delivery as
+// an advisory warning.
+func TestPackagingStudioRenderedQualityGateRepairsOrHolds(t *testing.T) {
 	def, ok := processByID("packaging_studio")
 	if !ok {
 		t.Fatal("packaging_studio not registered")
 	}
-	stage, ok := def.stageByID("ship_approval")
+	stage, ok := def.stageByID("quality_gate")
 	if !ok {
-		t.Fatal("ship_approval stage missing")
+		t.Fatal("quality_gate stage missing")
 	}
-	foundRevise := false
-	for _, option := range stage.CheckpointSpec.Options {
-		if option.Action == processCheckpointActionRevise && option.Target == "ship_deck" {
-			foundRevise = true
-		}
-	}
-	if !foundRevise {
-		t.Fatalf("ship_approval options carry no revise→ship_deck send-back: %+v", stage.CheckpointSpec.Options)
+	if stage.GateSpec == nil || stage.GateSpec.RepairTarget != "ship_deck" || !stage.GateSpec.HoldOnFailure || stage.GateSpec.ForceAccept {
+		t.Fatalf("quality_gate must repair ship_deck then hold, never force-accept: %+v", stage.GateSpec)
 	}
 }

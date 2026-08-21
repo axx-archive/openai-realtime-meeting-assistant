@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -513,7 +514,7 @@ func TestInternalRenderCallbackAuthAssetAppendAndFlattenLaw(t *testing.T) {
 	setupRenderSidecarEnv(t)
 	t.Setenv("BONFIRE_RUNNER_TOKEN", "render-secret")
 	deck := seedShareArtifact(t, "draft", "<!doctype html><html><body>deck</body></html>", map[string]string{"type": "html_deck"})
-	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(deck.ID, map[string]string{"renderJobId": "render-job-1"}); err != nil {
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(deck.ID, queuedRenderMetadata(deck, "render-job-1", renderJobKindDeck)); err != nil {
 		t.Fatalf("stamp job id: %v", err)
 	}
 	pdfBytes := []byte("%PDF-1.7 flattened deck")
@@ -588,6 +589,12 @@ func TestInternalRenderCallbackAuthAssetAppendAndFlattenLaw(t *testing.T) {
 	assets := artifactAssets(updated)
 	if len(assets) != 1 || assets[0].Ref != ref || assets[0].Kind != "pdf" || assets[0].Mime != "application/pdf" {
 		t.Fatalf("assets=%v, want one pdf asset with ref %s", assets, ref)
+	}
+	if assets[0].SourceArtifactVersion != artifactVersion(deck) ||
+		updated.Metadata[renderPDFSourceVersionMetadataKey] != strconv.Itoa(artifactVersion(deck)) ||
+		updated.Metadata[renderPDFArtifactVersionMetadataKey] != strconv.Itoa(artifactVersion(updated)) ||
+		updated.Metadata[renderPDFAssetRefMetadataKey] != ref || artifactVersion(updated) != artifactVersion(deck)+1 {
+		t.Fatalf("PDF binding metadata=%v asset=%+v version=%d, want source v%d bound to current v%d", updated.Metadata, assets[0], artifactVersion(updated), artifactVersion(deck), artifactVersion(deck)+1)
 	}
 	if updated.Metadata["renderStatus"] != renderJobStatusComplete || updated.Metadata["renderPageCount"] != "12" {
 		t.Fatalf("render metadata=%v, want complete + pageCount 12", updated.Metadata)

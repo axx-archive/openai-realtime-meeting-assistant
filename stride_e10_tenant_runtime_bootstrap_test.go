@@ -135,3 +135,29 @@ func TestStrideE10TenantProductionBootstrapShadowReachesMainResolverWithoutAutho
 		t.Fatalf("managed envelope key=%+v err=%v", key, err)
 	}
 }
+
+func TestStrideE10TenantFileReceiptSinkDeduplicatesStableShadowObservation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "tenant-receipts.jsonl")
+	key := StrideE10TenantReceiptKey{ID: "tenant-receipt-dedupe", Version: 1, Secret: []byte(strings.Repeat("r", 32))}
+	sink := &strideE10TenantFileReceiptSink{path: path, key: key}
+	principal := StrideE10TenantPrincipal{TenantID: "org-one", PersonID: "person-one", AuthorityGeneration: 7}
+	legacy := StrideE10LegacyPrincipalProjection{TenantID: canonicalTenantID(), AccountSubjectDigest: strings.Repeat("d", 64)}
+	receipt := strideE10TenantComparisonReceipt(key, StrideE10TenantSurfaceWebSocket, principal, legacy, principal.PersonID)
+	for index := 0; index < 100; index++ {
+		if err := sink.RecordStrideE10TenantDiscrepancy(context.Background(), receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := strideE10TenantComparisonReceipt(key, StrideE10TenantSurfaceChat, principal, legacy, principal.PersonID)
+	if err := sink.RecordStrideE10TenantDiscrepancy(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stable shadow observations should be written once per receipt id: count=%d body=%s", len(lines), body)
+	}
+}
