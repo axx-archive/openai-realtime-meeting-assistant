@@ -12344,6 +12344,7 @@
         margin: 0 4px;
       }
       .deck-editor__btn {
+        position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -12356,14 +12357,24 @@
         font: var(--type-body-sm);
         color: var(--text-2);
         cursor: pointer;
-        transition: all var(--dur-fast) var(--ease);
+        transition-property: background-color, border-color, color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
       .deck-editor__btn:hover {
         background: var(--surface-2);
         color: var(--text-1);
         border-color: var(--line-2);
       }
-      .deck-editor__btn:active { transform: scale(var(--press-scale)); }
+      .deck-editor__btn:active { transform: scale(0.96); }
+      .deck-editor__btn::after {
+        content: "";
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 40px;
+        height: 40px;
+        transform: translate(-50%, -50%);
+      }
       .deck-editor__btn--icon {
         width: 34px;
         padding: 0;
@@ -12392,13 +12403,14 @@
       .deck-editor__slide-nav {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         font: var(--type-body-sm);
         color: var(--text-2);
       }
       .deck-editor__slide-nav button {
-        width: 28px;
-        height: 28px;
+        position: relative;
+        width: 34px;
+        height: 34px;
         padding: 0;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
@@ -12408,8 +12420,19 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        transition: all var(--dur-fast) var(--ease);
+        transition-property: background-color, color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
+      .deck-editor__slide-nav button::after {
+        content: "";
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 40px;
+        height: 40px;
+        transform: translate(-50%, -50%);
+      }
+      .deck-editor__slide-nav button:active { transform: scale(0.96); }
       .deck-editor__slide-nav button:hover {
         background: var(--surface-2);
         color: var(--text-1);
@@ -12432,12 +12455,31 @@
         width: 196px;
         background: var(--surface-2);
         border-right: 1px solid var(--line-1);
-        overflow-y: auto;
+        overflow: hidden;
         padding: 12px;
         display: flex;
         flex-direction: column;
         gap: 8px;
       }
+      .deck-editor__slide-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 2px;
+        scrollbar-width: thin;
+      }
+      .deck-editor__slide-actions {
+        flex: none;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 34px 34px;
+        gap: 6px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line-1);
+      }
+      .deck-editor__slide-actions .deck-editor__btn { min-width: 0; padding-inline: 8px; }
       .deck-editor__thumb {
         position: relative;
         aspect-ratio: 16 / 9;
@@ -12537,6 +12579,11 @@
       .deck-editor__element-content--image {
         display: block;
         object-fit: cover;
+        outline: 1px solid rgba(0, 0, 0, 0.1);
+        outline-offset: -1px;
+      }
+      [data-theme="dark"] .deck-editor__element-content--image {
+        outline-color: rgba(255, 255, 255, 0.1);
       }
       .deck-editor__handle {
         position: absolute;
@@ -12597,6 +12644,12 @@
         display: flex;
         align-items: center;
         gap: 8px;
+      }
+      .deck-editor__prop-row output {
+        min-width: 34px;
+        color: var(--text-3);
+        font: var(--type-caption);
+        font-variant-numeric: tabular-nums;
       }
       .deck-editor__prop-input {
         flex: 1;
@@ -12678,8 +12731,11 @@
         color: var(--text-2);
         font: var(--type-body-sm);
         cursor: pointer;
-        transition: all var(--dur-fast) var(--ease);
+        transition-property: background-color, color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
+      .deck-editor__zorder button:active { transform: scale(0.96); }
       .deck-editor__zorder button:hover {
         background: var(--surface-3);
         color: var(--text-1);
@@ -12724,7 +12780,9 @@
         .deck-editor__toolbar-center [data-action="add-text"],
         .deck-editor__toolbar-center [data-action="add-image"],
         .deck-editor__toolbar-center [data-action="add-rectangle"],
-        .deck-editor__toolbar-center [data-action="add-ellipse"] {
+        .deck-editor__toolbar-center [data-action="add-ellipse"],
+        .deck-editor__toolbar-center [data-action="send-backward"],
+        .deck-editor__toolbar-center [data-action="bring-forward"] {
           display: none;
         }
       }
@@ -12745,7 +12803,10 @@
         .deck-editor__toolbar-center [data-action="add-rectangle"],
         .deck-editor__toolbar-center [data-action="add-ellipse"],
         .deck-editor__toolbar-center [data-action="bring-front"],
-        .deck-editor__toolbar-center [data-action="send-back"] {
+        .deck-editor__toolbar-center [data-action="send-back"],
+        .deck-editor__toolbar-center [data-action="send-backward"],
+        .deck-editor__toolbar-center [data-action="bring-forward"],
+        .deck-editor__toolbar-right [data-action="save-copy"] {
           display: none;
         }
         /* Compact Present button on phone */
@@ -12788,16 +12849,21 @@
       .deck-presenter__button {
         display: inline-grid;
         place-items: center;
-        min-width: 36px;
-        min-height: 34px;
+        min-width: 40px;
+        min-height: 40px;
         padding: 0 12px;
         border: 1px solid rgba(255,255,255,.16);
         border-radius: var(--r-full);
         background: rgba(255,255,255,.07);
         color: #fff;
         font: var(--type-label);
+        transition-property: background-color, border-color, color, opacity, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
       .deck-presenter__button:disabled { opacity: .35; }
+      .deck-presenter__button:active:not(:disabled) { transform: scale(0.96); }
+      .deck-presenter__button svg { width: 16px; height: 16px; }
       .deck-presenter__viewport {
         position: relative;
         display: grid;
@@ -12833,16 +12899,21 @@
         overflow: hidden;
         line-height: 1.08;
       }
-      .deck-presenter__image { display: block; width: 100%; height: 100%; }
+      .deck-presenter__image {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline-offset: -1px;
+      }
       .deck-presenter__shape { width: 100%; height: 100%; border-style: solid; box-sizing: border-box; }
       .deck-presenter__nav {
         position: absolute;
-        left: 50%;
+        right: 18px;
         bottom: 18px;
         z-index: 2;
         display: flex;
         gap: 8px;
-        transform: translateX(-50%);
       }
       .deck-presenter__notes {
         min-width: 0;
@@ -44712,6 +44783,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           saving: false,
           imageGenerating: false,
           canWrite: true,
+          savedToFiles: payload?.artifact?.savedToFiles === true || String(payload?.artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true',
           options
         }
 
@@ -44733,20 +44805,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn" data-action="add-ellipse">Ellipse</button>
               <span class="deck-editor__divider"></span>
               <button type="button" class="deck-editor__btn" data-action="send-back">Back</button>
+              <button type="button" class="deck-editor__btn" data-action="send-backward">Backward</button>
+              <button type="button" class="deck-editor__btn" data-action="bring-forward">Forward</button>
               <button type="button" class="deck-editor__btn" data-action="bring-front">Front</button>
             </div>
             <div class="deck-editor__toolbar-right">
               <div class="deck-editor__slide-nav">
-                <button type="button" data-action="prev-slide" aria-label="Previous slide">‹</button>
+                <button type="button" data-action="prev-slide" aria-label="Previous slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12 6 8l4-4"/></svg></button>
                 <span data-slide-indicator></span>
-                <button type="button" data-action="next-slide" aria-label="Next slide">›</button>
+                <button type="button" data-action="next-slide" aria-label="Next slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button>
               </div>
               <button type="button" class="deck-editor__btn" data-action="present">Present</button>
+              <button type="button" class="deck-editor__btn" data-action="save-copy">Save a copy…</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="save">Save</button>
             </div>
           </div>
           <div class="deck-editor__main">
-            <div class="deck-editor__sidebar" data-slide-list></div>
+            <aside class="deck-editor__sidebar">
+              <div class="deck-editor__slide-list" data-slide-list></div>
+              <div class="deck-editor__slide-actions">
+                <button type="button" class="deck-editor__btn" data-action="add-slide">+ Slide</button>
+                <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="duplicate-slide" aria-label="Duplicate slide" title="Duplicate slide">⧉</button>
+                <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="delete-slide" aria-label="Delete slide" title="Delete slide">⌫</button>
+              </div>
+            </aside>
             <div class="deck-editor__canvas-wrap" data-canvas-wrap>
               <div class="deck-editor__canvas" data-canvas><div class="deck-editor__scene" data-scene></div></div>
             </div>
@@ -44758,6 +44840,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <div class="deck-editor__prop-section">
                 <span class="deck-editor__prop-label">Size</span>
                 <div class="deck-editor__prop-row"><label>W</label><input type="number" class="deck-editor__prop-input" data-prop="width"><label>H</label><input type="number" class="deck-editor__prop-input" data-prop="height"></div>
+                <div class="deck-editor__prop-row"><label>Rotation</label><input type="number" min="-360" max="360" class="deck-editor__prop-input" data-prop="rotation"></div>
+                <div class="deck-editor__prop-row"><label>Opacity</label><input type="range" class="deck-editor__range" min="0" max="1" step="0.05" data-prop="opacity"><output data-opacity-output></output></div>
               </div>
               <div class="deck-editor__prop-section" data-text-controls hidden>
                 <span class="deck-editor__prop-label">Typography</span>
@@ -44769,7 +44853,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <div class="deck-editor__prop-section" data-shape-controls hidden>
                 <span class="deck-editor__prop-label">Appearance</span>
                 <div class="deck-editor__prop-row"><label>Fill</label><input type="color" class="deck-editor__color" data-prop="fill"><label>Stroke</label><input type="color" class="deck-editor__color" data-prop="stroke"></div>
-                <div class="deck-editor__prop-row"><label>Opacity</label><input type="range" class="deck-editor__range" min="0" max="1" step="0.05" data-prop="opacity"><output data-opacity-output></output></div>
+              </div>
+              <div class="deck-editor__prop-section" data-image-controls hidden>
+                <span class="deck-editor__prop-label">Image crop</span>
+                <div class="deck-editor__prop-row"><label>Frame</label><select class="deck-editor__prop-input" data-prop="fit"><option value="cover">Fill frame</option><option value="contain">Fit inside</option></select></div>
               </div>
               <div class="deck-editor__prop-section">
                 <span class="deck-editor__prop-label">Presenter notes</span>
@@ -44793,6 +44880,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const slideList = editor.querySelector('[data-slide-list]')
         const indicator = editor.querySelector('[data-slide-indicator]')
         const saveButton = editor.querySelector('[data-action="save"]')
+        const copyButton = editor.querySelector('[data-action="save-copy"]')
         const imageStatus = editor.querySelector('[data-image-status]')
 
         function normalizeDeckDocument(input) {
@@ -44991,8 +45079,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           editor.querySelectorAll('[data-prop]').forEach(input => { input.disabled = !element })
           editor.querySelector('[data-text-controls]').hidden = element?.type !== 'text'
           editor.querySelector('[data-shape-controls]').hidden = element?.type !== 'shape'
+          editor.querySelector('[data-image-controls]').hidden = element?.type !== 'image'
           if (!element) return
-          for (const prop of ['x', 'y', 'width', 'height', 'fill', 'stroke', 'opacity', 'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'lineHeight', 'letterSpacing']) {
+          for (const prop of ['x', 'y', 'width', 'height', 'rotation', 'fill', 'stroke', 'opacity', 'fit', 'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'lineHeight', 'letterSpacing']) {
             const input = editor.querySelector(`[data-prop="${prop}"]`)
             if (input) input.value = element[prop]
           }
@@ -45121,27 +45210,91 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const element = selected()
           if (!element) return
           checkpoint()
-          const ordered = [...slide().elements].sort((a, b) => a.z - b.z).filter(item => item.id !== element.id)
-          if (direction === 'front') ordered.push(element)
-          else ordered.unshift(element)
+          const stack = [...slide().elements].sort((a, b) => a.z - b.z)
+          const currentIndex = stack.findIndex(item => item.id === element.id)
+          if (currentIndex < 0) return
+          stack.splice(currentIndex, 1)
+          let nextIndex = currentIndex
+          if (direction === 'front') nextIndex = stack.length
+          else if (direction === 'back') nextIndex = 0
+          else if (direction === 'forward') nextIndex = Math.min(stack.length, currentIndex + 1)
+          else if (direction === 'backward') nextIndex = Math.max(0, currentIndex - 1)
+          stack.splice(nextIndex, 0, element)
+          const ordered = stack
           ordered.forEach((item, index) => { item.z = index + 1 })
           renderAll()
+        }
+
+        function addSlide() {
+          if (!requireDeckWrite()) return
+          checkpoint()
+          const next = { id: `slide-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`, background: state.deck?.theme?.background || '#111111', notes: '', elements: [] }
+          state.deck.slides.splice(state.slideIndex + 1, 0, next)
+          state.slideIndex++
+          state.selectedId = ''
+          renderAll()
+        }
+
+        function duplicateSlide() {
+          if (!requireDeckWrite()) return
+          checkpoint()
+          const copy = clone(slide())
+          const token = `${Date.now()}-${Math.random().toString(16).slice(2, 7)}`
+          copy.id = `slide-${token}`
+          copy.elements.forEach((element, index) => { element.id = `element-${token}-${index + 1}` })
+          state.deck.slides.splice(state.slideIndex + 1, 0, copy)
+          state.slideIndex++
+          state.selectedId = ''
+          renderAll()
+        }
+
+        function deleteSlide() {
+          if (!requireDeckWrite()) return
+          if (state.deck.slides.length <= 1) {
+            showToast({ text: 'A deck needs at least one slide.', kind: 'note' })
+            return
+          }
+          checkpoint()
+          state.deck.slides.splice(state.slideIndex, 1)
+          state.slideIndex = Math.min(state.slideIndex, state.deck.slides.length - 1)
+          state.selectedId = ''
+          renderAll()
+        }
+
+        function deckWithoutLocalImages() {
+          const localImages = state.deck.slides.flatMap(item => item.elements).filter(element => element.type === 'image' && element.dataUrl && !element.ref)
+          if (localImages.length) {
+            showToast({ text: 'Upload local imagery before saving this deck.', kind: 'error' })
+            return null
+          }
+          const deck = clone(state.deck)
+          deck.slides.forEach(item => item.elements.forEach(element => delete element.dataUrl))
+          return deck
+        }
+
+        async function saveDeckToFiles(destination) {
+          const response = await fetch('/assistant/files/save', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artifactId: state.artifactId, fileName: destination.fileName, folderId: destination.folderId })
+          })
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || !result?.file) throw new Error(result?.error || 'Deck saved, but could not be added to Files.')
+          state.savedToFiles = true
+          if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+          return result.file
         }
 
         async function saveDeck(closeAfter = true) {
           if (!requireDeckWrite()) return false
           if (state.saving) return false
-          const localImages = state.deck.slides.flatMap(item => item.elements).filter(element => element.type === 'image' && element.dataUrl && !element.ref)
-          if (localImages.length) {
-            showToast({ text: 'Upload persistence is not available yet. Remove local images or use Scout generation before saving.', kind: 'error' })
-            return false
-          }
+          const deck = deckWithoutLocalImages()
+          if (!deck) return false
+          const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(String(payload?.artifact?.title || title || 'Untitled deck'))
+          if (!state.savedToFiles && !destination) return false
           state.saving = true
           saveButton.disabled = true
           saveButton.textContent = 'Saving…'
           try {
-            const deck = clone(state.deck)
-            deck.slides.forEach(item => item.elements.forEach(element => delete element.dataUrl))
             const response = await fetch('/artifacts/deck', {
               method: 'PATCH', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, deck })
@@ -45154,6 +45307,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.future = []
             state.dirty = false
             const updatedEntry = mergeArtifactUpdate(result.artifact)
+            if (destination) {
+              await saveDeckToFiles(destination)
+              if (updatedEntry?.metadata) updatedEntry.metadata.savedToFiles = 'true'
+            }
             if (updatedEntry) addArtifactEntry(updatedEntry, { select: false })
             showToast({ text: 'Deck saved', kind: 'done' })
             if (closeAfter) closeDeckEditor()
@@ -45171,6 +45328,40 @@ Wrap the entire export in one code block. After the code block, say whether the 
           } finally {
             state.saving = false
             if (saveButton.isConnected) { saveButton.disabled = false; saveButton.textContent = 'Save' }
+          }
+        }
+
+        async function saveDeckCopy() {
+          if (!requireDeckWrite() || state.saving) return false
+          const deck = deckWithoutLocalImages()
+          if (!deck) return false
+          const defaultName = `${String(payload?.artifact?.title || title || 'Untitled deck')} copy`
+          const destination = await chooseDriveSaveOptions(defaultName)
+          if (!destination) return false
+          state.saving = true
+          copyButton.disabled = true
+          copyButton.textContent = 'Saving copy…'
+          try {
+            const response = await fetch('/artifacts/deck/copies', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, deck })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.artifact || !result?.file) throw new Error(result?.error || 'Deck copy could not be saved.')
+            const entry = {
+              id: result.artifact.id,
+              metadata: { title: result.artifact.title, type: result.artifact.type, artifactVersion: String(result.artifact.version), source: 'scout_thread', status: 'complete', savedToFiles: 'true' }
+            }
+            addArtifactEntry(entry, { select: false })
+            if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+            showToast({ text: `Saved “${destination.fileName}” to Files`, kind: 'done' })
+            return true
+          } catch (error) {
+            showToast({ text: error?.message || 'Deck copy could not be saved.', kind: 'error' })
+            return false
+          } finally {
+            state.saving = false
+            if (copyButton.isConnected) { copyButton.disabled = false; copyButton.textContent = 'Save a copy…' }
           }
         }
 
@@ -45222,6 +45413,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           if (action === 'close') closeDeckEditor()
           else if (action === 'save') saveDeck(true)
+          else if (action === 'save-copy') saveDeckCopy()
           else if (action === 'present') {
             openDeckPresentation(state.artifactId, title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true })
               .then(opened => { if (!opened) options.present?.() })
@@ -45232,6 +45424,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'add-ellipse') addElement('shape', { shape: 'ellipse' })
           else if (action === 'bring-front') changeLayer('front')
           else if (action === 'send-back') changeLayer('back')
+          else if (action === 'bring-forward') changeLayer('forward')
+          else if (action === 'send-backward') changeLayer('backward')
+          else if (action === 'add-slide') addSlide()
+          else if (action === 'duplicate-slide') duplicateSlide()
+          else if (action === 'delete-slide') deleteSlide()
           else if (action === 'prev-slide' && state.slideIndex > 0) { state.slideIndex--; state.selectedId = ''; renderAll() }
           else if (action === 'next-slide' && state.slideIndex < state.deck.slides.length - 1) { state.slideIndex++; state.selectedId = ''; renderAll() }
           else if (action === 'undo' && state.history.length) { state.future.push(clone(state.deck)); restore(state.history.pop()) }
@@ -45253,7 +45450,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const element = selected()
           if (!prop || !element) return
           checkpoint()
-          element[prop] = ['x', 'y', 'width', 'height', 'opacity', 'fontSize', 'fontWeight', 'lineHeight'].includes(prop) ? Number(event.target.value) : event.target.value
+          element[prop] = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontWeight', 'lineHeight'].includes(prop) ? Number(event.target.value) : event.target.value
           if (prop === 'opacity') element.opacity = Math.max(0, Math.min(1, element.opacity))
           renderAll()
         })
@@ -45328,8 +45525,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="deck-presenter__viewport" data-present-viewport>
               <div class="deck-presenter__stage" data-present-stage><div class="deck-presenter__scene" data-present-scene></div></div>
               <div class="deck-presenter__nav">
-                <button type="button" class="deck-presenter__button" data-present-action="previous" aria-label="Previous slide">←</button>
-                <button type="button" class="deck-presenter__button" data-present-action="next" aria-label="Next slide">→</button>
+                <button type="button" class="deck-presenter__button" data-present-action="previous" aria-label="Previous slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12 6 8l4-4"/></svg></button>
+                <button type="button" class="deck-presenter__button" data-present-action="next" aria-label="Next slide"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button>
               </div>
             </div>
             <aside class="deck-presenter__notes" data-present-notes hidden aria-label="Presenter notes"></aside>
@@ -46042,12 +46239,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
          state when the entry is already saved. */
       function artifactQualifiesForFiles(entry) {
         const meta = entry?.metadata || {}
-        const provenance = ['scout_thread', 'chat_image'].includes(String(meta.source || '').trim())
+        const source = String(meta.source || '').trim()
+        const studioShip = source === 'packaging_studio_ship' && String(meta.goalId || '').trim() && String(meta.artifactContract || '').trim()
+        const provenance = ['scout_thread', 'chat_image'].includes(source) || studioShip
           || String(meta.goalPlan || '').trim() !== ''
           || String(meta.goalDeliverable || '').trim().toLowerCase() === 'true'
         if (!provenance) return false
         const status = (typeof artifactStatusValue === 'function' ? artifactStatusValue(entry) : String(meta.status || '')).toLowerCase()
-        return status === 'complete' || status === 'published'
+        return status === 'complete' || status === 'published' || (studioShip && status === 'approved')
       }
 
       function driveFolderOptionLabel(folder, byId) {
@@ -58787,7 +58986,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			}
 			scoutChatHydrationRetries.delete(id)
 			scoutChatThreads[index] = { ...current, ...hydrated }
-			if (activeScoutThreadId === id) renderActiveScoutThread()
+			if (activeScoutThreadId === id) {
+			  const forceBottom = scoutChatNavigationTailThreadId === id
+			  renderActiveScoutThread({ forceBottom })
+			  if (forceBottom) {
+			    scoutChatNavigationTailThreadId = ''
+			    beginScoutChatOwnSendTailPin()
+			  }
+			}
 			return scoutChatThreads[index]
 		  } catch {
 			if (generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase()) renderScoutChatConversationLoadError(id)
@@ -64428,6 +64634,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          closeDesktopChatContext({ restoreFocus: false })
 	        }
 	        activeScoutThreadId = nextThreadId
+	        scoutChatNavigationTailThreadId = nextThreadId
 	        scoutChatMessageAttempt = null
 	        resetScoutChatProjectContext({ reload: true })
 	        // opening a thread cancels an in-flight rename (design §7.6)
@@ -64440,7 +64647,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        hideScoutChatThinking()
 		syncChatThreadSelection(nextThreadId)
-	        renderActiveScoutThread()
+	        renderActiveScoutThread({ forceBottom: true })
+		const selected = selectedScoutChatThread()
+		if (selected?.messagesLoaded === true) {
+		  scoutChatNavigationTailThreadId = ''
+		  beginScoutChatOwnSendTailPin()
+		}
 		void hydrateScoutChatThread(nextThreadId)
 	      }
 
@@ -64588,6 +64800,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      var scoutChatReplyTarget = null
 	      var scoutInlineWorkDetailsExpanded = null
 	      var scoutChatIncrementalAnchorPin = null
+	      // A channel click owns a fresh viewport. Keep that authority through
+	      // the index-row -> hydrated-thread handoff so the previous channel's
+	      // scroll offset can never be restored into the newly selected one.
+	      var scoutChatNavigationTailThreadId = ''
 	      // var + lazy init: boot can call renderActiveScoutThread before this
 	      // late chat section executes, matching the render-pass vars above.
 	      var desktopChatPreviewCache = null
@@ -65000,6 +65216,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }, options)
       }
 
+	      function scoutProcessThreadHasArtifactReceipt(message) {
+	        const ref = message?.thread || {}
+	        const artifactId = String(ref.artifactId || '').trim()
+	        if (String(message?.kind || '') !== 'thread' || String(ref.mode || '').toLowerCase() !== 'workflow' || !artifactId) return false
+	        const messages = selectedScoutChatThread()?.messages || []
+	        return messages.some(candidate =>
+	          candidate !== message &&
+	          String(candidate?.kind || '') === 'artifact' &&
+	          String(candidate?.thread?.artifactId || '').trim() === artifactId
+	        )
+	      }
+
 	      function scoutReplyLifecyclePresentation(message) {
 	        const reply = message?.reply
 	        if (!reply || reply.state === 'completed') return null
@@ -65080,6 +65308,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function scoutChatMessageRecordNode(message) {
 	        const recordKind = String(message?.kind || '')
+	        // Workflow children already land as one authored stage receipt in
+	        // the compact process rail. Their generic terminal thread record is
+	        // an internal transport duplicate; rendering it as a full research
+	        // card leaks deck HTML/CSS into the channel and doubles DOM weight.
+	        if (scoutProcessThreadHasArtifactReceipt(message)) {
+	          return document.createDocumentFragment()
+	        }
 	        // §1: only consecutive stage deliverables share a run log — any
 	        // other record closes the open container
 	        if (recordKind !== 'artifact') {
@@ -68135,22 +68370,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultId = String(message?.thread?.resultArtifactId || artifact?.id || '').trim()
 	        if (!resultId || !artifact || !artifactIsHTMLDeck(artifact)) return document.createDocumentFragment()
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
-	        const deliveredInManifest = messages.some(candidate => {
-	          if (String(candidate?.kind || '') !== 'manifest' || String(candidate?.manifest?.status || '') === 'held') return false
-	          return (Array.isArray(candidate?.manifest?.deliverables) ? candidate.manifest.deliverables : [])
-	            .some(deliverable => String(deliverable?.artifactId || '').trim() === resultId)
-	        })
-	        // Before handoff, the canonical card shows progress in place. Once a
-	        // shipped package owns this exact deck, the same rich card moves into
-	        // the manifest at the current delivery point instead of remaining
-	        // buried earlier in the run history.
-	        if (deliveredInManifest) return document.createDocumentFragment()
 	        const metadata = artifact?.metadata || {}
-	        // Older generated deck bodies may predate result-level goal metadata.
-	        // Their durable chat receipt still points at the stage/goal artifact,
-	        // which owns the immutable goal relationship. Resolve through that
-	        // source before deciding which result is canonical so approving a
-	        // goal cannot make superseded HTML attempts reappear in the feed.
 	        const sourceArtifactId = String(message?.thread?.artifactId || '').trim()
 	        const sourceArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === sourceArtifactId)
 	        const sourceMetadata = sourceArtifact?.metadata || {}
@@ -68161,6 +68381,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          sourceMetadata.goalId ||
 	          (String(message?.thread?.mode || '') === 'goal' ? sourceArtifactId : '')
 	        ).trim()
+	        const deliveredInManifest = messages.some(candidate => {
+	          if (String(candidate?.kind || '') !== 'manifest' || String(candidate?.manifest?.status || '') === 'held') return false
+	          if (goalId && String(candidate?.manifest?.goalId || '').trim() === goalId) return true
+	          return (Array.isArray(candidate?.manifest?.deliverables) ? candidate.manifest.deliverables : [])
+	            .some(deliverable => String(deliverable?.artifactId || '').trim() === resultId)
+	        })
+	        // Before handoff, the canonical card shows progress in place. Once a
+	        // shipped package owns this exact deck, the same rich card moves into
+	        // the manifest at the current delivery point instead of remaining
+	        // buried earlier in the run history.
+	        if (deliveredInManifest) return document.createDocumentFragment()
+	        // Older generated deck bodies may predate result-level goal metadata.
+	        // Their durable chat receipt still points at the stage/goal artifact,
+	        // which owns the immutable goal relationship. Resolve through that
+	        // source before deciding which result is canonical so approving a
+	        // goal cannot make superseded HTML attempts reappear in the feed.
 	        if (goalId) {
 	          let canonicalResultId = ''
 	          for (const candidate of messages) {
@@ -68202,8 +68438,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultArtifactId = String(message?.thread?.resultArtifactId || '').trim()
 	        const resultArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === resultArtifactId)
 	        if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) return scoutHTMLDeckRefRecordNode(message, resultArtifact)
-	        if (artifact && artifactIsHTMLDeck(artifact)) return scoutHTMLDeckRefRecordNode(message, artifact)
 	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
+	        // A process-stage artifact belongs in the compact stage rail even
+	        // when its bytes happen to be a complete HTML deck. Only an explicit
+	        // resultArtifactId (the goal's stable handoff) earns a rich deck card;
+	        // standalone deck receipts keep their existing direct-card behavior.
+	        if (artifact && artifactIsHTMLDeck(artifact) && !stagePresentation) return scoutHTMLDeckRefRecordNode(message, artifact)
 	        const dedupKey = String(stagePresentation?.label || message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
 	        const stageGoalId = String(artifact?.metadata?.goalParentId || artifact?.metadata?.goalId || '').trim()
 	        if (stageGoalId && dedupKey) {
@@ -68821,8 +69061,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              return entry && artifactIsHTMLDeck(entry)
 	            })
 	          : null
+	        const goalResultId = !held
+	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((resultId, candidate) => {
+	              const ref = candidate?.thread || {}
+	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
+	                ? String(ref.resultArtifactId).trim()
+	                : resultId
+	            }, '')
+	          : ''
 	        const deliveredDeckArtifact = deckDeliverable
-	          ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === String(deckDeliverable.artifactId || '').trim())
+	          ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+	              String(candidate?.id || '') === (goalResultId || String(deckDeliverable.artifactId || '').trim())
+	            )
 	          : null
 	        if (deliveredDeckArtifact) {
 	          const deckResult = document.createElement('article')
@@ -68839,8 +69089,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const row = bfEl('div', 'manifest-card__row')
 	          row.appendChild(bfEl('span', 'manifest-card__badge', String(deliverable.badge || 'doc')))
 	          const main = bfEl('span', 'manifest-card__row-main')
-	          const artifactId = String(deliverable.artifactId || '')
-	          const richDeckRow = Boolean(deliveredDeckArtifact && String(deliveredDeckArtifact.id || '') === artifactId)
+	          const manifestArtifactId = String(deliverable.artifactId || '')
+	          const richDeckRow = Boolean(deliveredDeckArtifact && deliverable === deckDeliverable)
+	          const artifactId = richDeckRow ? String(deliveredDeckArtifact.id || '') : manifestArtifactId
 	          main.appendChild(bfEl('span', 'manifest-card__row-title', richDeckRow ? 'Deck files & feedback' : String(deliverable.title || '')))
 	          if (deliverable.facts || richDeckRow) main.appendChild(bfEl('span', 'manifest-card__row-facts', richDeckRow ? 'The editable deck is above.' : String(deliverable.facts)))
 	          row.appendChild(main)

@@ -216,6 +216,8 @@ func TestPackagingStudioShipDeckCarriesFirstClassDesignAndEditorContract(t *test
 	for _, need := range []string{
 		"12-column grid", "minimum 96px safe zone", "Mix at least four composition types",
 		"no more than 45 client-facing words", "data-deck-element", "FULL-BLEED LAW",
+		"native presenter owns navigation", "Do not add custom JavaScript", "class=\"notes\" hidden",
+		`<figure class="image-plate fig-N"`, `add class "bleed"`, "left:0;top:0;width:1920px;height:1080px",
 	} {
 		if !strings.Contains(shipDeck.PromptBody, need) {
 			t.Errorf("ship_deck prompt missing first-class design contract %q:\n%s", need, shipDeck.PromptBody)
@@ -647,6 +649,16 @@ const studioTestFounderPhrase = "we are the last honest voice in this category"
 // as-is" option — the do_not_touch mark that must reach the ship_deck prompt.
 const studioTestDoNotTouch = "do_not_touch: keep the line \"" + studioTestFounderPhrase + "\" exactly as written"
 
+func studioTestDeckHTML() string {
+	return "<!doctype html><html><head><style>body{color:#111}</style></head><body><div id=\"stage\">" +
+		"<section class=\"pg on\" data-deck-slide=\"slide-1\" style=\"background:#101014\">" +
+		"<div data-deck-element=\"headline-1\" data-deck-type=\"text\" style=\"position:absolute;left:120px;top:140px;width:1600px;height:240px;z-index:2;opacity:1;transform:rotate(0deg);font-size:92px;font-family:Arial;font-weight:700;color:#ffffff;text-align:left;line-height:1.05;letter-spacing:normal\">Slide 1 — " + studioTestFounderPhrase + "</div>" +
+		"<div class=\"notes\" hidden>Opening note [BEAT]</div></section>" +
+		"<section class=\"pg\" data-deck-slide=\"slide-2\" style=\"background:#f4efe5\">" +
+		"<div data-deck-element=\"headline-2\" data-deck-type=\"text\" style=\"position:absolute;left:120px;top:140px;width:1600px;height:240px;z-index:2;opacity:1;transform:rotate(0deg);font-size:92px;font-family:Arial;font-weight:700;color:#111111;text-align:left;line-height:1.05;letter-spacing:normal\">Slide 2 — Close</div>" +
+		"<div class=\"notes\" hidden>Closing note [BEAT]</div></section></div></body></html>"
+}
+
 // installStudioChildRunner is installFakeChildRunner with per-subtask bodies,
 // so the voice/ship_deck writers produce the material the compile stage reads
 // (a real HTML deck, a real presenter script) instead of a generic echo.
@@ -737,7 +749,7 @@ func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, package
 	}
 	launched := installStudioChildRunner(t, map[string]string{
 		"voice":     "Presenter script. Page 1 (30s): " + studioTestFounderPhrase + ". [BEAT] Close on the ask.",
-		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><div id=\"stage\"><section class=\"pg on\">Slide 1 — " + studioTestFounderPhrase + "</section><section class=\"pg\">Slide 2 — Close</section></div></body></html>",
+		"ship_deck": studioTestDeckHTML(),
 	})
 
 	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
@@ -1534,7 +1546,7 @@ func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
 	}
 	children := installStudioChildRunner(t, map[string]string{
 		"voice":     "Presenter script. Page 1 (30s): " + studioTestFounderPhrase + ". [BEAT] Close on the ask.",
-		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
+		"ship_deck": studioTestDeckHTML(),
 	})
 
 	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
@@ -1714,6 +1726,17 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 
 	// The five deliverables, send order, sheet badges: deck paper paper doc doc.
 	filed := studioFiledDeliverables(t, app, parentID)
+	parent := mustArtifact(t, app, parentID)
+	if got := parent.Metadata["acceptedResultArtifactId"]; got != filed[packagingStudioDeckContract].ID {
+		t.Errorf("acceptedResultArtifactId=%q, want approved deck %q", got, filed[packagingStudioDeckContract].ID)
+	}
+	var completedPlan goalPlan
+	if err := json.Unmarshal([]byte(parent.Metadata["goalPlan"]), &completedPlan); err != nil {
+		t.Fatalf("decode completed plan: %v", err)
+	}
+	if got := completedPlan.Report.AcceptedResultArtifactID; got != filed[packagingStudioDeckContract].ID {
+		t.Errorf("plan accepted result=%q, want %q", got, filed[packagingStudioDeckContract].ID)
+	}
 	if len(manifest.Deliverables) != 5 {
 		t.Fatalf("manifest carries %d deliverables, want 5: %+v", len(manifest.Deliverables), manifest.Deliverables)
 	}
@@ -1953,5 +1976,74 @@ func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
 		if firstIDs[deliverable.Contract] == deliverable.ArtifactID {
 			t.Fatalf("goal-less ship reused %q — dedupe must key on the goal", deliverable.ArtifactID)
 		}
+	}
+}
+
+func TestFileStudioShipDeliverablesPreservesAcceptedDeckAndVersionsRetryCandidate(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Accepted deck retry", "goal", "AJ", map[string]string{
+		"mode": "goal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := studioShipInputs{
+		GoalID: parent.ID, CreatedBy: "AJ", DeckTitle: "Accepted deck retry",
+		DeckHTML: "<!doctype html><html><body><section class=\"pg\">approved deck</section></body></html>",
+		Wall:     "wall v1", Talk: "talk v1", Rigor: "rigor v1", Findings: "findings v1",
+	}
+	first, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("first ship: %v", err)
+	}
+	firstByContract := map[string]string{}
+	for _, deliverable := range first {
+		firstByContract[deliverable.Contract] = deliverable.ArtifactID
+	}
+	acceptedID := firstByContract[packagingStudioDeckContract]
+	if _, _, err := app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "AJ", map[string]string{
+		"acceptedResultArtifactId": acceptedID,
+	}); err != nil {
+		t.Fatalf("stamp accepted deck: %v", err)
+	}
+
+	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">retry candidate v2</section></body></html>"
+	inputs.Wall, inputs.Talk, inputs.Rigor, inputs.Findings = "wall v2", "talk v2", "rigor v2", "findings v2"
+	second, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("retry ship compile: %v", err)
+	}
+	secondByContract := map[string]string{}
+	for _, deliverable := range second {
+		secondByContract[deliverable.Contract] = deliverable.ArtifactID
+	}
+	if secondByContract[packagingStudioDeckContract] == acceptedID {
+		t.Fatal("retry overwrote the human-approved deck instead of filing a candidate")
+	}
+	for _, contract := range []string{packagingStudioWallContract, packagingStudioTalkContract, packagingStudioRigorContract, packagingStudioFindingsContract} {
+		if secondByContract[contract] != firstByContract[contract] {
+			t.Fatalf("supporting contract %q changed id from %q to %q", contract, firstByContract[contract], secondByContract[contract])
+		}
+	}
+	approved, _ := app.osArtifactByID(acceptedID)
+	if !strings.Contains(approved.Text, "approved deck") {
+		t.Fatalf("approved artifact bytes changed: %q", approved.Text)
+	}
+
+	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">retry candidate v3</section></body></html>"
+	third, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("candidate recompile: %v", err)
+	}
+	thirdByContract := map[string]string{}
+	for _, deliverable := range third {
+		thirdByContract[deliverable.Contract] = deliverable.ArtifactID
+	}
+	if thirdByContract[packagingStudioDeckContract] != secondByContract[packagingStudioDeckContract] {
+		t.Fatalf("unapproved candidate changed id from %q to %q", secondByContract[packagingStudioDeckContract], thirdByContract[packagingStudioDeckContract])
+	}
+	candidate, _ := app.osArtifactByID(thirdByContract[packagingStudioDeckContract])
+	if !strings.Contains(candidate.Text, "retry candidate v3") {
+		t.Fatalf("candidate was not versioned in place: %q", candidate.Text)
 	}
 }

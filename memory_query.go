@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"os"
 	"regexp"
 	"sort"
@@ -37,8 +38,10 @@ var (
 	dayMonthQueryPattern     = regexp.MustCompile(`\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(` + monthNameToken + `)(?:\s+(\d{4}))?\b`)
 	// The leading preposition is a CAPTURE group (F7+F22): "since X" is an open
 	// range to now, not just the named day/month, so the resolver needs to see it.
-	monthNameQueryPattern = regexp.MustCompile(`\b(in|during|for|of|since|back\s+in)\s+(` + monthNameToken + `)(?:\s+(\d{4}))?\b`)
-	weekdayQueryPattern   = regexp.MustCompile(`\b(on|last|this|since)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b`)
+	monthNameQueryPattern    = regexp.MustCompile(`\b(in|during|for|of|since|back\s+in)\s+(` + monthNameToken + `)(?:\s+(\d{4}))?\b`)
+	weekdayQueryPattern      = regexp.MustCompile(`\b(on|last|this|since)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b`)
+	htmlDocumentTitlePattern = regexp.MustCompile(`(?is)<title(?:\s[^>]*)?>(.*?)</title>`)
+	htmlTagPattern           = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
 // memoryMonthByToken maps a lowercase month name/abbreviation (as captured by
@@ -698,13 +701,14 @@ func (app *kanbanBoardApp) createOSArtifactWithIDAndMetadataAcknowledged(artifac
 		metadata[key] = strings.TrimSpace(value)
 	}
 	// First-class Artifact model (packaging OS §4): new artifacts are born with
-	// an explicit type (declared wins; else the render route's HTML sniff, so a
-	// worker that saves a deck body without declaring html_deck still gets the
+	// an explicit type (binary declarations win; HTML bytes repair a missing or
+	// contradictory markdown label so a worker-saved deck always gets the
 	// sandboxed viewer) and version 1. Old artifacts carry neither key and read
 	// back through the same defaults via artifactType/artifactVersion.
-	if strings.TrimSpace(metadata["type"]) == "" {
-		metadata["type"] = artifactType(meetingMemoryEntry{Text: answer})
-	}
+	// The bytes are authoritative for HTML documents. A worker may incorrectly
+	// label a complete deck as markdown; persisting that contradiction leaks raw
+	// CSS into chat and bypasses the deck viewer. Explicit binary types still win.
+	metadata["type"] = artifactType(meetingMemoryEntry{Text: answer, Metadata: metadata})
 	if strings.TrimSpace(metadata[artifactVersionMetadataKey]) == "" {
 		metadata[artifactVersionMetadataKey] = "1"
 	}
@@ -739,8 +743,20 @@ func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string,
 	if updatedBy = canonicalParticipantName(rawUpdatedBy); updatedBy == "" {
 		updatedBy = rawUpdatedBy
 	}
+	resolvedMetadata := map[string]string{}
+	if existing, exists := app.osArtifactByID(id); exists {
+		for key, value := range existing.Metadata {
+			resolvedMetadata[key] = value
+		}
+	}
+	normalizedUpdates := map[string]string{}
+	for key, value := range metadataUpdates {
+		normalizedUpdates[key] = value
+		resolvedMetadata[key] = value
+	}
+	normalizedUpdates["type"] = artifactType(meetingMemoryEntry{Text: text, Metadata: resolvedMetadata})
 
-	entry, changed, err := app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, metadataUpdates)
+	entry, changed, err := app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, normalizedUpdates)
 	if changed && err == nil {
 		// Unified push channel: a status transition (progress → complete, a
 		// publish) fans out title-only. Bookkeeping re-writes that leave the
@@ -965,17 +981,20 @@ const (
 	artifactTypeWorkbook = "workbook"
 )
 
-// artifactType resolves an artifact's render type: the declared metadata type
-// when it is in vocabulary, else the render route's own HTML-document sniff
-// (artifactIsHTMLDocument — the SAME function, so the viewer and the model can
-// never disagree about what is a deck), else markdown.
+// artifactType resolves an artifact's render type. Explicit binary/container
+// types win, but HTML document bytes override a contradictory markdown label:
+// the render route and the model must never disagree about what is a deck.
 func artifactType(entry meetingMemoryEntry) string {
 	switch declared := strings.ToLower(strings.TrimSpace(entry.Metadata["type"])); declared {
-	case artifactTypeMarkdown, artifactTypeHTMLDeck, artifactTypePDF, artifactTypeImage, artifactTypeBundle, artifactTypeWorkbook:
+	case artifactTypePDF, artifactTypeImage, artifactTypeBundle, artifactTypeWorkbook:
 		return declared
 	}
 	if artifactIsHTMLDocument(entry) {
 		return artifactTypeHTMLDeck
+	}
+	switch declared := strings.ToLower(strings.TrimSpace(entry.Metadata["type"])); declared {
+	case artifactTypeMarkdown, artifactTypeHTMLDeck:
+		return declared
 	}
 	return artifactTypeMarkdown
 }
@@ -1220,6 +1239,12 @@ func artifactTitleFromBody(body string, fallback string) string {
 		value = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(value), "#"))
 		value = strings.TrimRight(value, " \t.,:;!—-")
 		return trimForStorage(compactAssistantLine(value), 90)
+	}
+	if match := htmlDocumentTitlePattern.FindStringSubmatch(body); len(match) > 1 {
+		value := stdhtml.UnescapeString(htmlTagPattern.ReplaceAllString(match[1], " "))
+		if title := clean(value); title != "" && !isArtifactScaffoldOpener(title) {
+			return title
+		}
 	}
 
 	firstLine := ""

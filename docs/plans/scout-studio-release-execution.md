@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 156 serves exact release `43655436cd33be3a10780da2ced0f93f446a5f70` as `verified-local-unsigned`. Signed-in production QA shows exactly one canonical Like A Farmer deck card for `os-artifact-artifacts-1787303409669546304`, with the actual first slide, one current-goal activity sequence, and working full-window Edit/Present controls. The release correctly moved native export onto a 1920x1080 page, but its live re-export remained 11 pages because the trusted screen viewer's inline fit styles outranked the print chassis: slide 1 rendered at two-thirds size and its source strip spilled alone onto page 2. The current candidate adds a print-only `!important` reset for the exact inline position/left/top/transform properties; the exact viewer-script Chromium reproduction now prints 10/10 full pages. Final approval remains parked until the fixed production export is inspected. Because the release includes native changes after Build 69, the final TestFlight lane is Build 70 from the exact combined release SHA.
+Current phase: production generation 158 serves exact release `3ac79c2872157411ad921f22334db305fec138f4` as `verified-local-unsigned`; an `af7ae344fa205443477fa39a299957c43283a071` release candidate was built but never activated and must be superseded, not promoted. The current worktree adds stable accepted-deck projection, immutable approved deck bytes across retries, raw process-card suppression, deterministic channel-tail landing, faithful-editability generation gates, and a fuller Deck Studio with named Files-backed copies. The canonical approved Like A Farmer presentation remains `os-artifact-artifacts-1787303409669546304`; final production browser workshop, exact-release deployment, Build 70, and repository cleanup remain open.
 
 ## Invariants
 
@@ -29,8 +29,8 @@ Current phase: generation 156 serves exact release `43655436cd33be3a10780da2ced0
 
 ## Current Wave
 
-- Root owner: commit/push the web/native result-surfacing and image-expansion candidate; execute the receipted VPS release; verify the current production deck in the actual feed and renderer.
-- Production owner: re-export the already-edited Like A Farmer deck, inspect all ten pages with both Scout images present, approve final review, and confirm one channel delivery surface.
+- Root owner: finish the independent gate on the accepted-deck retry seam and Files-backed Deck Studio, then commit/push one superseding SHA and execute the receipted VPS release.
+- Production owner: verify one stable rich Like A Farmer card, minimal process sidecar, fast channel tail landing, then exercise native edit, Scout imagery, resize/crop/layers/type/shapes, Save, named Save a copy, reopen, and Present in the signed-in browser.
 - Mobile owner: increment to Build 70, build/submit only the final combined main SHA, then verify Apple processing and intended groups.
 
 ## Completed Evidence
@@ -106,9 +106,25 @@ Current phase: generation 156 serves exact release `43655436cd33be3a10780da2ced0
 - Generation 156 serves exact `43655436cd33be3a10780da2ced0f93f446a5f70` as `verified-local-unsigned`, bundle `d2cdc60ae092915d4f15944743aed45baedff99b91d43692a5e05f9d09430c17`, app image `sha256:719906b5ba75568f183215cfd1655a6bc3598267cb5aa55417ca0b50d021cb0f`, render image `sha256:9addd29253d667face55c536c96a65dfabe9953482fed326e300ba55152f54fd`, with generation 155 retained. Before the build, only closed-window generation 137-144 image pairs and reclaimable build cache were removed; 16.6 GB was recovered while all release directories/receipts, running containers, production volumes/data, active 155, and rollback 154 stayed intact.
 - The generation-156 official UI export proved the new page geometry reached Chromium: pages are now 2880x1620 at 144 DPI. It still produced 11 pages; page 1 showed the slide at two-thirds size in the top-left and page 2 held only its source strip. Root cause is `injectArtifactDeckNavigation`'s trusted `fit()` script writing inline `position:absolute`, `left`, `top`, and `transform:scale(...)` before print; the chassis did not override inline screen state. The current print-only viewer rule resets those four exact properties with `!important`. A real 1280x720 Chromium viewer-script reproduction with ten slides and an edge footer now yields exactly ten 1440x810-point PDF pages; focused normal/race tests pass.
 
+## Generation 159 Superseding Candidate
+
+- Feed projection now suppresses generic workflow receipts when the same run has an authored artifact receipt, and keeps process-stage HTML inside the compact run log. A rendered hostile `railwrap` fixture proves one run log, no duplicate rich research card, and no raw CSS/code in the feed.
+- Channel selection now owns a six-second tail-landing window across cached render, lazy hydration, resize, and mutation. The rendered long-channel switch/reopen regression ends within one pixel of the real bottom.
+- Packaging Studio records the exact accepted deck id at ship approval. Legacy approvals are backfilled synchronously before feedback resets the resolved checkpoint, so a fresh retry park cannot replace the approved channel handoff.
+- An accepted deck artifact is immutable: the first retry files a new candidate id, subsequent pre-approval compiles version that candidate in place, and the next explicit approval advances the accepted id. Supporting ship documents keep their stable ids.
+- HTML deck typing now treats authoritative HTML bytes as `html_deck` over a stale markdown stamp and derives display titles from `<title>` before CSS/body text, preventing selector fragments from becoming card titles.
+- The ship-deck law sweep now requires a faithful native scene round-trip, not merely an HTML wrapper. The generator contract requires explicit 1920x1080 element geometry, varied first-class compositions, inert per-slide notes, and no custom presenter JavaScript; the native app owns consistent presentation behavior.
+- Deck Studio remains full-window and now adds stepwise plus absolute layer movement, rotation, opacity, image fill/fit, slide add/duplicate/delete, consistent SVG navigation, larger interaction targets, explicit transitions, and neutral image outlines.
+- First Save files an unsaved original presentation through the existing authorized Files boundary. `Save a copy…` collects a name and folder, creates an independent scene/artifact without goal-result linkage, preserves only used image assets and authorization scope, and confirms the copy in Files while the original remains open and unchanged.
+- Save and Save a copy now authorize the destination against the held tenant/person principal after artifact authorization. A guessed folder from another tenant returns not found without stamping or moving the artifact.
+- Named copies materialize every used legacy/generated image ref into their own asset manifest before filing, so a copied presentation reloads and presents embedded imagery independently rather than retaining dangling scene refs.
+- The ship prompt and deterministic importer now share one exact `figure.image-plate.fig-N` grammar, including a bounded full-bleed variant. Authored decks beyond the native 100-slide bound fail closed instead of silently discarding slides.
+- Approved Packaging Studio ship contracts now qualify for Files only after their explicit approved terminal state; unapproved drafts still fail closed.
+- Focused rendered/backend gates cover the hostile feed, cached/lazy channel tail, legacy approval feedback retry, immutable accepted bytes, embedded-image named copy and Files row, cross-tenant folder rejection, image fit, layer movement, resize, type, notes, shapes, Save/reopen/Present, exact full-bleed grammar, oversize-deck rejection, and faithful deck law sweep. The focused normal and race suites pass; rendered tests pass with the bundled Playwright runtime. The required broad repository run reached its 10-minute global timeout in unrelated qualification/parallel suites, matching the documented baseline; touched packages and focused gates remained green.
+
 ## Pending Dependencies
 
-- Exact pagination release, fixed 10-page production render acceptance, final approval, Build 70 processing/groups, and safe cleanup remain pending.
+- Superseding exact release, signed-in production channel/editor workshop, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
@@ -126,8 +142,8 @@ Current phase: generation 156 serves exact release `43655436cd33be3a10780da2ced0
 
 ## Resume Here
 
-1. Commit/push the trusted-viewer print reset, deploy the next receipted release, and verify serving identity plus retained generation-156 rollback.
-2. Re-export artifact `os-artifact-artifacts-1787303409669546304` through the signed-in production UI; require exactly ten rendered pages, inspect every page, and require the Scout images on slides 1 and 7 with no clipping or spill page.
-3. Reconfirm one rich 16:9 channel card plus full-window Edit and 1/10 Present. Approve final review only after the ten-page gate passes, then confirm the completion/channel receipt.
-4. Build/submit iOS Build 70 from the exact final main SHA by explicit EAS build ID, and verify Apple processing plus intended groups.
+1. Receive the second independent critic verdict and commit/push one clean superseding SHA; never activate the unverified `af7ae344` candidate.
+2. Deploy that exact SHA with the retained release tool; require ledger, images, public health/readiness, rollback bundle, and `verified-local-unsigned` to agree.
+3. In the signed-in production browser, open Like A Farmer and require one stable rich 16:9 card, no raw code, minimal process activity, and true-bottom channel landing. Exercise Edit, Scout imagery, resize, fill/fit, layers, type, shapes, Save, named Save a copy to Files, reopen, and Present.
+4. Build/submit iOS Build 70 from the exact final main SHA by explicit EAS build ID, verify Apple processing plus intended groups, and spot-check deck preview/open behavior on phone/iPad surfaces without claiming unobserved physical-device proof.
 5. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

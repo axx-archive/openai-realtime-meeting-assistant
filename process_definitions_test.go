@@ -452,6 +452,7 @@ func TestProcessesGroupServesEmptyWithoutRegistrations(t *testing.T) {
 // makes that impossible.
 func TestProcessStageLawSweepDemandsRealDeckHTML(t *testing.T) {
 	deckStage := ProcessStage{ID: "ship_deck", OutputContract: "packaging_deck_v1"}
+	fullBleed := `<!doctype html><html><body><div id="stage"><section class="pg on" data-deck-slide="slide-1" style="background:#101014"><figure class="image-plate bleed fig-1" data-deck-element="hero-image" data-deck-type="image" style="position:absolute;left:0;top:0;width:1920px;height:1080px;z-index:1;opacity:1;transform:rotate(0deg);object-fit:cover;margin:0"><div class="ph"></div><figcaption data-deck-element="caption" data-deck-type="text" style="position:absolute;left:96px;top:990px;width:1200px;height:36px;z-index:3;opacity:1;transform:rotate(0deg);font-size:22px;font-family:Arial;font-weight:600;color:#ffffff">FIG. 1 — Field at dawn.</figcaption></figure></section></div></body></html>`
 	cases := []struct {
 		name    string
 		body    string
@@ -459,8 +460,10 @@ func TestProcessStageLawSweepDemandsRealDeckHTML(t *testing.T) {
 	}{
 		{"markdown description", "# packaging_deck_v1 — SHIPPED\n\n## Vision\nShip the deck.", true},
 		{"truncated html", "<!doctype html><html><body><h1>deck", true},
-		{"real deck", "<!doctype html><html><body><section>slide</section></body></html>", false},
-		{"leading whitespace ok", "\n\n  <!DOCTYPE HTML><html><body>x</body></html>", false},
+		{"render-only html is not faithfully editable", "<!doctype html><html><body><section>slide</section></body></html>", true},
+		{"real editable deck", faithfulDeckHTML, false},
+		{"native-importable full-bleed image slot", fullBleed, false},
+		{"leading whitespace ok", "\n\n  " + faithfulDeckHTML, false},
 	}
 	for _, tc := range cases {
 		_, violated := processStageLawSweep(deckStage, tc.body)
@@ -470,6 +473,18 @@ func TestProcessStageLawSweepDemandsRealDeckHTML(t *testing.T) {
 	}
 	if _, violated := processStageLawSweep(ProcessStage{ID: "write", OutputContract: "deck_copy_v1"}, "# markdown is fine here"); violated {
 		t.Error("non-deck contracts must not be swept by the deck rule")
+	}
+}
+
+func TestProcessStageLawSweepRejectsDeckBeyondNativeSlideBound(t *testing.T) {
+	var body strings.Builder
+	body.WriteString(`<!doctype html><html><body><div id="stage">`)
+	for index := 0; index <= deckDocumentMaxSlides; index++ {
+		fmt.Fprintf(&body, `<section class="pg" data-deck-slide="slide-%d" style="background:#101014"><div data-deck-element="headline-%d" data-deck-type="text" style="position:absolute;left:96px;top:96px;width:1200px;height:180px;z-index:2;opacity:1;font-size:88px;font-family:Arial;font-weight:700;color:#ffffff">Slide %d</div></section>`, index+1, index+1, index+1)
+	}
+	body.WriteString(`</div></body></html>`)
+	if _, violated := processStageLawSweep(ProcessStage{ID: "ship_deck", OutputContract: "packaging_deck_v1"}, body.String()); !violated {
+		t.Fatal("over-bound authored deck passed by silently truncating slides")
 	}
 }
 

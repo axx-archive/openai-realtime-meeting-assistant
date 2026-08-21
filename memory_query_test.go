@@ -491,7 +491,7 @@ func TestArtifactTypeDetectionMatrix(t *testing.T) {
 		{name: "declared pdf wins over html body", declared: "pdf", body: "<!doctype html><html></html>", want: artifactTypePDF},
 		{name: "declared image", declared: "image", body: "ref", want: artifactTypeImage},
 		{name: "declared bundle", declared: "bundle", body: "ref", want: artifactTypeBundle},
-		{name: "declared markdown", declared: "markdown", body: "<!doctype html>", want: artifactTypeMarkdown},
+		{name: "html bytes override contradictory markdown", declared: "markdown", body: "<!doctype html>", want: artifactTypeHTMLDeck},
 		{name: "undeclared doctype sniffs html_deck", declared: "", body: "  <!DOCTYPE html>\n<title>Deck</title>", want: artifactTypeHTMLDeck},
 		{name: "undeclared html tag sniffs html_deck", declared: "", body: "<html lang=\"en\"><body></body></html>", want: artifactTypeHTMLDeck},
 		{name: "unknown declared type falls back to sniff", declared: "deck", body: "<!doctype html>", want: artifactTypeHTMLDeck},
@@ -511,8 +511,8 @@ func TestArtifactTypeDetectionMatrix(t *testing.T) {
 	}
 }
 
-// New artifacts are born with an explicit type (sniffed when undeclared) and
-// version 1; a declared type is never overridden.
+// New artifacts are born with an explicit type and version 1. Binary types
+// remain explicit; HTML bytes repair a contradictory markdown declaration.
 func TestCreateOSArtifactStampsTypeAndVersion(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -541,6 +541,21 @@ func TestCreateOSArtifactStampsTypeAndVersion(t *testing.T) {
 	}
 	if declared.Metadata["type"] != artifactTypePDF {
 		t.Fatalf("declared type=%q, want the caller's pdf to win over the sniff", declared.Metadata["type"])
+	}
+
+	mislabeled, _, err := app.createOSArtifactWithMetadata("artifacts", "deck", "<!doctype html><html><head><title>Like A Farmer — Growth Story</title></head></html>", "AJ", map[string]string{"type": "markdown"})
+	if err != nil {
+		t.Fatalf("create mislabeled deck artifact: %v", err)
+	}
+	if mislabeled.Metadata["type"] != artifactTypeHTMLDeck {
+		t.Fatalf("mislabeled deck type=%q, want html_deck", mislabeled.Metadata["type"])
+	}
+}
+
+func TestArtifactTitleFromHTMLDocumentTitle(t *testing.T) {
+	got := artifactTitleFromBody(`<!doctype html><html><head><title>Like A Farmer &amp; the Next Acre</title><style>railwrap{display:grid}</style></head></html>`, "fallback")
+	if got != "Like A Farmer & the Next Acre" {
+		t.Fatalf("title=%q, want HTML document title", got)
 	}
 }
 

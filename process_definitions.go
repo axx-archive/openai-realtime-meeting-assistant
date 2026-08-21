@@ -204,6 +204,20 @@ func processStageLawSweep(stage ProcessStage, body string) (string, bool) {
 		if !strings.Contains(lowered, "</html>") {
 			return "LAW SWEEP (packaging_deck_v1): the HTML document is truncated (no closing </html>). Emit the complete self-contained file.", true
 		}
+		// A deck that merely renders is not enough: the native editor must be
+		// able to round-trip every authored slide without flattening or losing
+		// layout. Run the same strict legacy-to-scene importer used by Deck
+		// Studio before spending reviewer tokens. Missing inline geometry,
+		// unrecognized behavior, invalid coordinates, or inaccessible image
+		// references are blocking output defects, not post-ship cleanup.
+		candidate := meetingMemoryEntry{Text: trimmed, Metadata: map[string]string{"type": artifactTypeHTMLDeck}}
+		deck, quality := importLegacyDeckDocument(candidate)
+		if quality != "faithful" {
+			return "LAW SWEEP (packaging_deck_v1): the deck is not faithfully editable. Every authored slide and meaningful text, image, and shape must use the required data-deck ids/types and complete inline 1920x1080 geometry; remove unrecognized presenter behavior and emit the full editable HTML file.", true
+		}
+		if err := validateDeckDocument(deck, artifactAssetRefSet(candidate)); err != nil {
+			return "LAW SWEEP (packaging_deck_v1): the editable scene is invalid: " + compactAssistantLine(err.Error()), true
+		}
 	}
 	return "", false
 }
@@ -223,7 +237,8 @@ func rawDocumentContractInstructions(contract string) (string, bool) {
 			"Your ENTIRE response is the deliverable FILE ITSELF: one complete, self-contained HTML document.",
 			"The FIRST characters of your response must be <!doctype html> and it must end with </html> — no preamble, no markdown, no code fences, no Vision line, no section headings, no commentary before or after the file.",
 			"A plan, outline, or description of the deck is a FAILED deliverable — the law sweep rejects anything that is not the document itself.",
-			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, presenter mode from the VOICE script, and a .fig-N slot for each generated image.",
+			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, inert per-slide .notes from the VOICE script, and a .fig-N slot for each generated image. Do not add custom JavaScript or presenter chrome; the native app owns presentation behavior.",
+			"The file must round-trip through Deck Studio faithfully: stable data-deck ids/types plus explicit inline position, size, z-index, opacity, rotation, typography, fills, and image-fit for every editable element. A visually plausible but non-editable HTML page fails the deterministic law sweep.",
 		}, "\n"), true
 	}
 	return "", false

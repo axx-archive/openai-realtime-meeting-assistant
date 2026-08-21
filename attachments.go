@@ -1752,21 +1752,25 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 }
 
 type scoutChatResultProjectionIndex struct {
-	byID       map[string]meetingMemoryEntry
-	deckByGoal map[string]meetingMemoryEntry
+	byID               map[string]meetingMemoryEntry
+	deckByGoal         map[string]meetingMemoryEntry
+	acceptedDeckByGoal map[string]meetingMemoryEntry
 }
 
 func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex {
 	index := scoutChatResultProjectionIndex{
-		byID:       map[string]meetingMemoryEntry{},
-		deckByGoal: map[string]meetingMemoryEntry{},
+		byID:               map[string]meetingMemoryEntry{},
+		deckByGoal:         map[string]meetingMemoryEntry{},
+		acceptedDeckByGoal: map[string]meetingMemoryEntry{},
 	}
 	if app == nil {
 		return index
 	}
 	// One store snapshot per thread projection keeps a large channel O(A+M),
 	// rather than scanning every artifact once for every work message.
-	for _, artifact := range app.osArtifactsSnapshot(0) {
+	artifacts := app.osArtifactsSnapshot(0)
+	deckCandidates := map[string][]meetingMemoryEntry{}
+	for _, artifact := range artifacts {
 		index.byID[artifact.ID] = artifact
 		if artifactType(artifact) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(artifact) {
 			continue
@@ -1783,9 +1787,54 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 			// the exact goal supersedes its compiled ship draft without rewriting
 			// history or guessing from titles.
 			index.deckByGoal[goalID] = artifact
+			deckCandidates[goalID] = append(deckCandidates[goalID], artifact)
+		}
+	}
+	for _, goal := range artifacts {
+		if strings.TrimSpace(goal.Metadata["mode"]) != "goal" {
+			continue
+		}
+		acceptedID := strings.TrimSpace(goal.Metadata["acceptedResultArtifactId"])
+		var plan goalPlan
+		if raw := strings.TrimSpace(goal.Metadata["goalPlan"]); raw != "" && json.Unmarshal([]byte(raw), &plan) == nil {
+			if acceptedID == "" {
+				acceptedID = strings.TrimSpace(plan.Report.AcceptedResultArtifactID)
+			}
+		}
+		if accepted, ok := index.byID[acceptedID]; ok && scoutChatDeckBelongsToGoal(accepted, goal.ID) {
+			index.acceptedDeckByGoal[goal.ID] = accepted
+			continue
+		}
+		// Compatibility for goals approved before acceptedResultArtifactId was
+		// introduced: freeze the latest eligible deck that existed when the ship
+		// checkpoint resolved. A later retry cannot move that historical cutoff.
+		checkpoint := plan.Checkpoint
+		if checkpoint == nil || checkpoint.StageID != "ship_approval" || checkpoint.LastAction != processCheckpointActionProceed || strings.TrimSpace(checkpoint.ResolvedAt) == "" {
+			continue
+		}
+		resolvedAt, err := time.Parse(time.RFC3339Nano, checkpoint.ResolvedAt)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range deckCandidates[goal.ID] {
+			if !candidate.CreatedAt.After(resolvedAt) {
+				index.acceptedDeckByGoal[goal.ID] = candidate
+			}
 		}
 	}
 	return index
+}
+
+func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
+	if artifactType(deck) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(deck) {
+		return false
+	}
+	shipForGoal := strings.TrimSpace(deck.Metadata["source"]) == "packaging_studio_ship" &&
+		strings.TrimSpace(deck.Metadata["goalId"]) == goalID &&
+		strings.TrimSpace(deck.Metadata["artifactContract"]) == packagingStudioDeckContract
+	childForGoal := strings.TrimSpace(deck.Metadata["source"]) == "scout_thread" &&
+		strings.TrimSpace(deck.Metadata["goalParentId"]) == goalID
+	return shipForGoal || childForGoal
 }
 
 // projectScoutChatResultRef upgrades old and new work messages at the read
@@ -1810,15 +1859,14 @@ func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatR
 	}
 	result := artifact
 	if strings.TrimSpace(artifact.Metadata["mode"]) == "goal" {
-		deck, ok := index.deckByGoal[artifact.ID]
+		deck, ok := index.acceptedDeckByGoal[artifact.ID]
+		if !ok {
+			deck, ok = index.deckByGoal[artifact.ID]
+		}
 		if !ok {
 			return
 		}
-		shipForGoal := strings.TrimSpace(deck.Metadata["source"]) == "packaging_studio_ship" &&
-			strings.TrimSpace(deck.Metadata["goalId"]) == artifact.ID
-		childForGoal := strings.TrimSpace(deck.Metadata["source"]) == "scout_thread" &&
-			strings.TrimSpace(deck.Metadata["goalParentId"]) == artifact.ID
-		if !shipForGoal && !childForGoal {
+		if !scoutChatDeckBelongsToGoal(deck, artifact.ID) {
 			return
 		}
 		result = deck

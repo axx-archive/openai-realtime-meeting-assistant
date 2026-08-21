@@ -348,6 +348,34 @@ func TestAssistantFileDeleteChatAttachmentAndUnsavesDeliverable(t *testing.T) {
 	}
 }
 
+func TestApprovedPackagingStudioDeliverableCanBeSavedToFiles(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	deck, _, err := app.createOSArtifactWithMetadata("artifacts", "Approved studio deck", faithfulDeckHTML, "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "packaging_studio_ship", "status": artifactStatusApproved,
+		"goalId": "os-artifact-workflow-files-proof", "artifactContract": packagingStudioDeckContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deliverableRecordQualifies(deck) {
+		t.Fatal("approved Packaging Studio deck did not qualify for Files")
+	}
+	row, err := app.saveDeliverableToFilesNamed(deck.ID, "", "Approved studio deck", "AJ")
+	if err != nil {
+		t.Fatalf("save approved studio deck: %v", err)
+	}
+	if row.ID != deck.ID || row.Name != "Approved studio deck" {
+		t.Fatalf("Files row=%+v", row)
+	}
+	draft := deck
+	draft.ID = "draft-studio-deck"
+	draft.Metadata = map[string]string{"source": "packaging_studio_ship", "status": artifactStatusDraft, "goalId": "goal", "artifactContract": packagingStudioDeckContract}
+	if deliverableRecordQualifies(draft) {
+		t.Fatal("unapproved Packaging Studio draft qualified for Files")
+	}
+}
+
 func TestAssistantFileUploadOversizeRejected(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -869,6 +897,27 @@ func TestAssistantFileSaveHandler(t *testing.T) {
 	}
 	if rec := postFileSave(t, cookies, fmt.Sprintf(`{"artifactId":%q}`, note.ID)); rec.Code != http.StatusBadRequest {
 		t.Fatalf("save non-deliverable status=%d, want 400", rec.Code)
+	}
+
+	// A held canonical principal cannot file even an authorized artifact into
+	// a guessed folder owned by another tenant.
+	foreign, err := sharedFileFolderStore().createInParentForPrincipal("Foreign", "", StrideE10TenantPrincipal{TenantID: "tenant-foreign", PersonID: "person-foreign"})
+	if err != nil {
+		t.Fatalf("create foreign folder: %v", err)
+	}
+	crossTenant := httptest.NewRequest(http.MethodPost, "/assistant/files/save", strings.NewReader(fmt.Sprintf(`{"artifactId":%q,"folderId":%q}`, report.ID, foreign.ID)))
+	for _, cookie := range cookies {
+		crossTenant.AddCookie(cookie)
+	}
+	ctx := context.WithValue(crossTenant.Context(), strideE10TenantPrincipalContextKey{}, StrideE10TenantPrincipal{TenantID: "tenant-current", PersonID: "person-current"})
+	ctx = context.WithValue(ctx, strideE10TenantSurfaceContextKey{}, StrideE10TenantSurfaceDrive)
+	rec = httptest.NewRecorder()
+	assistantFileSaveHandler(rec, crossTenant.WithContext(ctx))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant folder save status=%d body=%s, want 404", rec.Code, rec.Body.String())
+	}
+	if saved, _ := kanbanApp.osArtifactByID(report.ID); saved.Metadata["savedToFiles"] == "true" {
+		t.Fatal("cross-tenant folder rejection stamped the artifact as saved")
 	}
 
 	// Happy path with a destination folder → 200, stamped + filed, now visible.

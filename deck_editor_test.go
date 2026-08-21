@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -396,8 +398,8 @@ func TestDeckEndpointTreatsStaleMarkdownStampOnHTMLDeckAsEditableDeck(t *testing
 	if err != nil {
 		t.Fatalf("stamp legacy markdown metadata: %v", err)
 	}
-	if artifactType(updated) != artifactTypeMarkdown || !artifactIsDeckEditorDocument(updated) {
-		t.Fatalf("artifactType=%q deckEditorDocument=%v, want scoped editor override for stale markdown stamp", artifactType(updated), artifactIsDeckEditorDocument(updated))
+	if artifactType(updated) != artifactTypeHTMLDeck || !artifactIsDeckEditorDocument(updated) {
+		t.Fatalf("artifactType=%q deckEditorDocument=%v, want persisted HTML-deck repair for stale markdown stamp", artifactType(updated), artifactIsDeckEditorDocument(updated))
 	}
 	request := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+updated.ID, "", cookies, deckEditorHandler)
 	if request.Code != http.StatusOK {
@@ -595,6 +597,126 @@ func TestDeckAssetUploadPersistsExactSlideAndBumpsVersion(t *testing.T) {
 	}
 	if got := uploaded.Deck.Slides[0].Elements[len(uploaded.Deck.Slides[0].Elements)-1].Ref; got != uploaded.Element.Ref {
 		t.Fatalf("last slide element ref=%q, want uploaded ref %q", got, uploaded.Element.Ref)
+	}
+}
+
+func TestDeckCopyCreatesIndependentNamedArtifactAndFilesIt(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
+	var initial struct {
+		Deck deckDocument `json:"deck"`
+	}
+	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &initial) != nil {
+		t.Fatalf("GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	initial.Deck.Slides[0].Elements[0].Text = "Independent copy headline"
+	body, _ := json.Marshal(map[string]any{
+		"artifactId": artifact.ID, "expectedVersion": artifactVersion(artifact),
+		"title": "Like A Farmer — Working Copy", "fileName": "Like A Farmer — Working Copy", "folderId": "", "deck": initial.Deck,
+	})
+	response := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(body), cookies, deckEditorCopyHandler)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("copy status=%d body=%s", response.Code, response.Body.String())
+	}
+	var copied struct {
+		Artifact deckArtifactView    `json:"artifact"`
+		Deck     deckDocument        `json:"deck"`
+		File     assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &copied); err != nil {
+		t.Fatal(err)
+	}
+	if copied.Artifact.ID == "" || copied.Artifact.ID == artifact.ID || !copied.Artifact.SavedToFiles || copied.File.ID != copied.Artifact.ID || copied.File.Name != "Like A Farmer — Working Copy" {
+		t.Fatalf("copy response=%s", response.Body.String())
+	}
+	stored, ok := kanbanApp.osArtifactByID(copied.Artifact.ID)
+	if !ok || stored.Metadata["copiedFromArtifactId"] != artifact.ID || stored.Metadata["source"] != "scout_thread" || stored.Metadata["savedToFiles"] != "true" || stored.Metadata["goalParentId"] != "" {
+		t.Fatalf("stored copy=%+v", stored)
+	}
+	loaded, imported, quality, err := loadDeckDocument(stored)
+	if err != nil || imported || quality != "native" || loaded.Slides[0].Elements[0].Text != "Independent copy headline" {
+		t.Fatalf("loaded copy imported=%v quality=%q err=%v deck=%+v", imported, quality, err, loaded)
+	}
+	original, _ := kanbanApp.osArtifactByID(artifact.ID)
+	if strings.Contains(original.Text, "Independent copy headline") || original.Metadata["savedToFiles"] == "true" {
+		t.Fatalf("save a copy mutated the original: %+v", original)
+	}
+}
+
+func TestDeckCopyMaterializesLegacyEmbeddedImagery(t *testing.T) {
+	cookies, _ := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	imageBytes := append([]byte("\x89PNG\r\n\x1a\n"), []byte("legacy embedded image")...)
+	ref, err := putBlob(imageBytes, "image/png")
+	if err != nil {
+		t.Fatalf("put embedded image: %v", err)
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes)
+	legacy, _, err := kanbanApp.createOSArtifactWithMetadata("design", "Embedded deck", `<!doctype html><html><body><div id="stage"><section class="pg on" data-deck-slide="slide-1" style="background:#101014">
+		<img src="`+dataURI+`" data-deck-element="hero" data-deck-type="image" style="position:absolute;left:0;top:0;width:1920px;height:1080px;z-index:1;opacity:1;transform:rotate(0deg);object-fit:cover">
+		<div data-deck-element="headline" data-deck-type="text" style="position:absolute;left:96px;top:96px;width:1200px;height:180px;z-index:2;opacity:1;font-size:88px;font-family:Arial;font-weight:700;color:#ffffff">Field story</div>
+	</section></div></body></html>`, "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "visibility": "organization", "requestedBy": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatalf("create embedded deck: %v", err)
+	}
+	deck, imported, quality, err := loadDeckDocument(legacy)
+	if err != nil || !imported || quality != "faithful" {
+		t.Fatalf("load embedded source imported=%v quality=%q err=%v", imported, quality, err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"artifactId": legacy.ID, "expectedVersion": artifactVersion(legacy),
+		"title": "Embedded deck copy", "fileName": "Embedded deck copy", "folderId": "", "deck": deck,
+	})
+	response := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(body), cookies, deckEditorCopyHandler)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("copy status=%d body=%s", response.Code, response.Body.String())
+	}
+	var copied struct {
+		Artifact deckArtifactView `json:"artifact"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &copied); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := kanbanApp.osArtifactByID(copied.Artifact.ID)
+	if !ok || len(artifactAssets(stored)) != 1 || artifactAssets(stored)[0].Ref != ref {
+		t.Fatalf("copied artifact did not materialize embedded image %s: %+v", ref, stored)
+	}
+	loaded, imported, quality, err := loadDeckDocument(stored)
+	if err != nil || imported || quality != "native" || loaded.Slides[0].Elements[0].Ref != ref {
+		t.Fatalf("copied native scene imported=%v quality=%q err=%v deck=%+v", imported, quality, err, loaded)
+	}
+	rendered, err := artifactRenderBody(stored)
+	if err != nil || !strings.Contains(string(rendered), "data:image/png;base64,") {
+		t.Fatalf("copied deck render err=%v body=%s", err, rendered)
+	}
+}
+
+func TestDeckCopyRejectsFolderFromAnotherTenant(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+	foreign, err := sharedFileFolderStore().createInParentForPrincipal("Foreign", "", StrideE10TenantPrincipal{TenantID: "tenant-foreign", PersonID: "person-foreign"})
+	if err != nil {
+		t.Fatalf("create foreign folder: %v", err)
+	}
+	deck, _, _, err := loadDeckDocument(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"artifactId": artifact.ID, "expectedVersion": artifactVersion(artifact),
+		"title": "Tenant-safe copy", "fileName": "Tenant-safe copy", "folderId": foreign.ID, "deck": deck,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/deck/copies", bytes.NewReader(body))
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	ctx := context.WithValue(req.Context(), strideE10TenantPrincipalContextKey{}, StrideE10TenantPrincipal{TenantID: "tenant-current", PersonID: "person-current"})
+	ctx = context.WithValue(ctx, strideE10TenantSurfaceContextKey{}, StrideE10TenantSurfaceDrive)
+	recorder := httptest.NewRecorder()
+	deckEditorCopyHandler(recorder, req.WithContext(ctx))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant copy status=%d body=%s, want 404", recorder.Code, recorder.Body.String())
 	}
 }
 

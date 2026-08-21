@@ -402,9 +402,9 @@ func packagingStudioDefinition() ProcessDefinition {
 					"DENSITY AND CRAFT: one claim per slide, no prose wall, no orphan labels, no tiny footnotes, and no more than 45 client-facing words on a normal slide unless it is a deliberately designed evidence page. Turn metrics into large-number compositions, comparisons into aligned columns, sequences into a visible path, and quotations into typographic moments. Add restrained slide numbers and source/caption furniture where evidence or imagery requires it.",
 					"EDITOR COMPATIBILITY: put each slide's background color directly on its <section class=\"pg\"> inline style. Give every meaningful text block, image plate, and decorative shape a stable data-deck-element id plus data-deck-type=\"text|image|shape\". Put position:absolute and its left, top, width, height, z-index, opacity, and rotation directly in that element's inline style using 1920×1080 pixel coordinates; do not leave editable geometry only in a CSS class. Put text color/font-size/font-weight, image object-fit, and shape fill/stroke directly on the element too. Decorative background layers must carry data-deck-element when they are intended to be editable. This explicit geometry is part of the deliverable contract, not optional metadata.",
 					"TEXT FIT CONTRACT: every text block must also put font-family, line-height, letter-spacing, and text-align inline. Author its width and height to contain the rendered text at that exact size, leading, and tracking. Independent text boxes must not intersect and should keep at least 24px of breathing room. If an intentional overlap is essential to the composition, mark the overlapping elements data-deck-overlap=\"allow\"; otherwise any text overflow, clipping, off-canvas geometry, or text-box intersection is a blocking render defect, not a style choice.",
-					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. Build that slide's photo element as a plate or full-bleed carrying BOTH its type class AND class \"fig-N\" (matching the FIG number), with an empty <div class=\"ph\"></div> inside and the FIG. caption. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
+					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. The photo element MUST use this native-importable grammar: <figure class=\"image-plate fig-N\" data-deck-element=\"unique-image-id\" data-deck-type=\"image\" style=\"position:absolute;left:...px;top:...px;width:...px;height:...px;z-index:...;opacity:1;transform:rotate(0deg);object-fit:cover\"><div class=\"ph\"></div><figcaption data-deck-element=\"unique-caption-id\" data-deck-type=\"text\" style=\"position:absolute;...\">FIG. caption</figcaption></figure>. For full bleed, add class \"bleed\" to that same figure and use left:0;top:0;width:1920px;height:1080px. Replace N with the matching FIG number. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
 					"FULL-BLEED LAW: when a generated image carries the emotional beat, let it reach all four slide edges and place copy over a purpose-built solid or gradient scrim. When the image is evidence, use a disciplined plate with a caption. Never use a small decorative image that contributes no meaning.",
-					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the presenter the script alongside each page.",
+					"PRESENTER NOTES: put VOICE's matching per-page script inside that slide as one <div class=\"notes\" hidden>…</div>, preserving its [BEAT] pause. Do not add custom JavaScript or presenter chrome to the file: Bonfire's native presenter owns navigation, notes, full-screen behavior, and consistent controls. Unknown behavior makes the deck non-editable and the law sweep rejects it.",
 					"Honor the decisions captured in Final content review, including any lines the reviewer explicitly asked Scout to preserve. Keep client-facing copy free of em dashes. " + studioSourceLanguageLaw,
 				}, "\n"),
 				OutputContract: packagingStudioDeckContract,
@@ -1154,12 +1154,38 @@ func (app *kanbanBoardApp) studioShipDeliverableByContract(goalID string, contra
 	if goalID == "" {
 		return meetingMemoryEntry{}, false
 	}
+	var latest meetingMemoryEntry
+	found := false
 	for _, entry := range app.osArtifactsSnapshot(0) {
 		if entry.Metadata["source"] == "packaging_studio_ship" && entry.Metadata["goalId"] == goalID && entry.Metadata["artifactContract"] == contract {
-			return entry, true
+			// Artifacts are oldest-first. Keep walking so a retry candidate,
+			// rather than the already accepted presentation, is the living
+			// draft that subsequent pre-approval compiles update in place.
+			latest = entry
+			found = true
 		}
 	}
-	return meetingMemoryEntry{}, false
+	return latest, found
+}
+
+func (app *kanbanBoardApp) acceptedStudioResultArtifactID(goalID string) string {
+	goalID = strings.TrimSpace(goalID)
+	if app == nil || goalID == "" {
+		return ""
+	}
+	parent, ok := app.osArtifactByID(goalID)
+	if !ok {
+		return ""
+	}
+	acceptedID := strings.TrimSpace(parent.Metadata["acceptedResultArtifactId"])
+	if acceptedID != "" {
+		return acceptedID
+	}
+	var plan goalPlan
+	if raw := strings.TrimSpace(parent.Metadata["goalPlan"]); raw != "" && json.Unmarshal([]byte(raw), &plan) == nil {
+		return strings.TrimSpace(plan.Report.AcceptedResultArtifactID)
+	}
+	return ""
 }
 
 func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]studioShipDeliverable, error) {
@@ -1190,6 +1216,7 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 	}
 
 	sidecar := renderSidecarAvailable()
+	acceptedDeckID := app.acceptedStudioResultArtifactID(in.GoalID)
 	filed := make([]studioShipDeliverable, 0, len(specs))
 	for _, spec := range specs {
 		body := strings.TrimSpace(spec.body)
@@ -1227,7 +1254,16 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 		// prior body) instead of filing a stranger, so chat refs, drawer rows,
 		// and package links keep pointing at the living artifact.
 		var artifact meetingMemoryEntry
-		if existing, found := app.studioShipDeliverableByContract(in.GoalID, spec.contract); found {
+		existing, found := app.studioShipDeliverableByContract(in.GoalID, spec.contract)
+		// Once a human has approved a deck, never rewrite that artifact in
+		// place. The feedback run gets a new candidate id; further compiles of
+		// that still-unapproved candidate may version it normally. Supporting
+		// documents keep their stable ids because only the presentation is the
+		// rich channel handoff bound by acceptedResultArtifactId.
+		if found && spec.contract == packagingStudioDeckContract && existing.ID == acceptedDeckID {
+			found = false
+		}
+		if found {
 			// The prior run's render exports are STALE against the revised
 			// body — clear them so the re-enqueued export lands as the only
 			// asset; a pending render reads honest, a superseded PDF does not.

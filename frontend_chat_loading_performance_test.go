@@ -64,6 +64,10 @@ const server=http.createServer((req,res)=>{
  // activation so selection also advances threads -> conversation; calling the
  // internal selector alone would correctly leave the conversation pane hidden.
  await page.evaluate(()=>document.querySelector('#chatChannelThreads [data-thread-id="country-golf"]')?.click());await page.locator('.scout-chat-loading').waitFor();assert.equal(threadRequests,1);await page.waitForFunction(()=>document.querySelectorAll('#scoutChatThread .scout-chat-msg').length>0);const rendered=await page.locator('#scoutChatThread .scout-chat-msg').count();assert.ok(rendered<=200,'constructed more than bounded message tail: '+rendered);assert.equal(await page.locator('.scout-chat-loading').count(),0);
+	// A fresh selection belongs to the selected channel, not the viewport of
+	// whichever conversation happened to be open before it. Hydrate an empty
+	// neighbor, then reopen the cached long channel and require the true tail.
+	await page.evaluate(()=>selectScoutChatThread('private-one'));await page.waitForFunction(()=>selectedScoutChatThread()?.messagesLoaded===true);await page.evaluate(()=>{scoutChatThread.scrollTop=0;selectScoutChatThread('country-golf')});await page.waitForTimeout(80);const distance=await page.evaluate(()=>scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight);assert.ok(distance<=1,'channel selection inherited the previous viewport instead of landing at the tail: '+distance);
  await browser.close();server.close()})().catch(e=>{console.error(e);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
 	cmd.Env = append(os.Environ(), "CHAT_LOADING_INDEX="+indexPath)

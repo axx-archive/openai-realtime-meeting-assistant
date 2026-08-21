@@ -238,6 +238,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/artifacts/render-token":                        {handler: artifactRenderTokenHandler, memberGated: true},
 		"/artifacts/blob":                                {handler: artifactBlobHandler, memberGated: true},
 		"/artifacts/deck":                                {handler: deckEditorHandler, memberGated: true},
+		"/artifacts/deck/copies":                         {handler: deckEditorCopyHandler, memberGated: true},
 		"/artifacts/deck/image-generations":              {handler: deckEditorImageGenerationHandler, memberGated: true},
 		"/artifacts/deck/assets":                         {handler: deckEditorAssetUploadHandler, memberGated: true},
 		"/artifacts/share":                               {handler: artifactShareHandler, memberGated: true},

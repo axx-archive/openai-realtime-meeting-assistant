@@ -1208,6 +1208,7 @@ func main() {
 	http.HandleFunc("/internal/media-soak/", mediaSoakObserverHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/artifacts/deck", deckEditorHandler)
+	http.HandleFunc("/artifacts/deck/copies", deckEditorCopyHandler)
 	http.HandleFunc("/artifacts/deck/image-generations", deckEditorImageGenerationHandler)
 	http.HandleFunc("/artifacts/deck/assets", deckEditorAssetUploadHandler)
 	http.HandleFunc("/artifacts/workstream", artifactWorkstreamCorrectionHandler)

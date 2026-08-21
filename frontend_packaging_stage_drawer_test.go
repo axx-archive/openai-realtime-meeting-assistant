@@ -149,6 +149,23 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.equal(legacyResearchCard,'artifact · Build the editable presentation');
  const ordinaryResearchCard=await page.evaluate(()=>{const artifact={id:'ordinary-research',text:'Analysis',metadata:{title:'Pricing analysis',source:'scout_thread',status:'complete'}};const card=scoutChatResearchNode({id:'ordinary-run',mode:'research',query:'Pricing analysis',status:'complete',artifact});updateScoutChatResearchNode(card,'complete',artifact);return card.querySelector('.scout-chat-research__title').textContent;});
  assert.equal(ordinaryResearchCard,'research · Pricing analysis');
+
+	// A process worker emits a generic terminal thread record and an authored
+	// stage receipt for the same artifact. Only the compact receipt belongs in
+	// the channel; the generic card must never leak HTML/CSS or double the DOM.
+	const duplicateProjection=await page.evaluate(()=>{
+	  const duplicateArtifact={id:'stage-ship-duplicate',text:'<!doctype html><html><head><title>Like A Farmer</title><style>railwrap{display:grid}</style></head><body></body></html>',metadata:{title:'railwrap{display:grid}',type:'markdown',status:'complete',threadStatus:'complete',source:'process_stage',processId:'packaging_studio',processStage:'ship_deck',goalSubtaskId:'ship_deck',goalParentId:'packaging-goal'}};
+	  artifactEntries.push(duplicateArtifact);
+	  const generic={id:'generic-ship',kind:'thread',role:'scout',createdAt:'2026-08-20T20:00:00Z',thread:{id:'run-ship',mode:'workflow',artifactId:duplicateArtifact.id,status:'complete',query:'railwrap{display:grid}'}};
+	  const receipt={id:'receipt-ship',kind:'artifact',role:'scout',text:'Build the editable presentation is in',createdAt:'2026-08-20T20:00:01Z',thread:{id:'run-ship',mode:'workflow',artifactId:duplicateArtifact.id,status:'complete',query:'Build the editable presentation'}};
+	  scoutChatThreads=[{id:'duplicate-channel',title:'Like A Farmer',visibility:'public',messagesLoaded:true,updatedAt:'2026-08-20T20:00:01Z',messages:[generic,receipt]}];
+	  activeScoutThreadId='duplicate-channel';
+	  renderActiveScoutThread({forceBottom:true});
+	  return {research:scoutChatThread.querySelectorAll('.scout-chat-research').length,runlogs:scoutChatThread.querySelectorAll('.runlog').length,text:scoutChatThread.textContent};
+	});
+	assert.equal(duplicateProjection.research,0,JSON.stringify(duplicateProjection));
+	assert.equal(duplicateProjection.runlogs,1,JSON.stringify(duplicateProjection));
+	assert.doesNotMatch(duplicateProjection.text,/railwrap/);
  await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
 
  const savedGoalCopy=await page.evaluate(()=>{

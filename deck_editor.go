@@ -104,18 +104,190 @@ type deckElement struct {
 }
 
 type deckArtifactView struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Type      string `json:"type"`
-	Version   int    `json:"version"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Type         string `json:"type"`
+	Version      int    `json:"version"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
+	SavedToFiles bool   `json:"savedToFiles"`
 }
 
 func deckArtifactViewFromEntry(entry meetingMemoryEntry) deckArtifactView {
 	return deckArtifactView{
 		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
 		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
+		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
+}
+
+func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			deckEditorCopyHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "deck copy is unavailable")
+		}
+		return
+	}
+	payload := struct {
+		ArtifactID      string       `json:"artifactId"`
+		ExpectedVersion int          `json:"expectedVersion"`
+		Title           string       `json:"title"`
+		FileName        string       `json:"fileName"`
+		FolderID        string       `json:"folderId"`
+		Deck            deckDocument `json:"deck"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, deckDocumentMaxBytes+64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read deck copy")
+		return
+	}
+	payload.ArtifactID = strings.TrimSpace(payload.ArtifactID)
+	payload.Title = strings.TrimSpace(payload.Title)
+	payload.FileName = strings.TrimSpace(payload.FileName)
+	payload.FolderID = strings.TrimSpace(payload.FolderID)
+	if payload.Title == "" {
+		payload.Title = payload.FileName
+	}
+	if len([]rune(payload.Title)) > 160 {
+		writeAuthError(w, http.StatusBadRequest, "deck name is too long")
+		return
+	}
+	normalizedFileName, err := normalizeAssistantFileName(payload.FileName)
+	if err != nil || payload.Title == "" {
+		writeAuthError(w, http.StatusBadRequest, "a valid deck name and Files destination are required")
+		return
+	}
+	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	if !ok || !artifactIsDeckEditorDocument(prior) {
+		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
+		return
+	}
+	if !fileFolderWritableFromContext(r.Context(), user, payload.FolderID) {
+		writeAuthError(w, fileFolderErrorStatus(errFileFolderNotFound), errFileFolderNotFound.Error())
+		return
+	}
+	if payload.ExpectedVersion < 1 || artifactVersion(prior) != payload.ExpectedVersion {
+		writeDeckVersionConflict(w, prior)
+		return
+	}
+	if err := validateDeckDocument(payload.Deck, artifactAssetRefSet(prior)); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	copyEntry, err := createDeckEditorCopy(user, prior, payload.Deck, payload.Title)
+	if err != nil {
+		log.Errorf("Deck copy create failed: %v", err)
+		writeAuthError(w, http.StatusInternalServerError, "deck copy could not be created")
+		return
+	}
+	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+	file, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, normalizedFileName, actor)
+	if err != nil {
+		status := fileSaveErrorStatus(err)
+		if status == http.StatusInternalServerError {
+			log.Errorf("Deck copy Files save failed: %v", err)
+			writeAuthError(w, status, "deck copy was created, but Files is unavailable")
+		} else {
+			writeAuthError(w, status, err.Error())
+		}
+		return
+	}
+	stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
+	broadcastSignedInKanbanEvent("file", file)
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"ok": true, "artifact": deckArtifactViewFromEntry(stored), "deck": payload.Deck, "file": file,
+	})
+}
+
+func createDeckEditorCopy(user *userAccount, prior meetingMemoryEntry, deck deckDocument, title string) (meetingMemoryEntry, error) {
+	raw, err := json.Marshal(deck)
+	if err != nil || len(raw) > deckDocumentMaxBytes {
+		return meetingMemoryEntry{}, fmt.Errorf("deck document exceeds its storage bound")
+	}
+	ref, err := putBlob(raw, "application/vnd.bonfire.deck+json")
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	usedRefs := map[string]struct{}{}
+	for _, slide := range deck.Slides {
+		for _, element := range slide.Elements {
+			if element.Type == "image" && validBlobRef(element.Ref) {
+				usedRefs[element.Ref] = struct{}{}
+			}
+		}
+	}
+	assets := make([]artifactAsset, 0, len(usedRefs))
+	attached := make(map[string]struct{}, len(usedRefs))
+	for _, asset := range artifactAssets(prior) {
+		if _, used := usedRefs[asset.Ref]; used {
+			assets = append(assets, asset)
+			attached[asset.Ref] = struct{}{}
+		}
+	}
+	for ref := range usedRefs {
+		if _, ok := attached[ref]; ok {
+			continue
+		}
+		_, meta, err := getBlob(ref)
+		if err != nil || !strings.HasPrefix(strings.ToLower(meta.Mime), "image/") {
+			return meetingMemoryEntry{}, fmt.Errorf("deck image is unavailable")
+		}
+		assets = append(assets, artifactAsset{Ref: ref, Mime: meta.Mime, Name: "deck-image." + deckImageExtension(meta.Mime), Kind: "image"})
+	}
+	sort.Slice(assets, func(i, j int) bool { return assets[i].Ref < assets[j].Ref })
+	assetsRaw, err := json.Marshal(assets)
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	owner := ""
+	if user != nil {
+		owner = normalizeAccountEmail(user.Email)
+	}
+	metadata := map[string]string{
+		"title":                     strings.TrimSpace(title),
+		"type":                      artifactTypeHTMLDeck,
+		"source":                    "scout_thread",
+		"status":                    artifactStatusComplete,
+		"threadStatus":              artifactStatusComplete,
+		"copiedFromArtifactId":      prior.ID,
+		"copiedFromArtifactVersion": strconv.Itoa(artifactVersion(prior)),
+		deckSceneRefMetadataKey:     ref,
+		deckSchemaMetadataKey:       strconv.Itoa(deckDocumentSchemaVersion),
+		artifactAssetsMetadataKey:   string(assetsRaw),
+		"tenantId":                  strings.TrimSpace(prior.Metadata["tenantId"]),
+		"visibility":                firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
+		"ownerEmail":                owner,
+	}
+	body := compileDeckDocumentHTML(deck, title)
+	createdBy := firstNonEmptyString(strings.TrimSpace(user.Name), owner)
+	copyEntry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", title, body, createdBy, metadata)
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	if !appended || strings.TrimSpace(copyEntry.ID) == "" {
+		return meetingMemoryEntry{}, fmt.Errorf("deck copy was not saved")
+	}
+	return copyEntry, nil
 }
 
 func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
@@ -841,7 +1013,7 @@ func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string
 		return defaultImportedDeck(artifact), "approximate"
 	}
 	if len(slideNodes) > deckDocumentMaxSlides {
-		slideNodes = slideNodes[:deckDocumentMaxSlides]
+		return defaultImportedDeck(artifact), "approximate"
 	}
 	outerNotes, outerPresenterSafe := legacyOuterPresenterNotes(doc, len(slideNodes))
 	typography := legacyTypographyContextForDocument(doc)

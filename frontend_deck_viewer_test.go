@@ -121,15 +121,17 @@ func TestIndexDeckViewerSecurityContract(t *testing.T) {
 		t.Error("renderArtifactDeck must not window.open the render URL — Present fullscreens the sandboxed iframe")
 	}
 
-	// The banned mechanisms must not exist ANYWHERE in the monolith: srcdoc
-	// would run the deck same-origin with the OS, and allow-same-origin would
-	// hand a sandboxed deck the render route's origin back.
+	// The banned mechanisms must not exist in the DECK viewer: srcdoc would run
+	// the deck same-origin with the OS, and allow-same-origin would hand a
+	// sandboxed deck the render route's origin back. Other explicitly isolated
+	// iframe products (for example the cross-origin Content Studio drawer) own
+	// separate sandbox contracts and must not make this scoped check lie.
 	for _, banned := range []string{
 		"srcdoc",
 		"allow-same-origin",
 	} {
-		if strings.Contains(html, banned) {
-			t.Errorf("index.html contains banned deck-viewer mechanism %q", banned)
+		if strings.Contains(body, banned) {
+			t.Errorf("renderArtifactDeck contains banned mechanism %q", banned)
 		}
 	}
 }

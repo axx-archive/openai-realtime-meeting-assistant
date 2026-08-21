@@ -265,9 +265,10 @@ func (app *kanbanBoardApp) fileRecordsFromThread(viewerEmail string, thread scou
 // terminal, non-UI-state deliverable — the provenance/status/kind checks that
 // PREDATE the explicit-save gate. Provenance must be an agent-thread run
 // (source scout_thread — including goal writer children) or the goal engine's
-// own stamps (goalPlan on the parent, goalDeliverable on a flagged child); the
-// status must be terminally good (complete/published — running scaffolds and
-// error/needs_attention bodies never qualify); and UI-state-ish artifacts
+// own stamps (goalPlan on the parent, goalDeliverable on a flagged child), or
+// an explicitly approved Packaging Studio ship contract; the status must be
+// terminally good (complete/published, or approved for a studio ship — running
+// scaffolds and error/needs_attention bodies never qualify); and UI-state-ish artifacts
 // (taste profiles, the house-style doc, quarantined entries) stay out. The
 // chat_image renders are also terminal deliverables: they carry source
 // chat_image and an image asset that the Files row can download/preview. The
@@ -278,8 +279,10 @@ func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
 	if metadata == nil {
 		return false
 	}
-	if strings.TrimSpace(metadata["source"]) != "scout_thread" &&
-		strings.TrimSpace(metadata["source"]) != "chat_image" &&
+	source := strings.TrimSpace(metadata["source"])
+	studioShip := source == "packaging_studio_ship" && strings.TrimSpace(metadata["goalId"]) != "" && strings.TrimSpace(metadata["artifactContract"]) != ""
+	if source != "scout_thread" &&
+		source != "chat_image" && !studioShip &&
 		strings.TrimSpace(metadata["goalPlan"]) == "" &&
 		!strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") {
 		return false
@@ -293,6 +296,8 @@ func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
 	switch agentThreadStatusValue(entry) {
 	case artifactStatusComplete, artifactStatusPublished:
 		return true
+	case artifactStatusApproved:
+		return studioShip
 	default:
 		return false
 	}
@@ -1496,6 +1501,25 @@ func fileFolderExists(folderID string) bool {
 	return false
 }
 
+// fileFolderWritableFromContext prevents an otherwise-authorized Files write
+// from naming a folder outside the held tenant/person authority. Legacy mode
+// keeps the existing per-user ownership rule; an empty id means Files root.
+func fileFolderWritableFromContext(ctx context.Context, user *userAccount, folderID string) bool {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return true
+	}
+	if principal, canonical := strideE10TenantPrincipalFromContext(ctx); canonical {
+		return fileFolderManagedByPrincipal(folderID, principal)
+	}
+	for _, folder := range listFileFolders() {
+		if folder.ID == folderID && strings.TrimSpace(folder.TenantID) != "" {
+			return false
+		}
+	}
+	return fileFolderManagedByUser(folderID, user)
+}
+
 // fileSaveErrorStatus maps saveDeliverableToFiles errors onto honest statuses.
 func fileSaveErrorStatus(err error) int {
 	switch {
@@ -1571,6 +1595,10 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 		artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
 		if !ok {
 			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		if !fileFolderWritableFromContext(r.Context(), user, payload.FolderID) {
+			writeAuthError(w, fileFolderErrorStatus(errFileFolderNotFound), errFileFolderNotFound.Error())
 			return
 		}
 		actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))

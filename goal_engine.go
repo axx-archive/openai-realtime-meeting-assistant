@@ -365,6 +365,10 @@ type goalReport struct {
 	// that terminated needs_attention. It is attached to the package and
 	// surfaced so an 8/10 draft is never orphaned when revisions run out.
 	DeliverableArtifactID string `json:"deliverableArtifactId,omitempty"`
+	// AcceptedResultArtifactID binds the exact presentation a human approved at
+	// Packaging Studio's ship checkpoint. Later retries remain visible in the
+	// activity ledger but cannot silently replace this channel handoff.
+	AcceptedResultArtifactID string `json:"acceptedResultArtifactId,omitempty"`
 	// SavedLessons is save_what_worked's distilled output (2-4 one-line
 	// lessons: reviewer praise that survived revision, what needed revision,
 	// what the gate cleared) — persisted with the plan, mirrored into
@@ -2824,6 +2828,11 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 // record and the review reasons, never hidden.
 func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, resolvedBy string, choice string, disclosure string) error {
 	checkpoint := plan.Checkpoint
+	if plan.ProcessID == packagingStudioProcessID && checkpoint.StageID == "ship_approval" {
+		if deck, ok := e.app.scoutChatResultIndex().deckByGoal[parentID]; ok {
+			plan.Report.AcceptedResultArtifactID = deck.ID
+		}
+	}
 	recordedChoice := firstNonEmptyString(choice, "(approved without an explicit choice)")
 	bodyLines := []string{
 		"Checkpoint decision",
@@ -4018,6 +4027,21 @@ func (e *goalEngine) reopenGoalForFeedback(plan *goalPlan, parentID string, resu
 	if target == nil {
 		return fmt.Errorf("could not match that deliverable to a stage of the goal")
 	}
+	// Compatibility seam for Packaging Studio goals shipped before the exact
+	// accepted deck id was persisted. The old resolved ship checkpoint is the
+	// last durable boundary that can identify what the human approved. Capture
+	// that deck BEFORE resetGoalDependents replaces the checkpoint with a fresh
+	// unresolved park; otherwise a retry draft can silently become the channel
+	// handoff merely because it is newer.
+	if e.app != nil && plan.ProcessID == packagingStudioProcessID &&
+		strings.TrimSpace(plan.Report.AcceptedResultArtifactID) == "" &&
+		plan.Checkpoint != nil && plan.Checkpoint.StageID == "ship_approval" &&
+		plan.Checkpoint.LastAction == processCheckpointActionProceed &&
+		strings.TrimSpace(plan.Checkpoint.ResolvedAt) != "" {
+		if accepted, ok := e.app.scoutChatResultIndex().acceptedDeckByGoal[parentID]; ok {
+			plan.Report.AcceptedResultArtifactID = accepted.ID
+		}
+	}
 	target.Status = subtaskReady
 	target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: note, By: resumedBy}
 	target.Protect = mergeGoalProtectList(target.Protect, checkpointProtectLines(note))
@@ -4955,6 +4979,9 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 	// id and the honest gap it missed, so the card can point at the saved work.
 	if id := strings.TrimSpace(plan.Report.DeliverableArtifactID); id != "" {
 		metadata["deliverableArtifactId"] = id
+	}
+	if id := strings.TrimSpace(plan.Report.AcceptedResultArtifactID); id != "" {
+		metadata["acceptedResultArtifactId"] = id
 	}
 	if gap := strings.TrimSpace(plan.Report.Gap); gap != "" {
 		metadata["goalGap"] = gap

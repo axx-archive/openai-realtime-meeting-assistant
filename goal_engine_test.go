@@ -4095,6 +4095,75 @@ func TestResumeGoalWithFeedbackReopensVerifiedGoal(t *testing.T) {
 	}
 }
 
+func TestResumeLegacyStudioGoalFreezesApprovedDeckBeforeFreshRetryPark(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+	previousAsync := startGoalFeedbackResumeAsync
+	startGoalFeedbackResumeAsync = func(func()) {}
+	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousAsync })
+
+	launched, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Keep the approved handoff stable", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := launched.Artifact
+	approved, _, err := app.createOSArtifactWithMetadata("workflow", "Approved deck", "<!doctype html><html><body><section class=\"pg\">approved</section></body></html>", "AJ", map[string]string{
+		"source": "packaging_studio_ship", "artifactContract": packagingStudioDeckContract,
+		"goalId": parent.ID, "type": artifactTypeHTMLDeck,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedAt := approved.CreatedAt.Add(time.Second).UTC().Format(time.RFC3339Nano)
+	legacyPlan := mustGoalPlan(t, app, parent.ID)
+	legacyPlan.ProcessID = packagingStudioProcessID
+	legacyPlan.State = goalStateVerified
+	legacyPlan.Subtasks = []goalSubtask{
+		{ID: "ship_deck", Status: subtaskComplete, ArtifactID: approved.ID},
+		{ID: "ship_approval", Role: processRoleHumanCheckpoint, Status: subtaskComplete},
+	}
+	legacyPlan.Checkpoint = &goalProcessCheckpoint{StageID: "ship_approval", ResolvedAt: resolvedAt, LastAction: processCheckpointActionProceed}
+	newGoalEngine(app).persist(&legacyPlan, parent.ID, "")
+	if _, err := app.resumeGoalWithFeedback(parent.ID, "AJ", "make the next candidate stronger", approved.ID); err != nil {
+		t.Fatalf("resume legacy studio goal: %v", err)
+	}
+	reopenedArtifact, _ := app.osArtifactByID(parent.ID)
+	reopened, ok := decodeGoalPlan(reopenedArtifact.Metadata["goalPlan"])
+	if !ok {
+		t.Fatal("reopened goal plan missing")
+	}
+	if reopened.Report.AcceptedResultArtifactID != approved.ID || reopenedArtifact.Metadata["acceptedResultArtifactId"] != approved.ID {
+		t.Fatalf("legacy approval was not durably backfilled: plan=%q metadata=%q want=%q", reopened.Report.AcceptedResultArtifactID, reopenedArtifact.Metadata["acceptedResultArtifactId"], approved.ID)
+	}
+
+	retry, _, err := app.createOSArtifactWithMetadata("workflow", "Retry candidate", "<!doctype html><html><body><section class=\"pg\">candidate</section></body></html>", "AJ", map[string]string{
+		"source": "packaging_studio_ship", "artifactContract": packagingStudioDeckContract,
+		"goalId": parent.ID, "type": artifactTypeHTMLDeck,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.State = goalStateApproval
+	reopened.Checkpoint = &goalProcessCheckpoint{StageID: "ship_approval"}
+	newGoalEngine(app).persist(&reopened, parent.ID, "")
+	index := app.scoutChatResultIndex()
+	if index.deckByGoal[parent.ID].ID != retry.ID || index.acceptedDeckByGoal[parent.ID].ID != approved.ID {
+		t.Fatalf("projection index latest/accepted=%q/%q, want retry/approved %q/%q", index.deckByGoal[parent.ID].ID, index.acceptedDeckByGoal[parent.ID].ID, retry.ID, approved.ID)
+	}
+	message := scoutChatMessageRecord{Thread: &scoutChatThreadRef{ArtifactID: parent.ID}}
+	projectScoutChatResultRef(&message, index)
+	if message.Thread.ResultArtifactID != approved.ID {
+		t.Fatalf("fresh retry park projected %q, want still-approved deck %q", message.Thread.ResultArtifactID, approved.ID)
+	}
+}
+
 func TestResumeGoalWithFeedbackAuthorizedRejectsMutationBeforeConditionalPersist(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

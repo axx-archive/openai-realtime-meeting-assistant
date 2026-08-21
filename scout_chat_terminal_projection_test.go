@@ -175,6 +175,28 @@ func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIden
 		t.Fatal("read projection mutated persisted thread")
 	}
 
+	// A legacy ship approval predating acceptedResultArtifactId freezes the
+	// latest deck that existed at the decision. Later retry artifacts remain in
+	// history but cannot replace the approved channel handoff.
+	legacyPlan := goalPlan{ProcessID: packagingStudioProcessID, Checkpoint: &goalProcessCheckpoint{
+		StageID: "ship_approval", ResolvedAt: time.Now().UTC().Format(time.RFC3339Nano), LastAction: processCheckpointActionProceed,
+	}}
+	rawPlan, _ := json.Marshal(legacyPlan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "Scout", map[string]string{"goalPlan": string(rawPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryDeck, _, err := app.createOSArtifactWithMetadata("workflow", "retry deck", "<!doctype html><html><body><section class=\"pg\">retry</section></body></html>", "Scout", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "goalParentId": goal.ID, "status": "complete",
+	})
+	if err != nil || retryDeck.ID == "" {
+		t.Fatal(err)
+	}
+	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != finalDeck.ID {
+		t.Fatalf("post-approval retry replaced accepted result with %q, want %q", got, finalDeck.ID)
+	}
+
 	other, _, err := app.createOSArtifactWithMetadata("workflow", "Wrong goal deck", "<!doctype html><html><body>wrong</body></html>", "AJ", map[string]string{
 		"type": artifactTypeHTMLDeck, "source": "packaging_studio_ship", "goalId": "another-goal", "artifactContract": packagingStudioDeckContract,
 	})

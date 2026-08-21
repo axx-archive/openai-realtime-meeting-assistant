@@ -24,6 +24,13 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"const canEdit = access?.canWrite === true",
 		"fetch('/artifacts/deck/image-generations'",
 		"fetch('/artifacts/deck/assets'",
+		"fetch('/artifacts/deck/copies'",
+		"data-action=\"save-copy\"",
+		"data-action=\"send-backward\"",
+		"data-action=\"bring-forward\"",
+		"data-prop=\"fit\"",
+		"data-prop=\"rotation\"",
+		"data-action=\"duplicate-slide\"",
 		"data-action=\"add-rectangle\"",
 		"data-action=\"add-ellipse\"",
 		"data-action=\"undo\"",
@@ -87,7 +94,7 @@ const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
 let version=4;let canWrite=true;
 let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'},{id:'rich-proof',type:'text',x:150,y:360,width:900,height:260,z:4,opacity:1,rotation:0,text:'OBSERVED 6.1M',richText:'OBSERVED <span style="display:block;font-family:Georgia;font-size:75px;letter-spacing:.13em;margin:9px 0">6.1M</span>',fontSize:24,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
-let patches=[];let imageRequests=[];let uploadRequests=[];
+let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];
 const artifact=()=>({id:artifactId,title:'Studio proof',version,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version)}});
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
@@ -103,6 +110,9 @@ const server=http.createServer((req,res)=>{
   }
   if(req.url==='/artifacts/deck/assets'&&req.method==='POST'){
     let bytes=0;req.on('data',chunk=>bytes+=chunk.length);req.on('end',()=>{uploadRequests.push({contentType:req.headers['content-type'],bytes});const element={id:'uploaded-image',type:'image',x:300,y:280,width:760,height:500,z:9,opacity:1,rotation:0,ref:'b'.repeat(64),name:'field-notes.png',fit:'cover'};deck.slides[0].elements.push(element);version++;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck,element,image:{ref:element.ref,name:element.name,mime:'image/png'}}));});return;
+  }
+  if(req.url==='/artifacts/deck/copies'&&req.method==='POST'){
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);copies.push(body);res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,artifact:{id:'deck-copy',title:body.title,type:'html_deck',version:1,savedToFiles:true},deck:body.deck,file:{id:'deck-copy',name:body.fileName,folderId:body.folderId}}));});return;
   }
   if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
@@ -215,6 +225,19 @@ const server=http.createServer((req,res)=>{
  assert.match(uploadRequests[0].contentType,/^multipart\/form-data; boundary=/);
  assert.ok(uploadRequests[0].bytes>8);
  assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1);
+
+ await page.locator('[data-prop="fit"]').selectOption('contain');
+ await page.getByRole('button',{name:'Backward',exact:true}).click();
+ await page.getByRole('button',{name:'Forward',exact:true}).click();
+ await page.getByRole('button',{name:'Save a copy…',exact:true}).click();
+ const copyDialog=page.locator('.drive-save-dialog');
+ await copyDialog.waitFor({state:'visible'});
+ await copyDialog.getByRole('textbox',{name:'File name'}).fill('Studio proof — team copy');
+ await copyDialog.getByRole('button',{name:'Save',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.deck-editor')&&!document.querySelector('.drive-save-dialog'));
+ assert.equal(copies.length,1);
+ assert.equal(copies[0].title,'Studio proof — team copy');
+ assert.equal(copies[0].deck.slides[0].elements.find(element=>element.id==='uploaded-image').fit,'contain');
 
  await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
  await page.locator('.deck-editor__text-input').fill('Edited plain text');
