@@ -145,6 +145,10 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.deepEqual(customerStage,{title:'Build the 10-slide story',meta:'rev 1 · deck story drafted',threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
  const legacyWriter=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');return {title:artifactDisplayTitle(artifact),query:scoutThreadFromArtifact(artifact).query};});
  assert.deepEqual(legacyWriter,{title:'Build the editable presentation',query:'Build the editable presentation'});
+ const legacyResearchCard=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');const card=scoutChatResearchNode({id:'legacy-run',mode:'artifacts',query:'Ship — the self-contained presenter deck — raw writer prompt',status:'complete',artifact});return card.querySelector('.scout-chat-research__title').textContent;});
+ assert.equal(legacyResearchCard,'artifact · Build the editable presentation');
+ const ordinaryResearchCard=await page.evaluate(()=>{const artifact={id:'ordinary-research',text:'Analysis',metadata:{title:'Pricing analysis',source:'scout_thread',status:'complete'}};const card=scoutChatResearchNode({id:'ordinary-run',mode:'research',query:'Pricing analysis',status:'complete',artifact});updateScoutChatResearchNode(card,'complete',artifact);return card.querySelector('.scout-chat-research__title').textContent;});
+ assert.equal(ordinaryResearchCard,'research · Pricing analysis');
  await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
 
  const savedGoalCopy=await page.evaluate(()=>{

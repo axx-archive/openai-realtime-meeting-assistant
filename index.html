@@ -69606,6 +69606,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+	  function scoutResearchThreadDisplayQuery(thread, artifact) {
+		return String(packagingStudioStagePresentationFor(artifact)?.label || thread?.query || '').trim() || 'Scout work thread'
+	  }
+
       function selectorEscape(value) {
         return window.CSS?.escape ? window.CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&')
       }
@@ -69655,7 +69659,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	    card.dataset.attentionReason = String(thread?.attentionReason || '')
         const mode = String(thread?.mode || 'research')
         card.dataset.threadMode = mode
-        const title = `${assistantModeTitle(mode)} · ${String(thread?.query || '').trim() || 'Scout work thread'}`
+		const title = `${assistantModeTitle(mode)} · ${scoutResearchThreadDisplayQuery(thread, thread?.artifact)}`
 
         card.innerHTML = `
           <div class="scout-chat-research__head">
@@ -69762,6 +69766,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (artifact) {
           card.__scoutArtifact = artifact
+		  const stagePresentation = packagingStudioStagePresentationFor(artifact)
+		  const title = stagePresentation && card.querySelector('.scout-chat-research__title')
+		  if (title) title.textContent = `${assistantModeTitle(card.dataset.threadMode)} · ${stagePresentation.label}`
         }
 
         if (pill) {
