@@ -178,6 +178,9 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 	// WRITE consumes the whole upstream: the objection ledger, the identity, the
 	// rival spines, the judges' steals, AND the human's chosen angle.
 	write := packagingStudioStage(t, def, "write")
+	if write.OutputContract != "deck_copy_v2" {
+		t.Fatalf("write contract=%q, want the exact deck_copy_v2 schema named in its instructions", write.OutputContract)
+	}
 	for _, need := range []string{"red_team", "identity", "compete_architects", "compete_judges", "compete_choice"} {
 		if !containsString(write.InputFrom, need) {
 			t.Errorf("write inputFrom=%v, missing %q — the grafted spine loses its source", write.InputFrom, need)
@@ -532,6 +535,39 @@ func TestPackagingStudioModelWrittenStagesUseBoundedOpenAIWriter(t *testing.T) {
 		if st == nil || st.Runner != agentRunnerOpenAIText {
 			t.Fatalf("stage %s runner=%+v, want bounded openai_text despite retired deployment pin", stageID, st)
 		}
+	}
+}
+
+func TestPackagingStudioCompanyContextCarriesAuthorizedSourceRefs(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	visible, _, err := app.createOSArtifactWithMetadata("artifacts", "Current company position", "The current operating thesis is evidence-first.", "AJ", map[string]string{
+		"type": artifactTypeMarkdown, "visibility": "organization", "ownerEmail": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateSibling, _, err := app.createOSArtifactWithMetadata("artifacts", "Tom private scratchpad", "PRIVATE SIBLING MUST NOT ENTER A SHARED DECK", "Tom", map[string]string{
+		"type": artifactTypeMarkdown, "visibility": "private", "ownerEmail": "tom@shareability.com", "requestedBy": "tom@shareability.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := newGoalEngine(app)
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, Objective: "Build the company deck", CreatedBy: "aj@shareability.com"}
+	companyContext := engine.processStageCompanyContext(plan)
+	if !strings.Contains(companyContext, "artifact_id="+visible.ID) || !strings.Contains(companyContext, "digest=") {
+		t.Fatalf("company context lost durable source identity:\n%s", companyContext)
+	}
+	if strings.Contains(companyContext, privateSibling.ID) || strings.Contains(companyContext, "PRIVATE SIBLING") {
+		t.Fatalf("company context leaked an unauthorized sibling:\n%s", companyContext)
+	}
+	evidence := packagingStudioStage(t, packagingStudioDefinition(), "evidence")
+	task, err := engine.processStageTaskAuthorized(context.Background(), plan, &goalSubtask{ID: "evidence"}, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task, "Company Brain context") || !strings.Contains(task, "artifact_id="+visible.ID) {
+		t.Fatalf("evidence stage did not receive source-linked company context:\n%s", task)
 	}
 }
 
@@ -1537,7 +1573,7 @@ func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
 	var writePrompts []string
 	inner := createOpenAITextResponse
 	createOpenAITextResponse = func(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
-		if strings.Contains(strings.ToLower(request.Instructions), "process stage synthesizer") {
+		if strings.Contains(strings.ToLower(request.Instructions), "process stage synthesizer") && strings.Contains(request.Instructions, `"Build the 10-slide story"`) {
 			promptsMu.Lock()
 			writePrompts = append(writePrompts, request.Input)
 			promptsMu.Unlock()

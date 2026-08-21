@@ -210,21 +210,21 @@ func studioHouseJudgeSeat() (ProcessPersona, bool) {
 func packagingStudioDefinition() ProcessDefinition {
 	return ProcessDefinition{
 		ID:          packagingStudioProcessID,
-		Version:     1,
+		Version:     2,
 		Title:       "Packaging Studio",
 		Description: "Turn source material into a reviewed, presenter-ready deck with a clear story, a coherent visual system, editable imagery, presenter notes, and customer checkpoints before delivery.",
 		Group:       toolGroupProcesses,
 		Authority:   toolAuthorityWorkspaceWrite,
-		// 14 stages + headroom; the free-form cap (6) never applies to an authored
-		// pipeline. Tokens/wall-clock raised for a long adversarial run.
-		Budgets: ProcessBudgets{MaxSubtasks: 16, MaxTokens: 48000, WallClock: 20 * time.Minute},
+		// V2 adds context, evidence, copy, and layout decisions while keeping the
+		// internal work out of the channel feed.
+		Budgets: ProcessBudgets{MaxSubtasks: 20, MaxTokens: 64000, WallClock: 25 * time.Minute},
 		Stages: []ProcessStage{
 			{
 				ID:    "intake",
 				Title: "Intake — source, audience, and visual direction",
 				Role:  processRoleHumanCheckpoint,
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?",
+					Question: "Should Scout use existing brand assets for this presentation, or develop the visual direction from the source material and company context?",
 					Options: []ProcessCheckpointOption{
 						{Label: "brand assets provided"},
 						{Label: "no brand assets — develop identity"},
@@ -232,10 +232,36 @@ func packagingStudioDefinition() ProcessDefinition {
 				},
 			},
 			{
+				ID:        "context_snapshot",
+				Title:     "Understand the request and company context",
+				Role:      processRoleSynthesizer,
+				InputFrom: []string{"intake"},
+				PromptBody: strings.Join([]string{
+					"Build deck_context_snapshot_v1 from the approved request, exact reply-thread/source packet, settled project decisions, and Company Brain context. The direct ask is authoritative.",
+					"Identify audience, decision the deck must unlock, desired response, known brand assets, explicit likes/dislikes, exact source language worth preserving, constraints, and unresolved facts. Do not ask a human when a safe reversible inference is available; label the inference.",
+					"Choose research_mode as none, internal, or external. External is warranted only when current facts, market claims, benchmarks, or credibility-critical numbers materially change the recommendation. Never invent a citation.",
+					"Return concise structured JSON with keys direct_ask, audience, decision, desired_response, context_used, settled_decisions, taste_signals, brand_assets, research_mode, research_questions, known_facts, uncertain_claims, and reversible_inferences.",
+				}, "\n"),
+				OutputContract: "deck_context_snapshot_v1",
+			},
+			{
+				ID:        "evidence",
+				Title:     "Build the evidence dossier",
+				Role:      processRoleWriter,
+				Mode:      "research",
+				InputFrom: []string{"intake", "context_snapshot"},
+				PromptBody: strings.Join([]string{
+					"Follow the context snapshot's research decision. If mode is none, ground the deck only in approved source material. If internal, use exact source and Company Brain facts. If external, investigate only the listed credibility-critical questions.",
+					"Produce evidence_dossier_v2. Every factual claim carries claim, source title, source URL or source artifact id, date when known, units, confidence, and status verified|internal|suggested. Suggested facts are never deck-ready and must not be rendered as truth.",
+					"Prefer primary and current sources when recency matters. Separate source fact from inference. End with deck_ready_claims and excluded_claims.",
+				}, "\n"),
+				OutputContract: "evidence_dossier_v2",
+			},
+			{
 				ID:        "red_team",
 				Title:     "Stress-test the brief",
 				Role:      processRolePanel,
-				InputFrom: []string{"intake"},
+				InputFrom: []string{"intake", "context_snapshot", "evidence"},
 				Personas:  studioRedTeamPersonas(),
 				PromptBody: strings.Join([]string{
 					"Attack the venture as the skeptical room it will actually face. " + studioSourceLanguageLaw,
@@ -248,12 +274,12 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID:        "identity",
 				Title:     "Build the visual system",
 				Role:      processRoleJudges,
-				InputFrom: []string{"intake", "red_team"},
+				InputFrom: []string{"intake", "context_snapshot", "evidence", "red_team"},
 				Personas:  studioIdentityJudges(),
 				PromptBody: strings.Join([]string{
-					"Read the INTAKE choice. TWO BRANCHES, pick by what INTAKE declared:",
-					"- If INTAKE says 'brand assets provided': DISCLOSE A SKIP — state in one short paragraph that a client identity exists, that the deck chassis recolors to it, and that no identity competition was run. Do not invent directions.",
-					"- If INTAKE says 'no brand assets — develop identity': run the competition. Propose 2-3 RIVAL visual directions (each a token set + a type pairing + a duotone treatment) described in copy for the SAME 2-3 sample slides, judge them, and pick a WINNER. State the winner's tokens explicitly — they feed WRITE and SHIP's deck chassis.",
+					"Read the context snapshot. When exact brand assets are present, respect them and extend only what is missing. Otherwise develop a distinctive identity born from the thesis, audience, company taste, and subject matter.",
+					"When INTAKE says 'brand assets provided', skip invention and record the extension rules. Otherwise audition 2-3 rival systems on the SAME sample slides: cover, evidence slide, and image-led slide. Define palette tokens, type pairing, spacing rhythm, graphic motif, image treatment, data-viz treatment, and what this system refuses to do.",
+					"Pick one winner. The cover must be powerful and simple: one idea, one focal hierarchy, no subtitle pile, no generic gradient-orb AI aesthetic. State the winning tokens explicitly for layout and rendering.",
 					studioSourceLanguageLaw,
 				}, "\n"),
 				OutputContract: "identity_direction_v1",
@@ -262,7 +288,7 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID:        "compete_architects",
 				Title:     "Explore narrative directions",
 				Role:      processRolePanel,
-				InputFrom: []string{"intake", "red_team"},
+				InputFrom: []string{"intake", "evidence", "red_team"},
 				Personas:  studioCompeteArchitects(),
 				PromptBody: strings.Join([]string{
 					"Each architect writes a COMPLETE, genuinely distinct narrative spine (the slide-by-slide argument) from their assigned angle. " + studioSourceLanguageLaw,
@@ -297,13 +323,13 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID:        "write",
 				Title:     "Build the 10-slide story",
 				Role:      processRoleSynthesizer,
-				InputFrom: []string{"intake", "red_team", "identity", "compete_architects", "compete_judges", "compete_choice"},
+				InputFrom: []string{"intake", "evidence", "red_team", "identity", "compete_architects", "compete_judges", "compete_choice"},
 				PromptBody: strings.Join([]string{
-					"Write the deck copy: the CHOSEN spine (compete_choice) as the backbone, with the judges' best_beats_to_steal grafted in, honoring the red_team's strengths_to_keep as a CONTRACT — every one survives.",
-					"Write in a spoken register. NO em dashes in any client-facing line (the engine's law sweep enforces this). Use the winning identity's tokens where the copy references look and feel.",
+					"Write structured deck_copy_v2: exactly one claim per slide with slide_id, purpose, headline, optional kicker, body, evidence, source label, speaker intent, and transition. Use only deck_ready_claims from the evidence dossier.",
+					"Use the chosen spine as the backbone and graft the judges' best beats while preserving strengths_to_keep. Write in a human spoken register. Remove AI tells: no throat-clearing, generic superlatives, slogan stacks, symmetrical filler, 'not just X but Y', or invented quotes. NO em dashes in client-facing copy. Keep normal slides under 45 visible words.",
 					studioSourceLanguageLaw,
 				}, "\n"),
-				OutputContract: "deck_copy_v1",
+				OutputContract: "deck_copy_v2",
 			},
 			{
 				ID:        "gate",
@@ -339,15 +365,20 @@ func packagingStudioDefinition() ProcessDefinition {
 				Role:      processRoleHumanCheckpoint,
 				InputFrom: []string{"write", "voice", "gate"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "The deck copy and presenter notes are ready. Approve this version, or send it back with any lines Scout should preserve exactly.",
-					// The labels tell the truth (the checkpoint-option teeth): a
-					// send-back mechanically re-queues WRITE with the founder's
-					// words as revision notes; ship-as-is proceeds.
+					Question: "The story and presenter notes are ready. Approve this direction, or send it back with the specific lines or ideas Scout must preserve exactly.",
 					Options: []ProcessCheckpointOption{
 						{Label: "ship as-is"},
 						{Label: "send back for changes", Action: processCheckpointActionRevise, Target: "write"},
 					},
 				},
+			},
+			{
+				ID:             "copy_edit",
+				Title:          "Make the copy sound human",
+				Role:           processRoleSynthesizer,
+				InputFrom:      []string{"write", "voice", "gate", "evidence", "founder_pass"},
+				PromptBody:     "Run the human-ear copy pass on every visible line and presenter transition. Preserve exact approved source language, remove AI cadence and empty abstraction, tighten headlines until each can be said aloud naturally, verify every number against the evidence dossier, and keep the narrative turn intact. Output the final locked deck_copy_v2, not commentary about editing it.",
+				OutputContract: "deck_copy_v2",
 			},
 			{
 				// The ART DIRECTOR. Reads the chosen narrative page-by-page + the
@@ -361,14 +392,14 @@ func packagingStudioDefinition() ProcessDefinition {
 				Title:     "Plan the visual beats",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
-				InputFrom: []string{"identity", "write", "voice", "founder_pass"},
+				InputFrom: []string{"identity", "write", "copy_edit", "voice", "founder_pass"},
 				PromptBody: strings.Join([]string{
 					"You are the ART DIRECTOR for this packaging deck. You decide WHERE a photographic image earns an emotional beat that drives consensus / talent / capital, and WHERE its absence is stronger. You direct imagery; you do NOT generate it and you do NOT write the deck.",
 					"Read the chosen narrative (WRITE + VOICE) page by page and the IDENTITY visual system. Imagery is EDITORIAL, never decoration: an image must do a job type and numbers cannot. If the story is carried by type and evidence, direct FEWER images or NONE — a deliberately typographic package is a valid, strong output.",
 					"Honor the deck chassis laws VERBATIM: at most ~5 full-bleeds in the whole deck; at most 6 images total; EXACTLY ONE crescendo image at the deck's peak (its treatment note names it, the deck renders it at --heat:.45); ledger / numbers ('bone') pages carry NO imagery; one FIG. per photo plate. The duotone/heat treatment is applied later in the deck CSS, so describe each shot in NATURAL color and real subjects — never a brand-color wash, never invented geography.",
 					"Name each shot's emotional temperature explicitly (drama, joy, awe, resolve, ...). When the PLACE is the claim, name the real place.",
 					"Output EXACTLY ONE fenced ```json block and NOTHING else, of this shape:",
-					"```json\n{\n  \"strategy\": \"one paragraph: where images earn a beat and where absence is stronger\",\n  \"visual_system\": \"the ONE visual-system brief, tied to the identity tokens, that rides every shot\",\n  \"shots\": [\n    { \"fig\": 1, \"slot\": \"bleed|plate\", \"subject\": \"what the image depicts (natural color, honest geography)\", \"composition\": \"framing, eyeline, scale\", \"temperature\": \"the NAMED emotional temperature\", \"treatment\": \"how it ties to the visual system; say if THIS is the one crescendo\", \"aspect\": \"landscape|portrait|square\", \"caption\": \"the FIG. caption line\", \"place\": \"real place by name when the place is the claim, else empty\", \"why\": \"the emotional job this image does\" }\n  ]\n}\n```",
+					"```json\n{\n  \"strategy\": \"one paragraph: where images earn a beat and where absence is stronger\",\n  \"visual_system\": \"the ONE visual-system brief, tied to the identity tokens, that rides every shot\",\n  \"shots\": [\n    { \"fig\": 1, \"slide_id\": \"the exact deck_copy_v2 slide_id\", \"slot\": \"bleed|plate\", \"subject\": \"what the image depicts (natural color, honest geography)\", \"composition\": \"framing, eyeline, scale, focal point, and negative space reserved for copy\", \"temperature\": \"the NAMED emotional temperature\", \"treatment\": \"how it ties to the visual system; say if THIS is the one crescendo\", \"aspect\": \"landscape|portrait|square\", \"caption\": \"the FIG. caption line\", \"place\": \"real place by name when the place is the claim, else empty\", \"why\": \"the emotional job this image does\" }\n  ]\n}\n```",
 					"For a typographic package return \"shots\": []. Every shot MUST carry a non-empty subject and temperature or it will be dropped.",
 				}, "\n"),
 				OutputContract: packagingStudioImageryDirectionContract,
@@ -387,13 +418,28 @@ func packagingStudioDefinition() ProcessDefinition {
 				Compile:    compilePackagingStudioImagery,
 			},
 			{
+				ID:        "layout_plan",
+				Title:     "Compose every slide",
+				Role:      processRoleWriter,
+				Mode:      "artifacts",
+				InputFrom: []string{"identity", "copy_edit", "voice", "evidence", "imagery_direction", "imagery_generate"},
+				PromptBody: strings.Join([]string{
+					"Create layout_plan_v2 only after copy is locked. For every slide_id select the composition best suited to its job: cover, section break, statement, evidence, comparison, numbers, timeline, quote, image-led, or close.",
+					"Specify a 1920x1080 scene: background, grid columns, element ids, element types, x/y/width/height/z, typography token, alignment, opacity, and intentional overlap. Tie each directed image to its exact slide_id, crop, focal point, and copy-safe negative space.",
+					"Use at least four composition types without novelty for novelty's sake. The cover is radically simple. Metrics become large-number compositions, evidence gets readable source furniture, and no text box may overflow or collide accidentally.",
+					"Return structured JSON plus a short visual QA checklist. Do not rewrite copy in the layout stage.",
+				}, "\n"),
+				OutputContract: "layout_plan_v2",
+			},
+			{
 				ID:        "ship_deck",
 				Title:     "Build the editable presentation",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
-				InputFrom: []string{"write", "voice", "founder_pass", "imagery_direction", "imagery_generate"},
+				InputFrom: []string{"copy_edit", "founder_pass", "voice", "evidence", "identity", "imagery_direction", "imagery_generate", "layout_plan"},
 				PromptBody: strings.Join([]string{
 					"Produce the deck as ONE self-contained HTML file: all CSS and JS inline, no external references — the ONLY URLs permitted anywhere are data: URIs (used for any embedded imagery). Start with <!doctype html>.",
+					"Treat copy_edit as the LOCKED copy and layout_plan as the LOCKED scene specification. Render them faithfully. Do not improvise a new title-plus-bullets layout and do not rewrite copy during rendering.",
 					"Build the deck on the REQUIRED print chassis. Include this exact <style> block verbatim in <head>, lay every slide out as a <section class=\"pg\">…</section> inside a single <div id=\"stage\">…</div>, and give the FIRST slide the extra class \"on\". NEVER remove or weaken the @page or @media print rules — they are what make the exported PDF contain EVERY slide instead of only the first one:",
 					"<style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>",
 					"Layer all brand aesthetics (colors, type, furniture) ON TOP of this chassis; do not fight its geometry (the 1920x1080 #stage, the .pg slide model). Treat every page as a designed 1920×1080 composition, never as a document paragraph parked in the upper-left.",
@@ -413,7 +459,7 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID:        "ship_compile",
 				Title:     "Assemble the presentation package",
 				Role:      processRoleCompile,
-				InputFrom: []string{"red_team", "write", "gate", "voice", "founder_pass", "ship_deck"},
+				InputFrom: []string{"red_team", "write", "copy_edit", "gate", "voice", "founder_pass", "ship_deck"},
 				// Documentation only — compile is authored Go (below), never a
 				// model call. The flatten law stays server-owned: the compiler
 				// stamps paperKit and serverRenderKindForArtifact picks the kind.
@@ -438,12 +484,9 @@ func packagingStudioDefinition() ProcessDefinition {
 				Role:      processRoleHumanCheckpoint,
 				InputFrom: []string{"ship_compile", "slide_jury", "ship_deck"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "The deck, presenter notes, supporting analysis, and review findings are ready. Approve this version, send the deck back for changes, or keep it on hold.",
+					Question: "The editable presentation is ready in this channel. Approve external sharing, request a rebuild, or keep it internal.",
 					Options: []ProcessCheckpointOption{
 						{Label: "approve the ship"},
-						// The first live run proved a bad deck can reach this park
-						// with no way back short of holding forever: send-back
-						// re-queues ship_deck and cascade re-runs compile + jury.
 						{Label: "send back — rebuild the deck", Action: processCheckpointActionRevise, Target: "ship_deck"},
 						{Label: "hold the package", Action: processCheckpointActionHold},
 					},
@@ -490,7 +533,7 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	// images, so this is the one place the bytes can reach the self-contained
 	// deck. A typographic package (no imagery) passes through untouched.
 	deckHTML, imageryNote := injectStudioDeckImagery(app, plan, deckHTML)
-	deckCopy := stageBody("write")
+	deckCopy := firstNonEmptyString(stageBody("copy_edit"), stageBody("write"))
 	if deckCopy == "" {
 		return "", nil, fmt.Errorf("the write stage left no gated copy — The Wall cannot compile")
 	}
@@ -593,6 +636,7 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 // imageryDirectionShot is one entry the art director emits in its JSON block.
 type imageryDirectionShot struct {
 	Fig         int    `json:"fig"`
+	SlideID     string `json:"slide_id"`
 	Slot        string `json:"slot"`
 	Subject     string `json:"subject"`
 	Composition string `json:"composition"`

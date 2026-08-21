@@ -110,8 +110,9 @@ func TestIndexManifestPresentRouting(t *testing.T) {
 		"function openArtifactStage(artifactId, fallbackTitle, options)",
 		"{ present: true }",
 		"autoPresent: Boolean(options?.present)",
-		"if (options.autoPresent) present()",
-		"openDeckPresentation(artifactId, title, access)",
+		"let autoPresentPending = Boolean(options.autoPresent)",
+		"if (autoPresentPending)",
+		"openDeckPresentation(artifactId, title, deckAccess)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing manifest present-routing hook %q", want)

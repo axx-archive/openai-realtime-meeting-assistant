@@ -233,3 +233,19 @@ func TestArtifactRenderMintRequiresReadContentAndExport(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeDeckViewerHidesStageUntilFirstFit(t *testing.T) {
+	document := injectArtifactDeckNavigation(`<!doctype html><html><body><div id="stage"><section class="pg on"></section></div></body></html>`)
+	for _, want := range []string{
+		`#stage{visibility:hidden}`,
+		`html[data-deck-ready="true"] #stage{visibility:visible}`,
+		`document.documentElement.dataset.deckReady='true'`,
+	} {
+		if !strings.Contains(document, want) {
+			t.Fatalf("viewer document missing no-flash contract %q: %s", want, document)
+		}
+	}
+	if strings.Index(document, `stage.style.transform='scale('`) > strings.Index(document, `document.documentElement.dataset.deckReady='true'`) {
+		t.Fatalf("viewer reveals the stage before applying the first fit: %s", document)
+	}
+}

@@ -136,13 +136,12 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    document.body.appendChild(node);
    const artifact=artifactEntries.find(entry=>entry.id==='stage-write');
    return {
-     title:document.querySelector('.runlog__title')?.textContent,
-     meta:document.querySelector('.runlog__meta')?.textContent,
+     runlogs:document.querySelectorAll('.runlog').length,
      threadQuery:scoutThreadFromArtifact(artifact).query,
      artifactTitle:artifactDisplayTitle(artifact)
    };
  });
- assert.deepEqual(customerStage,{title:'Build the 10-slide story',meta:'rev 1 · deck story drafted',threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
+ assert.deepEqual(customerStage,{runlogs:0,threadQuery:'Build the 10-slide story',artifactTitle:'Build the 10-slide story'});
  const legacyWriter=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');return {title:artifactDisplayTitle(artifact),query:scoutThreadFromArtifact(artifact).query};});
  assert.deepEqual(legacyWriter,{title:'Build the editable presentation',query:'Build the editable presentation'});
  const legacyResearchCard=await page.evaluate(()=>{const artifact=artifactEntries.find(entry=>entry.id==='legacy-writer-stage');const card=scoutChatResearchNode({id:'legacy-run',mode:'artifacts',query:'Ship — the self-contained presenter deck — raw writer prompt',status:'complete',artifact});return card.querySelector('.scout-chat-research__title').textContent;});
@@ -164,9 +163,36 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
 	  return {research:scoutChatThread.querySelectorAll('.scout-chat-research').length,runlogs:scoutChatThread.querySelectorAll('.runlog').length,text:scoutChatThread.textContent};
 	});
 	assert.equal(duplicateProjection.research,0,JSON.stringify(duplicateProjection));
-	assert.equal(duplicateProjection.runlogs,1,JSON.stringify(duplicateProjection));
+	assert.equal(duplicateProjection.runlogs,0,JSON.stringify(duplicateProjection));
 	assert.doesNotMatch(duplicateProjection.text,/railwrap/);
  await page.evaluate(()=>{document.querySelector('.runlog')?.remove();runlogOpen=null;});
+
+ const quietChannel=await page.evaluate(parent=>{
+   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:parent.id,status:'approval_required',query:'Like A Farmer presentation'}};
+   const card=scoutDesktopGoalWorkCardNode(message,parent);
+   document.body.appendChild(card);
+   return {
+     title:card.querySelector('.scout-chat-work-card__title')?.textContent,
+     eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,
+     runlogs:document.querySelectorAll('.runlog').length,
+     progressbars:card.querySelectorAll('[role="progressbar"]').length
+   };
+ },parent);
+ assert.deepEqual(quietChannel,{title:'Packaging Studio',eyebrow:'Presentation · Needs input',runlogs:0,progressbars:0});
+ await page.locator('.scout-chat-work-card--presentation').getByRole('button',{name:/View .* activity/}).click();
+ const activityDrawer=page.locator('#chatContextRail');
+ await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false);
+ assert.equal(await activityDrawer.locator('.chat-context-section-title').filter({hasText:'Presentation activity'}).count(),1);
+ assert.ok(await activityDrawer.locator('.chat-context-log-entry').count()>=2);
+ const activityState=await activityDrawer.locator('.chat-context-log-entry').evaluateAll(nodes=>nodes.map(node=>({text:node.textContent,actionable:node.classList.contains('is-actionable')})));
+ assert.ok(activityState.some(row=>row.actionable&&row.text.includes('Choose the strongest story')),JSON.stringify(activityState));
+ const juryActivity=activityDrawer.locator('.chat-context-log-entry.is-actionable').first();
+ await juryActivity.evaluate(node=>node.click());
+ await page.locator('.artifact-stage').waitFor({state:'visible'});
+ assert.match(await page.locator('.artifact-stage__kicker').textContent(),/Choose the strongest story/);
+ await page.locator('.artifact-stage__close').click();
+ await page.locator('#chatContextClose').evaluate(node=>node.click());
+ await page.locator('.scout-chat-work-card--presentation').evaluate(node=>node.remove());
 
  const savedGoalCopy=await page.evaluate(()=>{
    const terminal=document.createElement('div');

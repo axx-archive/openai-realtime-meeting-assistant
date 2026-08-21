@@ -11187,6 +11187,41 @@
         min-width: 0;
       }
 
+      .manifest-card--deck-first {
+        max-width: 920px;
+        padding: 0;
+        overflow: hidden;
+        border: 0;
+        background: transparent;
+      }
+
+      .manifest-card--deck-first .manifest-card__deck-result {
+        margin: 0;
+      }
+
+      .manifest-card__supporting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 48px;
+        margin-top: 8px;
+        padding: 0 4px;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
+      .manifest-card__supporting-action {
+        min-height: 40px;
+        padding: 0 13px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+      }
+
       .manifest-card__head {
         display: flex;
         align-items: baseline;
@@ -12138,6 +12173,14 @@
           0 8px 24px rgba(0, 0, 0, 0.08),
           0 1px 2px rgba(0, 0, 0, 0.06);
         transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        background: #08080a;
+      }
+      .chat-deck::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background: linear-gradient(118deg, #101216 0%, #171a20 48%, #101216 100%);
       }
       .chat-deck:hover {
         box-shadow:
@@ -12156,12 +12199,20 @@
         background: #000;
         z-index: 0;
         overflow: hidden;
+        opacity: 0;
+        transition: opacity 120ms var(--ease-out);
+      }
+      .chat-deck__frame.is-ready {
+        opacity: 1;
       }
       .chat-deck__frame:fullscreen {
         width: 100vw;
         height: 100vh;
         background: #000;
         border-radius: 0;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .chat-deck__frame { transition: none; }
       }
       /* Glass chrome overlay at bottom — title + controls */
       .chat-deck__chrome {
@@ -12214,6 +12265,18 @@
       }
       .chat-deck__btn:active {
         transform: scale(var(--press-scale));
+      }
+      .chat-deck__btn[disabled] {
+        opacity: .52;
+        pointer-events: none;
+      }
+      .chat-deck[data-preview-state="loading"] .chat-deck__btn[disabled],
+      .chat-deck[data-preview-state="error"] .chat-deck__btn--secondary[disabled] {
+        visibility: hidden;
+      }
+      .chat-deck__btn[data-deck-action="retry"] {
+        visibility: visible;
+        pointer-events: auto;
       }
       .chat-deck__btn--primary {
         background: rgba(255, 255, 255, 0.95);
@@ -12813,6 +12876,130 @@
         .deck-editor__toolbar-right [data-action="present"] span {
           display: none;
         }
+      }
+
+      /* ---------- Document Studio ---------- */
+      .document-editor {
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        display: grid;
+        grid-template-rows: 58px minmax(0, 1fr);
+        background: var(--bg-app);
+        animation: deck-editor-in var(--dur-slow) var(--ease);
+      }
+      .document-editor__toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+        align-items: center;
+        gap: 12px;
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--line-1);
+        background: var(--surface-1);
+      }
+      .document-editor__group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .document-editor__group--right { justify-content: flex-end; }
+      .document-editor__title {
+        min-width: 0;
+        max-width: 360px;
+        height: 36px;
+        padding: 0 10px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-1);
+        font: 600 14px/1 var(--font-sans);
+        text-overflow: ellipsis;
+      }
+      .document-editor__title:focus { outline: 0; border-color: var(--line-2); background: var(--surface-2); }
+      .document-editor__main { min-height: 0; display: grid; grid-template-columns: 228px minmax(0, 1fr) 260px; }
+      .document-editor__outline,
+      .document-editor__inspector {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 18px 14px;
+        background: var(--surface-1);
+      }
+      .document-editor__outline { border-right: 1px solid var(--line-1); }
+      .document-editor__inspector { border-left: 1px solid var(--line-1); }
+      .document-editor__side-label {
+        display: block;
+        margin: 0 0 11px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .document-editor__outline-list { display: grid; gap: 2px; }
+      .document-editor__outline-item {
+        min-height: 34px;
+        padding: 7px 9px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .document-editor__outline-item:hover { background: var(--surface-3); color: var(--text-1); }
+      .document-editor__workspace { min-width: 0; min-height: 0; overflow-y: auto; padding: 42px 5vw 80px; background: var(--surface-3); }
+      .document-editor__paper {
+        width: min(820px, 100%);
+        min-height: calc(100vh - 180px);
+        margin: 0 auto;
+        padding: clamp(42px, 7vw, 84px) clamp(34px, 8vw, 92px);
+        border-radius: 6px;
+        background: var(--surface-1);
+        box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 18px 60px rgba(0,0,0,.09);
+      }
+      .document-editor__source {
+        width: 100%;
+        min-height: calc(100vh - 350px);
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: 400 17px/1.7 var(--font-sans);
+        letter-spacing: -.006em;
+        tab-size: 2;
+      }
+      .document-editor__preview { display: grid; gap: 16px; }
+      .document-editor__preview[hidden], .document-editor__source[hidden] { display: none; }
+      .document-editor__meta { display: grid; gap: 12px; color: var(--text-2); font: var(--type-caption); }
+      .document-editor__meta strong { display: block; color: var(--text-1); font: var(--type-caption-medium); }
+      .document-editor__status[data-state="error"] { color: var(--danger); }
+      .document-editor__status[data-state="saved"] { color: var(--live); }
+      @media (max-width: 900px) {
+        .document-editor__toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+        .document-editor__toolbar > .document-editor__group:nth-child(2) { grid-row: 2; grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; }
+        .document-editor { grid-template-rows: auto minmax(0, 1fr); }
+        .document-editor__main { grid-template-columns: 160px minmax(0, 1fr); }
+        .document-editor__inspector { display: none; }
+      }
+      @media (max-width: 640px) {
+        .document-editor__outline { display: none; }
+        .document-editor__main { grid-template-columns: 1fr; }
+        .document-editor__toolbar { padding-inline: 8px; }
+        .document-editor__group--right {
+          position: fixed;
+          right: 12px;
+          bottom: max(12px, env(safe-area-inset-bottom));
+          z-index: 2;
+          gap: 4px;
+          padding: 6px;
+          border: 1px solid var(--line-1);
+          border-radius: 12px;
+          background: var(--surface-1);
+          box-shadow: var(--shadow-2);
+        }
+        .document-editor__toolbar [data-doc-action="save-copy"] { font-size: 0; padding-inline: 10px; }
+        .document-editor__toolbar [data-doc-action="save-copy"]::after { content: 'Copy'; font-size: 12px; }
+        .document-editor__workspace { padding: 16px 10px 64px; }
+        .document-editor__paper { padding: 34px 24px; }
       }
 
       .deck-presenter {
@@ -14803,6 +14990,17 @@
           background: var(--text-1);
         }
 
+        #chatTool .chat-context-log-entry.is-actionable {
+          cursor: pointer;
+          border-radius: 10px;
+        }
+
+        #chatTool .chat-context-log-entry.is-actionable:hover .chat-context-log-entry__title,
+        #chatTool .chat-context-log-entry.is-actionable:focus-visible .chat-context-log-entry__title {
+          text-decoration: underline;
+          text-underline-offset: 3px;
+        }
+
         #chatTool .chat-context-log-entry__copy {
           min-width: 0;
           display: grid;
@@ -16422,7 +16620,39 @@
 
         #chatTool .scout-chat-work-card__open:hover { background: var(--surface-3); }
         #chatTool .scout-chat-work-card__open:active { transform: scale(0.96); }
-        #chatTool .scout-chat-work-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      #chatTool .scout-chat-work-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+      #chatTool .scout-chat-work-card--presentation {
+        border-radius: var(--r-full);
+        padding-block: 9px;
+        box-shadow: none;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__title,
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project {
+        display: none;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__copy {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        column-gap: 10px;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__eyebrow {
+        color: var(--text-1);
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__progress {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
 
         #chatTool .scout-chat-destination {
           align-self: center;
@@ -31086,7 +31316,7 @@
         /* Artifact Stage and Content Studio are body-owned overlays at 1200.
            The live call is an explicit peer in that composite, so it must
            remain both painted and hit-testable above either surface. */
-        z-index: 1300;
+        z-index: 10000;
         border: 0;
         border-radius: 22px;
         box-shadow:
@@ -31229,7 +31459,7 @@
           right: 12px;
           top: calc(env(safe-area-inset-top, 0px) + 58px);
           bottom: auto;
-          z-index: 1300;
+          z-index: 10000;
         }
 
         #pipMeeting[hidden] { display: none; }
@@ -42459,7 +42689,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // beside #appShell, so it remains operable without reopening background
       // navigation, composer, or destructive controls.
       function syncStudioBackgroundInert() {
-        setContentStudioBackgroundInert(Boolean(contentStudioDrawerNode || artifactStageNode))
+        setContentStudioBackgroundInert(Boolean(contentStudioDrawerNode || artifactStageNode || activeDeckEditor || activeDocumentEditor || activeDeckPresenter))
       }
 
       function closeContentStudio() {
@@ -42687,18 +42917,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // should become the title of a channel card or artifact. Keeping this
       // map at the presentation boundary also cleans up already-saved runs.
       const packagingStudioStagePresentation = {
-        intake: { label: 'Source and visual direction', note: 'direction selected' },
+        intake: { label: 'Choose the visual direction', note: 'visual direction confirmed' },
+        context_snapshot: { label: 'Understand the request and company context', note: 'context assembled' },
+        evidence: { label: 'Build the evidence dossier', note: 'claims checked' },
         red_team: { label: 'Stress-test the brief', note: 'brief reviewed' },
         identity: { label: 'Build the visual system', note: 'visual direction selected' },
         compete_architects: { label: 'Explore narrative directions', note: 'three story directions developed' },
         compete_judges: { label: 'Choose the strongest story', note: 'story directions compared' },
-        compete_choice: { label: 'Narrative direction', note: 'direction selected' },
+        compete_choice: { label: 'Lock the narrative direction', note: 'story locked' },
         write: { label: 'Build the 10-slide story', note: 'deck story drafted' },
         gate: { label: 'Check the story against the brief', note: 'content review complete' },
         voice: { label: 'Add presenter notes', note: 'presenter notes ready' },
-        founder_pass: { label: 'Final content review', note: 'content approved' },
+        founder_pass: { label: 'Make the copy sound human', note: 'copy locked' },
+        copy_edit: { label: 'Make the copy sound human', note: 'copy locked' },
         imagery_direction: { label: 'Plan the visual beats', note: 'image plan ready' },
         imagery_generate: { label: 'Generate the selected imagery', note: 'imagery ready' },
+        layout_plan: { label: 'Compose every slide', note: 'layout locked' },
         ship_deck: { label: 'Build the editable presentation', note: 'presentation built' },
         ship_compile: { label: 'Assemble the presentation package', note: 'package assembled' },
         slide_jury: { label: 'Review every rendered slide', note: 'visual review complete' },
@@ -42709,7 +42943,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         intake: 'Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?',
         compete_choice: 'Scout evaluated three narrative directions. Which one should shape the deck?',
         founder_pass: 'The deck copy and presenter notes are ready. Approve this version, or send it back with any lines Scout should preserve exactly.',
-        ship_approval: 'The deck, presenter notes, supporting analysis, and review findings are ready. Approve this version, request changes, or keep it on hold.'
+        ship_approval: 'Your editable presentation is ready. Approve external sharing, request a rebuild, or keep it internal.'
       }
 
       function packagingStudioSlideJuryState(plan) {
@@ -43324,6 +43558,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // itself onto Files — it offers a Save-to-Files action from the stage.
         const saveToFilesControl = artifactSaveToFilesControl(entry)
         if (saveToFilesControl) headActions.appendChild(saveToFilesControl)
+	        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim()) {
+	          const editDocument = bfEl('button', 'artifact-stage__pdf-btn', 'Edit document')
+	          editDocument.type = 'button'
+	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry }))
+	          headActions.appendChild(editDocument)
+	        }
         const pdfAssets = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
         if (deckContext) {
@@ -43991,7 +44231,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // Edit mode lives alongside Present mode. Provides move/resize text,
       // drop images, z-order (front/back), and standard object controls.
       // REAL editing of slide content — not just overlay stickers.
-      let activeDeckEditor = null
+      var activeDeckEditor = null
+      var activeDocumentEditor = null
 
       function openDeckEditor(htmlContent, title, options = {}) {
         if (activeDeckEditor) {
@@ -44747,6 +44988,271 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
       }
 
+      function closeDocumentStudio() {
+        if (!activeDocumentEditor) return
+        activeDocumentEditor.cleanup?.()
+        activeDocumentEditor.element?.remove()
+        activeDocumentEditor = null
+        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
+      }
+
+      // Native Document Studio keeps Markdown as the durable source while
+      // providing a focused full-screen writing surface, outline navigation,
+      // formatting controls, preview, CAS saves, and named Files copies.
+      async function openDocumentStudio(artifactId, title, options = {}) {
+        artifactId = String(artifactId || '').trim()
+        if (!artifactId) return
+        let payload
+        try {
+          const response = await fetch(`/artifacts/document?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+          payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload?.document) throw new Error(payload?.error || 'Document Studio is unavailable')
+        } catch (error) {
+          showToast({ text: error?.message || 'Document Studio is unavailable', kind: 'error' })
+          return
+        }
+        if (payload.canWrite !== true) {
+          showToast({ text: 'This document is view-only.', kind: 'note' })
+          return
+        }
+        if (activeDocumentEditor) closeDocumentStudio()
+
+        const state = {
+          artifactId,
+          version: Number(payload?.artifact?.version || 1),
+          title: String(payload?.artifact?.title || title || 'Untitled document'),
+          markdown: String(payload.document.markdown || ''),
+          dirty: false,
+          saving: false,
+          previewing: false,
+          savedToFiles: payload?.artifact?.savedToFiles === true
+        }
+        const editor = document.createElement('section')
+        editor.className = 'document-editor'
+        editor.setAttribute('role', 'dialog')
+        editor.setAttribute('aria-modal', 'true')
+        editor.setAttribute('aria-label', `Edit ${state.title}`)
+        editor.innerHTML = `
+          <header class="document-editor__toolbar">
+            <div class="document-editor__group">
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="close" aria-label="Close Document Studio">×</button>
+              <input class="document-editor__title" data-doc-title maxlength="160" aria-label="Document name">
+            </div>
+            <div class="document-editor__group" aria-label="Document formatting">
+              <button type="button" class="deck-editor__btn" data-doc-action="undo">Undo</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="redo">Redo</button>
+              <span class="deck-editor__divider"></span>
+              <button type="button" class="deck-editor__btn" data-doc-action="heading">Heading</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="bold"><strong>B</strong></button>
+              <button type="button" class="deck-editor__btn" data-doc-action="italic"><em>I</em></button>
+              <button type="button" class="deck-editor__btn" data-doc-action="bullet">List</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="quote">Quote</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="link">Link</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="preview" aria-pressed="false">Preview</button>
+            </div>
+            <div class="document-editor__group document-editor__group--right">
+              <button type="button" class="deck-editor__btn" data-doc-action="save-copy" aria-label="Save a copy…">Save a copy…</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-doc-action="save">Save</button>
+            </div>
+          </header>
+          <div class="document-editor__main">
+            <aside class="document-editor__outline"><span class="document-editor__side-label">Outline</span><nav class="document-editor__outline-list" data-doc-outline></nav></aside>
+            <main class="document-editor__workspace"><article class="document-editor__paper"><textarea class="document-editor__source" data-doc-source spellcheck="true" aria-label="Document body"></textarea><div class="document-editor__preview artifact-stage__read" data-doc-preview hidden></div></article></main>
+            <aside class="document-editor__inspector"><span class="document-editor__side-label">Document</span><div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div></aside>
+          </div>`
+        const source = editor.querySelector('[data-doc-source]')
+        const titleInput = editor.querySelector('[data-doc-title]')
+        const outline = editor.querySelector('[data-doc-outline]')
+        const preview = editor.querySelector('[data-doc-preview]')
+        const status = editor.querySelector('[data-doc-status]')
+        const saveButton = editor.querySelector('[data-doc-action="save"]')
+        const copyButton = editor.querySelector('[data-doc-action="save-copy"]')
+        source.value = state.markdown
+        titleInput.value = state.title
+
+        function setStatus(text, tone = '') {
+          status.textContent = text
+          status.dataset.state = tone
+        }
+        function updateDocumentChrome() {
+          const body = source.value
+          editor.querySelector('[data-doc-words]').textContent = `${(body.trim().match(/\S+/g) || []).length} words`
+          editor.querySelector('[data-doc-chars]').textContent = `${body.length} characters`
+          outline.replaceChildren()
+          const headings = Array.from(body.matchAll(/^(#{1,3})\s+(.+)$/gm))
+          headings.forEach((match, index) => {
+            const button = bfEl('button', 'document-editor__outline-item', match[2].replace(/[*_`]/g, '').trim())
+            button.type = 'button'
+            button.style.paddingLeft = `${9 + (match[1].length - 1) * 12}px`
+            button.addEventListener('click', () => {
+              state.previewing = false
+              syncMode()
+              source.focus()
+              source.setSelectionRange(match.index, match.index + match[0].length)
+              source.scrollTop = Math.max(0, source.scrollHeight * (index / Math.max(1, headings.length)) - source.clientHeight / 3)
+            })
+            outline.appendChild(button)
+          })
+          if (!outline.childElementCount) outline.appendChild(bfEl('span', 'document-editor__outline-item', 'Add headings to build an outline'))
+        }
+        function syncMode() {
+          source.hidden = state.previewing
+          preview.hidden = !state.previewing
+          const toggle = editor.querySelector('[data-doc-action="preview"]')
+          toggle.setAttribute('aria-pressed', String(state.previewing))
+          toggle.textContent = state.previewing ? 'Edit' : 'Preview'
+          if (state.previewing) {
+            renderArtifactRead(preview, { id: state.artifactId, text: source.value, metadata: { title: titleInput.value, type: 'markdown' } }, { forceSafe: true })
+          }
+        }
+        function markDirty() {
+          state.dirty = true
+          setStatus('Unsaved changes')
+          updateDocumentChrome()
+          if (state.previewing) syncMode()
+        }
+        function requestDocumentClose() {
+          if (state.dirty && !window.confirm('Discard unsaved changes?')) return
+          closeDocumentStudio()
+        }
+        function replaceSelection(prefix, suffix = prefix, placeholder = '') {
+          const start = source.selectionStart
+          const end = source.selectionEnd
+          const selected = source.value.slice(start, end) || placeholder
+          source.setRangeText(`${prefix}${selected}${suffix}`, start, end, 'end')
+          source.focus()
+          markDirty()
+        }
+        function prefixLines(prefix) {
+          const start = source.value.lastIndexOf('\n', Math.max(0, source.selectionStart - 1)) + 1
+          const endLine = source.value.indexOf('\n', source.selectionEnd)
+          const end = endLine < 0 ? source.value.length : endLine
+          const selected = source.value.slice(start, end).split('\n').map(line => `${prefix}${line}`).join('\n')
+          source.setRangeText(selected, start, end, 'select')
+          source.focus()
+          markDirty()
+        }
+        async function saveToFiles(destination) {
+          const response = await fetch('/assistant/files/save', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artifactId: state.artifactId, fileName: destination.fileName, folderId: destination.folderId })
+          })
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || !result?.file) throw new Error(result?.error || 'Document saved, but could not be added to Files.')
+          state.savedToFiles = true
+          if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+        }
+        async function saveDocument(closeAfter = false) {
+          if (state.saving) return false
+          const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(titleInput.value.trim() || state.title)
+          if (!state.savedToFiles && !destination) return false
+          state.saving = true
+          saveButton.disabled = true
+          saveButton.textContent = 'Saving…'
+          try {
+            const response = await fetch('/artifacts/document', {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: titleInput.value.trim(), document: { schemaVersion: 1, markdown: source.value } })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.document) throw new Error(result?.error || 'Document save failed')
+            state.version = Number(result?.artifact?.version || state.version + 1)
+            state.markdown = String(result.document.markdown || '')
+            state.title = String(result?.artifact?.title || titleInput.value)
+            state.dirty = false
+            const entry = { ...(options.entry || {}), id: state.artifactId, text: state.markdown, metadata: { ...(options.entry?.metadata || {}), title: state.title, type: 'markdown', artifactVersion: String(state.version) } }
+            if (destination) { await saveToFiles(destination); entry.metadata.savedToFiles = 'true' }
+            addArtifactEntry(entry, { select: false })
+            setStatus('Saved', 'saved')
+            showToast({ text: 'Document saved', kind: 'done' })
+            if (closeAfter) closeDocumentStudio()
+            return true
+          } catch (error) {
+            setStatus(error?.message || 'Document save failed', 'error')
+            showToast({ text: status.textContent, kind: 'error' })
+            return false
+          } finally {
+            state.saving = false
+            if (saveButton.isConnected) { saveButton.disabled = false; saveButton.textContent = 'Save' }
+          }
+        }
+        async function saveCopy() {
+          if (state.saving) return false
+          const destination = await chooseDriveSaveOptions(`${titleInput.value.trim() || state.title} copy`)
+          if (!destination) return false
+          state.saving = true
+          copyButton.disabled = true
+          copyButton.textContent = 'Saving copy…'
+          try {
+            const response = await fetch('/artifacts/document/copies', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, document: { schemaVersion: 1, markdown: source.value } })
+            })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.artifact || !result?.file) throw new Error(result?.error || 'Document copy could not be saved')
+            addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'true', status: 'complete' } }, { select: false })
+            if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+            setStatus(`Saved “${destination.fileName}” to Files`, 'saved')
+            return true
+          } catch (error) {
+            setStatus(error?.message || 'Document copy could not be saved', 'error')
+            return false
+          } finally {
+            state.saving = false
+            if (copyButton.isConnected) { copyButton.disabled = false; copyButton.textContent = 'Save a copy…' }
+          }
+        }
+        async function reloadDocument() {
+          const response = await fetch(`/artifacts/document?id=${encodeURIComponent(state.artifactId)}`, { cache: 'no-store' })
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || !result?.document) { setStatus(result?.error || 'Reload failed', 'error'); return }
+          state.version = Number(result.artifact.version || state.version)
+          state.markdown = String(result.document.markdown || '')
+          state.title = String(result.artifact.title || state.title)
+          source.value = state.markdown
+          titleInput.value = state.title
+          state.dirty = false
+          updateDocumentChrome()
+          syncMode()
+          setStatus('Current version loaded', 'saved')
+        }
+        editor.addEventListener('click', event => {
+          const action = event.target.closest('[data-doc-action]')?.dataset.docAction
+          if (!action) return
+          if (action === 'close') requestDocumentClose()
+          else if (action === 'save') saveDocument(false)
+          else if (action === 'save-copy') saveCopy()
+          else if (action === 'reload') reloadDocument()
+          else if (action === 'preview') { state.previewing = !state.previewing; syncMode() }
+          else if (action === 'undo' || action === 'redo') { source.focus(); document.execCommand(action); markDirty() }
+          else if (action === 'heading') prefixLines('## ')
+          else if (action === 'bold') replaceSelection('**', '**', 'bold text')
+          else if (action === 'italic') replaceSelection('_', '_', 'emphasis')
+          else if (action === 'bullet') prefixLines('- ')
+          else if (action === 'quote') prefixLines('> ')
+          else if (action === 'link') replaceSelection('[', '](https://)', 'link text')
+        })
+        source.addEventListener('input', markDirty)
+        titleInput.addEventListener('input', markDirty)
+        const keydown = event => {
+          if (event.key === 'Escape') requestDocumentClose()
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDocument(false) }
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); replaceSelection('**', '**', 'bold text') }
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') { event.preventDefault(); replaceSelection('_', '_', 'emphasis') }
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); replaceSelection('[', '](https://)', 'link text') }
+        }
+        document.addEventListener('keydown', keydown)
+        activeDocumentEditor = { element: editor, cleanup: () => document.removeEventListener('keydown', keydown) }
+        document.body.appendChild(editor)
+        syncStudioBackgroundInert()
+        renderPipMeeting()
+        callPipSyncOpenSurfaceContracts()
+        updateDocumentChrome()
+        source.focus()
+      }
+
       // Structured Deck Studio. The server owns legacy-HTML import and HTML
       // compilation; this surface edits only normalized inert scene data.
       async function openDeckStudio(artifactId, title, options = {}) {
@@ -45489,7 +45995,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         activeDeckEditor = null
       }
 
-      let activeDeckPresenter = null
+      var activeDeckPresenter = null
 
       async function openDeckPresentation(artifactId, title, initialPayload = null) {
         artifactId = String(artifactId || '').trim()
@@ -45686,11 +46192,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         deck.setAttribute('data-deck-artifact', 'true')
 
         // Sandboxed iframe — fills the entire cover as the hero visual
-        const frame = document.createElement('iframe')
-        frame.className = 'chat-deck__frame'
-        frame.setAttribute('sandbox', 'allow-scripts')
-        frame.setAttribute('allowfullscreen', '')
-        frame.title = 'deck preview'
+        const createPreviewFrame = () => {
+          const node = document.createElement('iframe')
+          node.className = 'chat-deck__frame'
+          node.setAttribute('sandbox', 'allow-scripts')
+          node.setAttribute('allowfullscreen', '')
+          node.title = 'deck preview'
+          return node
+        }
+        let frame = createPreviewFrame()
 
         // Glass chrome overlay at bottom — title + action buttons
         const chrome = document.createElement('div')
@@ -45749,7 +46259,42 @@ Wrap the entire export in one code block. After the code block, say whether the 
         container.appendChild(deck)
 
         const artifactId = String(entry?.id || '').trim()
-        ;(async () => {
+        let deckAccess = null
+        let loading = false
+        let autoPresentPending = Boolean(options.autoPresent)
+        let previewAttempt = 0
+
+        const present = async () => {
+          if (presentBtn.dataset.deckAction === 'retry') {
+            await loadPreview()
+            return
+          }
+          if (await openDeckPresentation(artifactId, title, deckAccess)) return
+          if (frame.requestFullscreen) {
+            frame.requestFullscreen().catch(() => {})
+          } else if (frame.webkitRequestFullscreen) {
+            frame.webkitRequestFullscreen()
+          }
+        }
+        editBtn.addEventListener('click', () => {
+          if (editBtn.disabled) return
+          openDeckStudio(artifactId, title, {
+            entry,
+            source: deck,
+            present
+          })
+        })
+        presentBtn.addEventListener('click', present)
+
+        async function loadPreview() {
+          if (loading || !artifactId) return
+          loading = true
+          const attempt = ++previewAttempt
+          editBtn.disabled = true
+          presentBtn.disabled = true
+          delete presentBtn.dataset.deckAction
+          presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
+          deck.dataset.previewState = 'loading'
           try {
             const deckAccessPromise = fetch(`/artifacts/deck?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
               .then(async response => {
@@ -45763,52 +46308,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
               throw new Error(payload.error || 'render token unavailable')
             }
             if (!deck.isConnected) return // the pane moved on while we minted
-            frame.src = payload.url
-            presentBtn.disabled = false
-
-            // Edit opens the inert structured scene editor. The raw deck stays
-            // confined to this tokened sandboxed viewer. openDeckStudio fetches
-            // the scene again and independently requires server canWrite=true.
-            editBtn.addEventListener('click', () => {
-              openDeckStudio(artifactId, title, {
-                entry,
-                source: deck,
-                present: async () => {
-                  const access = await deckAccessPromise
-                  if (!(await openDeckPresentation(artifactId, title, access))) frame.requestFullscreen?.()?.catch?.(() => {})
-                }
+            const nextFrame = createPreviewFrame()
+            nextFrame.src = payload.url
+            nextFrame.addEventListener('load', () => {
+              if (attempt !== previewAttempt || frame !== nextFrame) return
+              requestAnimationFrame(() => {
+                if (attempt === previewAttempt && frame === nextFrame) nextFrame.classList.add('is-ready')
               })
-            })
-
-            // Present prefers the inert structured scene presenter so slide
-            // navigation is viewer-owned and never depends on executing deck
-            // HTML. Legacy/read-only fallback remains the same sandboxed frame.
-            const present = async () => {
-              const access = await deckAccessPromise
-              if (await openDeckPresentation(artifactId, title, access)) return
-              if (frame.requestFullscreen) {
-                frame.requestFullscreen().catch(() => {})
-              } else if (frame.webkitRequestFullscreen) {
-                frame.webkitRequestFullscreen()
-              }
-            }
-            presentBtn.addEventListener('click', present)
-
-            const access = await deckAccessPromise
-            const canEdit = access?.canWrite === true
+            }, { once: true })
+            frame.replaceWith(nextFrame)
+            frame = nextFrame
+            presentBtn.disabled = false
+            deckAccess = await deckAccessPromise
+            const canEdit = deckAccess?.canWrite === true
             editBtn.disabled = !canEdit
-            editBtn.title = canEdit ? 'Edit deck' : String(access?.writeBlockedReason || 'View-only deck')
+            editBtn.title = canEdit ? 'Edit deck' : String(deckAccess?.writeBlockedReason || 'View-only deck')
+            deck.dataset.previewState = 'ready'
 
             // Auto-present if requested (stage manifest pill)
-            if (options.autoPresent) present()
+            if (autoPresentPending) {
+              autoPresentPending = false
+              present()
+            }
           } catch {
-            // No token (signed out, artifact gone, server refused): fall back
-            // to the escaped safe renderer — never an inline document.
             if (!deck.isConnected) return
-            deck.remove()
-            renderArtifactRead(container, entry, { ...options, forceSafe: true })
+            deck.dataset.previewState = 'error'
+            editBtn.disabled = true
+            presentBtn.disabled = false
+            presentBtn.dataset.deckAction = 'retry'
+            presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13 5V2l-2 2a5 5 0 10 1.2 5"/></svg>Retry`
+            presentBtn.title = 'Retry presentation preview'
+          } finally {
+            loading = false
           }
-        })()
+        }
+        loadPreview()
       }
 
       function artifactIsDeckOutline(entry) {
@@ -49860,6 +50394,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function callPipObscuringSurfaceOpen() {
         return Boolean(
+          activeDocumentEditor?.element?.isConnected
+          || activeDeckEditor?.element?.isConnected
+          || activeDeckPresenter?.element?.isConnected
+          ||
           artifactStageNode
           || document.getElementById('contentStudioDrawer')
           || document.querySelector('[data-call-pip-obscures-room="true"]')
@@ -49871,7 +50409,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function callPipOpenSurfaces() {
-        return [contentStudioDrawerNode, artifactStageNode].filter(node => node?.isConnected)
+        return [
+          activeDocumentEditor?.element,
+          activeDeckEditor?.element,
+          activeDeckPresenter?.element,
+          contentStudioDrawerNode,
+          artifactStageNode
+        ].filter(node => node?.isConnected)
       }
 
       // A live PiP makes the viewer + call one non-modal composite. The app
@@ -49900,7 +50444,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // all parent-document boundaries are handled here.
       function callPipTrapCompositeTab(event) {
         if (event.key !== 'Tab' || !callPipCompositeActive()) return
-        const surface = contentStudioDrawerNode?.isConnected ? contentStudioDrawerNode : artifactStageNode
+        const surface = callPipOpenSurfaces()[0]
         const surfaceFocus = callPipFocusableNodes(surface)
         const pipFocus = callPipFocusableNodes(pipMeeting)
         if (!surfaceFocus.length || !pipFocus.length) return
@@ -67424,6 +67968,37 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (actions.childNodes.length) summary.appendChild(actions)
 	        const worklog = document.createElement('section')
 	        worklog.className = 'chat-context-worklog'
+	        const plan = goalPlanFromArtifact(artifact)
+	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
+	        const activityPlan = isPackagingStudio && String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio'
+	          ? { ...plan, processId: 'packaging_studio' }
+	          : plan
+	        if (isPackagingStudio && Array.isArray(plan?.subtasks) && plan.subtasks.length) {
+	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Presentation activity'))
+	          const activityList = bfEl('div', 'chat-context-activity-list')
+	          for (const task of plan.subtasks) {
+	            const taskState = String(task?.status || 'pending').toLowerCase()
+	            const row = bfEl('div', `chat-context-log-entry${taskState === 'complete' ? ' is-complete' : taskState === 'running' || taskState === 'ready' ? ' is-current' : ''}`)
+	            row.appendChild(bfEl('span', 'chat-context-log-entry__dot', ''))
+	            const rowCopy = bfEl('span', 'chat-context-log-entry__copy')
+	            rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__title', packagingStudioTaskDisplayTitle(activityPlan, task)))
+	            const taskArtifact = String(task?.artifactId || '').trim() && (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === String(task.artifactId))
+	            const stageNote = packagingStudioStagePresentation[String(task?.id || '').trim()]?.note || ''
+	            if (stageNote) rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__meta', taskState === 'complete' ? stageNote : taskState.replace(/_/g, ' ')))
+	            if (taskArtifact) {
+	              row.classList.add('is-actionable')
+	              row.tabIndex = 0
+	              row.setAttribute('role', 'button')
+	              row.addEventListener('click', () => openArtifactStage(taskArtifact.id, artifactDisplayTitle(taskArtifact)))
+	              row.addEventListener('keydown', event => {
+	                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click() }
+	              })
+	            }
+	            row.appendChild(rowCopy)
+	            activityList.appendChild(row)
+	          }
+	          worklog.appendChild(activityList)
+	        }
 	        if (sources.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Sources'))
 	          const sourceList = bfEl('div', 'chat-context-source-list')
@@ -67438,7 +68013,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
 	          worklog.appendChild(sourceList)
 	        }
-	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null].filter(Boolean))
+	        chatContextBody.replaceChildren(...[summary, (isPackagingStudio || sources.length) ? worklog : null].filter(Boolean))
 	      }
 
 	      function openDesktopWorkContext(message, trigger) {
@@ -68051,10 +68626,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const value = String(label || '').trim()
 	        const customerLabels = {
 	          'ship as-is': 'Approve this version',
-	          'approve the ship': 'Approve this version',
+	          'approve the ship': 'Approve external sharing',
 	          'send back for changes': 'Request changes',
-	          'send back — rebuild the deck': 'Request changes',
-	          'hold the package': 'Keep on hold',
+	          'send back — rebuild the deck': 'Request rebuild',
+	          'hold the package': 'Keep internal',
 	          'cultural-moment': 'Cultural moment',
 	          'franchise-playbook': 'Franchise playbook',
 	          'founder-conviction': 'Leadership conviction',
@@ -68238,6 +68813,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const phase = desktopWorkPhase(artifact, status, ref)
         const progress = desktopSafeWorkNote(ref.progressNote || artifact?.metadata?.progressNote, phase.label)
 	        const plan = goalPlanFromArtifact(artifact)
+	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
 	        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
         // One status: Draft is the thing, Blocked stays blocked, no fake percents
 	        const state = checkpoint
@@ -68257,6 +68833,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const card = document.createElement('article')
         card.className = 'scout-chat-work-card'
+	        if (isPackagingStudio) card.classList.add('scout-chat-work-card--presentation')
         card.dataset.state = status
         card.dataset.workArtifactId = workCardID
 	        card.setAttribute('aria-label', `${family} ${state.toLowerCase()}: ${title}${checkpoint ? `. Question: ${packagingStudioCheckpointQuestion(plan, checkpoint)}` : ''}${projectTitle ? `. Project: ${projectTitle}` : ''}`)
@@ -68266,7 +68843,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
         eyebrow.setAttribute('aria-live', 'polite')
         eyebrow.setAttribute('aria-atomic', 'true')
-        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
+	        if (isPackagingStudio) eyebrow.textContent = `Presentation · ${state}`
+	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
 	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
 	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', `${agent} · ${step}`))
 	        // No progress bar with fake percents — one status is the product
@@ -68439,6 +69017,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === resultArtifactId)
 	        if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) return scoutHTMLDeckRefRecordNode(message, resultArtifact)
 	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
+	        // Packaging Studio's durable stage artifacts remain available in the
+	        // Activity sidecar. They are process evidence, not five separate
+	        // channel deliverables.
+	        if (stagePresentation && !(resultArtifact && artifactIsHTMLDeck(resultArtifact))) return document.createDocumentFragment()
 	        // A process-stage artifact belongs in the compact stage rail even
 	        // when its bytes happen to be a complete HTML deck. Only an explicit
 	        // resultArtifactId (the goal's stable handoff) earns a rich deck card;
@@ -69058,7 +69640,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          ? deliverables.find(deliverable => {
 	              const artifactId = String(deliverable?.artifactId || '').trim()
 	              const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
-	              return entry && artifactIsHTMLDeck(entry)
+	              return String(deliverable?.badge || '').toLowerCase() === 'deck' || deliverable?.present === true || (entry && artifactIsHTMLDeck(entry))
 	            })
 	          : null
 	        const goalResultId = !held
@@ -69070,17 +69652,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            }, '')
 	          : ''
 	        const deliveredDeckArtifact = deckDeliverable
-	          ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+	          ? ((typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
 	              String(candidate?.id || '') === (goalResultId || String(deckDeliverable.artifactId || '').trim())
-	            )
+	            ) || {
+	              id: goalResultId || String(deckDeliverable.artifactId || '').trim(),
+	              title: String(deckDeliverable.title || manifest.title || 'Presentation'),
+	              metadata: { type: 'html_deck', title: String(deckDeliverable.title || manifest.title || 'Presentation') }
+	            })
 	          : null
 	        if (deliveredDeckArtifact) {
+	          card.classList.add('manifest-card--deck-first')
 	          const deckResult = document.createElement('article')
 	          deckResult.className = 'manifest-card__deck-result scout-chat-deck-result'
 	          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
 	          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
 	          renderArtifactDeck(deckResult, deliveredDeckArtifact)
 	          card.appendChild(deckResult)
+	          const supportingCount = Math.max(0, deliverables.length - 1)
+	          if (supportingCount || skips.length) {
+	            const supporting = bfEl('div', 'manifest-card__supporting')
+	            supporting.appendChild(bfEl('span', '', `${supportingCount} supporting file${supportingCount === 1 ? '' : 's'}${skips.length ? ` · ${skips.length} note${skips.length === 1 ? '' : 's'}` : ''}`))
+	            const activity = bfEl('button', 'manifest-card__supporting-action', 'View activity')
+	            activity.type = 'button'
+	            activity.addEventListener('click', () => {
+	              const workMessage = (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : [])
+	                .find(candidate => String(candidate?.thread?.artifactId || '').trim() === String(manifest.goalId || '').trim())
+	              if (workMessage && desktopChatLayoutQuery.matches) openDesktopWorkContext(workMessage, activity)
+	              else openArtifactStage(String(manifest.goalId || deckDeliverable.artifactId || ''), 'Presentation activity')
+	            })
+	            supporting.appendChild(activity)
+	            card.appendChild(supporting)
+	          }
+	          return card
 	        }
 
 	        // deliverable rows: badge · title + facts · pill actions

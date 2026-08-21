@@ -94,7 +94,8 @@ func TestIndexDeckBranchInsideSafeRenderer(t *testing.T) {
 // endpoint, point the sandboxed iframe at the returned tokened URL, and the
 // Present button fullscreens the SAME sandboxed iframe — never a top-level
 // navigation to the render URL, which would run the deck outside the iframe
-// sandbox. A failed mint falls back to the escaped renderer — never srcdoc.
+// sandbox. A failed mint preserves the same fixed preview shell and offers a
+// retry, so loading or auth failure cannot reflow the channel.
 func TestIndexDeckViewerSecurityContract(t *testing.T) {
 	html := readIndexForDeckViewer(t)
 	body := functionBodyAfterSignature(html, "function renderArtifactDeck(container, entry, options = {})")
@@ -104,9 +105,12 @@ func TestIndexDeckViewerSecurityContract(t *testing.T) {
 	for _, want := range []string{
 		`setAttribute('sandbox', 'allow-scripts')`,
 		"/artifacts/render-token?id=${encodeURIComponent(artifactId)}",
-		"frame.src = payload.url",
-		"frame.requestFullscreen?.()",
-		"renderArtifactRead(container, entry, { ...options, forceSafe: true })",
+		"nextFrame.src = payload.url",
+		"nextFrame.classList.add('is-ready')",
+		"attempt !== previewAttempt || frame !== nextFrame",
+		"frame.requestFullscreen",
+		"presentBtn.dataset.deckAction = 'retry'",
+		"deck.dataset.previewState = 'error'",
 		// stale-mint guard: the pane may have moved on while the token minted
 		"if (!deck.isConnected) return",
 	} {
@@ -119,6 +123,11 @@ func TestIndexDeckViewerSecurityContract(t *testing.T) {
 	// server CSP sandbox directive is the backstop).
 	if strings.Contains(body, "window.open") {
 		t.Error("renderArtifactDeck must not window.open the render URL — Present fullscreens the sandboxed iframe")
+	}
+	for _, banned := range []string{"deck.remove()", "renderArtifactRead(container, entry, { ...options, forceSafe: true })"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("renderArtifactDeck must preserve its fixed shell on failure; found %q", banned)
+		}
 	}
 
 	// The banned mechanisms must not exist in the DECK viewer: srcdoc would run

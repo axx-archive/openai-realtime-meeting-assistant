@@ -30,7 +30,7 @@ func TestPersistentCallPipSourceContract(t *testing.T) {
 		"surface.setAttribute('aria-modal', composite ? 'false' : 'true')",
 		"selectors.push('.artifact-stage__panel', '.content-studio-drawer__panel')",
 		`.pip-meeting[data-composite="true"]`,
-		"z-index: 1300",
+		"z-index: 10000",
 		`id="pipEnd"`,
 		"pipEnd.addEventListener('click', () => leaveButton.click())",
 		"pipReturn?.addEventListener('click', () => selectPD1Destination('Video'))",
@@ -68,6 +68,7 @@ const html=fs.readFileSync(process.env.CALL_PIP_INDEX,'utf8');
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
+  if(req.url==='/artifacts/document?id=pip-stage'&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:'pip-stage',title:'Call notes',type:'markdown',version:1,savedToFiles:true},document:{schemaVersion:1,markdown:'# Active call\n\nThe document stays open beside the call.'},canWrite:true}));}
   if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
 });
@@ -149,7 +150,7 @@ const server=http.createServer((req,res)=>{
    assert.equal(after.camera,before.camera+1);
    await page.locator('#pipReturn').focus();
    await page.keyboard.press('Tab');
-   assert.ok(await page.evaluate(()=>document.querySelector('.artifact-stage,.content-studio-drawer')?.contains(document.activeElement)), 'Tab from PiP must return to the open surface');
+   assert.ok(await page.evaluate(()=>Array.from(document.querySelectorAll('.document-editor,.deck-editor,.deck-presenter,.artifact-stage,.content-studio-drawer')).some(surface=>surface.contains(document.activeElement))), 'Tab from PiP must return to the open surface');
    await page.locator('#pipReturn').click();
    assert.equal(await page.evaluate(()=>window.__pipControlHits.return),before.return+1);
    assert.equal(await page.locator('#appShell').getAttribute('data-tool'),'room');
@@ -170,6 +171,15 @@ const server=http.createServer((req,res)=>{
  await page.waitForTimeout(100);
  await assertComposite('.artifact-stage','.artifact-stage__panel');
  await exerciseCompositeControls();
+ await page.evaluate(async()=>openDocumentStudio('pip-stage','Call notes',{}));
+ await page.locator('.document-editor').waitFor({state:'visible'});
+ await page.waitForTimeout(80);
+ assert.equal(await pip.isVisible(),true);
+ await assertComposite('.document-editor','.document-editor',{desktopAvoidsPanel:false});
+ await exerciseCompositeControls();
+ await page.locator('.document-editor').getByRole('button',{name:'Close Document Studio'}).click();
+ await page.locator('.document-editor').waitFor({state:'detached'});
+ assert.equal(await pip.isVisible(),true);
  await page.locator('.artifact-stage__close').click();
  await page.locator('.artifact-stage').waitFor({state:'detached'});
  assert.equal(await pip.isVisible(),true);

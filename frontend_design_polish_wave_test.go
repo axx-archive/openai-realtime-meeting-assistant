@@ -161,7 +161,7 @@ func TestPD1PresentationRejectionFixtureRendersOneConversationAndOneWorkState(t 
 		t.Fatalf("PD1 presentation fixture must contain one work card, got %d", strings.Count(fixture, "kind: 'thread'"))
 	}
 	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
-	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "progressbar", "openDesktopWorkContext", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
+	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "No progress bar with fake percents", "openDesktopWorkContext", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
 		if !strings.Contains(renderer, want) {
 			t.Errorf("compact presentation work card missing %q", want)
 		}
@@ -259,7 +259,7 @@ func TestPD1RecurringWorkAccessibilityAndLiveFocusContract(t *testing.T) {
 	html := readIndexForComposerPolish(t)
 	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
 	for _, want := range []string{
-		"aria-live", "aria-atomic", "role', 'progressbar'", "aria-valuenow",
+		"aria-live", "aria-atomic",
 		"View ${family} activity, ${phase.label}", "focus-visible",
 	} {
 		if !strings.Contains(renderer, want) && !strings.Contains(html, want) {

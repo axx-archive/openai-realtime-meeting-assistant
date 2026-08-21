@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: production generation 158 serves exact release `3ac79c2872157411ad921f22334db305fec138f4` as `verified-local-unsigned`; an `af7ae344fa205443477fa39a299957c43283a071` release candidate was built but never activated and must be superseded, not promoted. The current worktree adds stable accepted-deck projection, immutable approved deck bytes across retries, raw process-card suppression, deterministic channel-tail landing, faithful-editability generation gates, and a fuller Deck Studio with named Files-backed copies. The canonical approved Like A Farmer presentation remains `os-artifact-artifacts-1787303409669546304`; final production browser workshop, exact-release deployment, Build 70, and repository cleanup remain open.
+Current phase: production generation 160 serves exact release `1d1120185d0533ff34a83b1c6eaa61ff85632fe2` as `verified-local-unsigned`; generation 159 `5330e24a03a54d80b6b623631c0382783b24fa36` is the retained rollback. The live Deck Studio and production Like A Farmer workshop are complete, including Scout imagery, native layer/opacity edits, Save, named Save a copy to Files, reopen, Present, and the full-bleed z-order hotfix. The active expansion now owns zero-flash deck previews, one minimal process pill plus an activity sidecar, first-class native Document Studio, a source-bound company-Brain deck intelligence pipeline, Build 70/TestFlight, and final repository synchronization.
 
 ## Invariants
 
@@ -26,12 +26,16 @@ Current phase: production generation 158 serves exact release `3ac79c2872157411a
 | W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Native deck edited; one rich card plus Edit/Present verified on generation 155; 10-page export correction pending release |
 | W7 | Publish the final combined native SHA as Build 70 to TestFlight | Final web/mobile release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Build 69 uploaded from `9b2a04a8`; Build 70 required for current native result/preview fixes |
 | W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
+| W9 | Zero-flash deck preview and one-channel-truth progress sidecar | W6 live deck result | Zero shell layout shift; one keyed pill; one approved deck; stages/package detail only in sidecar | Implemented; focused rendered gate green, production gate pending |
+| W10 | Native Document Studio and first-class supporting files | W9 channel ownership contract and existing Files CAS patterns | Markdown round-trip, version conflict, Save/copy/Files, rendered desktop/mobile/PiP QA | Implemented; server/static/rendered gates green, production gate pending |
+| W11 | Brain-grounded deck intelligence v2 | W9 progress visibility and W10 internal-document boundary | Source snapshot, research/evidence decision, copy lock, native composition, pre-delivery jury, privacy/adversarial corpus | Implemented; focused process gates green, live source-bound deck gate pending |
 
 ## Current Wave
 
-- Root owner: finish the independent gate on the accepted-deck retry seam and Files-backed Deck Studio, then commit/push one superseding SHA and execute the receipted VPS release.
-- Production owner: verify one stable rich Like A Farmer card, minimal process sidecar, fast channel tail landing, then exercise native edit, Scout imagery, resize/crop/layers/type/shapes, Save, named Save a copy, reopen, and Present in the signed-in browser.
-- Mobile owner: increment to Build 70, build/submit only the final combined main SHA, then verify Apple processing and intended groups.
+- Root owner: implement W9-W11 in dependency order, retain one channel truth, and keep all process audit evidence behind Activity without deleting durable receipts.
+- Product owner: require the direct ask to outrank all memory; use only destination-authorized, source-linked company context; interrupt only for a genuinely consequential choice.
+- Production owner: run signed-in desktop/mobile journeys for preview stability, progress/decision sidecar, Document Studio, and a net-new source-bound deck before the next exact release.
+- Mobile owner: increment to Build 70 only after the final combined SHA, submit that exact EAS build ID, and verify Apple processing plus intended groups.
 
 ## Completed Evidence
 
@@ -124,9 +128,27 @@ Current phase: production generation 158 serves exact release `3ac79c2872157411a
 - Approved Packaging Studio ship contracts now qualify for Files only after their explicit approved terminal state; unapproved drafts still fail closed.
 - Focused rendered/backend gates cover the hostile feed, cached/lazy channel tail, legacy approval feedback retry, immutable accepted bytes, embedded-image named copy and Files row, cross-tenant folder rejection, image fit, layer movement, resize, type, notes, shapes, Save/reopen/Present, exact full-bleed grammar, oversize-deck rejection, and faithful deck law sweep. The focused normal and race suites pass; rendered tests pass with the bundled Playwright runtime. The required broad repository run reached its 10-minute global timeout in unrelated qualification/parallel suites, matching the documented baseline; touched packages and focused gates remained green.
 
+## Generation 160 And Expanded Studio Contract
+
+- `5330e24a03a54d80b6b623631c0382783b24fa36` shipped the full Deck Studio and one-channel deck handoff as production generation 159. The signed-in workshop opened all ten Like A Farmer slides full-window, generated an excellent rural-road image, exercised resize/fit/layers/type/shapes/opacity, saved the original to Files, created `Like A Farmer — Optimization Insights — Studio Edition`, reopened it, and presented slide 1 and slide 10 with notes.
+- The workshop found that generated full-bleed imagery used `z=-100`, beneath the scene background. The first `z=0` fix was independently rejected because authored zero-layer content could tie below an appended image. The final fix inserts the generated image first at `z=0`; stable z sorting keeps every authored `z=0` scrim/text above it without rebasing authored layers. Focused normal count=3, focused race, compiled-order regression, and independent critic pass.
+- Production generation 160 now serves exact hotfix `1d1120185d0533ff34a83b1c6eaa61ff85632fe2`, bundle `b25000160ef1f8caa33d41a51dad34d23b315481448c8db8e3185207772f7040`, app image `sha256:a74e463e80fe242a2e217ef9cafa786fdaf8616ff7b1fce645b9c3c383de8469`, and render image `sha256:a34523aed5dfb8e49135ba5c9e41b76c9711b7e1e2791f05c3e12462d0d70e6a`. The release verifier, public health/readiness, ledger generation 160, and serving images agree; generation 159 is retained rollback.
+- W9 channel contract: one persistent, goal-keyed presentation pill; any live human decision directly beneath it; one approved rich deck result. Stage rows, retry topology, provenance, package inventory, skips, and candidate revisions move behind Activity. The final handoff is deck-first with one quiet `Supporting files (N)` door.
+- W9 preview contract: mount the exact 16:9 shell before hydration, keep a stable poster/theme placeholder behind the iframe, reveal only after the first fit and iframe load, reserve authorized action geometry, and preserve the same shell on failure. Shell x/y/width/height must not move from placeholder through token, scene, image, and font loading.
+- W10 decision: Markdown remains the persisted document source. Document Studio uses a transient whitelisted block model, preserves unsupported/raw Markdown byte-for-byte until deliberately edited, and adds full-screen editing, outline, formatting, undo/redo, CAS Save, named Save a copy to Files, neutral document PDF, share compatibility, conflict recovery, and PiP coexistence. No parallel document JSON migration is introduced.
+- W11 context precedence is fixed: direct ask > exact approved reply/files > settled current decisions > current Project/channel evidence > source-linked company Brain > house/taste defaults > reversible inference. Private/imported preferences never enter a shared result. Context coverage and source IDs are explicit; ambiguity does not become truth.
+- W11 invisible pipeline: immutable `deck_context_snapshot_v1`; validated brief and research disposition; conditional evidence dossier with claim/source/date/unit/confidence; task-specific narrative hypotheses; human-ear copy lock; brand system and rendered cover auditions; layout plan with image destinations/crops/negative space; native scene generation; deterministic structural/evidence checks; pre-delivery rendered jury with bounded repair. Internal work records are not channel deliverables.
+- W9 implementation now reserves the final 16:9 deck frame before token/access hydration, keeps the renderer transparent until its first fit, and crossfades it without changing the shell dimensions. A rendered regression measures the frame before and after hydration and requires identical geometry.
+- Packaging Studio stage receipts now project only into the right-side `Presentation activity` ledger. The channel keeps one minimal presentation work pill, its genuine checkpoint when one is pending, the canonical deck, and one quiet supporting-files/activity door. Saved stage rows remain keyboard-accessible and open the first-class artifact surface.
+- W10 now has native `/artifacts/document` GET/PATCH and `/artifacts/document/copies` contracts with ACL checks, a 1 MB bound, source-authority fencing, expected-version conflicts, and independent named Files copies. The full-screen Document Studio adds Markdown editing, outline navigation, formatting, live preview, undo/redo, word count, Save/reload/conflict state, Save a copy, responsive phone/iPad layouts, and persistent call PiP coexistence.
+- W11 process version 2 now grounds every model-written stage with a precedence-marked company-context packet while keeping the exact direct source packet last and authoritative. The pipeline explicitly decides whether research is warranted, files a claim-level evidence dossier, auditions a thesis-derived visual system, locks human-ear copy, directs imagery to exact slide IDs and negative space, and composes a 1920x1080 element-level layout plan before rendering. The ship stage may not rewrite the locked copy or improvise a generic layout.
+- Focused rendered acceptance is green for the zero-shift deck preview, full Deck Studio edit/image/layer/save/copy/present journey, quiet channel plus Activity sidecar, large stage artifact drawers, and desktop/mobile Document Studio edit/preview/save/copy journey. Focused Packaging Studio stage wiring, branch, checkpoint, and manifest gates are green.
+- The final independent adversarial UI gate is PASS. It caught and closed six release-material issues before commit: an `about:blank` iframe load could reveal an empty preview; mobile hid Save a copy; write named two different copy schemas; generic advisory percentages became fake presentation progress; Document Studio was outside the call-PiP focus/z composite; and Brain excerpts lacked durable source IDs. Fresh-frame hydration, a mobile save dock, one `deck_copy_v2` contract, status-only presentation pills, editor-aware PiP at the top layer, and destination-authorized artifact/decision/memory IDs plus revision/digest now have rendered or backend regressions.
+- Final candidate gate: focused rendered/static suite passed; focused race suite passed; Sports Car journey passed 3/3; `git diff --check` is clean. The broad `go test ./...` was run for 595 seconds and surfaced the documented baseline/static/provider-noise group plus candidate-specific inventory/test-contract failures; every candidate-specific failure was fixed and re-run green before the independent PASS.
+
 ## Pending Dependencies
 
-- Superseding exact release, signed-in production channel/editor workshop, Build 70 processing/groups, and safe cleanup remain pending.
+- Independent final critique, the next exact release, signed-in production workshop of W9-W11, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
@@ -137,15 +159,15 @@ Current phase: production generation 158 serves exact release `3ac79c2872157411a
 
 ## Risks And Decisions
 
-- Native document editing is deliberately the next bridge, not part of this release, unless it can reuse the structured Deck Studio persistence contract without widening the current release gate.
+- Native document editing is now in scope. It reuses Markdown, artifact version history, authorization, Files, and PDF/share contracts; the editor adds expected-version CAS and never stores arbitrary editor HTML.
 - `www.kino.grok.me` has no DNS record; the working canonical embed target is `https://kino.grok.me` (HTTP 200, no current frame restriction). The UI label is exactly `Content Studio` with no punctuation.
 - The baseline full Go suite has seven known frontend static failures reproduced on clean `5fe9e469`; new changes must not add failures and focused production-path/browser gates remain mandatory.
 - Mobile has eight high transitive Expo/Metro `image-size` audit advisories with only a breaking forced downgrade offered; no unsafe forced downgrade is authorized.
 
 ## Resume Here
 
-1. Receive the second independent critic verdict and commit/push one clean superseding SHA; never activate the unverified `af7ae344` candidate.
-2. Deploy that exact SHA with the retained release tool; require ledger, images, public health/readiness, rollback bundle, and `verified-local-unsigned` to agree.
-3. In the signed-in production browser, open Like A Farmer and require one stable rich 16:9 card, no raw code, minimal process activity, and true-bottom channel landing. Exercise Edit, Scout imagery, resize, fill/fit, layers, type, shapes, Save, named Save a copy to Files, reopen, and Present.
-4. Build/submit iOS Build 70 from the exact final main SHA by explicit EAS build ID, verify Apple processing plus intended groups, and spot-check deck preview/open behavior on phone/iPad surfaces without claiming unobserved physical-device proof.
-5. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.
+1. Run the full proportional backend/race/rendered gate and an independent final design/quality critique; close only candidate-caused findings.
+2. Commit and push one clean exact SHA, deploy through the receipted DigitalOcean release path, and verify ledger/images/public health/readiness agree.
+3. Workshop the signed-in production Like A Farmer channel: cold/cached load stability, quiet Activity flow, deck edit/image/layer/save/copy/present, Document Studio save/copy, and PiP continuity.
+4. Build/submit iOS Build 70 from that exact final main SHA by explicit EAS build ID, verify phone/iPad rich-preview behavior plus Apple processing and intended groups.
+5. Preserve receipts and synchronize local `main`, `axx/main`, and safe worktrees without overwriting user work.

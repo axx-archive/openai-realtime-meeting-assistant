@@ -21,7 +21,7 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"expectedVersion: state.version",
 		"if (payload?.canWrite !== true)",
 		"payload?.writeBlockedReason",
-		"const canEdit = access?.canWrite === true",
+		"const canEdit = deckAccess?.canWrite === true",
 		"fetch('/artifacts/deck/image-generations'",
 		"fetch('/artifacts/deck/assets'",
 		"fetch('/artifacts/deck/copies'",
@@ -253,9 +253,14 @@ const server=http.createServer((req,res)=>{
  await page.evaluate(id=>openDeckStudio(id,'Read-only proof',{}),artifactId);
  await page.waitForTimeout(50);
  assert.equal(await page.locator('.deck-editor').count(),0);
- await page.evaluate(id=>{const host=document.createElement('div');host.id='readonly-deck-host';document.body.appendChild(host);renderArtifactDeck(host,{id,kind:'os_artifact',text:'<!doctype html>',metadata:{type:'html_deck',title:'Read-only proof',savedToFiles:'true'}},{autoPresent:true});},artifactId);
+ await page.evaluate(id=>{const host=document.createElement('div');host.id='readonly-deck-host';document.body.appendChild(host);renderArtifactDeck(host,{id,kind:'os_artifact',text:'<!doctype html>',metadata:{type:'html_deck',title:'Read-only proof',savedToFiles:'true'}},{autoPresent:true});const frame=host.querySelector('.chat-deck__frame').getBoundingClientRect();window.__deckPreviewInitial={width:frame.width,height:frame.height};},artifactId);
  const readonlyHost=page.locator('#readonly-deck-host');
  await readonlyHost.getByRole('button',{name:'Present'}).waitFor({state:'visible'});
+ await readonlyHost.locator('.chat-deck__frame.is-ready').waitFor({state:'attached'});
+ await page.waitForTimeout(160);
+ const stablePreview=await page.evaluate(()=>{const frame=document.querySelector('#readonly-deck-host .chat-deck__frame').getBoundingClientRect();const iframe=document.querySelector('#readonly-deck-host iframe');return {before:window.__deckPreviewInitial,after:{width:frame.width,height:frame.height},opacity:getComputedStyle(iframe).opacity};});
+ assert.ok(Math.abs(stablePreview.before.width-stablePreview.after.width)<0.5&&Math.abs(stablePreview.before.height-stablePreview.after.height)<0.5,JSON.stringify(stablePreview));
+ assert.equal(stablePreview.opacity,'1');
  await page.waitForFunction(()=>{const host=document.querySelector('#readonly-deck-host');return host?.querySelector('button')?.disabled===true&&Array.from(host.querySelectorAll('button')).some(button=>button.textContent.includes('Present')&&!button.disabled)});
  const readonlyEdit=readonlyHost.getByRole('button',{name:'Edit'});
  assert.equal(await readonlyEdit.isDisabled(),true);
