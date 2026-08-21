@@ -5,6 +5,28 @@ import (
 	"time"
 )
 
+func TestSaturatedConsentSubmitDoesNotCopyFrame(t *testing.T) {
+	mixer := &audioMixer{
+		input:             make(chan audioInput, 1),
+		stop:              make(chan struct{}),
+		dropWindowStarted: time.Now(),
+		droppedTracks:     map[string]struct{}{},
+	}
+	mixer.input <- audioInput{trackKey: "queued"}
+	pcm := make([]int16, roomAudioMixFrameSize)
+	fences := map[ConsentLane]ConsentFence{ConsentLaneAudioCapture: {lane: ConsentLaneAudioCapture}}
+
+	allocations := testing.AllocsPerRun(100, func() {
+		mixer.submitWithConsent("track-a", "AJ", pcm, fences)
+	})
+	if allocations > 0 {
+		t.Fatalf("saturated submit allocations=%f, want 0", allocations)
+	}
+	if got := len(mixer.input); got != 1 {
+		t.Fatalf("mixer queue depth=%d, want existing frame only", got)
+	}
+}
+
 func TestMixAudioFrameDoesNotAttenuateSpeakerWithSilentSource(t *testing.T) {
 	speakerFrame := make([]int16, roomAudioMixFrameSize)
 	silentFrame := make([]int16, roomAudioMixFrameSize)

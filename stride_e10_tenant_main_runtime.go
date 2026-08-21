@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -419,18 +420,23 @@ func (t *threadSafeWriter) writeJSONWithTenantAuthority(value any) error {
 
 func (t *threadSafeWriter) writeJSONWithTenantAuthorityContext(ctx context.Context, value any) error {
 	write := func() error {
+		if t.failed.Load() {
+			return net.ErrClosed
+		}
 		t.Lock()
 		defer t.Unlock()
+		if t.failed.Load() {
+			return net.ErrClosed
+		}
 		_ = t.Conn.SetWriteDeadline(time.Now().Add(websocketWriteTimeout))
 		err := t.Conn.WriteJSON(value)
 		_ = t.Conn.SetWriteDeadline(time.Time{})
 		return err
 	}
-	if t.tenantLease == nil {
-		return write()
-	}
 	var err error
-	if fence := strideE10HeldTenantAuthorityFromContext(ctx); fence != nil {
+	if t.tenantLease == nil {
+		err = write()
+	} else if fence := strideE10HeldTenantAuthorityFromContext(ctx); fence != nil {
 		if fence.authorizesWebSocket(t.tenantLease) {
 			err = write()
 		} else {
@@ -442,20 +448,39 @@ func (t *threadSafeWriter) writeJSONWithTenantAuthorityContext(ctx context.Conte
 	if strideE10TenantAuthorityUnavailable(err) {
 		_ = t.Conn.Close()
 	}
+	if err != nil {
+		// Gorilla permits Close concurrently with reads/writes. Marking the
+		// writer first makes every queued fan-out return immediately, while the
+		// close wakes the owning read loop so it evicts the socket and media rows.
+		t.failed.Store(true)
+		_ = t.Conn.Close()
+	}
 	return err
 }
 
 func (t *threadSafeWriter) writeControlWithTenantAuthority(messageType int, data []byte, deadline time.Time) error {
 	write := func() error {
+		if t.failed.Load() {
+			return net.ErrClosed
+		}
 		t.Lock()
 		defer t.Unlock()
+		if t.failed.Load() {
+			return net.ErrClosed
+		}
 		return t.Conn.WriteControl(messageType, data, deadline)
 	}
+	var err error
 	if t.tenantLease == nil {
-		return write()
+		err = write()
+	} else {
+		err = t.tenantLease.withCurrent(context.Background(), write)
 	}
-	err := t.tenantLease.withCurrent(context.Background(), write)
 	if strideE10TenantAuthorityUnavailable(err) && messageType != websocket.CloseMessage {
+		_ = t.Conn.Close()
+	}
+	if err != nil {
+		t.failed.Store(true)
 		_ = t.Conn.Close()
 	}
 	return err

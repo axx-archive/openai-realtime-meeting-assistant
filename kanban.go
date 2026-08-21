@@ -301,6 +301,15 @@ type kanbanBoardApp struct {
 	// never cross a room/sitting/media-generation boundary.
 	roomScoutTextMu    sync.Mutex
 	roomScoutTextLocks map[string]*sync.Mutex
+	// active-speaker energy ingestion is part of transcript attribution and
+	// remains lossless on the mixer goroutine. Only the derived UI payload is
+	// published asynchronously. One worker per room drains the latest pending
+	// payload, so a broken WebSocket cannot block media or grow goroutines.
+	activeSpeakerPublishMu      sync.Mutex
+	activeSpeakerPublishPending map[string]activeSpeakerPublication
+	activeSpeakerPublishRunning map[string]bool
+	// Test-only delivery seam. Production leaves nil and uses the room fan-out.
+	activeSpeakerPublishDeliver func(activeSpeakerPublication)
 	// roomFollowThrough is the durable, sitting-scoped outbox behind any room
 	// promise to deliver a recap after the call. It is intentionally separate
 	// from global deferred notifications: a different meeting ending must never

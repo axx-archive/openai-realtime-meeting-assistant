@@ -1802,10 +1802,12 @@ func (app *kanbanBoardApp) houseStyleArtifact() (meetingMemoryEntry, bool) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false
 	}
-	entries := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)
-	for index := len(entries) - 1; index >= 0; index-- {
-		if entries[index].Metadata[tasteProfileArtifactTypeKey] == houseStyleArtifactType {
-			return entries[index], true
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind == meetingMemoryKindOSArtifact && !memoryEntryIsMediaSoakCanary(entry) && entry.Metadata[tasteProfileArtifactTypeKey] == houseStyleArtifactType {
+			return cloneMemoryEntry(entry), true
 		}
 	}
 	return meetingMemoryEntry{}, false

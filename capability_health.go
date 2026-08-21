@@ -239,8 +239,13 @@ func latestAmbientCapabilityArtifactForApp(app *kanbanBoardApp, agent ambientAge
 		return time.Time{}, false
 	}
 
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
 	var latest time.Time
-	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+	for _, entry := range app.memory.entries {
+		if entry.Kind != meetingMemoryKindOSArtifact || memoryEntryIsMediaSoakCanary(entry) {
+			continue
+		}
 		at, ok := agent.healthSuccessAt(entry)
 		if ok && at.After(latest) {
 			latest = at
@@ -331,11 +336,7 @@ func ambientCapabilityEvidence(name string, agent ambientAgentConfig, now time.T
 	}
 	deadLetters := 0
 	if kanbanApp.memory != nil {
-		for _, entry := range kanbanApp.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0) {
-			if strings.TrimSpace(entry.Metadata[deadLetterAgentMetadataKey]) == agent.name {
-				deadLetters++
-			}
-		}
+		deadLetters = kanbanApp.memory.countEntriesOfKindByMetadata(meetingMemoryKindDeadLetter, deadLetterAgentMetadataKey, agent.name)
 		out["deadLetter"] = deadLetters
 	}
 	kanbanApp.mu.Lock()

@@ -100,8 +100,51 @@ func houseStyleWorkDue(app *kanbanBoardApp, now time.Time) bool {
 		consumedBinderID = strings.TrimSpace(style.Metadata[houseStyleCursorKey])
 		distilledAt, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(style.Metadata[tasteProfileDistilledAtKey]))
 	}
-	sources := app.collectHouseStyleSources()
-	return houseStyleShouldRun(hasStyle, distilledAt, sources.latestBinderID, consumedBinderID, sources.hasMaterial(), now)
+	latestBinderID, hasMaterial := houseStyleWorkDueInputs(app)
+	return houseStyleShouldRun(hasStyle, distilledAt, latestBinderID, consumedBinderID, hasMaterial, now)
+}
+
+// Readiness asks whether house-style work is due; it must not construct the
+// full model evidence packet. Scan metadata in place so a health probe never
+// clones every large published deck or signal while live media is running.
+func houseStyleWorkDueInputs(app *kanbanBoardApp) (latestBinderID string, hasMaterial bool) {
+	if app == nil || app.memory == nil {
+		return "", false
+	}
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for _, entry := range app.memory.entries {
+		switch entry.Kind {
+		case meetingMemoryKindOSArtifact:
+			if memoryEntryIsMediaSoakCanary(entry) {
+				continue
+			}
+			switch entry.Metadata[tasteProfileArtifactTypeKey] {
+			case tasteProfileArtifactType:
+				hasMaterial = true
+				continue
+			case houseStyleArtifactType:
+				continue
+			}
+			binder := houseStyleBinderArtifact(entry)
+			if binder {
+				latestBinderID = entry.ID
+			}
+			if binder || artifactIsPublished(entry) || strings.EqualFold(strings.TrimSpace(entry.Metadata["reviewGate"]), "approved") {
+				hasMaterial = true
+			}
+		case meetingMemoryKindSignal:
+			record, ok := decodeSignalEntry(entry)
+			if ok && record.Event == signalEventGrillDelta && record.Valence == signalValencePositive {
+				hasMaterial = true
+			}
+		case meetingMemoryKindDecision:
+			if entry.Metadata["status"] == decisionStatusActive {
+				hasMaterial = true
+			}
+		}
+	}
+	return latestBinderID, hasMaterial
 }
 
 // houseStyleArtifactSuccessAt recognizes the single typed document this

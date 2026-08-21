@@ -36,6 +36,12 @@ type activeSpeakerPayload struct {
 	RoomID     string  `json:"roomId,omitempty"`
 }
 
+type activeSpeakerPublication struct {
+	scope   RoomScoutScope
+	roomID  string
+	payload activeSpeakerPayload
+}
+
 // NoteAudioActivity is the OFFICE mixer's activity listener (the boot-started
 // global mixer registers kanbanApp itself). Named rooms feed the same state
 // machine through roomAudioActivityListener → noteAudioActivityForRoom, so
@@ -101,11 +107,63 @@ func (app *kanbanBoardApp) noteAudioActivityForScope(scope RoomScoutScope, at ti
 			return
 		}
 		log.Infof("room_active_speaker room=%s name=%q level=%.5f confidence=%.3f", roomID, activeSpeaker.Name, activeSpeaker.Level, activeSpeaker.Confidence)
-		if scope.valid() {
-			broadcastScopedRoomKanbanEvent(scope, "active_speaker", activeSpeaker)
-		} else {
-			broadcastRoomKanbanEvent(roomID, "active_speaker", activeSpeaker)
+		app.enqueueActiveSpeakerPublication(activeSpeakerPublication{scope: scope, roomID: roomID, payload: *activeSpeaker})
+	}
+}
+
+// enqueueActiveSpeakerPublication isolates derived UI fan-out from the
+// lossless 20ms energy-frame ingestion used by transcript attribution. A room
+// owns at most one publisher goroutine; while a socket write is blocked, new UI
+// payloads replace the pending one. Local attribution continues synchronously.
+func (app *kanbanBoardApp) enqueueActiveSpeakerPublication(publication activeSpeakerPublication) {
+	if app == nil {
+		return
+	}
+	key := normalizeRoomID(publication.roomID)
+	app.activeSpeakerPublishMu.Lock()
+	if app.activeSpeakerPublishPending == nil {
+		app.activeSpeakerPublishPending = map[string]activeSpeakerPublication{}
+	}
+	if app.activeSpeakerPublishRunning == nil {
+		app.activeSpeakerPublishRunning = map[string]bool{}
+	}
+	app.activeSpeakerPublishPending[key] = publication
+	if app.activeSpeakerPublishRunning[key] {
+		app.activeSpeakerPublishMu.Unlock()
+		return
+	}
+	app.activeSpeakerPublishRunning[key] = true
+	app.activeSpeakerPublishMu.Unlock()
+
+	go app.runActiveSpeakerPublisher(key)
+}
+
+func (app *kanbanBoardApp) runActiveSpeakerPublisher(key string) {
+	for {
+		app.activeSpeakerPublishMu.Lock()
+		publication, ok := app.activeSpeakerPublishPending[key]
+		if ok {
+			delete(app.activeSpeakerPublishPending, key)
 		}
+		deliver := app.activeSpeakerPublishDeliver
+		if !ok {
+			delete(app.activeSpeakerPublishRunning, key)
+			app.activeSpeakerPublishMu.Unlock()
+			return
+		}
+		app.activeSpeakerPublishMu.Unlock()
+
+		if deliver != nil {
+			deliver(publication)
+			continue
+		}
+		if publication.scope.valid() {
+			if app.roomMediaScopeCurrent(publication.scope) {
+				broadcastScopedRoomKanbanEvent(publication.scope, "active_speaker", &publication.payload)
+			}
+			continue
+		}
+		broadcastRoomKanbanEvent(publication.roomID, "active_speaker", &publication.payload)
 	}
 }
 

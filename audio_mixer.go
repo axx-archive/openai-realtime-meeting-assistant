@@ -33,6 +33,7 @@ const (
 	roomAudioMixFrameSize          = roomAudioSampleRate / 50 * roomAudioChannels
 	roomAudioTrailingSilenceFrames = 50
 	audioSourceLimit               = roomAudioMixFrameSize * 50
+	audioMixerDropLogInterval      = 10 * time.Second
 )
 
 type mixedAudioSink interface {
@@ -82,6 +83,10 @@ type audioMixer struct {
 	done                  chan struct{}
 	closeOnce             sync.Once
 	unsubscribeWithdrawal func()
+	dropMu                sync.Mutex
+	dropWindowStarted     time.Time
+	droppedFrames         uint64
+	droppedTracks         map[string]struct{}
 }
 
 type audioInput struct {
@@ -118,10 +123,12 @@ type audioSourceActivity struct {
 
 func newAudioMixer() *audioMixer {
 	mixer := &audioMixer{
-		sinks: map[string]audioMixerSink{},
-		input: make(chan audioInput, 128),
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
+		sinks:             map[string]audioMixerSink{},
+		input:             make(chan audioInput, 128),
+		stop:              make(chan struct{}),
+		done:              make(chan struct{}),
+		dropWindowStarted: time.Now(),
+		droppedTracks:     map[string]struct{}{},
 	}
 	mixer.unsubscribeWithdrawal = subscribeConsentWithdrawals(mixer.noteWithdrawal)
 
@@ -151,11 +158,15 @@ func (mixer *audioMixer) submit(trackKey string, participantName string, pcm []i
 		return
 	default:
 	}
+	if len(mixer.input) >= cap(mixer.input) {
+		mixer.noteDroppedFrame(trackKey)
+		return
+	}
 
 	select {
 	case mixer.input <- audioInput{trackKey: trackKey, participantName: participantName, pcm: pcm}:
 	default:
-		log.Warnf("Dropping decoded audio frame for track=%s", trackKey)
+		mixer.noteDroppedFrame(trackKey)
 	}
 }
 
@@ -172,6 +183,13 @@ func (mixer *audioMixer) submitWithConsent(trackKey string, participantName stri
 		return
 	default:
 	}
+	// Avoid allocating/copying PCM and consent fences when the bounded mixer
+	// intake is already saturated. Direct RTP forwarding does not use this
+	// queue, so shedding analysis capture here protects the call itself.
+	if len(mixer.input) >= cap(mixer.input) {
+		mixer.noteDroppedFrame(trackKey)
+		return
+	}
 	copiedFences := make(map[ConsentLane]ConsentFence, len(fences))
 	for lane, fence := range fences {
 		copiedFences[lane] = fence
@@ -180,8 +198,43 @@ func (mixer *audioMixer) submitWithConsent(trackKey string, participantName stri
 	select {
 	case mixer.input <- audioInput{trackKey: trackKey, participantName: participantName, pcm: copiedPCM, fences: copiedFences, consentBound: true}:
 	default:
-		log.Warnf("Dropping consent-bound decoded audio frame for track=%s", trackKey)
+		mixer.noteDroppedFrame(trackKey)
 	}
+}
+
+// noteDroppedFrame aggregates saturation telemetry. A warning per 10-20ms
+// audio packet can consume the CPU needed by direct RTP forwarding and turn a
+// degraded analysis lane into a failed call, so the media hot path emits at
+// most one summary per interval.
+func (mixer *audioMixer) noteDroppedFrame(trackKey string) {
+	if mixer == nil {
+		return
+	}
+	now := time.Now()
+	mixer.dropMu.Lock()
+	if mixer.droppedTracks == nil {
+		mixer.droppedTracks = map[string]struct{}{}
+	}
+	if mixer.dropWindowStarted.IsZero() {
+		mixer.dropWindowStarted = now
+	}
+	mixer.droppedFrames++
+	if trackKey != "" {
+		mixer.droppedTracks[trackKey] = struct{}{}
+	}
+	if now.Sub(mixer.dropWindowStarted) < audioMixerDropLogInterval {
+		mixer.dropMu.Unlock()
+		return
+	}
+	droppedFrames := mixer.droppedFrames
+	droppedTracks := len(mixer.droppedTracks)
+	window := now.Sub(mixer.dropWindowStarted).Round(time.Second)
+	mixer.droppedFrames = 0
+	mixer.droppedTracks = map[string]struct{}{}
+	mixer.dropWindowStarted = now
+	mixer.dropMu.Unlock()
+
+	log.Warnf("Audio mixer saturated: dropped %d analysis frame(s) across %d track(s) in %s; direct call media remains isolated", droppedFrames, droppedTracks, window)
 }
 
 func (mixer *audioMixer) removeTrack(trackKey string) {

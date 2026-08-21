@@ -2052,6 +2052,23 @@ func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meeting
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
+	// The common health/read paths ask only for the newest few entries. Walk
+	// backward and clone only those matches instead of materializing every
+	// artifact (some deck bodies are multi-megabyte) just to tail the slice.
+	if limit > 0 {
+		matched := make([]meetingMemoryEntry, 0, limit)
+		for index := len(store.entries) - 1; index >= 0 && len(matched) < limit; index-- {
+			entry := store.entries[index]
+			if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
+				matched = append(matched, cloneMemoryEntry(entry))
+			}
+		}
+		for left, right := 0, len(matched)-1; left < right; left, right = left+1, right-1 {
+			matched[left], matched[right] = matched[right], matched[left]
+		}
+		return matched
+	}
+
 	matched := make([]meetingMemoryEntry, 0)
 	for _, entry := range store.entries {
 		// entriesOfKind feeds artifact/model/worker lanes as well as maintenance
@@ -2063,6 +2080,21 @@ func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meeting
 	}
 
 	return cloneMemoryEntries(tailMemoryEntries(matched, limit))
+}
+
+func (store *meetingMemoryStore) countEntriesOfKindByMetadata(kind, key, value string) int {
+	if store == nil {
+		return 0
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	count := 0
+	for _, entry := range store.entries {
+		if entry.Kind == kind && strings.TrimSpace(entry.Metadata[key]) == value && !memoryEntryIsMediaSoakCanary(entry) {
+			count++
+		}
+	}
+	return count
 }
 
 // entryByKindAndID looks up a single entry; newest wins if ids ever collide

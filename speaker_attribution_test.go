@@ -2,9 +2,87 @@ package main
 
 import (
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestBlockedActiveSpeakerBroadcastDoesNotLoseAttributionFrames(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+
+	app := newKanbanBoardApp()
+	base := time.Now().UTC()
+	app.mu.Lock()
+	app.roomLive[officeRoomID].participants["Tom"] = base
+	app.roomLive[officeRoomID].participants["Tyler"] = base
+	app.mu.Unlock()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	delivered := make(chan string, 2)
+	var first atomic.Bool
+	app.activeSpeakerPublishMu.Lock()
+	app.activeSpeakerPublishDeliver = func(publication activeSpeakerPublication) {
+		if first.CompareAndSwap(false, true) {
+			started <- struct{}{}
+			<-release
+		}
+		delivered <- publication.payload.Name
+	}
+	app.activeSpeakerPublishMu.Unlock()
+
+	// Promote Tom and block only the derived UI publication.
+	app.NoteAudioActivity(base, []audioActivityLevel{{ParticipantName: "Tom", RMS: 2200}})
+	app.NoteAudioActivity(base.Add(activeSpeakerStabilityWindow+50*time.Millisecond), []audioActivityLevel{{ParticipantName: "Tom", RMS: 2100}})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("active-speaker publication did not reach the blocking seam")
+	}
+
+	// Tyler takes over while the UI publisher is blocked. Every 20ms-class
+	// attribution frame must still be ingested synchronously.
+	turnStart := base.Add(time.Second)
+	turnStop := turnStart.Add(900 * time.Millisecond)
+	app.mu.Lock()
+	app.roomLive[officeRoomID].currentSpeechStartedAt = turnStart
+	app.roomLive[officeRoomID].currentSpeechStoppedAt = turnStop
+	app.mu.Unlock()
+	callStarted := time.Now()
+	for index := 0; index < 10; index++ {
+		app.NoteAudioActivity(turnStart.Add(time.Duration(index)*100*time.Millisecond), []audioActivityLevel{
+			{ParticipantName: "Tyler", RMS: 1800},
+			{ParticipantName: "Tom", RMS: 120},
+		})
+	}
+	if elapsed := time.Since(callStarted); elapsed > 50*time.Millisecond {
+		t.Fatalf("local attribution waited %s for blocked UI publication", elapsed)
+	}
+
+	speaker, confidence := app.speakerForCompletedTranscript(turnStop.Add(100 * time.Millisecond))
+	if speaker != "Tyler" || confidence != "dominant" {
+		t.Fatalf("speaker=%q confidence=%q, want Tyler/dominant after blocked publication", speaker, confidence)
+	}
+
+	close(release)
+	select {
+	case name := <-delivered:
+		if name != "Tom" {
+			t.Fatalf("first publication=%q, want Tom", name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked publication did not release")
+	}
+	select {
+	case name := <-delivered:
+		if name != "Tyler" {
+			t.Fatalf("latest publication=%q, want Tyler", name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("latest active speaker was not published")
+	}
+}
 
 func TestSpeakerForCompletedTranscriptUsesDominantParticipantAudio(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))

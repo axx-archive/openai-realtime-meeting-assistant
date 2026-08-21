@@ -249,3 +249,13 @@ func TestNativeDeckViewerHidesStageUntilFirstFit(t *testing.T) {
 		t.Fatalf("viewer reveals the stage before applying the first fit: %s", document)
 	}
 }
+
+func TestNativeDeckViewerNavigationDoesNotCollideWithHostActions(t *testing.T) {
+	document := injectArtifactDeckNavigation(`<!doctype html><html><body><div id="stage"><section class="pg on"></section></div></body></html>`)
+	if !strings.Contains(document, `#deck-viewer-nav{position:fixed;right:24px;top:20px;`) {
+		t.Fatalf("viewer navigation is not anchored in the upper-right: %s", document)
+	}
+	if strings.Contains(document, `#deck-viewer-nav{position:fixed;right:24px;bottom:`) {
+		t.Fatalf("viewer navigation still collides with the host's lower-right Edit/Present actions: %s", document)
+	}
+}

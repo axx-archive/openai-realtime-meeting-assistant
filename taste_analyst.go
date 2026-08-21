@@ -417,14 +417,18 @@ func (app *kanbanBoardApp) tasteProfileForUser(userName string) (meetingMemoryEn
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false
 	}
-	entries := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)
-	for index := len(entries) - 1; index >= 0; index-- {
-		entry := entries[index]
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindOSArtifact || memoryEntryIsMediaSoakCanary(entry) {
+			continue
+		}
 		if entry.Metadata[tasteProfileArtifactTypeKey] != tasteProfileArtifactType {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(entry.Metadata[tasteProfileUserKey]), strings.TrimSpace(userName)) {
-			return entry, true
+			return cloneMemoryEntry(entry), true
 		}
 	}
 	return meetingMemoryEntry{}, false
@@ -441,13 +445,11 @@ func (store *meetingMemoryStore) unconsumedSignalsForActor(actor string, cursorI
 	}
 
 	store.mu.Lock()
-	entries := cloneMemoryEntries(store.entries)
-	store.mu.Unlock()
-
+	defer store.mu.Unlock()
 	startIndex := 0
 	if cursorID = strings.TrimSpace(cursorID); cursorID != "" {
-		for index := len(entries) - 1; index >= 0; index-- {
-			if entries[index].ID == cursorID {
+		for index := len(store.entries) - 1; index >= 0; index-- {
+			if store.entries[index].ID == cursorID {
 				startIndex = index + 1
 				break
 			}
@@ -455,7 +457,7 @@ func (store *meetingMemoryStore) unconsumedSignalsForActor(actor string, cursorI
 	}
 
 	window := make([]meetingMemoryEntry, 0, limit)
-	for _, entry := range entries[startIndex:] {
+	for _, entry := range store.entries[startIndex:] {
 		if entry.Kind != meetingMemoryKindSignal {
 			continue
 		}
@@ -465,7 +467,7 @@ func (store *meetingMemoryStore) unconsumedSignalsForActor(actor string, cursorI
 		if !signalActorMatches(entry, actor) {
 			continue
 		}
-		window = append(window, entry)
+		window = append(window, cloneMemoryEntry(entry))
 		if len(window) >= limit {
 			break
 		}

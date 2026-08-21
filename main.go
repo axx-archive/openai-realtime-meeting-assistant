@@ -6993,6 +6993,7 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 type threadSafeWriter struct {
 	*websocket.Conn
 	sync.Mutex
+	failed      atomic.Bool
 	tenantLease *strideE10TenantWebSocketLease
 	// guest marks the writer's principal class (multi-room §6.2): set once at
 	// connection setup, read by the write-time event allowlist so a guest
@@ -7005,6 +7006,7 @@ func (t *threadSafeWriter) Close() error {
 	if t == nil || t.Conn == nil {
 		return nil
 	}
+	t.failed.Store(true)
 
 	t.Lock()
 	defer t.Unlock()

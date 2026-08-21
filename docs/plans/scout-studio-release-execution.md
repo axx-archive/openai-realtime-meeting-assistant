@@ -152,11 +152,26 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 - Signed-in cold-channel instrumentation sampled the canonical deck every 80-100 ms. Its shell was 720x405 from the first observed frame, the renderer remained at opacity 0 until ready at approximately 1.6 seconds, then crossfaded to opacity 1 without any geometry change. The reported zoom/resize flash is closed on the live release.
 - That same browser pass caught a separate scroll-flow defect: `.manifest-card--deck-first` computed to zero height inside the vertical flex log while its 405 px deck child overflowed below the maximum scroll boundary. The bottom anchor was correct, but the final deck was literally outside the reachable scroll extent.
 - The follow-up makes the deck-first handoff a non-shrinking flex item with visible overflow, suppresses redundant package/title/subline chrome, and centers the deck plus its quiet supporting-files row. A static regression pins the sizing and clutter contract; the focused manifest/deck suite and `git diff --check` pass. This fix must supersede generation 161 before Build 70 is cut.
+- Production generation 162 serves exact `70f4f29260497a9c615f0a24292b312fc748a2f8`, bundle `e5572d3001c93a1c0fcf4f4464b790e7a2a14ce1cddfa86fdb56ae18dc76e9b9`, app image `sha256:689b43a5fd3a22388e267626c7d148cbe0de6de418d42bd353401e60d556ae3e`, and render image `sha256:2f81192bf0d71cd79f5a73dc233e210fa8aa0f38faf66f9abfe3d27a0995173e`; verifier, ledger, serving images, and public health/readiness agree, with generation 161 retained rollback.
+- Signed-in generation-162 acceptance proves the deck-first card now contributes 461 px to the scroll flow, its 720x405 deck is centered, the log is at its exact maximum scroll position, the full card plus supporting-files Activity row sits inside the visible log bounds, and the redundant package/title/subline preamble is absent.
+- The corrected screenshot exposed one remaining control collision: the server-owned deck navigation pill was fixed at lower-right underneath the host's lower-right Edit/Present actions. The follow-up moves only the trusted viewer navigation to the upper-right; print still removes it and native Deck Studio/Presenter continue to own their separate controls. A focused regression requires upper-right placement and bans the prior lower-right rule.
 
 ## Pending Dependencies
 
-- The deck-first scroll-flow follow-up critique/release, remaining signed-in Deck Studio/Document Studio production workshop, Build 70 processing/groups, and safe cleanup remain pending.
+- The viewer-navigation follow-up critique/release, remaining signed-in Deck Studio/Document Studio production workshop, Build 70 processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
+
+## Generation 162 Live Media Incident And Fix Contract
+
+- At 17:24-17:37 UTC, a four-person office call reproduced user-visible A/V drift followed by missing group video. Network telemetry itself remained healthy (roughly 64-109 ms RTT, low jitter, near-zero loss), while the app container reached 316% CPU, 1.7 GB memory, and failed its 5-second readiness probe.
+- The host is 4 vCPU / 8 GB RAM; the app has no CPU quota and a 3 GB memory limit. Capacity was not the initiating constraint. The active release repeatedly scanned/cloned large memory artifacts during `/readyz`, and the four-person call exposed a synchronous media/control coupling.
+- Exact blocking chain: the mixer tick called the active-speaker listener inline; the listener synchronously fanned out to every authorized WebSocket; one broken socket could hold its writer lock until the five-second write deadline. While the mixer was blocked, four publishers continued Opus decode and filled its 128-frame analysis queue. Every subsequent frame was copied, dropped, and warned individually, creating a CPU/log feedback loop that also starved signaling and RTP forwarding.
+- Disconnected/retrying sockets amplified the incident because a failed broadcast write did not mark the writer dead or wake its owning read loop. Active-speaker refreshes retried those sockets until heartbeat/read-deadline cleanup.
+- The candidate keeps every local 20 ms activity frame synchronous and lossless for transcript attribution, then isolates only the derived UI payload behind a per-room latest-state publisher. UI delivery can never block the mixer; saturated capture is shed before PCM/fence copies; drop telemetry is aggregated to one summary per ten seconds; and the first failed WebSocket write atomically marks the writer failed, closes the underlying connection, and makes queued writes return immediately so normal session cleanup evicts its room/media rows.
+- Readiness now retrieves only the exact newest/count metadata required by capability health rather than cloning whole artifact/signal/dead-letter stores or building the full house-style evidence packet. A 1,500-artifact allocation regression pins the hot path.
+- Live recovery without a restart confirmed the mechanism: once broken sockets aged out, the warning rates fell to zero, Docker health returned, and CPU dropped from 316% to about 145% while the group call remained active. The fix still requires exact-release deployment and same-load observation; recovery is not closure.
+- The independent media-path gate first rejected a lossy raw-activity queue because those frames also drive transcript attribution. The corrected A-to-B blocked-publication regression proves local ingestion remains fast, Tyler stays the dominant transcript speaker, and the UI later publishes Tom followed by the latest Tyler state. Focused normal count=5, focused race, all-package compile, and diff checks pass; the broad ten-minute repository run reproduced the documented unrelated frontend dependency/static drift and qualification timeout.
+- Capacity decision: do not resize before measuring the corrected build. After the fix, require a four-to-six-person soak with direct media intact, no readiness timeout, no repeated socket/mixer warnings, and sustained app CPU below 70% of four cores with headroom. If that evidence fails, resize to 8 vCPU as a reversible safety-margin step; it is not a substitute for the isolation contract.
 
 ## Operations And Authority Queue
 
@@ -173,8 +188,8 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 
 ## Resume Here
 
-1. Close the deck-first flex-flow critique, commit/push the follow-up, and supersede generation 161 through the receipted exact-release path.
-2. Recheck the signed-in Like A Farmer bottom anchor, quiet Activity flow, and centered rich deck; then finish Deck Studio/Document Studio/PiP production acceptance.
-3. Keep the generation-161 cold-load measurement as the preview-stability evidence; do not reopen it unless the superseding release changes the preview shell.
+1. Close the upper-right viewer-navigation critique, commit/push, and ship one final receipted web release.
+2. Recheck the signed-in Like A Farmer control hierarchy; then finish Deck Studio/Document Studio/PiP production acceptance.
+3. Keep the generation-161 cold-load measurement and generation-162 scroll-flow proof as acceptance evidence; neither follow-up changes the preview shell.
 4. Build/submit iOS Build 70 from that exact final main SHA by explicit EAS build ID, verify phone/iPad rich-preview behavior plus Apple processing and intended groups.
 5. Preserve receipts and synchronize local `main`, `axx/main`, and safe worktrees without overwriting user work.
