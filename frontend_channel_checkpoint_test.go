@@ -28,6 +28,9 @@ func TestChannelWorkCardOwnsCheckpointDecision(t *testing.T) {
 		"checkpointId: String(checkpointId || '').trim()",
 		"checkpointOptionId: String(checkpointOptionId || '').trim()",
 		"function desktopCheckpointChoiceLabel(label)",
+		"const retry = bfEl('button', 'chat-context-action', canResumeProcess ? 'Retry from here' : 'Ask Scout')",
+		"postAuthJSON('/artifacts/action', { id: artifact.id, action: 'resume' })",
+		"Resuming at the blocker…",
 		"This work remains held.",
 		"The work was sent back for revision.",
 		"Scout is continuing.",
@@ -139,6 +142,31 @@ const server=http.createServer((req,res)=>{
 	await page.evaluate(()=>mountChannelCheckpointFixture('channel-studio-copy','goal-channel-studio',{id:'goal-checkpoint-cccccccccccccccccccccccc',stageId:'ship_approval',question:'The deck is ready. What would you like to do?',options:[{id:'checkpoint-option-666666666666666666666666',label:'approve the ship',action:'proceed'},{id:'checkpoint-option-777777777777777777777777',label:'send back — rebuild the deck',action:'revise'},{id:'checkpoint-option-888888888888888888888888',label:'hold the package',action:'hold'},{id:'checkpoint-option-999999999999999999999999',label:'franchise-playbook',action:'proceed'}]},'Finish this deck'));
 	const studioLabels=await page.locator('#channel-studio-copy .scout-chat-work-card__checkpoint-choice').allTextContents();
 	assert.deepEqual(studioLabels,['Approve this version','Request changes','Keep on hold','Franchise playbook']);
+	await page.evaluate(()=>{
+	  const plan={state:'needs_attention',processId:'packaging_studio',subtasks:[{id:'voice',title:'Voice',status:'blocked'}]};
+	  const artifact={id:'goal-channel-blocked',kind:'os_artifact',text:'# Saved deck draft',metadata:{mode:'goal',title:'Like A Farmer deck',status:'needs_attention',threadStatus:'needs_attention',goalPlan:JSON.stringify(plan)}};
+	  const message={id:'work-message-blocked',thread:{id:'goal-channel-blocked',artifactId:'goal-channel-blocked',status:'needs_attention',mode:'goal',agentName:'Scout',query:'Finish the Like A Farmer deck'}};
+	  const fixture=document.createElement('div');fixture.id='channel-blocked-fixture';fixture.appendChild(scoutDesktopGoalWorkCardNode(message,artifact));chatTool.appendChild(fixture);
+	});
+	const blockedCard=page.locator('#channel-blocked-fixture .scout-chat-work-card');
+	await blockedCard.getByRole('button',{name:/View .* activity/}).click();
+	const retry=blockedCard.getByRole('button',{name:'Retry from here'});
+	await retry.click();
+	await page.waitForFunction(()=>document.querySelector('#channel-blocked-fixture .chat-context-action:last-child')?.textContent==='Resuming at the blocker…');
+	assert.deepEqual(requests[3],{id:'goal-channel-blocked',action:'resume'});
+	assert.equal(requests.length,4);
+	await page.evaluate(()=>{
+	  const mount=(id,status,plan)=>{const artifact={id,kind:'os_artifact',text:'# Saved work',metadata:{mode:'goal',title:id,status,threadStatus:status,goalPlan:JSON.stringify(plan)}};const message={id:'message-'+id,thread:{id,artifactId:id,status,mode:'goal',agentName:'Scout',query:'Continue this work'}};const fixture=document.createElement('div');fixture.id='fixture-'+id;fixture.appendChild(scoutDesktopGoalWorkCardNode(message,artifact));chatTool.appendChild(fixture)};
+	  mount('goal-channel-rejected','rejected',{state:'approval_required',processId:'packaging_studio',subtasks:[]});
+	  mount('goal-channel-legacy','needs_attention',{state:'needs_attention',subtasks:[]});
+	});
+	for(const id of ['goal-channel-rejected','goal-channel-legacy']){
+	  const candidate=page.locator('#fixture-'+id+' .scout-chat-work-card');
+	  await candidate.getByRole('button',{name:/View .* activity/}).click();
+	  assert.equal(await candidate.getByRole('button',{name:'Retry from here'}).count(),0);
+	  await candidate.getByRole('button',{name:'Ask Scout'}).click();
+	  assert.equal(requests.length,4);
+	}
 	await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
