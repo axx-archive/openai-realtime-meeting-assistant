@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: production generation 160 serves exact release `1d1120185d0533ff34a83b1c6eaa61ff85632fe2` as `verified-local-unsigned`; generation 159 `5330e24a03a54d80b6b623631c0382783b24fa36` is the retained rollback. The live Deck Studio and production Like A Farmer workshop are complete, including Scout imagery, native layer/opacity edits, Save, named Save a copy to Files, reopen, Present, and the full-bleed z-order hotfix. The active expansion now owns zero-flash deck previews, one minimal process pill plus an activity sidecar, first-class native Document Studio, a source-bound company-Brain deck intelligence pipeline, Build 70/TestFlight, and final repository synchronization.
+Current phase: production generation 163 serves exact release `5fbf8ba2693164ab7ac72d013bd59c7121cd9ce9` as `verified-local-unsigned`; generation 162 `70f4f29260497a9c615f0a24292b312fc748a2f8` is the retained rollback. Signed-in production acceptance is complete for the live Like A Farmer deck, Deck Studio, Document Studio, quiet Activity sidecar, zero-shift preview, and the media-path incident fix. Exact iOS Build 70 is uploaded to Apple and awaiting authenticated processing/tester-group readback; repository synchronization and safe temporary-worktree cleanup are the remaining local work.
 
 ## Invariants
 
@@ -23,12 +23,12 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
 | W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Native deck edited; one rich card plus Edit/Present verified on generation 155; 10-page export correction pending release |
-| W7 | Publish the final combined native SHA as Build 70 to TestFlight | Final web/mobile release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Build 69 uploaded from `9b2a04a8`; Build 70 required for current native result/preview fixes |
-| W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
-| W9 | Zero-flash deck preview and one-channel-truth progress sidecar | W6 live deck result | Zero shell layout shift; one keyed pill; one approved deck; stages/package detail only in sidecar | Implemented; focused rendered gate green, production gate pending |
-| W10 | Native Document Studio and first-class supporting files | W9 channel ownership contract and existing Files CAS patterns | Markdown round-trip, version conflict, Save/copy/Files, rendered desktop/mobile/PiP QA | Implemented; server/static/rendered gates green, production gate pending |
-| W11 | Brain-grounded deck intelligence v2 | W9 progress visibility and W10 internal-document boundary | Source snapshot, research/evidence decision, copy lock, native composition, pre-delivery jury, privacy/adversarial corpus | Implemented; focused process gates green, live source-bound deck gate pending |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Complete: rich channel card, native edit/image/layer/save/copy/reopen/present journey verified |
+| W7 | Publish the final combined native SHA as Build 70 to TestFlight | Final web/mobile release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Exact `5fbf8ba2` Build 70 built, signed, inspected, and uploaded; Apple processing/groups require authenticated readback |
+| W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Final ledger commit, local `main` fast-forward, and safe cleanup in progress |
+| W9 | Zero-flash deck preview and one-channel-truth progress sidecar | W6 live deck result | Zero shell layout shift; one keyed pill; one approved deck; stages/package detail only in sidecar | Complete in production generation 163 |
+| W10 | Native Document Studio and first-class supporting files | W9 channel ownership contract and existing Files CAS patterns | Markdown round-trip, version conflict, Save/copy/Files, rendered desktop/mobile/PiP QA | Complete in production generation 163 |
+| W11 | Brain-grounded deck intelligence v2 | W9 progress visibility and W10 internal-document boundary | Source snapshot, research/evidence decision, copy lock, native composition, pre-delivery jury, privacy/adversarial corpus | Complete in production generation 163 and the delivered source-bound deck |
 
 ## Current Wave
 
@@ -158,8 +158,8 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 
 ## Pending Dependencies
 
-- The viewer-navigation follow-up critique/release, remaining signed-in Deck Studio/Document Studio production workshop, Build 70 processing/groups, and safe cleanup remain pending.
-- TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
+- Build 70's Apple processing state and intended tester-group assignment require a fresh authenticated App Store Connect readback; the existing browser session has reached Apple's sign-in boundary.
+- Authenticated physical phone/iPad acceptance remains a separately observable gate and is not inferred from the signed archive or simulator/static tests.
 
 ## Generation 162 Live Media Incident And Fix Contract
 
@@ -172,11 +172,27 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 - Live recovery without a restart confirmed the mechanism: once broken sockets aged out, the warning rates fell to zero, Docker health returned, and CPU dropped from 316% to about 145% while the group call remained active. The fix still requires exact-release deployment and same-load observation; recovery is not closure.
 - The independent media-path gate first rejected a lossy raw-activity queue because those frames also drive transcript attribution. The corrected A-to-B blocked-publication regression proves local ingestion remains fast, Tyler stays the dominant transcript speaker, and the UI later publishes Tom followed by the latest Tyler state. Focused normal count=5, focused race, all-package compile, and diff checks pass; the broad ten-minute repository run reproduced the documented unrelated frontend dependency/static drift and qualification timeout.
 - Capacity decision: do not resize before measuring the corrected build. After the fix, require a four-to-six-person soak with direct media intact, no readiness timeout, no repeated socket/mixer warnings, and sustained app CPU below 70% of four cores with headroom. If that evidence fails, resize to 8 vCPU as a reversible safety-margin step; it is not a substitute for the isolation contract.
+- Production generation 163 now serves exact `5fbf8ba2693164ab7ac72d013bd59c7121cd9ce9`, bundle `7601a06e5081bc7e027be9242b60eadca6f6c9413833685eaa2b6c85cdf20a7d`, app image `sha256:3c886be5745e8c5b71380a8205b48863a7d5e8eaefd4473e259d072850fde92c`, and render image `sha256:d7ccf2c007af4b055d6d31968312d86896a24731faeaa5d894bb1ac04faf0283`; the retained verifier reports `verified-local-unsigned` and generation 162 remains the exact rollback.
+- A bounded production regression used an isolated guest-enabled room with four independent Chromium publishers. Server logs prove four audio plus four video tracks; every client reached a connected peer connection with live local audio/video and the remote-media gate reached three remote video plus three remote-audio elements. During the common four-way window CPU stayed about 79-127% of four cores (154.8% during staged admission), memory stayed below 0.87 GB, readiness stayed 0.25-0.51 seconds, Docker remained healthy, and both mixer-drop signatures plus active-speaker write errors remained zero. The harness ended on a guest-prefix label assertion, not a media failure; this is a short regression soak, not the formal two-hour W2 qualification.
+- Capacity verdict: keep the current 4 vCPU / 8 GB shape. The fixed build has more than the required CPU headroom under the reproduced four-publisher shape; an 8-vCPU resize is no longer justified by this incident. The isolated room is archived and its links are unusable while archived.
+- Disk, not CPU, was the remaining operational risk: repeated releases left the host with 0.9 GB free. Thirty-six closed-window release images older than the active/rollback pair were removed after exact target enumeration; release directories and receipts remain, but those retired image layers would require a rebuild to recover. Active generation 163 and rollback generation 162 images were retained and reverified; free space is now 9.6 GB.
+
+## Generation 163 Signed-In Acceptance And Build 70
+
+- The signed-in production Like A Farmer channel reaches its final card at the true scroll tail. The card contains one rich `Like A Farmer — Optimization Insights` deck, upper-right previous/next controls, lower-right Edit/Present actions, and one quiet `4 supporting files · 2 notes` Activity row instead of process-deliverable clutter.
+- Cold-load sampling observed no deck shell through the initial fetch, then a stable `720x405` shell from approximately 501 ms through 3 seconds with identical x/y/width/height measurements. The previously reported zoomed-then-resized flash did not reproduce.
+- Deck Studio opens full-window with Close, undo/redo, text, upload, rectangle, ellipse, z-order controls, slide navigation, Present, Save, and named Save a copy. The inspector exposes opacity, typography, fill, and stroke controls; Scout imagery accepts a prompt and places an image normally or full bleed. The production workshop already exercised generated rural-road imagery, resize/fit, layer moves, typography, shapes, opacity, Save, named copy `Like A Farmer — Optimization Insights — Studio Edition`, reopen, and Present.
+- The Activity sidecar keeps stage history and decision detail out of the channel. A supporting document opens full-window in Document Studio with outline navigation, Markdown body editing, undo/redo, heading/emphasis/list/quote/link tools, preview, Save, and Save a copy; this read-only acceptance pass intentionally made no production mutation.
+- Current mobile source passed all 587 mobile tests, TypeScript, and Expo Doctor 21/21. EAS App Store build `015a1169-2e27-41be-a1c8-dc9bac660ddd` is version `1.0.0`, Build 70, SDK 57, exact Git commit `5fbf8ba2693164ab7ac72d013bd59c7121cd9ce9`, and fingerprint `92f728d4cfa31d3ae2cea957d4d2ed72e1032ce7`.
+- The downloaded IPA's SHA-256 is `0bce640b206ae4f3a78bd9ad842f87f7dd4dace09b30f1bdb17bbcd229207821`; its main bundle is `xyz.thebonfire.app`, ReplayKit extension is `xyz.thebonfire.app.broadcast`, both report Build 70, and signing identifies team `73PT36P58W`.
+- EAS submission `87df3557-6bf5-4c71-9ab6-06605e8d86b3` uploaded that exact build successfully. Apple processing and the `Team (Expo)` / `Bonfire` group assignment are not claimed without the authenticated App Store Connect readback.
 
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; re-export/approve the current production deck; build and submit exact Build 70; verify TestFlight.
-- Not yet executed: fixed 10-page image-complete re-export, final approval/channel completion, Build 70 processing/group verification, final repository cleanup.
+- Executed: exact web release, signed-in Like A Farmer approval/edit/present journey, Build 70 build and upload, and the production media regression.
+- External readback remaining: Apple processing/tester groups and physical phone/iPad acceptance.
+- Local remaining: final ledger commit, `main` parity, and removal of only proven-clean temporary worktrees.
 - Rollback: retain the active generation and its immediately prior verified release/images until the follow-up live export journey passes.
 
 ## Risks And Decisions
@@ -188,8 +204,8 @@ Current phase: production generation 160 serves exact release `1d1120185d0533ff3
 
 ## Resume Here
 
-1. Close the upper-right viewer-navigation critique, commit/push, and ship one final receipted web release.
-2. Recheck the signed-in Like A Farmer control hierarchy; then finish Deck Studio/Document Studio/PiP production acceptance.
-3. Keep the generation-161 cold-load measurement and generation-162 scroll-flow proof as acceptance evidence; neither follow-up changes the preview shell.
-4. Build/submit iOS Build 70 from that exact final main SHA by explicit EAS build ID, verify phone/iPad rich-preview behavior plus Apple processing and intended groups.
-5. Preserve receipts and synchronize local `main`, `axx/main`, and safe worktrees without overwriting user work.
+1. Complete the authenticated App Store Connect readback for Build 70 processing and the intended `Team (Expo)` / `Bonfire` groups when that session is available.
+2. Run the phone/iPad rich-preview and editor acceptance on a physical device; keep it distinct from the signed-archive and automated mobile evidence.
+3. Keep the four-publisher regression as the incident acceptance evidence; do not resize CPU unless a later sustained real-team call exceeds the measured headroom or reproduces media/readiness failure.
+4. Preserve generation 163 and generation 162 release receipts/images as active and rollback; do not redeploy for this documentation-only ledger commit.
+5. Preserve all user work and remove only temporary worktrees whose cleanliness was reverified immediately before removal.
