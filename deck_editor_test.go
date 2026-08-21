@@ -64,9 +64,9 @@ func TestDeckDocumentValidationAndCompile(t *testing.T) {
 		t.Fatalf("putBlob: %v", err)
 	}
 	deck := deckDocument{SchemaVersion: 1, Width: 1920, Height: 1080, Slides: []deckSlide{{
-		ID: "slide-1", Background: "#102030", Elements: []deckElement{
+		ID: "slide-1", Background: "#102030", Notes: "Open with the field story [BEAT]", Elements: []deckElement{
 			{ID: "background", Type: "shape", X: 0, Y: 0, Width: 1920, Height: 1080, Z: -10, Opacity: .7, Shape: "rectangle", Fill: "#102030"},
-			{ID: "headline", Type: "text", X: 96, Y: 96, Width: 900, Height: 240, Z: 2, Opacity: 1, Text: "Farmers < founders", FontSize: 96, FontFamily: "Arial", FontWeight: 700, Color: "#ffffff"},
+			{ID: "headline", Type: "text", X: 96, Y: 96, Width: 900, Height: 240, Z: 2, Opacity: 1, Text: "Farmers < founders", FontSize: 96, FontFamily: "Arial", FontWeight: 700, Color: "#ffffff", TextAlign: "center", LineHeight: 1.05, LetterSpacing: ".04em"},
 			{ID: "image-1", Type: "image", X: 1100, Y: 0, Width: 820, Height: 1080, Z: 1, Opacity: 1, Ref: ref, Name: "fig-1.png", Fit: "cover"},
 		},
 	}}}
@@ -74,7 +74,7 @@ func TestDeckDocumentValidationAndCompile(t *testing.T) {
 		t.Fatalf("validateDeckDocument: %v", err)
 	}
 	html := compileDeckDocumentHTML(deck, "Like a Farmer")
-	for _, want := range []string{"width:1920px", "height:1080px", "Farmers &lt; founders", "/artifacts/blob?ref=" + ref} {
+	for _, want := range []string{"width:1920px", "height:1080px", "Farmers &lt; founders", "text-align:center", "line-height:1.05", "letter-spacing:.04em", `<div class="notes" hidden>Open with the field story [BEAT]</div>`, "/artifacts/blob?ref=" + ref} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("compiled HTML missing %q: %s", want, html)
 		}
@@ -116,6 +116,43 @@ func TestImportLegacyDeckPreservesDataDeckGeometryAndFigAsset(t *testing.T) {
 	image := deck.Slides[0].Elements[1]
 	if image.Type != "image" || image.Ref != ref || image.Name != "fig-1.png" || image.X != 1080 || image.Width != 840 || image.Height != 1080 {
 		t.Fatalf("image=%+v, want exact fig asset and geometry", image)
+	}
+}
+
+func TestImportLegacyDeckPreservesInheritedTypographyAndTracking(t *testing.T) {
+	source := `<!doctype html><html><head><style>
+	:root{--display:Georgia,"Times New Roman",serif;--body:"Arial Narrow","Aptos Narrow","Helvetica Neue",Arial,sans-serif}
+	html,body{font-family:var(--body)} .pg{font-family:var(--body)} .serif{font-family:var(--display)} .kicker{letter-spacing:.15em}
+	</style></head><body><div id="stage"><section class="pg on" data-deck-slide="slide-1" style="background:#101014">
+	<div class="serif" data-deck-element="headline" data-deck-type="text" style="position:absolute;left:96px;top:120px;width:1200px;height:220px;z-index:2;opacity:1;font-size:104px;font-weight:700;color:#ffffff;letter-spacing:.04em">Like a Farmer</div>
+	<div class="kicker" data-deck-element="label" data-deck-type="text" style="position:absolute;left:96px;top:420px;width:800px;height:80px;z-index:2;opacity:1;font-size:28px;font-weight:700;color:#ffffff">Working Fieldbook</div>
+	</section></div></body></html>`
+	artifact := meetingMemoryEntry{Metadata: map[string]string{"type": artifactTypeHTMLDeck}, Text: source}
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil {
+		t.Fatalf("loadDeckDocument: %v", err)
+	}
+	if !imported || quality != "faithful" || len(deck.Slides) != 1 || len(deck.Slides[0].Elements) != 2 {
+		t.Fatalf("imported=%v quality=%q deck=%+v", imported, quality, deck)
+	}
+	headline, label := deck.Slides[0].Elements[0], deck.Slides[0].Elements[1]
+	if headline.FontFamily != "Georgia,Times New Roman,serif" || headline.LetterSpacing != ".04em" {
+		t.Fatalf("headline typography=%+v, want inherited serif stack and inline tracking", headline)
+	}
+	if label.FontFamily != "Arial Narrow,Aptos Narrow,Helvetica Neue,Arial,sans-serif" || label.LetterSpacing != ".15em" {
+		t.Fatalf("label typography=%+v, want inherited body stack and class tracking", label)
+	}
+	compiled := compileDeckDocumentHTML(deck, "Typography roundtrip")
+	if !strings.Contains(compiled, "font-family:Georgia,Times New Roman,serif") || !strings.Contains(compiled, "letter-spacing:.15em") {
+		t.Fatalf("compiled deck dropped inherited typography: %s", compiled)
+	}
+	scene, err := json.Marshal(deck)
+	if err != nil {
+		t.Fatalf("marshal native scene: %v", err)
+	}
+	var roundtrip deckDocument
+	if err := json.Unmarshal(scene, &roundtrip); err != nil || roundtrip.Slides[0].Elements[0].FontFamily != headline.FontFamily || roundtrip.Slides[0].Elements[1].LetterSpacing != label.LetterSpacing {
+		t.Fatalf("typography scene roundtrip err=%v deck=%+v", err, roundtrip)
 	}
 }
 
@@ -287,14 +324,53 @@ func TestMixedLegacyDeckIsApproximateAndMutationIsRefused(t *testing.T) {
 	}
 }
 
+func TestLegacyPresenterChromeIsIgnoredButSlideNotesRemainEditable(t *testing.T) {
+	legacy := strings.Replace(faithfulDeckHTML, "</body>", "<button id=\"prompt\">Present</button><aside id=\"railwrap\">Presenter script</aside><script>const slides=[1]; const notes=[`Founder narration [BEAT] Keep the shift line exact.`]; const escapeHTML=value=>value.replace(/[&<>\"']/g,function(ch){return ch;}); addEventListener(\"keydown\",event=>present(notes,event));</script></body>", 1)
+	artifact := meetingMemoryEntry{Metadata: map[string]string{"type": artifactTypeHTMLDeck}, Text: legacy}
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil {
+		t.Fatalf("loadDeckDocument: %v", err)
+	}
+	if !imported || quality != "faithful" {
+		t.Fatalf("imported=%v quality=%q, want faithful presenter-chrome import", imported, quality)
+	}
+	if got := deck.Slides[0].Notes; got != "Founder narration [BEAT] Keep the shift line exact." {
+		t.Fatalf("notes=%q, want preserved presenter script", got)
+	}
+	compiled := compileDeckDocumentHTML(deck, "Like a Farmer")
+	if !strings.Contains(compiled, `<div class="notes" hidden>Founder narration [BEAT] Keep the shift line exact.</div>`) || strings.Contains(compiled, `id="prompt"`) || strings.Contains(compiled, "const VOICE") {
+		t.Fatalf("compiled native deck did not preserve notes while dropping outer presenter chrome: %s", compiled)
+	}
+}
+
 func TestLegacyBehaviorAndUnrepresentedVisualsStayReadOnlyWithoutLoss(t *testing.T) {
 	cases := []struct {
 		name string
 		html string
 	}{
 		{
-			name: "presenter script and voice behavior",
+			name: "unknown presenter script outside the slide",
 			html: strings.Replace(faithfulDeckHTML, "</body>", `<script>const VOICE={"slide-1":"Founder narration"};addEventListener("keydown",event=>present(VOICE,event));</script></body>`, 1),
+		},
+		{
+			name: "unknown behavior before a valid notes array",
+			html: strings.Replace(faithfulDeckHTML, "</body>", `<script>runImportantChart(); const slides=[1]; const notes=["n"]; addEventListener("keydown",event=>present(notes,event));</script></body>`, 1),
+		},
+		{
+			name: "unknown behavior after a valid notes array",
+			html: strings.Replace(faithfulDeckHTML, "</body>", `<script>const slides=[1]; const notes=["n"]; addEventListener("keydown",event=>present(notes,event)); mutateDeck();</script></body>`, 1),
+		},
+		{
+			name: "notes marker only inside a string",
+			html: strings.Replace(faithfulDeckHTML, "</body>", `<script>const decoy="const notes=['n']"; mutateDeck();</script></body>`, 1),
+		},
+		{
+			name: "interactive behavior inside a slide",
+			html: strings.Replace(faithfulDeckHTML, "</section>", `<button onclick="advance()">Advance</button><script>advance()</script></section>`, 1),
+		},
+		{
+			name: "overlong presenter notes",
+			html: strings.Replace(faithfulDeckHTML, "</section>", `<div class="notes">`+strings.Repeat("n", deckSlideNotesMaxRunes+1)+`</div></section>`, 1),
 		},
 		{
 			name: "unmarked visual-only shape",

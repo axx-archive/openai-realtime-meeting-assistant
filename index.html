@@ -12590,6 +12590,19 @@
         outline: none;
         border-color: var(--accent);
       }
+      .deck-editor__notes {
+        width: 100%;
+        min-height: 112px;
+        resize: vertical;
+        padding: 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        line-height: 1.45;
+      }
+      .deck-editor__notes:focus { outline: none; border-color: var(--accent); }
       .deck-editor__color {
         width: 42px;
         height: 32px;
@@ -12771,6 +12784,16 @@
         min-height: 0;
         overflow: hidden;
       }
+      .deck-presenter__body {
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        overflow: hidden;
+      }
+      .deck-presenter[data-notes-open="true"] .deck-presenter__body {
+        grid-template-columns: minmax(0, 1fr) min(380px, 32vw);
+      }
       .deck-presenter__stage {
         position: relative;
         overflow: hidden;
@@ -12781,8 +12804,7 @@
       .deck-presenter__scene { position: absolute; inset: 0; overflow: hidden; }
       .deck-presenter__element { position: absolute; transform-origin: center; overflow: hidden; }
       .deck-presenter__text {
-        display: flex;
-        align-items: center;
+        display: block;
         width: 100%;
         height: 100%;
         white-space: pre-wrap;
@@ -12800,6 +12822,18 @@
         gap: 8px;
         transform: translateX(-50%);
       }
+      .deck-presenter__notes {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 24px;
+        border-left: 1px solid rgba(255,255,255,.16);
+        background: #121214;
+        color: rgba(255,255,255,.9);
+        font: 400 15px/1.55 var(--font-sans);
+        white-space: pre-wrap;
+      }
+      .deck-presenter__notes[hidden] { display: none; }
 
       /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
          hairline, 18/18/18/6; follow-ups tuck the joined corner to 6px */
@@ -42585,6 +42619,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
         ship_approval: 'The deck, presenter notes, supporting analysis, and review findings are ready. Approve this version, request changes, or keep it on hold.'
       }
 
+      function packagingStudioSlideJuryState(plan) {
+        if (String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio') return null
+        const task = (Array.isArray(plan?.subtasks) ? plan.subtasks : []).find(candidate => String(candidate?.id || '').trim() === 'slide_jury')
+        if (!task) return null
+        const artifactId = String(task?.artifactId || '').trim()
+        const record = artifactId && typeof artifactEntries !== 'undefined'
+          ? artifactEntries.find(candidate => String(candidate?.id || '').trim() === artifactId)
+          : null
+        const verdict = String(record?.metadata?.reviewVerdict || '').trim()
+        return {
+          verdict: verdict || (String(task?.status || '').trim() === 'complete' ? 'needs_attention' : ''),
+          blockingPages: String(record?.metadata?.blockingPages || '').trim()
+        }
+      }
+
+      function packagingStudioCheckpointOptions(plan, checkpoint) {
+        let options = Array.isArray(checkpoint?.options) ? checkpoint.options : []
+        if (String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio' || String(checkpoint?.stageId || '').trim() !== 'ship_approval') return options
+        const stage = (Array.isArray(plan?.subtasks) ? plan.subtasks : []).find(candidate => String(candidate?.id || '').trim() === 'ship_approval')
+        if (Number(stage?.revisions || 0) >= 2) options = options.filter(option => String(option?.action || 'proceed') !== 'revise')
+        return options
+      }
+
       function packagingStudioStagePresentationFor(entry) {
         const metadata = entry?.metadata || {}
 		const presentation = packagingStudioStagePresentation[String(metadata.processStage || metadata.goalSubtaskId || '').trim()] || null
@@ -42614,6 +42671,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function packagingStudioCheckpointQuestion(plan, checkpoint) {
         const processId = String(plan?.processId || plan?.toolTemplate || '').trim()
         if (processId === 'packaging_studio') {
+          const authored = String(checkpoint?.question || '')
+          // The server rewrites final review when the rendered jury found
+          // blockers. Preserve that run-specific, customer-facing warning;
+          // the legacy cleanup map is only a fallback for older saved runs.
+          if (String(checkpoint?.stageId || '').trim() === 'ship_approval' && /rendered review|automated rebuild budget/i.test(authored)) return authored
+          if (String(checkpoint?.stageId || '').trim() === 'ship_approval') {
+            const review = packagingStudioSlideJuryState(plan)
+            if (review?.verdict === 'needs_changes') return `Rendered review found blocking issues on slide(s) ${review.blockingPages || 'listed in the review'}. Fix them in Deck Studio, request a rebuild if one remains, or keep the package on hold. Approve only after the visible deck is clean.`
+            if (review?.verdict === 'needs_attention') return 'The rendered review is incomplete or predates the current readiness check. Inspect the deck in Deck Studio, request a rebuild if one remains, or keep it on hold. Approve only after a complete visual check.'
+          }
           return packagingStudioCheckpointQuestions[String(checkpoint?.stageId || '').trim()] || String(checkpoint?.question || '')
         }
         return String(checkpoint?.question || '')
@@ -44656,10 +44723,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 <span class="deck-editor__prop-label">Size</span>
                 <div class="deck-editor__prop-row"><label>W</label><input type="number" class="deck-editor__prop-input" data-prop="width"><label>H</label><input type="number" class="deck-editor__prop-input" data-prop="height"></div>
               </div>
-              <div class="deck-editor__prop-section" data-style-controls>
+              <div class="deck-editor__prop-section" data-text-controls hidden>
+                <span class="deck-editor__prop-label">Typography</span>
+                <div class="deck-editor__prop-row"><label>Color</label><input type="color" class="deck-editor__color" data-prop="color"><label>Size</label><input type="number" min="8" max="400" class="deck-editor__prop-input" data-prop="fontSize"></div>
+                <div class="deck-editor__prop-row"><label>Font</label><input type="text" class="deck-editor__prop-input" data-prop="fontFamily" placeholder="Font family or stack"></div>
+                <div class="deck-editor__prop-row"><label>Weight</label><select class="deck-editor__prop-input" data-prop="fontWeight"><option value="400">Regular</option><option value="600">Semibold</option><option value="700">Bold</option><option value="800">Heavy</option></select><label>Align</label><select class="deck-editor__prop-input" data-prop="textAlign"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></div>
+                <div class="deck-editor__prop-row"><label>Leading</label><input type="number" min="0.7" max="4" step="0.05" class="deck-editor__prop-input" data-prop="lineHeight"><label>Tracking</label><input type="text" class="deck-editor__prop-input" data-prop="letterSpacing" placeholder="normal or .04em"></div>
+              </div>
+              <div class="deck-editor__prop-section" data-shape-controls hidden>
                 <span class="deck-editor__prop-label">Appearance</span>
                 <div class="deck-editor__prop-row"><label>Fill</label><input type="color" class="deck-editor__color" data-prop="fill"><label>Stroke</label><input type="color" class="deck-editor__color" data-prop="stroke"></div>
                 <div class="deck-editor__prop-row"><label>Opacity</label><input type="range" class="deck-editor__range" min="0" max="1" step="0.05" data-prop="opacity"><output data-opacity-output></output></div>
+              </div>
+              <div class="deck-editor__prop-section">
+                <span class="deck-editor__prop-label">Presenter notes</span>
+                <textarea class="deck-editor__notes" data-slide-notes placeholder="What the presenter should say on this slide"></textarea>
               </div>
               <div class="deck-editor__prop-section deck-editor__scout">
                 <span class="deck-editor__prop-label">Scout imagery</span>
@@ -44689,6 +44767,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           deck.slides = Array.isArray(deck.slides) && deck.slides.length ? deck.slides : [{ id: 'slide-1', elements: [] }]
           deck.slides.forEach((slide, slideIndex) => {
             slide.id = String(slide.id || `slide-${slideIndex + 1}`)
+            slide.notes = String(slide.notes || '')
             slide.elements = Array.isArray(slide.elements) ? slide.elements : []
             slide.elements.forEach((element, elementIndex) => normalizeElement(element, slideIndex, elementIndex))
           })
@@ -44711,8 +44790,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           element.shape = element.shape === 'ellipse' ? 'ellipse' : 'rectangle'
           element.text = String(element.text || '')
           element.fontSize = Math.max(8, Number(element.fontSize) || 48)
+          element.fontFamily = String(element.fontFamily || 'Arial')
           element.fontWeight = Number(element.fontWeight) || 600
           element.color = String(element.color || '#ffffff')
+          element.textAlign = ['left', 'center', 'right'].includes(element.textAlign) ? element.textAlign : 'left'
+          element.lineHeight = Math.max(.7, Math.min(4, Number(element.lineHeight) || 1.08))
+          element.letterSpacing = String(element.letterSpacing || 'normal')
           element.fit = element.fit === 'contain' ? 'contain' : 'cover'
           element.ref = String(element.ref || '')
           element.name = String(element.name || '')
@@ -44774,7 +44857,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             content.textContent = element.text || 'Text'
             content.style.color = element.color
             content.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
+            content.style.fontFamily = element.fontFamily
             content.style.fontWeight = String(element.fontWeight)
+            content.style.textAlign = element.textAlign
+            content.style.lineHeight = String(element.lineHeight)
+            content.style.letterSpacing = element.letterSpacing
+            content.style.display = 'block'
             box.appendChild(content)
           } else if (element.type === 'image') {
             const image = document.createElement('img')
@@ -44860,9 +44948,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         function updateProperties() {
           const element = selected()
+          const notes = editor.querySelector('[data-slide-notes]')
+          if (notes) notes.value = String(slide()?.notes || '')
           editor.querySelectorAll('[data-prop]').forEach(input => { input.disabled = !element })
+          editor.querySelector('[data-text-controls]').hidden = element?.type !== 'text'
+          editor.querySelector('[data-shape-controls]').hidden = element?.type !== 'shape'
           if (!element) return
-          for (const prop of ['x', 'y', 'width', 'height', 'fill', 'stroke', 'opacity']) {
+          for (const prop of ['x', 'y', 'width', 'height', 'fill', 'stroke', 'opacity', 'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'lineHeight', 'letterSpacing']) {
             const input = editor.querySelector(`[data-prop="${prop}"]`)
             if (input) input.value = element[prop]
           }
@@ -44879,7 +44971,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           input.value = element.text
           input.style.color = element.color
           input.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
+          input.style.fontFamily = element.fontFamily
           input.style.fontWeight = String(element.fontWeight)
+          input.style.textAlign = element.textAlign
+          input.style.lineHeight = String(element.lineHeight)
+          input.style.letterSpacing = element.letterSpacing
           box.appendChild(input)
           input.addEventListener('input', () => { element.text = input.value })
           input.addEventListener('blur', () => renderAll(), { once: true })
@@ -44932,7 +45028,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             height: type === 'text' ? 150 : 360, z: Math.max(0, ...elements.map(item => item.z || 0)) + 1,
             opacity: 1, rotation: 0, fill: '#ff6b35', stroke: '#000000', strokeWidth: 0,
             shape: 'rectangle', text: type === 'text' ? 'New text' : '', fontSize: 56,
-            fontWeight: 650, color: '#ffffff', fit: 'cover', ref: '', name: '', ...overrides
+            fontFamily: 'Arial', fontWeight: 600, color: '#ffffff', textAlign: 'left', lineHeight: 1.08, letterSpacing: 'normal', fit: 'cover', ref: '', name: '', ...overrides
           }
           normalizeElement(element, state.slideIndex, elements.length)
           elements.push(element)
@@ -45107,11 +45203,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         editor.querySelector('.deck-editor__props').addEventListener('change', event => {
           if (!requireDeckWrite()) return
+          if (event.target.matches('[data-slide-notes]')) {
+            const current = slide()
+            if (!current) return
+            checkpoint()
+            current.notes = String(event.target.value || '')
+            renderAll()
+            return
+          }
           const prop = event.target.dataset?.prop
           const element = selected()
           if (!prop || !element) return
           checkpoint()
-          element[prop] = ['x', 'y', 'width', 'height', 'opacity'].includes(prop) ? Number(event.target.value) : event.target.value
+          element[prop] = ['x', 'y', 'width', 'height', 'opacity', 'fontSize', 'fontWeight', 'lineHeight'].includes(prop) ? Number(event.target.value) : event.target.value
           if (prop === 'opacity') element.opacity = Math.max(0, Math.min(1, element.opacity))
           renderAll()
         })
@@ -45179,20 +45283,26 @@ Wrap the entire export in one code block. After the code block, say whether the 
           <header class="deck-presenter__chrome">
             <h2 class="deck-presenter__title"></h2>
             <span class="deck-presenter__counter" data-present-counter></span>
+            <button type="button" class="deck-presenter__button" data-present-action="notes" aria-pressed="false">Notes</button>
             <button type="button" class="deck-presenter__button" data-present-action="close">Close</button>
           </header>
-          <div class="deck-presenter__viewport" data-present-viewport>
-            <div class="deck-presenter__stage" data-present-stage><div class="deck-presenter__scene" data-present-scene></div></div>
-            <div class="deck-presenter__nav">
-              <button type="button" class="deck-presenter__button" data-present-action="previous" aria-label="Previous slide">←</button>
-              <button type="button" class="deck-presenter__button" data-present-action="next" aria-label="Next slide">→</button>
+          <div class="deck-presenter__body">
+            <div class="deck-presenter__viewport" data-present-viewport>
+              <div class="deck-presenter__stage" data-present-stage><div class="deck-presenter__scene" data-present-scene></div></div>
+              <div class="deck-presenter__nav">
+                <button type="button" class="deck-presenter__button" data-present-action="previous" aria-label="Previous slide">←</button>
+                <button type="button" class="deck-presenter__button" data-present-action="next" aria-label="Next slide">→</button>
+              </div>
             </div>
+            <aside class="deck-presenter__notes" data-present-notes hidden aria-label="Presenter notes"></aside>
           </div>`
         presenter.querySelector('.deck-presenter__title').textContent = title || payload?.artifact?.title || 'Presentation'
         const viewport = presenter.querySelector('[data-present-viewport]')
         const stage = presenter.querySelector('[data-present-stage]')
         const scene = presenter.querySelector('[data-present-scene]')
         const counter = presenter.querySelector('[data-present-counter]')
+        const notes = presenter.querySelector('[data-present-notes]')
+        const notesButton = presenter.querySelector('[data-present-action="notes"]')
         let index = 0
 
         const color = value => typeof value === 'string' ? value : (value?.color || '')
@@ -45216,6 +45326,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
             text.style.fontFamily = String(element.fontFamily || 'Arial, sans-serif')
             text.style.fontSize = `${Number(element.fontSize || 48) / Number(documentModel.height || 1080) * 100}cqh`
             text.style.fontWeight = String(Number(element.fontWeight || 600))
+            text.style.textAlign = ['left', 'center', 'right'].includes(element.textAlign) ? element.textAlign : 'left'
+            text.style.lineHeight = String(Math.max(.7, Math.min(4, Number(element.lineHeight) || 1.08)))
+            text.style.letterSpacing = String(element.letterSpacing || 'normal')
             box.appendChild(text)
           } else if (element?.type === 'image') {
             const image = document.createElement('img')
@@ -45250,6 +45363,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           scene.replaceChildren()
           ;[...(slide?.elements || [])].sort((a, b) => Number(a.z || 0) - Number(b.z || 0)).forEach(element => scene.appendChild(paint(element)))
           counter.textContent = `${index + 1} / ${slides.length}`
+          notes.textContent = String(slide?.notes || 'No presenter notes for this slide.')
           presenter.querySelector('[data-present-action="previous"]').disabled = index === 0
           presenter.querySelector('[data-present-action="next"]').disabled = index === slides.length - 1
         }
@@ -45269,6 +45383,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (action === 'close') closeDeckPresentation()
           else if (action === 'previous') navigate(-1)
           else if (action === 'next') navigate(1)
+          else if (action === 'notes') {
+            notes.hidden = !notes.hidden
+            presenter.dataset.notesOpen = String(!notes.hidden)
+            notesButton.setAttribute('aria-pressed', String(!notes.hidden))
+            requestAnimationFrame(fit)
+          }
         })
         const resizeObserver = new ResizeObserver(fit)
         activeDeckPresenter = {
@@ -61103,7 +61223,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           // Options normalize from BOTH persisted shapes: the pre-teeth plain
           // string (action proceed) and the {label, action} object.
-          const options = (Array.isArray(checkpoint.options) ? checkpoint.options : [])
+          const options = packagingStudioCheckpointOptions(plan, checkpoint)
             .map(option => typeof option === 'string'
               ? { label: option.trim(), action: 'proceed' }
               : { label: String(option?.label || '').trim(), action: String(option?.action || 'proceed').trim() || 'proceed' })
@@ -67654,7 +67774,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const stage = (plan?.subtasks || []).find(candidate => String(candidate?.id || '') === stageId)
 	        const stageTitle = stage ? packagingStudioTaskDisplayTitle(plan, stage) : ''
 	        const checkpointId = String(checkpoint.id || '').trim()
-	        const options = (Array.isArray(checkpoint.options) ? checkpoint.options : [])
+	        const options = packagingStudioCheckpointOptions(plan, checkpoint)
 	          .map(option => typeof option === 'string'
 	            ? { id: '', label: option.trim(), action: 'proceed' }
 	            : { id: String(option?.id || '').trim(), label: String(option?.label || '').trim(), action: String(option?.action || 'proceed').trim() || 'proceed' })

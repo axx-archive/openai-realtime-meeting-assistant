@@ -389,6 +389,9 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 	if jury.Metadata["packageId"] != "pkg-aurora" {
 		t.Fatalf("jury packageId=%q, want the deck's package", jury.Metadata["packageId"])
 	}
+	if jury.Metadata["reviewVerdict"] != "needs_changes" || jury.Metadata["blockingPages"] != "1" || jury.Metadata["parsedSeats"] != "3" {
+		t.Fatalf("jury readiness metadata wrong: %v", jury.Metadata)
+	}
 	if !strings.Contains(jury.Text, mergedScoreboard) {
 		t.Fatalf("scoreboard missing the synthesis:\n%s", jury.Text)
 	}
@@ -407,6 +410,64 @@ func TestRunSlideJuryKeylessErrors(t *testing.T) {
 	deck := seedSlideJuryDeck(t, app, []byte("fake-jpeg-page-one"))
 	if _, err := runSlideJury(context.Background(), app, "goal-1", deck); err == nil {
 		t.Fatal("keyless jury must error, not silently succeed")
+	}
+}
+
+func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
+	voice := func(persona string, pageOne, pageTwo float64) goalPanelVoice {
+		return goalPanelVoice{Persona: persona, Text: fmt.Sprintf(`{"pages":[{"page":1,"score":%.1f,"fix":"Refit the title","blockers":[]},{"page":2,"score":%.1f,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`, pageOne, pageTwo)}
+	}
+	got := evaluateSlideJuryReadiness([]goalPanelVoice{
+		voice("headline_ear", 4, 9),
+		voice("design_eye", 5, 8),
+		voice("room_gut", 8, 9),
+	}, 2)
+	if got.Verdict != "needs_changes" || len(got.BlockingPages) != 1 || got.BlockingPages[0] != 1 || got.ParsedSeats != 3 {
+		t.Fatalf("readiness=%+v, want slide 1 blocked by two-seat agreement", got)
+	}
+	if got.MinimumAverage < 5.66 || got.MinimumAverage > 5.67 {
+		t.Fatalf("minimum average=%v, want 5.67", got.MinimumAverage)
+	}
+
+	oneOutlier := evaluateSlideJuryReadiness([]goalPanelVoice{
+		voice("headline_ear", 4, 9),
+		voice("design_eye", 8, 8),
+		voice("room_gut", 8, 9),
+	}, 2)
+	if oneOutlier.Verdict != "ready" || len(oneOutlier.BlockingPages) != 0 {
+		t.Fatalf("one-outlier readiness=%+v, want ready", oneOutlier)
+	}
+
+	incomplete := evaluateSlideJuryReadiness([]goalPanelVoice{voice("headline_ear", 9, 9)}, 2)
+	if incomplete.Verdict != "needs_attention" {
+		t.Fatalf("incomplete readiness=%+v, want fail-closed needs_attention", incomplete)
+	}
+
+	omitted := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP"}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP"}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP"}]}`},
+	}, 2)
+	if omitted.Verdict != "needs_attention" {
+		t.Fatalf("omitted-page readiness=%+v, want fail-closed needs_attention", omitted)
+	}
+
+	structural := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"Refit","blockers":["text_overlap"]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":8,"fix":"Refit","blockers":["text_overlap"]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if structural.Verdict != "needs_changes" || len(structural.BlockingPages) != 1 {
+		t.Fatalf("structural-blocker readiness=%+v, want needs_changes", structural)
+	}
+
+	duplicateFromOneSeat := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"Refit","blockers":["text_overlap","text_overlap"]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if duplicateFromOneSeat.Verdict != "ready" {
+		t.Fatalf("duplicate single-seat blocker=%+v, want one vote only", duplicateFromOneSeat)
 	}
 }
 

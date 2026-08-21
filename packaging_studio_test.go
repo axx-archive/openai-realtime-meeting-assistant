@@ -1425,6 +1425,12 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 	if jury.Metadata["goalId"] != parentID {
 		t.Fatalf("jury goalId=%q, want the running goal %s", jury.Metadata["goalId"], parentID)
 	}
+	if jury.Metadata["reviewVerdict"] != "needs_changes" || jury.Metadata["blockingPages"] != "1" {
+		t.Fatalf("jury readiness=%v, want slide 1 blocked", jury.Metadata)
+	}
+	if plan.Checkpoint == nil || !strings.Contains(plan.Checkpoint.Question, "slide(s) 1") || strings.Contains(plan.Checkpoint.Question, "are ready") {
+		t.Fatalf("ship checkpoint did not surface the rendered blocker truthfully: %+v", plan.Checkpoint)
+	}
 	if !strings.Contains(jury.Text, mergedScoreboard) || !strings.Contains(jury.Text, "## Jury voices") {
 		t.Fatalf("jury artifact missing scoreboard/voices:\n%s", jury.Text)
 	}

@@ -28,12 +28,18 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"data-action=\"add-ellipse\"",
 		"data-action=\"undo\"",
 		"data-action=\"redo\"",
+		"data-slide-notes",
+		"data-prop=\"fontFamily\"",
+		"data-prop=\"textAlign\"",
+		"data-prop=\"lineHeight\"",
+		"data-prop=\"letterSpacing\"",
 		"openDeckStudio(artifactId, title,",
 		"if (e.source !== state.currentBackdrop?.contentWindow) return",
 		"artifactIsDeckOutline(entry)",
 		"Generate deck",
 		"async function openDeckPresentation(artifactId, title, initialPayload = null)",
 		"data-present-action=\"next\"",
+		"data-present-action=\"notes\"",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("Deck Studio contract missing %q", want)
@@ -80,7 +86,7 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
 let version=4;let canWrite=true;
-let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontWeight:700,color:'#ffffff',fill:'#ffffff',stroke:'#000000'}]}]};
+let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'}]}]};
 let patches=[];let imageRequests=[];let uploadRequests=[];
 const artifact=()=>({id:artifactId,title:'Studio proof',version,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version)}});
 const server=http.createServer((req,res)=>{
@@ -115,6 +121,17 @@ const server=http.createServer((req,res)=>{
  assert.ok(geometry.canvas.left>=geometry.wrap.left&&geometry.canvas.right<=geometry.wrap.right,JSON.stringify(geometry));
  assert.ok(geometry.canvas.top>=geometry.wrap.top&&geometry.canvas.bottom<=geometry.wrap.bottom,JSON.stringify(geometry));
 
+ await page.locator('[data-scene] [data-element-id="headline"]').click();
+ await page.locator('[data-prop="fontFamily"]').fill('Georgia, Times New Roman, serif');
+ await page.locator('[data-prop="fontFamily"]').dispatchEvent('change');
+ await page.locator('[data-prop="textAlign"]').selectOption('center');
+ await page.locator('[data-prop="lineHeight"]').fill('1.2');
+ await page.locator('[data-prop="lineHeight"]').dispatchEvent('change');
+ await page.locator('[data-prop="letterSpacing"]').fill('.04em');
+ await page.locator('[data-prop="letterSpacing"]').dispatchEvent('change');
+ await page.locator('[data-slide-notes]').fill('Revised opening note [BEAT]');
+ await page.locator('[data-slide-notes]').dispatchEvent('change');
+
  await page.getByRole('button',{name:'Rectangle'}).click();
  await page.locator('[data-prop="fill"]').fill('#3366ff');
  await page.locator('[data-prop="opacity"]').fill('0.55');
@@ -137,6 +154,12 @@ const server=http.createServer((req,res)=>{
  assert.ok(savedShape);
  assert.ok(savedShape.x>240&&savedShape.y>240,JSON.stringify(savedShape));
  assert.ok(savedShape.width>520&&savedShape.height>360,JSON.stringify(savedShape));
+ const savedHeadline=patches[0].deck.slides[0].elements.find(element=>element.id==='headline');
+ assert.equal(savedHeadline.fontFamily,'Georgia, Times New Roman, serif');
+ assert.equal(savedHeadline.textAlign,'center');
+ assert.equal(savedHeadline.lineHeight,1.2);
+ assert.equal(savedHeadline.letterSpacing,'.04em');
+ assert.equal(patches[0].deck.slides[0].notes,'Revised opening note [BEAT]');
 
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
@@ -180,6 +203,14 @@ const server=http.createServer((req,res)=>{
  await page.waitForSelector('.deck-presenter');
  assert.equal(await page.locator('[data-present-counter]').textContent(),'1 / 2');
  assert.equal(await page.locator('[data-present-element-id="headline"]').count(),1);
+ const stageBeforeNotes=await page.locator('[data-present-stage]').boundingBox();
+ await page.getByRole('button',{name:'Notes',exact:true}).click();
+ await page.waitForTimeout(50);
+ assert.equal(await page.locator('[data-present-notes]').textContent(),'Revised opening note [BEAT]');
+ const stageWithNotes=await page.locator('[data-present-stage]').boundingBox();
+ const notesRail=await page.locator('[data-present-notes]').boundingBox();
+ assert.ok(stageWithNotes.width<stageBeforeNotes.width,JSON.stringify({stageBeforeNotes,stageWithNotes,notesRail}));
+ assert.ok(stageWithNotes.x+stageWithNotes.width<=notesRail.x+1,JSON.stringify({stageWithNotes,notesRail}));
  await page.getByRole('button',{name:'Next slide'}).click();
  assert.equal(await page.locator('[data-present-counter]').textContent(),'2 / 2');
  assert.equal(await page.locator('[data-present-element-id="second-title"]').textContent(),'The second slide');

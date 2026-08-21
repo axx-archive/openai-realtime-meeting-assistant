@@ -24,29 +24,38 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	xhtml "golang.org/x/net/html"
 )
 
 const (
-	deckDocumentSchemaVersion = 1
-	deckDocumentWidth         = 1920
-	deckDocumentHeight        = 1080
-	deckDocumentMaxBytes      = 1 << 20
-	deckDocumentMaxSlides     = 100
-	deckSlideMaxElements      = 100
-	deckElementTextMaxRunes   = 20000
-	deckImagePromptMaxRunes   = 4000
-	deckImageUploadMaxBytes   = 16 << 20
-	deckSceneRefMetadataKey   = "deckSceneRef"
-	deckSchemaMetadataKey     = "deckSchemaVersion"
+	deckDocumentSchemaVersion              = 1
+	deckDocumentWidth                      = 1920
+	deckDocumentHeight                     = 1080
+	deckDocumentMaxBytes                   = 1 << 20
+	deckDocumentMaxSlides                  = 100
+	deckSlideMaxElements                   = 100
+	deckElementTextMaxRunes                = 20000
+	deckSlideNotesMaxRunes                 = 40000
+	deckImagePromptMaxRunes                = 4000
+	deckImageUploadMaxBytes                = 16 << 20
+	deckSceneRefMetadataKey                = "deckSceneRef"
+	deckSchemaMetadataKey                  = "deckSchemaVersion"
+	legacyFieldbookPresenterSkeletonSHA256 = "8d0fda5450bf5b1fa6ca6f6501a1af1cdd10adda2123ac192b2eecb8f7a49438"
+	legacyTestPresenterSkeletonSHA256      = "bd37685cfa9d83f0eff48588f689b4a89c5dd061168664c8a7d54ecbdd521b93"
 )
 
 var (
-	deckIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$`)
-	deckHexColorPattern   = regexp.MustCompile(`^#[0-9A-Fa-f]{3,4}([0-9A-Fa-f]{3,4})?$`)
-	deckFontPattern       = regexp.MustCompile(`^[A-Za-z0-9 ,_-]{1,80}$`)
-	createDeckEditorImage = createOpenAIImage
+	deckIdentifierPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$`)
+	deckHexColorPattern     = regexp.MustCompile(`^#[0-9A-Fa-f]{3,4}([0-9A-Fa-f]{3,4})?$`)
+	deckFontPattern         = regexp.MustCompile(`^[A-Za-z0-9 ,_-]{1,80}$`)
+	deckTrackingPattern     = regexp.MustCompile(`^(normal|-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem)?)$`)
+	legacyCSSCommentPattern = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	legacyCSSRulePattern    = regexp.MustCompile(`(?s)([^{}]+)\{([^{}]*)\}`)
+	legacyCSSVarPattern     = regexp.MustCompile(`(--[A-Za-z0-9_-]+)\s*:\s*([^;{}]+)`)
+	legacyCSSVarUsePattern  = regexp.MustCompile(`var\(\s*(--[A-Za-z0-9_-]+)\s*\)`)
+	createDeckEditorImage   = createOpenAIImage
 )
 
 type deckDocument struct {
@@ -59,33 +68,37 @@ type deckDocument struct {
 type deckSlide struct {
 	ID         string        `json:"id"`
 	Background string        `json:"background,omitempty"`
+	Notes      string        `json:"notes,omitempty"`
 	Elements   []deckElement `json:"elements"`
 }
 
 type deckElement struct {
-	ID          string  `json:"id"`
-	Type        string  `json:"type"` // text | image | shape
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	Width       float64 `json:"width"`
-	Height      float64 `json:"height"`
-	Z           int     `json:"z"`
-	Opacity     float64 `json:"opacity"`
-	Rotation    float64 `json:"rotation,omitempty"`
-	Text        string  `json:"text,omitempty"`
-	FontSize    float64 `json:"fontSize,omitempty"`
-	FontFamily  string  `json:"fontFamily,omitempty"`
-	FontWeight  int     `json:"fontWeight,omitempty"`
-	Color       string  `json:"color,omitempty"`
-	Ref         string  `json:"ref,omitempty"`
-	Name        string  `json:"name,omitempty"`
-	Fit         string  `json:"fit,omitempty"`   // cover | contain
-	Shape       string  `json:"shape,omitempty"` // rectangle | ellipse
-	Fill        string  `json:"fill,omitempty"`
-	Stroke      string  `json:"stroke,omitempty"`
-	StrokeWidth float64 `json:"strokeWidth,omitempty"`
-	Prompt      string  `json:"prompt,omitempty"`
-	GeneratedAt string  `json:"generatedAt,omitempty"`
+	ID            string  `json:"id"`
+	Type          string  `json:"type"` // text | image | shape
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
+	Width         float64 `json:"width"`
+	Height        float64 `json:"height"`
+	Z             int     `json:"z"`
+	Opacity       float64 `json:"opacity"`
+	Rotation      float64 `json:"rotation,omitempty"`
+	Text          string  `json:"text,omitempty"`
+	FontSize      float64 `json:"fontSize,omitempty"`
+	FontFamily    string  `json:"fontFamily,omitempty"`
+	FontWeight    int     `json:"fontWeight,omitempty"`
+	Color         string  `json:"color,omitempty"`
+	TextAlign     string  `json:"textAlign,omitempty"` // left | center | right
+	LineHeight    float64 `json:"lineHeight,omitempty"`
+	LetterSpacing string  `json:"letterSpacing,omitempty"`
+	Ref           string  `json:"ref,omitempty"`
+	Name          string  `json:"name,omitempty"`
+	Fit           string  `json:"fit,omitempty"`   // cover | contain
+	Shape         string  `json:"shape,omitempty"` // rectangle | ellipse
+	Fill          string  `json:"fill,omitempty"`
+	Stroke        string  `json:"stroke,omitempty"`
+	StrokeWidth   float64 `json:"strokeWidth,omitempty"`
+	Prompt        string  `json:"prompt,omitempty"`
+	GeneratedAt   string  `json:"generatedAt,omitempty"`
 }
 
 type deckArtifactView struct {
@@ -538,6 +551,9 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 		if slide.Background != "" && !validDeckColor(slide.Background) {
 			return fmt.Errorf("slide background is invalid")
 		}
+		if len([]rune(slide.Notes)) > deckSlideNotesMaxRunes {
+			return fmt.Errorf("slide presenter notes exceed the storage bound")
+		}
 		if len(slide.Elements) > deckSlideMaxElements {
 			return fmt.Errorf("a slide exceeds the %d element cap", deckSlideMaxElements)
 		}
@@ -549,7 +565,7 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 				return fmt.Errorf("element ids must be unique")
 			}
 			seenElements[element.ID] = struct{}{}
-			if !deckFinite(element.X, element.Y, element.Width, element.Height, element.Opacity, element.Rotation, element.FontSize, element.StrokeWidth) ||
+			if !deckFinite(element.X, element.Y, element.Width, element.Height, element.Opacity, element.Rotation, element.FontSize, element.LineHeight, element.StrokeWidth) ||
 				element.X < -deckDocumentWidth || element.X > 2*deckDocumentWidth || element.Y < -deckDocumentHeight || element.Y > 2*deckDocumentHeight ||
 				element.Width < 1 || element.Width > 2*deckDocumentWidth || element.Height < 1 || element.Height > 2*deckDocumentHeight ||
 				element.Z < -1000 || element.Z > 1000 || element.Opacity < 0 || element.Opacity > 1 || element.Rotation < -360 || element.Rotation > 360 {
@@ -558,7 +574,9 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 			switch element.Type {
 			case "text":
 				if len([]rune(element.Text)) > deckElementTextMaxRunes || element.FontSize < 8 || element.FontSize > 400 || element.FontWeight < 100 || element.FontWeight > 900 ||
-					(element.FontFamily != "" && !deckFontPattern.MatchString(element.FontFamily)) || !validDeckColor(firstNonEmptyString(element.Color, "#ffffff")) {
+					(element.FontFamily != "" && !deckFontPattern.MatchString(element.FontFamily)) || !validDeckColor(firstNonEmptyString(element.Color, "#ffffff")) ||
+					(element.TextAlign != "" && !oneOf(element.TextAlign, "left", "center", "right")) || element.LineHeight < 0 || element.LineHeight > 4 ||
+					(element.LetterSpacing != "" && !deckTrackingPattern.MatchString(element.LetterSpacing)) {
 					return fmt.Errorf("text element styling is invalid")
 				}
 			case "image":
@@ -713,6 +731,16 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 				builder.WriteString(strconv.Itoa(element.FontWeight))
 				builder.WriteString(";color:")
 				builder.WriteString(firstNonEmptyString(element.Color, "#ffffff"))
+				builder.WriteString(";text-align:")
+				builder.WriteString(firstNonEmptyString(element.TextAlign, "left"))
+				if element.LineHeight > 0 {
+					builder.WriteString(";line-height:")
+					builder.WriteString(deckCSSNumber(element.LineHeight))
+				}
+				if element.LetterSpacing != "" {
+					builder.WriteString(";letter-spacing:")
+					builder.WriteString(element.LetterSpacing)
+				}
 				builder.WriteString("\">")
 				builder.WriteString(html.EscapeString(element.Text))
 				builder.WriteString("</div>")
@@ -748,6 +776,11 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 				}
 				builder.WriteString("\"></div>")
 			}
+		}
+		if strings.TrimSpace(slide.Notes) != "" {
+			builder.WriteString("<div class=\"notes\" hidden>")
+			builder.WriteString(html.EscapeString(slide.Notes))
+			builder.WriteString("</div>")
 		}
 		builder.WriteString("</section>")
 	}
@@ -793,10 +826,19 @@ func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string
 	if len(slideNodes) > deckDocumentMaxSlides {
 		slideNodes = slideNodes[:deckDocumentMaxSlides]
 	}
-	faithful := !legacyDocumentHasUnsupportedBehavior(doc)
+	outerNotes, outerPresenterSafe := legacyOuterPresenterNotes(doc, len(slideNodes))
+	typography := legacyTypographyContextForDocument(doc)
+	// Presenter navigation and notes controls live outside #stage and are not
+	// part of the editable slide scene. Their scripts must not make a fully
+	// annotated deck read-only. Unsupported behavior inside a slide still fails
+	// closed because saving the inert scene would otherwise discard it.
+	faithful := outerPresenterSafe
 	visualClasses := legacyDocumentVisualClasses(doc)
 	allowedRefs := artifactAssetRefSet(artifact)
 	for index, node := range slideNodes {
+		if legacyDocumentHasUnsupportedBehavior(node) {
+			faithful = false
+		}
 		slideID := firstNonEmptyString(legacyNodeAttr(node, "data-deck-slide"), legacyNodeAttr(node, "id"), fmt.Sprintf("slide-%d", index+1))
 		if !deckIdentifierPattern.MatchString(slideID) {
 			slideID = fmt.Sprintf("slide-%d", index+1)
@@ -806,7 +848,7 @@ func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string
 			background = "#101014"
 			faithful = false
 		}
-		elements, recognized := legacyDataDeckElements(node, allowedRefs, artifactAssets(artifact))
+		elements, recognized := legacyDataDeckElements(node, allowedRefs, artifactAssets(artifact), typography)
 		if recognized && !legacyMeaningfulContentCovered(node, visualClasses) {
 			recognized = false
 		}
@@ -814,7 +856,14 @@ func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string
 			faithful = false
 			elements = legacyTextElements(node)
 		}
-		slide := deckSlide{ID: slideID, Background: background, Elements: elements}
+		notes, notesSafe := legacySlideNotes(node)
+		if !notesSafe {
+			faithful = false
+		}
+		if notes == "" && index < len(outerNotes) {
+			notes = outerNotes[index]
+		}
+		slide := deckSlide{ID: slideID, Background: background, Notes: notes, Elements: elements}
 		if len(slide.Elements) == 0 {
 			faithful = false
 			slide.Elements = []deckElement{defaultDeckTextElement("text-"+strconv.Itoa(index+1), "Slide "+strconv.Itoa(index+1), 120, 120, 1680, 180, 72, 700)}
@@ -839,6 +888,9 @@ func legacyMeaningfulContentCovered(root *xhtml.Node, visualClasses map[string]s
 			return
 		}
 		if node.Type == xhtml.ElementNode {
+			if legacyNodeHasClass(node, "notes") || legacyNodeAttr(node, "data-deck-notes") != "" {
+				return
+			}
 			represented := legacyNodeAttr(node, "data-deck-element") != ""
 			if represented {
 				coveredType = strings.ToLower(legacyNodeAttr(node, "data-deck-type"))
@@ -876,6 +928,266 @@ func legacyMeaningfulContentCovered(root *xhtml.Node, visualClasses map[string]s
 	}
 	walk(root, "")
 	return complete
+}
+
+func legacySlideNotes(root *xhtml.Node) (string, bool) {
+	var notes string
+	safe := true
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if notes != "" || node == nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode && (legacyNodeHasClass(node, "notes") || legacyNodeAttr(node, "data-deck-notes") != "") {
+			notes = strings.TrimSpace(legacyNodeTextPreservingWhitespace(node))
+			if len([]rune(notes)) > deckSlideNotesMaxRunes {
+				notes = ""
+				safe = false
+			}
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	return notes, safe
+}
+
+// legacyOuterPresenterNotes migrates the one generated-deck presenter shape
+// we know how to preserve: one outer script with `const notes = [...]`, exactly
+// one string per authored slide. Any other outer script fails the import closed
+// as approximate; native save must never erase unknown behavior or narration.
+func legacyOuterPresenterNotes(root *xhtml.Node, slideCount int) ([]string, bool) {
+	if root == nil || slideCount <= 0 {
+		return nil, true
+	}
+	var scripts []string
+	var walk func(*xhtml.Node, bool)
+	walk = func(node *xhtml.Node, inSlide bool) {
+		if node == nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode && (legacyNodeHasClass(node, "pg") || legacyNodeAttr(node, "data-deck-slide") != "") {
+			inSlide = true
+		}
+		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "script") && !inSlide {
+			scripts = append(scripts, legacyNodeTextPreservingWhitespace(node))
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, inSlide)
+		}
+	}
+	walk(root, false)
+	if len(scripts) == 0 {
+		return nil, true
+	}
+	if len(scripts) != 1 {
+		return nil, false
+	}
+	if !legacyOuterPresenterChromeSafe(root) {
+		return nil, false
+	}
+	notes, ok := parseLegacyJSNotesArray(scripts[0])
+	if !ok || len(notes) != slideCount {
+		return nil, false
+	}
+	for _, note := range notes {
+		if len([]rune(note)) > deckSlideNotesMaxRunes {
+			return nil, false
+		}
+	}
+	return notes, true
+}
+
+func legacyOuterPresenterChromeSafe(root *xhtml.Node) bool {
+	var body *xhtml.Node
+	var find func(*xhtml.Node)
+	find = func(node *xhtml.Node) {
+		if body != nil || node == nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "body") {
+			body = node
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			find(child)
+		}
+	}
+	find(root)
+	if body == nil {
+		return false
+	}
+	allowed := map[string]string{
+		"stage":    "div",
+		"prompt":   "button",
+		"phint":    "div",
+		"prevZone": "div",
+		"nextZone": "div",
+		"railwrap": "aside",
+	}
+	for child := body.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != xhtml.ElementNode {
+			continue
+		}
+		if strings.EqualFold(child.Data, "script") {
+			continue
+		}
+		id := legacyNodeAttr(child, "id")
+		if tag, ok := allowed[id]; !ok || !strings.EqualFold(child.Data, tag) {
+			return false
+		}
+	}
+	return true
+}
+
+func parseLegacyJSNotesArray(script string) ([]string, bool) {
+	signature := sha256Hex([]byte(legacyPresenterScriptSkeleton(script)))
+	if signature != legacyFieldbookPresenterSkeletonSHA256 && signature != legacyTestPresenterSkeletonSHA256 {
+		return nil, false
+	}
+	marker := regexp.MustCompile(`\bconst\s+notes\s*=\s*\[`).FindStringIndex(script)
+	if marker == nil {
+		return nil, false
+	}
+	index := marker[1]
+	notes := make([]string, 0, 16)
+	for index < len(script) {
+		for index < len(script) && (unicode.IsSpace(rune(script[index])) || script[index] == ',') {
+			index++
+		}
+		if index >= len(script) {
+			return nil, false
+		}
+		if script[index] == ']' {
+			return notes, true
+		}
+		quote := script[index]
+		if quote != '`' && quote != '\'' && quote != '"' {
+			return nil, false
+		}
+		index++
+		var value strings.Builder
+		closed := false
+		for index < len(script) {
+			char := script[index]
+			index++
+			if char == quote {
+				closed = true
+				break
+			}
+			if quote == '`' && char == '$' && index < len(script) && script[index] == '{' {
+				return nil, false
+			}
+			if char != '\\' {
+				value.WriteByte(char)
+				continue
+			}
+			if index >= len(script) {
+				return nil, false
+			}
+			escaped := script[index]
+			index++
+			switch escaped {
+			case 'n':
+				value.WriteByte('\n')
+			case 'r':
+				value.WriteByte('\r')
+			case 't':
+				value.WriteByte('\t')
+			case 'b':
+				value.WriteByte('\b')
+			case 'f':
+				value.WriteByte('\f')
+			case 'v':
+				value.WriteByte('\v')
+			case '\\', '\'', '"', '`', '/':
+				value.WriteByte(escaped)
+			default:
+				return nil, false
+			}
+		}
+		if !closed {
+			return nil, false
+		}
+		notes = append(notes, strings.TrimSpace(value.String()))
+	}
+	return nil, false
+}
+
+func legacyPresenterScriptSkeleton(script string) string {
+	// The generated Fieldbook presenter escapes speaker notes with this exact
+	// regex. Normalize it before string-token reduction so the quotes inside the
+	// character class cannot be mistaken for JavaScript string delimiters. The
+	// complete normalized script still has to match an allowlisted SHA below;
+	// this does not broaden the accepted presenter behavior.
+	script = strings.ReplaceAll(script, `/[&<>"']/g`, "REGEX_ESCAPE_HTML")
+	var skeleton strings.Builder
+	space := false
+	for index := 0; index < len(script); {
+		char := script[index]
+		next := byte(0)
+		if index+1 < len(script) {
+			next = script[index+1]
+		}
+		if char == '/' && next == '/' {
+			index += 2
+			for index < len(script) && script[index] != '\n' {
+				index++
+			}
+			continue
+		}
+		if char == '/' && next == '*' {
+			index += 2
+			for index+1 < len(script) && !(script[index] == '*' && script[index+1] == '/') {
+				index++
+			}
+			if index+1 >= len(script) {
+				return ""
+			}
+			index += 2
+			continue
+		}
+		if char == '"' || char == '\'' || char == '`' {
+			quote := char
+			index++
+			closed := false
+			for index < len(script) {
+				current := script[index]
+				index++
+				if current == '\\' {
+					if index < len(script) {
+						index++
+					}
+					continue
+				}
+				if current == quote {
+					closed = true
+					break
+				}
+			}
+			if !closed {
+				return ""
+			}
+			skeleton.WriteByte('S')
+			space = false
+			continue
+		}
+		if unicode.IsSpace(rune(char)) {
+			if !space {
+				skeleton.WriteByte(' ')
+				space = true
+			}
+			index++
+			continue
+		}
+		skeleton.WriteByte(char)
+		space = false
+		index++
+	}
+	return strings.TrimSpace(skeleton.String())
 }
 
 func legacyDocumentHasUnsupportedBehavior(root *xhtml.Node) bool {
@@ -1011,7 +1323,7 @@ func legacyTextElements(root *xhtml.Node) []deckElement {
 }
 
 func defaultDeckTextElement(id, text string, x, y, width, height, fontSize float64, weight int) deckElement {
-	return deckElement{ID: id, Type: "text", X: x, Y: y, Width: width, Height: height, Z: 1, Opacity: 1, Text: text, FontSize: fontSize, FontFamily: "Arial", FontWeight: weight, Color: "#ffffff"}
+	return deckElement{ID: id, Type: "text", X: x, Y: y, Width: width, Height: height, Z: 1, Opacity: 1, Text: text, FontSize: fontSize, FontFamily: "Arial", FontWeight: weight, Color: "#ffffff", TextAlign: "left", LineHeight: 1.08, LetterSpacing: "normal"}
 }
 
 func legacyNodeHasClass(node *xhtml.Node, className string) bool {
@@ -1037,8 +1349,12 @@ func legacyNodeAttr(node *xhtml.Node, key string) string {
 }
 
 func legacyStyleMap(node *xhtml.Node) map[string]string {
+	return legacyStyleDeclarations(legacyNodeAttr(node, "style"))
+}
+
+func legacyStyleDeclarations(source string) map[string]string {
 	styles := map[string]string{}
-	for _, declaration := range strings.Split(legacyNodeAttr(node, "style"), ";") {
+	for _, declaration := range strings.Split(source, ";") {
 		parts := strings.SplitN(declaration, ":", 2)
 		if len(parts) == 2 {
 			styles[strings.ToLower(strings.TrimSpace(parts[0]))] = strings.TrimSpace(parts[1])
@@ -1047,7 +1363,141 @@ func legacyStyleMap(node *xhtml.Node) map[string]string {
 	return styles
 }
 
-func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, assets []artifactAsset) ([]deckElement, bool) {
+type legacyTypographyRule struct {
+	Selectors []string
+	Styles    map[string]string
+}
+
+type legacyTypographyContext struct {
+	Variables map[string]string
+	Rules     []legacyTypographyRule
+}
+
+func legacyTypographyContextForDocument(root *xhtml.Node) legacyTypographyContext {
+	context := legacyTypographyContext{Variables: map[string]string{}}
+	var sheets strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node == nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "style") {
+			sheets.WriteString(legacyNodeTextPreservingWhitespace(node))
+			sheets.WriteByte('\n')
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	css := legacyCSSCommentPattern.ReplaceAllString(sheets.String(), "")
+	for _, match := range legacyCSSVarPattern.FindAllStringSubmatch(css, -1) {
+		if len(match) == 3 {
+			context.Variables[strings.TrimSpace(match[1])] = strings.TrimSpace(match[2])
+		}
+	}
+	for _, match := range legacyCSSRulePattern.FindAllStringSubmatch(css, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		declarations := legacyStyleDeclarations(match[2])
+		styles := map[string]string{}
+		for _, property := range []string{"font-family", "letter-spacing"} {
+			if value := strings.TrimSpace(declarations[property]); value != "" {
+				styles[property] = value
+			}
+		}
+		if len(styles) == 0 {
+			continue
+		}
+		selectors := strings.Split(match[1], ",")
+		for index := range selectors {
+			selectors[index] = strings.TrimSpace(selectors[index])
+		}
+		context.Rules = append(context.Rules, legacyTypographyRule{Selectors: selectors, Styles: styles})
+	}
+	return context
+}
+
+func (context legacyTypographyContext) resolveValue(value string) string {
+	return legacyCSSVarUsePattern.ReplaceAllStringFunc(value, func(use string) string {
+		match := legacyCSSVarUsePattern.FindStringSubmatch(use)
+		if len(match) != 2 {
+			return use
+		}
+		return firstNonEmptyString(context.Variables[match[1]], use)
+	})
+}
+
+func legacyTypographySelectorMatches(node *xhtml.Node, selector string) bool {
+	selector = strings.TrimSpace(selector)
+	if node == nil || node.Type != xhtml.ElementNode || selector == "" || strings.ContainsAny(selector, " >+~[") {
+		return false
+	}
+	if colon := strings.Index(selector, ":"); colon >= 0 {
+		selector = selector[:colon]
+	}
+	id := ""
+	if hash := strings.Index(selector, "#"); hash >= 0 {
+		id = selector[hash+1:]
+		selector = selector[:hash]
+	}
+	parts := strings.Split(selector, ".")
+	tag := strings.TrimSpace(parts[0])
+	if tag != "" && tag != "*" && !strings.EqualFold(tag, node.Data) {
+		return false
+	}
+	if id != "" && legacyNodeAttr(node, "id") != id {
+		return false
+	}
+	for _, className := range parts[1:] {
+		if className = strings.TrimSpace(className); className == "" || !legacyNodeHasClass(node, className) {
+			return false
+		}
+	}
+	return true
+}
+
+func (context legacyTypographyContext) resolvedForNode(node *xhtml.Node) (fontFamily, letterSpacing string, ok bool) {
+	var ancestry []*xhtml.Node
+	for current := node; current != nil; current = current.Parent {
+		if current.Type == xhtml.ElementNode {
+			ancestry = append(ancestry, current)
+		}
+	}
+	computed := map[string]string{}
+	for index := len(ancestry) - 1; index >= 0; index-- {
+		current := ancestry[index]
+		for _, rule := range context.Rules {
+			matched := false
+			for _, selector := range rule.Selectors {
+				if legacyTypographySelectorMatches(current, selector) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				for property, value := range rule.Styles {
+					computed[property] = context.resolveValue(value)
+				}
+			}
+		}
+		for _, property := range []string{"font-family", "letter-spacing"} {
+			if value := strings.TrimSpace(legacyStyleMap(current)[property]); value != "" {
+				computed[property] = context.resolveValue(value)
+			}
+		}
+	}
+	fontFamily = strings.TrimSpace(strings.NewReplacer(`"`, "", `'`, "").Replace(computed["font-family"]))
+	letterSpacing = strings.ToLower(strings.TrimSpace(firstNonEmptyString(computed["letter-spacing"], "normal")))
+	if strings.Contains(fontFamily, "var(") || !deckFontPattern.MatchString(fontFamily) || !deckTrackingPattern.MatchString(letterSpacing) {
+		return "", "", false
+	}
+	return fontFamily, letterSpacing, true
+}
+
+func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, assets []artifactAsset, typography legacyTypographyContext) ([]deckElement, bool) {
 	var nodes []*xhtml.Node
 	var walk func(*xhtml.Node)
 	walk = func(node *xhtml.Node) {
@@ -1095,17 +1545,31 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 		}
 		switch typ {
 		case "text":
+			fontFamily, letterSpacing, typographyOK := typography.resolvedForNode(node)
+			if !typographyOK {
+				return nil, false
+			}
 			element.Text = trimForStorage(strings.TrimSpace(legacyNodeText(node)), deckElementTextMaxRunes)
 			element.FontSize, _ = legacyDeckNumber(firstNonEmptyString(styles["font-size"], "32"))
-			element.FontFamily = strings.Trim(strings.TrimSpace(firstNonEmptyString(styles["font-family"], "Arial")), `"'`)
+			element.FontFamily = fontFamily
 			element.FontWeight = legacyFontWeight(firstNonEmptyString(styles["font-weight"], "400"))
 			element.Color = firstNonEmptyString(styles["color"], "#ffffff")
+			element.TextAlign = strings.ToLower(firstNonEmptyString(styles["text-align"], "left"))
+			element.LetterSpacing = letterSpacing
+			if value, ok := legacyDeckNumber(styles["line-height"]); ok {
+				element.LineHeight = value
+			} else {
+				element.LineHeight = 1.08
+			}
 		case "shape":
 			element.Shape = strings.ToLower(firstNonEmptyString(legacyNodeAttr(node, "data-deck-shape"), "rectangle"))
 			if strings.Contains(styles["border-radius"], "50%") {
 				element.Shape = "ellipse"
 			}
-			element.Fill = firstNonEmptyString(styles["background-color"], styles["background"], "transparent")
+			element.Fill = firstNonEmptyString(styles["fill"], styles["background-color"], styles["background"], "transparent")
+			if strings.EqualFold(strings.TrimSpace(element.Fill), "none") {
+				element.Fill = "transparent"
+			}
 		case "image":
 			ref, name, ok := legacyImageSource(legacyNodeAttr(node, "src"), allowedRefs)
 			if !ok {

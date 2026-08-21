@@ -3695,6 +3695,46 @@ func TestProcessCheckpointReviseBudgetSpentFallsBackDisclosed(t *testing.T) {
 	}
 }
 
+func TestPackagingStudioSpentRebuildRequestHoldsInsteadOfApproving(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "packaging_spent_rebuild_probe")
+
+	thread, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective:    "Probe the deck ship boundary",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "packaging_spent_rebuild_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	checkpointStage := plan.subtaskByID("pass")
+	if checkpointStage == nil {
+		t.Fatal("probe checkpoint stage missing")
+	}
+	checkpointStage.ID = "ship_approval"
+	checkpointStage.Revisions = goalMaxRevisions
+	plan.ProcessID = packagingStudioProcessID
+	plan.Checkpoint.StageID = "ship_approval"
+
+	engine := newGoalEngine(app)
+	if err := engine.resumeProcessCheckpoint(&plan, thread.Artifact.ID, "aj@shareability.com", "send back", -1); err != nil {
+		t.Fatalf("spent Packaging Studio rebuild request: %v", err)
+	}
+	if plan.State != goalStateApproval || plan.Checkpoint == nil || !plan.Checkpoint.Held || plan.Checkpoint.ResolvedAt != "" {
+		t.Fatalf("spent rebuild request did not hold the package: state=%s checkpoint=%+v", plan.State, plan.Checkpoint)
+	}
+	if plan.Checkpoint.LastAction != processCheckpointActionRevise {
+		t.Fatalf("last action=%q, want the human's explicit revise request retained", plan.Checkpoint.LastAction)
+	}
+	if checkpointStage.Status == subtaskComplete {
+		t.Fatalf("spent rebuild request completed the ship checkpoint: %+v", checkpointStage)
+	}
+}
+
 // A hold-action choice keeps the goal PARKED with the choice on record: the
 // approval surface stays up, the held badge rides the checkpoint mirror, a
 // resume attempt without an explicit proceed choice is refused, and only a

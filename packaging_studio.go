@@ -401,6 +401,7 @@ func packagingStudioDefinition() ProcessDefinition {
 					"LAYOUT VARIETY WITH ONE VISUAL THESIS: choose the best supported composition per beat — cover, section break, statement, evidence, comparison, numbers, timeline, quote, image-led, or close. Mix at least four composition types. Do not repeat a title-plus-bullets template; do not leave accidental empty space; do not center every slide. Reserve centered type for intentional dramatic beats.",
 					"DENSITY AND CRAFT: one claim per slide, no prose wall, no orphan labels, no tiny footnotes, and no more than 45 client-facing words on a normal slide unless it is a deliberately designed evidence page. Turn metrics into large-number compositions, comparisons into aligned columns, sequences into a visible path, and quotations into typographic moments. Add restrained slide numbers and source/caption furniture where evidence or imagery requires it.",
 					"EDITOR COMPATIBILITY: put each slide's background color directly on its <section class=\"pg\"> inline style. Give every meaningful text block, image plate, and decorative shape a stable data-deck-element id plus data-deck-type=\"text|image|shape\". Put position:absolute and its left, top, width, height, z-index, opacity, and rotation directly in that element's inline style using 1920×1080 pixel coordinates; do not leave editable geometry only in a CSS class. Put text color/font-size/font-weight, image object-fit, and shape fill/stroke directly on the element too. Decorative background layers must carry data-deck-element when they are intended to be editable. This explicit geometry is part of the deliverable contract, not optional metadata.",
+					"TEXT FIT CONTRACT: every text block must also put font-family, line-height, letter-spacing, and text-align inline. Author its width and height to contain the rendered text at that exact size, leading, and tracking. Independent text boxes must not intersect and should keep at least 24px of breathing room. If an intentional overlap is essential to the composition, mark the overlapping elements data-deck-overlap=\"allow\"; otherwise any text overflow, clipping, off-canvas geometry, or text-box intersection is a blocking render defect, not a style choice.",
 					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. Build that slide's photo element as a plate or full-bleed carrying BOTH its type class AND class \"fig-N\" (matching the FIG number), with an empty <div class=\"ph\"></div> inside and the FIG. caption. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
 					"FULL-BLEED LAW: when a generated image carries the emotional beat, let it reach all four slide edges and place copy over a purpose-built solid or gradient scrim. When the image is evidence, use a disciplined plate with a caption. Never use a small decorative image that contributes no meaning.",
 					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the presenter the script alongside each page.",
@@ -845,7 +846,7 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 			"",
 			"The vision jury did not run: " + reason,
 			"The package ships un-juried; export the deck PDF later and the page images will be on file for a future jury.",
-		}, "\n"), map[string]string{"slideJury": "skipped"}, nil
+		}, "\n"), map[string]string{"slideJury": "skipped", "reviewVerdict": "needs_attention"}, nil
 	}
 
 	deck, findings, err := studioShipArtifactsForJury(app, plan)
@@ -879,15 +880,27 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 
 	findingsNote := appendSlideJuryRevisionNotes(app, findings, jury)
 
+	verdict := firstNonEmptyString(strings.TrimSpace(jury.Metadata["reviewVerdict"]), "needs_attention")
+	blockingPages := strings.TrimSpace(jury.Metadata["blockingPages"])
+	readinessLine := "- Rendered review verdict: " + verdict + "."
+	if blockingPages != "" {
+		readinessLine = "- Rendered review verdict: needs changes on slide(s) " + blockingPages + "; final review must not describe this version as ready."
+	}
 	lines := []string{
 		"Slide jury — the critics saw the rendered pages",
 		"",
 		fmt.Sprintf("- %d rendered page image(s) went before the 3-seat jury (headline ear, design eye, room gut) — every seat saw all pages.", len(pageImages)),
 		"- Merged scoreboard filed: " + slideJuryContract + " → " + jury.ID,
+		readinessLine,
 		"- " + findingsNote,
-		"- Advisory by design: revision notes only, no auto-revise — the reviewer decides what to apply at final deck review.",
+		"- The reviewer applies the concrete fixes in Deck Studio or sends the deck back before approving.",
 	}
-	return strings.Join(lines, "\n"), map[string]string{"slideJuryArtifactId": jury.ID}, nil
+	return strings.Join(lines, "\n"), map[string]string{
+		"slideJuryArtifactId": jury.ID,
+		"reviewVerdict":       verdict,
+		"blockingPages":       blockingPages,
+		"minimumAverage":      strings.TrimSpace(jury.Metadata["minimumAverage"]),
+	}, nil
 }
 
 func validatePackagingStudioDeckRender(deck meetingMemoryEntry) error {

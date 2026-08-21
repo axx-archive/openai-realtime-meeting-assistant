@@ -156,6 +156,19 @@ const server=http.createServer((req,res)=>{
 	const studioLabels=await page.locator('#channel-studio-copy .scout-chat-work-card__checkpoint-choice').allTextContents();
 	assert.deepEqual(studioLabels,['Approve this version','Request changes','Keep on hold','Franchise playbook']);
 	await page.evaluate(()=>{
+	  const checkpoint={id:'goal-checkpoint-dddddddddddddddddddddddd',stageId:'ship_approval',question:'The deck is ready. What would you like to do?',options:[{id:'checkpoint-option-aaaaaaaaaaaaaaaaaaaaaaa1',label:'approve the ship',action:'proceed'},{id:'checkpoint-option-aaaaaaaaaaaaaaaaaaaaaaa2',label:'send back — rebuild the deck',action:'revise'},{id:'checkpoint-option-aaaaaaaaaaaaaaaaaaaaaaa3',label:'hold the package',action:'hold'}]};
+	  const jury={id:'jury-stage-legacy',kind:'os_artifact',text:'Legacy jury completed before structured readiness.',metadata:{processId:'packaging_studio',processStage:'slide_jury'}};
+	  addArtifactEntry(jury,{select:false});
+	  const plan={state:'approval_required',processId:'packaging_studio',checkpoint,subtasks:[{id:'slide_jury',title:'Review every rendered slide',status:'complete',artifactId:jury.id},{id:'ship_approval',title:'Final deck review',status:'running',revisions:2}]};
+	  const artifact={id:'goal-channel-studio-legacy',kind:'os_artifact',text:'# Launch deck',metadata:{mode:'goal',type:'html_deck',title:'Launch deck',status:'needs_input',threadStatus:'needs_input',processId:'packaging_studio',goalPlan:JSON.stringify(plan),checkpoint:JSON.stringify(checkpoint)}};
+	  const message={id:'work-message-studio-legacy',thread:{id:artifact.id,artifactId:artifact.id,status:'needs_input',mode:'goal',agentName:'Scout',query:'Finish this deck',checkpoint}};
+	  addArtifactEntry(artifact,{select:false});
+	  const fixture=document.createElement('div');fixture.id='channel-studio-legacy';fixture.appendChild(scoutDesktopGoalWorkCardNode(message,artifact));chatTool.appendChild(fixture);
+	});
+	const legacyStudio=page.locator('#channel-studio-legacy .scout-chat-work-card');
+	assert.match(await legacyStudio.locator('.scout-chat-work-card__checkpoint-question').textContent(),/review is incomplete/i);
+	assert.deepEqual(await legacyStudio.locator('.scout-chat-work-card__checkpoint-choice').allTextContents(),['Approve this version','Keep on hold']);
+	await page.evaluate(()=>{
 	  const plan={state:'needs_attention',processId:'packaging_studio',subtasks:[{id:'voice',title:'Voice',status:'blocked'}]};
 	  const artifact={id:'goal-channel-blocked',kind:'os_artifact',text:'# Saved deck draft',metadata:{mode:'goal',title:'Like A Farmer deck',status:'needs_attention',threadStatus:'needs_attention',goalPlan:JSON.stringify(plan)}};
 	  const message={id:'work-message-blocked',thread:{id:'goal-channel-blocked',artifactId:'goal-channel-blocked',status:'needs_attention',mode:'goal',agentName:'Scout',query:'Finish the Like A Farmer deck'}};

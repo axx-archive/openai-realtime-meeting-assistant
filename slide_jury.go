@@ -20,9 +20,9 @@ package main
 //      the synthesis — sees ALL pages. The merged scoreboard files as a
 //      slide_jury_v1 artifact.
 //
-// The jury is ADVISORY by design: its findings land as revision notes on the
-// findings record (packaging_studio.go), never as an auto-revise — the founder
-// sees the scoreboard and human judgment decides what to apply.
+// The jury's copy/layout findings land as revision notes, while its structured
+// readiness stamp changes the final checkpoint language so a deck with
+// blocking rendered defects is never described as ready.
 //
 // Keyless + sidecar-absent degrade gracefully: the studio stage discloses a
 // skip (packaging_studio.go); nothing here blocks a ship.
@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,8 +208,119 @@ func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEnt
 // system prompt (the runGoalPanel Schema seam). Fixes must be executable or
 // the literal word KEEP — a jury that says "make it better" is slop.
 const slideJurySchema = `Return STRICT JSON only, no prose outside it:
-{"pages":[{"page":1,"score":0,"fix":"one executable change, or the literal word KEEP"}],"weakest_three":[1,2,3],"strongest_three":[4,5,6]}
-Rules: score EVERY page you were shown, 0-10. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
+{"pages":[{"page":1,"score":0,"fix":"one executable change, or the literal word KEEP","blockers":["text_overlap"]}],"weakest_three":[1,2,3],"strongest_three":[4,5,6]}
+Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
+
+type slideJurySeatScorecard struct {
+	Pages []struct {
+		Page     int      `json:"page"`
+		Score    float64  `json:"score"`
+		Blockers []string `json:"blockers"`
+	} `json:"pages"`
+}
+
+type slideJuryReadiness struct {
+	Verdict        string
+	BlockingPages  []int
+	MinimumAverage float64
+	ParsedSeats    int
+}
+
+// evaluateSlideJuryReadiness turns the independent seat scorecards into a
+// stable machine-readable checkpoint signal. Two seats must agree that a page
+// is below the 7/10 presentation floor; one outlier cannot block the deck.
+// Fewer than two parseable seats fails closed as needs_attention.
+func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slideJuryReadiness {
+	type pageVotes struct {
+		total    float64
+		count    int
+		low      int
+		blockers map[string]int
+	}
+	pages := map[int]*pageVotes{}
+	parsedSeats := 0
+	for _, voice := range voices {
+		if voice.Err != nil {
+			continue
+		}
+		var card slideJurySeatScorecard
+		if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(voice.Text))), &card); err != nil || len(card.Pages) == 0 {
+			continue
+		}
+		parsedSeats++
+		seen := map[int]struct{}{}
+		for _, page := range card.Pages {
+			if page.Page < 1 || page.Page > expectedPages || page.Score < 0 || page.Score > 10 {
+				continue
+			}
+			if _, duplicate := seen[page.Page]; duplicate {
+				continue
+			}
+			seen[page.Page] = struct{}{}
+			vote := pages[page.Page]
+			if vote == nil {
+				vote = &pageVotes{blockers: map[string]int{}}
+				pages[page.Page] = vote
+			}
+			vote.total += page.Score
+			vote.count++
+			if page.Score < 7 {
+				vote.low++
+			}
+			seenBlockers := map[string]struct{}{}
+			for _, blocker := range page.Blockers {
+				blocker = strings.ToLower(strings.TrimSpace(blocker))
+				if _, duplicate := seenBlockers[blocker]; duplicate {
+					continue
+				}
+				seenBlockers[blocker] = struct{}{}
+				if oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable") {
+					vote.blockers[blocker]++
+				}
+			}
+		}
+	}
+	result := slideJuryReadiness{Verdict: "ready", MinimumAverage: 10, ParsedSeats: parsedSeats}
+	if parsedSeats < 2 || expectedPages <= 0 || len(pages) == 0 {
+		result.Verdict = "needs_attention"
+		result.MinimumAverage = 0
+		return result
+	}
+	for page := 1; page <= expectedPages; page++ {
+		votes := pages[page]
+		if votes == nil || votes.count < 2 {
+			result.Verdict = "needs_attention"
+			continue
+		}
+		average := votes.total / float64(votes.count)
+		if average < result.MinimumAverage {
+			result.MinimumAverage = average
+		}
+		structuralAgreement := false
+		for _, count := range votes.blockers {
+			if count >= 2 {
+				structuralAgreement = true
+				break
+			}
+		}
+		if votes.low >= 2 || structuralAgreement {
+			result.BlockingPages = append(result.BlockingPages, page)
+		}
+	}
+	slices.Sort(result.BlockingPages)
+	if len(result.BlockingPages) > 0 {
+		result.Verdict = "needs_changes"
+	}
+	return result
+}
+
+func slideJuryPageList(pages []int) string {
+	values := make([]string, 0, len(pages))
+	for _, page := range pages {
+		values = append(values, strconv.Itoa(page))
+	}
+	return strings.Join(values, ",")
+}
 
 // slideJurySynthesisSystem merges the three scoreboards. It deliberately says
 // "slide jury synthesizer" so responder fakes can route it, mirroring the
@@ -402,6 +515,11 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 		"source":           slideJurySource,
 		"deckArtifactId":   artifact.ID,
 	}
+	readiness := evaluateSlideJuryReadiness(outcome.Voices, len(assets))
+	metadata["reviewVerdict"] = readiness.Verdict
+	metadata["blockingPages"] = slideJuryPageList(readiness.BlockingPages)
+	metadata["minimumAverage"] = strconv.FormatFloat(readiness.MinimumAverage, 'f', 2, 64)
+	metadata["parsedSeats"] = strconv.Itoa(readiness.ParsedSeats)
 	if goalID = strings.TrimSpace(goalID); goalID != "" {
 		metadata["goalId"] = goalID
 	}

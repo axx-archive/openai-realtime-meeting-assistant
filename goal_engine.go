@@ -2600,6 +2600,35 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 		}
 	}
 	question := firstNonEmptyString(strings.TrimSpace(spec.Question), "Approve this stage to continue?")
+	// The final deck checkpoint reads the rendered jury's structured verdict.
+	// A low-scoring or incomplete review must never be projected as "ready".
+	// The deck remains human-fixable in Deck Studio, while a spent send-back
+	// budget loses its revise option so it can never degrade to the historical
+	// proceed_unapproved fallback.
+	if plan.ProcessID == packagingStudioProcessID && stage.ID == "ship_approval" {
+		if juryStage := plan.subtaskByID("slide_jury"); juryStage != nil {
+			if juryRecord, ok := e.app.osArtifactByID(juryStage.ArtifactID); ok {
+				verdict := strings.TrimSpace(juryRecord.Metadata["reviewVerdict"])
+				pages := strings.TrimSpace(juryRecord.Metadata["blockingPages"])
+				switch verdict {
+				case "needs_changes":
+					question = "Rendered review found blocking layout or copy issues on slide(s) " + firstNonEmptyString(pages, "listed in the review") + ". Fix them in Deck Studio, send the deck back for a rebuild, or keep it on hold. Approve only after the visible deck is clean."
+				case "needs_attention":
+					question = "The rendered review could not reach a reliable verdict. Inspect the deck in Deck Studio, send it back for a rebuild, or keep it on hold. Approve only after a complete visual check."
+				}
+				if verdict != "" && verdict != "ready" && st.Revisions >= goalMaxRevisions {
+					filtered := options[:0]
+					for _, option := range options {
+						if option.action() != processCheckpointActionRevise {
+							filtered = append(filtered, option)
+						}
+					}
+					options = filtered
+					question += " The automated rebuild budget is spent, so make the remaining fixes directly in Deck Studio or hold the package."
+				}
+			}
+		}
+	}
 	// P0-4: a checkpoint that PROMISED extracted options (OptionsFrom set) but
 	// got none must never park optionless — offer mechanical defaults and
 	// disclose the miss in the question itself. Authored-free-form checkpoints
@@ -2735,9 +2764,17 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 			// stage. Degrade to proceed with the failure disclosed, never stall.
 			disclosure = "the send-back target " + option.Target + " is missing from the plan — proceeded with the request disclosed"
 		case st.Revisions >= goalMaxRevisions:
-			// The same MaxRounds discipline as gates: a spent budget never loops
-			// again; it proceeds with the send-back disclosed on the record.
-			disclosure = fmt.Sprintf("the send-back budget is spent (%d rounds) — proceeded with the request disclosed", st.Revisions)
+			if plan.ProcessID == packagingStudioProcessID && checkpoint.StageID == "ship_approval" {
+				// A human explicitly asking to rebuild a deck must never be coerced
+				// into approval. Once the bounded rebuild budget is spent, hold the
+				// package for direct Deck Studio repair instead.
+				commitReceipt(processCheckpointActionHold, false)
+				transitionErr = e.holdProcessCheckpoint(plan, parentID, resolvedBy, "Automated rebuild budget spent; repair the deck in Deck Studio or explicitly approve after visual review.")
+			} else {
+				// Compatibility for other process checkpoints retains the historic
+				// bounded fallback; Packaging Studio is the stricter ship boundary.
+				disclosure = fmt.Sprintf("the send-back budget is spent (%d rounds) — proceeded with the request disclosed", st.Revisions)
+			}
 		default:
 			commitReceipt(processCheckpointActionRevise, true)
 			driveNeeded = true
