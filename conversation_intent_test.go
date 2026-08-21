@@ -1458,13 +1458,17 @@ func TestConversationApprovalAcceptedGoalReconcilesLostCardWithoutDuplicateRun(t
 		startGoalThreadAsync = previousGoalStarter
 		conversationWorkBeforeCardCommitProbe = previousProbe
 	})
+	longAcceptedObjective := "Push the reviewed Aurora change to GitHub." + strings.Repeat(" Preserve this exact reviewed source context.", 120)
+	if len(longAcceptedObjective) <= 4000 {
+		t.Fatalf("regression objective length=%d, want >4000", len(longAcceptedObjective))
+	}
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Workflow != "scout_route" {
 			t.Fatalf("unexpected workflow %q", request.Workflow)
 		}
 		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
 			Outcome: string(conversationIntentStartPrivateWork), Route: "goal_run",
-			Objective: "Push the reviewed Aurora change to GitHub", AuthorityHint: toolAuthorityWorkspaceWrite,
+			Objective: longAcceptedObjective, AuthorityHint: toolAuthorityWorkspaceWrite,
 		}), nil
 	})
 	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Approved goal", scoutChatVisibilityPrivate)

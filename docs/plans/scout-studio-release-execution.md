@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: combined web and Mobile Build 69 source is green at `d96fc89b`; record the release checkpoint, push the exact reviewed tree, deploy it, then rerun the production deck and submit Mobile Build 69.
+Current phase: generation 138 proved the integrated UI/source work live, then exposed and locally closed a long exact-approval comparison bug; ship that narrow hotfix before rerunning the deck and submitting Mobile Build 69.
 
 ## Invariants
 
@@ -49,6 +49,7 @@ Current phase: combined web and Mobile Build 69 source is green at `d96fc89b`; r
 - W4 Content Studio uses the canonical `https://kino.grok.me`, background inerting, cross-origin focus sentinels, fallback/external escape, and a web-only rail item. W4 PiP hit-tests above Stage/KINO, remains operable as a truthful composite, docks away from actions, routes Return to `/video`, and disappears only on canonical hangup.
 - Final independent critic verdict: PASS after critical normal/race, PiP/Studio/stage, 230-event chat stress, and canonical cold-index browser suites.
 - Combined release tree `d96fc89bdbb3372bfa57e2cdbbcc0f5ea288f5c8` contains web commit `712f2dce` plus Mobile Build 69 commit `d96fc89b`; the exact combined focused Go/browser gate passed in 19.119s, all 587 mobile tests passed, TypeScript passed, and `git diff --check` was clean. A clean `npm ci` reproduced the known eight high transitive Expo/Metro advisories without changing the lockfile.
+- Generation 138 deployed `38397bb359b82d8d6bcba9d320e1f26c796e3595` and verified as `verified-local-unsigned`. Its first production reply-thread proposal visibly included the full Dr. May paste, but exact approval failed closed because the client copy alone was truncated to 4,000 characters before comparison. The hotfix compares immutable approvals byte-for-byte and applies the cap only to editable proposals; a >4,000-character acceptance regression and focused race gate pass. No work launched from the rejected approval. The first EAS attempt was interrupted before creation after its upload stalled, so no stale Build 69 exists.
 
 ## Pending Dependencies
 
@@ -58,7 +59,7 @@ Current phase: combined web and Mobile Build 69 source is green at `d96fc89b`; r
 ## Operations And Authority Queue
 
 - Authorized: commit/push the reviewed integrated source to `axx/main`; deploy the exact web release to the DigitalOcean VPS; rerun and edit the production deck; build and submit the exact Mobile Build 69 to TestFlight.
-- Not yet executed: final ledger checkpoint commit, push/deploy, production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
+- Not yet executed: approval hotfix commit/push/deploy, production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
 - Rollback: retain production release `25bf7248` and its images until the replacement passes the retained verifier and live canaries.
 
 ## Risks And Decisions

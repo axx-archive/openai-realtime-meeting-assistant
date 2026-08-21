@@ -4299,11 +4299,12 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	acceptedObjective := strings.TrimSpace(pending.Objective)
 	exactApproval := pending.IntentOutcome == string(conversationIntentApprovalRequired) || strings.TrimSpace(pending.EffectClass) != ""
 	if verb == "accepted" {
-		requestedObjective := trimForStorage(action.Objective, 4000)
+		requestedObjective := strings.TrimSpace(action.Objective)
 		if exactApproval && requestedObjective != "" && requestedObjective != acceptedObjective {
 			return nil, fmt.Errorf("the approved request changed; send the revised objective as a new message so Stride can classify and approve its exact effect")
 		}
 		if !exactApproval {
+			requestedObjective = trimForStorage(requestedObjective, 4000)
 			acceptedObjective = firstNonBlank(requestedObjective, acceptedObjective)
 		}
 		pending.Objective = acceptedObjective
