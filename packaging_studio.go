@@ -224,10 +224,10 @@ func packagingStudioDefinition() ProcessDefinition {
 		Stages: []ProcessStage{
 			{
 				ID:    "intake",
-				Title: "Intake — the founder's words, the audience, the assets",
+				Title: "Intake — source, audience, and visual direction",
 				Role:  processRoleHumanCheckpoint,
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "Confirm the intake brief before the studio runs: the sources, the founder's VERBATIM words (these are law downstream), and the real audience. Do brand assets (logo, colors, type) already exist, or should the studio develop a visual identity?",
+					Question: "Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?",
 					Options: []ProcessCheckpointOption{
 						{Label: "brand assets provided"},
 						{Label: "no brand assets — develop identity"},

@@ -399,8 +399,22 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	def := packagingStudioDefinition()
 
 	intake := packagingStudioStage(t, def, "intake")
+	if intake.Title != "Intake — source, audience, and visual direction" {
+		t.Fatalf("intake title=%q, want customer-facing source and visual-direction language", intake.Title)
+	}
 	if intake.CheckpointSpec == nil || len(intake.CheckpointSpec.Options) != 2 {
 		t.Fatalf("intake checkpoint options=%+v, want the two brand-assets branches", intake.CheckpointSpec)
+	}
+	question := strings.ToLower(intake.CheckpointSpec.Question)
+	for _, leaked := range []string{"verbatim", "law downstream", "confirm the intake brief"} {
+		if strings.Contains(question, leaked) {
+			t.Fatalf("intake question leaks internal studio policy %q: %q", leaked, intake.CheckpointSpec.Question)
+		}
+	}
+	for _, need := range []string{"brand assets", "visual direction", "source material"} {
+		if !strings.Contains(question, need) {
+			t.Fatalf("intake question missing customer-facing decision %q: %q", need, intake.CheckpointSpec.Question)
+		}
 	}
 	intakeLabels := make([]string, 0, len(intake.CheckpointSpec.Options))
 	for _, option := range intake.CheckpointSpec.Options {

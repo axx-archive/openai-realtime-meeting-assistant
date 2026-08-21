@@ -3,6 +3,7 @@ package main
 import (
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -13,6 +14,7 @@ const (
 	scoutChatAnchorMessageMaxBytes     = 8000
 	scoutChatOrdinaryMessageMaxBytes   = 800
 	scoutChatReplySourceMaxMessages    = 4
+	scoutChatNamedSourceMaxMessages    = 4
 	scoutChatSubstantiveSourceMinBytes = 512
 )
 
@@ -35,6 +37,203 @@ type scoutChatReplyContextSelection struct {
 	Omitted          bool
 	SourcesComplete  bool
 	DefaultBodyLimit int
+}
+
+// scoutChatExplicitNamedAuthorSources resolves an explicit possessive source
+// reference such as “Dr. May's full recommendations” or “Tyler's ask” to the
+// matching authorized main-channel author. This is deliberately narrower than
+// semantic recall: the request must name the displayed author possessively and
+// describe the material as a source; a top-level request never reaches into a
+// sibling reply branch. Stable author identities, source-shaped messages, and
+// topic overlap must resolve to one candidate. Ambiguity fails closed instead
+// of guessing or dropping a collaborator's material.
+func scoutChatExplicitNamedAuthorSources(thread scoutChatThreadRecord, current scoutChatMessageRecord) ([]scoutChatMessageRecord, bool) {
+	if current.ReplyTo != nil {
+		return nil, true
+	}
+	canonical := func(value string) string {
+		value = strings.ToLower(value)
+		value = strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsNumber(r) {
+				return r
+			}
+			return ' '
+		}, value)
+		return strings.Join(strings.Fields(value), " ")
+	}
+	request := " " + canonical(current.Text) + " "
+	if strings.TrimSpace(request) == "" {
+		return nil, true
+	}
+	descriptorMode := func(author string) string {
+		name := canonical(author)
+		if name == "" {
+			return ""
+		}
+		marker := " " + name + " s "
+		at := strings.Index(request, marker)
+		if at < 0 {
+			return ""
+		}
+		tail := strings.Fields(request[at+len(marker):])
+		if len(tail) > 8 {
+			tail = tail[:8]
+		}
+		for _, token := range tail {
+			switch token {
+			case "ask", "request", "instruction", "instructions":
+				return "turn"
+			case "recommendation", "recommendations", "thoughts", "analysis", "brief", "notes", "source", "feedback":
+				return "substantive"
+			}
+		}
+		return ""
+	}
+
+	stableIdentity := func(message scoutChatMessageRecord) string {
+		if email := normalizeAccountEmail(message.AuthorEmail); email != "" {
+			return "email:" + email
+		}
+		if name := canonical(message.AuthorName); name != "" {
+			return "legacy-name:" + name
+		}
+		return ""
+	}
+	topicStop := map[string]bool{
+		"a": true, "an": true, "and": true, "are": true, "as": true, "ask": true, "at": true, "attached": true, "above": true,
+		"below": true, "brief": true, "build": true, "channel": true, "create": true, "deck": true, "exact": true,
+		"file": true, "for": true, "from": true, "full": true, "her": true, "his": true, "in": true, "instruction": true,
+		"instructions": true, "make": true, "notes": true, "of": true, "on": true, "presentation": true, "put": true,
+		"recommendation": true, "recommendations": true, "request": true, "scout": true, "source": true, "the": true,
+		"their": true, "this": true, "thoughts": true, "to": true, "turn": true, "use": true, "using": true, "with": true,
+	}
+	topicTokens := map[string]bool{}
+	for _, token := range strings.Fields(strings.TrimSpace(request)) {
+		if !topicStop[token] && token != "s" {
+			topicTokens[token] = true
+		}
+	}
+	looksLikeAsk := func(message scoutChatMessageRecord) bool {
+		text := " " + canonical(scoutChatMessageModelText(message)) + " "
+		for _, marker := range []string{" can you ", " could you ", " would you ", " please "} {
+			if strings.Contains(text, marker) {
+				return true
+			}
+		}
+		if strings.Contains(strings.ToLower(scoutChatMessageModelText(message)), "@scout") {
+			for _, verb := range []string{" build ", " create ", " make ", " put ", " turn ", " review ", " analyze ", " prepare "} {
+				if strings.Contains(text, verb) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	topicScore := func(message scoutChatMessageRecord, author string) (int, int) {
+		authorTokens := map[string]bool{}
+		for _, token := range strings.Fields(canonical(author)) {
+			authorTokens[token] = true
+		}
+		meaningfulTopics := 0
+		for token := range topicTokens {
+			if !authorTokens[token] {
+				meaningfulTopics++
+			}
+		}
+		seen := map[string]bool{}
+		score := 0
+		for _, token := range strings.Fields(canonical(scoutChatMessageModelText(message))) {
+			if topicTokens[token] && !authorTokens[token] && !seen[token] {
+				seen[token] = true
+				score++
+			}
+		}
+		return score, meaningfulTopics
+	}
+	type authorSource struct {
+		author     string
+		mode       string
+		identities map[string][]scoutChatMessageRecord
+	}
+	authors := map[string]*authorSource{}
+	matchedReference := false
+	for _, message := range thread.Messages {
+		if message.ID == current.ID || message.ReplyTo != nil || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			continue
+		}
+		author := strings.TrimSpace(message.AuthorName)
+		key := canonical(author)
+		identity := stableIdentity(message)
+		if key == "" || identity == "" {
+			continue
+		}
+		entry := authors[key]
+		if entry == nil {
+			mode := descriptorMode(author)
+			if mode == "" {
+				continue
+			}
+			matchedReference = true
+			entry = &authorSource{author: author, mode: mode, identities: map[string][]scoutChatMessageRecord{}}
+			authors[key] = entry
+		}
+		if strings.TrimSpace(scoutChatMessageModelText(message)) != "" {
+			entry.identities[identity] = append(entry.identities[identity], message)
+		}
+	}
+
+	selectedIDs := map[string]bool{}
+	var selected []scoutChatMessageRecord
+	for _, entry := range authors {
+		if len(entry.identities) != 1 {
+			return nil, false
+		}
+		var candidates []scoutChatMessageRecord
+		for _, messages := range entry.identities {
+			for _, message := range messages {
+				if entry.mode == "turn" && looksLikeAsk(message) || entry.mode == "substantive" && len(strings.TrimSpace(scoutChatMessageModelText(message))) >= scoutChatSubstantiveSourceMinBytes {
+					candidates = append(candidates, message)
+				}
+			}
+		}
+		if len(candidates) == 0 {
+			return nil, false
+		}
+		bestScore := -1
+		meaningfulTopics := 0
+		var best []scoutChatMessageRecord
+		for _, message := range candidates {
+			score, topics := topicScore(message, entry.author)
+			meaningfulTopics = topics
+			if score > bestScore {
+				bestScore = score
+				best = []scoutChatMessageRecord{message}
+			} else if score == bestScore {
+				best = append(best, message)
+			}
+		}
+		if meaningfulTopics > 0 && bestScore == 0 || len(best) != 1 {
+			return nil, false
+		}
+		for _, message := range best {
+			if !selectedIDs[message.ID] {
+				selectedIDs[message.ID] = true
+				selected = append(selected, message)
+			}
+		}
+	}
+	if matchedReference && len(selected) == 0 {
+		return nil, false
+	}
+	if len(selected) > scoutChatNamedSourceMaxMessages {
+		return nil, false
+	}
+	order := map[string]int{}
+	for index, message := range thread.Messages {
+		order[message.ID] = index
+	}
+	sort.SliceStable(selected, func(i, j int) bool { return order[selected[i].ID] < order[selected[j].ID] })
+	return selected, true
 }
 
 // scoutChatReplyRootID resolves reply ancestry from durable message IDs. A
@@ -266,11 +465,17 @@ func scoutChatGlobalContextMessages(thread scoutChatThreadRecord) scoutChatReply
 		PinnedIDs: map[string]bool{}, SourceIDs: map[string]bool{}, SourcesComplete: true,
 		DefaultBodyLimit: scoutChatAnchorMessageMaxBytes,
 	}
-	start := 0
-	if len(thread.Messages) > scoutChatMaxHistoryTurns {
-		start = len(thread.Messages) - scoutChatMaxHistoryTurns
+	indices := make([]int, 0, scoutChatMaxHistoryTurns)
+	for index := len(thread.Messages) - 1; index >= 0 && len(indices) < scoutChatMaxHistoryTurns; index-- {
+		if thread.Messages[index].ReplyTo != nil {
+			continue
+		}
+		indices = append(indices, index)
 	}
-	selection.Messages = append([]scoutChatMessageRecord(nil), thread.Messages[start:]...)
+	sort.Ints(indices)
+	for _, index := range indices {
+		selection.Messages = append(selection.Messages, thread.Messages[index])
+	}
 	return selection
 }
 
@@ -350,7 +555,7 @@ func bindScoutReplyContextToWork(decision conversationIntentDecision, context st
 	context = strings.TrimSpace(context)
 	hasWork := decision.Work != nil || decision.Approval != nil && decision.Approval.Work != nil
 	if hasWork && !sourcesComplete {
-		return unavailableConversationDecision("reply_source_too_large", "The reply-thread source is too large to carry into governed work without dropping content. Attach it as a readable file, then ask again; nothing was launched.", proposalSourceDeterministicGuard)
+		return unavailableConversationDecision("reply_source_too_large", "Scout couldn't bind every requested channel source unambiguously. Reply to the exact message or attach or name the exact file; nothing was launched.", proposalSourceDeterministicGuard)
 	}
 	if context == "" {
 		return decision
@@ -393,8 +598,40 @@ func (app *kanbanBoardApp) scoutChatTurnContextForViewer(viewerEmail string, thr
 		rootID = scoutChatReplyRootID(projected, current.ReplyTo.MessageID)
 	}
 	if rootID == "" {
-		history, _ := scoutChatHistoryFromMessages(projected, scoutChatGlobalContextMessages(projected))
-		return scoutChatTurnContext{History: history, RecallQuery: strings.TrimSpace(scoutChatMessageModelText(current)), SourceComplete: true}
+		selection := scoutChatGlobalContextMessages(projected)
+		named, namedComplete := scoutChatExplicitNamedAuthorSources(projected, current)
+		if len(named) == 0 {
+			history, _ := scoutChatHistoryFromMessages(projected, selection)
+			return scoutChatTurnContext{History: history, RecallQuery: strings.TrimSpace(scoutChatMessageModelText(current)), SourceComplete: namedComplete}
+		}
+		selected := map[string]bool{}
+		for _, message := range selection.Messages {
+			selected[message.ID] = true
+		}
+		for _, message := range named {
+			selection.SourceIDs[message.ID] = true
+			selection.PinnedIDs[message.ID] = true
+			if !selected[message.ID] {
+				selection.Messages = append(selection.Messages, message)
+				selected[message.ID] = true
+			}
+		}
+		order := map[string]int{}
+		for index, message := range projected.Messages {
+			order[message.ID] = index
+		}
+		sort.SliceStable(selection.Messages, func(i, j int) bool { return order[selection.Messages[i].ID] < order[selection.Messages[j].ID] })
+		history, historyComplete := scoutChatHistoryFromMessages(projected, selection)
+		namedSelection := scoutChatReplyContextSelection{Messages: named, PinnedIDs: map[string]bool{}, SourceIDs: map[string]bool{}, SourcesComplete: namedComplete}
+		for _, message := range named {
+			namedSelection.PinnedIDs[message.ID] = true
+			namedSelection.SourceIDs[message.ID] = true
+		}
+		workContext, workComplete := scoutChatReplyWorkContext(namedSelection)
+		return scoutChatTurnContext{
+			History: history, RecallQuery: scoutChatSemanticRecallQuery(current, selection), WorkContext: workContext,
+			SourceComplete: namedComplete && historyComplete && workComplete,
+		}
 	}
 	selection := scoutChatReplyContextMessages(projected, rootID)
 	history, historySourcesComplete := scoutChatHistoryFromMessages(projected, selection)

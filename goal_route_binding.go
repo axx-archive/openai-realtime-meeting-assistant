@@ -471,7 +471,21 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 		}
 		contextText = turn.WorkContext
 	} else {
-		contextText, _ = scoutChatReplyWorkContext(scoutChatReplyContextSelection{Messages: projectedSelected, PinnedIDs: map[string]bool{}, SourceIDs: map[string]bool{}, SourcesComplete: true})
+		named, namedComplete := scoutChatExplicitNamedAuthorSources(projected, projected.Messages[projectedSourceIndex])
+		if !namedComplete {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved named source selection is incomplete")
+		}
+		namedIDs := map[string]bool{}
+		for _, message := range named {
+			namedIDs[message.ID] = true
+		}
+		var contextComplete bool
+		contextText, contextComplete = scoutChatReplyWorkContext(scoutChatReplyContextSelection{
+			Messages: projectedSelected, PinnedIDs: namedIDs, SourceIDs: namedIDs, SourcesComplete: namedComplete,
+		})
+		if !contextComplete {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved named source selection is incomplete")
+		}
 	}
 	contextText = strings.TrimSpace(contextText)
 	// Context is included byte-for-byte because it is the exact provider-facing

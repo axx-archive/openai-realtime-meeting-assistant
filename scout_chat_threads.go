@@ -3560,7 +3560,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			unavailable := scoutChatMessageRecord{
 				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "message", Role: "scout",
 				AuthorName: visibleWorkerName, IntentOutcome: string(conversationIntentUnavailable), CausedByMessageID: userMessage.ID,
-				Text:      "The reply-thread source is too large to carry into governed work without dropping content. Attach it as a readable file, then ask again; nothing was launched.",
+				Text:      "Scout couldn't bind every requested channel source unambiguously. Reply to the exact message or attach or name the exact file; nothing was launched.",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			}
 			saved, commitErr := commitUserMessage(userMessage, unavailable)
@@ -4727,27 +4727,66 @@ func scoutChatSourceWindow(thread scoutChatThreadRecord, sourceMessageID string)
 	if sourceMessageID == "" {
 		return nil, scoutChatSourceBinding{}, nil
 	}
-	window := make([]scoutChatMessageRecord, 0, agentThreadSourceConversationWindow)
-	digests := make([]string, 0, agentThreadSourceConversationWindow)
+	sourceIndex := scoutChatMessageIndex(thread, sourceMessageID)
+	if sourceIndex < 0 {
+		return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is unavailable")
+	}
+	indices := make([]int, 0, agentThreadSourceConversationWindow+scoutChatNamedSourceMaxMessages)
+	selected := map[int]bool{}
+	if thread.Messages[sourceIndex].ReplyTo == nil {
+		// A top-level request can use top-level channel history, but reply branches
+		// are separate source topology. Select the latest bounded main-channel
+		// turns rather than the latest raw records so a recent sibling reply can
+		// never become provider material merely by proximity.
+		for index := sourceIndex; index >= 0 && len(indices) < agentThreadSourceConversationWindow; index-- {
+			if thread.Messages[index].ReplyTo != nil {
+				continue
+			}
+			indices = append(indices, index)
+			selected[index] = true
+		}
+	} else {
+		start := sourceIndex - agentThreadSourceConversationWindow + 1
+		if start < 0 {
+			start = 0
+		}
+		for index := start; index <= sourceIndex; index++ {
+			indices = append(indices, index)
+			selected[index] = true
+		}
+	}
+	named, namedComplete := scoutChatExplicitNamedAuthorSources(thread, thread.Messages[sourceIndex])
+	if !namedComplete {
+		return nil, scoutChatSourceBinding{}, fmt.Errorf("explicit named source set exceeds the governed source limit")
+	}
+	for _, message := range named {
+		index := scoutChatMessageIndex(thread, message.ID)
+		if index >= 0 && index <= sourceIndex && !selected[index] {
+			indices = append(indices, index)
+			selected[index] = true
+		}
+	}
+	sort.Ints(indices)
+	window := make([]scoutChatMessageRecord, 0, len(indices))
+	digests := make([]string, 0, len(indices))
 	binding := scoutChatSourceBinding{MessageID: sourceMessageID}
-	for _, message := range thread.Messages {
+	for _, index := range indices {
+		message := thread.Messages[index]
 		digest, err := scoutChatSourceMessageDigest(thread, message)
 		if err != nil {
 			return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is invalid")
 		}
 		window = append(window, message)
 		digests = append(digests, message.ID+":"+digest)
-		if len(window) > agentThreadSourceConversationWindow {
-			window = window[1:]
-			digests = digests[1:]
-		}
 		if strings.TrimSpace(message.ID) == sourceMessageID {
 			binding.MessageDigest = digest
-			binding.WindowDigest = sha256Hex([]byte(strings.Join(digests, "\n")))
-			return append([]scoutChatMessageRecord(nil), window...), binding, nil
 		}
 	}
-	return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is unavailable")
+	if binding.MessageDigest == "" {
+		return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is unavailable")
+	}
+	binding.WindowDigest = sha256Hex([]byte(strings.Join(digests, "\n")))
+	return append([]scoutChatMessageRecord(nil), window...), binding, nil
 }
 
 func (app *kanbanBoardApp) pendingScoutChatProposalContext(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, *scoutChatReplyRef, scoutChatSourceBinding, error) {

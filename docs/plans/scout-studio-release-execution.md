@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: generation 139 proved the exact-approval hotfix and the in-channel checkpoint/stage flow live, then exposed an attachment-selection gap for an explicitly named older main-channel PDF. The source resolver/replay fence is now critic-approved locally; finish the chat-polish gate, ship one final exact release, rerun the deck, then build Mobile 69 from that same SHA.
+Current phase: generation 140 serves exact release `9b2a04a8` with the named-PDF resolver, chat polish, Deck Studio, Content Studio, PiP, and Mobile Build 69 source integrated. Build 69 was uploaded to Apple from that exact SHA and is awaiting processing/group proof. A live Like A Farmer rerun proved the PDF path but exposed a second source gap: the top-level request named Dr. May's older authored recommendations, yet only Tyler's exact PDF entered the governed source window. A narrow local follow-up now binds explicit possessive collaborator sources (for example, “Dr. May's full recommendations” and “Tyler's ask”) and replaces leaked studio-policy checkpoint copy; independent review and final release/rerun remain.
 
 ## Invariants
 
@@ -22,10 +22,10 @@ Current phase: generation 139 proved the exact-approval hotfix and the in-channe
 | W2 | Durable channel checkpoint choices on the existing root card | W1 | Focused normal/race tests, production exact-release verifier, live two-checkpoint journey | Complete and live in `25bf7248` |
 | W3 | Source-complete Packaging Studio stages and beautiful, navigable activity drawers | W2 and live blocked-run evidence | Production-path source/ACL tests; rendered desktop/mobile drawer journey; critic | Complete in combined release tree; final gate green |
 | W4 | Web-only internal KINO Content Studio and persistent call picture-in-picture | W3 shared `index.html` integration | Cross-origin isolation, navigation/call lifecycle browser tests, rendered QA | Complete in combined release tree; final gate green |
-| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete locally: one interaction surface, no zero-count pills, true-tail send pin; release pending |
-| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | Pending |
-| W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Pending |
-| W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Pending |
+| W5 | Slick web chat: stable scroll anchoring and fast optimistic reactions/comments | W4 shared navigation/chat shell | Instrumented interaction journey, no scroll jump, rollback-safe socket reconciliation | Complete and live in `9b2a04a8` |
+| W6 | Rerun and finish the Like A Farmer deck in production | W3-W5 deployed | Exact source present in stages; deck save/reopen/present; edited imagery/layout; channel delivery receipts | In progress; current run is editor QA only because Dr. May's authored source was absent |
+| W7 | Integrate Mobile Build 69 and publish exact SHA to TestFlight | Final web release SHA | EAS build identity, Apple processing, intended tester groups; no claim of physical-device proof without evidence | Uploaded from `9b2a04a8`; Apple processing/groups pending |
+| W8 | Synchronize GitHub/local refs and prune safe temporary state | W6-W7 | No lost dirty work; main parity; clean retained worktrees | Main parity reached at `9b2a04a8`; final follow-up and safe cleanup pending |
 
 ## Current Wave
 
@@ -56,17 +56,21 @@ Current phase: generation 139 proved the exact-approval hotfix and the in-channe
 - User live screenshot reopened W5: stacked zero-count reaction pills and duplicated hover actions are visually noisy, and posting a new comment can still finish above the true rendered tail. The final UI gate must show only meaningful reaction state in one surface and prove multiline send + delayed socket echo + reflow ends within 1 px of the real tail.
 - Two EAS uploads from `b2959fa7` ended or were intentionally stopped before build creation; Build 69 remains unused. A reproducible Node 20.20.2 / EAS CLI 21.4.0 lane is prepared for the final post-fix SHA.
 - The screenshot-driven W5 fix is release-gated: zero-count reaction summaries are absent, add/reply/riff/more share one interaction pill, keyboard/coarse-pointer access remains intact, and a six-second author-send pin survives multiline composer collapse, delayed HTTP projection, socket echo, and late media sizing while wheel/touch reader intent cancels it. The exact rendered journey passed three consecutive times; the adjacent chat suite, exact named-source normal/race suites, compile-only gate, and `git diff --check` are green.
+- Generation 140 serves exact `9b2a04a8cf32a2b3ddbefc13f88e4d7146e53049` as `verified-local-unsigned`; health, readiness, ledger, serving images, and retained rollback agreed. Local `main` and `axx/main` matched that SHA before this follow-up.
+- EAS Build 69 is build ID `9ffa1417-bf63-433d-a231-db6b24b27513`, fingerprint `b2864e34da14e6c3341a90c0348fda834e852414`, and exact Git commit `9b2a04a8`; Apple submission `2daac20b-a38e-4ef2-bf77-57557213e1d9` completed upload and is awaiting authenticated processing/group verification.
+- The 01:55 production rerun durably showed “Presentation in progress,” rendered both in-channel checkpoint cards, accepted the selected no-assets and franchise-playbook choices, and landed Red-team, Identity, competing architects/judges, Gate, and three Write revisions. The Working Fieldbook identity and PDF-derived figures are strong, but the artifacts lack Dr. May's Clips Engine and Country + Football source language; Voice then blocked after two revisions and no deck was emitted. This run is not final acceptance evidence.
+- Local follow-up tests prove an explicit older named collaborator source survives both the ordinary history cutoff and 16-message release-binding window, reaches the work context, recall query, and authenticated source window, while focused normal/race gates remain green. Intake copy now asks only whether to use existing brand assets or develop a visual direction; internal founder-word fidelity remains downstream.
 
 ## Pending Dependencies
 
-- The exact named-attachment source fix and reopened W5 live-polish gate are green locally. Final GitHub/VPS release, production deck, EAS, Apple, and cleanup proof remain pending.
+- Independent review, exact GitHub/VPS release of the collaborator-source/copy follow-up, one source-complete production deck rerun, editor/presenter proof, Apple processing/groups, and safe cleanup remain pending.
 - TestFlight completion depends on EAS/Apple processing and tester-group state; authenticated physical-device acceptance remains a separately observable gate.
 
 ## Operations And Authority Queue
 
-- Authorized: commit/push the reviewed integrated source to `axx/main`; deploy the exact web release to the DigitalOcean VPS; rerun and edit the production deck; build and submit the exact Mobile Build 69 to TestFlight.
-- Not yet executed: final source/chat-polish commit and exact-release deploy, successful production rerun, EAS Build 69, Apple submission/group verification, repository cleanup.
-- Rollback: retain production release `25bf7248` and its images until the replacement passes the retained verifier and live canaries.
+- Authorized: commit/push the reviewed follow-up to `axx/main`; deploy the exact web release; rerun and edit the production deck; verify the already-uploaded Build 69 in TestFlight.
+- Not yet executed: collaborator-source/copy follow-up release, source-complete deck, editor/presenter acceptance, Apple processing/group verification, final repository cleanup.
+- Rollback: retain production release `9b2a04a8` and its images until the follow-up passes the retained verifier and live canaries.
 
 ## Risks And Decisions
 
@@ -77,10 +81,10 @@ Current phase: generation 139 proved the exact-approval hotfix and the in-channe
 
 ## Resume Here
 
-1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, and `axx/main` before trusting any status above.
-2. Finish and independently gate the reopened W5 reaction/tail-position work; keep the exact attachment-source gate green.
-3. Commit this checkpoint with the source/UI fixes, fetch and compare `axx/main`, and push only if it remains the expected ancestor; verify local/remote exact parity.
-4. Deploy and verify that exact VPS release. Send a new production request naming Tyler's exact PDF, require the PDF revision/text in every stage, and answer only the already-selected no-assets/franchise-playbook checkpoints.
+1. Re-read this ledger, then verify the active goal, `git status`, `git diff --check`, `axx/main`, and generation 140 before trusting any status above.
+2. Finish the independent authority review; revise and rerun focused normal/race tests if needed. Use the current source-incomplete run only to expose deck/editor defects.
+3. Commit the collaborator-source/copy follow-up, fetch and compare `axx/main`, push only if `9b2a04a8` remains the expected ancestor, then exact-release and verify it.
+4. Rerun the same production request and require both Dr. May's authored Clips Engine/Country + Football language and Tyler's exact PDF revision/text in the stages.
 5. Generate, edit, image-polish, layer/shape/opacity-test, save, reopen, and present the complete 10-slide deck in #Like A Farmer.
-6. Build and submit Mobile Build 69 from the same final SHA with Node 20 / EAS CLI 21.4.0; verify Apple processing and tester groups.
+6. Verify Apple Build 69 processing and intended TestFlight groups without implying the later web-only copy/source commit is in that mobile binary.
 7. Preserve/archive dirty mobile receipts, update local `main` to exact `axx/main`, and prune only safe stale worktree metadata after all release evidence is recorded.

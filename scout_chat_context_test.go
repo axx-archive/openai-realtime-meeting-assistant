@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,126 @@ func replyContextTestMessage(id, role, author, text string, replyTo *scoutChatRe
 	return scoutChatMessageRecord{
 		ID: id, Kind: "message", Role: role, AuthorName: author, Text: text,
 		CreatedAt: time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano), ReplyTo: replyTo,
+	}
+}
+
+func TestScoutChatTopLevelExplicitCollaboratorSourceSurvivesOldChannelHistory(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	channel, err := app.createScoutChatThread(user.Email, user.Name, "Like A Farmer", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drMay := replyContextTestMessage("named-dr-may-source", "user", "Dr. May", strings.Repeat("Like A Farmer recommendation evidence ", 80)+"NAMED_DR_MAY_SOURCE_SENTINEL", nil)
+	drMay.AuthorEmail = "dr.may@example.com"
+	unrelated := replyContextTestMessage("named-dr-may-unrelated", "user", "Dr. May", strings.Repeat("automotive campaign launch ", 80)+"UNRELATED_DR_MAY_SENTINEL", nil)
+	unrelated.AuthorEmail = drMay.AuthorEmail
+	siblingRoot := replyContextTestMessage("named-source-sibling-root", "user", "Coworker", "Unrelated campaign thread", nil)
+	sibling := replyContextTestMessage("named-source-sibling", "user", "Dr. May", strings.Repeat("Like A Farmer secret sibling recommendation ", 80)+"SIBLING_DR_MAY_SECRET", &scoutChatReplyRef{MessageID: siblingRoot.ID})
+	sibling.AuthorEmail = drMay.AuthorEmail
+	seed := []scoutChatMessageRecord{drMay, unrelated, siblingRoot, sibling}
+	for index := 0; index < agentThreadSourceConversationWindow+4; index++ {
+		seed = append(seed, replyContextTestMessage(fmt.Sprintf("named-source-chatter-%02d", index), "user", "Coworker", "unrelated channel chatter", nil))
+	}
+	recentSiblingRoot := replyContextTestMessage("named-source-recent-sibling-root", "user", "Coworker", "Recent unrelated campaign thread", nil)
+	recentSibling := replyContextTestMessage("named-source-recent-sibling", "user", "Dr. May", strings.Repeat("Like A Farmer recent sibling secret ", 40)+"RECENT_SIBLING_DR_MAY_SECRET", &scoutChatReplyRef{MessageID: recentSiblingRoot.ID})
+	recentSibling.AuthorEmail = drMay.AuthorEmail
+	seed = append(seed, recentSiblingRoot, recentSibling)
+	if _, err := app.commitScoutChatThreadMessages(user.Email, channel.ID, seed...); err != nil {
+		t.Fatal(err)
+	}
+	thread, _, err := app.scoutChatThreadByID(user.Email, channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := replyContextTestMessage("named-source-request", "user", "AJ", "Build the Like A Farmer deck using Dr. May’s full recommendations in this channel.", nil)
+	turn := app.scoutChatTurnContextForViewer(user.Email, thread, request)
+	if !turn.SourceComplete || !strings.Contains(turn.WorkContext, "NAMED_DR_MAY_SOURCE_SENTINEL") || !strings.Contains(turn.RecallQuery, "NAMED_DR_MAY_SOURCE_SENTINEL") {
+		t.Fatalf("top-level named collaborator source was not pinned: complete=%t work=%q recall=%q", turn.SourceComplete, turn.WorkContext, turn.RecallQuery)
+	}
+	for _, forbidden := range []string{"UNRELATED_DR_MAY_SENTINEL", "SIBLING_DR_MAY_SECRET", "RECENT_SIBLING_DR_MAY_SECRET"} {
+		if strings.Contains(turn.WorkContext, forbidden) || strings.Contains(turn.RecallQuery, forbidden) {
+			t.Fatalf("named collaborator selection leaked %q: work=%q recall=%q", forbidden, turn.WorkContext, turn.RecallQuery)
+		}
+	}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, channel.ID, request); err != nil {
+		t.Fatal(err)
+	}
+	thread, _, err = app.scoutChatThreadByID(user.Email, channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, binding, err := scoutChatSourceWindow(thread, request.ID)
+	if err != nil || !isHexDigest(binding.WindowDigest) {
+		t.Fatalf("named source window failed: binding=%+v err=%v", binding, err)
+	}
+	found := false
+	for _, message := range window {
+		found = found || message.ID == drMay.ID && strings.Contains(message.Text, "NAMED_DR_MAY_SOURCE_SENTINEL")
+	}
+	if !found {
+		t.Fatalf("old named collaborator source missing from bound window: %#v", window)
+	}
+	for _, message := range window {
+		if strings.Contains(message.Text, "UNRELATED_DR_MAY_SENTINEL") || strings.Contains(message.Text, "SIBLING_DR_MAY_SECRET") || strings.Contains(message.Text, "RECENT_SIBLING_DR_MAY_SECRET") {
+			t.Fatalf("bound source window leaked unrelated/sibling named-author content: %+v", message)
+		}
+	}
+	selection, err := app.goalRouteSourceSelection(goalRouteReceipt{Requester: user.Email, OriginID: channel.ID, SourceMessageID: request.ID})
+	if err != nil || !strings.Contains(selection.Context, "NAMED_DR_MAY_SOURCE_SENTINEL") {
+		t.Fatalf("final provider source selection lost the named source: selection=%+v err=%v", selection, err)
+	}
+	for _, forbidden := range []string{"SIBLING_DR_MAY_SECRET", "RECENT_SIBLING_DR_MAY_SECRET"} {
+		if strings.Contains(selection.Context, forbidden) {
+			t.Fatalf("final provider source selection leaked sibling content %q: %s", forbidden, selection.Context)
+		}
+	}
+	originalWindowDigest := binding.WindowDigest
+	edited := thread
+	edited.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
+	edited.Messages[scoutChatMessageIndex(edited, drMay.ID)].Text = "edited after approval"
+	if _, changed, err := scoutChatSourceWindow(edited, request.ID); err == nil && changed.WindowDigest == originalWindowDigest {
+		t.Fatalf("named-source edit did not invalidate the authenticated source window: changed=%+v err=%v", changed, err)
+	}
+	deleted := thread
+	deleted.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
+	deletedIndex := scoutChatMessageIndex(deleted, drMay.ID)
+	deleted.Messages = append(deleted.Messages[:deletedIndex], deleted.Messages[deletedIndex+1:]...)
+	if _, changed, err := scoutChatSourceWindow(deleted, request.ID); err == nil && changed.WindowDigest == originalWindowDigest {
+		t.Fatalf("named-source deletion did not invalidate the authenticated source window: changed=%+v err=%v", changed, err)
+	}
+}
+
+func TestScoutChatNamedCollaboratorAskIsNotLatestChatterAndAmbiguityFailsClosed(t *testing.T) {
+	tylersAsk := replyContextTestMessage("tyler-real-ask", "user", "Tyler", "@Scout can you put Tom's recommendations into a presentation?", nil)
+	tylersAsk.AuthorEmail = "tyler@example.com"
+	laterChatter := replyContextTestMessage("tyler-later-chatter", "user", "Tyler", "I'm doing a deeper dive; hang tight.", nil)
+	laterChatter.AuthorEmail = tylersAsk.AuthorEmail
+	request := replyContextTestMessage("use-tyler-ask", "user", "AJ", "Use Tyler's ask.", nil)
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{tylersAsk, laterChatter}}
+	selected, complete := scoutChatExplicitNamedAuthorSources(thread, request)
+	if !complete || len(selected) != 1 || selected[0].ID != tylersAsk.ID {
+		t.Fatalf("Tyler's ask resolved to latest chatter or failed: complete=%t selected=%+v", complete, selected)
+	}
+	secondAsk := replyContextTestMessage("tyler-second-ask", "user", "Tyler", "@Scout can you prepare another presentation?", nil)
+	secondAsk.AuthorEmail = tylersAsk.AuthorEmail
+	thread.Messages = append(thread.Messages, secondAsk)
+	if selected, complete := scoutChatExplicitNamedAuthorSources(thread, request); complete || len(selected) != 0 {
+		t.Fatalf("two equally plausible Tyler asks did not fail closed: complete=%t selected=%+v", complete, selected)
+	}
+
+	firstDrMay := replyContextTestMessage("duplicate-dr-may-a", "user", "Dr. May", strings.Repeat("Like A Farmer recommendation ", 40), nil)
+	firstDrMay.AuthorEmail = "dr.may.one@example.com"
+	secondDrMay := replyContextTestMessage("duplicate-dr-may-b", "user", "Dr. May", strings.Repeat("Like A Farmer recommendation ", 40), nil)
+	secondDrMay.AuthorEmail = "dr.may.two@example.com"
+	request = replyContextTestMessage("duplicate-dr-may-request", "user", "AJ", "Use Dr. May's full Like A Farmer recommendations.", nil)
+	thread.Messages = []scoutChatMessageRecord{firstDrMay, secondDrMay}
+	if selected, complete := scoutChatExplicitNamedAuthorSources(thread, request); complete || len(selected) != 0 {
+		t.Fatalf("duplicate display identities did not fail closed: complete=%t selected=%+v", complete, selected)
 	}
 }
 
