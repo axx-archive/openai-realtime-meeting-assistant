@@ -12662,9 +12662,9 @@
         background: var(--surface-3);
         color: var(--text-1);
       }
-      /* Dark theme overrides for deck editor - match slide background */
+      /* Slide color is document state, not app-theme chrome. */
       [data-theme="dark"] .deck-editor__canvas {
-        background: #000;
+        background: var(--deck-background, #111);
       }
       /* Tablet responsive deck editor (iPad) */
       @media (max-width: 1024px) {

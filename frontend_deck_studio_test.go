@@ -115,6 +115,9 @@ const server=http.createServer((req,res)=>{
  await page.waitForSelector('#appShell.is-authed');
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
+	await page.evaluate(()=>{document.documentElement.dataset.theme='dark'});
+	const darkThemeSlideBackground=await page.locator('.deck-editor__canvas').evaluate(node=>getComputedStyle(node).backgroundColor);
+	assert.equal(darkThemeSlideBackground,'rgb(16, 20, 28)');
  const geometry=await page.evaluate(()=>{const canvas=document.querySelector('.deck-editor__canvas').getBoundingClientRect();const wrap=document.querySelector('.deck-editor__canvas-wrap').getBoundingClientRect();return {canvas:canvas.toJSON(),wrap:wrap.toJSON(),ratio:canvas.width/canvas.height};});
  assert.ok(geometry.canvas.width>700,JSON.stringify(geometry));
  assert.ok(Math.abs(geometry.ratio-16/9)<0.01,JSON.stringify(geometry));
