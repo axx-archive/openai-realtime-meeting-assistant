@@ -27,6 +27,7 @@ import (
 	"unicode"
 
 	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 const (
@@ -83,6 +84,7 @@ type deckElement struct {
 	Opacity       float64 `json:"opacity"`
 	Rotation      float64 `json:"rotation,omitempty"`
 	Text          string  `json:"text,omitempty"`
+	RichText      string  `json:"richText,omitempty"`
 	FontSize      float64 `json:"fontSize,omitempty"`
 	FontFamily    string  `json:"fontFamily,omitempty"`
 	FontWeight    int     `json:"fontWeight,omitempty"`
@@ -573,7 +575,7 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 			}
 			switch element.Type {
 			case "text":
-				if len([]rune(element.Text)) > deckElementTextMaxRunes || element.FontSize < 8 || element.FontSize > 400 || element.FontWeight < 100 || element.FontWeight > 900 ||
+				if len([]rune(element.Text)) > deckElementTextMaxRunes || len([]rune(element.RichText)) > deckElementTextMaxRunes*4 || (element.RichText != "" && !deckRichTextSafe(element.RichText)) || element.FontSize < 8 || element.FontSize > 400 || element.FontWeight < 100 || element.FontWeight > 900 ||
 					(element.FontFamily != "" && !deckFontPattern.MatchString(element.FontFamily)) || !validDeckColor(firstNonEmptyString(element.Color, "#ffffff")) ||
 					(element.TextAlign != "" && !oneOf(element.TextAlign, "left", "center", "right")) || element.LineHeight < 0 || element.LineHeight > 4 ||
 					(element.LetterSpacing != "" && !deckTrackingPattern.MatchString(element.LetterSpacing)) {
@@ -742,7 +744,11 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 					builder.WriteString(element.LetterSpacing)
 				}
 				builder.WriteString("\">")
-				builder.WriteString(html.EscapeString(element.Text))
+				if element.RichText != "" {
+					builder.WriteString(element.RichText)
+				} else {
+					builder.WriteString(html.EscapeString(element.Text))
+				}
 				builder.WriteString("</div>")
 			case "image":
 				builder.WriteString("<img class=\"el image\" data-element-id=\"")
@@ -895,7 +901,8 @@ func legacyMeaningfulContentCovered(root *xhtml.Node, visualClasses map[string]s
 			if represented {
 				coveredType = strings.ToLower(legacyNodeAttr(node, "data-deck-type"))
 			}
-			if node != root && !represented && legacyNodeHasUnrepresentedVisual(node, coveredType, visualClasses) {
+			inlineTextDecoration := coveredType == "text" && legacyInlineTextDecorationSafe(node)
+			if node != root && !represented && !inlineTextDecoration && legacyNodeHasUnrepresentedVisual(node, coveredType, visualClasses) {
 				complete = false
 				return
 			}
@@ -1265,6 +1272,193 @@ func legacyNodeHasUnrepresentedVisual(node *xhtml.Node, coveredType string, visu
 	return false
 }
 
+// A data-deck text annotation declares one native text box. Generated decks
+// sometimes use harmless inline emphasis inside that box (for example a Clay
+// word or a block kicker). The native editor intentionally treats that as one
+// text element, preserving all copy and the parent box's explicit fallback
+// typography. Layout, imagery, backgrounds, transforms, and arbitrary classes
+// are not accepted through this compatibility seam.
+func legacyInlineTextDecorationSafe(node *xhtml.Node) bool {
+	if node == nil || node.Type != xhtml.ElementNode || !oneOf(strings.ToLower(node.Data), "span", "strong", "b", "em", "i", "small", "sup", "sub", "br") {
+		return false
+	}
+	if legacyNodeAttr(node, "id") != "" {
+		return false
+	}
+	className := strings.TrimSpace(legacyNodeAttr(node, "class"))
+	if className != "" && className != "serif" {
+		return false
+	}
+	for _, attribute := range node.Attr {
+		if strings.EqualFold(attribute.Key, "style") || strings.EqualFold(attribute.Key, "class") {
+			continue
+		}
+		return false
+	}
+	allowed := map[string]struct{}{
+		"color": {}, "font-size": {}, "font-weight": {}, "font-style": {}, "font-family": {},
+		"letter-spacing": {}, "line-height": {}, "text-decoration": {}, "display": {},
+		"margin": {}, "margin-top": {}, "margin-bottom": {},
+	}
+	for property, value := range legacyStyleMap(node) {
+		if _, ok := allowed[property]; !ok || strings.ContainsAny(strings.ToLower(value), "{};") || strings.Contains(strings.ToLower(value), "url(") {
+			return false
+		}
+		if property == "display" && !oneOf(strings.ToLower(strings.TrimSpace(value)), "inline", "inline-block", "block") {
+			return false
+		}
+	}
+	return true
+}
+
+var deckRichTextMarginPattern = regexp.MustCompile(`^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%)?(?:\s+-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%)?){0,3}$`)
+
+func legacyRichTextForNode(node *xhtml.Node, typography legacyTypographyContext) (string, bool) {
+	var builder strings.Builder
+	hasMarkup := false
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if !writeDeckRichTextNode(&builder, child, &typography, &hasMarkup) {
+			return "", false
+		}
+	}
+	if !hasMarkup {
+		return "", true
+	}
+	return builder.String(), true
+}
+
+func deckRichTextSafe(value string) bool {
+	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(value), context)
+	if err != nil {
+		return false
+	}
+	var builder strings.Builder
+	hasMarkup := false
+	for _, node := range nodes {
+		if !writeDeckRichTextNode(&builder, node, nil, &hasMarkup) {
+			return false
+		}
+	}
+	return hasMarkup && builder.String() == value
+}
+
+func writeDeckRichTextNode(builder *strings.Builder, node *xhtml.Node, typography *legacyTypographyContext, hasMarkup *bool) bool {
+	if node == nil {
+		return true
+	}
+	if node.Type == xhtml.TextNode {
+		builder.WriteString(html.EscapeString(node.Data))
+		return true
+	}
+	if node.Type != xhtml.ElementNode || !legacyInlineTextDecorationSafe(node) {
+		return false
+	}
+	tag := strings.ToLower(node.Data)
+	*hasMarkup = true
+	if tag == "br" {
+		builder.WriteString("<br>")
+		return node.FirstChild == nil
+	}
+	styles := legacyStyleMap(node)
+	if typography != nil && legacyNodeAttr(node, "class") != "" {
+		fontFamily, letterSpacing, ok := typography.resolvedForNode(node)
+		if !ok {
+			return false
+		}
+		styles["font-family"] = fontFamily
+		if letterSpacing != "normal" {
+			styles["letter-spacing"] = letterSpacing
+		}
+	}
+	if !deckRichTextStylesSafe(styles) {
+		return false
+	}
+	builder.WriteByte('<')
+	builder.WriteString(tag)
+	if len(styles) > 0 {
+		keys := make([]string, 0, len(styles))
+		for key := range styles {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		builder.WriteString(` style="`)
+		for index, key := range keys {
+			if index > 0 {
+				builder.WriteByte(';')
+			}
+			builder.WriteString(key)
+			builder.WriteByte(':')
+			builder.WriteString(html.EscapeString(strings.TrimSpace(styles[key])))
+		}
+		builder.WriteByte('"')
+	}
+	builder.WriteByte('>')
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if !writeDeckRichTextNode(builder, child, typography, hasMarkup) {
+			return false
+		}
+	}
+	builder.WriteString("</")
+	builder.WriteString(tag)
+	builder.WriteByte('>')
+	return true
+}
+
+func deckRichTextStylesSafe(styles map[string]string) bool {
+	for property, raw := range styles {
+		value := strings.TrimSpace(raw)
+		switch property {
+		case "color":
+			if !validDeckColor(value) {
+				return false
+			}
+		case "font-size":
+			number, ok := legacyDeckNumber(value)
+			if !ok || number < 8 || number > 400 {
+				return false
+			}
+		case "font-weight":
+			weight := legacyFontWeight(value)
+			if weight < 100 || weight > 900 {
+				return false
+			}
+		case "font-family":
+			if !deckFontPattern.MatchString(strings.NewReplacer(`"`, "", `'`, "").Replace(value)) {
+				return false
+			}
+		case "letter-spacing":
+			if !deckTrackingPattern.MatchString(strings.ToLower(value)) {
+				return false
+			}
+		case "line-height":
+			number, ok := legacyDeckNumber(value)
+			if !ok || number <= 0 || number > 4 {
+				return false
+			}
+		case "display":
+			if !oneOf(strings.ToLower(value), "inline", "inline-block", "block") {
+				return false
+			}
+		case "margin", "margin-top", "margin-bottom":
+			if !deckRichTextMarginPattern.MatchString(strings.ToLower(value)) {
+				return false
+			}
+		case "font-style":
+			if !oneOf(strings.ToLower(value), "normal", "italic", "oblique") {
+				return false
+			}
+		case "text-decoration":
+			if !oneOf(strings.ToLower(value), "none", "underline", "line-through") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func legacyNodeTextPreservingWhitespace(node *xhtml.Node) string {
 	var builder strings.Builder
 	var walk func(*xhtml.Node)
@@ -1550,6 +1744,11 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 				return nil, false
 			}
 			element.Text = trimForStorage(strings.TrimSpace(legacyNodeText(node)), deckElementTextMaxRunes)
+			richText, richTextOK := legacyRichTextForNode(node, typography)
+			if !richTextOK || len([]rune(richText)) > deckElementTextMaxRunes*4 {
+				return nil, false
+			}
+			element.RichText = richText
 			element.FontSize, _ = legacyDeckNumber(firstNonEmptyString(styles["font-size"], "32"))
 			element.FontFamily = fontFamily
 			element.FontWeight = legacyFontWeight(firstNonEmptyString(styles["font-weight"], "400"))
@@ -1580,6 +1779,12 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 					ref, name, ok = legacyImageSource(source, allowedRefs)
 				}
 			}
+			if !ok && legacyEmptyImagePlaceholderSafe(node) {
+				element.Type = "shape"
+				element.Shape = "rectangle"
+				element.Fill = "transparent"
+				break
+			}
 			if !ok {
 				return nil, false
 			}
@@ -1591,6 +1796,49 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 		elements = append(elements, element)
 	}
 	return elements, true
+}
+
+// The ship writer emits empty `.ph` figure slots when the source revision has
+// not embedded its separately generated image bytes. Their current visual is
+// genuinely empty, so a transparent native placeholder is lossless and gives
+// Deck Studio a safe full-bleed target for subsequent Scout imagery. Any real
+// image source, unmarked child, or visible placeholder copy remains fail-closed.
+func legacyEmptyImagePlaceholderSafe(node *xhtml.Node) bool {
+	if node == nil || node.Type != xhtml.ElementNode || !strings.EqualFold(node.Data, "figure") || !legacyNodeHasClass(node, "image-plate") || legacyDescendantImageSource(node) != "" {
+		return false
+	}
+	figClass := false
+	for _, className := range strings.Fields(legacyNodeAttr(node, "class")) {
+		if regexp.MustCompile(`^fig-[1-9][0-9]*$`).MatchString(className) {
+			figClass = true
+		}
+	}
+	if !figClass {
+		return false
+	}
+	phCount := 0
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.TextNode {
+			if strings.TrimSpace(child.Data) != "" {
+				return false
+			}
+			continue
+		}
+		if child.Type != xhtml.ElementNode {
+			continue
+		}
+		if legacyNodeHasClass(child, "ph") {
+			if !strings.EqualFold(child.Data, "div") || strings.TrimSpace(legacyNodeTextPreservingWhitespace(child)) != "" || len(child.Attr) != 1 {
+				return false
+			}
+			phCount++
+			continue
+		}
+		if legacyNodeAttr(child, "data-deck-element") == "" {
+			return false
+		}
+	}
+	return phCount == 1
 }
 
 func legacyFigAsset(node *xhtml.Node, assets []artifactAsset) (string, string, bool) {

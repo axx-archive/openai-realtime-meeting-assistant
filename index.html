@@ -44640,6 +44640,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderCanvas()
       }
 
+      function scaleDeckRichText(root, deckHeight) {
+        const height = Math.max(1, Number(deckHeight) || 1080)
+        const scaleLength = value => String(value || '').replace(/(-?(?:\d+(?:\.\d+)?|\.\d+))(px|rem)\b/gi, (_, number, unit) => {
+          const pixels = Number(number) * (String(unit).toLowerCase() === 'rem' ? 16 : 1)
+          return `${pixels / height * 100}cqh`
+        })
+        root.querySelectorAll('span,strong,b,em,i,small,sup,sub').forEach(node => {
+          for (const property of ['fontSize', 'letterSpacing', 'lineHeight', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft']) {
+            const value = node.style[property]
+            if (/px|rem/i.test(value)) node.style[property] = scaleLength(value)
+          }
+        })
+      }
+
       // Structured Deck Studio. The server owns legacy-HTML import and HTML
       // compilation; this surface edits only normalized inert scene data.
       async function openDeckStudio(artifactId, title, options = {}) {
@@ -44789,6 +44803,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           element.strokeWidth = Math.max(0, Number(element.strokeWidth) || 0)
           element.shape = element.shape === 'ellipse' ? 'ellipse' : 'rectangle'
           element.text = String(element.text || '')
+          element.richText = String(element.richText || '')
           element.fontSize = Math.max(8, Number(element.fontSize) || 48)
           element.fontFamily = String(element.fontFamily || 'Arial')
           element.fontWeight = Number(element.fontWeight) || 600
@@ -44854,7 +44869,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (element.type === 'text') {
             const content = document.createElement('div')
             content.className = 'deck-editor__element-content deck-editor__element-content--text'
-            content.textContent = element.text || 'Text'
+            if (element.richText) { content.innerHTML = element.richText; scaleDeckRichText(content, state.deck.height) }
+            else content.textContent = element.text || 'Text'
             content.style.color = element.color
             content.style.fontSize = `${element.fontSize / state.deck.height * 100}cqh`
             content.style.fontFamily = element.fontFamily
@@ -44977,7 +44993,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           input.style.lineHeight = String(element.lineHeight)
           input.style.letterSpacing = element.letterSpacing
           box.appendChild(input)
-          input.addEventListener('input', () => { element.text = input.value })
+          input.addEventListener('input', () => { element.text = input.value; element.richText = '' })
           input.addEventListener('blur', () => renderAll(), { once: true })
           input.focus()
           input.select()
@@ -45321,7 +45337,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (element?.type === 'text') {
             const text = document.createElement('div')
             text.className = 'deck-presenter__text'
-            text.textContent = String(element.text || '')
+            if (element.richText) { text.innerHTML = String(element.richText); scaleDeckRichText(text, documentModel.height) }
+            else text.textContent = String(element.text || '')
             text.style.color = String(element.color || '#fff')
             text.style.fontFamily = String(element.fontFamily || 'Arial, sans-serif')
             text.style.fontSize = `${Number(element.fontSize || 48) / Number(documentModel.height || 1080) * 100}cqh`

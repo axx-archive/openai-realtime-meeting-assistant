@@ -119,6 +119,50 @@ func TestImportLegacyDeckPreservesDataDeckGeometryAndFigAsset(t *testing.T) {
 	}
 }
 
+func TestImportLegacyDeckPreservesSafeRichTextAndEmptyGeneratedImageSlot(t *testing.T) {
+	artifact := meetingMemoryEntry{Metadata: map[string]string{"type": artifactTypeHTMLDeck}, Text: `<!doctype html><html><head><style>:root{--display:Georgia,"Times New Roman",serif}.serif{font-family:var(--display)}</style></head><body><div id="stage"><section class="pg on" data-deck-slide="cover" style="background:#17211C">
+		<figure class="image-plate bleed fig-1" data-deck-element="hero-image" data-deck-type="image" style="position:absolute;left:0;top:0;width:1920px;height:1080px;z-index:1;opacity:1;transform:rotate(0deg);object-fit:cover;margin:0"><div class="ph"></div><figcaption data-deck-element="caption" data-deck-type="text" style="position:absolute;left:96px;top:1010px;width:1200px;height:30px;z-index:5;opacity:1;color:#ffffff;font-size:18px;font-family:Arial;font-weight:600">Rights-safe replacement slot.</figcaption></figure>
+		<div data-deck-element="score" data-deck-type="text" style="position:absolute;left:96px;top:120px;width:700px;height:300px;z-index:4;opacity:1;color:#ffffff;font-size:24px;font-family:Arial;font-weight:700">OBSERVED <span class="serif" style="display:block;color:#C79B4D;font-size:75px;line-height:.92;margin:9px 0">6.1M</span><span style="color:#B84F32">YouTube</span></div>
+	</section></div></body></html>`}
+
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil {
+		t.Fatalf("loadDeckDocument: %v", err)
+	}
+	if !imported || quality != "faithful" || len(deck.Slides) != 1 || len(deck.Slides[0].Elements) != 3 {
+		t.Fatalf("imported=%v quality=%q deck=%+v, want faithful three-element scene", imported, quality, deck)
+	}
+	var placeholder, score deckElement
+	for _, element := range deck.Slides[0].Elements {
+		switch element.ID {
+		case "hero-image":
+			placeholder = element
+		case "score":
+			score = element
+		}
+	}
+	if placeholder.Type != "shape" || placeholder.Fill != "transparent" || placeholder.Width != 1920 || placeholder.Height != 1080 {
+		t.Fatalf("placeholder=%+v, want lossless transparent full-bleed slot", placeholder)
+	}
+	for _, want := range []string{"<span", "font-family:Georgia,Times New Roman,serif", "font-size:75px", "margin:9px 0", "6.1M", "YouTube"} {
+		if !strings.Contains(score.RichText, want) {
+			t.Fatalf("richText=%q missing %q", score.RichText, want)
+		}
+	}
+	if err := validateDeckDocument(deck, nil); err != nil {
+		t.Fatalf("validate imported rich scene: %v", err)
+	}
+	compiled := compileDeckDocumentHTML(deck, "Working Fieldbook")
+	if !strings.Contains(compiled, score.RichText) || strings.Contains(compiled, `class="serif"`) {
+		t.Fatalf("compiled rich text did not remain explicit and self-contained: %s", compiled)
+	}
+
+	deck.Slides[0].Elements[2].RichText = `<span style="position:absolute">unsafe</span>`
+	if err := validateDeckDocument(deck, nil); err == nil || !strings.Contains(err.Error(), "text element styling") {
+		t.Fatalf("unsafe rich text validation error=%v, want fail closed", err)
+	}
+}
+
 func TestImportLegacyDeckPreservesInheritedTypographyAndTracking(t *testing.T) {
 	source := `<!doctype html><html><head><style>
 	:root{--display:Georgia,"Times New Roman",serif;--body:"Arial Narrow","Aptos Narrow","Helvetica Neue",Arial,sans-serif}

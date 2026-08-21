@@ -86,7 +86,7 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
 let version=4;let canWrite=true;
-let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'}]}]};
+let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'},{id:'rich-proof',type:'text',x:150,y:360,width:900,height:260,z:4,opacity:1,rotation:0,text:'OBSERVED 6.1M',richText:'OBSERVED <span style="display:block;font-family:Georgia;font-size:75px;letter-spacing:.13em;margin:9px 0">6.1M</span>',fontSize:24,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
 let patches=[];let imageRequests=[];let uploadRequests=[];
 const artifact=()=>({id:artifactId,title:'Studio proof',version,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version)}});
 const server=http.createServer((req,res)=>{
@@ -120,6 +120,21 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs(geometry.ratio-16/9)<0.01,JSON.stringify(geometry));
  assert.ok(geometry.canvas.left>=geometry.wrap.left&&geometry.canvas.right<=geometry.wrap.right,JSON.stringify(geometry));
  assert.ok(geometry.canvas.top>=geometry.wrap.top&&geometry.canvas.bottom<=geometry.wrap.bottom,JSON.stringify(geometry));
+
+ const richMetrics=async()=>page.evaluate(()=>{const canvas=document.querySelector('.deck-editor__canvas').getBoundingClientRect();const span=document.querySelector('[data-scene] [data-element-id="rich-proof"] span');const style=getComputedStyle(span);return {canvasHeight:canvas.height,fontSize:parseFloat(style.fontSize),marginTop:parseFloat(style.marginTop)};});
+ const richLarge=await richMetrics();
+ assert.ok(Math.abs(richLarge.fontSize/richLarge.canvasHeight-75/1080)<0.002,JSON.stringify(richLarge));
+ assert.ok(Math.abs(richLarge.marginTop/richLarge.canvasHeight-9/1080)<0.002,JSON.stringify(richLarge));
+ await page.setViewportSize({width:1100,height:700});await page.waitForTimeout(80);
+ const richSmall=await richMetrics();
+ assert.ok(richSmall.canvasHeight<richLarge.canvasHeight,JSON.stringify({richLarge,richSmall}));
+ assert.ok(Math.abs(richSmall.fontSize/richSmall.canvasHeight-75/1080)<0.002,JSON.stringify(richSmall));
+ assert.ok(Math.abs(richSmall.marginTop/richSmall.canvasHeight-9/1080)<0.002,JSON.stringify(richSmall));
+ await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
+
+ await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
+ await page.locator('.deck-editor__text-input').waitFor({state:'visible'});
+ await page.getByRole('button',{name:'Rectangle'}).focus();
 
  await page.locator('[data-scene] [data-element-id="headline"]').click();
  await page.locator('[data-prop="fontFamily"]').fill('Georgia, Times New Roman, serif');
@@ -155,11 +170,27 @@ const server=http.createServer((req,res)=>{
  assert.ok(savedShape.x>240&&savedShape.y>240,JSON.stringify(savedShape));
  assert.ok(savedShape.width>520&&savedShape.height>360,JSON.stringify(savedShape));
  const savedHeadline=patches[0].deck.slides[0].elements.find(element=>element.id==='headline');
+ const savedRich=patches[0].deck.slides[0].elements.find(element=>element.id==='rich-proof');
+ assert.match(savedRich.richText,/font-size:75px/);
  assert.equal(savedHeadline.fontFamily,'Georgia, Times New Roman, serif');
  assert.equal(savedHeadline.textAlign,'center');
  assert.equal(savedHeadline.lineHeight,1.2);
  assert.equal(savedHeadline.letterSpacing,'.04em');
  assert.equal(patches[0].deck.slides[0].notes,'Revised opening note [BEAT]');
+
+ await page.evaluate(async id=>{await openDeckPresentation(id,'Studio proof')},artifactId);
+ await page.waitForSelector('.deck-presenter');
+ const presenterRichMetrics=async()=>page.evaluate(()=>{const stage=document.querySelector('[data-present-stage]').getBoundingClientRect();const span=document.querySelector('[data-present-element-id="rich-proof"] span');const style=getComputedStyle(span);return {stageHeight:stage.height,fontSize:parseFloat(style.fontSize),marginTop:parseFloat(style.marginTop)};});
+ const presenterRichLarge=await presenterRichMetrics();
+ assert.ok(Math.abs(presenterRichLarge.fontSize/presenterRichLarge.stageHeight-75/1080)<0.002,JSON.stringify(presenterRichLarge));
+ assert.ok(Math.abs(presenterRichLarge.marginTop/presenterRichLarge.stageHeight-9/1080)<0.002,JSON.stringify(presenterRichLarge));
+ await page.setViewportSize({width:1100,height:700});await page.waitForTimeout(80);
+ const presenterRichSmall=await presenterRichMetrics();
+ assert.ok(presenterRichSmall.stageHeight<presenterRichLarge.stageHeight,JSON.stringify({presenterRichLarge,presenterRichSmall}));
+ assert.ok(Math.abs(presenterRichSmall.fontSize/presenterRichSmall.stageHeight-75/1080)<0.002,JSON.stringify(presenterRichSmall));
+ assert.ok(Math.abs(presenterRichSmall.marginTop/presenterRichSmall.stageHeight-9/1080)<0.002,JSON.stringify(presenterRichSmall));
+ await page.getByRole('button',{name:'Close'}).click();
+ await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
 
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
@@ -182,7 +213,15 @@ const server=http.createServer((req,res)=>{
  assert.ok(uploadRequests[0].bytes>8);
  assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1);
 
- await page.getByRole('button',{name:'Close editor'}).click();
+ await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
+ await page.locator('.deck-editor__text-input').fill('Edited plain text');
+ await page.getByRole('button',{name:'Save',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
+ assert.equal(patches.length,2);
+ const flattenedRich=patches[1].deck.slides[0].elements.find(element=>element.id==='rich-proof');
+ assert.equal(flattenedRich.text,'Edited plain text');
+ assert.equal(flattenedRich.richText,'');
+
  canWrite=false;
  deck.slides.push({id:'slide-two',background:'#f2eee5',elements:[{id:'second-title',type:'text',x:180,y:160,width:1300,height:180,z:1,opacity:1,text:'The second slide',fontSize:72,fontWeight:700,color:'#151515'}]});
  await page.evaluate(id=>openDeckStudio(id,'Read-only proof',{}),artifactId);
