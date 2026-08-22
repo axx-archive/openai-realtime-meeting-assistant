@@ -14,10 +14,26 @@ const minimumResearchArtifactWords = 1000
 
 var (
 	researchHeadingPattern = regexp.MustCompile(`(?m)^#{1,6}\s+(.+?)\s*$`)
-	researchURLPattern     = regexp.MustCompile(`https://[^\s<>()\[\]"']+`)
+	researchURLPattern     = regexp.MustCompile(`https://[^\s<>\[\]"']+`)
 	researchTablePattern   = regexp.MustCompile(`(?m)^\s*\|[^\n]+\|\s*\n\s*\|(?:\s*:?-{3,}:?\s*\|){2,}`)
 	researchReceiptPattern = regexp.MustCompile(`(?m)<!--\s*stride-web-citation-receipt:v1 count=([0-9]+) domains=([0-9]+) searches=([0-9]+) response=([a-f0-9]{64}) digest=([a-f0-9]{64})\s*-->`)
 )
+
+// parseBareHTTPSURL is the single literal-URL contract shared by the provider
+// receipt writer and every evidence gate. It deliberately does not trim
+// punctuation or normalize the string: the digest and the deck row must bind
+// the exact same provider-owned URL, including legal path characters such as
+// parentheses or a terminal period.
+func parseBareHTTPSURL(raw string) (*url.URL, bool) {
+	if raw == "" || raw != strings.TrimSpace(raw) || strings.ContainsAny(raw, " \t\r\n") {
+		return nil, false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Opaque != "" || !strings.EqualFold(parsed.Scheme, "https") || strings.TrimSpace(parsed.Hostname()) == "" || parsed.User != nil {
+		return nil, false
+	}
+	return parsed, true
+}
 
 var requiredResearchHeadings = []string{
 	"executive summary",
@@ -289,17 +305,12 @@ func validateExternalEvidenceArtifact(body string) error {
 		if confidence != "high" && confidence != "medium" && confidence != "low" {
 			evidenceFailures = append(evidenceFailures, fmt.Sprintf("evidence row %d confidence must be High, Medium, or Low", rowNumber))
 		}
-		matches := researchURLPattern.FindAllString(strings.TrimSpace(row[3]), -1)
-		if len(matches) != 1 || strings.TrimSpace(row[3]) != matches[0] {
+		rawURL := strings.TrimSpace(row[3])
+		if _, ok := parseBareHTTPSURL(rawURL); !ok {
 			evidenceFailures = append(evidenceFailures, fmt.Sprintf("evidence row %d must contain one bare HTTPS URL", rowNumber))
 			continue
 		}
-		parsed, err := url.Parse(matches[0])
-		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || strings.TrimSpace(parsed.Hostname()) == "" {
-			evidenceFailures = append(evidenceFailures, fmt.Sprintf("evidence row %d URL is invalid", rowNumber))
-			continue
-		}
-		if receiptErr == nil && !receipt.CitationURLs[matches[0]] {
+		if receiptErr == nil && !receipt.CitationURLs[rawURL] {
 			evidenceFailures = append(evidenceFailures, fmt.Sprintf("evidence row %d URL is absent from the provider citation receipt", rowNumber))
 		}
 	}
@@ -381,10 +392,8 @@ func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt
 		if confidence != "high" && confidence != "medium" && confidence != "low" {
 			failures = append(failures, fmt.Sprintf("evidence row %d confidence must be High, Medium, or Low", rowNumber))
 		}
-		rawURL := strings.TrimSpace(row.URL)
-		matches := researchURLPattern.FindAllString(rawURL, -1)
-		parsed, parseErr := url.Parse(rawURL)
-		if len(matches) != 1 || matches[0] != rawURL || parseErr != nil || !strings.EqualFold(parsed.Scheme, "https") || strings.TrimSpace(parsed.Hostname()) == "" {
+		rawURL := row.URL
+		if _, ok := parseBareHTTPSURL(rawURL); !ok {
 			failures = append(failures, fmt.Sprintf("evidence row %d must contain one valid bare HTTPS URL", rowNumber))
 		} else if !receipt.CitationURLs[rawURL] {
 			failures = append(failures, fmt.Sprintf("evidence row %d URL is absent from the provider citation receipt", rowNumber))
@@ -587,16 +596,34 @@ func verifiedResearchCitationReceipt(body string) (researchCitationReceipt, erro
 	if heading < 0 {
 		return researchCitationReceipt{}, fmt.Errorf("missing exact provider web-search citation receipt")
 	}
-	section := body[heading:strings.Index(body, match[0])]
+	markerStart := strings.Index(body, match[0])
+	section := strings.TrimSpace(body[heading+len("## Scout source receipt") : markerStart])
 	urls := make([]string, 0)
 	domains := map[string]bool{}
-	for _, raw := range researchURLPattern.FindAllString(section, -1) {
-		raw = strings.TrimRight(raw, ".,;:!?")
-		parsed, err := url.Parse(raw)
-		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || strings.TrimSpace(parsed.Hostname()) == "" {
+	for _, line := range strings.Split(section, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		urls = append(urls, raw)
+		if !strings.HasPrefix(line, "- ") {
+			return researchCitationReceipt{}, fmt.Errorf("provider web-search citation receipt is invalid")
+		}
+		source := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		rawURL := source
+		parsed, ok := parseBareHTTPSURL(rawURL)
+		if !ok {
+			// Titled rows are serialized as "title — URL". Split on the
+			// final separator and validate the exact suffix so legal URL path
+			// punctuation is never trimmed or guessed by a regex.
+			if delimiter := strings.LastIndex(source, " — "); delimiter >= 0 {
+				rawURL = source[delimiter+len(" — "):]
+				parsed, ok = parseBareHTTPSURL(rawURL)
+			}
+		}
+		if !ok {
+			return researchCitationReceipt{}, fmt.Errorf("provider web-search citation receipt is invalid")
+		}
+		urls = append(urls, rawURL)
 		domains[strings.ToLower(parsed.Hostname())] = true
 	}
 	count, countErr := strconv.Atoi(match[1])

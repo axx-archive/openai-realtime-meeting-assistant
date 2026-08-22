@@ -3944,13 +3944,22 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	if _, ok := engine.resolvedProcess(&plan); ok {
 		assignGoalRunners(&plan)
 	}
+	priorBlocker := strings.TrimSpace(plan.Blocker)
 	reset := 0
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
 		if st.Status == subtaskBlocked || st.Status == subtaskFailed {
 			st.Status = subtaskReady
 			st.Revisions = 0
-			st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "resumed by " + firstNonEmptyString(strings.TrimSpace(resumedBy), "admin") + " after the block", By: "resume_blocked"}
+			reason := "resumed by " + firstNonEmptyString(strings.TrimSpace(resumedBy), "admin") + " after the block"
+			if priorBlocker != "" {
+				// The blocker is no longer active once the retry is accepted, but it
+				// remains useful evidence for the exact stage being re-run. Keep it
+				// on the stage review instead of continuing to project it as the
+				// root goal's current state.
+				reason += "; prior blocker: " + compactAssistantLine(priorBlocker)
+			}
+			st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reason, By: "resume_blocked"}
 			reset++
 		}
 	}
@@ -3959,7 +3968,12 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	}
 	engine.applyProcessBudgets(&plan)
 	plan.State = goalStateExecute
-	engine.persist(&plan, parentID, "")
+	plan.Blocker = ""
+	// A terminal goal body says "needs attention" and carries an active
+	// Blocker section. Reusing that text while only changing metadata makes
+	// Inspect work contradict the authoritative running plan until the next
+	// terminal compose. Project the accepted retry atomically as a running body.
+	engine.persist(&plan, parentID, composeGoalArtifact(&plan))
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
 	engine.drive(ctx, &plan, parentID)
@@ -4110,13 +4124,18 @@ func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorizedOperation(parentSnaps
 		// The blocked recovery door with the note attached: every blocked
 		// subtask resets with the feedback as its revision reasons (and its
 		// do_not_touch lines protected), mirroring resumeBlockedGoal.
+		priorBlocker := strings.TrimSpace(plan.Blocker)
 		reset := 0
 		for index := range plan.Subtasks {
 			st := &plan.Subtasks[index]
 			if st.Status == subtaskBlocked || st.Status == subtaskFailed {
 				st.Status = subtaskReady
 				st.Revisions = 0
-				st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "resumed by " + resumedByName + " with feedback: " + note, By: "feedback_resume"}
+				reason := "resumed by " + resumedByName + " with feedback: " + note
+				if priorBlocker != "" {
+					reason += "; prior blocker: " + compactAssistantLine(priorBlocker)
+				}
+				st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reason, By: "feedback_resume"}
 				st.Protect = mergeGoalProtectList(st.Protect, checkpointProtectLines(note))
 				reset++
 			}
@@ -4125,7 +4144,8 @@ func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorizedOperation(parentSnaps
 			return scoutAgentThread{}, fmt.Errorf("no blocked subtask to resume")
 		}
 		plan.State = goalStateExecute
-		engine.persist(&plan, parentID, "")
+		plan.Blocker = ""
+		engine.persist(&plan, parentID, composeGoalArtifact(&plan))
 	case goalStateVerified:
 		if err := engine.reopenGoalForFeedback(&plan, parentID, resumedByName, note, deliverableArtifactID); err != nil {
 			return scoutAgentThread{}, err
@@ -5162,9 +5182,10 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 			metadata["savedLessons"] = string(raw)
 		}
 	}
-	if strings.TrimSpace(plan.Blocker) != "" {
-		metadata["goalBlocker"] = plan.Blocker
-	}
+	// This is a derived projection, so write the empty value too. Metadata
+	// updates merge with the existing record; omitting the key on resume would
+	// leave the terminal blocker attached to an otherwise-running goal.
+	metadata["goalBlocker"] = strings.TrimSpace(plan.Blocker)
 	// The human_checkpoint record rides the artifact as metadata["checkpoint"]
 	// ({stageId, question, options}, plus the choice once resolved) so the
 	// approval card can render the question and its options without decoding

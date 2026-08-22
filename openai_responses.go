@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -106,6 +105,8 @@ type openAIResponsesPayload struct {
 	Store           *bool                 `json:"store,omitempty"`
 	ServiceTier     string                `json:"service_tier,omitempty"`
 	Tools           []openAIResponsesTool `json:"tools,omitempty"`
+	ToolChoice      string                `json:"tool_choice,omitempty"`
+	Include         []string              `json:"include,omitempty"`
 }
 
 type openAIResponsesTool struct {
@@ -121,7 +122,14 @@ type openAIResponsesBody struct {
 		Reason string `json:"reason,omitempty"`
 	} `json:"incomplete_details,omitempty"`
 	Output []struct {
-		Type    string `json:"type,omitempty"`
+		Type   string `json:"type,omitempty"`
+		Action *struct {
+			Sources []struct {
+				Type  string `json:"type,omitempty"`
+				Title string `json:"title,omitempty"`
+				URL   string `json:"url,omitempty"`
+			} `json:"sources,omitempty"`
+		} `json:"action,omitempty"`
 		Content []struct {
 			Type        string                     `json:"type,omitempty"`
 			Text        string                     `json:"text,omitempty"`
@@ -351,6 +359,14 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 	if request.EnableWebSearch {
 		payload.Tools = []openAIResponsesTool{{Type: "web_search"}}
+		// A research request that may silently skip its only evidence tool cannot
+		// satisfy the product's source-bound contract. Responses owns hosted-tool
+		// execution, so requiring one call still produces one final model answer.
+		payload.ToolChoice = "required"
+		// Structured JSON does not reliably carry URL annotations on its literal
+		// URL fields. Ask Responses for the provider-owned search source list and
+		// bind those URLs server-side instead of trusting model-authored receipts.
+		payload.Include = []string{"web_search_call.action.sources"}
 	}
 
 	rawPayload, err := json.Marshal(payload)
@@ -576,8 +592,26 @@ type openAIResponseWebEvidence struct {
 func extractOpenAIResponseWebEvidence(body openAIResponsesBody) openAIResponseWebEvidence {
 	seen := map[string]bool{}
 	citations := make([]openAIResponseWebCitation, 0)
+	appendCitation := func(rawURL, rawTitle string) {
+		if _, ok := parseBareHTTPSURL(rawURL); !ok || seen[rawURL] {
+			return
+		}
+		seen[rawURL] = true
+		title := strings.Join(strings.Fields(rawTitle), " ")
+		if len(title) > 180 {
+			title = title[:180]
+		}
+		citations = append(citations, openAIResponseWebCitation{Title: title, URL: rawURL})
+	}
+	searchCalls := 0
 	for _, output := range body.Output {
 		if output.Type == "web_search_call" {
+			searchCalls++
+			if output.Action != nil {
+				for _, source := range output.Action.Sources {
+					appendCitation(source.URL, source.Title)
+				}
+			}
 			continue
 		}
 		if output.Type != "" && output.Type != "message" {
@@ -588,24 +622,8 @@ func extractOpenAIResponseWebEvidence(body openAIResponsesBody) openAIResponseWe
 				if annotation.Type != "" && annotation.Type != "url_citation" {
 					continue
 				}
-				rawURL := strings.TrimSpace(annotation.URL)
-				parsed, err := url.Parse(rawURL)
-				if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || seen[rawURL] {
-					continue
-				}
-				seen[rawURL] = true
-				title := strings.Join(strings.Fields(annotation.Title), " ")
-				if len(title) > 180 {
-					title = title[:180]
-				}
-				citations = append(citations, openAIResponseWebCitation{Title: title, URL: rawURL})
+				appendCitation(annotation.URL, annotation.Title)
 			}
-		}
-	}
-	searchCalls := 0
-	for _, output := range body.Output {
-		if output.Type == "web_search_call" {
-			searchCalls++
 		}
 	}
 	return openAIResponseWebEvidence{ResponseID: strings.TrimSpace(body.ID), SearchCalls: searchCalls, Citations: citations}
@@ -615,23 +633,31 @@ func extractOpenAIResponseWebEvidence(body openAIResponsesBody) openAIResponseWe
 // durable in the saved artifact even when the model rendered citation markers
 // rather than literal URLs in its prose. The model cannot self-mint this
 // receipt: any claimed block is stripped and the server rebuilds it only from
-// the provider response ID, hosted-search calls, and URL annotations.
+// the provider response ID, hosted-search calls, and provider-owned source
+// records/URL annotations.
 func appendOpenAIResponseWebSources(text string, evidence openAIResponseWebEvidence) string {
 	text = stripOpenAIWebCitationReceipt(text)
 	lines := make([]string, 0, len(evidence.Citations))
 	urls := make([]string, 0, len(evidence.Citations))
 	domains := map[string]bool{}
+	seen := map[string]bool{}
 	for _, citation := range evidence.Citations {
-		parsed, err := url.Parse(citation.URL)
-		if err != nil || parsed.Hostname() == "" {
+		rawURL := citation.URL
+		parsed, ok := parseBareHTTPSURL(rawURL)
+		if !ok || seen[rawURL] {
 			continue
 		}
-		line := "- " + citation.URL
-		if citation.Title != "" {
-			line = "- " + citation.Title + " — " + citation.URL
+		seen[rawURL] = true
+		title := strings.Join(strings.Fields(citation.Title), " ")
+		if len(title) > 180 {
+			title = title[:180]
+		}
+		line := "- " + rawURL
+		if title != "" {
+			line = "- " + title + " — " + rawURL
 		}
 		lines = append(lines, line)
-		urls = append(urls, citation.URL)
+		urls = append(urls, rawURL)
 		domains[strings.ToLower(parsed.Hostname())] = true
 	}
 	if len(lines) == 0 || evidence.SearchCalls < 1 || evidence.ResponseID == "" {

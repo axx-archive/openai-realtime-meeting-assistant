@@ -1,7 +1,7 @@
 # Scout Studio And Continuity Release - Execution Ledger
 
 Goal and source pointers: active Codex goal for Scout reply-context, durable public work, Deck Studio, production Like A Farmer workshop, mobile TestFlight, and repository synchronization.
-Current phase: production generation 164 serves exact release `434974a941c7aedb5fd140b8ccc5b33928c03549` as `verified-local-unsigned`; generation 163 `5fbf8ba2693164ab7ac72d013bd59c7121cd9ce9` is the retained rollback. Build 71 from that same exact SHA was built, inspected, and uploaded. A private eight-slide production canary truthfully stopped at external research, exposing the strict-evidence and progress-presentation defects fixed in the generation-165 candidate. Final local review, exact release, retry of that same private goal, the private engagement-army report journey, and exact Build 72 remain active.
+Current phase: production generation 165 serves exact release `138edd2c22211900ad0235150b9da9e3e45d51e6` as `verified-local-unsigned`; generation 164 is retained for rollback. Exact Build 72 from that same SHA was built, inspected, and uploaded to Apple. The same private eight-slide production run then exposed one request-contract defect: hosted search was available but not required, so a strict evidence response could omit provider-owned sources and correctly fail closed. The generation-166 required-search/exact-receipt hotfix is locally qualified; exact release, same-goal retry, private engagement-army report journey, and production editor/export acceptance remain active.
 
 ## Invariants
 
@@ -30,13 +30,13 @@ Current phase: production generation 164 serves exact release `434974a941c7aedb5
 | W10 | Native Document Studio and first-class supporting files | W9 channel ownership contract and existing Files CAS patterns | Markdown round-trip, version conflict, Save/copy/Files, rendered desktop/mobile/PiP QA | Complete in production generation 163 |
 | W11 | Brain-grounded deck intelligence v2 | W9 progress visibility and W10 internal-document boundary | Source snapshot, research/evidence decision, copy lock, native composition, pre-delivery jury, privacy/adversarial corpus | Complete in production generation 163 and the delivered source-bound deck |
 | W12 | Proportionate Scout execution harness | Existing router, durable work, Packaging Studio v2 | Immediate answers stay conversational; artifact requests become durable; specialist loops are internal policy, not prompt theater | Live launch accepted; corrected production retry pending |
-| W13 | Private research-heavy deck audit and pipeline simplification | W12 observable route contract | Research/story/evidence/design trace plus one finished native deck; unnecessary stages removed or internalized | Live canary exposed evidence failure; v2 fix local PASS; retry pending |
+| W13 | Private research-heavy deck audit and pipeline simplification | W12 observable route contract | Research/story/evidence/design trace plus one finished native deck; unnecessary stages removed or internalized | Generation-165 retry exposed skipped hosted search; required-search/source-list fix local PASS; live retry pending |
 | W14 | First-class deck export and inspector polish | W13 native deck contract | Explicit PDF and editable PowerPoint downloads; right rail, selection, keyboard, responsive, accessibility rendered gates | Integrated local candidate PASS; live export pending |
 | W15 | First-class Document Studio and report | W12 artifact route plus existing document CAS | Generate, edit, save/copy, export, reopen the engagement-army report; desktop/mobile/PiP/conflict gates | Integrated local candidate PASS; production report journey pending |
 | W16 | Independent product-quality gate | W13-W15 | Critic sees rendered outputs, interaction evidence, source/evidence trace, and impacted regression tests | PASS; integrated rendered, export, revision, responsive, mobile, and race gates green |
-| W17 | Authorized release and repeated private-production acceptance | W16 local PASS and existing shipping authority | Exact commit/release receipt, rollback retained, final private deck/report journeys | Authorized; generation-165 candidate pending |
+| W17 | Authorized release and repeated private-production acceptance | W16 local PASS and existing shipping authority | Exact commit/release receipt, rollback retained, final private deck/report journeys | Generation 165 live/verified; generation-166 research hotfix pending |
 | W18 | Production runtime headroom for authored work | W12 private launch path plus generation-163 media fix | No per-request fsync storm, bounded shadow receipts, disk headroom, healthy readiness, and a private Scout run that actually advances | Generation 164 observation healthy; final authored soak pending |
-| W19 | Exact Mobile Build 72 and TestFlight | W16 local PASS plus final release commit | Node 20 preflight, exact EAS build ID/fingerprint/commit, exact-ID submission, authenticated Apple readback when available | Build 71 uploaded; final mobile changes require exact Build 72 |
+| W19 | Exact Mobile Build 72 and TestFlight | W16 local PASS plus final release commit | Node 20 preflight, exact EAS build ID/fingerprint/commit, exact-ID submission, authenticated Apple readback when available | Build 72 exact build/upload PASS; Apple processing/group readback external |
 
 ## Current Wave
 
@@ -234,13 +234,22 @@ Current phase: production generation 164 serves exact release `434974a941c7aedb5
 - Candidate gates: rendered Deck/Document/Activity journeys; strict evidence and progress contracts; PDF/PPTX revision binding and openability; private/public ACLs; report routing; focused race; `go build ./...`; `go vet ./...`; all 592 mobile tests; TypeScript; Expo Doctor 21/21; and `git diff --check` pass. The known broad root-package 600-second qualification timeout is not represented as green.
 - Build 71 (`10732a05-7145-4f12-b2bf-f30bc93de8e3`, fingerprint `1615d0ec1eeb56d8c34d4552484aaaea0e845525`, IPA SHA-256 `216bbd9af77c7a8826cc50f93bcafeb40feafb48c3073ee7cd1304455f43857f`) was inspected and uploaded through exact submission `1b6aa964-adcb-424e-8047-a73cebef2a02`. Because the final native phase/editor projection follows that SHA, source is now reserved as Build 72; it must be built and submitted from the final reviewed generation-165 commit.
 
+## Generation 165 Live And Generation 166 Research Hotfix
+
+- Generation 165 serves exact `138edd2c22211900ad0235150b9da9e3e45d51e6` as `verified-local-unsigned`, bundle `149404c0ad3bae3c227ba7f7e990aab63d5a8cf510fb3ae31009ec82f36cef7d`, app image `sha256:2798e7bd7470e038272e491a8ea1bbe1fbe8fef678e6c5c10cef9f5053279339`, and render image `sha256:0a9ba2e33faacc89a68221f666b29b4545e34363b8fd4e05fe671bd54d6620bd`; generation 164 remains the exact rollback.
+- The same private eight-slide run was resumed. The channel correctly stayed on one five-phase progress surface without a fake human question, but the evidence child stopped before story/design because the provider response carried no hosted-search receipt. The exact product defect was request-level: `web_search` was available but optional, so a strict JSON response could skip the only evidence tool and then fail the server's correct provenance gate.
+- The hotfix follows the official Responses contract: every explicitly web-search-enabled request sets `tool_choice: required`, requests `web_search_call.action.sources`, and derives the durable citation receipt from provider-owned action sources plus URL annotations. Only exact bare HTTPS sources are admitted; writer and verifier share one structural URL contract, preserve legal path punctuation without guessing, deduplicate provider rows, and require every JSON ledger URL to match the exact provider source list.
+- Resume also atomically rewrites the root goal body to running, clears the active blocker projection, and preserves the old blocker only as retried-stage diagnostic evidence. `Inspect work` no longer contradicts the authoritative running metadata with a stale needs-attention body.
+- Local hotfix evidence: hosted-search/source-receipt tests pass five times, including exact parentheses/terminal-period URLs plus duplicate, HTTP, JavaScript, and digest-tamper fixtures; focused evidence tests pass; focused OpenAI/evidence race gate passes three times; stale-body regression passes five times normally and three times under race; related resume tests pass; `go build ./...`, `go vet ./...`, and `git diff --check` pass.
+- Exact Build 72 is EAS build `cfad21b0-5e01-4bfa-9aa6-c259664c26b5`, version `1.0.0 (72)`, source commit `138edd2c22211900ad0235150b9da9e3e45d51e6`, fingerprint `0397f06cd2c9145c697480ba01ace826047304ca`, and IPA SHA-256 `eabb45ff10b319858d7e5211614046774de4bb4bccf8bb6830586fefc3430b37`. The app and ReplayKit extension passed identity, arm64, strict signing, App Store profile, production push, shared-app-group, associated-domain, and phone/iPad inspection. Exact-ID submission `d87d6656-74bc-465f-aca2-29975834c3af` finished and Apple accepted the binary for processing. Processing and tester-group visibility remain an authenticated external readback; no group or store-metadata mutation was made.
+
 ## Operations And Authority Queue
 
-- Authorized: commit/push the reviewed generation-165 follow-up to `axx/main`; deploy the exact release; resume the existing private deck; generate/edit/export the private engagement-army report; build and submit exact Build 72; verify TestFlight when authenticated readback is available.
-- Executed: generation 164 exact release, private canary through the truthful research failure, Build 71 exact build/upload, local candidate integration, and backend independent re-gate.
-- Remaining: final integrated critic; generation-165 commit/push/release; same-goal retry; deck quality/edit/PDF/PPTX acceptance; private report generation/edit/PDF acceptance; Build 72 exact build/upload; final repository parity.
+- Authorized: commit/push the reviewed generation-166 follow-up to `axx/main`; deploy the exact release; resume the existing private deck; generate/edit/export the private engagement-army report; verify the already-uploaded Build 72 in TestFlight when authenticated readback is available.
+- Executed: generation 165 exact release, private canary through the truthful required-search failure, Build 72 exact build/upload, local hotfix qualification, and the prior integrated independent product gate.
+- Remaining: generation-166 commit/push/release; same-goal retry; deck quality/edit/PDF/PPTX acceptance; private report generation/edit/PDF acceptance; Build 72 Apple upload readback; final repository parity.
 - External readback remaining: Apple processing/tester groups and physical phone/iPad acceptance. Signed archive and simulator/rendered evidence do not substitute for those gates.
-- Rollback: retain generation 164 and generation 163 receipts/images through the generation-165 live deck/report/export acceptance.
+- Rollback: retain generation 165 and generation 164 receipts/images through the generation-166 live deck/report/export acceptance.
 
 ## Risks And Decisions
 
@@ -251,9 +260,9 @@ Current phase: production generation 164 serves exact release `434974a941c7aedb5
 
 ## Resume Here
 
-1. Finish the integrated independent critic; commit and push one clean reviewed generation-165 SHA; prepare/build/activate/verify it only through the retained generation-164 exact-release tool.
+1. Commit and push the clean generation-166 required-search/stale-retry hotfix; prepare/build/activate/verify it only through the retained generation-165 exact-release tool.
 2. In private thread `scout-home-52ac5280c49ac0035f294234`, use Retry from here on root artifact `os-artifact-workflow-1787348649582934084`; inspect all eight rendered slides, evidence/story/copy/design, edit/reopen/present, and download/open PDF plus editable PowerPoint.
 3. In a separate private AJ thread, request the opt-in western-culture engagement-army Insights & Opportunities report; inspect source/counterevidence, edit nested lists/image/text, Save, Save a copy, reopen, and export PDF.
 4. Observe readiness, CPU, receipt-file growth, and release identity during both authored runs. Keep 4 vCPU unless a sustained corrected-build soak disproves current headroom.
-5. Build and submit exact Build 72 from the same final reviewed SHA; complete Apple processing/group readback and physical phone/iPad acceptance when authenticated access is available.
+5. Verify Apple processing, intended tester groups, and physical phone/iPad acceptance for the already-uploaded exact Build 72 when authenticated access is available. Generation 166 is a backend-only hotfix and does not require rebuilding the accepted Build 72 binary or consuming Build 73.
 6. Fast-forward local `main` only without overwriting user work; verify `main` and `axx/main` parity; remove only clean temporary worktrees after all live evidence is filed.

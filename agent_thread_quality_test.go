@@ -108,6 +108,39 @@ func TestExternalEvidenceContractRejectsUnreceiptedOrUnboundSources(t *testing.T
 	}
 }
 
+func TestProviderWebReceiptRoundTripsExactBareHTTPSURLs(t *testing.T) {
+	exactURL := "https://example.org/creator_(program)."
+	body := appendOpenAIResponseWebSources("candidate", openAIResponseWebEvidence{
+		ResponseID:  "resp_exact_url_round_trip",
+		SearchCalls: 1,
+		Citations: []openAIResponseWebCitation{
+			{Title: "Official creator program", URL: exactURL},
+			{Title: "duplicate", URL: exactURL},
+			{Title: "padded", URL: " " + exactURL + " "},
+			{Title: "insecure", URL: "http://example.org/insecure"},
+			{Title: "unsafe", URL: "javascript:alert(1)"},
+		},
+	})
+	if got := strings.Count(body, exactURL); got != 1 {
+		t.Fatalf("receipt exact URL occurrences=%d, want one deduplicated row:\n%s", got, body)
+	}
+	if strings.Contains(body, "http://example.org/insecure") || strings.Contains(body, "javascript:") || strings.Contains(body, "padded") {
+		t.Fatalf("receipt admitted a non-bare or non-HTTPS provider source:\n%s", body)
+	}
+	receipt, err := verifiedResearchCitationReceipt(body)
+	if err != nil {
+		t.Fatalf("verify exact provider receipt: %v\n%s", err, body)
+	}
+	if receipt.CitationCount != 1 || receipt.DomainCount != 1 || !receipt.CitationURLs[exactURL] {
+		t.Fatalf("receipt=%#v, want one exact provider URL", receipt)
+	}
+
+	tampered := strings.Replace(body, exactURL, strings.TrimSuffix(exactURL, "."), 1)
+	if _, err := verifiedResearchCitationReceipt(tampered); err == nil {
+		t.Fatalf("punctuation-trimmed URL unexpectedly preserved the exact provider digest:\n%s", tampered)
+	}
+}
+
 func focusedExternalEvidenceJSONForTest() string {
 	raw, _ := json.Marshal(externalEvidenceEnvelope{
 		ResearchQuestions: []string{"What current official figure best establishes the reachable creator audience?"},
