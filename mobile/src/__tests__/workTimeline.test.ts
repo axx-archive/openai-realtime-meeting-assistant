@@ -7,6 +7,7 @@ import {
   latestScoutWorkMessage,
   workMessageHasActionableDecision,
   workMessageHasPrimaryResult,
+  workResultArtifactKind,
 } from '../messaging/workTimeline';
 
 function message(id: string, thread?: ScoutMessage['thread']): ScoutMessage {
@@ -127,6 +128,49 @@ test('persistent activity truth follows the newest run, never an older delivered
     currentStage: 'quality_gate',
   });
   assert.equal(latestScoutWorkMessage([delivered, failed])?.id, 'newer-failed');
+});
+
+test('historical process results survive missing type only through closed process contracts', () => {
+  const legacyDeck = message('legacy-process-deck', {
+    id: 'goal-deck',
+    mode: 'goal',
+    processId: 'packaging_studio',
+    query: 'Build the deck',
+    status: 'complete',
+    artifactId: 'goal-deck-root',
+    resultArtifactId: 'deck-result',
+  });
+  const legacyDocument = message('legacy-process-document', {
+    id: 'goal-document',
+    mode: 'goal',
+    processId: 'document_report',
+    query: 'Write the report',
+    status: 'complete',
+    artifactId: 'goal-document-root',
+    resultArtifactId: 'document-result',
+  });
+  const unknownProcess = message('unknown-process-result', {
+    id: 'goal-unknown',
+    mode: 'goal',
+    processId: 'future_process',
+    query: 'Make something',
+    status: 'complete',
+    artifactId: 'goal-unknown-root',
+    resultArtifactId: 'unknown-result',
+  });
+
+  assert.equal(workResultArtifactKind(legacyDeck.thread), 'html_deck');
+  assert.equal(workResultArtifactKind(legacyDocument.thread), 'markdown');
+  assert.equal(workResultArtifactKind(unknownProcess.thread), '');
+  assert.equal(workMessageHasPrimaryResult(legacyDeck), true);
+  assert.equal(workMessageHasPrimaryResult(legacyDocument), true);
+  assert.equal(workMessageHasPrimaryResult(unknownProcess), false);
+  assert.equal(workResultArtifactKind({ ...legacyDeck.thread!, processId: 'packaging_studio_v8' }), '');
+  assert.equal(workResultArtifactKind({ ...legacyDocument.thread!, processId: 'document_report_v2' }), '');
+  assert.deepEqual(
+    compactThreadWorkMessages([legacyDeck, legacyDocument, unknownProcess]).map(({ id }) => id),
+    ['legacy-process-deck', 'legacy-process-document'],
+  );
 });
 
 test('reply compaction preserves the human decision and final result while removing stage chatter', () => {

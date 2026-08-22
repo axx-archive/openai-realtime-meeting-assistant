@@ -6,13 +6,13 @@ import { registerTestStubModules } from './support/registerTestStubModules';
 test('Home Ember shortcut renders as one accessible direct action', async () => {
   registerTestStubModules('premium-home-stub:', {
     'premium-home-stub:react-native': `
-      export const ActivityIndicator='ActivityIndicator'; export const Pressable='Pressable'; export const View='View';
-      export const StyleSheet={create:value=>value};
+      export const ActivityIndicator='ActivityIndicator'; export const Pressable='Pressable'; export const Text='Text'; export const View='View';
+      export const StyleSheet={create:value=>value,hairlineWidth:1};
     `,
     'premium-home-stub:react-native-svg': `export const Circle='Circle'; export const Path='Path'; export default 'Svg';`,
     'premium-home-stub:../theme/glass': `export const Glass='Glass';`,
     'premium-home-stub:../theme/tokens': `
-      const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const shadow=proxy;
+      const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const shadow=proxy; export const space=proxy; export const type=proxy;
     `,
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -30,6 +30,16 @@ test('Home Ember shortcut renders as one accessible direct action', async () => 
   assert.equal(renderer!.root.findAllByType('Svg' as any).length, 1);
   await act(async () => { shortcut.props.onPress(); });
   assert.equal(presses, 1);
+
+  await act(async () => {
+    renderer!.update(React.createElement(BonfireChatShortcut, {
+      unavailable: true,
+      onPress: () => { presses += 1; },
+    }));
+  });
+  const retry = renderer!.root.findByProps({ accessibilityLabel: 'Try Bonfire Chat again' });
+  await act(async () => { retry.props.onPress(); });
+  assert.equal(presses, 2);
   await act(async () => { renderer!.unmount(); });
 });
 
@@ -59,7 +69,7 @@ test('native Activity renders the quiet five-stage sheet and opens the final res
     thread: {
       id: 'goal-1',
       mode: 'goal',
-      processId: 'packaging_studio_v3',
+      processId: 'packaging_studio',
       query: 'Make the deck',
       status: 'complete',
       currentStage: 'ship_approval',

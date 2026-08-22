@@ -84,7 +84,7 @@ test('Project-bound Research uses governed actions while Project presentations k
 
   const runningGoal = {
     id: 'running-goal', kind: 'thread', role: 'scout', text: 'Building the presentation.', createdAt: '2026-08-13T18:06:00Z',
-    thread: { id: 'run-goal', mode: 'goal', processId: 'packaging_studio_v3', query: 'Build the deck', status: 'running', artifactId: 'goal-root-not-a-deck' },
+    thread: { id: 'run-goal', mode: 'goal', processId: 'packaging_studio', query: 'Build the deck', status: 'running', artifactId: 'goal-root-not-a-deck' },
   };
   await act(async () => {
     renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
@@ -113,8 +113,8 @@ test('Project-bound Research uses governed actions while Project presentations k
   const goalWithDeck = {
     id: 'goal-with-deck', kind: 'thread', role: 'scout', text: 'Ready for your decision.', createdAt: '2026-08-13T18:10:00Z',
     thread: {
-      id: 'run-goal-deck', mode: 'goal', query: 'Build the Like A Farmer deck', status: 'approval_required', artifactId: 'goal-artifact',
-      resultArtifactId: 'deck-artifact', resultArtifactType: 'html_deck', resultTitle: 'Like A Farmer — Optimization Insights',
+      id: 'run-goal-deck', mode: 'goal', processId: 'packaging_studio', query: 'Build the Like A Farmer deck', status: 'approval_required', artifactId: 'goal-artifact',
+      resultArtifactId: 'deck-artifact', resultTitle: 'Like A Farmer — Optimization Insights',
       checkpoint: { id: 'checkpoint-final', stageId: 'ship', question: 'Is this ready to share?', options: [{ id: 'approve-final', label: 'Approve and share', action: 'approve' }] },
     },
   };
@@ -135,8 +135,8 @@ test('Project-bound Research uses governed actions while Project presentations k
   const reportGoal = {
     id: 'goal-with-report', kind: 'thread', role: 'scout', text: 'Report delivered.', createdAt: '2026-08-13T18:12:00Z',
     thread: {
-      id: 'run-goal-report', mode: 'goal', processId: 'document_report_v1', query: 'Write the opportunity report', status: 'complete', artifactId: 'goal-report-root',
-      resultArtifactId: 'report-artifact', resultArtifactType: 'markdown', resultTitle: 'Insights & Opportunities',
+      id: 'run-goal-report', mode: 'goal', processId: 'document_report', query: 'Write the opportunity report', status: 'complete', artifactId: 'goal-report-root',
+      resultArtifactId: 'report-artifact', resultTitle: 'Insights & Opportunities',
       resultQualityState: 'admitted', resultCanExport: true,
       resultPreview: '# Insights & Opportunities\n\nThe engagement army is an activation network, not a reach product.',
     },
@@ -150,4 +150,19 @@ test('Project-bound Research uses governed actions while Project presentations k
   assert.equal(report.props.kind, 'document');
   assert.equal(report.props.artifactId, 'report-artifact');
   assert.match(report.props.text, /activation network, not a reach product/u);
+
+  const historicalInlineDeck = {
+    id: 'historical-inline-deck', kind: 'message', role: 'scout',
+    text: '<!doctype html><html><head><title>Archived presentation</title></head><body></body></html>',
+    createdAt: '2026-08-13T18:14:00Z',
+  };
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: historicalInlineDeck, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+      onViewArtifactFullscreen: () => { presented += 1; },
+    } as any));
+  });
+  const historicalPreview = renderer!.root.findByType('InlineArtifactPreview' as any);
+  assert.equal(historicalPreview.props.previewOnlyLabel, 'Preview only');
+  assert.equal(historicalPreview.props.onPresent, undefined);
 });

@@ -26,15 +26,16 @@ import {
   InlineArtifactPreview,
   type InlineArtifactKind,
 } from './InlineArtifactPreview';
+import { workResultArtifactKind } from './workTimeline';
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
  *
- * Checks message.thread.mode (live path) first, then message.work.
- * Does NOT infer kind from title/summary keywords alone — mode must be explicit.
+ * Checks the declared/closed-process result kind first, then message.thread.mode
+ * (live path), then message.work. It never infers from title or summary copy.
  */
 function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
-  const resultType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
+  const resultType = workResultArtifactKind(message.thread);
   if (/^(html_deck|deck|presentation|slides?)$/u.test(resultType)) return 'html_deck';
   if (/^(table|data_table|spreadsheet)$/u.test(resultType)) return 'table';
   if (/^(ideation|ideas|brainstorm)$/u.test(resultType)) return 'ideation';
@@ -782,7 +783,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               text=""
               agentName="Scout"
               htmlContent={body}
-              onPresent={onViewArtifactFullscreen ? () => onViewArtifactFullscreen?.(message) : undefined}
+              previewOnlyLabel="Preview only"
             />
           ) : !generatedImagePending && !workThread && body && !linkOnly && scout ? (
             <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />

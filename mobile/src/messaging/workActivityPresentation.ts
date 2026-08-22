@@ -1,6 +1,6 @@
 import type { ScoutMessage } from '../api/types';
 import { packagingStudioCustomerPhases, packagingStudioPhase } from './workPresentation';
-import { workMessageHasPrimaryResult } from './workTimeline';
+import { workMessageHasPrimaryResult, workResultArtifactKind } from './workTimeline';
 
 export type WorkActivityPhaseState = 'complete' | 'current' | 'upcoming';
 
@@ -36,7 +36,7 @@ export function workActivityResultPresentation(
   if (!workMessageHasPrimaryResult(message) || !message?.thread) return null;
   const work = message.thread;
   const explicitResultId = String(work.resultArtifactId ?? '').trim();
-  const resultType = String(work.resultArtifactType ?? work.mode ?? '').trim().toLowerCase();
+  const resultType = workResultArtifactKind(work) || String(work.mode ?? '').trim().toLowerCase();
   const kind = /^(?:html_deck|deck|presentation|slides?)$/u.test(resultType)
     ? 'presentation'
     : 'document';

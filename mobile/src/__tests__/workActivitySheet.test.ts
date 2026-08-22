@@ -44,7 +44,6 @@ test('Activity opens only the exact admitted presentation revision', () => {
     thread: {
       ...base.thread!,
       resultArtifactId: 'deck-1',
-      resultArtifactType: 'html_deck',
       resultQualityState: 'admitted',
       resultCanPresent: true,
       resultCanEdit: true,

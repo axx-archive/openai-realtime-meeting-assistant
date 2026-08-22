@@ -238,6 +238,18 @@ test('native preview keeps deck navigation top-right and actions separate from n
 
   await act(async () => {
     renderer!.update(React.createElement(InlineArtifactPreview, {
+      kind: 'html_deck', title: 'Archived field network', text: '', htmlContent: '<html><body></body></html>',
+      previewOnlyLabel: 'Preview only',
+    }));
+  });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Present' }).length, 0);
+  assert.equal(
+    renderer!.root.findByProps({ accessibilityLabel: 'Preview only. Full-screen presentation is unavailable for this archived deck.' }).props.accessibilityRole,
+    'summary',
+  );
+
+  await act(async () => {
+    renderer!.update(React.createElement(InlineArtifactPreview, {
       kind: 'html_deck', title: 'Signed field network', text: '', artifactId: 'deck', sessionToken: 'session',
       desktopEditingOnly: true, onPresent: () => { presented += 1; },
     }));

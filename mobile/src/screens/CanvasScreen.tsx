@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,6 +36,7 @@ import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
 import { personalizedHomeGreeting } from '../canvas/homeGreeting';
+import { bonfireStatusLanePlacement } from '../canvas/bonfireShortcutPlacement';
 import { isBonfireChat } from '../messaging/channelPresentation';
 
 type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
@@ -54,10 +56,12 @@ type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
 
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
+  const { width: canvasWidth, height: canvasHeight } = useWindowDimensions();
   const { sessionToken, user } = useAuth();
   const home = useHomeCanvas();
   const realtime = usePersonalRealtimeContext();
   const listening = realtime.active;
+  const bonfireStatusLane = bonfireStatusLanePlacement(canvasWidth, canvasHeight);
   const [draft, setDraft] = useState('');
   const [draftDestination, setDraftDestination] = useState<HomeStarterDestination | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -71,8 +75,8 @@ export function CanvasScreen() {
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [projectError, setProjectError] = useState('');
   const [projectFocusGeneration, setProjectFocusGeneration] = useState(0);
-  const [bonfireTarget, setBonfireTarget] = useState<{ sessionToken: string; threadId: string } | null>(null);
   const [bonfireOpening, setBonfireOpening] = useState(false);
+  const [bonfireError, setBonfireError] = useState('');
   const inputRef = useRef<TextInput>(null);
   const draftRef = useRef(draft);
   const draftDestinationRef = useRef<HomeStarterDestination | null>(draftDestination);
@@ -81,7 +85,11 @@ export function CanvasScreen() {
   const sessionTokenRef = useRef(sessionToken);
   const openingAttemptRef = useRef<HomeScoutOpeningAttempt | null>(null);
   const threadAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  const bonfireTargetRef = useRef<{ sessionToken: string; threadId: string } | null>(null);
   const bonfireRequestRef = useRef<{ sessionToken: string; promise: Promise<string | null> } | null>(null);
+  const bonfireMountedRef = useRef(true);
+  const bonfireFocusedRef = useRef(false);
+  const bonfireAttemptGenerationRef = useRef(0);
   draftRef.current = draft;
   draftDestinationRef.current = draftDestination;
   sessionTokenRef.current = sessionToken;
@@ -100,18 +108,25 @@ export function CanvasScreen() {
   const dictationActive = dictation.state !== 'idle';
   const dictationCanCommit = ['listening', 'held', 'error'].includes(dictation.state);
 
-  const loadBonfireTarget = useCallback(async (): Promise<string | null> => {
-    if (!sessionToken) return null;
-    const cached = bonfireTarget?.sessionToken === sessionToken ? bonfireTarget.threadId : '';
+  const bonfireAttemptIsCurrent = useCallback((token: string, generation: number): boolean => (
+    bonfireMountedRef.current
+    && bonfireFocusedRef.current
+    && sessionTokenRef.current === token
+    && bonfireAttemptGenerationRef.current === generation
+  ), []);
+
+  const loadBonfireTarget = useCallback(async (token: string): Promise<string | null> => {
+    const cached = bonfireTargetRef.current?.sessionToken === token ? bonfireTargetRef.current.threadId : '';
     if (cached) return cached;
-    if (bonfireRequestRef.current?.sessionToken === sessionToken) return bonfireRequestRef.current.promise;
-    const token = sessionToken;
+    if (bonfireRequestRef.current?.sessionToken === token) return bonfireRequestRef.current.promise;
     const promise = api.scoutThreadIndex(token)
       .then((response) => {
-        if (sessionTokenRef.current !== token) return null;
-        const thread = (response.threads ?? []).find(isBonfireChat);
+        const threads = response.threads ?? [];
+        const thread = threads.find((candidate) => (
+          String(candidate.visibility ?? '').trim().toLowerCase() === 'public'
+          && String(candidate.title ?? '').trim().toLowerCase() === 'bonfire chat'
+        )) ?? threads.find(isBonfireChat);
         const threadId = String(thread?.id ?? '').trim();
-        if (threadId) setBonfireTarget({ sessionToken: token, threadId });
         return threadId || null;
       })
       .catch(() => null)
@@ -120,36 +135,58 @@ export function CanvasScreen() {
       });
     bonfireRequestRef.current = { sessionToken: token, promise };
     return promise;
-  }, [bonfireTarget, sessionToken]);
+  }, []);
+
+  useEffect(() => () => {
+    bonfireMountedRef.current = false;
+    bonfireFocusedRef.current = false;
+    bonfireAttemptGenerationRef.current += 1;
+    bonfireRequestRef.current = null;
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadBonfireTarget();
-      return undefined;
-    }, [loadBonfireTarget]),
+      const token = sessionToken;
+      const generation = ++bonfireAttemptGenerationRef.current;
+      bonfireFocusedRef.current = true;
+      setBonfireOpening(false);
+      setBonfireError('');
+      if (bonfireTargetRef.current?.sessionToken !== token) bonfireTargetRef.current = null;
+      if (bonfireRequestRef.current?.sessionToken !== token) bonfireRequestRef.current = null;
+      if (token) {
+        void loadBonfireTarget(token).then((threadId) => {
+          if (!threadId || !bonfireAttemptIsCurrent(token, generation)) return;
+          bonfireTargetRef.current = { sessionToken: token, threadId };
+        });
+      }
+      return () => {
+        if (bonfireAttemptGenerationRef.current === generation) {
+          bonfireAttemptGenerationRef.current += 1;
+        }
+        bonfireFocusedRef.current = false;
+      };
+    }, [bonfireAttemptIsCurrent, loadBonfireTarget, sessionToken]),
   );
-
-  useEffect(() => {
-    if (bonfireRequestRef.current?.sessionToken !== sessionToken) {
-      bonfireRequestRef.current = null;
-    }
-    setBonfireTarget((current) => current?.sessionToken === sessionToken ? current : null);
-    setBonfireOpening(false);
-  }, [sessionToken]);
 
   const openBonfireChat = useCallback(async () => {
     const token = sessionToken;
-    if (!token || bonfireOpening) return;
+    if (!token || bonfireOpening || !bonfireMountedRef.current || !bonfireFocusedRef.current) return;
+    const generation = ++bonfireAttemptGenerationRef.current;
+    setBonfireError('');
     setBonfireOpening(true);
-    const threadId = await loadBonfireTarget();
-    if (sessionTokenRef.current !== token) return;
-    setBonfireOpening(false);
-    if (threadId) {
+    try {
+      const threadId = await loadBonfireTarget(token);
+      if (!bonfireAttemptIsCurrent(token, generation)) return;
+      if (!threadId) {
+        setBonfireError('Bonfire Chat is unavailable right now. Tap the icon to try again.');
+        return;
+      }
+      bonfireTargetRef.current = { sessionToken: token, threadId };
       navigation.navigate('Thread', { threadId, title: 'Bonfire Chat' });
-      return;
+    } finally {
+      if (bonfireAttemptIsCurrent(token, generation)) setBonfireOpening(false);
     }
-    navigation.navigate('Chat');
-  }, [bonfireOpening, loadBonfireTarget, navigation, sessionToken]);
+  }, [bonfireAttemptIsCurrent, bonfireOpening, loadBonfireTarget, navigation, sessionToken]);
 
   const refreshProjectContext = useCallback(async (createTitle = '') => {
     if (!sessionToken) return;
@@ -573,8 +610,27 @@ export function CanvasScreen() {
 
         <View style={[canvasCradleComposition.skyBelow, keyboardVisible && styles.keyboardSky]} />
       </ScrollView>
+      {!keyboardVisible && bonfireError ? (
+        <View
+          accessibilityRole="alert"
+          pointerEvents="none"
+          style={[
+            styles.bonfireStatusLane,
+            {
+              height: bonfireStatusLane.height,
+              left: bonfireStatusLane.left,
+              top: bonfireStatusLane.top,
+              width: bonfireStatusLane.width,
+            },
+          ]}
+        >
+          <Text maxFontSizeMultiplier={1.4} numberOfLines={2} style={styles.bonfireStatusText}>
+            {bonfireStatusLane.compact ? 'Bonfire unavailable' : bonfireError}
+          </Text>
+        </View>
+      ) : null}
       {!keyboardVisible ? (
-        <BonfireChatShortcut busy={bonfireOpening} onPress={() => { void openBonfireChat(); }} />
+        <BonfireChatShortcut busy={bonfireOpening} unavailable={Boolean(bonfireError)} onPress={() => { void openBonfireChat(); }} />
       ) : null}
 		  <Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
 		<SafeAreaView style={styles.projectSheet}>
@@ -601,6 +657,21 @@ export function CanvasScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgApp },
+  bonfireStatusLane: {
+    position: 'absolute',
+    zIndex: 19,
+    justifyContent: 'center',
+    paddingHorizontal: space[3],
+    borderRadius: radius.lg,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.danger,
+    backgroundColor: colors.surface1,
+  },
+  bonfireStatusText: {
+    ...type.captionMedium,
+    color: colors.text1,
+  },
   bellHeader: {
     position: 'absolute',
     top: 0,

@@ -3,6 +3,23 @@ import { workHasDecisionCard } from './workPresentation';
 
 const authoredResultKinds = /^(?:html_deck|deck|presentation|slides?|markdown|document|doc|memo|brief|research|deep_research|report|analysis|table|data_table|spreadsheet|ideation|ideas|brainstorm)$/u;
 const decisionStatuses = new Set(['approval_required', 'needs_input', 'parked']);
+const historicalResultKindByProcessId: Readonly<Record<string, string>> = {
+  packaging_studio: 'html_deck',
+  document_report: 'markdown',
+};
+
+/**
+ * Returns the server-declared result kind, or a compatibility kind derived
+ * only from a closed, server-owned process contract. Historical goal receipts
+ * can predate resultArtifactType; never guess from user copy, titles, or IDs.
+ */
+export function workResultArtifactKind(work: ScoutWorkThreadRef | null | undefined): string {
+  const declaredKind = String(work?.resultArtifactType ?? '').trim().toLowerCase();
+  if (declaredKind) return authoredResultKinds.test(declaredKind) ? declaredKind : '';
+
+  const processId = String(work?.processId ?? '').trim().toLowerCase();
+  return historicalResultKindByProcessId[processId] ?? '';
+}
 
 export function isScoutWorkMessage(message: ScoutMessage | null | undefined): boolean {
   return String(message?.kind ?? '').trim().toLowerCase() === 'thread' && Boolean(message?.thread);
@@ -19,7 +36,7 @@ export function workMessageHasPrimaryResult(message: ScoutMessage | null | undef
   if (!isScoutWorkMessage(message)) return false;
   const work = message?.thread;
   const resultArtifactId = String(work?.resultArtifactId ?? '').trim();
-  const resultKind = String(work?.resultArtifactType ?? '').trim().toLowerCase();
+  const resultKind = workResultArtifactKind(work);
   if (resultArtifactId && authoredResultKinds.test(resultKind)) return true;
 
   // Legacy standalone presentations use the lifecycle artifact as the deck.

@@ -152,6 +152,7 @@ import {
   compactThreadWorkMessages,
   isScoutWorkMessage,
   latestScoutWorkMessage,
+  workResultArtifactKind,
 } from "../messaging/workTimeline";
 import { PrivateRiffContextSheet } from "../messaging/PrivateRiffContextSheet";
 import { PrivateRiffShareSheet } from "../messaging/PrivateRiffShareSheet";
@@ -2750,7 +2751,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
       const resultArtifactId = explicitResultArtifactId
         || String(message.thread?.artifactId ?? '').trim();
-      const resultArtifactType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
+      const resultArtifactType = workResultArtifactKind(message.thread);
       const resultStudioKind = artifactStudioKind(resultArtifactType)
         ?? artifactStudioKind(message.thread?.mode);
       const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
@@ -3014,7 +3015,8 @@ export function ThreadScreen({ route, navigation }: Props) {
     (message: ScoutMessage) => {
       const artifactId = String(message.thread?.resultArtifactId ?? "").trim()
         || String(message.thread?.artifactId ?? "").trim();
-      const mode = String(message.thread?.resultArtifactType ?? message.thread?.mode ?? "").toLowerCase();
+      const mode = workResultArtifactKind(message.thread)
+        || String(message.thread?.mode ?? "").toLowerCase();
       const title = String(message.thread?.resultTitle ?? "Deliverable").trim();
       
       if (!artifactId) {

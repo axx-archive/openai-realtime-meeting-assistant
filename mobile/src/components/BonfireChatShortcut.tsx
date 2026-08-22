@@ -3,10 +3,11 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { Glass } from '../theme/glass';
-import { colors, radius, shadow } from '../theme/tokens';
+import { colors, shadow } from '../theme/tokens';
 
 type Props = {
   busy?: boolean;
+  unavailable?: boolean;
   onPress: () => void;
 };
 
@@ -32,19 +33,19 @@ function EmberChatMark() {
   );
 }
 
-export function BonfireChatShortcut({ busy = false, onPress }: Props) {
+export function BonfireChatShortcut({ busy = false, unavailable = false, onPress }: Props) {
   return (
-    <Glass interactive radius={32} tint={colors.ember} style={styles.glass}>
+    <Glass interactive radius={32} tint={unavailable ? colors.danger : colors.ember} style={styles.glass}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Open Bonfire Chat"
+        accessibilityLabel={unavailable ? 'Try Bonfire Chat again' : 'Open Bonfire Chat'}
         accessibilityHint="Goes directly to the company Bonfire Chat channel"
         accessibilityState={{ busy }}
         disabled={busy}
         onPress={onPress}
         style={({ pressed }) => [styles.button, pressed && styles.pressed, busy && styles.busy]}
       >
-        <View accessibilityElementsHidden style={styles.emberCore}>
+        <View accessibilityElementsHidden style={[styles.emberCore, unavailable && styles.unavailableCore]}>
           {busy ? <ActivityIndicator color="#FFFFFF" size="small" /> : <EmberChatMark />}
         </View>
       </Pressable>
@@ -79,6 +80,7 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     backgroundColor: colors.ember,
   },
+  unavailableCore: { backgroundColor: colors.danger },
   pressed: { opacity: 0.9, transform: [{ scale: 0.96 }] },
   busy: { opacity: 0.72 },
 });

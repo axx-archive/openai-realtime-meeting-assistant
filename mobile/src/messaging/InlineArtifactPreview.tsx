@@ -31,6 +31,8 @@ type Props = {
   /** Direct HTML content for live html_deck path (bypasses API fetch) */
   htmlContent?: string;
   desktopEditingOnly?: boolean;
+  /** Truthful state for historical inline HTML that has no canonical artifact route. */
+  previewOnlyLabel?: string;
   onEdit?: () => void;
   onPresent?: () => void;
   onExpand?: () => void;
@@ -72,6 +74,7 @@ export function InlineArtifactPreview({
   sessionToken,
   htmlContent,
   desktopEditingOnly = false,
+  previewOnlyLabel,
   onEdit,
   onPresent,
   onExpand,
@@ -342,6 +345,15 @@ export function InlineArtifactPreview({
               <SymbolView name="play.fill" size={14} tintColor={colors.onAccent} />
               <Text style={styles.deckActionText}>Present</Text>
             </Pressable>
+          ) : previewOnlyLabel ? (
+            <View
+              accessibilityLabel={`${previewOnlyLabel}. Full-screen presentation is unavailable for this archived deck.`}
+              accessibilityRole="summary"
+              style={styles.deckPreviewOnlyBadge}
+            >
+              <SymbolView name="eye" size={14} tintColor={colors.onAccent} />
+              <Text maxFontSizeMultiplier={1.4} style={styles.deckPreviewOnlyText}>{previewOnlyLabel}</Text>
+            </View>
           ) : null}
         </View>
       </View>
@@ -565,6 +577,20 @@ const styles = StyleSheet.create({
   },
   deckActionText: {
     ...type.captionMedium,
+    color: colors.onAccent,
+  },
+  deckPreviewOnlyBadge: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(0,0,0,0.66)',
+  },
+  deckPreviewOnlyText: {
+    ...type.label,
     color: colors.onAccent,
   },
   deckNavigation: {
