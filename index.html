@@ -16006,7 +16006,8 @@
           border-top: 1px solid var(--line-1);
         }
 
-        #chatTool .chat-context-technical > summary {
+        #chatTool .chat-context-technical > summary,
+        #chatTool .chat-context-technical__head {
           min-height: 44px;
           display: flex;
           align-items: center;
@@ -16019,6 +16020,10 @@
         }
 
         #chatTool .chat-context-technical > summary::-webkit-details-marker { display: none; }
+
+        #chatTool .chat-context-technical__head {
+          cursor: default;
+        }
 
         #chatTool .chat-context-technical__count {
           color: var(--text-3);
@@ -44096,6 +44101,55 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return list
       }
 
+      function packagingStudioTechnicalWorkNode(plan) {
+        const tasks = Array.isArray(plan?.subtasks) ? plan.subtasks : []
+        const technical = document.createElement('section')
+        technical.className = 'chat-context-technical'
+        technical.id = 'chatContextTechnicalWork'
+        technical.setAttribute('aria-label', 'Internal work')
+        technical.tabIndex = -1
+        const technicalHead = bfEl('div', 'chat-context-technical__head')
+        technicalHead.append(
+          bfEl('span', '', 'Internal work'),
+          bfEl('span', 'chat-context-technical__count', `${tasks.length} step${tasks.length === 1 ? '' : 's'}`)
+        )
+        technical.appendChild(technicalHead)
+        const activityList = bfEl('div', 'chat-context-activity-list chat-context-technical__list')
+        for (const task of tasks) {
+          const taskState = String(task?.status || 'pending').toLowerCase()
+          const row = bfEl('div', `chat-context-log-entry${taskState === 'complete' ? ' is-complete' : taskState === 'running' || taskState === 'ready' ? ' is-current' : ''}`)
+          row.appendChild(bfEl('span', 'chat-context-log-entry__dot', ''))
+          const rowCopy = bfEl('span', 'chat-context-log-entry__copy')
+          rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__title', packagingStudioTaskDisplayTitle(plan, task)))
+          const stageNote = packagingStudioStagePresentation[String(task?.id || '').trim()]?.note || ''
+          if (stageNote) rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__meta', taskState === 'complete' ? stageNote : taskState.replace(/_/g, ' ')))
+          const taskArtifactId = String(task?.artifactId || '').trim()
+          if (taskArtifactId) {
+            row.classList.add('is-actionable')
+            row.tabIndex = 0
+            row.setAttribute('role', 'button')
+            row.setAttribute('aria-label', `Open ${packagingStudioTaskDisplayTitle(plan, task)}`)
+            const openTaskArtifact = () => {
+              const taskArtifact = typeof artifactEntries !== 'undefined'
+                ? artifactEntries.find(entry => String(entry?.id || '') === taskArtifactId)
+                : null
+              openArtifactStage(taskArtifactId, taskArtifact ? artifactDisplayTitle(taskArtifact) : packagingStudioTaskDisplayTitle(plan, task))
+            }
+            row.addEventListener('click', openTaskArtifact)
+            row.addEventListener('keydown', event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                openTaskArtifact()
+              }
+            })
+          }
+          row.appendChild(rowCopy)
+          activityList.appendChild(row)
+        }
+        technical.appendChild(activityList)
+        return technical
+      }
+
       const packagingStudioCheckpointQuestions = {
         intake: 'Do you have existing brand assets for this deck, or should Scout develop a visual direction from the source material?',
         compete_choice: 'Scout evaluated three narrative directions. Which one should shape the deck?',
@@ -71346,6 +71400,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const customerCheckpoint = isPackagingStudio ? (ref?.checkpoint || goalPendingCheckpoint(artifact, activityPlan)) : null
 	        const terminalError = ['error', 'failed', 'needs_attention', 'rejected'].includes(status)
 	        const terminalComplete = ['complete', 'completed', 'published'].includes(status)
+	        if (terminalComplete && chatContextState?.inspectWork) chatContextState.inspectWork = false
 	        const deliveredResult = Boolean(String(ref.resultArtifactId || '').trim() || String(artifact?.metadata?.deliveredAt || '').trim())
 	        const note = isPackagingStudio
 	          ? customerCheckpoint
@@ -71371,10 +71426,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        )
 	        summary.appendChild(bfEl('span', 'chat-context-event__meta', isPackagingStudio ? `Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count}` : `${family} · ${terminalComplete ? 'Complete' : (deliveredResult && terminalError ? 'Delivered with review note' : phase.label)}`))
 	        const actions = bfEl('div', 'chat-context-actions')
+	        const inspectionOpen = isPackagingStudio && !terminalComplete && Boolean(chatContextState?.inspectWork)
 	        if (artifact?.id && artifact?.text) {
-	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : 'Inspect work')
+	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : inspectionOpen ? 'Hide work' : 'Inspect work')
 	          view.type = 'button'
-	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
+	          if (isPackagingStudio && !terminalComplete) {
+	            view.dataset.inspectWork = 'true'
+	            view.setAttribute('aria-controls', 'chatContextTechnicalWork')
+	            view.setAttribute('aria-expanded', String(inspectionOpen))
+	            view.addEventListener('click', () => {
+	              if (!chatContextState || chatContextState.mode !== 'work') return
+	              chatContextState.inspectWork = !inspectionOpen
+	              renderDesktopWorkContext(message, artifact)
+	              requestAnimationFrame(() => {
+	                const technicalWork = chatContextBody.querySelector('#chatContextTechnicalWork')
+	                if (!inspectionOpen && technicalWork) {
+	                  technicalWork.focus({ preventScroll: true })
+	                  technicalWork.scrollIntoView({ behavior: 'smooth', block: 'start' })
+	                } else {
+	                  chatContextBody.querySelector('[data-inspect-work="true"]')?.focus({ preventScroll: true })
+	                }
+	              })
+	            })
+	          } else {
+	            view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
+	          }
 	          actions.appendChild(view)
 	        }
 	        if (terminalError) {
@@ -71412,6 +71488,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (isPackagingStudio && Array.isArray(plan?.subtasks) && plan.subtasks.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Presentation activity'))
 	          worklog.appendChild(packagingStudioPhaseListNode(customerProgress))
+	          if (inspectionOpen) worklog.appendChild(packagingStudioTechnicalWorkNode(activityPlan))
 	        }
 	        if (sources.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Sources'))

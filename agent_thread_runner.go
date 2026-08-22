@@ -2149,6 +2149,15 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 		return thread, fmt.Errorf("public conversation provider reservation is unavailable")
 	}
 	thread.Artifact = current
+	// Validate the immutable research authority before a hosted-search request
+	// is frozen or sent. Output normalization repeats this check after the
+	// provider returns, but doing it here prevents deterministic context-shape
+	// errors from consuming a provider call on every automatic revision.
+	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		if _, err := authorizedExternalEvidenceResearchQuestionsForThread(app, thread); err != nil {
+			return thread, fmt.Errorf("external evidence authority is invalid before provider handoff: %w", err)
+		}
+	}
 	refreshed, err := app.reauthorizeAgentThreadProfile(thread)
 	if err != nil {
 		return thread, err

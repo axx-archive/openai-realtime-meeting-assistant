@@ -588,6 +588,163 @@ func TestExternalEvidenceV2AcceptsOneDecisiveResearchQuestion(t *testing.T) {
 	}
 }
 
+func authorizedExternalEvidenceTestContext(t *testing.T) (*kanbanBoardApp, goalPlan, string) {
+	t.Helper()
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "external-evidence-context-test-key"
+	previousStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStart })
+	parent, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Build a private presentation about whether the official program's 2026 opted-in creator count supports proceeding",
+		CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, app, parent.Artifact.ID)
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parent.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	const question = "How many opted-in creators does the official program have in 2026?"
+	contextBody := `{"direct_ask":"Decide whether the official program's 2026 opted-in creator count supports proceeding","audience":"decision makers","decision":"whether the program size supports proceeding","desired_response":"make a grounded decision","slide_count":6,"context_used":[],"settled_decisions":[],"taste_signals":[],"brand_assets":[],"research_mode":"external","research_questions":["` + question + `"],"known_facts":[],"uncertain_claims":[],"reversible_inferences":[]}`
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName, map[string]string{
+		"goalParentId": parent.Artifact.ID, "goalSubtaskId": "context_snapshot", "outputContract": "deck_context_snapshot_v2",
+		"processId": packagingStudioProcessID, "processStage": "context_snapshot", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextStage := plan.subtaskByID("context_snapshot")
+	contextStage.Status, contextStage.ArtifactID = subtaskComplete, contextArtifact.ID
+	encodedPlan, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.updateOSArtifactWithMetadata(parent.Artifact.ID, "", parent.Artifact.Text, scoutParticipantName, map[string]string{"goalPlan": string(encodedPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	return app, plan, parent.Artifact.ID
+}
+
+func authorizedExternalEvidenceResearchThreadForTest(t *testing.T, app *kanbanBoardApp, plan goalPlan, parentID, threadID string) scoutAgentThread {
+	t.Helper()
+	writer := plan.subtaskByID("external_research")
+	researchMetadata := map[string]string{
+		"goalParentId": parentID, "goalSubtaskId": "external_research", "outputContract": packagingStudioExternalEvidenceContract,
+		"processId": packagingStudioProcessID, "processStage": "external_research", "status": "running", "threadStatus": "running",
+		"threadId": threadID, "threadQuery": "Research the authorized context snapshot.", "mode": "research",
+		"assignedRunner": writer.Runner, "authority": goalChildAuthority(writer.Authority, plan.Authority),
+		"goalDeliverable": "true", "goalChildActivationState": goalChildActivationStarted,
+		publicConversationWorkActivationState: publicConversationWorkStarted,
+		publicConversationWorkActivationOwner: "external-evidence-context-test-worker",
+	}
+	for key, value := range goalRouteChildBindingMetadata(&plan) {
+		researchMetadata[key] = value
+	}
+	researchArtifact, _, err := app.createOSArtifactWithMetadata("research", "External research", "Research pending.", scoutParticipantName, researchMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.Status, writer.ArtifactID, writer.ThreadID = subtaskRunning, researchArtifact.ID, threadID
+	encodedPlan, _ := json.Marshal(plan)
+	parentArtifact, _ := app.osArtifactByID(parentID)
+	if _, _, err := app.updateOSArtifactWithMetadata(parentID, "", parentArtifact.Text, scoutParticipantName, map[string]string{"goalPlan": string(encodedPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	return scoutAgentThread{ID: threadID, Mode: "research", Query: "Research the authorized context snapshot.", Status: "running", Artifact: researchArtifact}
+}
+
+func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	contextStage := plan.subtaskByID("context_snapshot")
+	if contextStage == nil {
+		t.Fatal("context snapshot stage missing")
+	}
+	artifact, ok := app.osArtifactByID(contextStage.ArtifactID)
+	if !ok {
+		t.Fatal("context snapshot artifact missing")
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(artifact.Text), &object); err != nil {
+		t.Fatalf("decode context snapshot: %v", err)
+	}
+	question := object["research_questions"].([]any)[0].(string)
+	object["research_questions"] = []any{map[string]any{
+		"question":           question,
+		"decision_relevance": "This fact could change the recommendation.",
+	}}
+	body, err := json.Marshal(object)
+	if err != nil {
+		t.Fatalf("encode production-shaped context snapshot: %v", err)
+	}
+	if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", string(body), scoutParticipantName, artifact.Metadata); err != nil {
+		t.Fatalf("update production-shaped context snapshot: %v", err)
+	}
+
+	questions, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
+	if err != nil {
+		t.Fatalf("production-shaped research question should remain authorized: %v", err)
+	}
+	if len(questions) != 1 || questions[0] != question {
+		t.Fatalf("questions=%v, want exact production question %q", questions, question)
+	}
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "valid-object-research-authority")
+	prepared, err := app.preparePublicConversationProviderRequest(thread)
+	if err != nil {
+		t.Fatalf("valid production-shaped authority should reach provider preflight: %v", err)
+	}
+	if strings.TrimSpace(prepared.Artifact.Metadata[publicConversationProviderRequestKey]) == "" {
+		t.Fatal("valid production-shaped authority did not reserve a durable provider request")
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, found, err := app.decodeDurablePublicConversationProviderRequest(prepared, providerContext.Memory)
+	if err != nil || !found || request.NormalizeOutput == nil || request.JSONSchema == nil || request.MaxToolCalls != externalEvidenceMaxToolCalls {
+		t.Fatalf("decoded provider request lost the exact evidence contract: found=%t schema=%t normalize=%t calls=%d err=%v", found, request.JSONSchema != nil, request.NormalizeOutput != nil, request.MaxToolCalls, err)
+	}
+	retained, err := authorizedExternalEvidenceResearchQuestionsForThread(app, prepared)
+	if err != nil || len(retained) != 1 || retained[0] != question {
+		t.Fatalf("decoded provider request lost normalized question authority: questions=%v err=%v", retained, err)
+	}
+}
+
+func TestAuthorizedExternalEvidenceQuestionsRejectsObjectWithoutQuestion(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	contextStage := plan.subtaskByID("context_snapshot")
+	artifact, _ := app.osArtifactByID(contextStage.ArtifactID)
+	var object map[string]any
+	if err := json.Unmarshal([]byte(artifact.Text), &object); err != nil {
+		t.Fatalf("decode context snapshot: %v", err)
+	}
+	object["research_questions"] = []any{map[string]any{"decision_relevance": "Missing the actual question."}}
+	body, _ := json.Marshal(object)
+	if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", string(body), scoutParticipantName, artifact.Metadata); err != nil {
+		t.Fatalf("update invalid context snapshot: %v", err)
+	}
+
+	_, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
+	if err == nil || !strings.Contains(err.Error(), "research question 1 is empty") {
+		t.Fatalf("error=%v, want a specific empty-question rejection", err)
+	}
+
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "invalid-research-authority")
+	if _, err := app.preparePublicConversationProviderRequest(thread); err == nil || !strings.Contains(err.Error(), "invalid before provider handoff") {
+		t.Fatalf("preflight error=%v, want deterministic authority rejection before provider handoff", err)
+	}
+	current, _ := app.osArtifactByID(thread.Artifact.ID)
+	if strings.TrimSpace(current.Metadata[publicConversationProviderRequestKey]) != "" {
+		t.Fatal("invalid external evidence authority must not reserve a provider request")
+	}
+}
+
 func TestExternalEvidenceV2AllowsHonestZeroUsableEvidenceAfterProviderSearch(t *testing.T) {
 	envelope := externalEvidenceEnvelope{
 		ResearchQuestions:    []string{"What official count establishes the active creator population?"},

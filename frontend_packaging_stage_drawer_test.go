@@ -19,6 +19,7 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 		"const packagingStudioCustomerPhases",
 		"function packagingStudioCustomerProgress(plan, artifact, ref, status)",
 		"function packagingStudioPhaseListNode(progress)",
+		"function packagingStudioTechnicalWorkNode(plan)",
 		"Frame the decision",
 		"Ground the recommendation",
 		"stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence']",
@@ -243,7 +244,41 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.match(await activityDrawer.locator('#chatContextMeta').textContent(),/Phase 2 of 5.*11%/);
  assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
  assert.equal(await activityDrawer.getByText(/internal steps/i).count(),0);
- assert.equal(await activityDrawer.getByRole('button',{name:'Inspect work',exact:true}).count(),1);
+ const inspectWork=activityDrawer.getByRole('button',{name:'Inspect work',exact:true});
+ assert.equal(await inspectWork.count(),1);
+ assert.equal(await inspectWork.getAttribute('aria-expanded'),'false');
+ await inspectWork.click();
+ const technicalWork=activityDrawer.locator('#chatContextTechnicalWork');
+ assert.equal(await technicalWork.count(),1);
+ assert.match(await technicalWork.textContent(),/Internal work.*16 steps/is);
+ assert.equal(await technicalWork.locator('.chat-context-log-entry').count(),16);
+ const hideWork=activityDrawer.getByRole('button',{name:'Hide work',exact:true});
+ assert.equal(await hideWork.getAttribute('aria-expanded'),'true');
+ await page.waitForFunction(()=>document.activeElement?.id==='chatContextTechnicalWork');
+ const savedStage=technicalWork.getByRole('button',{name:'Open Understand the request and company context',exact:true});
+ assert.equal(await savedStage.count(),1);
+ await savedStage.click();
+ const stageDrawer=page.locator('.artifact-stage');
+ await stageDrawer.waitFor({state:'visible'});
+ assert.match(await stageDrawer.locator('.artifact-stage__title').textContent(),/Build the visual system/);
+ assert.equal(await stageDrawer.locator('.artifact-stage-activity').count(),1);
+ await stageDrawer.getByRole('button',{name:'Close',exact:true}).click();
+ await hideWork.click();
+ assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
+ assert.equal(await activityDrawer.getByRole('button',{name:'Inspect work',exact:true}).getAttribute('aria-expanded'),'false');
+ await activityDrawer.getByRole('button',{name:'Inspect work',exact:true}).click();
+ assert.equal(await activityDrawer.locator('.chat-context-technical').count(),1);
+ await page.evaluate(parent=>{
+   const plan=JSON.parse(parent.metadata.goalPlan);
+   plan.state='complete';
+   plan.subtasks=plan.subtasks.map(task=>({...task,status:'complete'}));
+   const artifact={...parent,metadata:{...parent.metadata,status:'complete',threadStatus:'complete',progressPercent:'100',goalPlan:JSON.stringify(plan)}};
+   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:artifact.id,status:'complete',progressPercent:100,query:'Like A Farmer presentation'}};
+   renderDesktopWorkContext(message,artifact);
+ },parent);
+ assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
+ assert.equal(await activityDrawer.getByRole('button',{name:'Hide work',exact:true}).count(),0);
+ assert.equal(await activityDrawer.getByRole('button',{name:'Open',exact:true}).count(),1);
  await page.locator('#chatContextClose').evaluate(node=>node.click());
  await page.locator('.scout-chat-work-card--presentation').evaluate(node=>node.remove());
 

@@ -384,10 +384,24 @@ func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goal
 	questions := make([]string, 0, len(raw))
 	seen := map[string]bool{}
 	for index, value := range raw {
-		question, _ := value.(string)
+		question := ""
+		switch typed := value.(type) {
+		case string:
+			question = typed
+		case map[string]any:
+			question, _ = typed["question"].(string)
+		default:
+			return nil, fmt.Errorf("context snapshot research question %d must be a string or an object with a string question field", index+1)
+		}
 		question = strings.TrimSpace(question)
-		if question == "" || len(question) > 500 || seen[question] {
-			return nil, fmt.Errorf("context snapshot research question %d is empty, duplicated, or oversized", index+1)
+		if question == "" {
+			return nil, fmt.Errorf("context snapshot research question %d is empty", index+1)
+		}
+		if len([]rune(question)) > 500 {
+			return nil, fmt.Errorf("context snapshot research question %d is oversized", index+1)
+		}
+		if seen[question] {
+			return nil, fmt.Errorf("context snapshot research question %d is duplicated", index+1)
 		}
 		seen[question] = true
 		questions = append(questions, question)
