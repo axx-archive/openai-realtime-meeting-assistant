@@ -12314,6 +12314,7 @@
         flex-shrink: 0;
       }
       .chat-deck__download { position: relative; }
+      .chat-deck__download-more { display: none; }
       .chat-deck__download-menu {
         position: absolute;
         right: 0;
@@ -12359,6 +12360,13 @@
         font-weight: 500;
         cursor: pointer;
         transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      /* Capability truth wins over the component display model. Browsers'
+         default [hidden] rule is weaker than these flex/button declarations. */
+      .chat-deck__btn[hidden],
+      .deck-editor__btn[hidden],
+      .deck-editor__popover button[hidden] {
+        display: none;
       }
       .chat-deck__btn:active {
         transform: scale(var(--press-scale));
@@ -12440,6 +12448,57 @@
         background: color-mix(in srgb, var(--ember-500) 8%, var(--surface-1));
         font: var(--type-label);
       }
+	  .scout-authored-result__quality {
+	    display: flex;
+	    align-items: center;
+	    justify-content: space-between;
+	    gap: 14px;
+	    min-height: 52px;
+	    margin-top: 8px;
+	    padding: 10px 12px 10px 14px;
+	    border-radius: var(--r-md);
+	    background: color-mix(in srgb, var(--ember-500) 7%, var(--surface-2));
+	    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--ember-500) 76%, transparent), var(--shadow-1);
+	  }
+	  .scout-chat-document-result > .scout-authored-result__quality {
+	    margin: 0;
+	    border-radius: 0;
+	    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--ember-500) 76%, transparent);
+	  }
+	  .scout-authored-result__quality-copy {
+	    min-width: 0;
+	    color: var(--text-2);
+	    font: var(--type-body-sm);
+	    text-wrap: pretty;
+	  }
+	  .scout-authored-result__quality-copy strong,
+	  .scout-authored-result__quality-copy span { display: block; }
+	  .scout-authored-result__quality-copy strong {
+	    margin-bottom: 2px;
+	    color: var(--text-1);
+	    font: var(--type-label);
+	  }
+	  .scout-authored-result__continue {
+	    display: inline-flex;
+	    min-width: 92px;
+	    min-height: 40px;
+	    flex: none;
+	    align-items: center;
+	    justify-content: center;
+	    padding: 0 15px;
+	    border: 0;
+	    border-radius: var(--r-full);
+	    background: var(--text-1);
+	    color: var(--bg-app);
+	    font: var(--type-body-sm);
+	    cursor: pointer;
+	    transition-property: transform, opacity, background-color;
+	    transition-duration: var(--dur-fast);
+	    transition-timing-function: var(--ease);
+	  }
+	  .scout-authored-result__continue:hover { background: var(--text-2); }
+	  .scout-authored-result__continue:active { transform: scale(.96); }
+	  .scout-authored-result__continue:disabled { cursor: wait; opacity: .62; }
       .scout-chat-document-result {
         width: min(100%, 720px);
         margin: 14px 0 18px;
@@ -12483,7 +12542,7 @@
       }
       .scout-chat-document-result__action {
         display: inline-flex;
-        min-height: 36px;
+        min-height: 40px;
         align-items: center;
         justify-content: center;
         padding: 0 14px;
@@ -12527,12 +12586,82 @@
       }
       @media (max-width: 640px) {
         .chat-deck { min-width: 0; max-width: 100%; }
+        .chat-deck__chrome {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          align-items: end;
+          gap: 7px;
+          padding: 10px 12px 11px;
+        }
+        .chat-deck__title {
+          width: 100%;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          overflow: hidden;
+          white-space: normal;
+          line-height: 1.22;
+          text-wrap: balance;
+        }
+        .chat-deck__actions {
+          width: 100%;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .chat-deck__actions > .chat-deck__btn--secondary { order: 1; }
+        .chat-deck__actions > .chat-deck__btn--primary { order: 2; }
+        .chat-deck__actions > .chat-deck__download { order: 3; }
+        .chat-deck__btn {
+          min-height: 44px;
+          padding-inline: 12px;
+        }
+        .chat-deck__download > .chat-deck__btn {
+          width: 44px;
+          padding: 0;
+          border-radius: var(--r-full);
+        }
+        .chat-deck__download-label { display: none; }
+        .chat-deck__download-more {
+          display: inline;
+          font: 700 15px/1 var(--font-sans);
+          letter-spacing: .08em;
+        }
+        .chat-deck__download-menu button { min-height: 44px; }
+        .chat-deck__nav {
+          top: 8px;
+          right: 8px;
+          min-height: 44px;
+          padding: 0;
+        }
+        .chat-deck__nav button { width: 44px; height: 44px; }
         .scout-chat-deck-result,
         .scout-chat-document-result { width: 100%; }
         .scout-chat-document-result__head { align-items: flex-start; padding: 15px 16px; }
         .scout-chat-document-result__actions { gap: 6px; }
-        .scout-chat-document-result__action { min-width: 56px; padding-inline: 11px; }
+        .scout-chat-document-result__action { min-width: 56px; min-height: 44px; padding-inline: 11px; }
         .scout-chat-document-result__preview.artifact-read { min-height: 190px; max-height: 280px; padding: 18px 16px 48px; }
+	    .scout-chat-document-result__preview .artifact-read__table-wrap { overflow-x: hidden; }
+	    .scout-chat-document-result__preview .artifact-read__table {
+	      width: 100%;
+	      min-width: 0;
+	      table-layout: fixed;
+	      font-size: 11px;
+	    }
+	    .scout-chat-document-result__preview .artifact-read__table th,
+	    .scout-chat-document-result__preview .artifact-read__table td {
+	      padding: 7px 6px;
+	      overflow-wrap: anywhere;
+	      word-break: break-word;
+	    }
+	    .scout-authored-result__quality { align-items: flex-start; flex-direction: column; }
+	    .scout-authored-result__continue { width: 100%; min-height: 44px; }
+      }
+      @media (pointer: coarse) {
+        .chat-deck__btn,
+        .chat-deck__download-menu button,
+        .scout-chat-document-result__action,
+        .scout-authored-result__continue { min-height: 44px; }
+        .chat-deck__nav button { width: 44px; height: 44px; }
       }
 
       /* ---------- Deck Studio ----------
@@ -12584,16 +12713,27 @@
       }
       .deck-editor__mobile-more { display: none; position: relative; }
       .deck-editor__title {
+        min-width: 0;
+        height: 40px;
         margin: 0 12px 0 4px;
+        padding: 0 9px;
+        border: 1px solid transparent;
+        border-radius: var(--r-sm);
+        background: transparent;
         font: var(--type-body);
         font-weight: 600;
         color: var(--text-1);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        overflow: hidden;
-        text-overflow: ellipsis;
         max-width: 240px;
+      }
+      .deck-editor__title:hover { background: var(--surface-2); }
+      .deck-editor__title:focus {
+        outline: none;
+        border-color: var(--accent);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
       }
       .deck-editor__save-state {
         flex: none;
@@ -12612,7 +12752,13 @@
       .deck-editor__save-state[data-state="dirty"] { color: var(--ember-text); border-color: color-mix(in srgb, var(--ember) 38%, var(--line-1)); }
       .deck-editor__save-state[data-state="saving"] { color: var(--accent); }
       .deck-editor__save-state[data-state="error"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--line-1)); }
-      .deck-editor__save-state[data-state="saved"] { color: var(--live); }
+      .deck-editor__save-state[data-state="saved"] {
+        padding-inline: 2px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--text-3);
+      }
+      .deck-editor__save-state[data-state="saved"]::before { content: '✓'; margin-right: 4px; color: var(--live); }
       .deck-editor__divider {
         width: 1px;
         height: 24px;
@@ -13028,6 +13174,20 @@
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.04);
       }
       .deck-editor__prop-section[hidden] { display: none; }
+      .deck-editor__panel [data-element-controls] {
+        overflow: hidden;
+        border-radius: 14px;
+        background: var(--surface-1);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.04);
+      }
+      .deck-editor__panel [data-element-controls] > .deck-editor__prop-section,
+      .deck-editor__panel [data-element-controls] > .deck-editor__advanced {
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .deck-editor__panel [data-element-controls] > :last-child { border-bottom: 0; }
       .deck-editor__prop-label {
         color: var(--text-1);
         font: var(--type-caption-medium);
@@ -13181,6 +13341,28 @@
       .deck-editor__scout-status[data-state="working"] {
         color: var(--accent);
       }
+      .deck-editor__advanced {
+        background: var(--surface-1);
+      }
+      .deck-editor__advanced > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 48px;
+        padding: 0 14px;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+        list-style: none;
+      }
+      .deck-editor__advanced > summary::-webkit-details-marker { display: none; }
+      .deck-editor__advanced > summary::after {
+        content: '+';
+        color: var(--text-3);
+        font: 500 18px/1 var(--font-sans);
+      }
+      .deck-editor__advanced[open] > summary::after { content: '−'; }
+      .deck-editor__advanced > .deck-editor__prop-section { margin: 0; padding-top: 2px; box-shadow: none; }
       .deck-editor__empty {
         position: absolute;
         inset: 0;
@@ -13216,6 +13398,33 @@
         background: var(--surface-3);
         color: var(--text-1);
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 12%, transparent);
+      }
+      .deck-editor__action-label {
+        margin: 2px 0 -2px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .deck-editor__zorder + .deck-editor__action-label { margin-top: 6px; }
+      .deck-editor__zorder--final { margin-top: 4px; }
+      .deck-editor__zorder .deck-editor__danger {
+        color: var(--danger);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
+      }
+      .deck-editor__zorder .deck-editor__danger:hover {
+        background: color-mix(in srgb, var(--danger) 8%, var(--surface-2));
+        color: var(--danger);
+      }
+      .deck-editor__scrim,
+      .document-editor__scrim {
+        position: fixed;
+        border: 0;
+        background: rgba(0, 0, 0, .14);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
       }
       /* Slide color is document state, not app-theme chrome. */
       [data-theme="dark"] .deck-editor__canvas {
@@ -13255,6 +13464,8 @@
       }
       .deck-editor__popover button:hover,
       .deck-editor__popover a:hover { background: var(--surface-2); }
+      .deck-editor [data-action="export-pdf"][data-state="rendering"],
+      .document-editor [data-doc-action="pdf"][data-state="rendering"] { color: var(--accent); }
       .deck-editor__popover small { color: var(--text-3); font: var(--type-caption); }
       .deck-editor__menu-separator {
         height: 1px;
@@ -13368,6 +13579,16 @@
           transition-duration: var(--dur-slow);
           transition-timing-function: var(--ease);
         }
+        .deck-editor__scrim {
+          inset: 0;
+          z-index: 4;
+        }
+        .deck-editor[data-inspector-open="true"] .deck-editor__scrim {
+          opacity: 1;
+          visibility: visible;
+          pointer-events: auto;
+          transition-delay: 0s;
+        }
         .deck-editor[data-inspector-open="true"] .deck-editor__props {
           opacity: 1;
           pointer-events: auto;
@@ -13440,7 +13661,7 @@
       }
       .document-editor__group--right { justify-content: flex-end; }
       .document-editor__mobile-status {
-        display: none;
+        display: inline-flex;
         flex: none;
         min-height: 40px;
         align-items: center;
@@ -13468,7 +13689,8 @@
         text-overflow: ellipsis;
       }
       .document-editor__title:focus { outline: 0; border-color: var(--line-2); background: var(--surface-2); }
-      .document-editor__main { min-height: 0; display: grid; grid-template-columns: 228px minmax(0, 1fr) 260px; }
+      .document-editor__title:hover { border-color: var(--line-1); background: var(--surface-2); }
+      .document-editor__main { min-height: 0; display: grid; grid-template-columns: 228px minmax(0, 1fr); }
       .document-editor__outline,
       .document-editor__inspector {
         min-height: 0;
@@ -13477,7 +13699,40 @@
         background: var(--surface-1);
       }
       .document-editor__outline { border-right: 1px solid var(--line-1); }
-      .document-editor__inspector { border-left: 1px solid var(--line-1); }
+      .document-editor__inspector {
+        position: fixed;
+        top: 70px;
+        right: 12px;
+        bottom: auto;
+        z-index: 9;
+        display: block;
+        width: min(360px, calc(100vw - 24px));
+        max-height: calc(100dvh - 82px);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        box-shadow: var(--shadow-3);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: translateX(24px);
+        transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
+      }
+      .document-editor[data-inspector-open="true"] .document-editor__inspector {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translateX(0);
+        transition-delay: 0s;
+      }
+      .document-editor__scrim {
+        inset: 58px 0 0;
+        z-index: 8;
+      }
+      .document-editor[data-inspector-open="true"] .document-editor__scrim {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
       .document-editor__inspector-head {
         display: flex;
         align-items: center;
@@ -13486,7 +13741,7 @@
         margin-bottom: 11px;
       }
       .document-editor__inspector-head .document-editor__side-label { margin: 0; }
-      .document-editor__inspector-close { display: none; }
+      .document-editor__inspector-close { display: inline-flex; }
       .document-editor__side-label {
         display: block;
         margin: 0 0 11px;
@@ -13775,16 +14030,43 @@
       .document-editor__meta > .deck-editor__btn { margin-top: 2px; }
       .document-editor__status[data-state="error"] { color: var(--danger); }
       .document-editor__status[data-state="saved"] { color: var(--live); }
+      .document-editor__details {
+        margin-top: 14px;
+        border-top: 1px solid var(--line-1);
+      }
+      .document-editor__details > summary {
+        display: flex;
+        min-height: 48px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+        list-style: none;
+      }
+      .document-editor__details > summary::-webkit-details-marker { display: none; }
+      .document-editor__details > summary::after { content: '+'; color: var(--text-3); font: 500 18px/1 var(--font-sans); }
+      .document-editor__details[open] > summary::after { content: '−'; }
       .document-editor__image-tools {
         display: grid;
         gap: 10px;
-        margin-top: 14px;
-        padding: 14px;
-        border-radius: 14px;
-        background: var(--surface-2);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.04);
+        margin-top: 2px;
       }
       .document-editor__image-tools[hidden] { display: none; }
+      .document-editor__table-tools {
+        display: grid;
+        gap: 10px;
+        margin-top: 2px;
+      }
+      .document-editor__table-tools[hidden] { display: none; }
+      .document-editor__table-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .document-editor__table-actions .deck-editor__btn { min-width: 0; }
+      .document-editor__table-actions .document-editor__table-wide { grid-column: 1 / -1; }
+      .document-editor__table-actions .document-editor__table-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 22%, var(--line-1)); }
       .document-editor__field { display: grid; gap: 6px; color: var(--text-3); font: var(--type-label); }
       .document-editor__field input,
       .document-editor__field select {
@@ -13802,6 +14084,25 @@
       .document-editor__image-align .deck-editor__btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
       .document-editor__image-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .document-editor__toolbar [data-doc-action="save-copy"] { white-space: nowrap; }
+      .document-editor__more { position: relative; display: none; }
+      .document-editor__more .deck-editor__popover {
+        top: calc(100% + 6px);
+        right: 0;
+        width: min(250px, calc(100vw - 20px));
+        max-height: min(60vh, 440px);
+        overflow-y: auto;
+      }
+      @media (min-width: 1341px) {
+        .document-editor[data-inspector-open="true"] .document-editor__workspace { padding-right: 384px; }
+      }
+      @media (max-width: 1340px) {
+        .document-editor[data-inspector-open="true"] .document-editor__scrim {
+          opacity: 1;
+          visibility: visible;
+          pointer-events: auto;
+          transition-delay: 0s;
+        }
+      }
       @media (max-width: 1100px) {
         .document-editor__toolbar { grid-template-columns: minmax(0, 1fr) auto; }
         .document-editor__toolbar > .document-editor__group:nth-child(2) {
@@ -13816,32 +14117,7 @@
         .document-editor__toolbar > .document-editor__group:nth-child(2) > * { flex: none; }
         .document-editor { grid-template-rows: auto minmax(0, 1fr); }
         .document-editor__main { grid-template-columns: 160px minmax(0, 1fr); }
-        .document-editor__inspector {
-          position: fixed;
-          top: 12px;
-          right: 12px;
-          bottom: 12px;
-          z-index: 9;
-          display: block;
-          width: min(360px, calc(100vw - 24px));
-          border: 1px solid var(--line-1);
-          border-radius: var(--r-lg);
-          box-shadow: var(--shadow-3);
-          opacity: 0;
-          visibility: hidden;
-          pointer-events: none;
-          transform: translateX(24px);
-          transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
-        }
-        .document-editor[data-inspector-open="true"] .document-editor__inspector {
-          opacity: 1;
-          visibility: visible;
-          pointer-events: auto;
-          transform: translateX(0);
-          transition-delay: 0s;
-        }
-        .document-editor__inspector-close { display: inline-flex; }
-        .document-editor__mobile-status { display: inline-flex; }
+        .document-editor__inspector { top: 12px; max-height: calc(100dvh - 24px); }
       }
       @media (max-width: 768px) {
         .document-editor__outline { display: none; }
@@ -13868,6 +14144,21 @@
         .document-editor__workspace { padding: 16px 10px calc(84px + env(safe-area-inset-bottom)); }
         .document-editor__paper { padding: 34px 24px; }
         .document-editor__rich { min-height: calc(100vh - 260px); font-size: 16px; }
+        .document-editor__toolbar > [role="toolbar"] {
+          flex-wrap: wrap;
+          overflow-x: visible;
+          padding-right: 3px;
+        }
+        .document-editor__secondary-tool { display: none; }
+        .document-editor__more { display: block; }
+        .document-editor__more .deck-editor__popover {
+          position: fixed;
+          top: 150px;
+          right: 10px;
+          left: 10px;
+          width: auto;
+        }
+        .document-editor__block-select { min-width: 108px; }
         .document-editor__inspector {
           top: auto;
           right: 0;
@@ -13881,9 +14172,17 @@
           transform: translateY(calc(100% + 16px));
         }
         .document-editor[data-inspector-open="true"] .document-editor__inspector { transform: translateY(0); }
+        .document-editor .deck-editor__btn,
+        .document-editor .deck-editor__popover button,
+        .document-editor__block-select,
+        .document-editor__mobile-status,
+        .document-editor__title,
+        .document-editor__field input,
+        .document-editor__field select { min-height: 44px; }
       }
       @media (pointer: coarse) {
         .document-editor .deck-editor__btn,
+        .document-editor .deck-editor__popover button,
         .document-editor__block-select,
         .document-editor__mobile-status,
         .document-editor__title,
@@ -13893,7 +14192,9 @@
       }
       @media (prefers-reduced-motion: reduce) {
         .document-editor__paper { animation: none; }
-        .document-editor__inspector { transition: none; }
+        .document-editor__inspector,
+        .document-editor__scrim,
+        .deck-editor__scrim { transition: none; }
       }
 
       .deck-presenter {
@@ -17632,24 +17933,53 @@
       #chatTool .scout-chat-work-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
       #chatTool .scout-chat-work-card--presentation {
-        border-radius: var(--r-full);
+        border-radius: 18px;
         padding-block: 9px;
         box-shadow: none;
       }
 
-      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__title,
-      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project {
-        display: none;
-      }
-
       #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__copy {
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: center;
-        column-gap: 10px;
+        gap: 3px;
       }
 
       #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__eyebrow {
         color: var(--text-1);
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__context {
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        overflow: hidden;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__title {
+        display: block;
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project {
+        min-width: 0;
+        max-width: 42%;
+        display: block;
+        flex: 0 1 auto;
+        overflow: hidden;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-3);
+        font: var(--type-label);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project::before {
+        content: '· ';
       }
 
       #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__meta {
@@ -18028,6 +18358,37 @@
 	        #chatTool .scout-chat-work-card__meta { text-wrap: pretty; }
 	        #chatTool .scout-chat-work-card__progress { width: min(220px, 72%); }
 	        #chatTool .scout-chat-work-card__open { grid-column: 2; justify-self: start; }
+	        #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__copy { gap: 3px; }
+	        #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__context {
+	          min-width: 0;
+	          display: flex;
+	          align-items: baseline;
+	          gap: 7px;
+	          overflow: hidden;
+	        }
+	        #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__title {
+	          display: block;
+	          min-width: 0;
+	          flex: 1 1 auto;
+	          overflow: hidden;
+	          text-overflow: ellipsis;
+	          white-space: nowrap;
+	        }
+	        #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project {
+	          min-width: 0;
+	          max-width: 42%;
+	          display: block;
+	          flex: 0 1 auto;
+	          overflow: hidden;
+	          padding: 0;
+	          border-radius: 0;
+	          background: transparent;
+	          color: var(--text-3);
+	          font: var(--type-label);
+	          text-overflow: ellipsis;
+	          white-space: nowrap;
+	        }
+	        #chatTool .scout-chat-work-card--presentation .scout-chat-work-card__project::before { content: '· '; }
 	        #chatTool .scout-chat-work-card__checkpoint { padding: 12px; }
 	        #chatTool .scout-chat-work-card__checkpoint-choices { display: grid; grid-template-columns: 1fr; }
 	        #chatTool .scout-chat-work-card__checkpoint-choice { width: 100%; }
@@ -31579,6 +31940,10 @@
         color: var(--text-3);
         cursor: progress;
       }
+      .artifact-stage__pdf-btn[data-state="rendering"][data-pdf-pending="true"] {
+        color: var(--accent);
+        cursor: pointer;
+      }
 
       /* ---------- the research report reader (founder pass 2026-07-07) ----------
          A research deliverable reads as a designed brief: kicker/display hero
@@ -33476,6 +33841,7 @@
           display: grid;
         }
       }
+
     </style>
   </head>
   <body>
@@ -43986,7 +44352,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           id: 'ground', label: 'Ground the recommendation',
           stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence'],
           working: 'Scout is verifying the proof points that can change the recommendation.',
-          complete: 'The recommendation is grounded in verified company context and evidence.',
+		  complete: 'The recommendation is grounded in available company context and admitted evidence.',
           recovering: 'Scout is recovering from an evidence check before the story moves forward.'
         },
         {
@@ -44685,7 +45051,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           body.classList.remove('artifact-stage__body--deck-hero')
           body.classList.add('artifact-stage__body--deck')
           body.replaceChildren()
-          renderArtifactDeck(body, deckEntry, { surface: 'stage', presentSlot: opts.headActions, autoPresent: true })
+		  renderArtifactDeck(body, deckEntry, {
+			surface: 'stage', presentSlot: opts.headActions, autoPresent: opts.canPresent === true,
+			qualityState: opts.qualityState, canEdit: opts.canEdit, canPresent: opts.canPresent, canExport: opts.canExport
+		  })
         }
 
         if (ctx.autoPresent) presentDeck()
@@ -44694,6 +45063,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       async function openArtifactStage(artifactId, fallbackTitle, options) {
         const id = String(artifactId || '').trim()
 		if (!id) return false
+		const stageQualityState = String(options?.qualityState || '').trim()
+		const stageCanExport = options?.canExport !== false && (!stageQualityState || stageQualityState === 'admitted')
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
         if (!entry && canUseArtifactLibrary()) {
           entry = await fetchArtifactEntryById(id)
@@ -44741,7 +45112,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const headings = bfEl('div', 'artifact-stage__headings')
         // DD-2: kind + state from ONE source — the deck hero speaks "deck ·
         // passed", never a kicker/body contradiction
-        headings.appendChild(bfEl('span', 'artifact-stage__kicker', deckContext ? deckHeroKicker(deckContext) : artifactStageKicker(entry)))
+		const stageKicker = stageQualityState === 'draft_needs_attention'
+		  ? `${deckContext || artifactIsHTMLDeck(entry) ? 'presentation' : 'document'} · draft needs attention`
+		  : stageQualityState === 'edited_after_admission'
+			? `${deckContext || artifactIsHTMLDeck(entry) ? 'presentation' : 'document'} · edited draft`
+			: deckContext ? deckHeroKicker(deckContext) : artifactStageKicker(entry)
+		headings.appendChild(bfEl('span', 'artifact-stage__kicker', stageKicker))
         const title = document.createElement('h2')
         title.className = 'artifact-stage__title'
         title.textContent = stageTitle
@@ -44778,13 +45154,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // a queued/running/error scaffold never does.
         const stagePdfStatus = artifactStatusValue(entry)
         if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim()
-            && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
+			&& stageCanExport && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
           const pdfControl = artifactPdfControl(entry, {
             onLanded: (fresh) => {
               // the assets block lives inside the read pane — re-render it so
               // the new PDF shows without reopening the stage
               const readPane = panel.querySelector('.artifact-stage__read')
-              if (readPane) renderArtifactRead(readPane, fresh)
+			  if (readPane) renderArtifactRead(readPane, fresh, { allowFinalExport: stageCanExport })
             }
           })
           if (pdfControl) headActions.appendChild(pdfControl)
@@ -44796,15 +45172,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim() && options?.canEdit !== false && options?.hideEdit !== true) {
 	          const editDocument = bfEl('button', 'artifact-stage__pdf-btn', 'Edit document')
 	          editDocument.type = 'button'
-	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry }))
+	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry, qualityState: stageQualityState, canExport: stageCanExport }))
 	          headActions.appendChild(editDocument)
 	        }
         const currentPdfAsset = artifactNewestPdfAsset(entry)
-        const pdfAssets = currentPdfAsset ? [currentPdfAsset] : []
+		const pdfAssets = stageCanExport && currentPdfAsset ? [currentPdfAsset] : []
         if (deckContext) {
           // DD-1: lead with the deck cover; present swaps in the sandboxed deck
           // iframe below, and the run-log demotes to a "run details" disclosure
-          renderArtifactStageDeckHero(body, deckContext, { headActions })
+		  renderArtifactStageDeckHero(body, deckContext, {
+			headActions, qualityState: stageQualityState, canEdit: options?.canEdit,
+			canPresent: options?.canPresent, canExport: stageCanExport
+		  })
         } else if (stageActivity) {
           body.classList.add('artifact-stage__body--activity')
           body.appendChild(artifactStageActivityNode(entry, stageActivity))
@@ -44814,7 +45193,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // top-level open of the render URL — the iframe sandbox IS the
           // security model)
           body.classList.add('artifact-stage__body--deck')
-          renderArtifactDeck(body, entry, { surface: 'stage', presentSlot: headActions, autoPresent: Boolean(options?.present) })
+		  renderArtifactDeck(body, entry, {
+			surface: 'stage', presentSlot: headActions,
+			autoPresent: Boolean(options?.present) && options?.canPresent !== false,
+			qualityState: stageQualityState, canEdit: options?.canEdit,
+			canPresent: options?.canPresent, canExport: stageCanExport
+		  })
         } else if (pdfAssets.length && !String(entry.text || '').trim()) {
           // the payload IS the pdf: embed the newest, list every asset
           body.classList.add('artifact-stage__body--read')
@@ -44825,14 +45209,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           embed.src = artifactBlobUrl(newest)
           embed.className = 'artifact-stage__pdf'
           read.appendChild(embed)
-          renderArtifactAssets(read, entry)
+		  renderArtifactAssets(read, entry, { allowFinalExport: stageCanExport })
           body.appendChild(read)
         } else {
           // markdown / plain text: the injection-safe renderer on a 68ch
           // measure (assets, pdf previews included, ride along)
           body.classList.add('artifact-stage__body--read')
           const read = bfEl('div', 'artifact-stage__read')
-          renderArtifactRead(read, entry)
+		  renderArtifactRead(read, entry, { allowFinalExport: stageCanExport })
           body.appendChild(read)
         }
 
@@ -46893,6 +47277,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         if (activeDocumentEditor) closeDocumentStudio()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+		const documentQualityState = String(payload?.qualityState || options?.qualityState || '').trim()
+		const hasDocumentExportCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canExport') || Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
+		const initialDocumentCanExport = hasDocumentExportCapability
+		  ? payload?.canExport === true && options?.canExport !== false
+		  : true
 
         const state = {
           artifactId,
@@ -46903,7 +47292,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           bodyDirty: false,
           saving: false,
           sourceMode: false,
-          savedToFiles: payload?.artifact?.savedToFiles === true
+		  savedToFiles: payload?.artifact?.savedToFiles === true,
+		  qualityState: documentQualityState,
+		  managedAuthoredResult: Boolean(documentQualityState),
+		  savedCanExport: initialDocumentCanExport,
+		  canExport: initialDocumentCanExport
         }
         const editor = document.createElement('section')
         editor.className = 'document-editor'
@@ -46915,7 +47308,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="document-editor__group">
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="close" aria-label="Close Document Studio">×</button>
               <input class="document-editor__title" data-doc-title maxlength="160" aria-label="Document name">
-              <button type="button" class="document-editor__mobile-status" data-doc-mobile-status data-doc-action="status" aria-label="Open document status" aria-controls="document-studio-inspector" aria-expanded="false" aria-live="polite" aria-atomic="true" data-state="saved">Saved</button>
+              <button type="button" class="document-editor__mobile-status" data-doc-mobile-status data-doc-action="status" aria-label="Open document details" aria-controls="document-studio-inspector" aria-expanded="false" aria-live="polite" aria-atomic="true" data-state="saved">Saved</button>
             </div>
             <div class="document-editor__group" role="toolbar" aria-label="Document formatting. Scroll horizontally for more tools.">
               <button type="button" class="deck-editor__btn" data-doc-action="undo" disabled>Undo</button>
@@ -46926,15 +47319,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn" data-doc-action="italic" aria-pressed="false" aria-label="Italic"><em>I</em></button>
               <button type="button" class="deck-editor__btn" data-doc-action="bullet" aria-pressed="false" aria-label="Bullets">• List</button>
               <button type="button" class="deck-editor__btn" data-doc-action="ordered" aria-pressed="false" aria-label="Numbered">1. List</button>
-              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="outdent" aria-label="Decrease list indent" title="Decrease list indent">⇤</button>
-              <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="indent" aria-label="Increase list indent" title="Increase list indent">⇥</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="link">Link</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="image" aria-label="Upload image">Image</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="image-url" aria-label="Image URL">URL</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="table">Table</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="divider" aria-label="Divider">Rule</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="find">Find</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="source" aria-pressed="false">Source</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__secondary-tool" data-doc-action="outdent" aria-label="Decrease list indent" title="Decrease list indent">⇤</button>
+              <button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__secondary-tool" data-doc-action="indent" aria-label="Increase list indent" title="Increase list indent">⇥</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="link">Link</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="image" aria-label="Upload image">Image</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="image-url" aria-label="Image URL">URL</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="table">Table</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="divider" aria-label="Divider">Rule</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="find">Find</button>
+              <button type="button" class="deck-editor__btn document-editor__secondary-tool" data-doc-action="source" aria-pressed="false">Source</button>
+              <div class="document-editor__more">
+                <button type="button" class="deck-editor__btn" data-doc-action="more" aria-haspopup="menu" aria-expanded="false" aria-controls="document-more-tools">More</button>
+                <div class="deck-editor__popover" id="document-more-tools" data-doc-more-menu role="menu" aria-label="More document tools" hidden>
+                  <button type="button" role="menuitem" data-doc-action="outdent">Decrease list indent</button>
+                  <button type="button" role="menuitem" data-doc-action="indent">Increase list indent</button>
+                  <button type="button" role="menuitem" data-doc-action="link">Link</button>
+                  <button type="button" role="menuitem" data-doc-action="image">Upload image</button>
+                  <button type="button" role="menuitem" data-doc-action="image-url">Image URL</button>
+                  <button type="button" role="menuitem" data-doc-action="table">Table</button>
+                  <button type="button" role="menuitem" data-doc-action="divider">Divider</button>
+                  <button type="button" role="menuitem" data-doc-action="find">Find and replace</button>
+                  <button type="button" role="menuitem" data-doc-action="source" aria-pressed="false">Source</button>
+                </div>
+              </div>
             </div>
             <div class="document-editor__group document-editor__group--right" aria-label="Document actions">
               <button type="button" class="deck-editor__btn" data-doc-action="pdf">PDF</button>
@@ -46945,11 +47352,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           <div class="document-editor__main">
             <aside class="document-editor__outline"><span class="document-editor__side-label">Outline</span><nav class="document-editor__outline-list" data-doc-outline></nav></aside>
             <main class="document-editor__workspace"><article class="document-editor__paper"><div class="document-editor__rich" data-doc-rich contenteditable="true" role="textbox" aria-multiline="true" aria-label="Document body" spellcheck="true"></div><textarea class="document-editor__source" data-doc-source spellcheck="false" aria-label="Markdown source" hidden></textarea></article></main>
-            <aside class="document-editor__inspector" id="document-studio-inspector" aria-label="Document status and revision">
-              <div class="document-editor__inspector-head"><span class="document-editor__side-label">Document</span><button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__inspector-close" data-doc-action="close-status" aria-label="Close document status">×</button></div>
-              <div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>If it changes elsewhere, we’ll ask before replacing it.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">Changes are local until saved.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div>
+            <button type="button" class="document-editor__scrim" data-doc-action="close-status" tabindex="-1" aria-hidden="true" aria-label="Close document inspector"></button>
+            <aside class="document-editor__inspector" id="document-studio-inspector" aria-label="Document inspector">
+              <div class="document-editor__inspector-head"><span class="document-editor__side-label" data-doc-inspector-title>Document details</span><button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__inspector-close" data-doc-action="close-status" aria-label="Close document inspector">×</button></div>
               <section class="document-editor__image-tools" data-doc-image-tools hidden aria-label="Selected image">
-                <span class="document-editor__side-label">Image</span>
                 <label class="document-editor__field">Description<input type="text" maxlength="500" data-doc-image-alt aria-label="Image description"></label>
                 <label class="document-editor__field">Caption<input type="text" maxlength="500" data-doc-image-caption aria-label="Image caption"></label>
                 <label class="document-editor__field">Width<select data-doc-image-width aria-label="Image width"><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Full width</option></select></label>
@@ -46957,6 +47363,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 <div class="document-editor__image-actions"><button type="button" class="deck-editor__btn" data-doc-action="replace-image">Replace</button><button type="button" class="deck-editor__btn" data-doc-action="remove-image">Remove</button></div>
                 <button type="button" class="deck-editor__btn" data-doc-action="image-url">Use image URL</button>
               </section>
+              <section class="document-editor__table-tools" data-doc-table-tools hidden aria-label="Selected table">
+                <div class="document-editor__table-actions">
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-row-above">Row above</button>
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-row-below">Row below</button>
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-column-before">Column before</button>
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-column-after">Column after</button>
+                  <button type="button" class="deck-editor__btn document-editor__table-wide" data-doc-action="table-toggle-header">Toggle header row</button>
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-delete-row">Delete row</button>
+                  <button type="button" class="deck-editor__btn" data-doc-action="table-delete-column">Delete column</button>
+                  <button type="button" class="deck-editor__btn document-editor__table-wide document-editor__table-danger" data-doc-action="table-delete">Delete table</button>
+                </div>
+              </section>
+              <details class="document-editor__details" data-doc-details open>
+                <summary>Document details</summary>
+                <div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>If it changes elsewhere, we’ll ask before replacing it.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">Changes are local until saved.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div>
+              </details>
             </aside>
           </div>`
         const source = editor.querySelector('[data-doc-source]')
@@ -46968,10 +47390,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const copyButton = editor.querySelector('[data-doc-action="save-copy"]')
         const inspectorPanel = editor.querySelector('.document-editor__inspector')
         const inspectorTrigger = editor.querySelector('[data-doc-mobile-status]')
+        const documentDetails = editor.querySelector('[data-doc-details]')
+        const documentInspectorTitle = editor.querySelector('[data-doc-inspector-title]')
+        const documentTableTools = editor.querySelector('[data-doc-table-tools]')
+        const documentMoreMenu = editor.querySelector('[data-doc-more-menu]')
+        const documentMoreButton = editor.querySelector('[data-doc-action="more"]')
+		const documentPDFButton = editor.querySelector('[data-doc-action="pdf"]')
         const responsiveDocumentMedia = matchMedia('(max-width: 1100px)')
         source.value = state.markdown
         markdownIntoDocumentEditor(rich, state.markdown)
         titleInput.value = state.title
+
+		function updateDocumentPublicationControls() {
+		  if (!documentPDFButton) return
+		  documentPDFButton.hidden = state.canExport !== true
+		  documentPDFButton.disabled = state.canExport !== true
+		  documentPDFButton.title = state.canExport === true ? 'Download final PDF' : 'Final PDF becomes available after this exact revision passes review.'
+		}
+		updateDocumentPublicationControls()
 
         const documentHistory = {
           past: [],
@@ -47031,28 +47467,44 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         function setDocumentInspectorOpen(open, focusInspector = false) {
-          const responsive = responsiveDocumentMedia.matches
-          const expanded = responsive && Boolean(open)
+          const expanded = Boolean(open)
           editor.dataset.inspectorOpen = String(expanded)
           inspectorTrigger?.setAttribute('aria-expanded', String(expanded))
-          inspectorPanel.inert = responsive && !expanded
-          if (responsive && !expanded) inspectorPanel.setAttribute('aria-hidden', 'true')
+          inspectorPanel.inert = !expanded
+          if (!expanded) inspectorPanel.setAttribute('aria-hidden', 'true')
           else inspectorPanel.removeAttribute('aria-hidden')
           if (focusInspector && expanded) requestAnimationFrame(() => editor.querySelector('[data-doc-action="close-status"]')?.focus())
         }
         function syncResponsiveDocumentStudio() {
-          if (!responsiveDocumentMedia.matches) setDocumentInspectorOpen(false)
-          else setDocumentInspectorOpen(editor.dataset.inspectorOpen === 'true')
+          setDocumentInspectorOpen(editor.dataset.inspectorOpen === 'true')
+        }
+        function setDocumentMoreOpen(open, focusMenu = false) {
+          if (!documentMoreMenu || !documentMoreButton) return
+          documentMoreMenu.hidden = !open
+          documentMoreButton.setAttribute('aria-expanded', String(open))
+          if (open && focusMenu) requestAnimationFrame(() => documentMoreMenu.querySelector('[role="menuitem"]')?.focus())
         }
         function setStatus(text, tone = '') {
           status.textContent = text
           status.dataset.state = tone
           const compactStatus = editor.querySelector('[data-doc-mobile-status]')
           if (compactStatus) {
-            compactStatus.textContent = tone === 'saved' ? 'Saved' : tone === 'error' ? 'Needs attention' : text === 'Unsaved changes' ? 'Unsaved' : text
+            compactStatus.textContent = tone === 'saved'
+              ? 'Saved'
+              : tone === 'error'
+                ? 'Needs attention'
+                : text === 'Unsaved changes'
+                  ? 'Unsaved'
+                  : text.startsWith('PDF rendering')
+                    ? 'PDF running'
+                    : text
             compactStatus.dataset.state = tone
+            compactStatus.setAttribute('aria-busy', String(text.startsWith('PDF rendering')))
           }
-          if (tone === 'error' && responsiveDocumentMedia.matches) setDocumentInspectorOpen(true)
+          if (tone === 'error') {
+            if (documentDetails) documentDetails.open = true
+            setDocumentInspectorOpen(true)
+          }
         }
         function currentDocumentMarkdown() {
           if (state.sourceMode) return source.value
@@ -47098,9 +47550,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           source.hidden = !state.sourceMode
           rich.hidden = state.sourceMode
-          const toggle = editor.querySelector('[data-doc-action="source"]')
-          toggle.setAttribute('aria-pressed', String(state.sourceMode))
-          toggle.textContent = state.sourceMode ? 'Visual' : 'Source'
+          editor.querySelectorAll('[data-doc-action="source"]').forEach(toggle => {
+            toggle.setAttribute('aria-pressed', String(state.sourceMode))
+            toggle.textContent = state.sourceMode ? 'Visual' : 'Source'
+          })
           editor.querySelector('[data-doc-block]').disabled = state.sourceMode
           editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="outdent"],[data-doc-action="indent"],[data-doc-action="link"],[data-doc-action="image"],[data-doc-action="image-url"],[data-doc-action="replace-image"],[data-doc-action="remove-image"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
           if (state.sourceMode) selectDocumentImage(null)
@@ -47112,6 +47565,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         function refreshDocumentMutationState(snapshot = documentSnapshot()) {
           state.dirty = !documentSnapshotMatchesSaved(snapshot)
           state.bodyDirty = snapshot.markdown !== state.markdown
+		  state.canExport = state.managedAuthoredResult && state.dirty ? false : state.savedCanExport
+		  updateDocumentPublicationControls()
           if (!state.sourceMode) source.value = snapshot.markdown
           setStatus(state.dirty ? 'Unsaved changes' : 'Saved', state.dirty ? '' : 'saved')
           updateDocumentChrome()
@@ -47262,11 +47717,110 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const image = anchor?.closest?.('img') || (anchor?.tagName === 'IMG' ? anchor : null)
           return image && rich.contains(image) ? image : null
         }
+        function selectedDocumentTableCell() {
+          const selection = window.getSelection()
+          const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement
+          const cell = anchor?.closest?.('td,th')
+          return cell && rich.contains(cell) ? cell : null
+        }
+        function focusDocumentTableCell(cell) {
+          if (!cell?.isConnected || !rich.contains(cell)) return
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          range.collapse(false)
+          const selection = window.getSelection()
+          selection.removeAllRanges()
+          selection.addRange(range)
+          rich.focus()
+        }
+        function mutateSelectedDocumentTable(action) {
+          const cell = selectedDocumentTableCell()
+          const row = cell?.closest('tr')
+          const table = row?.closest('table')
+          if (!cell || !row || !table) return false
+          const rows = Array.from(table.rows)
+          const rowIndex = rows.indexOf(row)
+          const cellIndex = Array.from(row.cells).indexOf(cell)
+          if (rowIndex < 0 || cellIndex < 0) return false
+          let focusCell = cell
+          const changed = commitDocumentMutation(() => {
+            if (action === 'row-above' || action === 'row-below') {
+              const reference = action === 'row-above' ? row : row.nextSibling
+              const nextRow = document.createElement('tr')
+              const count = Math.max(1, row.cells.length)
+              const header = action === 'row-above' && rowIndex === 0 && Array.from(row.cells).every(item => item.tagName === 'TH')
+              for (let index = 0; index < count; index++) {
+                const nextCell = document.createElement(header ? 'th' : 'td')
+                nextCell.textContent = header ? `Column ${index + 1}` : 'Cell'
+                nextRow.appendChild(nextCell)
+              }
+              row.parentElement.insertBefore(nextRow, reference)
+              focusCell = nextRow.cells[Math.min(cellIndex, nextRow.cells.length - 1)]
+            } else if (action === 'column-before' || action === 'column-after') {
+              const targetIndex = cellIndex + (action === 'column-after' ? 1 : 0)
+              for (const tableRow of Array.from(table.rows)) {
+                const reference = tableRow.cells[targetIndex] || null
+                const tag = Array.from(tableRow.cells).every(item => item.tagName === 'TH') ? 'th' : 'td'
+                const nextCell = document.createElement(tag)
+                nextCell.textContent = tag === 'th' ? `Column ${targetIndex + 1}` : 'Cell'
+                tableRow.insertBefore(nextCell, reference)
+                if (tableRow === row) focusCell = nextCell
+              }
+            } else if (action === 'toggle-header') {
+              const firstRow = table.rows[0]
+              const makeHeader = !Array.from(firstRow.cells).every(item => item.tagName === 'TH')
+              Array.from(firstRow.cells).forEach((item, index) => {
+                const replacement = document.createElement(makeHeader ? 'th' : 'td')
+                replacement.innerHTML = item.innerHTML
+                item.replaceWith(replacement)
+                if (rowIndex === 0 && index === cellIndex) focusCell = replacement
+              })
+            } else if (action === 'delete-row') {
+              if (table.rows.length <= 1) {
+                const trailing = table.nextElementSibling || table.previousElementSibling
+                table.remove()
+                focusCell = null
+                trailing?.scrollIntoView?.({ block: 'nearest' })
+              } else {
+                const targetRow = rows[Math.min(rowIndex + 1, rows.length - 1)] === row ? rows[Math.max(0, rowIndex - 1)] : rows[Math.min(rowIndex + 1, rows.length - 1)]
+                row.remove()
+                focusCell = targetRow?.cells[Math.min(cellIndex, targetRow.cells.length - 1)] || null
+              }
+            } else if (action === 'delete-column') {
+              if (row.cells.length <= 1) {
+                table.remove()
+                focusCell = null
+              } else {
+                for (const tableRow of Array.from(table.rows)) tableRow.deleteCell(Math.min(cellIndex, tableRow.cells.length - 1))
+                const freshRow = table.rows[Math.min(rowIndex, table.rows.length - 1)]
+                focusCell = freshRow?.cells[Math.min(cellIndex, freshRow.cells.length - 1)] || null
+              }
+            } else if (action === 'delete-table') {
+              table.remove()
+              focusCell = null
+            }
+          })
+          if (!changed) return false
+          if (focusCell) focusDocumentTableCell(focusCell)
+          else {
+            selectDocumentImage(null)
+            if (documentDetails) documentDetails.open = true
+          }
+          syncDocumentImageTools()
+          return true
+        }
         function syncDocumentImageTools() {
           const image = selectedDocumentImage()
+          const tableCell = !image && !state.sourceMode ? selectedDocumentTableCell() : null
           imageTools.hidden = !image || state.sourceMode
+          documentTableTools.hidden = !tableCell || state.sourceMode
+          if (documentInspectorTitle) documentInspectorTitle.textContent = image && !state.sourceMode ? 'Image' : tableCell ? 'Table' : 'Document details'
           rich.querySelectorAll('[data-doc-image-block]').forEach(block => { block.dataset.selected = String(Boolean(image && block.contains(image))) })
-          if (!image || state.sourceMode) return
+          if ((!image && !tableCell) || state.sourceMode) {
+            if (editor.dataset.inspectorOpen === 'true' && documentDetails) documentDetails.open = true
+            return
+          }
+          if (tableCell) return
           syncDocumentImageRuntimeState(image, image.closest('[data-doc-image-block]')?.dataset.imageState)
           const presentation = documentImagePresentation(image.getAttribute('src'))
           editor.querySelector('[data-doc-image-alt]').value = image.getAttribute('alt') || ''
@@ -47277,7 +47831,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         function selectDocumentImage(image, openInspector = false) {
           selectedDocumentImageElement = image && rich.contains(image) ? image : null
           syncDocumentImageTools()
-          if (selectedDocumentImageElement && openInspector && responsiveDocumentMedia.matches) setDocumentInspectorOpen(true)
+          if (selectedDocumentImageElement && openInspector) {
+            if (documentDetails) documentDetails.open = false
+            setDocumentInspectorOpen(true)
+          }
         }
         function currentDocumentInsertionRange() {
           const selection = window.getSelection()
@@ -47416,6 +47973,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           for (const [action, command] of [['bold', 'bold'], ['italic', 'italic'], ['bullet', 'insertUnorderedList'], ['ordered', 'insertOrderedList']]) {
             editor.querySelector(`[data-doc-action="${action}"]`)?.setAttribute('aria-pressed', String(document.queryCommandState(command)))
           }
+          syncDocumentImageTools()
           const selection = window.getSelection()
           const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement
           if (!anchor || !rich.contains(anchor)) return
@@ -47452,6 +48010,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.version = Number(result?.artifact?.version || state.version + 1)
             state.markdown = String(result.document.markdown || '')
             state.title = String(result?.artifact?.title || titleInput.value)
+			state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
+			state.managedAuthoredResult = Boolean(state.qualityState)
+			if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) {
+			  state.savedCanExport = result.canExport === true
+			  state.canExport = state.savedCanExport
+			}
             state.dirty = false
             state.bodyDirty = false
             titleInput.value = state.title
@@ -47465,6 +48029,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             addArtifactEntry(entry, { select: false })
             updateDocumentChrome()
+			updateDocumentPublicationControls()
             updateDocumentHistoryControls()
             if (filingError) {
               setStatus('Document saved. Adding it to Files failed; Save will retry the filing step.', 'error')
@@ -47535,6 +48100,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.version = Number(result.artifact.version || state.version)
           state.markdown = String(result.document.markdown || '')
           state.title = String(result.artifact.title || state.title)
+		  state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
+		  state.managedAuthoredResult = Boolean(state.qualityState)
+		  if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) {
+			state.savedCanExport = result.canExport === true
+			state.canExport = state.savedCanExport
+		  }
           source.value = state.markdown
           markdownIntoDocumentEditor(rich, state.markdown)
           titleInput.value = state.title
@@ -47546,22 +48117,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
           documentHistory.future = []
           documentHistory.lastObserved = documentSnapshot()
           updateDocumentHistoryControls()
+		  updateDocumentPublicationControls()
           setStatus('Current version loaded', 'saved')
         }
         async function exportDocumentPDF(button) {
+		  if (state.canExport !== true) {
+			showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
+			return
+		  }
           if (state.dirty && !(await saveDocument(false))) return
           const label = button.textContent
-          button.disabled = true
-          button.textContent = 'Rendering…'
-          try {
-            const response = await fetch('/artifacts/export-pdf', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
-            })
-            const result = await response.json().catch(() => ({}))
-            if (!response.ok) throw new Error(result?.error || 'PDF export failed')
-            const landed = await waitForArtifactPdfAsset(state.artifactId)
-            if (!landed?.pdf) throw new Error('PDF is still rendering and will remain attached to this document when ready.')
+          let waiting = false
+          const downloadLandedPDF = (landed) => {
             state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
             const fileName = studioDownloadFileName(landed.pdf.name || state.title, 'report', 'pdf')
             const href = artifactBlobUrl({ ...landed.pdf, name: fileName })
@@ -47572,14 +48139,56 @@ Wrap the entire export in one code block. After the code block, say whether the 
               document.body.appendChild(link); link.click(); link.remove()
               showToast({ text: 'PDF downloaded', kind: 'done' })
             }
+            setStatus('PDF ready', 'saved')
+          }
+          button.disabled = true
+          button.dataset.state = 'rendering'
+          button.setAttribute('aria-busy', 'true')
+          button.textContent = button.dataset.pdfPending === 'true' ? 'Checking…' : 'Rendering…'
+          try {
+            let landed = await currentArtifactPdfAsset(state.artifactId)
+            if (!landed?.pdf) {
+              const response = await fetch('/artifacts/export-pdf', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
+              })
+              const result = await response.json().catch(() => ({}))
+              if (!response.ok) throw new Error(result?.error || 'PDF export failed')
+              landed = await waitForArtifactPdfAsset(state.artifactId)
+            }
+            if (!landed?.pdf) {
+              waiting = true
+              button.dataset.pdfPending = 'true'
+              button.textContent = 'Rendering · check'
+              button.title = 'PDF rendering continues. Choose again to check progress.'
+              setStatus('PDF rendering continues in the background')
+              showToast({ text: 'PDF is still rendering. Choose PDF again to check progress.', kind: 'note' })
+              return
+            }
+            delete button.dataset.pdfPending
+            downloadLandedPDF(landed)
           } catch (error) {
-            showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+            const landed = await currentArtifactPdfAsset(state.artifactId).catch(() => null)
+            if (landed?.pdf) {
+              delete button.dataset.pdfPending
+              downloadLandedPDF(landed)
+            } else {
+              delete button.dataset.pdfPending
+              setStatus(error?.message || 'PDF export failed', 'error')
+              showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+            }
           } finally {
             button.disabled = false
-            button.textContent = label
+            if (!waiting) {
+              delete button.dataset.state
+              button.removeAttribute('aria-busy')
+              button.textContent = label
+              button.title = ''
+            }
           }
         }
         editor.addEventListener('click', event => {
+          if (!event.target.closest('.document-editor__more')) setDocumentMoreOpen(false)
           const alignment = event.target.closest('[data-doc-image-align]')?.dataset.docImageAlign
           if (alignment) {
             updateDocumentImagePresentation({ align: alignment })
@@ -47587,14 +48196,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           const action = event.target.closest('[data-doc-action]')?.dataset.docAction
           if (!action) return
+          if (action !== 'more' && event.target.closest('[data-doc-more-menu]')) setDocumentMoreOpen(false)
           if (action === 'close') requestDocumentClose()
-          else if (action === 'status') setDocumentInspectorOpen(editor.dataset.inspectorOpen !== 'true', true)
+          else if (action === 'more') setDocumentMoreOpen(documentMoreMenu?.hidden !== false, true)
+          else if (action === 'status') {
+            if (documentDetails) documentDetails.open = true
+            setDocumentInspectorOpen(editor.dataset.inspectorOpen !== 'true', true)
+          }
           else if (action === 'close-status') { setDocumentInspectorOpen(false); inspectorTrigger?.focus() }
           else if (action === 'save') saveDocument(false)
           else if (action === 'save-copy') saveCopy()
           else if (action === 'reload') reloadDocument()
           else if (action === 'pdf') exportDocumentPDF(event.target.closest('[data-doc-action="pdf"]'))
-          else if (action === 'source') { finishDocumentTypingBatch(); state.sourceMode = !state.sourceMode; syncMode() }
+          else if (action === 'source') { setDocumentMoreOpen(false); finishDocumentTypingBatch(); state.sourceMode = !state.sourceMode; syncMode() }
           else if (action === 'undo' || action === 'redo') applyDocumentHistory(action)
           else if (action === 'bold') runRichCommand('bold')
           else if (action === 'italic') runRichCommand('italic')
@@ -47617,7 +48231,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
           }
           else if (action === 'find') findAndReplaceDocumentText()
-          else if (action === 'table') runRichCommand('insertHTML', '<table><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr></table><p><br></p>')
+          else if (action === 'table') {
+            if (selectedDocumentTableCell()) {
+              syncDocumentImageTools()
+              if (documentDetails) documentDetails.open = false
+              setDocumentInspectorOpen(true, true)
+            } else {
+              runRichCommand('insertHTML', '<table><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr></table><p><br></p>')
+            }
+          }
+          else if (action === 'table-row-above') mutateSelectedDocumentTable('row-above')
+          else if (action === 'table-row-below') mutateSelectedDocumentTable('row-below')
+          else if (action === 'table-column-before') mutateSelectedDocumentTable('column-before')
+          else if (action === 'table-column-after') mutateSelectedDocumentTable('column-after')
+          else if (action === 'table-toggle-header') mutateSelectedDocumentTable('toggle-header')
+          else if (action === 'table-delete-row') mutateSelectedDocumentTable('delete-row')
+          else if (action === 'table-delete-column') mutateSelectedDocumentTable('delete-column')
+          else if (action === 'table-delete') mutateSelectedDocumentTable('delete-table')
           else if (action === 'divider') runRichCommand('insertHorizontalRule')
         })
         editor.querySelector('[data-doc-block]').addEventListener('change', event => runRichCommand('formatBlock', event.target.value))
@@ -47632,7 +48262,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         formattingToolbar.addEventListener('keydown', event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || event.target.tagName === 'SELECT') return
           event.preventDefault()
-          const controls = Array.from(formattingToolbar.querySelectorAll('button:not([disabled]), select:not([disabled])'))
+          const controls = Array.from(formattingToolbar.querySelectorAll('button:not([disabled]), select:not([disabled])')).filter(control => control.getClientRects().length && !control.closest('[role="menu"]'))
           const index = controls.indexOf(document.activeElement)
           const nextIndex = event.key === 'Home' ? 0
             : event.key === 'End' ? controls.length - 1
@@ -47700,6 +48330,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const selectionChange = () => { if (editor.isConnected && !state.sourceMode) updateFormatState() }
         document.addEventListener('selectionchange', selectionChange)
         const keydown = event => {
+          if (event.key === 'Escape' && documentMoreMenu?.hidden === false) {
+            event.preventDefault()
+            setDocumentMoreOpen(false)
+            documentMoreButton?.focus()
+            return
+          }
           if (event.defaultPrevented || !editor.contains(event.target)) return
           if (event.key === 'Tab') {
             const focusable = Array.from(editor.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"], [tabindex="0"]')).filter(node => !node.hidden && !node.closest('[inert]') && node.getClientRects().length)
@@ -47707,7 +48343,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (focusable.length && event.shiftKey && index <= 0) { event.preventDefault(); focusable[focusable.length - 1].focus(); return }
             if (focusable.length && !event.shiftKey && index === focusable.length - 1) { event.preventDefault(); focusable[0].focus(); return }
           }
-          if (event.key === 'Escape' && responsiveDocumentMedia.matches && editor.dataset.inspectorOpen === 'true') {
+          if (event.key === 'Escape' && editor.dataset.inspectorOpen === 'true') {
             event.preventDefault()
             setDocumentInspectorOpen(false)
             inspectorTrigger?.focus()
@@ -47761,12 +48397,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         if (activeDeckEditor) closeDeckEditor()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+		const deckQualityState = String(payload?.qualityState || options?.qualityState || '').trim()
+		const payloadHasDeckPresentCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canPresent')
+		const payloadHasDeckExportCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canExport')
+		const optionsHaveDeckPresentCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canPresent')
+		const optionsHaveDeckExportCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
+		const initialDeckCanPresent = (payloadHasDeckPresentCapability ? payload?.canPresent === true : true) && (optionsHaveDeckPresentCapability ? options?.canPresent === true : true)
+		const initialDeckCanExport = (payloadHasDeckExportCapability ? payload?.canExport === true : true) && (optionsHaveDeckExportCapability ? options?.canExport === true : true)
 
         const clone = value => JSON.parse(JSON.stringify(value))
         const state = {
           artifactId,
           version: Number(payload?.artifact?.version || 1),
           sceneRef: String(payload?.artifact?.sceneRef || '').trim(),
+          title: String(payload?.artifact?.title || title || 'Untitled deck'),
           deck: normalizeDeckDocument(payload.deck),
           slideIndex: 0,
           selectedId: '',
@@ -47781,6 +48425,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           elementClipboard: null,
           textEditingId: '',
           canWrite: true,
+		  qualityState: deckQualityState,
+		  managedAuthoredResult: Boolean(deckQualityState),
+		  canPresent: initialDeckCanPresent,
+		  canExport: initialDeckCanExport,
           savedToFiles: payload?.artifact?.savedToFiles === true || String(payload?.artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true',
           options
         }
@@ -47789,12 +48437,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         editor.className = 'deck-editor'
         editor.setAttribute('role', 'dialog')
         editor.setAttribute('aria-modal', 'true')
-        editor.setAttribute('aria-label', `Deck Studio — ${title || payload?.artifact?.title || 'Untitled deck'}`)
+        editor.setAttribute('aria-label', `Deck Studio — ${state.title}`)
         editor.innerHTML = `
           <div class="deck-editor__toolbar">
             <div class="deck-editor__toolbar-left">
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close Deck Studio">×</button>
-              <h2 class="deck-editor__title">${escapeHtml(title || payload?.artifact?.title || 'Untitled deck')}</h2>
+              <input class="deck-editor__title" data-deck-title maxlength="160" aria-label="Deck name" value="${escapeHtml(state.title)}">
               <span class="deck-editor__save-state" data-save-state data-state="saved" role="status" aria-live="polite">Saved</span>
             </div>
             <div class="deck-editor__toolbar-center">
@@ -47838,7 +48486,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 </div>
               </div>
               <div class="deck-editor__download">
-                <button type="button" class="deck-editor__btn" data-action="download-menu" aria-haspopup="menu" aria-expanded="false">Download</button>
+                <button type="button" class="deck-editor__btn" data-action="download-menu" aria-label="Download" aria-haspopup="menu" aria-expanded="false">Download</button>
                 <div class="deck-editor__popover" data-download-menu role="menu" hidden>
                   <button type="button" role="menuitem" data-action="export-pptx"><span>PowerPoint</span><small>.pptx</small></button>
                   <button type="button" role="menuitem" data-action="export-pdf"><span>PDF</span><small>.pdf</small></button>
@@ -47864,6 +48512,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="deck-editor__canvas-wrap" data-canvas-wrap>
               <div class="deck-editor__canvas" data-canvas role="group" aria-label="Slide canvas"><div class="deck-editor__scene" data-scene></div></div>
             </div>
+            <button type="button" class="deck-editor__scrim" data-action="close-inspector" tabindex="-1" aria-hidden="true" aria-label="Close slide inspector"></button>
             <aside class="deck-editor__props" id="deck-slide-inspector" aria-label="Slide inspector">
               <header class="deck-editor__inspector-head">
                 <span class="deck-editor__inspector-eyebrow" data-inspector-eyebrow>Slide 1</span>
@@ -47892,17 +48541,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
                   </div>
                 </div>
                 <div data-element-controls hidden>
-                  <div class="deck-editor__prop-section">
-                    <span class="deck-editor__prop-label">Transform</span>
-                    <div class="deck-editor__prop-grid">
-                      <label class="deck-editor__field">X<input type="number" class="deck-editor__prop-input" data-prop="x"></label>
-                      <label class="deck-editor__field">Y<input type="number" class="deck-editor__prop-input" data-prop="y"></label>
-                      <label class="deck-editor__field">Width<input type="number" class="deck-editor__prop-input" data-prop="width"></label>
-                      <label class="deck-editor__field">Height<input type="number" class="deck-editor__prop-input" data-prop="height"></label>
-                      <label class="deck-editor__field">Rotation<input type="number" min="-360" max="360" class="deck-editor__prop-input" data-prop="rotation"></label>
-                      <label class="deck-editor__field">Opacity<span class="deck-editor__field-inline"><input type="range" class="deck-editor__range" min="0" max="1" step="0.01" data-prop="opacity"><output data-opacity-output></output></span></label>
-                    </div>
-                  </div>
                   <div class="deck-editor__prop-section" data-text-controls hidden>
                     <span class="deck-editor__prop-label">Typography</span>
                     <div class="deck-editor__prop-grid">
@@ -47930,18 +48568,40 @@ Wrap the entire export in one code block. After the code block, say whether the 
                     </div>
                   </div>
                   <div class="deck-editor__prop-section">
+                    <span class="deck-editor__prop-label">Opacity</span>
+                    <label class="deck-editor__field"><span class="deck-editor__field-inline"><input type="range" class="deck-editor__range" min="0" max="1" step="0.01" data-prop="opacity" aria-label="Object opacity"><output data-opacity-output></output></span></label>
+                  </div>
+                  <div class="deck-editor__prop-section">
                     <span class="deck-editor__prop-label">Arrange</span>
+                    <span class="deck-editor__action-label">Layer</span>
                     <div class="deck-editor__zorder">
                       <button type="button" data-action="send-back">Send to back</button>
                       <button type="button" data-action="bring-front">Bring to front</button>
                       <button type="button" data-action="send-backward">Back one</button>
                       <button type="button" data-action="bring-forward">Forward one</button>
+                    </div>
+                    <span class="deck-editor__action-label">Align</span>
+                    <div class="deck-editor__zorder">
                       <button type="button" data-action="align-center">Center horizontally</button>
                       <button type="button" data-action="align-middle">Center vertically</button>
+                    </div>
+                    <div class="deck-editor__zorder deck-editor__zorder--final">
                       <button type="button" data-action="duplicate-element">Duplicate</button>
-                      <button type="button" data-action="delete-element">Delete</button>
+                      <button type="button" class="deck-editor__danger" data-action="delete-element">Delete</button>
                     </div>
                   </div>
+                  <details class="deck-editor__advanced" data-deck-position-details>
+                    <summary>Position &amp; size</summary>
+                    <div class="deck-editor__prop-section">
+                      <div class="deck-editor__prop-grid">
+                        <label class="deck-editor__field">X<input type="number" class="deck-editor__prop-input" data-prop="x"></label>
+                        <label class="deck-editor__field">Y<input type="number" class="deck-editor__prop-input" data-prop="y"></label>
+                        <label class="deck-editor__field">Width<input type="number" class="deck-editor__prop-input" data-prop="width"></label>
+                        <label class="deck-editor__field">Height<input type="number" class="deck-editor__prop-input" data-prop="height"></label>
+                        <label class="deck-editor__field deck-editor__field--wide">Rotation<input type="number" min="-360" max="360" class="deck-editor__prop-input" data-prop="rotation"></label>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
               <div class="deck-editor__panel" id="deck-inspector-panel-notes" role="tabpanel" aria-labelledby="deck-inspector-tab-notes" data-inspector-panel="notes" hidden>
@@ -47974,6 +48634,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const indicator = editor.querySelector('[data-slide-indicator]')
         const saveButton = editor.querySelector('[data-action="save"]')
         const copyButton = editor.querySelector('[data-action="save-copy"]')
+        const titleInput = editor.querySelector('[data-deck-title]')
         const saveState = editor.querySelector('[data-save-state]')
         const imageStatus = editor.querySelector('[data-image-status]')
         const downloadMenu = editor.querySelector('[data-download-menu]')
@@ -47985,6 +48646,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const zoomInput = editor.querySelector('[data-zoom]')
         const zoomOutput = editor.querySelector('[data-zoom-output]')
         let lastInspectorSelectionId = ''
+
+		function updateDeckPublicationControls() {
+		  editor.querySelectorAll('[data-action="present"]').forEach(button => {
+			button.hidden = state.canPresent !== true
+			button.disabled = state.canPresent !== true
+			button.title = state.canPresent === true ? 'Present this exact reviewed revision' : 'This draft needs review before it can be presented.'
+		  })
+		  editor.querySelectorAll('[data-action="export-pptx"], [data-action="export-pdf"]').forEach(button => {
+			button.hidden = state.canExport !== true
+			button.disabled = state.canExport !== true
+		  })
+		  const download = editor.querySelector('.deck-editor__download')
+		  if (download) download.hidden = state.canExport !== true
+		}
+		function revokeDeckPublication() {
+		  if (!state.managedAuthoredResult) return
+		  if (state.qualityState === 'admitted') state.qualityState = 'edited_after_admission'
+		  state.canPresent = false
+		  state.canExport = false
+		  updateDeckPublicationControls()
+		}
+		updateDeckPublicationControls()
 
         function normalizeDeckDocument(input) {
           const deck = input && typeof input === 'object' ? clone(input) : {}
@@ -48093,6 +48776,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.future = []
           state.dirty = true
           state.saveError = ''
+		  revokeDeckPublication()
         }
         function restore(snapshot) {
           state.deck = normalizeDeckDocument(snapshot)
@@ -48312,8 +48996,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         function updateProperties() {
           const element = selected()
           // Inspector scroll belongs to the selected object. Carrying a deep
-          // Arrange/Typography scroll position onto another object can hide
-          // its identity and Transform labels, making the rail look broken.
+          // Arrange/advanced scroll position onto another object can hide
+          // its primary formatting controls, making the rail look broken.
           if (lastInspectorSelectionId !== state.selectedId) {
             lastInspectorSelectionId = state.selectedId
             const designPanel = editor.querySelector('[data-inspector-panel="design"]')
@@ -48333,7 +49017,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (eyebrow) eyebrow.textContent = `Slide ${state.slideIndex + 1}`
           if (heading) heading.textContent = element ? (element.type === 'text' ? 'Text' : element.type === 'image' ? 'Image' : 'Shape') : 'Slide design'
           if (hint) hint.textContent = element
-            ? `${Math.round(element.x)}, ${Math.round(element.y)} · ${Math.round(element.width)} × ${Math.round(element.height)}`
+            ? (element.type === 'text'
+                ? 'Refine type, layer, and placement'
+                : element.type === 'image'
+                  ? 'Refine crop, layer, and placement'
+                  : 'Refine appearance, layer, and placement')
             : objectCount
               ? `${objectCount} object${objectCount === 1 ? '' : 's'} · select one to refine`
               : 'Blank slide · start here or ask Scout for an image'
@@ -48545,6 +49233,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
               state.history = []
               state.future = []
               state.dirty = false
+			  revokeDeckPublication()
               imageStatus.dataset.state = 'done'
               imageStatus.textContent = 'Image uploaded and added to this slide.'
               const updatedEntry = mergeArtifactUpdate(result.artifact)
@@ -48640,12 +49329,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         async function exportPowerPoint(button) {
+		  if (state.canExport !== true) {
+			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
+			return
+		  }
           if (!(await ensureExportRevision())) return
           const original = button.innerHTML
           button.disabled = true
           button.innerHTML = '<span>Preparing PowerPoint…</span><small>.pptx</small>'
           try {
-            const fileName = studioDownloadFileName(payload?.artifact?.title || title, 'presentation', 'pptx')
+            const fileName = studioDownloadFileName(state.title, 'presentation', 'pptx')
             if (nativeStudioDownload({
               kind: 'deck', format: 'pptx', artifactId: state.artifactId, fileName,
               expectedVersion: state.version, sceneRef: state.sceneRef
@@ -48675,21 +49368,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
 
         async function exportPDF(button) {
+		  if (state.canExport !== true) {
+			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
+			return
+		  }
           if (!(await ensureExportRevision())) return
-          const original = button.innerHTML
-          button.disabled = true
-          button.innerHTML = '<span>Rendering PDF…</span><small>.pdf</small>'
-          try {
-            const response = await fetch('/artifacts/export-pdf', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
-            })
-            const result = await response.json().catch(() => ({}))
-            if (!response.ok) throw new Error(result?.error || 'PDF export failed')
-            const landed = await waitForArtifactPdfAsset(state.artifactId)
-            if (!landed?.pdf) throw new Error('PDF is still rendering. It will stay attached to this deck when ready.')
+          const pdfControls = Array.from(editor.querySelectorAll('[data-action="export-pdf"]'))
+          const pdfStatusTriggers = [editor.querySelector('[data-action="download-menu"]'), mobileToolsButton].filter(Boolean)
+          const setVisiblePDFState = running => pdfStatusTriggers.forEach(control => {
+            if (!control.dataset.pdfIdleText) control.dataset.pdfIdleText = control.textContent
+            control.textContent = running ? 'PDF running' : control.dataset.pdfIdleText
+            if (running) control.setAttribute('aria-busy', 'true')
+            else control.removeAttribute('aria-busy')
+          })
+          pdfControls.forEach(control => {
+            if (!control.dataset.pdfIdleHtml) control.dataset.pdfIdleHtml = control.innerHTML
+          })
+          const resuming = pdfControls.some(control => control.dataset.pdfPending === 'true')
+          let waiting = false
+          setVisiblePDFState(true)
+          const downloadLandedPDF = (landed) => {
             state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
-            const fileName = studioDownloadFileName(landed.pdf.name || payload?.artifact?.title || title, 'presentation', 'pdf')
+            const fileName = studioDownloadFileName(landed.pdf.name || state.title, 'presentation', 'pdf')
             const href = artifactBlobUrl({ ...landed.pdf, name: fileName })
             if (nativeStudioDownload({ kind: 'deck', format: 'pdf', artifactId: state.artifactId, fileName, url: href })) {
               showToast({ text: 'Opening iOS save options…', kind: 'done' })
@@ -48703,11 +49403,58 @@ Wrap the entire export in one code block. After the code block, say whether the 
               showToast({ text: 'PDF downloaded', kind: 'done' })
             }
             downloadMenu.hidden = true
+          }
+          pdfControls.forEach(control => {
+            control.disabled = true
+            control.dataset.state = 'rendering'
+            control.setAttribute('aria-busy', 'true')
+            control.innerHTML = resuming
+              ? '<span>Checking PDF…</span><small>.pdf</small>'
+              : '<span>Rendering PDF…</span><small>.pdf</small>'
+          })
+          try {
+            let landed = await currentArtifactPdfAsset(state.artifactId)
+            if (!landed?.pdf) {
+              const response = await fetch('/artifacts/export-pdf', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
+              })
+              const result = await response.json().catch(() => ({}))
+              if (!response.ok) throw new Error(result?.error || 'PDF export failed')
+              landed = await waitForArtifactPdfAsset(state.artifactId)
+            }
+            if (!landed?.pdf) {
+              waiting = true
+              pdfControls.forEach(control => {
+                control.dataset.pdfPending = 'true'
+                control.innerHTML = '<span>Rendering · check</span><small>.pdf</small>'
+                control.title = 'PDF rendering continues. Choose again to check progress.'
+              })
+              showToast({ text: 'PDF is still rendering. Choose PDF again to check progress.', kind: 'note' })
+              return
+            }
+            pdfControls.forEach(control => { delete control.dataset.pdfPending })
+            downloadLandedPDF(landed)
           } catch (error) {
-            showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+            const landed = await currentArtifactPdfAsset(state.artifactId).catch(() => null)
+            if (landed?.pdf) {
+              pdfControls.forEach(control => { delete control.dataset.pdfPending })
+              downloadLandedPDF(landed)
+            } else {
+              pdfControls.forEach(control => { delete control.dataset.pdfPending })
+              showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
+            }
           } finally {
-            button.disabled = false
-            button.innerHTML = original
+            pdfControls.forEach(control => {
+              control.disabled = false
+              if (!waiting) {
+                delete control.dataset.state
+                control.removeAttribute('aria-busy')
+                control.innerHTML = control.dataset.pdfIdleHtml || '<span>PDF</span><small>.pdf</small>'
+                control.title = ''
+              }
+            })
+            if (!waiting) setVisiblePDFState(false)
           }
         }
 
@@ -48794,7 +49541,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (state.saving) return false
           const deck = deckWithoutLocalImages()
           if (!deck) return false
-          const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(String(payload?.artifact?.title || title || 'Untitled deck'))
+          const requestedTitle = titleInput.value.trim() || state.title || 'Untitled deck'
+          titleInput.value = requestedTitle
+          const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(requestedTitle)
           if (!state.savedToFiles && !destination) return false
           state.saving = true
           state.saveError = ''
@@ -48804,17 +49553,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
           try {
             const response = await fetch('/artifacts/deck', {
               method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, deck })
+              body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: requestedTitle, deck })
             })
             const result = await response.json().catch(() => ({}))
             if (!response.ok || !result?.deck) throw new Error(result?.error || (response.status === 409 ? 'This deck changed elsewhere. Reopen it before saving.' : 'Deck save failed'))
             state.deck = normalizeDeckDocument(result.deck)
             state.version = Number(result?.artifact?.version || state.version + 1)
             state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
+            state.title = String(result?.artifact?.title || state.title)
+			state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
+			state.managedAuthoredResult = Boolean(state.qualityState)
+			if (Object.prototype.hasOwnProperty.call(result || {}, 'canPresent')) state.canPresent = result.canPresent === true
+			else if (state.managedAuthoredResult && result?.updated === true) state.canPresent = false
+			if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) state.canExport = result.canExport === true
+			else if (state.managedAuthoredResult && result?.updated === true) state.canExport = false
+            titleInput.value = state.title
+            editor.setAttribute('aria-label', `Deck Studio — ${state.title}`)
             state.history = []
             state.future = []
             state.dirty = false
             state.saveError = ''
+			updateDeckPublicationControls()
             const updatedEntry = mergeArtifactUpdate(result.artifact)
             if (destination) {
               await saveDeckToFiles(destination)
@@ -48827,7 +49586,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
               const host = options.source.parentElement
               if (host) {
                 host.replaceChildren()
-                renderArtifactDeck(host, updatedEntry, {})
+				renderArtifactDeck(host, updatedEntry, {
+				  qualityState: state.qualityState, canEdit: true,
+				  canPresent: state.canPresent, canExport: state.canExport
+				})
               }
             }
             return true
@@ -48847,7 +49609,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!requireDeckWrite() || state.saving) return false
           const deck = deckWithoutLocalImages()
           if (!deck) return false
-          const defaultName = `${String(payload?.artifact?.title || title || 'Untitled deck')} copy`
+          const defaultName = `${titleInput.value.trim() || state.title} copy`
           const destination = await chooseDriveSaveOptions(defaultName)
           if (!destination) return false
           state.saving = true
@@ -48859,7 +49621,25 @@ Wrap the entire export in one code block. After the code block, say whether the 
               body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, title: destination.fileName, fileName: destination.fileName, folderId: destination.folderId, deck })
             })
             const result = await response.json().catch(() => ({}))
-            if (!response.ok || !result?.artifact || !result?.file) throw new Error(result?.error || 'Deck copy could not be saved.')
+            if (!response.ok && result?.partialSuccess && result?.artifact?.id) {
+              const retryFileName = String(result?.receipt?.fileName || destination.fileName)
+              const retryFolderId = String(result?.receipt?.folderId ?? destination.folderId)
+              const retry = await fetch('/assistant/files/save', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artifactId: result.artifact.id, fileName: retryFileName, folderId: retryFolderId })
+              })
+              const retried = await retry.json().catch(() => ({}))
+              if (!retry.ok || !retried?.file) {
+                if (typeof loadArtifacts === 'function') {
+                  try { await loadArtifacts() } catch {}
+                }
+                showToast({ text: `Copy “${destination.fileName}” was created. Files is unavailable; open the copy from Artifacts to retry.`, kind: 'note' })
+                return true
+              }
+              result.file = retried.file
+            } else if (!response.ok || !result?.artifact || !result?.file) {
+              throw new Error(result?.error || 'Deck copy could not be saved.')
+            }
             const entry = {
               id: result.artifact.id,
               metadata: { title: result.artifact.title, type: result.artifact.type, artifactVersion: String(result.artifact.version), source: 'scout_thread', status: 'complete', savedToFiles: 'true' }
@@ -48902,6 +49682,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.history = []
             state.future = []
             state.dirty = false
+			revokeDeckPublication()
             imageStatus.dataset.state = 'done'
             imageStatus.textContent = 'Image generated and added to this slide.'
             const updatedEntry = mergeArtifactUpdate(result.artifact)
@@ -48989,7 +49770,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           else if (action === 'close-inspector') { setInspectorOpen(false); inspectorButton?.focus() }
           else if (action === 'present') {
-            openDeckPresentation(state.artifactId, title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true })
+			if (state.canPresent !== true) {
+			  showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
+			  return
+			}
+			openDeckPresentation(state.artifactId, state.title, { artifact: payload.artifact, deck: clone(state.deck), canWrite: true, qualityState: state.qualityState, canPresent: state.canPresent })
               .then(opened => { if (!opened) options.present?.() })
           }
           else if (action === 'add-text') addElement('text')
@@ -49026,6 +49811,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           checkpoint()
           slide().background = String(event.target.value || '#111111')
           renderAll()
+        })
+
+        titleInput.addEventListener('input', () => {
+          if (!requireDeckWrite()) return
+          state.dirty = true
+		  revokeDeckPublication()
+          editor.setAttribute('aria-label', `Deck Studio — ${titleInput.value.trim() || 'Untitled deck'}`)
+          updateDeckSaveState()
         })
 
         zoomInput.addEventListener('input', event => {
@@ -49202,6 +49995,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return false
           }
         }
+		const presentationQualityState = String(payload?.qualityState || '').trim()
+		if ((presentationQualityState && presentationQualityState !== 'admitted') || (Object.prototype.hasOwnProperty.call(payload || {}, 'canPresent') && payload?.canPresent !== true)) {
+		  showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
+		  return false
+		}
         const documentModel = payload.deck
         const slides = Array.isArray(documentModel?.slides) ? documentModel.slides : []
         if (!slides.length) return false
@@ -49381,11 +50179,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // hero showing the first slide, with title and controls overlaid as
       // glass chrome. Same styling as renderInlineChatDeck (not the old card).
       //
-      // Edit + Present modes: Anyone can enter Edit/Present if deck is in Files
-      // or shared to a channel. Access control is checked at edit time.
+	  // Edit is viewer-scoped by the artifact ACL. Present and final export are
+	  // additionally revision-scoped: only the exact server-admitted authored
+	  // result may expose them.
       function renderArtifactDeck(container, entry, options = {}) {
         // Extract title from entry metadata
         const title = String(entry?.metadata?.title || entry?.title || 'Presentation').trim()
+	    const projectedQualityState = String(options?.qualityState || '').trim().toLowerCase()
+	    const hasProjectedQuality = ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(projectedQualityState)
 
         // First-class cover structure — matches renderInlineChatDeck
         const deck = document.createElement('section')
@@ -49515,6 +50316,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         editBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
         editBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/><path d="M9.5 4.5l2 2"/></svg>Edit`
         editBtn.disabled = true
+	    editBtn.hidden = hasProjectedQuality && options.canEdit !== true
 
         // Present button — fullscreens the sandboxed iframe
         const presentBtn = document.createElement('button')
@@ -49522,13 +50324,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
         presentBtn.className = 'chat-deck__btn chat-deck__btn--primary'
         presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3v10l9-5-9-5z"/></svg>Present`
         presentBtn.disabled = true
+	    presentBtn.hidden = true
 
         const downloadWrap = document.createElement('div')
         downloadWrap.className = 'chat-deck__download'
         const downloadBtn = document.createElement('button')
         downloadBtn.type = 'button'
         downloadBtn.className = 'chat-deck__btn chat-deck__btn--secondary'
-        downloadBtn.textContent = 'Download'
+        downloadBtn.innerHTML = '<span class="chat-deck__download-label">Download</span><span class="chat-deck__download-more" aria-hidden="true">•••</span>'
+        downloadBtn.setAttribute('aria-label', 'Download')
+        downloadBtn.title = 'Download PowerPoint or PDF'
         downloadBtn.setAttribute('aria-haspopup', 'menu')
         downloadBtn.setAttribute('aria-expanded', 'false')
         downloadBtn.disabled = true
@@ -49538,6 +50343,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         downloadMenu.hidden = true
         downloadMenu.innerHTML = `<button type="button" role="menuitem" data-deck-download="pptx"><span>PowerPoint</span><small>.pptx</small></button><button type="button" role="menuitem" data-deck-download="pdf"><span>PDF</span><small>.pdf</small></button>`
         downloadWrap.append(downloadBtn, downloadMenu)
+	    downloadWrap.hidden = true
 
         actions.append(editBtn, downloadWrap, presentBtn)
         chrome.append(titleEl, actions)
@@ -49556,6 +50362,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const syncButtons = () => {
             stageEditBtn.disabled = editBtn.disabled
             stagePresentBtn.disabled = presentBtn.disabled
+	        stageEditBtn.hidden = editBtn.hidden
+	        stagePresentBtn.hidden = presentBtn.hidden
             stageEditBtn.title = editBtn.title
             stagePresentBtn.title = presentBtn.title
           }
@@ -49564,8 +50372,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           stagePresentBtn.addEventListener('click', () => presentBtn.click())
           // Observer to sync disabled state
           const observer = new MutationObserver(syncButtons)
-          observer.observe(editBtn, { attributes: true, attributeFilter: ['disabled'] })
-          observer.observe(presentBtn, { attributes: true, attributeFilter: ['disabled'] })
+	      observer.observe(editBtn, { attributes: true, attributeFilter: ['disabled', 'hidden'] })
+	      observer.observe(presentBtn, { attributes: true, attributeFilter: ['disabled', 'hidden'] })
+	      syncButtons()
         }
 
         container.appendChild(deck)
@@ -49581,6 +50390,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             await loadPreview()
             return
           }
+	      if (presentBtn.hidden || presentBtn.disabled) return
           if (await openDeckPresentation(artifactId, title, deckAccess)) return
           if (frame.requestFullscreen) {
             frame.requestFullscreen().catch(() => {})
@@ -49593,7 +50403,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           openDeckStudio(artifactId, title, {
             entry,
             source: deck,
-            present
+			present,
+			qualityState: projectedQualityState,
+			canEdit: options.canEdit,
+			canPresent: options.canPresent,
+			canExport: options.canExport
           })
         })
         presentBtn.addEventListener('click', present)
@@ -49695,14 +50509,25 @@ Wrap the entire export in one code block. After the code block, say whether the 
               frame = nextFrame
             }
             presentBtn.disabled = false
-            const canEdit = deckAccess?.canWrite === true
+	        const responseHasPresent = Object.prototype.hasOwnProperty.call(deckAccess || {}, 'canPresent')
+	        const responseHasExport = Object.prototype.hasOwnProperty.call(deckAccess || {}, 'canExport')
+	        const freshCanPresent = responseHasPresent ? deckAccess?.canPresent === true : true
+	        const freshCanExport = responseHasExport ? deckAccess?.canExport === true : true
+	        const canPresent = (hasProjectedQuality ? options.canPresent === true : true) && freshCanPresent
+	        const canExport = (hasProjectedQuality ? options.canExport === true : true) && freshCanExport
+	        const canEdit = deckAccess?.canWrite === true && (!hasProjectedQuality || options.canEdit === true)
             editBtn.disabled = !canEdit
-            downloadBtn.disabled = !deckAccess?.deck
+	        editBtn.hidden = !canEdit
+	        presentBtn.disabled = !canPresent
+	        presentBtn.hidden = !canPresent
+	        downloadBtn.disabled = !deckAccess?.deck || !canExport
+	        downloadWrap.hidden = !canExport
             editBtn.title = canEdit ? 'Edit deck' : String(deckAccess?.writeBlockedReason || 'View-only deck')
-            deck.dataset.previewState = 'ready'
+	        deck.dataset.previewState = 'ready'
+	        deck.dataset.qualityState = String(deckAccess?.qualityState || projectedQualityState || '')
 
             // Auto-present if requested (stage manifest pill)
-            if (autoPresentPending) {
+	        if (autoPresentPending && canPresent) {
               autoPresentPending = false
               present()
             }
@@ -49710,10 +50535,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (!deck.isConnected) return
             deck.dataset.previewState = 'error'
             editBtn.disabled = true
+	        editBtn.hidden = hasProjectedQuality && options.canEdit !== true
             presentBtn.disabled = false
+	        presentBtn.hidden = false
             presentBtn.dataset.deckAction = 'retry'
             presentBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13 5V2l-2 2a5 5 0 10 1.2 5"/></svg>Retry`
-            presentBtn.title = 'Retry presentation preview'
+	        presentBtn.title = 'Retry deck preview'
           } finally {
             loading = false
           }
@@ -49799,7 +50626,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // whose token mint fails lands back here too (forceSafe).
         if (!options.forceSafe && artifactIsHTMLDeck(entry)) {
           renderArtifactDeck(container, entry, options)
-          renderArtifactAssets(container, entry)
+		  renderArtifactAssets(container, entry, options)
           return
         }
 
@@ -49809,7 +50636,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // different frame. Everything else keeps the data-room grid below.
         if (artifactIsResearchReport(entry)) {
           renderResearchReportRead(container, entry)
-          renderArtifactAssets(container, entry)
+		  renderArtifactAssets(container, entry, options)
           return
         }
 
@@ -49909,7 +50736,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           container.appendChild(sourceWrap)
         }
 
-        renderArtifactAssets(container, entry)
+		renderArtifactAssets(container, entry, options)
       }
 
       /* ---------- the research report reader (founder pass 2026-07-07) ----------
@@ -50455,38 +51282,87 @@ Wrap the entire export in one code block. After the code block, say whether the 
         button.textContent = downloadLabel
         button.title = 'Render a branded PDF of this report'
         button.addEventListener('click', async () => {
+          let waiting = false
           button.disabled = true
           button.dataset.state = 'rendering'
-          button.textContent = compact ? 'Rendering…' : 'Rendering PDF…'
+          button.textContent = button.dataset.pdfPending === 'true'
+            ? (compact ? 'Checking…' : 'Checking PDF…')
+            : (compact ? 'Rendering…' : 'Rendering PDF…')
           try {
-            const response = await fetch('/artifacts/export-pdf', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                artifactId,
-                expectedVersion: Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1),
-                sceneRef: String(entry?.metadata?.deckSceneRef || '')
+            let landed = await currentArtifactPdfAsset(artifactId)
+            if (!landed?.pdf) {
+              const response = await fetch('/artifacts/export-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  artifactId,
+                  expectedVersion: Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1),
+                  sceneRef: String(entry?.metadata?.deckSceneRef || '')
+                })
               })
-            })
-            const payload = await response.json().catch(() => ({}))
-            if (!response.ok) {
-              throw new Error(payload.error || 'PDF export failed')
+              const payload = await response.json().catch(() => ({}))
+              if (!response.ok) {
+                throw new Error(payload.error || 'PDF export failed')
+              }
+              landed = await waitForArtifactPdfAsset(artifactId)
             }
-            const landed = await waitForArtifactPdfAsset(artifactId)
-            if (!landed) {
-              throw new Error('the PDF is still rendering — it lands on this report as an asset when done')
+            if (!landed?.pdf) {
+              waiting = true
+              button.dataset.pdfPending = 'true'
+              button.textContent = compact ? 'Rendering · check' : 'Rendering PDF · check'
+              button.title = 'PDF rendering continues. Choose again to check progress.'
+              showToast({ text: 'PDF is still rendering. Choose again to check progress.', kind: 'note' })
+              return
             }
+            delete button.dataset.pdfPending
             button.replaceWith(pdfDownloadLink(landed.pdf))
             showToast({ text: 'PDF ready — download is live on the report', kind: 'done' })
             if (typeof options.onLanded === 'function') options.onLanded(landed.entry)
           } catch (error) {
-            button.disabled = false
-            delete button.dataset.state
-            button.textContent = downloadLabel
+            const landed = await currentArtifactPdfAsset(artifactId).catch(() => null)
+            if (landed?.pdf) {
+              delete button.dataset.pdfPending
+              button.replaceWith(pdfDownloadLink(landed.pdf))
+              showToast({ text: 'PDF ready — download is live on the report', kind: 'done' })
+              if (typeof options.onLanded === 'function') options.onLanded(landed.entry)
+              return
+            }
+            delete button.dataset.pdfPending
             showToast({ text: error.message || 'PDF export failed', kind: 'error' })
+          } finally {
+            if (button.isConnected) {
+              button.disabled = false
+              if (!waiting) {
+                delete button.dataset.state
+                button.textContent = downloadLabel
+                button.title = 'Render a branded PDF of this report'
+              }
+            }
           }
         })
         return button
+      }
+
+      // Read the exact authorized artifact before starting or retrying a PDF.
+      // If a callback landed between the editor's previous poll and this click,
+      // the ready asset wins and no stale-version POST is necessary.
+      async function currentArtifactPdfAsset(artifactId) {
+        let fresh = null
+        if (typeof fetchArtifactEntryById === 'function') {
+          fresh = await fetchArtifactEntryById(artifactId, { refresh: true })
+        } else {
+          if (typeof loadArtifacts === 'function') await loadArtifacts()
+          fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === String(artifactId || ''))
+        }
+        if (!fresh) return null
+        const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
+        if (renderStatus === 'failed' || renderStatus === 'stale') {
+          throw new Error(String(fresh?.metadata?.renderError || '').trim() || (renderStatus === 'stale'
+            ? 'The artifact changed while the PDF was rendering. Export the current version again.'
+            : 'PDF render failed'))
+        }
+        const pdf = artifactNewestPdfAsset(fresh)
+        return pdf ? { entry: fresh, pdf } : null
       }
 
       // ride the artifact library refresh until the render callback lands the
@@ -50523,7 +51399,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          spec §4 viewer item 2 — no PDF.js); image assets (card 096 concept
          renders, imagery boards) render inline above their download link; every
          other kind is download-only. DOM-built, never innerHTML. */
-      function renderArtifactAssets(container, entry) {
+      function renderArtifactAssets(container, entry, options = {}) {
 		// Flattened page JPEGs are internal visual-QA evidence for the slide
 		// jury, not customer assets. A superseded PDF is likewise internal
 		// history, never a current preview/download affordance.
@@ -50531,6 +51407,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const assets = artifactAssetEntries(entry).filter(asset => {
           if (artifactAssetIsRenderedPage(asset)) return false
           const isPdf = String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf'
+		  if (isPdf && options.allowFinalExport === false) return false
           return !isPdf || String(asset.ref || '') === String(currentPdf?.ref || '')
         })
         if (!assets.length) return
@@ -72310,7 +73187,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const projectTitle = String(ref.projectTitle || artifact?.metadata?.projectWorkTitle || '').trim()
         const phase = desktopWorkPhase(artifact, status, ref)
 	        const plan = goalPlanFromArtifact(artifact)
-	        const isPresentationWorkflow = family === 'Presentation'
+		const processId = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || ref?.processId || '').trim()
+		const isPresentationWorkflow = family === 'Presentation' && processId === 'packaging_studio'
 	        const checkpoint = ref?.checkpoint || goalPendingCheckpoint(artifact, plan)
         const customerProgress = isPresentationWorkflow ? packagingStudioCustomerProgress(plan, artifact, ref, status) : null
         const progress = isPresentationWorkflow
@@ -72344,9 +73222,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const eyebrow = bfEl('span', 'scout-chat-work-card__eyebrow', `${family} · ${state}`)
         eyebrow.setAttribute('aria-live', 'polite')
         eyebrow.setAttribute('aria-atomic', 'true')
-	        if (isPresentationWorkflow && !checkpoint) eyebrow.textContent = `Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count}`
-	        copy.append(eyebrow, bfEl('span', 'scout-chat-work-card__title', title))
-	        if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
+	        if (isPresentationWorkflow) eyebrow.textContent = `Presentation · ${state} · Phase ${customerProgress.currentNumber} of ${customerProgress.count}`
+	        const requestTitle = bfEl('span', 'scout-chat-work-card__title', title)
+	        copy.appendChild(eyebrow)
+	        if (isPresentationWorkflow) {
+	          const context = bfEl('span', 'scout-chat-work-card__context')
+	          context.appendChild(requestTitle)
+	          if (projectTitle) context.appendChild(bfEl('span', 'scout-chat-work-card__project', projectTitle))
+	          copy.appendChild(context)
+	        } else {
+	          copy.appendChild(requestTitle)
+	          if (projectTitle) copy.appendChild(bfEl('span', 'scout-chat-work-card__project', `Project · ${projectTitle}`))
+	        }
 	        const customerPercent = customerProgress?.percent
 	        copy.appendChild(bfEl('span', 'scout-chat-work-card__meta', isPresentationWorkflow
 	          ? `${step}${customerPercent === null ? '' : ` · ${customerPercent}%`}`
@@ -72446,6 +73333,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
+	      function authoredResultQualityState(message) {
+	        const state = String(message?.thread?.resultQualityState || '').trim().toLowerCase()
+	        return ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(state)
+	          ? state
+	          : 'draft_needs_attention'
+	      }
+
+	      function authoredResultContinueControl(message, label = 'Continue') {
+	        if (message?.thread?.resultCanContinue !== true) return null
+	        const goalId = String(message?.thread?.artifactId || '').trim()
+		const resultId = String(message?.thread?.resultArtifactId || '').trim()
+	        if (!goalId) return null
+		const reviewChanges = authoredResultQualityState(message) === 'edited_after_admission'
+		const actionLabel = reviewChanges ? 'Review changes' : label
+	        const button = bfEl('button', 'scout-authored-result__continue', actionLabel)
+	        button.type = 'button'
+	        button.addEventListener('click', async () => {
+	          if (button.disabled) return
+	          button.disabled = true
+	          button.textContent = reviewChanges ? 'Starting review…' : 'Continuing…'
+	          try {
+			const response = await postAuthJSON('/artifacts/action', reviewChanges
+			  ? { id: goalId, action: 'review_changes', resultArtifactId: resultId }
+			  : { id: goalId, action: 'resume' })
+	            if (!response?.ok) throw new Error(response?.data?.error || 'Could not continue this draft.')
+	            button.textContent = reviewChanges ? 'Reviewing changes…' : 'Resuming review…'
+	            goalCardScheduleSync()
+	          } catch (error) {
+	            button.disabled = false
+	            button.textContent = actionLabel
+	            showToast({ text: error?.message || 'Could not continue this draft.', kind: 'error' })
+	          }
+	        })
+	        return button
+	      }
+
+	      function authoredResultQualityNote(message, kind) {
+	        const qualityState = authoredResultQualityState(message)
+	        if (qualityState === 'admitted') return null
+	        const note = bfEl('div', 'scout-authored-result__quality')
+	        note.dataset.qualityState = qualityState
+	        const copy = bfEl('div', 'scout-authored-result__quality-copy')
+	        copy.append(
+	          bfEl('strong', null, qualityState === 'edited_after_admission' ? 'Edited draft · review required' : 'Draft · needs attention'),
+	          bfEl('span', null, qualityState === 'edited_after_admission'
+	            ? `This ${kind} changed after review. Presenting and final downloads stay unavailable until the edited version is reviewed again.`
+	            : `Scout saved the working ${kind}. It remains editable, but it has not passed the final quality review.`)
+	        )
+	        note.appendChild(copy)
+	        const resume = authoredResultContinueControl(message)
+	        if (resume) note.appendChild(resume)
+	        return note
+	      }
+
 	      // One concrete deck result earns one rich 16:9 feed surface. Work
 	      // orchestration can emit both a child completion and a stage receipt;
 	      // latest-wins prevents those durable receipts from becoming duplicate
@@ -72503,12 +73444,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const result = document.createElement('article')
 	        result.className = 'scout-chat-deck-result'
 	        result.dataset.resultArtifactId = resultId
+	        const qualityState = authoredResultQualityState(message)
+	        result.dataset.qualityState = qualityState
 	        result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation`)
-	        renderArtifactDeck(result, artifact)
-	        if (String(message?.thread?.resultApprovalState || '') === 'edited_after_approval') {
-	          result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation, edited after approval`)
-	          result.appendChild(bfEl('div', 'scout-chat-deck-result__approval-note', 'Edited after approval · review this version before presenting'))
-	        }
+	        renderArtifactDeck(result, artifact, {
+	          qualityState,
+	          canEdit: message?.thread?.resultCanEdit === true,
+	          canPresent: message?.thread?.resultCanPresent === true,
+	          canExport: message?.thread?.resultCanExport === true
+	        })
+	        const qualityNote = authoredResultQualityNote(message, 'presentation')
+	        if (qualityNote) result.appendChild(qualityNote)
 	        return result
 	      }
 
@@ -72558,23 +73504,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const result = document.createElement('article')
 	        result.className = 'scout-chat-document-result'
 	        result.dataset.resultArtifactId = resultId
+	        const qualityState = authoredResultQualityState(message)
+	        const admitted = qualityState === 'admitted'
+	        result.dataset.qualityState = qualityState
 	        result.setAttribute('aria-label', `${title} document`)
 
 	        const head = bfEl('header', 'scout-chat-document-result__head')
 	        const identity = bfEl('div', 'scout-chat-document-result__identity')
 	        identity.append(
-	          bfEl('span', 'scout-chat-document-result__kicker', message?.thread?.resultCanEdit === true ? 'document · ready to edit' : 'document · ready to read'),
+	          bfEl('span', 'scout-chat-document-result__kicker', admitted ? 'document · ready' : qualityState === 'edited_after_admission' ? 'document · edited draft' : 'document · draft'),
 	          bfEl('h3', 'scout-chat-document-result__title', title)
 	        )
 	        const actions = bfEl('div', 'scout-chat-document-result__actions')
 	        const open = bfEl('button', 'scout-chat-document-result__action', 'Open')
 	        open.type = 'button'
 	        open.setAttribute('aria-label', `Open ${title}`)
-	        open.addEventListener('click', () => openArtifactStage(resultId, title, { canEdit: message?.thread?.resultCanEdit === true }))
+	        open.addEventListener('click', () => openArtifactStage(resultId, title, {
+	          canEdit: message?.thread?.resultCanEdit === true,
+	          canExport: message?.thread?.resultCanExport === true,
+	          qualityState
+	        }))
 	        const edit = bfEl('button', 'scout-chat-document-result__action scout-chat-document-result__action--primary', 'Edit')
 	        edit.type = 'button'
 	        edit.setAttribute('aria-label', `Edit ${title}`)
-	        edit.addEventListener('click', () => openDocumentStudio(resultId, title, { entry: artifact }))
+	        edit.addEventListener('click', () => openDocumentStudio(resultId, title, {
+	          entry: artifact,
+	          canExport: message?.thread?.resultCanExport === true,
+	          qualityState
+	        }))
 	        actions.appendChild(open)
 	        if (message?.thread?.resultCanEdit === true) actions.appendChild(edit)
 	        head.append(identity, actions)
@@ -72582,8 +73539,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const preview = bfEl('div', 'scout-chat-document-result__preview artifact-read')
 	        preview.setAttribute('aria-hidden', 'true')
 	        preview.setAttribute('inert', '')
-	        renderArtifactRead(preview, artifact)
-	        result.append(head, preview)
+	        renderArtifactRead(preview, artifact, { allowFinalExport: message?.thread?.resultCanExport === true })
+	        const qualityNote = authoredResultQualityNote(message, 'document')
+	        result.appendChild(head)
+	        if (qualityNote) result.appendChild(qualityNote)
+	        result.appendChild(preview)
 	        return result
 	      }
 
@@ -73250,6 +74210,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	                : state
 	            }, '')
 	          : ''
+	        const goalResultCapabilities = !held
+	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((capabilities, candidate) => {
+	              const ref = candidate?.thread || {}
+	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
+	                ? {
+	                    qualityState: authoredResultQualityState(candidate),
+	                    canEdit: ref.resultCanEdit === true,
+	                    canPresent: ref.resultCanPresent === true,
+	                    canExport: ref.resultCanExport === true
+	                  }
+	                : capabilities
+	            }, { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false })
+	          : { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false }
 	        const deliveredDeckArtifact = deckDeliverable
 	          ? ((typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
 	              String(candidate?.id || '') === (goalResultId || String(deckDeliverable.artifactId || '').trim())
@@ -73265,7 +74238,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          deckResult.className = 'manifest-card__deck-result scout-chat-deck-result'
 	          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
 	          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
-	          renderArtifactDeck(deckResult, deliveredDeckArtifact)
+	          renderArtifactDeck(deckResult, deliveredDeckArtifact, goalResultCapabilities)
 	          if (goalResultApprovalState === 'edited_after_approval') {
 	            deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation, edited after approval`)
 	            deckResult.appendChild(bfEl('div', 'scout-chat-deck-result__approval-note', 'Edited after approval · review this version before presenting'))

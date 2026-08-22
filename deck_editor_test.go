@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -547,6 +549,114 @@ func TestDeckEditorGETCanWriteAndPATCHCASAtHTTPBoundary(t *testing.T) {
 	})
 }
 
+func TestDeckEditorRenameIsRevisionBoundAndSurvivesReloadWithoutChangingSlides(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+
+	getDeck := func() struct {
+		Artifact deckArtifactView `json:"artifact"`
+		Deck     deckDocument     `json:"deck"`
+	} {
+		t.Helper()
+		response := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET deck status=%d body=%s", response.Code, response.Body.String())
+		}
+		var payload struct {
+			Artifact deckArtifactView `json:"artifact"`
+			Deck     deckDocument     `json:"deck"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode deck GET: %v", err)
+		}
+		return payload
+	}
+	patchDeck := func(expectedVersion int, title string, deck deckDocument) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"artifactId": artifact.ID, "expectedVersion": expectedVersion, "title": title, "deck": deck,
+		})
+		if err != nil {
+			t.Fatalf("marshal deck PATCH: %v", err)
+		}
+		return artifactAuthorizationRequest(t, http.MethodPatch, "/artifacts/deck", string(body), cookies, deckEditorHandler)
+	}
+
+	// Establish the faithful legacy deck as a native scene first. The rename
+	// assertion below then proves the scene itself is content-addressed and
+	// remains byte-for-byte unchanged while only the artifact title changes.
+	initial := getDeck()
+	nativeSave := patchDeck(initial.Artifact.Version, "", initial.Deck)
+	if nativeSave.Code != http.StatusOK {
+		t.Fatalf("native save status=%d body=%s", nativeSave.Code, nativeSave.Body.String())
+	}
+	beforeRename := getDeck()
+	if beforeRename.Artifact.SceneRef == "" {
+		t.Fatal("native save did not persist a scene ref")
+	}
+
+	rename := patchDeck(beforeRename.Artifact.Version, "Creator-powered audience engine", beforeRename.Deck)
+	if rename.Code != http.StatusOK {
+		t.Fatalf("rename status=%d body=%s", rename.Code, rename.Body.String())
+	}
+	var renamed struct {
+		Updated  bool             `json:"updated"`
+		Artifact deckArtifactView `json:"artifact"`
+		Deck     deckDocument     `json:"deck"`
+	}
+	if err := json.Unmarshal(rename.Body.Bytes(), &renamed); err != nil {
+		t.Fatalf("decode rename response: %v", err)
+	}
+	if !renamed.Updated || renamed.Artifact.Title != "Creator-powered audience engine" || renamed.Artifact.Version != beforeRename.Artifact.Version+1 {
+		t.Fatalf("rename response=%s, want renamed artifact at exactly the next revision", rename.Body.String())
+	}
+	if renamed.Artifact.SceneRef != beforeRename.Artifact.SceneRef || !reflect.DeepEqual(renamed.Deck, beforeRename.Deck) {
+		t.Fatalf("rename changed deck content: before=%+v after=%+v", beforeRename, renamed)
+	}
+
+	// A client that was open on the superseded revision cannot rename over the
+	// current title. The conflict reports the authoritative revision and leaves
+	// both title and scene untouched.
+	stale := patchDeck(beforeRename.Artifact.Version, "Stale client title", beforeRename.Deck)
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), fmt.Sprintf(`"currentVersion":%d`, renamed.Artifact.Version)) {
+		t.Fatalf("stale rename status=%d body=%s, want current-version conflict", stale.Code, stale.Body.String())
+	}
+	afterStale, ok := kanbanApp.osArtifactByID(artifact.ID)
+	if !ok || afterStale.Metadata["title"] != renamed.Artifact.Title || artifactVersion(afterStale) != renamed.Artifact.Version || afterStale.Metadata[deckSceneRefMetadataKey] != beforeRename.Artifact.SceneRef {
+		t.Fatalf("stale rename mutated artifact: %+v", afterStale)
+	}
+
+	// A new GET models closing and reopening Deck Studio: it must resolve the
+	// new name while returning the exact pre-rename scene.
+	reopened := getDeck()
+	if reopened.Artifact.Title != renamed.Artifact.Title || reopened.Artifact.Version != renamed.Artifact.Version || reopened.Artifact.SceneRef != beforeRename.Artifact.SceneRef || !reflect.DeepEqual(reopened.Deck, beforeRename.Deck) {
+		t.Fatalf("reopened deck=%+v, want renamed title and unchanged scene", reopened)
+	}
+}
+
+func TestDeckEditorPersistenceFailureIsNotReportedAsRevisionConflict(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
+	var initial struct {
+		Deck deckDocument `json:"deck"`
+	}
+	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &initial) != nil {
+		t.Fatalf("GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	body, _ := json.Marshal(map[string]any{
+		"artifactId": artifact.ID, "expectedVersion": artifactVersion(artifact),
+		"title": "A truthful failure", "deck": initial.Deck,
+	})
+	kanbanApp.memory.path = t.TempDir() // rewriting onto a directory fails after the in-memory mutation is rolled back.
+	failed := artifactAuthorizationRequest(t, http.MethodPatch, "/artifacts/deck", string(body), cookies, deckEditorHandler)
+	if failed.Code != http.StatusInternalServerError || strings.Contains(failed.Body.String(), "revision changed") {
+		t.Fatalf("persistence failure status=%d body=%s, want truthful 500 rather than a false conflict", failed.Code, failed.Body.String())
+	}
+	current, ok := kanbanApp.osArtifactByID(artifact.ID)
+	if !ok || current.Metadata["title"] != artifact.Metadata["title"] || artifactVersion(current) != artifactVersion(artifact) || current.Text != artifact.Text || current.Metadata[deckSceneRefMetadataKey] != "" {
+		t.Fatalf("failed persistence mutated artifact: %+v", current)
+	}
+}
+
 func TestDeckAssetUploadPersistsExactSlideAndBumpsVersion(t *testing.T) {
 	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
 	get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
@@ -651,6 +761,81 @@ func TestDeckCopyCreatesIndependentNamedArtifactAndFilesIt(t *testing.T) {
 	original, _ := kanbanApp.osArtifactByID(artifact.ID)
 	if strings.Contains(original.Text, "Independent copy headline") || original.Metadata["savedToFiles"] == "true" {
 		t.Fatalf("save a copy mutated the original: %+v", original)
+	}
+}
+
+func TestDeckCopyFailureReturnsRetryablePartialSuccess(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, LegacyCompatibleObjectAuthorizer{})
+	get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
+	var initial struct {
+		Deck deckDocument `json:"deck"`
+	}
+	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &initial) != nil {
+		t.Fatalf("GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	initial.Deck.Slides[0].Elements[0].Text = "Recoverable deck copy"
+	folder, err := createFileFolder("Deck copy race", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousProbe := fileSaveAfterArtifactStampProbe
+	fileSaveAfterArtifactStampProbe = func() {
+		fileSaveAfterArtifactStampProbe = nil
+		_ = sharedFileFolderStore().remove(folder.ID)
+	}
+	t.Cleanup(func() { fileSaveAfterArtifactStampProbe = previousProbe })
+	body, _ := json.Marshal(map[string]any{
+		"artifactId": artifact.ID, "expectedVersion": artifactVersion(artifact),
+		"title": "Recoverable deck", "fileName": "Recoverable deck", "folderId": folder.ID, "deck": initial.Deck,
+	})
+	response := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(body), cookies, deckEditorCopyHandler)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("partial copy status=%d body=%s", response.Code, response.Body.String())
+	}
+	var partial struct {
+		OK             bool             `json:"ok"`
+		PartialSuccess bool             `json:"partialSuccess"`
+		Artifact       deckArtifactView `json:"artifact"`
+		Deck           deckDocument     `json:"deck"`
+		Receipt        struct {
+			Outcome      string `json:"outcome"`
+			ArtifactID   string `json:"artifactId"`
+			ContentSaved bool   `json:"contentSaved"`
+			FilingDone   bool   `json:"filingCompleted"`
+			SavedToFiles bool   `json:"savedToFiles"`
+			Retryable    bool   `json:"retryable"`
+			RetryURL     string `json:"retryUrl"`
+			FileName     string `json:"fileName"`
+			FolderID     string `json:"folderId"`
+		} `json:"receipt"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &partial); err != nil || partial.OK || !partial.PartialSuccess || partial.Artifact.ID == "" || partial.Artifact.SavedToFiles || partial.Deck.Slides[0].Elements[0].Text != "Recoverable deck copy" || partial.Receipt.Outcome != "copy_created_files_failed" || partial.Receipt.ArtifactID != partial.Artifact.ID || !partial.Receipt.ContentSaved || partial.Receipt.FilingDone || partial.Receipt.SavedToFiles || !partial.Receipt.Retryable || partial.Receipt.RetryURL != "/assistant/files/save" || partial.Receipt.FileName != "Recoverable deck" || partial.Receipt.FolderID != folder.ID {
+		t.Fatalf("partial copy response=%s", response.Body.String())
+	}
+	created, ok := kanbanApp.osArtifactByID(partial.Artifact.ID)
+	if !ok || created.Metadata["copiedFromArtifactId"] != artifact.ID || strings.EqualFold(created.Metadata["savedToFiles"], "true") {
+		t.Fatalf("partial copy artifact=%+v", created)
+	}
+	copyCount := func() int {
+		count := 0
+		for _, entry := range kanbanApp.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+			if entry.Metadata["copiedFromArtifactId"] == artifact.ID {
+				count++
+			}
+		}
+		return count
+	}
+	if got := copyCount(); got != 1 {
+		t.Fatalf("copies after partial failure=%d, want exactly one", got)
+	}
+	retryBody, _ := json.Marshal(map[string]any{"artifactId": partial.Artifact.ID, "fileName": partial.Receipt.FileName, "folderId": ""})
+	retry := artifactAuthorizationRequest(t, http.MethodPost, "/assistant/files/save", string(retryBody), cookies, assistantFileSaveHandler)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("partial copy retry status=%d body=%s", retry.Code, retry.Body.String())
+	}
+	filed, ok := kanbanApp.osArtifactByID(partial.Artifact.ID)
+	if !ok || !strings.EqualFold(filed.Metadata["savedToFiles"], "true") || filed.Metadata["driveFileName"] != partial.Receipt.FileName || copyCount() != 1 {
+		t.Fatalf("retry did not file the exact existing copy: artifact=%+v copies=%d", filed, copyCount())
 	}
 }
 

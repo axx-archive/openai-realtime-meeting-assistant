@@ -113,9 +113,12 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, canWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
+		qualityState := kanbanApp.authoredResultQualityForArtifact(artifact)
+		managedAuthoredResult := qualityState != ""
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "artifact": documentStudioView(artifact),
 			"document": documentStudioDocumentFromEntry(artifact), "canWrite": canWrite,
+			"qualityState": qualityState, "canExport": !managedAuthoredResult || qualityState == authoredResultQualityAdmitted,
 		})
 		return
 	}
@@ -167,9 +170,11 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "document could not be saved")
 		return
 	}
+	qualityState := kanbanApp.authoredResultQualityForArtifact(updated)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": documentStudioView(updated),
-		"document": documentStudioDocumentFromEntry(updated),
+		"document":     documentStudioDocumentFromEntry(updated),
+		"qualityState": qualityState, "canExport": qualityState == "" || qualityState == authoredResultQualityAdmitted,
 		"receipt": map[string]any{
 			"outcome": "document_saved", "artifactId": updated.ID,
 			"artifactVersion": artifactVersion(updated), "contentSaved": true,

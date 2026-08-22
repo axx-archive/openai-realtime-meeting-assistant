@@ -706,6 +706,18 @@ export const api = {
     });
   },
 
+  reviewEditedGoal(
+    sessionToken: string,
+    id: string,
+    resultArtifactId: string,
+  ): Promise<{ ok: boolean; replayed?: boolean }> {
+    return request('/artifacts/action', {
+      method: 'POST',
+      body: { id, action: 'review_changes', resultArtifactId },
+      sessionToken,
+    });
+  },
+
   artifactDisposition(
     sessionToken: string,
     body: {

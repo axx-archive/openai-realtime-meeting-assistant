@@ -48,6 +48,190 @@ var processMissingExternalProofColumns = []string{
 	"Candidate ID", "Candidate fact", "Source title", "URL", "Proof status", "Missing proof",
 }
 
+var processResearchQuestionCoverageColumns = []string{
+	"Research question", "Candidate claims", "Admitted claims", "Strong claims", "Coverage",
+}
+
+const (
+	processEvidenceAdequacyNotRequired  = "not_required"
+	processEvidenceAdequacySufficient   = "sufficient"
+	processEvidenceAdequacyInsufficient = "insufficient"
+
+	processResearchCoverageSupported = "supported"
+	processResearchCoverageWeak      = "weak"
+	processResearchCoveragePartial   = "partial"
+	processResearchCoverageMissing   = "missing"
+)
+
+// processResearchQuestionCoverage is deliberately small and replayable. The
+// compile seam derives it from the frozen question authority, provider
+// candidates, source snapshots, and entailment rows; later stages validate the
+// durable counters and digest without resolving or fetching any source again.
+type processResearchQuestionCoverage struct {
+	Question   string `json:"question"`
+	Candidates int    `json:"candidates"`
+	Admitted   int    `json:"admitted"`
+	Strong     int    `json:"strong"`
+	Coverage   string `json:"coverage"`
+}
+
+func processResearchQuestionCoverageStatus(candidates, admitted, strong int) (string, error) {
+	if candidates < 0 || admitted < 0 || strong < 0 || admitted > candidates || strong > admitted {
+		return "", fmt.Errorf("research question coverage counts are inconsistent")
+	}
+	switch {
+	case strong > 0:
+		return processResearchCoverageSupported, nil
+	case admitted > 0:
+		return processResearchCoverageWeak, nil
+	case candidates > 0:
+		return processResearchCoveragePartial, nil
+	default:
+		return processResearchCoverageMissing, nil
+	}
+}
+
+func processResearchQuestionCoverageDigest(coverage []processResearchQuestionCoverage) string {
+	raw, err := json.Marshal(coverage)
+	if err != nil {
+		return ""
+	}
+	return sha256Hex(raw)
+}
+
+// processExternalResearchQuestionCoverage binds every provider candidate and
+// admitted row back to one exact authorized question. A claim is strong only
+// when both discovery and the independent entailment seat call it High
+// confidence; decision-grade source quality and exact relevance were already
+// required for the row to enter admittedRows. Thus weak/partial/missing proof
+// stays visible for audit but cannot become story authority.
+func processExternalResearchQuestionCoverage(authorities []externalEvidenceResearchQuestionAuthority, authority externalEvidenceEntailmentAuthority, admittedRows [][]string) ([]processResearchQuestionCoverage, error) {
+	if len(authorities) < 1 || len(authorities) > 3 {
+		return nil, fmt.Errorf("external evidence must bind one to three exact authorized research questions")
+	}
+	coverage := make([]processResearchQuestionCoverage, len(authorities))
+	questionIndex := make(map[string]int, len(authorities))
+	for index, item := range authorities {
+		question := canonicalEvidenceText(item.Question)
+		if question == "" || questionIndex[question] != 0 {
+			return nil, fmt.Errorf("external evidence research questions are empty or duplicated")
+		}
+		coverage[index].Question = question
+		questionIndex[question] = index + 1
+	}
+
+	snapshots := make(map[string]externalSourceSnapshot, len(authority.SourceEnvelope.Snapshots))
+	for index, snapshot := range authority.SourceEnvelope.Snapshots {
+		candidateID := strings.TrimSpace(snapshot.CandidateID)
+		candidate, ok := authority.Candidates[candidateID]
+		question := canonicalEvidenceText(snapshot.ResearchQuestion)
+		position := questionIndex[question] - 1
+		if !ok || position < 0 || candidateID != externalEvidenceCandidateID(candidate) || canonicalEvidenceText(candidate.ResearchQuestion) != question || snapshots[candidateID].CandidateID != "" {
+			return nil, fmt.Errorf("external evidence source snapshot %d is outside the exact authorized question manifest", index+1)
+		}
+		snapshot.CandidateID = candidateID
+		snapshots[candidateID] = snapshot
+		coverage[position].Candidates++
+	}
+	if len(snapshots) != len(authority.Candidates) {
+		return nil, fmt.Errorf("external evidence source snapshots do not cover every provider candidate")
+	}
+
+	seenAdmitted := map[string]bool{}
+	for index, row := range admittedRows {
+		if len(row) != len(externalEvidenceEntailmentColumns) {
+			return nil, fmt.Errorf("admitted external evidence row %d is malformed", index+1)
+		}
+		candidateID := strings.TrimSpace(row[0])
+		candidate, candidateOK := authority.Candidates[candidateID]
+		snapshot, snapshotOK := snapshots[candidateID]
+		question := canonicalEvidenceText(snapshot.ResearchQuestion)
+		position := questionIndex[question] - 1
+		if !candidateOK || !snapshotOK || position < 0 || seenAdmitted[candidateID] || strings.TrimSpace(row[1]) != strings.TrimSpace(candidate.SourceFact) || strings.TrimSpace(row[3]) != strings.TrimSpace(candidate.URL) {
+			return nil, fmt.Errorf("admitted external evidence row %d is outside the exact authorized question manifest", index+1)
+		}
+		seenAdmitted[candidateID] = true
+		coverage[position].Admitted++
+		if strings.EqualFold(strings.TrimSpace(candidate.Confidence), "High") && strings.EqualFold(strings.TrimSpace(row[10]), "High") {
+			coverage[position].Strong++
+		}
+	}
+	for index := range coverage {
+		status, err := processResearchQuestionCoverageStatus(coverage[index].Candidates, coverage[index].Admitted, coverage[index].Strong)
+		if err != nil {
+			return nil, err
+		}
+		coverage[index].Coverage = status
+	}
+	return coverage, nil
+}
+
+func canonicalProcessResearchQuestionCoverageManifest(researchMode string, coverage []processResearchQuestionCoverage) (string, string, int, string, error) {
+	lines := []string{
+		"## Research question coverage",
+		"| " + strings.Join(processResearchQuestionCoverageColumns, " | ") + " |",
+		"|---|---|---|---|---|",
+	}
+	if researchMode != "external" {
+		if len(coverage) != 0 {
+			return "", "", 0, "", fmt.Errorf("non-external research cannot carry external question coverage")
+		}
+		lines = append(lines, "| None required | 0 | 0 | 0 | not_required |")
+		return strings.Join(lines, "\n"), processEvidenceAdequacyNotRequired, 0, processResearchQuestionCoverageDigest([]processResearchQuestionCoverage{}), nil
+	}
+	strongQuestions := 0
+	for _, item := range coverage {
+		if item.Coverage == processResearchCoverageSupported {
+			strongQuestions++
+		}
+		lines = append(lines, "| "+strings.Join([]string{
+			externalEvidenceMarkdownCell(item.Question), strconv.Itoa(item.Candidates), strconv.Itoa(item.Admitted), strconv.Itoa(item.Strong), item.Coverage,
+		}, " | ")+" |")
+	}
+	adequacy := processEvidenceAdequacyInsufficient
+	if len(coverage) > 0 && strongQuestions == len(coverage) {
+		adequacy = processEvidenceAdequacySufficient
+	}
+	return strings.Join(lines, "\n"), adequacy, strongQuestions, processResearchQuestionCoverageDigest(coverage), nil
+}
+
+func processResearchQuestionCoverageRows(body, researchMode string) ([]processResearchQuestionCoverage, error) {
+	rows, err := processManifestTableRows(body, "Research question coverage", processResearchQuestionCoverageColumns)
+	if err != nil {
+		return nil, err
+	}
+	if researchMode != "external" {
+		want := []string{"None required", "0", "0", "0", processEvidenceAdequacyNotRequired}
+		if len(rows) != 1 {
+			return nil, fmt.Errorf("non-external research coverage sentinel is not canonical")
+		}
+		for index := range want {
+			if strings.TrimSpace(rows[0][index]) != want[index] {
+				return nil, fmt.Errorf("non-external research coverage sentinel is not canonical")
+			}
+		}
+		return []processResearchQuestionCoverage{}, nil
+	}
+	if len(rows) < 1 || len(rows) > 3 {
+		return nil, fmt.Errorf("external research coverage must contain one to three questions")
+	}
+	coverage := make([]processResearchQuestionCoverage, 0, len(rows))
+	seen := map[string]bool{}
+	for index, row := range rows {
+		question := canonicalEvidenceText(row[0])
+		candidates, candidatesErr := strconv.Atoi(strings.TrimSpace(row[1]))
+		admitted, admittedErr := strconv.Atoi(strings.TrimSpace(row[2]))
+		strong, strongErr := strconv.Atoi(strings.TrimSpace(row[3]))
+		status, statusErr := processResearchQuestionCoverageStatus(candidates, admitted, strong)
+		if question == "" || seen[question] || candidatesErr != nil || admittedErr != nil || strongErr != nil || statusErr != nil || strings.TrimSpace(row[4]) != status {
+			return nil, fmt.Errorf("external research coverage row %d is malformed", index+1)
+		}
+		seen[question] = true
+		coverage = append(coverage, processResearchQuestionCoverage{Question: question, Candidates: candidates, Admitted: admitted, Strong: strong, Coverage: status})
+	}
+	return coverage, nil
+}
+
 func canonicalEvidenceText(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
@@ -70,8 +254,14 @@ func processInternalAuthoritySources(app *kanbanBoardApp, plan *goalPlan) (map[s
 		}
 	}
 	engine := newGoalEngine(app)
-	if _, err := engine.processStageSourcePacket(context.Background(), plan); err != nil {
-		return nil, err
+	var packetErr error
+	if app.externalEvidenceSourcePacket != nil {
+		_, packetErr = app.externalEvidenceSourcePacket(context.Background(), plan)
+	} else {
+		_, packetErr = engine.processStageSourcePacket(context.Background(), plan)
+	}
+	if packetErr != nil {
+		return nil, packetErr
 	}
 	if plan.RouteReceipt != nil {
 		selection, err := app.goalRouteSourceSelection(*plan.RouteReceipt)
@@ -126,6 +316,44 @@ func processInternalAuthoritySources(app *kanbanBoardApp, plan *goalPlan) (map[s
 			add(ref, sourceText)
 		}
 	}
+	return sources, nil
+}
+
+// processResearchObjectiveAuthoritySource is an intent-only authority. It lets
+// the context stage bind a proposed web question to the exact approved goal,
+// but it is deliberately kept out of processInternalAuthoritySources so a user
+// request can never become factual evidence merely because it was requested.
+func processResearchObjectiveAuthoritySource(plan *goalPlan) (processInternalAuthoritySource, bool) {
+	if plan == nil {
+		return processInternalAuthoritySource{}, false
+	}
+	goalID := strings.TrimSpace(plan.GoalID)
+	objective := strings.TrimSpace(plan.Objective)
+	if goalID == "" || objective == "" {
+		return processInternalAuthoritySource{}, false
+	}
+	ref := fmt.Sprintf("goal_objective_id=%s digest=%s", goalID, sha256Hex([]byte(plan.Objective)))
+	return processInternalAuthoritySource{Ref: ref, Text: objective}, true
+}
+
+// processResearchAuthoritySources is the per-question research scope map. It
+// reuses every currently authorized factual source revision, then adds the
+// exact approved objective as a separate intent-only source. The generated
+// context artifact is never part of this map, preventing a model-authored
+// question from authorizing itself by appearing in that same JSON object.
+func processResearchAuthoritySources(app *kanbanBoardApp, plan *goalPlan) (map[string]processInternalAuthoritySource, error) {
+	sources, err := processInternalAuthoritySources(app, plan)
+	if err != nil {
+		return nil, err
+	}
+	objective, ok := processResearchObjectiveAuthoritySource(plan)
+	if !ok {
+		return nil, fmt.Errorf("approved research objective is unavailable")
+	}
+	if _, exists := sources[objective.Ref]; exists {
+		return nil, fmt.Errorf("approved research objective identity collides with a factual source")
+	}
+	sources[objective.Ref] = objective
 	return sources, nil
 }
 
@@ -461,6 +689,29 @@ func processContextDownstreamBrief(text, processID string) string {
 	brief := map[string]any{}
 	for _, key := range fields {
 		if value, ok := object[key]; ok {
+			if key == "research_questions" {
+				raw, ok := value.([]any)
+				if !ok {
+					brief[key] = []string{}
+					continue
+				}
+				questions := make([]string, 0, len(raw))
+				for _, item := range raw {
+					question := ""
+					switch typed := item.(type) {
+					case string:
+						question = canonicalEvidenceText(typed)
+					case map[string]any:
+						question, _ = typed["question"].(string)
+						question = canonicalEvidenceText(question)
+					}
+					if question != "" {
+						questions = append(questions, question)
+					}
+				}
+				brief[key] = questions
+				continue
+			}
 			brief[key] = value
 		}
 	}
@@ -549,7 +800,15 @@ func compileProcessEvidenceDossier(app *kanbanBoardApp, plan *goalPlan, parentID
 		"| None | None | N/A | N/A | available | No external proof gaps were recorded. |",
 	}, "\n")
 	missingExternalCount := 0
+	var researchCoverage []processResearchQuestionCoverage
 	if researchMode == "external" {
+		authorizedQuestions, authorizedMode, authorityErr := externalEvidenceResearchQuestionAuthoritiesFromText(contextArtifact.Text)
+		if authorityErr != nil {
+			return "", nil, fmt.Errorf("external research question authority is invalid: %w", authorityErr)
+		}
+		if authorizedMode != "external" {
+			return "", nil, fmt.Errorf("external research question authority has mode %q", authorizedMode)
+		}
 		entailmentStage := plan.subtaskByID("evidence_entailment")
 		if entailmentStage == nil || entailmentStage.Status != subtaskComplete || strings.TrimSpace(entailmentStage.ArtifactID) == "" {
 			return "", nil, fmt.Errorf("completed evidence entailment is required for external research")
@@ -572,11 +831,28 @@ func compileProcessEvidenceDossier(app *kanbanBoardApp, plan *goalPlan, parentID
 		if err != nil {
 			return "", nil, err
 		}
+		entailmentAuthority, authorityErr := authorizedExternalEvidenceEntailmentAuthority(app, thread)
+		if authorityErr != nil {
+			return "", nil, authorityErr
+		}
+		admittedRows, admittedErr := externalEvidenceEntailmentAdmittedRows(artifact.Text)
+		if admittedErr != nil {
+			return "", nil, admittedErr
+		}
+		researchCoverage, err = processExternalResearchQuestionCoverage(authorizedQuestions, entailmentAuthority, admittedRows)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	researchCoverageManifest, evidenceAdequacy, strongQuestionCount, researchCoverageDigest, err := canonicalProcessResearchQuestionCoverageManifest(researchMode, researchCoverage)
+	if err != nil {
+		return "", nil, err
 	}
 
 	body := strings.Join([]string{
 		"## Evidence admission dossier",
 		"Only the externally admitted claims below may be used as factual evidence. The decision context is direction, audience, taste, and constraints from the authorized brief; it is not a factual claim manifest and must not be presented as market proof.",
+		researchCoverageManifest,
 		external,
 		missingExternal,
 		strings.Join(internalLines, "\n"),
@@ -593,12 +869,16 @@ func compileProcessEvidenceDossier(app *kanbanBoardApp, plan *goalPlan, parentID
 	digest := sha256Hex([]byte(body))
 	body += fmt.Sprintf("\n\n<!-- stride-process-evidence-dossier:v1 process=%s external=%d internal=%d digest=%s -->", plan.ProcessID, externalCount, len(internalClaims), digest)
 	return body, map[string]string{
-		"evidenceAdmissionDigest": digest,
-		"externalClaimsAdmitted":  fmt.Sprintf("%d", externalCount),
-		"externalClaimsMissing":   fmt.Sprintf("%d", missingExternalCount),
-		"internalClaimsAdmitted":  fmt.Sprintf("%d", len(internalClaims)),
-		"internalClaimsRejected":  fmt.Sprintf("%d", internalRejected),
-		"researchMode":            researchMode,
+		"evidenceAdmissionDigest":        digest,
+		"externalClaimsAdmitted":         fmt.Sprintf("%d", externalCount),
+		"externalClaimsMissing":          fmt.Sprintf("%d", missingExternalCount),
+		"internalClaimsAdmitted":         fmt.Sprintf("%d", len(internalClaims)),
+		"internalClaimsRejected":         fmt.Sprintf("%d", internalRejected),
+		"researchMode":                   researchMode,
+		"researchQuestionsAuthorized":    strconv.Itoa(len(researchCoverage)),
+		"researchQuestionsStrong":        strconv.Itoa(strongQuestionCount),
+		"researchQuestionCoverageDigest": researchCoverageDigest,
+		"evidenceAdequacy":               evidenceAdequacy,
 	}, nil
 }
 
@@ -639,6 +919,48 @@ func validateProcessEvidenceDossier(plan *goalPlan, artifact meetingMemoryEntry)
 	}
 	if metadataCount, countErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["internalClaimsAdmitted"])); countErr != nil || metadataCount != internalCount {
 		return fmt.Errorf("evidence dossier internal metadata count does not match its receipt")
+	}
+	researchMode := strings.ToLower(strings.TrimSpace(artifact.Metadata["researchMode"]))
+	if !oneOf(researchMode, "none", "internal", "external") {
+		return fmt.Errorf("evidence dossier has an invalid research mode")
+	}
+	coverage, err := processResearchQuestionCoverageRows(prefix, researchMode)
+	if err != nil {
+		return fmt.Errorf("evidence dossier research coverage is invalid: %w", err)
+	}
+	if strings.TrimSpace(artifact.Metadata["researchQuestionCoverageDigest"]) != processResearchQuestionCoverageDigest(coverage) {
+		return fmt.Errorf("evidence dossier research coverage digest does not bind the exact coverage manifest")
+	}
+	strongQuestions := 0
+	for _, item := range coverage {
+		if item.Coverage == processResearchCoverageSupported {
+			strongQuestions++
+		}
+	}
+	if metadataCount, countErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["researchQuestionsAuthorized"])); countErr != nil || metadataCount != len(coverage) {
+		return fmt.Errorf("evidence dossier authorized research question count does not match its manifest")
+	}
+	if metadataCount, countErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["researchQuestionsStrong"])); countErr != nil || metadataCount != strongQuestions {
+		return fmt.Errorf("evidence dossier strong research question count does not match its manifest")
+	}
+	wantAdequacy := processEvidenceAdequacyNotRequired
+	if researchMode == "external" {
+		wantAdequacy = processEvidenceAdequacyInsufficient
+		if len(coverage) > 0 && strongQuestions == len(coverage) {
+			wantAdequacy = processEvidenceAdequacySufficient
+		}
+	}
+	if strings.TrimSpace(artifact.Metadata["evidenceAdequacy"]) != wantAdequacy {
+		return fmt.Errorf("evidence dossier adequacy metadata does not match its coverage manifest")
+	}
+	if researchMode == "external" && wantAdequacy != processEvidenceAdequacySufficient {
+		gaps := make([]string, 0, len(coverage))
+		for _, item := range coverage {
+			if item.Coverage != processResearchCoverageSupported {
+				gaps = append(gaps, fmt.Sprintf("%s (%s)", item.Question, item.Coverage))
+			}
+		}
+		return fmt.Errorf("load-bearing external research coverage is insufficient: %s", strings.Join(gaps, "; "))
 	}
 	return nil
 }

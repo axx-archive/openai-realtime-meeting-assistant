@@ -2714,6 +2714,16 @@ export function ThreadScreen({ route, navigation }: Props) {
       const resultStudioKind = artifactStudioKind(resultArtifactType)
         ?? artifactStudioKind(message.thread?.mode);
       if (resultArtifactId && resultStudioKind) {
+        const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+        const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
+        const managedAuthoredResult = Boolean(explicitResultArtifactId)
+          && (String(message.thread?.mode ?? '').trim().toLowerCase() === 'goal' || qualityState !== '');
+        const admittedPresentation = qualityState === 'admitted'
+          && message.thread?.resultCanPresent === true;
+        if (resultStudioKind === 'deck' && managedAuthoredResult && !admittedPresentation && message.thread?.resultCanEdit !== true) {
+          setError('This draft needs review before it can be presented.');
+          return;
+        }
         navigation.navigate('OSWeb', {
           path: artifactStudioPath(resultArtifactId, resultStudioKind, message.thread?.resultCanEdit === true ? 'edit' : 'present'),
           title: String(
@@ -2918,6 +2928,20 @@ export function ThreadScreen({ route, navigation }: Props) {
         return;
       }
 
+      const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+      const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
+      const managedAuthoredResult = Boolean(explicitResultArtifactId)
+        && (String(message.thread?.mode ?? '').trim().toLowerCase() === 'goal' || qualityState !== '');
+      if (studioKind === 'deck' && managedAuthoredResult
+        && (qualityState !== 'admitted' || message.thread?.resultCanPresent !== true)) {
+        if (message.thread?.resultCanEdit === true) {
+          void openWorkArtifact(message);
+        } else {
+          setError('This draft needs review before it can be presented.');
+        }
+        return;
+      }
+
       navigation.navigate("OSWeb", {
         path: artifactStudioPath(artifactId, studioKind, 'present'),
         title,
@@ -3056,12 +3080,21 @@ export function ThreadScreen({ route, navigation }: Props) {
       const goalID = String(message.thread?.artifactId ?? "").trim();
       const mode = String(message.thread?.mode ?? "").trim().toLowerCase();
       const status = String(message.thread?.status ?? "").trim().toLowerCase();
+      const qualityState = String(message.thread?.resultQualityState ?? "").trim().toLowerCase();
+      const resultArtifactID = String(message.thread?.resultArtifactId ?? "").trim();
+      const reviewingChanges = qualityState === 'edited_after_admission';
       const retryable = ["failed", "error", "needs_attention", "rejected", "blocked"].includes(status);
-      if (!sessionToken || !messageID || !goalID || mode !== "goal" || !retryable || retryingGoalID) return;
+      const canContinue = message.thread?.resultCanContinue === true && (reviewingChanges || retryable);
+      if (!sessionToken || !messageID || !goalID || mode !== "goal" || !canContinue || retryingGoalID) return;
       setRetryingGoalID(messageID);
       setError(null);
       try {
-        await api.resumeGoal(sessionToken, goalID);
+        if (reviewingChanges) {
+          if (!resultArtifactID) return;
+          await api.reviewEditedGoal(sessionToken, goalID, resultArtifactID);
+        } else {
+          await api.resumeGoal(sessionToken, goalID);
+        }
         await load();
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } catch (caught) {
@@ -3070,7 +3103,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             ? caught.message
             : caught instanceof Error
               ? caught.message
-              : "Scout could not resume that goal.",
+              : reviewingChanges ? "Scout could not start review of those changes." : "Scout could not resume that goal.",
         );
       } finally {
         setRetryingGoalID(null);

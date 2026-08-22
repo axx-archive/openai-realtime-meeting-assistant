@@ -137,6 +137,7 @@ test('Project-bound Research uses governed actions while Project presentations k
     thread: {
       id: 'run-goal-report', mode: 'goal', processId: 'document_report_v1', query: 'Write the opportunity report', status: 'complete', artifactId: 'goal-report-root',
       resultArtifactId: 'report-artifact', resultArtifactType: 'markdown', resultTitle: 'Insights & Opportunities',
+      resultQualityState: 'admitted', resultCanExport: true,
       resultPreview: '# Insights & Opportunities\n\nThe engagement army is an activation network, not a reach product.',
     },
   };

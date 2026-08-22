@@ -1609,6 +1609,49 @@ func renderSidecarAvailable() bool {
 	return heartbeatOK
 }
 
+func activeRenderJobForBinding(artifact meetingMemoryEntry, binding renderPDFJobBinding) (renderRunnerJob, bool, error) {
+	jobID := strings.TrimSpace(artifact.Metadata["renderJobId"])
+	status := strings.ToLower(strings.TrimSpace(artifact.Metadata["renderStatus"]))
+	if jobID == "" || (status != renderJobStatusQueued && status != renderJobStatusRunning) {
+		return renderRunnerJob{}, false, nil
+	}
+	sourceVersion, versionOK := renderSourceVersion(artifact)
+	if !versionOK || sourceVersion != binding.SourceArtifactVersion || sourceVersion != artifactVersion(artifact) ||
+		strings.TrimSpace(artifact.Metadata[renderSourceSceneRefMetadataKey]) != strings.TrimSpace(binding.SourceSceneRef) ||
+		strings.TrimSpace(binding.SourceSceneRef) != strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) {
+		return renderRunnerJob{}, false, nil
+	}
+	if digest := strings.TrimSpace(artifact.Metadata[renderSourceContentDigestMetadataKey]); digest != "" && digest != binding.SourceContentDigest {
+		return renderRunnerJob{}, false, nil
+	}
+	job, err := newRenderRunnerJobStore(renderRunnerQueuePath()).read(jobID + ".json")
+	if err != nil {
+		return renderRunnerJob{}, false, err
+	}
+	// A renderer persists complete before POSTing its callback. Treat that
+	// narrow late-callback window as still reusable while the artifact remains
+	// queued/running, so an HTTP retry cannot invalidate the result in flight.
+	if job.Status != renderJobStatusQueued && job.Status != renderJobStatusRunning && job.Status != renderJobStatusComplete {
+		return renderRunnerJob{}, false, nil
+	}
+	if !renderRunnerJobMatchesBinding(*job, binding) {
+		return renderRunnerJob{}, false, nil
+	}
+	return *job, true, nil
+}
+
+func writeAcceptedRenderJob(w http.ResponseWriter, job renderRunnerJob, binding renderPDFJobBinding, reused bool) {
+	writeAuthJSON(w, http.StatusAccepted, map[string]any{
+		"ok":            true,
+		"jobId":         job.ID,
+		"kind":          binding.Kind,
+		"sourceVersion": binding.SourceArtifactVersion,
+		"sceneRef":      binding.SourceSceneRef,
+		"renderStatus":  firstNonEmptyString(strings.TrimSpace(job.Status), renderJobStatusQueued),
+		"reused":        reused,
+	})
+}
+
 // artifactExportPDFHandler serves POST /artifacts/export-pdf
 // {artifactId, kind, expectedVersion?, sceneRef?} (packaging OS §4 item 14b) — session-gated exactly like
 // its /artifacts neighbors. It enqueues an export_pdf job for the
@@ -1650,6 +1693,10 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
+	if err := kanbanApp.requireFinalExportAdmission(artifact); err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
+		return
+	}
 	payload.SceneRef = strings.TrimSpace(payload.SceneRef)
 	sourceVersion := artifactVersion(artifact)
 	sourceSceneRef := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
@@ -1668,6 +1715,21 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The flatten law is server-owned: the client may request an export, not
+	// choose the print path (a deck exported as "paper" would ship the layered
+	// print). Kind derives from the artifact's own declaration; a stated kind
+	// that disagrees is rejected rather than silently rewritten. A markdown
+	// report is text-native by construction — always paper, never a flatten.
+	markdownReport := !artifactIsHTMLDocument(artifact)
+	kind := serverRenderKindForArtifact(artifact)
+	if markdownReport {
+		kind = renderJobKindPaper
+	}
+	if requested := strings.TrimSpace(payload.Kind); requested != "" && normalizeRenderJobKind(requested) != kind {
+		writeAuthError(w, http.StatusBadRequest, "export kind is derived from the artifact (paper is only for paper-kit documents and markdown reports) — omit kind or match it")
+		return
+	}
+
 	// Decks and paper-kit documents print their own HTML (deck: flatten law;
 	// paper: text-native direct print). A markdown body — the research-report
 	// contract — has nothing for chromium to lay out, so the server converts
@@ -1675,7 +1737,6 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	// (renderResearchReportPrintHTML) and ships it down the text-native paper
 	// path.
 	printHTML := artifact.Text
-	markdownReport := !artifactIsHTMLDocument(artifact)
 	if markdownReport {
 		printHTML = renderResearchReportPrintHTML(artifact)
 	} else if strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) != "" {
@@ -1690,25 +1751,39 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		printHTML = string(expanded)
 	}
+	binding := renderPDFJobBinding{
+		ArtifactID: artifact.ID, Kind: kind, HTML: printHTML, Title: artifact.Metadata["title"],
+		SourceArtifactVersion: sourceVersion, SourceSceneRef: sourceSceneRef,
+		SourceContentDigest: renderPDFContentDigest(kind, printHTML),
+	}
+	if existingJob, reusable, reuseErr := activeRenderJobForBinding(artifact, binding); reuseErr == nil && reusable {
+		writeAcceptedRenderJob(w, existingJob, binding, true)
+		return
+	} else if reuseErr != nil && !os.IsNotExist(reuseErr) {
+		writeAuthError(w, http.StatusServiceUnavailable, "the existing PDF render could not be resumed; try again shortly")
+		return
+	}
+	// A pending id from another revision/input is deliberately retired before
+	// a new job is reserved. Its eventual callback can no longer attach to or
+	// overwrite the current artifact.
+	if pendingID := strings.TrimSpace(artifact.Metadata["renderJobId"]); pendingID != "" {
+		if _, retireErr := retireStaleRenderJob(artifact.ID, pendingID); retireErr != nil {
+			writeAuthError(w, http.StatusServiceUnavailable, "the prior PDF render could not be retired; try again shortly")
+			return
+		}
+		artifact, _ = kanbanApp.osArtifactByID(artifact.ID)
+		if artifactVersion(artifact) != sourceVersion || strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]) != sourceSceneRef {
+			writeAuthJSON(w, http.StatusConflict, map[string]any{
+				"ok": false, "error": "the artifact changed while PDF export was starting; reopen it before exporting", "currentVersion": artifactVersion(artifact),
+			})
+			return
+		}
+	}
 	if !renderSidecarAvailable() {
 		writeAuthError(w, http.StatusServiceUnavailable, "render sidecar not available — start the render-runner container (or run with -render-runner) to export PDFs")
 		return
 	}
-
-	// The flatten law is server-owned: the client may request an export, not
-	// choose the print path (a deck exported as "paper" would ship the layered
-	// print). Kind derives from the artifact's own declaration; a stated kind
-	// that disagrees is rejected rather than silently rewritten. A markdown
-	// report is text-native by construction — always paper, never a flatten.
-	kind := serverRenderKindForArtifact(artifact)
-	if markdownReport {
-		kind = renderJobKindPaper
-	}
-	if requested := strings.TrimSpace(payload.Kind); requested != "" && normalizeRenderJobKind(requested) != kind {
-		writeAuthError(w, http.StatusBadRequest, "export kind is derived from the artifact (paper is only for paper-kit documents and markdown reports) — omit kind or match it")
-		return
-	}
-	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, printHTML, artifact.Metadata["title"])
+	job, reused, err := enqueueBoundRenderExportPDFJob(binding)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1718,21 +1793,25 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	// happens first because it mints the job id; a losing race leaves an
 	// unattachable orphan job, never a stale PDF on the artifact.
 	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
-	if _, changed, stampErr := kanbanApp.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, queuedRenderMetadata(artifact, job.ID, kind)); stampErr != nil || !changed {
+	_, changed, stampErr := kanbanApp.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
+		"renderJobId": strings.TrimSpace(artifact.Metadata["renderJobId"]),
+	}, artifact.ID, queuedRenderMetadataForInput(artifact, job.ID, kind, binding.SourceContentDigest))
+	if stampErr != nil || !changed {
+		fresh, found := kanbanApp.osArtifactByID(artifact.ID)
+		if found {
+			if activeJob, active, _ := activeRenderJobForBinding(fresh, binding); active && activeJob.ID == job.ID {
+				writeAcceptedRenderJob(w, activeJob, binding, reused)
+				return
+			}
+		}
 		log.Warnf("PDF export job %s could not bind to artifact %s revision %d: %v", job.ID, artifact.ID, sourceVersion, stampErr)
 		writeAuthJSON(w, http.StatusConflict, map[string]any{
-			"ok": false, "error": "the artifact changed while PDF export was starting; try again", "currentVersion": sourceVersion,
+			"ok": false, "error": "the artifact changed while PDF export was starting; try again", "currentVersion": artifactVersion(fresh),
 		})
 		return
 	}
 
-	writeAuthJSON(w, http.StatusAccepted, map[string]any{
-		"ok":            true,
-		"jobId":         job.ID,
-		"kind":          kind,
-		"sourceVersion": sourceVersion,
-		"sceneRef":      sourceSceneRef,
-	})
+	writeAcceptedRenderJob(w, job, binding, reused)
 }
 
 // renderCallbackMaxBytes bounds the render callback body: base64 of a

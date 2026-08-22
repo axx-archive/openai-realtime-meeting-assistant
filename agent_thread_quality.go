@@ -15,8 +15,13 @@ import (
 )
 
 const (
-	minimumResearchArtifactWords = 1000
-	externalEvidenceMaxToolCalls = 6
+	minimumResearchArtifactWords              = 1000
+	externalEvidenceMaxToolCalls              = 6
+	packagingStudioResearchContextContract    = "deck_context_snapshot_v3"
+	documentReportResearchContextContract     = "report_context_snapshot_v2"
+	externalEvidenceMaxResearchQuestions      = 3
+	externalEvidenceMaxAuthorityQuoteRunes    = 1000
+	externalEvidenceMaxDecisionRelevanceRunes = 500
 )
 
 var (
@@ -270,7 +275,7 @@ func externalEvidenceJSONSchema() *openAIJSONSchema {
 			"additionalProperties": false,
 			"required":             []string{"research_questions", "evidence", "excluded_or_unverified"},
 			"properties": map[string]any{
-				"research_questions": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": stringField(500)},
+				"research_questions": map[string]any{"type": "array", "minItems": 1, "maxItems": externalEvidenceMaxResearchQuestions, "items": stringField(500)},
 				"evidence": map[string]any{
 					"type": "array", "minItems": 0, "maxItems": 12,
 					"items": map[string]any{
@@ -343,7 +348,7 @@ func externalEvidenceContractInstructions() string {
 func externalEvidenceV2ContractInstructions() string {
 	return strings.Join([]string{
 		"This is Stride's focused external-evidence contract for a governed deliverable.",
-		"Copy the 1 to 5 research_questions exactly and in order from the approved context snapshot. Do not add, rephrase, broaden, or replace a question. Use one question when the approved snapshot contains one; do not invent a second research lane to fill the schema. This is an internal evidence ledger feeding the requested deliverable, not a generic market report, work log, or comparable-company exercise.",
+		"Copy the 1 to 3 research_questions exactly and in order from the server-authorized context snapshot. Do not add, rephrase, broaden, or replace a question. Use one question when the approved snapshot contains one; do not invent a second research lane to fill the schema. This is an internal evidence ledger feeding the requested deliverable, not a generic market report, work log, or comparable-company exercise.",
 		"Return only the strict external_evidence_v2 JSON object requested by the response schema. Do not emit Markdown, a code fence, prose before or after the object, or a Scout source receipt.",
 		"Every evidence item must populate all eight fields: research_question, source_fact, source_title, url, published_or_updated, units, confidence, and deck_implication. Copy research_question exactly from research_questions. source_fact must equal one complete factual sentence copied verbatim from the fetched page, or one complete canonical header/value table row; do not copy an inner clause, paraphrase, combine facts, or use attributed, alleged, disputed, denied, or refuted language. Use one exact bare HTTPS URL actually fetched in this run. Put the fetched page title in source_title; the server will replace it with the provider-owned citation title or a URL-derived label before showing it.",
 		"Format published_or_updated exactly as Published YYYY-MM-DD, Updated YYYY-MM-DD, or Accessed YYYY-MM-DD. Use Published/Updated only when that label and exact date are stated by the source; an event date inside a claim is not a publication date. Otherwise use today's access date. Use explicit semantic units. N/A is allowed only for a non-measure claim. A bare $ is currency-ambiguous and may not be labeled USD, AUD, CAD, or another currency without an explicit code/name in the source. Confidence must be High, Medium, or Low. Keep inference out of source_fact and put the bounded interpretation only in deck_implication. The deck_implication field name is retained for schema compatibility; use it for the bounded implication to the requested deliverable, whether that deliverable is a presentation or a document.",
@@ -368,7 +373,26 @@ type externalEvidenceFrozenAuthority struct {
 	ContextArtifactRevision       int      `json:"contextArtifactRevision"`
 	ContextArtifactBodyDigest     string   `json:"contextArtifactBodyDigest"`
 	ContextBindingDigest          string   `json:"contextBindingDigest"`
+	QuestionAuthorityDigest       string   `json:"questionAuthorityDigest"`
+	SourceAuthorityDigest         string   `json:"sourceAuthorityDigest"`
 	Questions                     []string `json:"questions"`
+}
+
+type externalEvidenceResearchQuestionAuthority struct {
+	Question          string `json:"question"`
+	ResearchKind      string `json:"research_kind"`
+	SourceRef         string `json:"source_ref"`
+	AuthorityQuote    string `json:"authority_quote"`
+	ScopeAnchor       string `json:"scope_anchor"`
+	DecisionEffect    string `json:"decision_effect"`
+	DecisionRelevance string `json:"decision_relevance"`
+}
+
+type externalEvidenceAuthorizedResearch struct {
+	Authorities             []externalEvidenceResearchQuestionAuthority
+	Questions               []string
+	QuestionAuthorityDigest string
+	SourceAuthorityDigest   string
 }
 
 func cloneExternalEvidenceFrozenAuthority(authority *externalEvidenceFrozenAuthority) *externalEvidenceFrozenAuthority {
@@ -380,7 +404,7 @@ func cloneExternalEvidenceFrozenAuthority(authority *externalEvidenceFrozenAutho
 	return &clone
 }
 
-func externalEvidenceContextArtifact(app *kanbanBoardApp, plan *goalPlan, parentID string) (meetingMemoryEntry, error) {
+func externalEvidenceRawContextArtifact(app *kanbanBoardApp, plan *goalPlan, parentID string) (meetingMemoryEntry, error) {
 	if app == nil || plan == nil || strings.TrimSpace(parentID) == "" {
 		return meetingMemoryEntry{}, fmt.Errorf("authorized research brief is unavailable")
 	}
@@ -399,11 +423,367 @@ func externalEvidenceContextArtifact(app *kanbanBoardApp, plan *goalPlan, parent
 	return artifact, nil
 }
 
-func externalEvidenceResearchQuestionsFromContext(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+func externalEvidenceContextArtifact(app *kanbanBoardApp, plan *goalPlan, parentID string) (meetingMemoryEntry, error) {
+	if app == nil || plan == nil {
+		return meetingMemoryEntry{}, fmt.Errorf("authorized research brief is unavailable")
+	}
+	if !plan.routeVerified {
+		if err := newGoalEngine(app).prepareGoalRoute(plan, parentID); err != nil {
+			return meetingMemoryEntry{}, fmt.Errorf("authorized research process is unavailable: %w", err)
+		}
+	}
+	definition, err := resolvePinnedProcessDefinition(plan)
+	if err != nil {
+		return meetingMemoryEntry{}, fmt.Errorf("authorized research process is unavailable: %w", err)
+	}
+	contextDefinition, ok := definition.stageByID("context_snapshot")
+	if !ok || !externalEvidenceFreshResearchContextContract(contextDefinition.OutputContract) {
+		return meetingMemoryEntry{}, fmt.Errorf("context snapshot does not use the fresh source-bound research authority contract")
+	}
+	artifact, err := externalEvidenceRawContextArtifact(app, plan, parentID)
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	artifactContract := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["artifactContract"]), strings.TrimSpace(artifact.Metadata["outputContract"]))
+	if artifactContract != strings.TrimSpace(contextDefinition.OutputContract) {
+		return meetingMemoryEntry{}, fmt.Errorf("context snapshot is not the exact completed process artifact")
+	}
+	return artifact, nil
+}
+
+func externalEvidenceFreshResearchContextContract(contract string) bool {
+	return oneOf(strings.TrimSpace(contract), packagingStudioResearchContextContract, documentReportResearchContextContract)
+}
+
+var (
+	externalEvidenceComparativeQuestionPattern   = regexp.MustCompile(`(?i)\b(?:compar(?:e|ed|ing|ison|ative)|comparables?|peers?|benchmarks?|analogs?|versus|vs\.?|how\s+do|how\s+does|differences?\s+between)\b`)
+	externalEvidenceCurrentConstraintTimePattern = regexp.MustCompile(`(?i)\b(?:current|currently|latest|today|now|as\s+of)\b`)
+	externalEvidenceCurrentConstraintRulePattern = regexp.MustCompile(`(?i)\b(?:rules?|polic(?:y|ies)|regulations?|requirements?|requires?|guides?|guidelines?|standards?|compliance|disclosures?|attribution|reuse|branded[- ]content|terms?|laws?)\b`)
+	externalEvidenceDecisionActionPattern        = regexp.MustCompile(`(?i)\b(?:recommend|recommendation|decide|decision|choose|proceed|pilot|launch|build|stop|delay|sequence|stage|scope|scale|guardrail|measure|measurement|prioritize)\b`)
+)
+
+func externalEvidenceResearchQuestionAuthorityDigest(authorities []externalEvidenceResearchQuestionAuthority) string {
+	raw, err := json.Marshal(authorities)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	return sha256Hex(raw)
+}
+
+func externalEvidenceTextContainsExactPhrase(text, phrase string) bool {
+	text = strings.ToLower(canonicalEvidenceText(text))
+	phrase = strings.ToLower(canonicalEvidenceText(phrase))
+	return text != "" && phrase != "" && strings.Contains(text, phrase)
+}
+
+func externalEvidenceMaterialScopeAnchor(anchor string) bool {
+	tokens := externalEvidenceEntailmentTokens(anchor)
+	if len(tokens) < 2 || len(tokens) > 12 {
+		return false
+	}
+	generic := map[string]bool{
+		"a": true, "an": true, "business": true, "company": true, "current": true, "data": true,
+		"evidence": true, "market": true, "product": true, "research": true, "service": true,
+		"source": true, "this": true, "that": true, "the": true,
+	}
+	for _, token := range tokens {
+		if len([]rune(token)) >= 4 && !generic[token] {
+			return true
+		}
+	}
+	return false
+}
+
+func validateExternalEvidenceResearchQuestionShape(authority externalEvidenceResearchQuestionAuthority, index int) error {
+	question := authority.Question
+	if question == "" || len([]rune(question)) > 500 || strings.ContainsAny(question, "\r\n;") || strings.Count(question, "?") != 1 || !strings.HasSuffix(question, "?") {
+		return fmt.Errorf("context snapshot research question %d must be one atomic question ending in one question mark", index+1)
+	}
+	if !oneOf(authority.ResearchKind, "direct_evidence", "comparative_evidence", "current_constraint") {
+		return fmt.Errorf("context snapshot research question %d has an invalid research_kind", index+1)
+	}
+	if authority.SourceRef == "" || authority.AuthorityQuote == "" || len([]rune(authority.AuthorityQuote)) > externalEvidenceMaxAuthorityQuoteRunes {
+		return fmt.Errorf("context snapshot research question %d is missing a bounded source_ref or authority_quote", index+1)
+	}
+	if !externalEvidenceMaterialScopeAnchor(authority.ScopeAnchor) || !externalEvidenceTextContainsExactPhrase(question, authority.ScopeAnchor) {
+		return fmt.Errorf("context snapshot research question %d has no material exact scope_anchor", index+1)
+	}
+	if !oneOf(authority.DecisionEffect, "recommendation", "scope", "sequence", "guardrail", "measurement") {
+		return fmt.Errorf("context snapshot research question %d has an invalid decision_effect", index+1)
+	}
+	if len([]rune(authority.DecisionRelevance)) < 20 || len([]rune(authority.DecisionRelevance)) > externalEvidenceMaxDecisionRelevanceRunes ||
+		!externalEvidenceTextContainsExactPhrase(authority.DecisionRelevance, authority.ScopeAnchor) || !externalEvidenceDecisionActionPattern.MatchString(authority.DecisionRelevance) {
+		return fmt.Errorf("context snapshot research question %d has generic or unbound decision_relevance", index+1)
+	}
+	measureCount := len(externalEvidenceMeasureKinds(question))
+	switch authority.ResearchKind {
+	case "direct_evidence":
+		if externalEvidenceComparativeQuestionPattern.MatchString(question) || externalEvidenceCurrentConstraintRulePattern.MatchString(question) || measureCount > 1 {
+			return fmt.Errorf("context snapshot research question %d mixes direct evidence with another research lane", index+1)
+		}
+	case "comparative_evidence":
+		if !externalEvidenceComparativeQuestionPattern.MatchString(question) || externalEvidenceCurrentConstraintRulePattern.MatchString(question) || measureCount > 1 {
+			return fmt.Errorf("context snapshot research question %d is not one bounded comparative evidence lane", index+1)
+		}
+	case "current_constraint":
+		if !externalEvidenceCurrentConstraintTimePattern.MatchString(question) || !externalEvidenceCurrentConstraintRulePattern.MatchString(question) || measureCount > 0 {
+			return fmt.Errorf("context snapshot research question %d is not one bounded current-constraint lane", index+1)
+		}
+	}
+	return nil
+}
+
+func externalEvidenceComparativeDimensionsBoundToAuthority(question, authorityQuote string) bool {
+	questionMeasures, authorityMeasures := externalEvidenceMeasureKinds(question), externalEvidenceMeasureKinds(authorityQuote)
+	if len(questionMeasures) > 0 && (len(authorityMeasures) == 0 || !externalEvidenceSetsOverlap(questionMeasures, authorityMeasures)) {
+		return false
+	}
+	questionPopulations := externalEvidenceNormalizedTermSet(question, externalEvidencePopulationTerms)
+	authorityPopulations := externalEvidenceNormalizedTermSet(authorityQuote, externalEvidencePopulationTerms)
+	if len(questionPopulations) > 0 && (len(authorityPopulations) == 0 || !externalEvidenceSetsOverlap(questionPopulations, authorityPopulations)) {
+		return false
+	}
+	questionPredicates, authorityPredicates := externalEvidencePredicateKinds(question), externalEvidencePredicateKinds(authorityQuote)
+	if len(questionPredicates) > 0 && (len(authorityPredicates) == 0 || !externalEvidenceSetsOverlap(questionPredicates, authorityPredicates)) {
+		return false
+	}
+	questionGeography := externalEvidenceNormalizedTermSet(question, externalEvidenceGeoTerms)
+	authorityGeography := externalEvidenceNormalizedTermSet(authorityQuote, externalEvidenceGeoTerms)
+	if len(questionGeography) > 0 && (len(authorityGeography) == 0 || !externalEvidenceSetsOverlap(questionGeography, authorityGeography)) {
+		return false
+	}
+	authorityYears := map[string]bool{}
+	for _, year := range externalEvidenceYearTokenPattern.FindAllString(authorityQuote, -1) {
+		authorityYears[year] = true
+	}
+	for _, year := range externalEvidenceYearTokenPattern.FindAllString(question, -1) {
+		if !authorityYears[year] {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeExternalEvidenceResearchQuestionAuthority(value any, index int) (externalEvidenceResearchQuestionAuthority, error) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return externalEvidenceResearchQuestionAuthority{}, fmt.Errorf("context snapshot research question %d must be an authority object", index+1)
+	}
+	required := []string{"question", "research_kind", "source_ref", "authority_quote", "scope_anchor", "decision_effect", "decision_relevance"}
+	if len(object) != len(required) {
+		return externalEvidenceResearchQuestionAuthority{}, fmt.Errorf("context snapshot research question %d does not match the strict authority object", index+1)
+	}
+	values := make(map[string]string, len(required))
+	for _, field := range required {
+		value, ok := object[field].(string)
+		if !ok {
+			return externalEvidenceResearchQuestionAuthority{}, fmt.Errorf("context snapshot research question %d has a missing or non-string %s", index+1, field)
+		}
+		values[field] = canonicalEvidenceText(value)
+	}
+	authority := externalEvidenceResearchQuestionAuthority{
+		Question: values["question"], ResearchKind: strings.ToLower(values["research_kind"]), SourceRef: values["source_ref"],
+		AuthorityQuote: values["authority_quote"], ScopeAnchor: values["scope_anchor"], DecisionEffect: strings.ToLower(values["decision_effect"]),
+		DecisionRelevance: values["decision_relevance"],
+	}
+	if err := validateExternalEvidenceResearchQuestionShape(authority, index); err != nil {
+		return externalEvidenceResearchQuestionAuthority{}, err
+	}
+	return authority, nil
+}
+
+func externalEvidenceResearchQuestionAuthoritiesFromText(text string) ([]externalEvidenceResearchQuestionAuthority, string, error) {
+	text = strings.TrimSpace(text)
+	extracted := strings.TrimSpace(extractJSONObject(text))
+	if extracted == "" || extracted != text {
+		return nil, "", fmt.Errorf("context snapshot must be exactly one structured JSON object")
+	}
+	decoder := json.NewDecoder(strings.NewReader(extracted))
+	decoder.UseNumber()
+	value, err := decodeUniqueJSONValue(decoder)
+	if err != nil || ensureJSONEOF(decoder) != nil {
+		return nil, "", fmt.Errorf("context snapshot is not valid structured context")
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, "", fmt.Errorf("context snapshot is not a JSON object")
+	}
+	modeValue, ok := object["research_mode"].(string)
+	if !ok {
+		return nil, "", fmt.Errorf("context snapshot has no valid research_mode")
+	}
+	mode := strings.ToLower(strings.TrimSpace(modeValue))
+	if !oneOf(mode, "none", "internal", "external") {
+		return nil, "", fmt.Errorf("context snapshot has an invalid research_mode")
+	}
+	raw, ok := object["research_questions"].([]any)
+	if !ok {
+		return nil, "", fmt.Errorf("context snapshot research_questions must be an array")
+	}
+	if mode != "external" {
+		if len(raw) != 0 {
+			return nil, "", fmt.Errorf("context snapshot %s research_mode must have no external research questions", mode)
+		}
+		return []externalEvidenceResearchQuestionAuthority{}, mode, nil
+	}
+	if len(raw) < 1 || len(raw) > externalEvidenceMaxResearchQuestions {
+		return nil, "", fmt.Errorf("context snapshot must authorize 1 to %d exact research questions", externalEvidenceMaxResearchQuestions)
+	}
+	authorities := make([]externalEvidenceResearchQuestionAuthority, 0, len(raw))
+	seen := map[string]bool{}
+	for index, value := range raw {
+		authority, err := decodeExternalEvidenceResearchQuestionAuthority(value, index)
+		if err != nil {
+			return nil, "", err
+		}
+		key := strings.ToLower(canonicalEvidenceText(authority.Question))
+		if seen[key] {
+			return nil, "", fmt.Errorf("context snapshot research question %d is duplicated", index+1)
+		}
+		seen[key] = true
+		authorities = append(authorities, authority)
+	}
+	return authorities, mode, nil
+}
+
+func externalEvidenceResearchQuestionAuthoritiesFromContext(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]externalEvidenceResearchQuestionAuthority, error) {
 	artifact, err := externalEvidenceContextArtifact(app, plan, parentID)
 	if err != nil {
 		return nil, err
 	}
+	authorities, mode, err := externalEvidenceResearchQuestionAuthoritiesFromText(artifact.Text)
+	if err != nil {
+		return nil, err
+	}
+	if mode != "external" {
+		return nil, fmt.Errorf("context snapshot did not authorize external research")
+	}
+	return authorities, nil
+}
+
+func externalEvidenceResearchQuestionsFromContext(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+	authorities, err := externalEvidenceResearchQuestionAuthoritiesFromContext(app, plan, parentID)
+	if err != nil {
+		return nil, err
+	}
+	questions := make([]string, 0, len(authorities))
+	for _, authority := range authorities {
+		questions = append(questions, authority.Question)
+	}
+	return questions, nil
+}
+
+func externalEvidenceAuthorityQuoteIsAtomic(quote, sourceText string) bool {
+	quote = canonicalEvidenceText(quote)
+	sourceText = strings.TrimSpace(sourceText)
+	if quote == "" || sourceText == "" || len([]rune(quote)) > externalEvidenceMaxAuthorityQuoteRunes || json.Valid([]byte(quote)) {
+		return false
+	}
+	for _, item := range externalEvidenceAssertionContexts(sourceText) {
+		if item.Assertion == quote {
+			return true
+		}
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(sourceText, "\r\n", "\n"), "\n") {
+		line = canonicalEvidenceText(line)
+		if line != quote || len(strings.Fields(line)) < 3 || json.Valid([]byte(line)) {
+			continue
+		}
+		items := externalEvidenceAssertionContexts(line)
+		if len(items) == 0 || (len(items) == 1 && items[0].Assertion == line) {
+			return true
+		}
+	}
+	canonicalSource := canonicalEvidenceText(sourceText)
+	if canonicalSource != quote || len(strings.Fields(quote)) < 3 || len([]rune(quote)) > externalEvidenceMaxAuthorityQuoteRunes || json.Valid([]byte(canonicalSource)) {
+		return false
+	}
+	items := externalEvidenceAssertionContexts(canonicalSource)
+	return len(items) == 0 || (len(items) == 1 && items[0].Assertion == canonicalSource)
+}
+
+func authorizeExternalEvidenceResearchQuestionAuthorities(app *kanbanBoardApp, plan *goalPlan, authorities []externalEvidenceResearchQuestionAuthority) (externalEvidenceAuthorizedResearch, error) {
+	sources, err := processResearchAuthoritySources(app, plan)
+	if err != nil {
+		return externalEvidenceAuthorizedResearch{}, fmt.Errorf("authorized research source packet is unavailable: %w", err)
+	}
+	questions := make([]string, 0, len(authorities))
+	bindings := make([]string, 0, len(authorities))
+	for index, authority := range authorities {
+		source, ok := sources[authority.SourceRef]
+		if !ok || !externalEvidenceAuthorityQuoteIsAtomic(authority.AuthorityQuote, source.Text) {
+			return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d does not bind one atomic quote to an exact authorized source", index+1)
+		}
+		if !externalEvidenceTextContainsExactPhrase(plan.Objective, authority.ScopeAnchor) || !externalEvidenceTextContainsExactPhrase(authority.AuthorityQuote, authority.ScopeAnchor) {
+			return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d scope_anchor is outside the approved objective or authority quote", index+1)
+		}
+		switch authority.ResearchKind {
+		case "direct_evidence":
+			if !externalEvidenceCandidateRelevantToQuestion(authority.Question, authority.AuthorityQuote) {
+				return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized direct-evidence dimensions", index+1)
+			}
+		case "comparative_evidence":
+			if !externalEvidenceComparativeDimensionsBoundToAuthority(authority.Question, authority.AuthorityQuote) {
+				return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized comparative-evidence dimensions", index+1)
+			}
+		}
+		questions = append(questions, authority.Question)
+		bindings = append(bindings, authority.SourceRef+"\x00"+sha256Hex([]byte(source.Text))+"\x00"+sha256Hex([]byte(authority.AuthorityQuote)))
+	}
+	authorityDigest := externalEvidenceResearchQuestionAuthorityDigest(authorities)
+	sourceDigest := sha256Hex([]byte(strings.Join(bindings, "\n")))
+	if !isHexDigest(authorityDigest) || !isHexDigest(sourceDigest) {
+		return externalEvidenceAuthorizedResearch{}, fmt.Errorf("authorized research authority could not be frozen")
+	}
+	return externalEvidenceAuthorizedResearch{
+		Authorities: authorities, Questions: questions, QuestionAuthorityDigest: authorityDigest, SourceAuthorityDigest: sourceDigest,
+	}, nil
+}
+
+func authorizeExternalEvidenceResearchText(app *kanbanBoardApp, plan *goalPlan, text string) (externalEvidenceAuthorizedResearch, string, error) {
+	authorities, mode, err := externalEvidenceResearchQuestionAuthoritiesFromText(text)
+	if err != nil {
+		return externalEvidenceAuthorizedResearch{}, "", err
+	}
+	if mode != "external" {
+		return externalEvidenceAuthorizedResearch{Authorities: authorities}, mode, nil
+	}
+	authorized, err := authorizeExternalEvidenceResearchQuestionAuthorities(app, plan, authorities)
+	return authorized, mode, err
+}
+
+func authorizedExternalEvidenceResearch(app *kanbanBoardApp, plan *goalPlan, parentID string) (externalEvidenceAuthorizedResearch, error) {
+	authorities, err := externalEvidenceResearchQuestionAuthoritiesFromContext(app, plan, parentID)
+	if err != nil {
+		return externalEvidenceAuthorizedResearch{}, err
+	}
+	return authorizeExternalEvidenceResearchQuestionAuthorities(app, plan, authorities)
+}
+
+func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+	artifact, err := externalEvidenceRawContextArtifact(app, plan, parentID)
+	if err != nil {
+		return nil, err
+	}
+	contract := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["artifactContract"]), strings.TrimSpace(artifact.Metadata["outputContract"]))
+	if !externalEvidenceFreshResearchContextContract(contract) {
+		// Legacy context snapshots may be consumed only by the already-completed
+		// source-snapshot path. New provider reservations never reach this branch:
+		// freezeExternalEvidenceAuthorityForThread requires the fresh strict
+		// authority envelope and frozen digests directly.
+		if !oneOf(contract, "deck_context_snapshot_v2", "report_context_snapshot_v1") {
+			return nil, fmt.Errorf("context snapshot does not use a recognized research authority contract")
+		}
+		return authorizedLegacyExternalEvidenceResearchQuestions(app, plan, artifact)
+	}
+	authorized, err := authorizedExternalEvidenceResearch(app, plan, parentID)
+	if err != nil {
+		return nil, err
+	}
+	return authorized.Questions, nil
+}
+
+func authorizedLegacyExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goalPlan, artifact meetingMemoryEntry) ([]string, error) {
 	var object map[string]any
 	if err := json.Unmarshal([]byte(extractJSONObject(artifact.Text)), &object); err != nil {
 		return nil, fmt.Errorf("context snapshot is not valid structured context")
@@ -414,42 +794,24 @@ func externalEvidenceResearchQuestionsFromContext(app *kanbanBoardApp, plan *goa
 	}
 	raw, ok := object["research_questions"].([]any)
 	if !ok || len(raw) < 1 || len(raw) > 5 {
-		return nil, fmt.Errorf("context snapshot must authorize 1 to 5 exact research questions")
+		return nil, fmt.Errorf("legacy context snapshot must contain 1 to 5 exact research questions")
 	}
 	questions := make([]string, 0, len(raw))
 	seen := map[string]bool{}
 	for index, value := range raw {
-		question := ""
-		switch typed := value.(type) {
-		case string:
-			question = typed
-		case map[string]any:
-			question, _ = typed["question"].(string)
-		default:
-			return nil, fmt.Errorf("context snapshot research question %d must be a string or an object with a string question field", index+1)
-		}
+		question, ok := value.(string)
 		question = strings.TrimSpace(question)
-		if question == "" {
-			return nil, fmt.Errorf("context snapshot research question %d is empty", index+1)
-		}
-		if len([]rune(question)) > 500 {
-			return nil, fmt.Errorf("context snapshot research question %d is oversized", index+1)
+		if !ok || question == "" || len([]rune(question)) > 500 {
+			return nil, fmt.Errorf("legacy context snapshot research question %d is invalid", index+1)
 		}
 		if seen[question] {
-			return nil, fmt.Errorf("context snapshot research question %d is duplicated", index+1)
+			return nil, fmt.Errorf("legacy context snapshot research question %d is duplicated", index+1)
 		}
 		seen[question] = true
 		questions = append(questions, question)
 	}
-	return questions, nil
-}
-
-func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
-	questions, err := externalEvidenceResearchQuestionsFromContext(app, plan, parentID)
-	if err != nil {
-		return nil, err
-	}
 	var packet string
+	var err error
 	if app.externalEvidenceSourcePacket != nil {
 		packet, err = app.externalEvidenceSourcePacket(context.Background(), plan)
 	} else {
@@ -461,7 +823,7 @@ func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goal
 	authorityText := strings.TrimSpace(plan.Objective + "\n" + packet)
 	for index, question := range questions {
 		if !externalEvidenceQuestionBoundToAuthority(question, authorityText) {
-			return nil, fmt.Errorf("context snapshot research question %d is not materially bound to the direct request or authorized source packet", index+1)
+			return nil, fmt.Errorf("legacy context snapshot research question %d is not materially bound to the direct request or authorized source packet", index+1)
 		}
 	}
 	return questions, nil
@@ -538,8 +900,9 @@ func externalEvidenceContextBindingDigest(artifact meetingMemoryEntry) string {
 	metadata := artifact.Metadata
 	return sha256Hex([]byte(strings.Join([]string{
 		artifact.ID, strconv.Itoa(artifactVersion(artifact)), sha256Hex([]byte(artifact.Text)), metadata[artifactContentDigestMetadataKey],
-		metadata["goalParentId"], metadata["goalSubtaskId"], metadata["processId"], metadata["processStage"], metadata["outputContract"],
-		metadata["status"], metadata["threadStatus"],
+		metadata["goalParentId"], metadata["goalSubtaskId"], metadata["processId"], metadata["processStage"],
+		firstNonEmptyString(metadata["artifactContract"], metadata["outputContract"]), metadata["researchMode"], metadata["researchQuestionCount"],
+		metadata["researchQuestionAuthorityDigest"], metadata["researchSourceAuthorityDigest"], metadata["status"], metadata["threadStatus"],
 	}, "\x00")))
 }
 
@@ -548,7 +911,7 @@ func freezeExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutA
 	if err != nil {
 		return nil, err
 	}
-	questions, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
+	authorized, err := authorizedExternalEvidenceResearch(app, &plan, parentID)
 	if err != nil {
 		return nil, err
 	}
@@ -556,6 +919,11 @@ func freezeExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutA
 	if err != nil {
 		return nil, err
 	}
+	if contextArtifact.Metadata["researchMode"] != "external" || contextArtifact.Metadata["researchQuestionCount"] != strconv.Itoa(len(authorized.Questions)) ||
+		contextArtifact.Metadata["researchQuestionAuthorityDigest"] != authorized.QuestionAuthorityDigest || contextArtifact.Metadata["researchSourceAuthorityDigest"] != authorized.SourceAuthorityDigest {
+		return nil, fmt.Errorf("external evidence context authority receipt is missing or changed")
+	}
+	contextBindingDigest := externalEvidenceContextBindingDigest(contextArtifact)
 	routeDigest := ""
 	if plan.RouteReceipt != nil {
 		routeDigest = plan.RouteReceipt.Digest
@@ -565,7 +933,8 @@ func freezeExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutA
 		ProcessDigest: plan.ProcessDigest, ProcessImplementationRevision: plan.ProcessImplementationRevision, RouteDigest: routeDigest,
 		ChildArtifactID: child.ID, ChildThreadID: thread.ID, ChildBindingDigest: externalEvidenceChildBindingDigest(child),
 		ContextArtifactID: contextArtifact.ID, ContextArtifactRevision: artifactVersion(contextArtifact), ContextArtifactBodyDigest: sha256Hex([]byte(contextArtifact.Text)),
-		ContextBindingDigest: externalEvidenceContextBindingDigest(contextArtifact), Questions: append([]string(nil), questions...),
+		ContextBindingDigest: contextBindingDigest, QuestionAuthorityDigest: authorized.QuestionAuthorityDigest, SourceAuthorityDigest: authorized.SourceAuthorityDigest,
+		Questions: append([]string(nil), authorized.Questions...),
 	}, nil
 }
 
@@ -575,7 +944,8 @@ func freezeExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutA
 // was reserved; repeating transient source-packet reconstruction here could
 // reject the same authority after a paid call.
 func validateFrozenExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutAgentThread, frozen *externalEvidenceFrozenAuthority) error {
-	if frozen == nil || len(frozen.Questions) == 0 {
+	if frozen == nil || len(frozen.Questions) == 0 || len(frozen.Questions) > externalEvidenceMaxResearchQuestions ||
+		!isHexDigest(frozen.QuestionAuthorityDigest) || !isHexDigest(frozen.SourceAuthorityDigest) {
 		return fmt.Errorf("external evidence authority was not frozen before provider handoff")
 	}
 	plan, parentID, child, err := externalEvidenceResearchPlanForThread(app, thread)
@@ -599,9 +969,16 @@ func validateFrozenExternalEvidenceAuthorityForThread(app *kanbanBoardApp, threa
 		sha256Hex([]byte(contextArtifact.Text)) != frozen.ContextArtifactBodyDigest || externalEvidenceContextBindingDigest(contextArtifact) != frozen.ContextBindingDigest {
 		return fmt.Errorf("external evidence context artifact changed")
 	}
-	current, err := externalEvidenceResearchQuestionsFromContext(app, &plan, parentID)
+	currentAuthorities, err := externalEvidenceResearchQuestionAuthoritiesFromContext(app, &plan, parentID)
 	if err != nil {
 		return err
+	}
+	if externalEvidenceResearchQuestionAuthorityDigest(currentAuthorities) != frozen.QuestionAuthorityDigest {
+		return fmt.Errorf("external evidence question authority changed")
+	}
+	current := make([]string, 0, len(currentAuthorities))
+	for _, authority := range currentAuthorities {
+		current = append(current, authority.Question)
 	}
 	return validateExternalEvidenceResearchQuestions(current, frozen.Questions)
 }
@@ -782,8 +1159,8 @@ func externalEvidenceUnitsLabelValid(units, candidate string) bool {
 
 func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt researchCitationReceipt) error {
 	var failures []string
-	if len(envelope.ResearchQuestions) < 1 || len(envelope.ResearchQuestions) > 5 {
-		failures = append(failures, "research_questions must contain 1 to 5 credibility-critical questions")
+	if len(envelope.ResearchQuestions) < 1 || len(envelope.ResearchQuestions) > externalEvidenceMaxResearchQuestions {
+		failures = append(failures, fmt.Sprintf("research_questions must contain 1 to %d credibility-critical questions", externalEvidenceMaxResearchQuestions))
 	}
 	questions := make(map[string]bool, len(envelope.ResearchQuestions))
 	for index, question := range envelope.ResearchQuestions {
@@ -928,7 +1305,7 @@ func externalEvidenceArtifactResearchQuestions(body string) ([]string, error) {
 			questions = append(questions, question)
 		}
 	}
-	if !found || len(questions) < 1 || len(questions) > 5 {
+	if !found || len(questions) < 1 || len(questions) > externalEvidenceMaxResearchQuestions {
 		return nil, fmt.Errorf("external evidence has no complete bounded research-question section")
 	}
 	return questions, nil

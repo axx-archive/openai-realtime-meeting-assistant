@@ -1,9 +1,43 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestProcessContextDownstreamBriefStripsResearchAuthorityEnvelope(t *testing.T) {
+	const question = "What current rules govern the official program?"
+	brief := processContextDownstreamBrief(`{
+		"direct_ask":"Prepare the decision brief.",
+		"research_mode":"external",
+		"research_questions":[{
+			"question":"`+question+`",
+			"research_kind":"current_constraint",
+			"source_ref":"goal_objective_id=secret digest=secret",
+			"authority_quote":"DO NOT FORWARD THIS SOURCE BODY",
+			"scope_anchor":"official program",
+			"decision_effect":"guardrail",
+			"decision_relevance":"The official program rules determine the launch guardrail."
+		}],
+		"reversible_inferences":[]
+	}`, packagingStudioProcessID)
+	for _, forbidden := range []string{"goal_objective_id", "DO NOT FORWARD", "scope_anchor", "decision_effect", "decision_relevance", "current_constraint"} {
+		if strings.Contains(brief, forbidden) {
+			t.Fatalf("downstream creative brief leaked research authority metadata %q:\n%s", forbidden, brief)
+		}
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(brief), &object); err != nil {
+		t.Fatal(err)
+	}
+	questions, ok := object["research_questions"].([]any)
+	if !ok || len(questions) != 1 || questions[0] != question {
+		t.Fatalf("downstream questions=%#v, want only exact question %q", object["research_questions"], question)
+	}
+}
 
 func processInternalAuthorityFixture(t *testing.T) (*kanbanBoardApp, goalPlan, meetingMemoryEntry, meetingMemoryEntry) {
 	t.Helper()
@@ -71,6 +105,28 @@ func TestProcessInternalClaimsBindQuoteAndExactSourceRevisionTogether(t *testing
 				t.Fatalf("mismatched source authority survived: claims=%+v rejected=%d err=%v", claims, rejectedCount, claimErr)
 			}
 		})
+	}
+}
+
+func TestResearchObjectiveAuthorityIsIntentOnly(t *testing.T) {
+	app, plan, _, _ := processInternalAuthorityFixture(t)
+	objective, ok := processResearchObjectiveAuthoritySource(&plan)
+	if !ok {
+		t.Fatal("objective intent authority is unavailable")
+	}
+	factual, err := processInternalAuthoritySources(app, &plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := factual[objective.Ref]; leaked {
+		t.Fatal("goal objective leaked into factual evidence authority")
+	}
+	research, err := processResearchAuthoritySources(app, &plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, exists := research[objective.Ref]; !exists || got.Text != strings.TrimSpace(plan.Objective) {
+		t.Fatalf("research intent authority=%+v, want separately addressable objective", got)
 	}
 }
 
@@ -158,5 +214,188 @@ func TestProcessMissingExternalProofKeepsPDFSourceSpecificButNonAuthoritative(t 
 	}
 	if strings.Contains(missing, "entailment_checked") || strings.Contains(missing, "external_source_bound") {
 		t.Fatalf("unproved PDF candidate was made authoritative:\n%s", missing)
+	}
+}
+
+func compileFocusedEvidenceDossierForTest(t *testing.T, verdict, confidence string) (*kanbanBoardApp, goalPlan, meetingMemoryEntry) {
+	t.Helper()
+	const candidateFact = "In 2026, the official program has 4,200 opted-in creators."
+	const sourceURL = "https://example.org/creator-program"
+	fixture := focusedEntailmentThreadForTest(t, candidateFact, sourceURL, candidateFact)
+	body := externalEvidenceEntailmentBodyForTest(t, externalEvidenceEntailmentCheck{
+		CandidateID: fixture.candidateID, CandidateFact: candidateFact, URL: sourceURL,
+		SourceWindowDigest: fixture.windowDigest, Verdict: verdict, Confidence: confidence,
+		Reason: "The exact authority-bound source window was checked for this candidate claim.",
+	}, nil)
+	normalized, err := normalizeExternalEvidenceEntailmentArtifact(fixture.app, fixture.thread, body)
+	if err != nil {
+		t.Fatalf("normalize focused entailment: %v", err)
+	}
+	writer, _, err := fixture.app.updateOSArtifactWithMetadata(fixture.thread.Artifact.ID, "", normalized, scoutParticipantName, map[string]string{
+		"status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := strings.TrimSpace(writer.Metadata["goalParentId"])
+	parent, ok := fixture.app.osArtifactByID(parentID)
+	if !ok {
+		t.Fatal("focused entailment parent is unavailable")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok {
+		t.Fatal("focused entailment parent plan is unavailable")
+	}
+	entailment := plan.subtaskByID("evidence_entailment")
+	if entailment == nil {
+		t.Fatal("focused entailment stage is unavailable")
+	}
+	entailment.Status, entailment.ArtifactID, entailment.ThreadID = subtaskComplete, writer.ID, writer.Metadata["threadId"]
+	encodedPlan, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parentID, "", parent.Text, scoutParticipantName, map[string]string{"goalPlan": string(encodedPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	evidenceBody, evidenceMetadata, err := compileProcessEvidenceDossier(fixture.app, &plan, parentID, ProcessStage{ID: "evidence"})
+	if err != nil {
+		t.Fatalf("compile focused evidence dossier: %v", err)
+	}
+	for key, value := range map[string]string{
+		"goalParentId": parentID, "goalSubtaskId": "evidence", "processId": plan.ProcessID,
+		"processStage": "evidence", "status": "complete", "threadStatus": "complete",
+	} {
+		evidenceMetadata[key] = value
+	}
+	evidence, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "Evidence admission dossier", evidenceBody, scoutParticipantName, evidenceMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceStage := plan.subtaskByID("evidence")
+	if evidenceStage == nil {
+		t.Fatal("focused evidence stage is unavailable")
+	}
+	evidenceStage.Status, evidenceStage.ArtifactID = subtaskComplete, evidence.ID
+	return fixture.app, plan, evidence
+}
+
+func cloneEvidenceMetadataForTest(source map[string]string) map[string]string {
+	clone := make(map[string]string, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func TestProcessEvidenceDossierRequiresStrongCoverageForEveryExternalQuestion(t *testing.T) {
+	t.Run("high confidence admitted support passes", func(t *testing.T) {
+		_, plan, evidence := compileFocusedEvidenceDossierForTest(t, "entailed", "High")
+		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacySufficient || evidence.Metadata["researchQuestionsAuthorized"] != "1" || evidence.Metadata["researchQuestionsStrong"] != "1" {
+			t.Fatalf("strong coverage metadata=%v", evidence.Metadata)
+		}
+		if err := validateProcessEvidenceDossier(&plan, evidence); err != nil {
+			t.Fatalf("strong exact-question coverage did not pass: %v\n%s", err, evidence.Text)
+		}
+	})
+
+	t.Run("weak admitted support holds before story", func(t *testing.T) {
+		app, plan, evidence := compileFocusedEvidenceDossierForTest(t, "entailed", "Medium")
+		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacyInsufficient || !strings.Contains(evidence.Text, "| weak |") {
+			t.Fatalf("weak coverage was not recorded honestly: metadata=%v\n%s", evidence.Metadata, evidence.Text)
+		}
+		if err := validateProcessEvidenceDossier(&plan, evidence); err == nil || !strings.Contains(err.Error(), "load-bearing external research coverage is insufficient") || !strings.Contains(err.Error(), "(weak)") {
+			t.Fatalf("weak coverage reached story authority: %v", err)
+		}
+		story, ok := packagingStudioDefinition().stageByID("story_architects")
+		if !ok {
+			t.Fatal("story stage is unavailable")
+		}
+		if err := newGoalEngine(app).validateProcessStageInputAuthority(&plan, story); err == nil || !strings.Contains(err.Error(), "(weak)") {
+			t.Fatalf("weak coverage crossed the exact pre-story authority boundary: %v", err)
+		}
+	})
+
+	t.Run("unadmitted candidate support holds as partial", func(t *testing.T) {
+		_, plan, evidence := compileFocusedEvidenceDossierForTest(t, "unclear", "High")
+		if !strings.Contains(evidence.Text, "| partial |") {
+			t.Fatalf("partial coverage was not recorded honestly:\n%s", evidence.Text)
+		}
+		if err := validateProcessEvidenceDossier(&plan, evidence); err == nil || !strings.Contains(err.Error(), "(partial)") {
+			t.Fatalf("partial coverage reached story authority: %v", err)
+		}
+	})
+}
+
+func TestProcessExternalResearchCoverageTracksMissingPartialAndStrongPerExactQuestion(t *testing.T) {
+	authorities := []externalEvidenceResearchQuestionAuthority{
+		{Question: "What is the official creator count?"},
+		{Question: "What is the current participation rule?"},
+		{Question: "What comparator changes the decision?"},
+	}
+	first := externalEvidenceEnvelopeRow{ResearchQuestion: authorities[0].Question, SourceFact: "The program has 4,200 creators.", SourceTitle: "Official count", URL: "https://example.org/count", PublishedOrUpdated: "Accessed 2026-08-21", Units: "creators", Confidence: "High", DeckImplication: "Use as the ceiling."}
+	second := externalEvidenceEnvelopeRow{ResearchQuestion: authorities[1].Question, SourceFact: "The current rule requires opt in.", SourceTitle: "Official rule", URL: "https://example.org/rule", PublishedOrUpdated: "Accessed 2026-08-21", Units: "rule", Confidence: "High", DeckImplication: "Use as a guardrail."}
+	firstID, secondID := externalEvidenceCandidateID(first), externalEvidenceCandidateID(second)
+	authority := externalEvidenceEntailmentAuthority{
+		Candidates: map[string]externalEvidenceEnvelopeRow{firstID: first, secondID: second},
+		SourceEnvelope: externalSourceSnapshotEnvelope{Snapshots: []externalSourceSnapshot{
+			{CandidateID: firstID, ResearchQuestion: first.ResearchQuestion, CandidateFact: first.SourceFact, URL: first.URL},
+			{CandidateID: secondID, ResearchQuestion: second.ResearchQuestion, CandidateFact: second.SourceFact, URL: second.URL},
+		}},
+	}
+	admitted := [][]string{{firstID, first.SourceFact, first.SourceTitle, first.URL, "exact window", strings.Repeat("a", 64), "Count", "relevant", "decision_grade", "entailed", "High", "Exact support."}}
+	coverage, err := processExternalResearchQuestionCoverage(authorities, authority, admitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{processResearchCoverageSupported, processResearchCoveragePartial, processResearchCoverageMissing}
+	for index := range want {
+		if coverage[index].Question != authorities[index].Question || coverage[index].Coverage != want[index] {
+			t.Fatalf("coverage[%d]=%+v, want exact question and %s", index, coverage[index], want[index])
+		}
+	}
+	manifest, adequacy, strong, digest, err := canonicalProcessResearchQuestionCoverageManifest("external", coverage)
+	if err != nil || adequacy != processEvidenceAdequacyInsufficient || strong != 1 || digest == "" || !strings.Contains(manifest, authorities[2].Question) {
+		t.Fatalf("coverage manifest adequacy=%q strong=%d digest=%q err=%v\n%s", adequacy, strong, digest, err, manifest)
+	}
+}
+
+func TestProcessResearchCoverageNoneAndInternalRemainValid(t *testing.T) {
+	for _, mode := range []string{"none", "internal"} {
+		t.Run(mode, func(t *testing.T) {
+			manifest, adequacy, strong, digest, err := canonicalProcessResearchQuestionCoverageManifest(mode, nil)
+			if err != nil || adequacy != processEvidenceAdequacyNotRequired || strong != 0 || digest == "" {
+				t.Fatalf("%s coverage manifest adequacy=%q strong=%d digest=%q err=%v", mode, adequacy, strong, digest, err)
+			}
+			rows, err := processResearchQuestionCoverageRows(manifest, mode)
+			if err != nil || len(rows) != 0 || !strings.Contains(manifest, "| None required | 0 | 0 | 0 | not_required |") {
+				t.Fatalf("%s coverage was not a canonical no-research sentinel: rows=%+v err=%v\n%s", mode, rows, err, manifest)
+			}
+		})
+	}
+}
+
+func TestProcessEvidenceDossierCoverageTamperingFailsClosed(t *testing.T) {
+	_, plan, evidence := compileFocusedEvidenceDossierForTest(t, "entailed", "High")
+	index := processEvidenceDossierReceiptPattern.FindStringIndex(evidence.Text)
+	if len(index) != 2 {
+		t.Fatal("focused evidence receipt is unavailable")
+	}
+	prefix := strings.TrimSpace(evidence.Text[:index[0]])
+	prefix = strings.Replace(prefix, "| supported |", "| weak |", 1)
+	digest := sha256Hex([]byte(prefix))
+	tampered := evidence
+	tampered.Text = prefix + fmt.Sprintf("\n\n<!-- stride-process-evidence-dossier:v1 process=%s external=%s internal=%s digest=%s -->", plan.ProcessID, evidence.Metadata["externalClaimsAdmitted"], evidence.Metadata["internalClaimsAdmitted"], digest)
+	tampered.Metadata = cloneEvidenceMetadataForTest(evidence.Metadata)
+	tampered.Metadata["evidenceAdmissionDigest"] = digest
+	if err := validateProcessEvidenceDossier(&plan, tampered); err == nil || !strings.Contains(err.Error(), "coverage row 1 is malformed") {
+		t.Fatalf("resigned inconsistent coverage survived: %v", err)
+	}
+
+	tampered = evidence
+	tampered.Metadata = cloneEvidenceMetadataForTest(evidence.Metadata)
+	tampered.Metadata["researchQuestionsStrong"] = strconv.Itoa(0)
+	if err := validateProcessEvidenceDossier(&plan, tampered); err == nil || !strings.Contains(err.Error(), "strong research question count") {
+		t.Fatalf("coverage metadata downgrade survived: %v", err)
 	}
 }

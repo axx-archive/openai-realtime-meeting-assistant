@@ -1203,6 +1203,22 @@ func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string)
 			e.persist(plan, parentID, "")
 
 		case goalStateReview:
+			if goalUsesAuthoritativeRenderedAdmission(plan) {
+				if !goalAllComplete(plan) {
+					e.fail(plan, parentID, goalBlockerLine(plan))
+					return
+				}
+				if err := e.validateAuthoritativeRenderedPublication(plan, parentID); err != nil {
+					e.fail(plan, parentID, "exact rendered publication changed before terminal review: "+compactAssistantLine(err.Error()))
+					return
+				}
+				// The authored process has already reviewed the real rendered
+				// pages. A generic per-subtask text reviewer would be both weaker
+				// and capable of invalidating the exact admitted dependency chain.
+				plan.State = goalStateGate
+				e.persist(plan, parentID, "")
+				continue
+			}
 			switch e.reviewSubtasks(ctx, plan) {
 			case goalReviewOutcomeRequeue:
 				plan.State = goalStateExecute
@@ -1235,7 +1251,11 @@ func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string)
 			e.persist(plan, parentID, "")
 
 		case goalStateReport:
-			e.report(ctx, plan)
+			if goalUsesAuthoritativeRenderedAdmission(plan) {
+				e.reportAuthoritativeRenderedPublication(plan)
+			} else {
+				e.report(ctx, plan)
+			}
 			plan.State = goalStateVerify
 			e.persist(plan, parentID, composeGoalArtifact(plan))
 
@@ -1507,7 +1527,11 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 				stageContract = contract
 				query += "\n\nOutput contract: " + contract
 			}
-			if inputs := e.processStageInputs(plan, stage); inputs != "" {
+			inputs, inputErr := e.processStageInputsAuthorized(plan, parentID, stage)
+			if inputErr != nil {
+				return inputErr
+			}
+			if inputs != "" {
 				query += "\n\nInput from prior stages:\n" + inputs
 			}
 			// Process writers consume only their declared, authority-validated
@@ -1821,11 +1845,12 @@ type goalPanelPersona struct {
 // task (user prompt) and the SAME strict-JSON schema appended to its own
 // system prompt; the synthesis call then reads all N replies.
 type goalPanelSpec struct {
-	Task      string
-	Schema    string
-	Personas  []goalPanelPersona
-	Synthesis string // synthesis system prompt; "" falls back to the default
-	Review    bool   // route every persona and synthesis call through Sol/max review
+	Task               string
+	Schema             string
+	Personas           []goalPanelPersona
+	Synthesis          string // synthesis system prompt; "" falls back to the default
+	Review             bool   // route every persona and synthesis call through Sol/max review
+	MinSuccessfulSeats int    // defaults to one; quality-critical panels explicitly require quorum
 }
 
 // goalPanelVoice is one persona's raw reply (strict JSON by contract). A
@@ -1852,6 +1877,21 @@ func (e *goalEngine) runGoalPanelVoices(ctx context.Context, spec goalPanelSpec)
 	if len(spec.Personas) == 0 {
 		return goalPanelOutcome{}, fmt.Errorf("panel needs at least one persona")
 	}
+	minimum := spec.MinSuccessfulSeats
+	if minimum <= 0 {
+		minimum = 1
+	}
+	if minimum > len(spec.Personas) {
+		return goalPanelOutcome{}, fmt.Errorf("panel requires %d successful seats but has only %d personas", minimum, len(spec.Personas))
+	}
+	seenPersonas := map[string]bool{}
+	for _, persona := range spec.Personas {
+		name := strings.ToLower(strings.TrimSpace(persona.Name))
+		if name == "" || seenPersonas[name] {
+			return goalPanelOutcome{}, fmt.Errorf("panel persona names must be non-empty and distinct")
+		}
+		seenPersonas[name] = true
+	}
 	outcome := goalPanelOutcome{Voices: make([]goalPanelVoice, len(spec.Personas))}
 	call := e.callModel
 	if spec.Review {
@@ -1868,6 +1908,9 @@ func (e *goalEngine) runGoalPanelVoices(ctx context.Context, spec goalPanelSpec)
 				system += "\n\n" + schema
 			}
 			text, err := call(ctx, system, spec.Task)
+			if err == nil && strings.TrimSpace(text) == "" {
+				err = fmt.Errorf("panelist returned an empty response")
+			}
 			outcome.Voices[index] = goalPanelVoice{Persona: persona.Name, Text: text, Err: err}
 		}(index)
 	}
@@ -1878,8 +1921,8 @@ func (e *goalEngine) runGoalPanelVoices(ctx context.Context, spec goalPanelSpec)
 			answered++
 		}
 	}
-	if answered == 0 {
-		return outcome, fmt.Errorf("every panelist call failed")
+	if answered < minimum {
+		return outcome, fmt.Errorf("panel quorum failed: %d of %d seats succeeded; %d required", answered, len(spec.Personas), minimum)
 	}
 	return outcome, nil
 }
@@ -1917,6 +1960,9 @@ func (e *goalEngine) runGoalPanel(ctx context.Context, spec goalPanelSpec) (goal
 		return outcome, fmt.Errorf("panel synthesis failed: %w", err)
 	}
 	outcome.Synthesis = strings.TrimSpace(synthesis)
+	if outcome.Synthesis == "" {
+		return outcome, fmt.Errorf("panel synthesis returned an empty response")
+	}
 	return outcome, nil
 }
 
@@ -2232,25 +2278,100 @@ func nextReadyInlineSubtask(plan *goalPlan) *goalSubtask {
 	return nil
 }
 
-// processStageInputs assembles the bodies of the stages a stage declares as
-// inputs, each capped like a review body. Empty when nothing was produced.
-func (e *goalEngine) processStageInputs(plan *goalPlan, stage ProcessStage) string {
+const processPanelArtifactContract = "process_panel_record_v1"
+
+// processStageArtifactForwardText is the single downstream boundary for a
+// completed process artifact. Panel/judges records retain every raw voice for
+// audit in the durable body, but only the byte- and digest-bound synthesis may
+// become a later stage's prompt authority. Ordinary artifacts pass unchanged.
+func processStageArtifactForwardText(artifact meetingMemoryEntry) (string, error) {
+	body := strings.TrimSpace(artifact.Text)
+	role := strings.TrimSpace(artifact.Metadata["processRole"])
+	if !oneOf(role, processRolePanel, processRoleJudges) {
+		return body, nil
+	}
+	if strings.TrimSpace(artifact.Metadata["panelArtifactContract"]) != processPanelArtifactContract {
+		return "", fmt.Errorf("panel artifact has no synthesis-only forwarding contract")
+	}
+	byteCount, err := strconv.Atoi(strings.TrimSpace(artifact.Metadata["panelSynthesisBytes"]))
+	if err != nil || byteCount < 1 || byteCount > len(body) {
+		return "", fmt.Errorf("panel artifact has an invalid synthesis boundary")
+	}
+	synthesis := body[:byteCount]
+	if strings.TrimSpace(artifact.Metadata["panelSynthesisDigest"]) != sha256Hex([]byte(synthesis)) {
+		return "", fmt.Errorf("panel artifact synthesis digest does not bind its exact boundary")
+	}
+	voices := body[byteCount:]
+	if !strings.HasPrefix(voices, "\n\n## Panel voices\n") || strings.TrimSpace(voices) == "## Panel voices" || strings.TrimSpace(artifact.Metadata["panelVoicesDigest"]) != sha256Hex([]byte(voices)) {
+		return "", fmt.Errorf("panel artifact raw-voice record is missing or changed")
+	}
+	seatCount, seatErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["panelSeatCount"]))
+	successful, successErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["panelSuccessfulSeats"]))
+	required, requiredErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata["panelRequiredSeats"]))
+	if seatErr != nil || successErr != nil || requiredErr != nil || seatCount < 1 || required < 1 || required > seatCount || successful < required || successful > seatCount {
+		return "", fmt.Errorf("panel artifact quorum metadata is invalid")
+	}
+	return synthesis, nil
+}
+
+// processStageInputsAuthorized assembles the exact declared prior-stage bodies.
+// A declared edge is part of the server-owned process contract: it must never
+// disappear merely because a subtask, artifact, or body is missing. Conditional
+// stages that are intentionally skipped still complete with a source-bound skip
+// record, so every InputFrom edge can fail closed without a special exception.
+func (e *goalEngine) processStageInputsAuthorized(plan *goalPlan, parentID string, stage ProcessStage) (string, error) {
+	if plan == nil {
+		return "", fmt.Errorf("process plan is unavailable")
+	}
+	if e == nil || e.app == nil {
+		return "", fmt.Errorf("process artifact store is unavailable")
+	}
 	var builder strings.Builder
 	for _, from := range stage.InputFrom {
+		from = strings.TrimSpace(from)
+		if from == "" {
+			return "", fmt.Errorf("process stage %s declares an empty input stage", stage.ID)
+		}
 		st := plan.subtaskByID(from)
 		if st == nil {
-			continue
+			return "", fmt.Errorf("input from process stage %s is missing from the plan", from)
+		}
+		if st.Status != subtaskComplete {
+			return "", fmt.Errorf("input from process stage %s is not complete", from)
+		}
+		if strings.TrimSpace(st.ArtifactID) == "" {
+			return "", fmt.Errorf("input from process stage %s has no artifact", from)
 		}
 		artifact, ok := e.app.osArtifactByID(st.ArtifactID)
-		if !ok || strings.TrimSpace(artifact.Text) == "" {
-			continue
+		if !ok {
+			return "", fmt.Errorf("input artifact from process stage %s is unavailable", from)
+		}
+		if strings.TrimSpace(artifact.Text) == "" {
+			return "", fmt.Errorf("input artifact from process stage %s is empty", from)
+		}
+		if strings.TrimSpace(plan.ProcessID) != "" {
+			if expectedParentID := strings.TrimSpace(parentID); expectedParentID != "" && strings.TrimSpace(artifact.Metadata["goalParentId"]) != expectedParentID {
+				return "", fmt.Errorf("input artifact from process stage %s is bound to a different goal", from)
+			}
+			if strings.TrimSpace(artifact.Metadata["goalSubtaskId"]) != from {
+				return "", fmt.Errorf("input artifact from process stage %s is bound to a different subtask", from)
+			}
+			if processID := strings.TrimSpace(artifact.Metadata["processId"]); processID != "" && processID != strings.TrimSpace(plan.ProcessID) {
+				return "", fmt.Errorf("input artifact from process stage %s is bound to a different process", from)
+			}
+			if processStage := strings.TrimSpace(artifact.Metadata["processStage"]); processStage != "" && processStage != from {
+				return "", fmt.Errorf("input artifact from process stage %s is bound to a different process stage", from)
+			}
 		}
 		builder.WriteString("### Input from stage ")
 		builder.WriteString(st.ID)
 		builder.WriteString(" — ")
 		builder.WriteString(st.Title)
 		builder.WriteByte('\n')
-		body := artifact.Text
+		body, err := processStageArtifactForwardText(artifact)
+		if err != nil {
+			return "", fmt.Errorf("input from process stage %s is invalid: %w", from, err)
+		}
 		if from == "context_snapshot" && plan != nil && plan.ProcessID != "" &&
 			!oneOf(stage.ID, "external_research", "source_snapshot", "evidence_entailment", "evidence") {
 			body = processContextDownstreamBrief(body, plan.ProcessID)
@@ -2258,13 +2379,29 @@ func (e *goalEngine) processStageInputs(plan *goalPlan, stage ProcessStage) stri
 		builder.WriteString(goalReviewArtifactBody(body))
 		builder.WriteString("\n\n")
 	}
-	return strings.TrimSpace(builder.String())
+	return strings.TrimSpace(builder.String()), nil
+}
+
+// processStageInputs is retained for read-only inspection/tests. Executing
+// stages use processStageInputsAuthorized and propagate every boundary error.
+func (e *goalEngine) processStageInputs(plan *goalPlan, stage ProcessStage) string {
+	inputs, _ := e.processStageInputsAuthorized(plan, "", stage)
+	return inputs
 }
 
 // processStageTask is the shared user prompt an inline stage's model calls
 // receive: the goal, the stage's authored instructions, its contract, any
 // revision notes from a gate, and its declared inputs.
 func (e *goalEngine) processStageTask(plan *goalPlan, st *goalSubtask, stage ProcessStage) string {
+	inputs := e.processStageInputs(plan, stage)
+	return processStageTaskWithInputs(plan, st, stage, inputs)
+}
+
+// processStageTaskWithInputs formats one already-resolved input snapshot. The
+// authorized execution path resolves prior-stage artifacts exactly once and
+// passes that checked snapshot here; it must not perform a second, error-
+// swallowing read that could observe a different panel artifact revision.
+func processStageTaskWithInputs(plan *goalPlan, st *goalSubtask, stage ProcessStage, inputs string) string {
 	var builder strings.Builder
 	builder.WriteString("Goal: " + plan.Objective)
 	if plan.ProcessID == packagingStudioProcessID {
@@ -2288,7 +2425,7 @@ func (e *goalEngine) processStageTask(plan *goalPlan, st *goalSubtask, stage Pro
 	if goalSubtaskInRevision(st) && len(st.Protect) > 0 {
 		builder.WriteString("\n\nDO NOT LOSE (protected) — these are explicitly locked; keep every one intact in the revision:\n- " + strings.Join(st.Protect, "\n- "))
 	}
-	if inputs := e.processStageInputs(plan, stage); inputs != "" {
+	if inputs != "" {
 		builder.WriteString("\n\nInput from prior stages:\n" + inputs)
 	}
 	return builder.String()
@@ -2417,12 +2554,30 @@ func (e *goalEngine) processStageSourcePacket(ctx context.Context, plan *goalPla
 	return builder.String(), nil
 }
 
-func (e *goalEngine) processStageTaskAuthorized(ctx context.Context, plan *goalPlan, st *goalSubtask, stage ProcessStage) (string, error) {
+func (e *goalEngine) processStageTaskAuthorized(ctx context.Context, plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) (string, error) {
 	if err := e.validateProcessStageInputAuthority(plan, stage); err != nil {
 		return "", err
 	}
-	task := e.processStageTask(plan, st, stage)
+	inputs := ""
+	if strings.TrimSpace(parentID) != "" {
+		var err error
+		inputs, err = e.processStageInputsAuthorized(plan, parentID, stage)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		// Inspection-only callers may format an authorized source packet before
+		// prior stages exist. Every execution caller supplies parentID and takes
+		// the fail-closed branch above.
+		inputs = e.processStageInputs(plan, stage)
+	}
+	task := processStageTaskWithInputs(plan, st, stage, inputs)
 	if stage.ID == "context_snapshot" {
+		if externalEvidenceFreshResearchContextContract(stage.OutputContract) {
+			if objective, ok := processResearchObjectiveAuthoritySource(plan); ok {
+				task += "\n\nResearch-intent authority source (this authorizes research scope but is not factual evidence):\nSOURCE [" + objective.Ref + "] Approved objective\n" + objective.Text + "\nEND SOURCE"
+			}
+		}
 		if company := e.processStageCompanyContext(plan); company != "" {
 			task += "\n\n" + company
 		}
@@ -2531,6 +2686,19 @@ func failProcessStage(st *goalSubtask, reason string) {
 	st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: compactAssistantLine(reason), By: "process_engine"}
 }
 
+func processPanelRequiredSeats(plan *goalPlan, stage ProcessStage) int {
+	if plan == nil || !oneOf(stage.Role, processRolePanel, processRoleJudges) {
+		return 1
+	}
+	if plan.ProcessID == packagingStudioProcessID && oneOf(stage.ID, "story_architects", "identity") {
+		return 2
+	}
+	if plan.ProcessID == documentReportProcessID && stage.ID == "story" {
+		return 2
+	}
+	return 1
+}
+
 // runProcessPanelStage maps panel/judges onto runGoalPanel: the stage's
 // personas fan out over the shared stage task inside this one engine step, and
 // the synthesis (with every voice on the record) is the stage's artifact.
@@ -2539,14 +2707,15 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 	for _, persona := range stage.Personas {
 		personas = append(personas, goalPanelPersona{Name: persona.Name, System: persona.System})
 	}
-	task, err := e.processStageTaskAuthorized(ctx, plan, st, stage)
+	task, err := e.processStageTaskAuthorized(ctx, plan, parentID, st, stage)
 	if err != nil {
 		failProcessStage(st, err.Error())
 		return
 	}
 	outcome, err := e.runGoalPanel(ctx, goalPanelSpec{
-		Task:     task,
-		Personas: personas,
+		Task:               task,
+		Personas:           personas,
+		MinSuccessfulSeats: processPanelRequiredSeats(plan, stage),
 	})
 	if err != nil {
 		failProcessStage(st, stage.Role+" stage failed: "+err.Error())
@@ -2567,8 +2736,9 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 			return
 		}
 	}
+	successfulSeats := 0
 	var body strings.Builder
-	body.WriteString(outcome.Synthesis)
+	body.WriteString(strings.TrimSpace(outcome.Synthesis))
 	body.WriteString("\n\n## Panel voices\n")
 	for _, voice := range outcome.Voices {
 		body.WriteString("\n### " + voice.Persona + "\n")
@@ -2576,17 +2746,34 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 			body.WriteString("(this seat's call failed: " + compactAssistantLine(voice.Err.Error()) + ")\n")
 			continue
 		}
+		successfulSeats++
 		body.WriteString(strings.TrimSpace(voice.Text) + "\n")
 	}
-	e.completeProcessStage(plan, parentID, st, stage, body.String(),
-		fmt.Sprintf("synthesis of a %d-seat %s", len(personas), stage.Role), nil)
+	durableBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, body.String())
+	durableSynthesis := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, outcome.Synthesis)
+	if !strings.HasPrefix(durableBody, durableSynthesis) || len(durableBody) <= len(durableSynthesis) {
+		failProcessStage(st, "panel synthesis boundary could not be recorded")
+		return
+	}
+	voicesRecord := durableBody[len(durableSynthesis):]
+	extra := map[string]string{
+		"panelArtifactContract": processPanelArtifactContract,
+		"panelSynthesisBytes":   strconv.Itoa(len(durableSynthesis)),
+		"panelSynthesisDigest":  sha256Hex([]byte(durableSynthesis)),
+		"panelVoicesDigest":     sha256Hex([]byte(voicesRecord)),
+		"panelSeatCount":        strconv.Itoa(len(personas)),
+		"panelSuccessfulSeats":  strconv.Itoa(successfulSeats),
+		"panelRequiredSeats":    strconv.Itoa(processPanelRequiredSeats(plan, stage)),
+	}
+	e.completeProcessStage(plan, parentID, st, stage, durableBody,
+		fmt.Sprintf("synthesis of a %d-seat %s", len(personas), stage.Role), extra)
 }
 
 // runProcessSynthesizerStage is the single-voice inline stage: one model call
 // producing the stage output from its inputs.
 func (e *goalEngine) runProcessSynthesizerStage(ctx context.Context, plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) {
 	system := "You are Scout's process stage synthesizer for Stride, running the \"" + stage.Title + "\" stage. Produce the stage's output exactly per its instructions — write the deliverable text itself, no preamble, no meta-commentary."
-	task, err := e.processStageTaskAuthorized(ctx, plan, st, stage)
+	task, err := e.processStageTaskAuthorized(ctx, plan, parentID, st, stage)
 	if err != nil {
 		failProcessStage(st, err.Error())
 		return
@@ -2600,7 +2787,21 @@ func (e *goalEngine) runProcessSynthesizerStage(ctx context.Context, plan *goalP
 		failProcessStage(st, err.Error())
 		return
 	}
-	e.completeProcessStage(plan, parentID, st, stage, strings.TrimSpace(text), "synthesizer output", nil)
+	extra := map[string]string{}
+	if stage.ID == "context_snapshot" && externalEvidenceFreshResearchContextContract(stage.OutputContract) {
+		authorized, mode, err := authorizeExternalEvidenceResearchText(e.app, plan, strings.TrimSpace(text))
+		if err != nil {
+			failProcessStage(st, "context snapshot research authority is invalid: "+err.Error())
+			return
+		}
+		extra["researchMode"] = mode
+		extra["researchQuestionCount"] = strconv.Itoa(len(authorized.Questions))
+		if mode == "external" {
+			extra["researchQuestionAuthorityDigest"] = authorized.QuestionAuthorityDigest
+			extra["researchSourceAuthorityDigest"] = authorized.SourceAuthorityDigest
+		}
+	}
+	e.completeProcessStage(plan, parentID, st, stage, strings.TrimSpace(text), "synthesizer output", extra)
 }
 
 // runProcessGateStage maps a gate stage onto runGoalGate with the stage's
@@ -2614,6 +2815,7 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		spec = *stage.GateSpec
 	}
 	var renderedReview *packagingStudioQualityGateReview
+	var documentRenderedReview *documentReportQualityReview
 	decision := goalGateDecision{}
 	if plan.ProcessID == packagingStudioProcessID && stage.ID == "quality_gate" {
 		review, err := resolvePackagingStudioQualityGateReview(e.app, plan, parentID)
@@ -2646,8 +2848,14 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 					Gaps:    review.repairLines(),
 				}
 			case "ready":
-				// Only an exact ready scoreboard/draft binding may spend the
-				// current model scorer call for the 9/7 rubric.
+				// The exact rendered verdict is the quality decision. Do not
+				// weaken or duplicate it with a second text/HTML-only scorer that
+				// never saw the slides the room will see.
+				decision = goalGateDecision{
+					Outcome: goalGateOutcomeAccept, Verdict: goalReviewPass,
+					Reasons: fmt.Sprintf("rendered slide jury passed the exact reviewed draft at a minimum page average of %.2f (floor %.2f)", review.MinimumAverage, slideJuryReadyAverageFloor),
+					Score:   review.MinimumAverage,
+				}
 			default:
 				decision = goalGateDecision{
 					Outcome: goalGateOutcomeBlocked, Verdict: goalReviewFail,
@@ -2655,6 +2863,13 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 				}
 			}
 		}
+	}
+	if plan.ProcessID == documentReportProcessID && stage.ID == documentReportRenderedAdmissionID {
+		review, err := resolveDocumentReportQualityReview(e.app, plan, parentID)
+		if err == nil {
+			documentRenderedReview = &review
+		}
+		decision = documentReportRenderedGateDecision(review, err, spec, st.Revisions)
 	}
 	if decision.Outcome == "" {
 		decision = runGoalGate(ctx, goalGateSpec{
@@ -2664,7 +2879,7 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 			Round:       st.Revisions,
 			ForceAccept: spec.ForceAccept,
 			Score: func(ctx context.Context) goalGateRound {
-				return e.scoreProcessGateRound(ctx, plan, st, stage)
+				return e.scoreProcessGateRound(ctx, plan, parentID, st, stage)
 			},
 		})
 	}
@@ -2692,6 +2907,9 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		extra := map[string]string(nil)
 		if renderedReview != nil {
 			extra = renderedReview.gateMetadata()
+		}
+		if documentRenderedReview != nil {
+			extra = documentRenderedReview.gateMetadata()
 		}
 		e.completeProcessStage(plan, parentID, st, stage, body, "gate "+decision.Outcome+": "+compactAssistantLine(reasons), extra)
 		st.Review.Score = decision.Score
@@ -2730,6 +2948,22 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		e.fail(plan, parentID, blocker)
 	case goalGateOutcomeBlocked:
 		if spec.HoldOnFailure {
+			if plan.ProcessID == documentReportProcessID && stage.ID == documentReportRenderedAdmissionID {
+				// Retry must rebuild the exact paper render and every jury seat.
+				// Replaying a completed needs_attention record would still have seen
+				// no pages and can never become a delivery decision.
+				if render := plan.subtaskByID(documentReportDraftRenderStageID); render != nil {
+					resetGoalDependentsWithEvidence(plan, render.ID, "", "document_rendered_admission_recovery",
+						"the rendered document admission needs a fresh PDF and page jury before another delivery decision")
+					render.Status = subtaskBlocked
+					render.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reasons, By: "document_rendered_admission_recovery"}
+					st.Status = subtaskPending
+					st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Score: decision.Score, Reasons: reasons, By: "document_rendered_admission_recovery"}
+					plan.Checkpoint = nil
+					e.fail(plan, parentID, fmt.Sprintf("%s needs a fresh rendered review before delivery: %s", stage.Title, compactAssistantLine(reasons)))
+					return
+				}
+			}
 			if plan.ProcessID == packagingStudioProcessID && stage.ID == "quality_gate" {
 				// A human Retry must rebuild the rendered-review chain, not replay
 				// the same completed jury record forever. Block the earliest exact
@@ -2782,9 +3016,9 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 // Source admission, provider, and malformed-response failures are distinct
 // non-judgment outcomes. They never consume a revision round and can never be
 // converted into force-accept or a human proceed-with-gaps checkpoint.
-func (e *goalEngine) scoreProcessGateRound(ctx context.Context, plan *goalPlan, st *goalSubtask, stage ProcessStage) goalGateRound {
+func (e *goalEngine) scoreProcessGateRound(ctx context.Context, plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) goalGateRound {
 	system := "You are Scout's process gate scorer for Stride. Score the produced work against the stage's gate rubric. Return STRICT JSON only: {\"dimensions\":[{\"name\":\"...\",\"score\":0,\"gap\":\"what closing it would take\"}],\"reasons\":\"one line\"}. Scores are 0-10. Score every rubric dimension the stage instructions name; if they name none, score Quality and Completeness."
-	task, taskErr := e.processStageTaskAuthorized(ctx, plan, st, stage)
+	task, taskErr := e.processStageTaskAuthorized(ctx, plan, parentID, st, stage)
 	if taskErr != nil {
 		return goalGateRound{Failure: goalGateFailureSource, Reasons: taskErr.Error()}
 	}
@@ -2938,6 +3172,14 @@ func (e *goalEngine) runProcessCompileStage(plan *goalPlan, parentID string, st 
 	if stage.Compile == nil {
 		// Definition drift only — validation refuses a nil compiler.
 		failProcessStage(st, "compile stage has no compiler function")
+		return
+	}
+	// Compile functions are deterministic Go, but they still read the run's
+	// durable stage artifacts from the plan. Admit every declared edge through
+	// the same exact parent/subtask/process and synthesis-only boundary used by
+	// model-backed stages before any compiler code is allowed to execute.
+	if _, err := e.processStageInputsAuthorized(plan, parentID, stage); err != nil {
+		failProcessStage(st, "compile stage input authorization failed: "+err.Error())
 		return
 	}
 	body, extra, err := stage.Compile(e.app, plan, parentID, stage)
@@ -3500,6 +3742,84 @@ func checkpointProtectLines(choice string) []string {
 
 // --- Stage: review_against_goal ---------------------------------------------
 
+func goalUsesAuthoritativeRenderedAdmission(plan *goalPlan) bool {
+	return plan != nil && oneOf(strings.TrimSpace(plan.ProcessID), packagingStudioProcessID, documentReportProcessID)
+}
+
+func authoredRenderedPlanParentID(app *kanbanBoardApp, plan *goalPlan) string {
+	if app == nil || plan == nil || strings.TrimSpace(plan.GoalID) == "" || strings.TrimSpace(plan.ProcessID) == "" {
+		return ""
+	}
+	parentMatches := func(parentID string) bool {
+		parentID = strings.TrimSpace(parentID)
+		parent, ok := app.osArtifactByID(parentID)
+		if !ok || parent.Metadata["mode"] != "goal" || strings.TrimSpace(parent.Metadata["threadId"]) != strings.TrimSpace(plan.GoalID) {
+			return false
+		}
+		if processID := strings.TrimSpace(parent.Metadata["processId"]); processID != "" && processID != strings.TrimSpace(plan.ProcessID) {
+			return false
+		}
+		persisted, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+		if !ok || strings.TrimSpace(persisted.GoalID) != strings.TrimSpace(plan.GoalID) || strings.TrimSpace(persisted.ProcessID) != strings.TrimSpace(plan.ProcessID) {
+			return false
+		}
+		return persisted.ProcessVersion == plan.ProcessVersion &&
+			strings.TrimSpace(persisted.ProcessDigest) == strings.TrimSpace(plan.ProcessDigest) &&
+			strings.TrimSpace(persisted.ProcessImplementationRevision) == strings.TrimSpace(plan.ProcessImplementationRevision) &&
+			strings.TrimSpace(persisted.ResultStageID) == strings.TrimSpace(plan.ResultStageID) &&
+			strings.TrimSpace(persisted.ResultOutputContract) == strings.TrimSpace(plan.ResultOutputContract)
+	}
+	for _, stageID := range []string{
+		"ship_compile", documentReportPublishStageID,
+		"quality_gate", documentReportRenderedAdmissionID,
+		"slide_jury", documentReportJuryStageID,
+		"draft_compile", documentReportDraftRenderStageID,
+		"ship_deck", "write",
+	} {
+		stage := plan.subtaskByID(stageID)
+		if stage == nil || strings.TrimSpace(stage.ArtifactID) == "" {
+			continue
+		}
+		record, ok := app.osArtifactByID(stage.ArtifactID)
+		if !ok {
+			continue
+		}
+		if subtaskID := strings.TrimSpace(record.Metadata["goalSubtaskId"]); subtaskID != "" && subtaskID != stageID {
+			continue
+		}
+		if processID := strings.TrimSpace(record.Metadata["processId"]); processID != "" && processID != strings.TrimSpace(plan.ProcessID) {
+			continue
+		}
+		if processStage := strings.TrimSpace(record.Metadata["processStage"]); processStage != "" && processStage != stageID {
+			continue
+		}
+		if parentID := strings.TrimSpace(record.Metadata["goalParentId"]); parentMatches(parentID) {
+			return parentID
+		}
+	}
+	// Legacy plans sometimes stored their OS parent id directly as GoalID. That
+	// fallback is accepted only when the named artifact itself proves the same
+	// thread and pinned process identity; a bare thread id is never treated as an
+	// artifact identity.
+	if parentMatches(plan.GoalID) {
+		return strings.TrimSpace(plan.GoalID)
+	}
+	return ""
+}
+
+func (e *goalEngine) validateAuthoritativeRenderedPublication(plan *goalPlan, parentID string) error {
+	switch strings.TrimSpace(plan.ProcessID) {
+	case packagingStudioProcessID:
+		_, err := resolvePublishedPackagingStudioQuality(e.app, plan, parentID)
+		return err
+	case documentReportProcessID:
+		_, err := resolvePublishedDocumentReportQuality(e.app, plan, parentID)
+		return err
+	default:
+		return fmt.Errorf("process has no authoritative rendered admission")
+	}
+}
+
 type goalReviewOutcome int
 
 const (
@@ -3750,6 +4070,36 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	defer func() {
 		recordGoalGateResult(goalShipGateRunner(plan), plan.Gate.Status, plan.GoalID)
 	}()
+	if plan.ProcessID == packagingStudioProcessID && plan.Authority != codexJobAuthorityExternalWrite {
+		// The slide jury and quality gate already made the quality decision
+		// from the exact rendered pages. Re-resolve the final publication
+		// receipt instead of asking a text-only ship model to second-guess it.
+		review, err := resolvePublishedPackagingStudioQuality(e.app, plan, authoredRenderedPlanParentID(e.app, plan))
+		plan.Gate.ReviewedBy = "presentation_rendered_admission"
+		if err != nil {
+			plan.Gate.Status = subtaskBlocked
+			plan.Gate.Reason = "exact rendered presentation admission changed before shipping: " + compactAssistantLine(err.Error())
+			return
+		}
+		plan.Gate.Status = "passed"
+		plan.Gate.Reason = fmt.Sprintf("exact rendered presentation remained admitted at v%d with a %.2f minimum slide average", review.DeckVersion, review.MinimumAverage)
+		return
+	}
+	if plan.ProcessID == documentReportProcessID && plan.Authority != codexJobAuthorityExternalWrite {
+		// The rendered admission already made the quality decision from exact
+		// pages. Re-resolve its publish binding instead of asking a later
+		// text-only ship model to score work it cannot see.
+		review, err := resolvePublishedDocumentReportQuality(e.app, plan, documentReportPlanParentID(e.app, plan))
+		plan.Gate.ReviewedBy = "document_rendered_admission"
+		if err != nil {
+			plan.Gate.Status = subtaskBlocked
+			plan.Gate.Reason = "exact rendered document admission changed before shipping: " + compactAssistantLine(err.Error())
+			return
+		}
+		plan.Gate.Status = "passed"
+		plan.Gate.Reason = fmt.Sprintf("exact rendered document remained admitted at v%d with a %.2f minimum page average", review.ArtifactVersion, review.MinimumAverage)
+		return
+	}
 	system := "You are Scout's ship gate for Stride. Answer one question: is the work safe and complete to publish/deliver? Return STRICT JSON only: {\"safe\":true|false,\"external_write_required\":true|false,\"command\":\"\",\"reason\":\"one line\"}. Set external_write_required true only if shipping needs a commit, push, deploy, email, or other production side effect."
 	tool, hasTool := e.resolvedTool(plan)
 	if hasTool {
@@ -4029,6 +4379,26 @@ func goalRevisionNote(plan *goalPlan) string {
 // report is one short model call producing the 4-line Changed/Headline/Gap/Next
 // card plus the assumed-claim count the future return card will surface. Only
 // the headline is meant to be spoken/notified; the detail lives in the artifact.
+func (e *goalEngine) reportAuthoritativeRenderedPublication(plan *goalPlan) {
+	if plan == nil {
+		return
+	}
+	plan.Report.GateOutcome = plan.Gate.Status
+	plan.Report.ArtifactIDs = goalArtifactIDs(plan)
+	plan.Report.AssumedClaimCount = 0
+	plan.Report.Gap = ""
+	switch plan.ProcessID {
+	case packagingStudioProcessID:
+		plan.Report.Changed = "The exact rendered and reviewed presentation was filed as an editable deck."
+		plan.Report.Headline = "Presentation ready"
+		plan.Report.Next = "Open it in Deck Studio, present it, or download PDF or PowerPoint."
+	case documentReportProcessID:
+		plan.Report.Changed = "The exact rendered and reviewed report was filed as an editable document with its PDF."
+		plan.Report.Headline = "Document ready"
+		plan.Report.Next = "Open it in Document Studio to read, edit, save a copy, or download the PDF."
+	}
+}
+
 func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
 	system := "You are Scout reporting a finished goal for Stride. Report only what matters. Return STRICT JSON only: {\"changed\":\"one line\",\"headline\":\"one line\",\"gap\":\"one line or empty\",\"next\":\"one line or empty\",\"assumed_claim_count\":0,\"decision\":\"\"}. assumed_claim_count is how many claims in the work are assumptions not backed by a produced artifact. decision is the ONE concrete decision this goal explicitly established (a price, an attach/no-attach, a go/no-go) that the team should be held to later — leave it empty unless the work clearly settled one; never invent a decision."
 	user := "Goal: " + plan.Objective + "\nSubtasks:\n" + goalSubtaskSummary(plan) + "\nGate: " + plan.Gate.Status
@@ -4092,6 +4462,24 @@ func (e *goalEngine) recordGoalDecision(plan *goalPlan, decision string) {
 // --- Stage: verify_goal_completed -------------------------------------------
 
 func (e *goalEngine) verify(ctx context.Context, plan *goalPlan) bool {
+	if plan.ProcessID == packagingStudioProcessID {
+		review, err := resolvePublishedPackagingStudioQuality(e.app, plan, authoredRenderedPlanParentID(e.app, plan))
+		if err != nil {
+			plan.Verification.Reasons = "exact rendered presentation verification failed: " + compactAssistantLine(err.Error())
+			return false
+		}
+		plan.Verification.Reasons = fmt.Sprintf("exact rendered presentation v%d and %d-seat slide jury remain bound and admitted", review.DeckVersion, review.ParsedSeats)
+		return true
+	}
+	if plan.ProcessID == documentReportProcessID {
+		review, err := resolvePublishedDocumentReportQuality(e.app, plan, documentReportPlanParentID(e.app, plan))
+		if err != nil {
+			plan.Verification.Reasons = "exact rendered document verification failed: " + compactAssistantLine(err.Error())
+			return false
+		}
+		plan.Verification.Reasons = fmt.Sprintf("exact rendered document v%d, PDF, %d pages, and %d-seat jury remain bound and admitted", review.ArtifactVersion, review.PageCount, review.ParsedSeats)
+		return true
+	}
 	system := "You are Scout's final verifier for Stride. Check the produced work against the original goal. Return STRICT JSON only: {\"verdict\":\"pass|fail\",\"reasons\":\"one line\"}."
 	user := "Goal: " + plan.Objective + "\nSubtasks:\n" + goalSubtaskSummary(plan) + "\nReport headline: " + plan.Report.Headline
 	text, err := e.callModel(ctx, system, user)

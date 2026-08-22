@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,39 @@ import (
 	"testing"
 	"time"
 )
+
+func TestOrderedRenderRasterPagePathsUsesNumericIdentityThroughOneHundred(t *testing.T) {
+	paths := make([]string, 0, renderPageImageAssetCap)
+	for page := renderPageImageAssetCap; page >= 1; page-- {
+		paths = append(paths, filepath.Join("/render", fmt.Sprintf("page-%d.jpg", page)))
+	}
+	ordered, err := orderedRenderRasterPagePaths(paths)
+	if err != nil {
+		t.Fatalf("order 100 raster pages: %v", err)
+	}
+	if len(ordered) != renderPageImageAssetCap || filepath.Base(ordered[9]) != "page-10.jpg" || filepath.Base(ordered[98]) != "page-99.jpg" || filepath.Base(ordered[99]) != "page-100.jpg" {
+		t.Fatalf("numeric order is wrong around digit boundaries: page10=%q page99=%q page100=%q", filepath.Base(ordered[9]), filepath.Base(ordered[98]), filepath.Base(ordered[99]))
+	}
+}
+
+func TestOrderedRenderRasterPagePathsFailsClosedOnCoverageDefects(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+	}{
+		{name: "duplicate numeric page", paths: []string{"/render/page-1.jpg", "/render/page-01.jpg"}},
+		{name: "missing middle page", paths: []string{"/render/page-1.jpg", "/render/page-3.jpg"}},
+		{name: "zero page", paths: []string{"/render/page-0.jpg"}},
+		{name: "nonnumeric page", paths: []string{"/render/page-final.jpg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := orderedRenderRasterPagePaths(tc.paths); err == nil {
+				t.Fatalf("%s raster set was admitted", tc.name)
+			}
+		})
+	}
+}
 
 // writeStubRenderBinary creates a real executable file so resolveRenderBinary
 // (exec.LookPath) passes while the runRenderExecCommand seam intercepts the

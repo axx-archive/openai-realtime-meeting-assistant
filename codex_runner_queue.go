@@ -1679,6 +1679,10 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// option. The server binds it to the selected opaque option; it never
 		// changes the option's action or target.
 		CheckpointNote string `json:"checkpointNote"`
+		// ResultArtifactID binds review_changes to the exact edited result. The
+		// server revalidates its revision and ACL before reopening only the
+		// deterministic rendered-admission tail.
+		ResultArtifactID string `json:"resultArtifactId"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -1834,6 +1838,24 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		updated, _ := kanbanApp.osArtifactByID(artifactID)
 		writeAuthJSON(w, http.StatusAccepted, map[string]any{"ok": true, "artifact": updated})
 		return
+	case "review_changes":
+		if artifact.Metadata["mode"] != "goal" {
+			writeAuthError(w, http.StatusBadRequest, "review changes applies to authored goal results")
+			return
+		}
+		resultID := strings.TrimSpace(payload.ResultArtifactID)
+		result, resultExists := authorizedArtifactForActions(r.Context(), user, resultID, ACLReadContent, ACLWrite)
+		if resultID == "" || !resultExists {
+			writeAuthError(w, http.StatusNotFound, "edited result not found")
+			return
+		}
+		thread, reviewErr := kanbanApp.reviewEditedAuthoredResult(artifact, result, user.Name)
+		if reviewErr != nil {
+			writeAuthError(w, http.StatusBadRequest, reviewErr.Error())
+			return
+		}
+		writeAuthJSON(w, http.StatusAccepted, map[string]any{"ok": true, "artifact": thread.Artifact, "agentThread": thread})
+		return
 	case "reject":
 		if !isArtifactApprovalAdmin(user) {
 			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
@@ -1881,7 +1903,7 @@ func artifactRunnerRequiredACLActions(action string) []ACLAction {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "approve", "reject":
 		return []ACLAction{ACLReadMetadata, ACLApprove, ACLWrite}
-	case "resume":
+	case "resume", "review_changes":
 		return []ACLAction{ACLReadContent, ACLExecute, ACLWrite}
 	case "rerun":
 		return []ACLAction{ACLReadContent, ACLExecute}

@@ -194,6 +194,7 @@ function workThreadPresentation(message: ScoutMessage) {
   const ref = work.ref;
   const status = String(ref.status ?? 'running').toLowerCase();
   const complete = status === 'complete' || status === 'completed' || status === 'published';
+	const resultQualityState = String(ref.resultQualityState ?? '').trim().toLowerCase();
 	const followUpStatus = String(ref.followUpStatus ?? '').toLowerCase();
   const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(ref.progressNote ?? ''))));
   const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected' || status === 'blocked';
@@ -225,6 +226,7 @@ function workThreadPresentation(message: ScoutMessage) {
     mode: String(ref.mode ?? 'work').trim() || 'work',
     query: String(ref.query ?? '').trim() || 'Scout workstream',
     progressPercent,
+    resultQualityState,
     attentionReason,
     attentionCopy: attentionReason === 'output_truncated'
       ? 'Scout reached the final report, but the response was cut off before a deliverable could be accepted.'
@@ -239,8 +241,12 @@ function workThreadPresentation(message: ScoutMessage) {
       ? 'Queued'
       : status === 'running'
         ? phase
-        : complete
-          ? revisionNeedsAttention ? 'Deliverable ready · revision needs attention' : 'Deliverable ready'
+        : resultQualityState === 'edited_after_admission'
+          ? 'Edited draft · review required'
+          : resultQualityState === 'draft_needs_attention'
+            ? 'Draft · needs attention'
+            : complete
+              ? revisionNeedsAttention ? 'Deliverable ready · revision needs attention' : 'Deliverable ready'
           : needsInput
             ? 'Needs input'
           : failed
@@ -321,8 +327,19 @@ export const MessageBubble = React.memo(function MessageBubble({
   const projectTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
+  const explicitResultArtifactId = String(workThread?.ref.resultArtifactId ?? '').trim();
+  const authoredResultQuality = String(workThread?.resultQualityState ?? '').trim().toLowerCase();
+  const managedAuthoredResult = Boolean(explicitResultArtifactId) && (
+    String(workThread?.ref.mode ?? '').trim().toLowerCase() === 'goal'
+    || authoredResultQuality !== ''
+  );
+  const authoredResultAdmitted = managedAuthoredResult
+    && authoredResultQuality === 'admitted';
+  const authoredResultNeedsAttention = managedAuthoredResult && !authoredResultAdmitted;
+  const actionableAuthoredDraft = authoredResultNeedsAttention
+    && workThread?.ref.resultCanContinue === true;
   const failedGoal = Boolean(
-    workThread?.failed
+    (workThread?.failed || actionableAuthoredDraft)
     && !workThread.governedRecord
     && String(workThread.ref.mode ?? '').trim().toLowerCase() === 'goal'
     && String(workThread.ref.artifactId ?? '').trim(),
@@ -330,7 +347,6 @@ export const MessageBubble = React.memo(function MessageBubble({
   const retryingFailedWork = failedGoal ? retryingGoal : regeneratingWork;
   const retryFailedWork = () => failedGoal ? onRetryGoal?.(message) : onRegenerateWorkArtifact?.(message);
   const inlineArtifactKind = workThread ? detectInlineArtifactKind(message) : null;
-  const explicitResultArtifactId = String(workThread?.ref.resultArtifactId ?? '').trim();
   const directArtifactMode = /^(html_deck|deck|presentation|slides?)$/u.test(String(workThread?.ref.mode ?? '').toLowerCase());
   // A goal/process artifact id owns lifecycle, not media. Only an explicit
   // ResultArtifactID may drive its preview/actions. Legacy standalone deck
@@ -341,6 +357,8 @@ export const MessageBubble = React.memo(function MessageBubble({
       ? String(workThread.ref.artifactId ?? '').trim()
       : ''
   );
+  const authoredResultCanPresent = Boolean(richArtifactId)
+    && (!managedAuthoredResult || (authoredResultAdmitted && workThread?.ref.resultCanPresent === true));
   const showRichWorkResult = Boolean(richArtifactId) || Boolean(workThread?.active && workThread.family === 'Presentation');
   const proposal = message.proposal;
   const proposalKind = String(proposal?.kind ?? '').toLowerCase();
@@ -580,31 +598,32 @@ export const MessageBubble = React.memo(function MessageBubble({
                 text={String(workThread.ref.resultPreview ?? '')}
                 agentName={workThread.agentName}
                 loading={workThread.active && !richArtifactId}
-                needsAttention={workThread.failed}
+                needsAttention={workThread.failed || authoredResultNeedsAttention}
                 artifactId={richArtifactId || undefined}
                 sessionToken={sessionToken}
                 onEdit={richArtifactId && workThread.ref.resultCanEdit === true ? () => onOpenWorkArtifact?.(message) : undefined}
-                onPresent={richArtifactId ? () => onViewArtifactFullscreen?.(message) : undefined}
-                onExpand={richArtifactId ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onPresent={authoredResultCanPresent ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onExpand={richArtifactId && (inlineArtifactKind !== 'html_deck' || authoredResultCanPresent) ? () => onViewArtifactFullscreen?.(message) : undefined}
               />
-              {workThread.ref.resultApprovalState === 'edited_after_approval' ? (
+              {authoredResultQuality === 'edited_after_admission' ? (
+                <Text accessibilityRole="alert" style={styles.workAttentionCopy}>Edited draft · fresh rendered review is required before presenting or exporting</Text>
+              ) : workThread.ref.resultApprovalState === 'edited_after_approval' ? (
                 <Text accessibilityRole="alert" style={styles.workAttentionCopy}>Edited after approval · review this version before presenting</Text>
               ) : null}
-              {workThread.failed && richArtifactId ? (
+              {(workThread.failed || authoredResultNeedsAttention) && richArtifactId ? (
                 <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
                   <View style={styles.checkpointStatusRow}>
                     <SymbolView name="exclamationmark.triangle.fill" tintColor={colors.emberText} size={14} />
                     <Text style={styles.checkpointKicker}>Draft · needs attention</Text>
                   </View>
-                  <Text style={styles.checkpointQuestion}>{workThread.attentionCopy || 'Scout saved the best current draft, but it has not passed the final quality gate.'}</Text>
+                  <Text style={styles.checkpointQuestion}>{authoredResultQuality === 'edited_after_admission'
+                    ? 'Your saved changes need a fresh rendered review before this version can be presented or exported.'
+                    : workThread.attentionCopy || 'Scout saved the best current draft, but it has not passed the final quality review.'}</Text>
                   <View style={styles.workResultActions}>
-                    <Pressable accessibilityRole="button" accessibilityLabel="Inspect draft details" onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed]}>
-                      <Text style={styles.workResultActionText}>Inspect</Text>
-                    </Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel="Retry draft from here" accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
+                    {workThread.ref.resultCanContinue === true ? <Pressable accessibilityRole="button" accessibilityLabel={authoredResultQuality === 'edited_after_admission' ? 'Review saved changes' : 'Continue draft review'} accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
                       {retryingFailedWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
-                      <Text style={styles.workResultActionText}>{retryingFailedWork ? 'Starting…' : 'Retry'}</Text>
-                    </Pressable>
+                      <Text style={styles.workResultActionText}>{retryingFailedWork ? 'Starting…' : authoredResultQuality === 'edited_after_admission' ? 'Review changes' : 'Continue'}</Text>
+                    </Pressable> : null}
                   </View>
                 </View>
               ) : null}

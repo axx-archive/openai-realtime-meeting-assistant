@@ -25,6 +25,8 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"fetch('/artifacts/deck/image-generations'",
 		"fetch('/artifacts/deck/assets'",
 		"fetch('/artifacts/deck/copies'",
+		"data-deck-title",
+		"title: requestedTitle",
 		"data-action=\"save-copy\"",
 		"data-action=\"send-backward\"",
 		"data-action=\"bring-forward\"",
@@ -104,10 +106,10 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
 const sceneRef='c'.repeat(64);
-let version=4;let canWrite=true;
+let version=4;let canWrite=true;let deckTitle='Studio proof';
 let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'},{id:'rich-proof',type:'text',x:150,y:360,width:900,height:260,z:4,opacity:1,rotation:0,text:'OBSERVED 6.1M',richText:'OBSERVED <span style="display:block;font-family:Georgia;font-size:75px;letter-spacing:.13em;margin:9px 0">6.1M</span>',fontSize:24,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
-let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];let pptxRequests=[];
-const artifact=()=>({id:artifactId,title:'Studio proof',version,sceneRef,metadata:{title:'Studio proof',type:'html_deck',savedToFiles:'true',artifactVersion:String(version),deckSceneRef:sceneRef}});
+let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];let fileRetries=[];let pptxRequests=[];
+const artifact=()=>({id:artifactId,title:deckTitle,version,sceneRef,metadata:{title:deckTitle,type:'html_deck',savedToFiles:'true',artifactVersion:String(version),deckSceneRef:sceneRef}});
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
@@ -115,7 +117,7 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/artifacts/render-token?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,url:'/mock-deck-render'}));}
   if(req.url==='/mock-deck-render'){res.writeHead(200,{'content-type':'text/html'});return res.end('<!doctype html><title>safe viewer</title>');}
   if(req.url==='/artifacts/deck'&&req.method==='PATCH'){
-    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);patches.push(body);assert.equal(body.expectedVersion,version);deck=body.deck;version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck}));});return;
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);patches.push(body);assert.equal(body.expectedVersion,version);deck=body.deck;deckTitle=body.title||deckTitle;version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck}));});return;
   }
   if(req.url==='/artifacts/deck/image-generations'&&req.method==='POST'){
     let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);imageRequests.push(body);const element={id:'generated-image',type:'image',x:260,y:360,width:780,height:440,z:8,opacity:1,rotation:0,ref:'a'.repeat(64),name:'generated.png',fit:'cover'};deck.slides[0].elements.push(element);version++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck,element,image:{ref:element.ref,name:element.name,mime:'image/png'}}));});return;
@@ -124,7 +126,10 @@ const server=http.createServer((req,res)=>{
     let bytes=0;req.on('data',chunk=>bytes+=chunk.length);req.on('end',()=>{uploadRequests.push({contentType:req.headers['content-type'],bytes});const element={id:'uploaded-image',type:'image',x:300,y:280,width:760,height:500,z:9,opacity:1,rotation:0,ref:'b'.repeat(64),name:'field-notes.png',fit:'cover'};deck.slides[0].elements.push(element);version++;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,updated:true,artifact:artifact(),deck,element,image:{ref:element.ref,name:element.name,mime:'image/png'}}));});return;
   }
   if(req.url==='/artifacts/deck/copies'&&req.method==='POST'){
-    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);copies.push(body);res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,artifact:{id:'deck-copy',title:body.title,type:'html_deck',version:1,savedToFiles:true},deck:body.deck,file:{id:'deck-copy',name:body.fileName,folderId:body.folderId}}));});return;
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);copies.push(body);res.writeHead(404,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,partialSuccess:true,error:'deck copy was created, but Files filing failed',artifact:{id:'deck-copy',title:body.title,type:'html_deck',version:1,savedToFiles:false},deck:body.deck,receipt:{outcome:'copy_created_files_failed',artifactId:'deck-copy',artifactVersion:1,contentSaved:true,filingCompleted:false,savedToFiles:false,retryable:true,retryUrl:'/assistant/files/save',retryMethod:'POST',fileName:body.fileName,folderId:body.folderId}}));});return;
+  }
+  if(req.url==='/assistant/files/save'&&req.method==='POST'){
+    let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw);fileRetries.push(body);res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,file:{id:body.artifactId,name:body.fileName,folderId:body.folderId}}));});return;
   }
   if(req.url==='/artifacts/export-pptx'&&req.method==='POST'){
     let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{pptxRequests.push(JSON.parse(raw));res.writeHead(200,{'content-type':'application/vnd.openxmlformats-officedocument.presentationml.presentation'});res.end(Buffer.from('mock-pptx'));});return;
@@ -232,6 +237,7 @@ const server=http.createServer((req,res)=>{
 	 await page.keyboard.press('Alt+ArrowRight');
 	 assert.equal(Number(await page.locator('[data-prop="width"]').inputValue()),keyboardWidth+1);
 	 assert.equal(await page.locator('[data-save-state]').textContent(),'Unsaved');
+	 await page.locator('[data-deck-position-details] summary').click();
 	 const setProp=async(prop,value)=>{const input=page.locator('[data-prop="'+prop+'"]');await input.fill(String(value));await input.dispatchEvent('change');};
 	 await setProp('x',-500);
 	 assert.equal(Number(await page.locator('[data-prop="x"]').inputValue()),0);
@@ -271,14 +277,16 @@ const server=http.createServer((req,res)=>{
 	 await designPanel.evaluate(node=>{node.scrollTop=node.scrollHeight});
 	 assert.ok(await designPanel.evaluate(node=>node.scrollTop)>0,'fixture must exercise a deeply scrolled inspector');
 	 await page.locator('[data-scene] [data-element-id="rich-proof"]').click();
-	 assert.equal(await designPanel.evaluate(node=>node.scrollTop),0,'selecting another object must reveal its identity and Transform controls');
+	 assert.equal(await designPanel.evaluate(node=>node.scrollTop),0,'selecting another object must reveal its primary formatting controls');
 	 await page.locator('[data-scene] [data-element-id="headline"]').click();
-	 assert.equal(await page.locator('[data-slide-controls]').isHidden(),true,'selected-object controls should start with Transform instead of burying it below slide settings');
-	 const transformCard=page.locator('[data-element-controls] .deck-editor__prop-section').first();
-	 const transformCardStyle=await transformCard.evaluate(node=>({radius:getComputedStyle(node).borderRadius,background:getComputedStyle(node).backgroundColor,shadow:getComputedStyle(node).boxShadow,top:node.getBoundingClientRect().top,panelTop:node.closest('[data-inspector-panel]')?.getBoundingClientRect().top}));
-	 assert.notEqual(transformCardStyle.radius,'0px',JSON.stringify(transformCardStyle));
-	 assert.notEqual(transformCardStyle.shadow,'none',JSON.stringify(transformCardStyle));
-	 assert.ok(transformCardStyle.top>=transformCardStyle.panelTop,JSON.stringify(transformCardStyle));
+	 assert.equal(await page.locator('[data-slide-controls]').isHidden(),true,'selected-object controls should replace slide settings');
+	 const selectionSurface=page.locator('[data-element-controls]');
+	 const selectionSurfaceState=await selectionSurface.evaluate(node=>({radius:getComputedStyle(node).borderRadius,shadow:getComputedStyle(node).boxShadow,firstLabel:node.querySelector('.deck-editor__prop-label')?.textContent,advancedOpen:node.querySelector('[data-deck-position-details]')?.open,top:node.getBoundingClientRect().top,panelTop:node.closest('[data-inspector-panel]')?.getBoundingClientRect().top}));
+	 assert.notEqual(selectionSurfaceState.radius,'0px',JSON.stringify(selectionSurfaceState));
+	 assert.notEqual(selectionSurfaceState.shadow,'none',JSON.stringify(selectionSurfaceState));
+	 assert.equal(selectionSurfaceState.firstLabel,'Typography',JSON.stringify(selectionSurfaceState));
+	 assert.equal(selectionSurfaceState.advancedOpen,true,'the user-opened advanced section should stay open while refining another text object');
+	 assert.ok(selectionSurfaceState.top>=selectionSurfaceState.panelTop,JSON.stringify(selectionSurfaceState));
  if(process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT,fullPage:true});}
  await page.locator('[data-prop="fontFamily"]').fill('Georgia, Times New Roman, serif');
  await page.locator('[data-prop="fontFamily"]').dispatchEvent('change');
@@ -306,12 +314,14 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'Bring to front',exact:true}).click();
 	 await page.getByRole('button',{name:'Undo'}).click();
 	 await page.getByRole('button',{name:'Redo'}).click();
+	 await page.getByRole('textbox',{name:'Deck name'}).fill('Studio proof — final');
 	 await page.getByRole('button',{name:'Save',exact:true}).click();
 	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save"]');return button&&!button.disabled&&button.textContent==='Save';});
 	 assert.equal(await page.locator('.deck-editor').count(),1,'Save must keep Deck Studio open');
 	 assert.match(await page.locator('[data-save-state]').textContent(),/^Saved/);
 	 assert.equal(patches.length,1);
  assert.equal(patches[0].artifactId,artifactId);
+ assert.equal(patches[0].title,'Studio proof — final');
  const savedShape=patches[0].deck.slides[0].elements.find(element=>element.type==='shape'&&element.shape==='rectangle');
  assert.ok(savedShape);
  assert.ok(savedShape.x>240&&savedShape.y>240,JSON.stringify(savedShape));
@@ -343,6 +353,7 @@ const server=http.createServer((req,res)=>{
 
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
+ assert.equal(await page.getByRole('textbox',{name:'Deck name'}).inputValue(),'Studio proof — final');
  await page.getByRole('tab',{name:'Scout'}).click();
  const scoutHint=await page.locator('[data-inspector-panel="scout"] .deck-editor__inspector-hint').evaluate(node=>({whiteSpace:getComputedStyle(node).whiteSpace,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight,text:node.textContent}));
  assert.notEqual(scoutHint.whiteSpace,'nowrap',JSON.stringify(scoutHint));
@@ -378,9 +389,12 @@ const server=http.createServer((req,res)=>{
  await copyDialog.getByRole('textbox',{name:'File name'}).fill('Studio proof — team copy');
  await copyDialog.getByRole('button',{name:'Save',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.deck-editor')&&!document.querySelector('.drive-save-dialog'));
+ await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save-copy"]');return button&&!button.disabled&&button.textContent==='Save a copy…';});
  assert.equal(copies.length,1);
  assert.equal(copies[0].title,'Studio proof — team copy');
  assert.equal(copies[0].deck.slides[0].elements.find(element=>element.id==='uploaded-image').fit,'contain');
+ assert.deepEqual(fileRetries,[{artifactId:'deck-copy',fileName:'Studio proof — team copy',folderId:''}]);
+ assert.equal(copies.length,1,'Files retry must file the created copy rather than POSTing another deck copy');
 
 	 await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
 	 await page.locator('.deck-editor__text-input').fill('Edited plain text');
@@ -410,7 +424,7 @@ const server=http.createServer((req,res)=>{
  await nativeNext.click();
  assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'2 / 2');
  assert.equal(await readonlyHost.locator('.chat-deck__native-element').filter({hasText:'The second slide'}).count(),1);
- const nativeChromeGeometry=await readonlyHost.evaluate(host=>{const shell=host.querySelector('.chat-deck').getBoundingClientRect();const nav=host.querySelector('.chat-deck__nav').getBoundingClientRect();const actions=host.querySelector('.chat-deck__actions').getBoundingClientRect();const navButtons=Array.from(host.querySelectorAll('.chat-deck__nav button')).map(node=>node.getBoundingClientRect().toJSON());const actionButtons=Array.from(host.querySelectorAll('.chat-deck__actions .chat-deck__btn')).map(node=>node.getBoundingClientRect().toJSON());return {shell:shell.toJSON(),nav:nav.toJSON(),actions:actions.toJSON(),navButtons,actionButtons};});
+ const nativeChromeGeometry=await readonlyHost.evaluate(host=>{const rendered=node=>{const style=getComputedStyle(node);const rect=node.getBoundingClientRect();return !node.hidden&&!node.closest('[hidden],[aria-hidden="true"],[inert]')&&style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0;};const shell=host.querySelector('.chat-deck').getBoundingClientRect();const nav=host.querySelector('.chat-deck__nav').getBoundingClientRect();const actions=host.querySelector('.chat-deck__actions').getBoundingClientRect();const navButtons=Array.from(host.querySelectorAll('.chat-deck__nav button')).filter(rendered).map(node=>node.getBoundingClientRect().toJSON());const actionButtons=Array.from(host.querySelectorAll('.chat-deck__actions .chat-deck__btn')).filter(rendered).map(node=>node.getBoundingClientRect().toJSON());return {shell:shell.toJSON(),nav:nav.toJSON(),actions:actions.toJSON(),navButtons,actionButtons};});
  assert.ok(nativeChromeGeometry.nav.top<nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
  assert.ok(nativeChromeGeometry.actions.top>nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
  nativeChromeGeometry.navButtons.forEach(rect=>assert.ok(rect.width>=40&&rect.height>=40,JSON.stringify(nativeChromeGeometry)));
@@ -428,9 +442,10 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs(stablePreview.before.width-stablePreview.after.width)<0.5&&Math.abs(stablePreview.before.height-stablePreview.after.height)<0.5,JSON.stringify(stablePreview));
  assert.equal(stablePreview.opacity,'1');
  await page.waitForFunction(()=>{const host=document.querySelector('#readonly-deck-host');return host?.querySelector('button')?.disabled===true&&Array.from(host.querySelectorAll('button')).some(button=>button.textContent.includes('Present')&&!button.disabled)});
- const readonlyEdit=readonlyHost.getByRole('button',{name:'Edit'});
- assert.equal(await readonlyEdit.isDisabled(),true);
- await readonlyEdit.evaluate(node=>node.click());
+ const readonlyEdit=readonlyHost.locator('.chat-deck__btn--secondary').filter({hasText:'Edit'});
+ assert.equal(await readonlyHost.getByRole('button',{name:'Edit'}).count(),0);
+ assert.equal(await readonlyEdit.count(),1);
+ assert.equal(await readonlyEdit.evaluate(node=>node.hidden),true);
  assert.equal(await page.locator('.deck-editor').count(),0);
  await readonlyHost.getByRole('button',{name:'Present'}).click();
  await page.waitForSelector('.deck-presenter');
@@ -498,6 +513,28 @@ const server=http.createServer((req,res)=>{
  const page=await context.newPage();
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
+ await page.evaluate(id=>{const host=document.createElement('div');host.id='deck-channel-phone';host.style.cssText='position:fixed;inset:96px 12px auto;z-index:9999';document.body.appendChild(host);renderArtifactDeck(host,{id,title:'Phone proof — a readable launch presentation',text:'<!doctype html>',metadata:{title:'Phone proof — a readable launch presentation',type:'html_deck',savedToFiles:'true'}},{});},artifactId);
+ const channelCard=page.locator('#deck-channel-phone .chat-deck');
+ await channelCard.getByRole('button',{name:'Edit',exact:true}).waitFor({state:'visible'});
+ await page.waitForFunction(()=>{const card=document.querySelector('#deck-channel-phone .chat-deck');return card?.dataset.previewState==='ready'&&Array.from(card.querySelectorAll('button')).some(button=>button.textContent.includes('Present')&&!button.disabled);});
+ assert.equal(await channelCard.getByRole('button',{name:'Edit',exact:true}).count(),1);
+ assert.equal(await channelCard.getByRole('button',{name:'Present',exact:true}).count(),1);
+ assert.equal(await channelCard.getByRole('button',{name:'Download',exact:true}).count(),1);
+ const channelGeometry=await channelCard.evaluate(card=>{const rect=node=>node.getBoundingClientRect().toJSON();const title=card.querySelector('.chat-deck__title');const actions=Array.from(card.querySelectorAll('.chat-deck__actions .chat-deck__btn')).filter(button=>{const style=getComputedStyle(button);return !button.hidden&&style.display!=='none'&&style.visibility!=='hidden'&&button.getClientRects().length;});return {card:rect(card),title:rect(title),titleText:title.textContent,titleLines:Math.round(title.scrollHeight/parseFloat(getComputedStyle(title).lineHeight)),actions:actions.map(button=>({name:button.getAttribute('aria-label')||button.textContent.trim(),rect:rect(button)})).sort((a,b)=>a.rect.left-b.rect.left),downloadLabel:getComputedStyle(card.querySelector('.chat-deck__download-label')).display,downloadMore:getComputedStyle(card.querySelector('.chat-deck__download-more')).display,scrollWidth:document.documentElement.scrollWidth};});
+ assert.equal(channelGeometry.titleText,'Phone proof — a readable launch presentation');
+ assert.ok(channelGeometry.title.width>300&&channelGeometry.titleLines<=2,JSON.stringify(channelGeometry));
+ assert.deepEqual(channelGeometry.actions.map(action=>action.name),['Edit','Present','Download']);
+ channelGeometry.actions.forEach(action=>assert.ok(action.rect.height>=44&&action.rect.left>=channelGeometry.card.left&&action.rect.right<=channelGeometry.card.right,JSON.stringify(channelGeometry)));
+ assert.equal(channelGeometry.downloadLabel,'none');assert.notEqual(channelGeometry.downloadMore,'none');
+ assert.ok(channelGeometry.card.left>=0&&channelGeometry.card.right<=390&&channelGeometry.scrollWidth<=390,JSON.stringify(channelGeometry));
+ if(process.env.DECK_CHANNEL_PHONE_SCREENSHOT){await page.screenshot({path:process.env.DECK_CHANNEL_PHONE_SCREENSHOT,fullPage:true});}
+ await channelCard.getByRole('button',{name:'Download',exact:true}).tap();
+ const channelDownloadMenu=channelCard.getByRole('menu');
+ await channelDownloadMenu.waitFor({state:'visible'});
+ const channelMenuTargets=await channelDownloadMenu.locator('button').evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().toJSON()));
+ channelMenuTargets.forEach(rect=>assert.ok(rect.height>=44,JSON.stringify(channelMenuTargets)));
+ if(process.env.DECK_CHANNEL_PHONE_MENU_SCREENSHOT){await page.screenshot({path:process.env.DECK_CHANNEL_PHONE_MENU_SCREENSHOT,fullPage:true});}
+ await page.evaluate(()=>document.getElementById('deck-channel-phone')?.remove());
  await page.evaluate(id=>openDeckStudio(id,'Phone proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
  assert.equal(await page.evaluate(()=>matchMedia('(pointer: coarse)').matches),true);
@@ -532,7 +569,7 @@ const server=http.createServer((req,res)=>{
  const inspector=await page.locator('.deck-editor__props').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),inert:node.inert,hidden:node.getAttribute('aria-hidden')}));
  assert.ok(inspector.rect.left>=0&&inspector.rect.right<=390&&inspector.rect.bottom<=844,JSON.stringify(inspector));
  assert.equal(inspector.inert,false);assert.equal(inspector.hidden,null);
- const inspectorTargets=await page.locator('.deck-editor__props').evaluate(node=>Array.from(node.querySelectorAll('button:not([hidden]),input:not([hidden]),select:not([hidden])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ const inspectorTargets=await page.locator('.deck-editor__props').evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>{const style=getComputedStyle(control);const rect=control.getBoundingClientRect();return !control.hidden&&!control.closest('[hidden],[aria-hidden="true"],[inert]')&&style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0;}).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
  inspectorTargets.forEach(target=>assert.ok(target.rect.height>=44,JSON.stringify(target)));
  if(process.env.DECK_STUDIO_PHONE_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_PHONE_SCREENSHOT,fullPage:true});}
  await page.getByRole('button',{name:'Close slide inspector'}).tap();

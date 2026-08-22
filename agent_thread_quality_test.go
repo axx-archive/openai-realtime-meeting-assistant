@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +18,6 @@ func largeExternalEvidenceFixtureForTest(t *testing.T) (externalEvidenceEnvelope
 		"What official market count establishes the reachable audience?",
 		"What primary-source behavior signal establishes participation quality?",
 		"What official spend measure establishes commercial relevance?",
-		"What primary-source operating constraint most affects feasibility?",
-		"What official trend establishes why the decision matters now?",
 	}
 	providerURLs := make([]string, 166)
 	citations := make([]openAIResponseWebCitation, 166)
@@ -133,6 +132,71 @@ type focusedEntailmentFixture struct {
 	sourceURL          string
 }
 
+func externalEvidenceResearchAuthorityObjectForTest(t *testing.T, plan goalPlan, question string) map[string]any {
+	t.Helper()
+	objective, ok := processResearchObjectiveAuthoritySource(&plan)
+	if !ok {
+		t.Fatal("test objective authority is unavailable")
+	}
+	return map[string]any{
+		"question": question, "research_kind": "direct_evidence", "source_ref": objective.Ref,
+		"authority_quote": canonicalEvidenceText(objective.Text), "scope_anchor": "official program",
+		"decision_effect": "recommendation", "decision_relevance": "The official program count determines whether to recommend proceeding.",
+	}
+}
+
+func externalEvidenceContextBodyForTest(t *testing.T, plan goalPlan, question string, slideCount int) string {
+	t.Helper()
+	body := map[string]any{
+		"direct_ask": "Decide whether the official program's 2026 opted-in creator count supports proceeding",
+		"audience":   "decision makers", "decision": "whether the program size supports proceeding", "desired_response": "make a grounded decision",
+		"slide_count": slideCount, "context_used": []any{}, "settled_decisions": []any{}, "taste_signals": []any{}, "brand_assets": []any{},
+		"research_mode": "external", "research_questions": []any{externalEvidenceResearchAuthorityObjectForTest(t, plan, question)},
+		"known_facts": []any{}, "uncertain_claims": []any{}, "reversible_inferences": []any{},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func externalEvidenceContextWithQuestionsForTest(t *testing.T, plan goalPlan, questions []any) string {
+	t.Helper()
+	var object map[string]any
+	if err := json.Unmarshal([]byte(externalEvidenceContextBodyForTest(t, plan, "What is the official program's 2026 opted-in creator count?", 6)), &object); err != nil {
+		t.Fatal(err)
+	}
+	object["research_questions"] = questions
+	raw, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func cloneResearchAuthorityObjectForTest(source map[string]any) map[string]any {
+	clone := make(map[string]any, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func externalEvidenceContextMetadataForTest(t *testing.T, app *kanbanBoardApp, plan *goalPlan, parentID, body string) map[string]string {
+	t.Helper()
+	authorized, mode, err := authorizeExternalEvidenceResearchText(app, plan, body)
+	if err != nil {
+		t.Fatalf("authorize fixture context: %v", err)
+	}
+	return map[string]string{
+		"goalParentId": parentID, "goalSubtaskId": "context_snapshot", "artifactContract": packagingStudioResearchContextContract,
+		"processId": packagingStudioProcessID, "processStage": "context_snapshot", "status": "complete", "threadStatus": "complete",
+		"researchMode": mode, "researchQuestionCount": strconv.Itoa(len(authorized.Questions)),
+		"researchQuestionAuthorityDigest": authorized.QuestionAuthorityDigest, "researchSourceAuthorityDigest": authorized.SourceAuthorityDigest,
+	}
+}
+
 func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetchedText string) focusedEntailmentFixture {
 	t.Helper()
 	setupAuthTestEnv(t)
@@ -156,12 +220,10 @@ func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetc
 		t.Fatal(err)
 	}
 	plan.State = goalStateExecute
-	const authorizedQuestion = "How many opted-in creators does the official program have in 2026?"
-	contextBody := `{"direct_ask":"Decide whether the official program's 2026 opted-in creator count supports proceeding","audience":"decision makers","decision":"whether the program size supports proceeding","desired_response":"make a grounded decision","slide_count":8,"context_used":[],"settled_decisions":[],"taste_signals":[],"brand_assets":[],"research_mode":"external","research_questions":["` + authorizedQuestion + `"],"known_facts":[],"uncertain_claims":[],"reversible_inferences":[]}`
-	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName, map[string]string{
-		"goalParentId": parent.Artifact.ID, "goalSubtaskId": "context_snapshot", "outputContract": "deck_context_snapshot_v2",
-		"processId": packagingStudioProcessID, "processStage": "context_snapshot", "status": "complete", "threadStatus": "complete",
-	})
+	const authorizedQuestion = "What is the official program's 2026 opted-in creator count?"
+	contextBody := externalEvidenceContextBodyForTest(t, plan, authorizedQuestion, 8)
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName,
+		externalEvidenceContextMetadataForTest(t, app, &plan, parent.Artifact.ID, contextBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +233,7 @@ func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetc
 	row := externalEvidenceEnvelopeRow{
 		ResearchQuestion: authorizedQuestion, SourceFact: candidateFact,
 		SourceTitle: "Official creator program", URL: sourceURL, PublishedOrUpdated: "Accessed 2026-08-21",
-		Units: "creators", Confidence: "Medium", DeckImplication: "Use only after entailment checking.",
+		Units: "creators", Confidence: "High", DeckImplication: "Use only after entailment checking.",
 	}
 	rawEvidence := externalEvidenceJSONForTest(t, externalEvidenceEnvelope{
 		ResearchQuestions: []string{row.ResearchQuestion}, Evidence: []externalEvidenceEnvelopeRow{row}, ExcludedOrUnverified: []string{},
@@ -616,12 +678,10 @@ func authorizedExternalEvidenceTestContext(t *testing.T) (*kanbanBoardApp, goalP
 	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	const question = "How many opted-in creators does the official program have in 2026?"
-	contextBody := `{"direct_ask":"Decide whether the official program's 2026 opted-in creator count supports proceeding","audience":"decision makers","decision":"whether the program size supports proceeding","desired_response":"make a grounded decision","slide_count":6,"context_used":[],"settled_decisions":[],"taste_signals":[],"brand_assets":[],"research_mode":"external","research_questions":["` + question + `"],"known_facts":[],"uncertain_claims":[],"reversible_inferences":[]}`
-	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName, map[string]string{
-		"goalParentId": parent.Artifact.ID, "goalSubtaskId": "context_snapshot", "outputContract": "deck_context_snapshot_v2",
-		"processId": packagingStudioProcessID, "processStage": "context_snapshot", "status": "complete", "threadStatus": "complete",
-	})
+	const question = "What is the official program's 2026 opted-in creator count?"
+	contextBody := externalEvidenceContextBodyForTest(t, plan, question, 6)
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName,
+		externalEvidenceContextMetadataForTest(t, app, &plan, parent.Artifact.ID, contextBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,6 +723,127 @@ func authorizedExternalEvidenceResearchThreadForTest(t *testing.T, app *kanbanBo
 	return scoutAgentThread{ID: threadID, Mode: "research", Query: "Research the authorized context snapshot.", Status: "running", Artifact: researchArtifact}
 }
 
+func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
+	app, plan, _ := authorizedExternalEvidenceTestContext(t)
+	base := externalEvidenceResearchAuthorityObjectForTest(t, plan, "What is the official program's 2026 opted-in creator count?")
+	contextStage := plan.subtaskByID("context_snapshot")
+	contextArtifact, _ := app.osArtifactByID(contextStage.ArtifactID)
+	selfRef := fmt.Sprintf("artifact_id=%s revision=%d digest=%s", contextArtifact.ID, artifactVersion(contextArtifact), sha256Hex([]byte(contextArtifact.Text)))
+
+	tests := []struct {
+		name      string
+		questions func() []any
+		want      string
+	}{
+		{name: "legacy string", questions: func() []any { return []any{base["question"]} }, want: "must be an authority object"},
+		{name: "four questions", questions: func() []any {
+			return []any{cloneResearchAuthorityObjectForTest(base), cloneResearchAuthorityObjectForTest(base), cloneResearchAuthorityObjectForTest(base), cloneResearchAuthorityObjectForTest(base)}
+		}, want: "1 to 3"},
+		{name: "extra field", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["model_note"] = "self approved"
+			return []any{value}
+		}, want: "strict authority object"},
+		{name: "fake source ref", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["source_ref"] = "goal_objective_id=fake digest=" + strings.Repeat("a", 64)
+			return []any{value}
+		}, want: "exact authorized source"},
+		{name: "context self authorization", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["source_ref"], value["authority_quote"] = selfRef, contextArtifact.Text
+			return []any{value}
+		}, want: "exact authorized source"},
+		{name: "inner-clause authority quote", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["authority_quote"] = "the official program's 2026 opted-in creator count"
+			return []any{value}
+		}, want: "one atomic quote"},
+		{name: "direct count to spend drift", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["question"] = "What is the official program's 2026 advertising spend?"
+			return []any{value}
+		}, want: "direct-evidence dimensions"},
+		{name: "comparative count to spend drift", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["question"] = "How does the official program's 2026 advertising spend compare with peer programs?"
+			value["research_kind"] = "comparative_evidence"
+			return []any{value}
+		}, want: "comparative-evidence dimensions"},
+		{name: "current rule mixed with performance", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["question"] = "What current advertising-spend rules govern the official program?"
+			value["research_kind"] = "current_constraint"
+			value["decision_effect"] = "guardrail"
+			value["decision_relevance"] = "The official program rules determine the launch guardrail."
+			return []any{value}
+		}, want: "current-constraint lane"},
+		{name: "generic decision relevance", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["decision_relevance"] = "The official program fact might be useful later."
+			return []any{value}
+		}, want: "generic or unbound"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := externalEvidenceContextWithQuestionsForTest(t, plan, test.questions())
+			if _, _, err := authorizeExternalEvidenceResearchText(app, &plan, body); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestFreshResearchAuthorityAllowsBoundedComparatorAndCurrentRuleLanes(t *testing.T) {
+	app, plan, _ := authorizedExternalEvidenceTestContext(t)
+	objective, ok := processResearchObjectiveAuthoritySource(&plan)
+	if !ok {
+		t.Fatal("objective authority missing")
+	}
+	tests := []externalEvidenceResearchQuestionAuthority{
+		{
+			Question: "How does the official program's 2026 opted-in creator count compare with peer programs?", ResearchKind: "comparative_evidence",
+			SourceRef: objective.Ref, AuthorityQuote: canonicalEvidenceText(objective.Text), ScopeAnchor: "official program", DecisionEffect: "recommendation",
+			DecisionRelevance: "The official program creator count benchmark determines whether to recommend proceeding.",
+		},
+		{
+			Question: "What current rules govern the official program?", ResearchKind: "current_constraint",
+			SourceRef: objective.Ref, AuthorityQuote: canonicalEvidenceText(objective.Text), ScopeAnchor: "official program", DecisionEffect: "guardrail",
+			DecisionRelevance: "The official program rules determine the launch guardrail.",
+		},
+	}
+	for _, authority := range tests {
+		raw, _ := json.Marshal(authority)
+		var object map[string]any
+		if err := json.Unmarshal(raw, &object); err != nil {
+			t.Fatal(err)
+		}
+		body := externalEvidenceContextWithQuestionsForTest(t, plan, []any{object})
+		authorized, mode, err := authorizeExternalEvidenceResearchText(app, &plan, body)
+		if err != nil || mode != "external" || len(authorized.Questions) != 1 || authorized.Questions[0] != authority.Question {
+			t.Fatalf("bounded %s lane was rejected: authority=%+v mode=%q err=%v", authority.ResearchKind, authorized, mode, err)
+		}
+	}
+}
+
+func TestResearchAuthorityQuoteRequiresOneAtomicSourceExcerpt(t *testing.T) {
+	const source = "The official program has 4,200 creators. The pilot launched in 2026."
+	for name, quote := range map[string]string{
+		"inner clause":      "official program has 4,200 creators",
+		"joined assertions": source,
+		"minified json":     `{"direct_ask":"official program","research_questions":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if externalEvidenceAuthorityQuoteIsAtomic(quote, source) {
+				t.Fatalf("non-atomic authority quote was accepted: %q", quote)
+			}
+		})
+	}
+	if !externalEvidenceAuthorityQuoteIsAtomic("The official program has 4,200 creators.", source) {
+		t.Fatal("one complete source sentence was rejected")
+	}
+}
+
 func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *testing.T) {
 	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
 	contextStage := plan.subtaskByID("context_snapshot")
@@ -677,17 +858,17 @@ func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *test
 	if err := json.Unmarshal([]byte(artifact.Text), &object); err != nil {
 		t.Fatalf("decode context snapshot: %v", err)
 	}
-	question := object["research_questions"].([]any)[0].(string)
-	object["research_questions"] = []any{map[string]any{
-		"question":           question,
-		"decision_relevance": "This fact could change the recommendation.",
-	}}
-	body, err := json.Marshal(object)
-	if err != nil {
-		t.Fatalf("encode production-shaped context snapshot: %v", err)
+	rawQuestions, ok := object["research_questions"].([]any)
+	if !ok || len(rawQuestions) != 1 {
+		t.Fatalf("production-shaped research_questions=%#v", object["research_questions"])
 	}
-	if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", string(body), scoutParticipantName, artifact.Metadata); err != nil {
-		t.Fatalf("update production-shaped context snapshot: %v", err)
+	authority, ok := rawQuestions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("production-shaped research authority=%#v", rawQuestions[0])
+	}
+	question, _ := authority["question"].(string)
+	if question == "" || len(authority) != 7 {
+		t.Fatalf("production-shaped research authority=%#v", authority)
 	}
 
 	questions, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
@@ -715,6 +896,10 @@ func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *test
 	}
 	if request.ExternalEvidenceAuthority == nil || len(request.ExternalEvidenceAuthority.Questions) != 1 || request.ExternalEvidenceAuthority.Questions[0] != question {
 		t.Fatalf("decoded provider request authority=%+v, want exact frozen question %q", request.ExternalEvidenceAuthority, question)
+	}
+	wantInput, _ := json.Marshal([]string{question})
+	if request.Input != string(wantInput) || len(request.Attachments) != 0 || strings.Contains(request.Input, plan.Objective) || strings.Contains(request.Input, "authority_quote") || strings.Contains(request.Input, "decision_relevance") {
+		t.Fatalf("provider input escaped least privilege: input=%q attachments=%#v", request.Input, request.Attachments)
 	}
 	retained, err := authorizedExternalEvidenceResearchQuestionsForThread(app, prepared)
 	if err != nil || len(retained) != 1 || retained[0] != question {
@@ -1003,6 +1188,29 @@ func TestExternalEvidenceSourcePacketFailureStopsBeforeProviderReservation(t *te
 	}
 }
 
+func TestLegacyResearchContextCannotReserveFreshProviderRun(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	contextStage := plan.subtaskByID("context_snapshot")
+	artifact, _ := app.osArtifactByID(contextStage.ArtifactID)
+	legacy, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
+		"artifactContract": "deck_context_snapshot_v2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Metadata["artifactContract"] != "deck_context_snapshot_v2" {
+		t.Fatalf("fixture did not become legacy: %+v", legacy.Metadata)
+	}
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "legacy-context-provider-reservation")
+	if _, err := app.preparePublicConversationProviderRequest(thread); err == nil || !strings.Contains(err.Error(), "before provider handoff") {
+		t.Fatalf("legacy context reached provider reservation: %v", err)
+	}
+	current, _ := app.osArtifactByID(thread.Artifact.ID)
+	if current.Metadata[publicConversationProviderRequestKey] != "" || current.Metadata[publicConversationProviderRequestHash] != "" {
+		t.Fatal("legacy context reserved a provider request")
+	}
+}
+
 func TestAuthorizedExternalEvidenceQuestionsRejectsObjectWithoutQuestion(t *testing.T) {
 	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
 	contextStage := plan.subtaskByID("context_snapshot")
@@ -1018,8 +1226,8 @@ func TestAuthorizedExternalEvidenceQuestionsRejectsObjectWithoutQuestion(t *test
 	}
 
 	_, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
-	if err == nil || !strings.Contains(err.Error(), "research question 1 is empty") {
-		t.Fatalf("error=%v, want a specific empty-question rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "strict authority object") {
+		t.Fatalf("error=%v, want a strict-object rejection", err)
 	}
 
 	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "invalid-research-authority")
@@ -1287,13 +1495,13 @@ func TestExternalEvidenceV2RequestUsesBoundedStrictSchemaAndNormalizer(t *testin
 	properties, _ := request.JSONSchema.Schema["properties"].(map[string]any)
 	evidence, _ := properties["evidence"].(map[string]any)
 	questions, _ := properties["research_questions"].(map[string]any)
-	if questions["minItems"] != 1 || questions["maxItems"] != 5 {
-		t.Fatalf("question bounds=%#v, want 1..5", questions)
+	if questions["minItems"] != 1 || questions["maxItems"] != externalEvidenceMaxResearchQuestions {
+		t.Fatalf("question bounds=%#v, want 1..%d", questions, externalEvidenceMaxResearchQuestions)
 	}
 	if evidence["minItems"] != 0 || evidence["maxItems"] != 12 {
 		t.Fatalf("evidence bounds=%#v, want 0..12", evidence)
 	}
-	if request.MaxToolCalls != 6 || !strings.Contains(request.Instructions, "Copy the 1 to 5 research_questions exactly") || !strings.Contains(request.Instructions, "when the approved snapshot contains one") || !strings.Contains(request.Instructions, "second corroborating source only") {
+	if request.MaxToolCalls != 6 || !strings.Contains(request.Instructions, "Copy the 1 to 3 research_questions exactly") || !strings.Contains(request.Instructions, "when the approved snapshot contains one") || !strings.Contains(request.Instructions, "second corroborating source only") {
 		t.Fatalf("v2 request lost bounded research contract: max_tool_calls=%d\n%s", request.MaxToolCalls, request.Instructions)
 	}
 	snapshotRaw, err := json.Marshal(durableOpenAIRequest(request))
@@ -1310,6 +1518,21 @@ func TestExternalEvidenceV2RequestUsesBoundedStrictSchemaAndNormalizer(t *testin
 	restored := snapshot.request(app, thread)
 	if restored.JSONSchema == nil || restored.NormalizeOutput == nil || restored.MaxToolCalls != 6 {
 		t.Fatal("durable request replay lost v2 schema, server normalizer, or hosted-tool budget")
+	}
+}
+
+func TestExternalEvidenceProviderBoundaryDropsInheritedPromptAndAttachments(t *testing.T) {
+	const question = "What current rules govern the official program?"
+	request := configureExternalEvidenceV2Request(nil, focusedExternalEvidenceThreadForTest(), openAITextRequest{
+		Input:       "UNTRUSTED CHILD QUERY AND SOURCE BODY",
+		Attachments: []openAIInputContent{{Type: "input_text", Text: "SECRET ATTACHMENT BODY"}},
+		ExternalEvidenceAuthority: &externalEvidenceFrozenAuthority{
+			Questions: []string{question}, QuestionAuthorityDigest: strings.Repeat("a", 64), SourceAuthorityDigest: strings.Repeat("b", 64),
+		},
+	})
+	want, _ := json.Marshal([]string{question})
+	if request.PreflightError != nil || request.Input != string(want) || len(request.Attachments) != 0 || strings.Contains(request.Input, "UNTRUSTED") || strings.Contains(request.Input, "SECRET") {
+		t.Fatalf("external provider boundary leaked inherited input: input=%q attachments=%#v err=%v", request.Input, request.Attachments, request.PreflightError)
 	}
 }
 
@@ -1439,7 +1662,7 @@ func TestExternalEvidenceContractInstructionsStayFocusedAndPrivateBound(t *testi
 	app := newIsolatedKanbanBoardApp(t)
 	thread := focusedExternalEvidenceThreadForTest()
 	instructions := app.agentThreadInstructionsForThread(thread)
-	for _, want := range []string{"focused external-evidence contract", "governed deliverable", "Copy the 1 to 5 research_questions exactly", "when the approved snapshot contains one", "primary or official source", "second corroborating source only", "schema compatibility", "server appends"} {
+	for _, want := range []string{"focused external-evidence contract", "governed deliverable", "Copy the 1 to 3 research_questions exactly", "when the approved snapshot contains one", "primary or official source", "second corroborating source only", "schema compatibility", "server appends"} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("focused instructions missing %q:\n%s", want, instructions)
 		}

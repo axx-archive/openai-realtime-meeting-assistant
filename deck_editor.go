@@ -204,19 +204,37 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
 	file, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, normalizedFileName, actor)
 	if err != nil {
-		status := fileSaveErrorStatus(err)
-		if status == http.StatusInternalServerError {
+		if fileSaveErrorStatus(err) == http.StatusInternalServerError {
 			log.Errorf("Deck copy Files save failed: %v", err)
-			writeAuthError(w, status, "deck copy was created, but Files is unavailable")
-		} else {
-			writeAuthError(w, status, err.Error())
 		}
+		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
+		storedView := deckArtifactViewFromEntry(stored)
+		writeAuthJSON(w, fileSaveErrorStatus(err), map[string]any{
+			"ok": false, "partialSuccess": true,
+			"error":    "deck copy was created, but Files filing failed",
+			"artifact": storedView, "deck": payload.Deck,
+			"receipt": map[string]any{
+				"outcome": "copy_created_files_failed", "artifactId": stored.ID,
+				"artifactVersion": artifactVersion(stored), "contentSaved": true,
+				"filingCompleted": false, "savedToFiles": storedView.SavedToFiles,
+				"branchedFromArtifactVersion": payload.ExpectedVersion,
+				"sourceCurrentVersion":        artifactVersion(prior), "staleBranch": false,
+				"retryable": true, "retryUrl": "/assistant/files/save", "retryMethod": http.MethodPost,
+				"fileName": normalizedFileName, "folderId": payload.FolderID,
+			},
+		})
 		return
 	}
 	stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 	broadcastSignedInKanbanEvent("file", file)
 	writeAuthJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "artifact": deckArtifactViewFromEntry(stored), "deck": payload.Deck, "file": file,
+		"receipt": map[string]any{
+			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
+			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
+			"branchedFromArtifactVersion": payload.ExpectedVersion,
+			"sourceCurrentVersion":        artifactVersion(prior), "staleBranch": false,
+		},
 	})
 }
 
@@ -324,8 +342,12 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		_, aclCanWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
 		canWrite := aclCanWrite && importQuality != "approximate"
+		qualityState := kanbanApp.authoredResultQualityForArtifact(artifact)
+		managedAuthoredResult := qualityState != ""
+		admitted := !managedAuthoredResult || qualityState == authoredResultQualityAdmitted
 		response := map[string]any{
 			"ok": true, "artifact": deckArtifactViewFromEntry(artifact), "deck": deck, "imported": imported, "importQuality": importQuality, "canWrite": canWrite,
+			"qualityState": qualityState, "canPresent": admitted, "canExport": admitted,
 		}
 		if aclCanWrite && !canWrite {
 			response["writeBlockedReason"] = "legacy deck cannot be edited without losing unrecognized content"
@@ -337,10 +359,16 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		ArtifactID      string       `json:"artifactId"`
 		ExpectedVersion int          `json:"expectedVersion"`
+		Title           string       `json:"title"`
 		Deck            deckDocument `json:"deck"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, deckDocumentMaxBytes+64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read deck update")
+		return
+	}
+	payload.Title = strings.TrimSpace(payload.Title)
+	if len([]rune(payload.Title)) > 160 {
+		writeAuthError(w, http.StatusBadRequest, "deck name is too long")
 		return
 	}
 	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLWrite)
@@ -365,13 +393,26 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	updated, changed, err := persistDeckDocument(r.Context(), user, artifact, payload.Deck, nil)
+	title := firstNonEmptyString(payload.Title, strings.TrimSpace(artifact.Metadata["title"]), "Presentation")
+	updated, changed, err := persistDeckDocumentWithTitle(r.Context(), user, artifact, payload.Deck, title, nil)
 	if err != nil {
-		writeDeckVersionConflict(w, artifact)
+		current, found := kanbanApp.osArtifactByID(artifact.ID)
+		if !found || artifactVersion(current) != payload.ExpectedVersion ||
+			!artifactAuthorizationHeaderEqual(
+				resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)),
+				resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(current)),
+			) {
+			writeDeckVersionConflict(w, current)
+			return
+		}
+		writeAuthError(w, http.StatusInternalServerError, "deck could not be saved")
 		return
 	}
+	qualityState := kanbanApp.authoredResultQualityForArtifact(updated)
+	canPublish := qualityState == "" || qualityState == authoredResultQualityAdmitted
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": deckArtifactViewFromEntry(updated), "deck": payload.Deck,
+		"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish,
 	})
 }
 
@@ -648,6 +689,11 @@ func loadDeckDocument(artifact meetingMemoryEntry) (deckDocument, bool, string, 
 }
 
 func persistDeckDocument(ctx context.Context, user *userAccount, prior meetingMemoryEntry, deck deckDocument, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return persistDeckDocumentWithTitle(ctx, user, prior, deck, strings.TrimSpace(prior.Metadata["title"]), extraMetadata)
+}
+
+func persistDeckDocumentWithTitle(ctx context.Context, user *userAccount, prior meetingMemoryEntry, deck deckDocument, title string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
+	title = firstNonEmptyString(strings.TrimSpace(title), strings.TrimSpace(prior.Metadata["title"]), "Presentation")
 	raw, err := json.Marshal(deck)
 	if err != nil || len(raw) > deckDocumentMaxBytes {
 		return meetingMemoryEntry{}, false, fmt.Errorf("deck document exceeds its storage bound")
@@ -698,13 +744,13 @@ func persistDeckDocument(ctx context.Context, user *userAccount, prior meetingMe
 		}
 		metadata[artifactAssetsMetadataKey] = string(encoded)
 	}
-	body := compileDeckDocumentHTML(deck, strings.TrimSpace(prior.Metadata["title"]))
+	body := compileDeckDocumentHTML(deck, title)
 	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior))
 	var updated meetingMemoryEntry
 	var changed bool
 	err = kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
 		var updateErr error
-		updated, changed, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, prior.ID, prior.Metadata["title"], body, user.Name, metadata)
+		updated, changed, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, prior.ID, title, body, user.Name, metadata)
 		return updateErr
 	})
 	return updated, changed, err

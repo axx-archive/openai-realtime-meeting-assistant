@@ -258,6 +258,10 @@ func deckPPTXExportHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 		return
 	}
+	if err := kanbanApp.requireFinalExportAdmission(artifact); err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
+		return
+	}
 	currentRef := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
 	if currentRef == "" {
 		_, imported, quality, loadErr := loadDeckDocument(artifact)

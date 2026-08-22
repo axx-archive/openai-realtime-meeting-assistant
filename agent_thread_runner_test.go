@@ -1357,7 +1357,7 @@ func TestRawDocumentContractOverridesGenericInstructions(t *testing.T) {
 		t.Fatalf("outputContract=%q, want the stage contract stamped on the child", deck.Artifact.Metadata["outputContract"])
 	}
 	instructions := app.agentThreadInstructionsForThread(deck)
-	for _, banned := range []string{"Markdown sections", "one-line Vision", "Work decomposition"} {
+	for _, banned := range []string{"Markdown sections", "one-line Vision", "Work decomposition", "Workflow profiles loaded for this run"} {
 		if strings.Contains(instructions, banned) {
 			t.Fatalf("raw-document child still carries the generic instruction %q:\n%s", banned, instructions)
 		}
@@ -1371,8 +1371,8 @@ func TestRawDocumentContractOverridesGenericInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch plain child: %v", err)
 	}
-	if got := app.agentThreadInstructionsForThread(plain); !strings.Contains(got, "Markdown sections") {
-		t.Fatalf("plain child lost the generic instructions:\n%s", got)
+	if got := app.agentThreadInstructionsForThread(plain); !strings.Contains(got, "Markdown sections") || !strings.Contains(got, "Workflow profiles loaded for this run: "+coworkerWorkflowGoalLoop) {
+		t.Fatalf("plain child lost the generic instructions or native workflow profile:\n%s", got)
 	}
 }
 

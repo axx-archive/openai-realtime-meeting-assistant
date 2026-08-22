@@ -371,7 +371,7 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 			seatSystems++
 			// Every seat carries the shared strict-JSON schema with the
 			// executable-or-KEEP fix rule.
-			if !strings.Contains(request.Instructions, "KEEP") || !strings.Contains(request.Instructions, "weakest_three") {
+			if !strings.Contains(request.Instructions, "KEEP") || !strings.Contains(request.Instructions, "weakest_three") || !strings.Contains(request.Instructions, "low_contrast") || !strings.Contains(request.Instructions, "weak_cover_hierarchy") {
 				t.Fatalf("seat request %d missing the jury schema: %q", index, request.Instructions)
 			}
 		}
@@ -614,12 +614,30 @@ func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
 	}
 
 	oneOutlier := evaluateSlideJuryReadiness([]goalPanelVoice{
-		voice("headline_ear", 4, 9),
-		voice("design_eye", 8, 8),
-		voice("room_gut", 8, 9),
+		voice("headline_ear", 6, 9),
+		voice("design_eye", 10, 9),
+		voice("room_gut", 10, 9),
 	}, 2)
 	if oneOutlier.Verdict != "ready" || len(oneOutlier.BlockingPages) != 0 {
-		t.Fatalf("one-outlier readiness=%+v, want ready", oneOutlier)
+		t.Fatalf("one-outlier readiness=%+v, want ready because the page average clears %.1f", oneOutlier, slideJuryReadyAverageFloor)
+	}
+
+	bland := evaluateSlideJuryReadiness([]goalPanelVoice{
+		voice("headline_ear", 8, 9),
+		voice("design_eye", 8, 9),
+		voice("room_gut", 8, 9),
+	}, 2)
+	if bland.Verdict != "needs_changes" || len(bland.BlockingPages) != 1 || bland.BlockingPages[0] != 1 || bland.MinimumAverage != 8 {
+		t.Fatalf("bland 8/10 rendered page escaped the %.1f floor: %+v", slideJuryReadyAverageFloor, bland)
+	}
+
+	noRepair := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if noRepair.Verdict != "needs_attention" || len(noRepair.Repairs) != 0 {
+		t.Fatalf("below-floor page without an executable repair was routable: %+v", noRepair)
 	}
 
 	incomplete := evaluateSlideJuryReadiness([]goalPanelVoice{voice("headline_ear", 9, 9)}, 2)
@@ -646,12 +664,43 @@ func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
 	}
 
 	duplicateFromOneSeat := evaluateSlideJuryReadiness([]goalPanelVoice{
-		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"Refit","blockers":["text_overlap","text_overlap"]}]}`},
-		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"Refit","blockers":["text_overlap","text_overlap"]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
 		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
 	}, 1)
 	if duplicateFromOneSeat.Verdict != "ready" {
 		t.Fatalf("duplicate single-seat blocker=%+v, want one vote only", duplicateFromOneSeat)
+	}
+
+	duplicatePersona := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: " headline_ear ", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if duplicatePersona.Verdict != "needs_attention" || duplicatePersona.ParsedSeats != 1 {
+		t.Fatalf("duplicate persona manufactured independent-seat quorum: %+v", duplicatePersona)
+	}
+}
+
+func TestSlideJuryBlockerCodesCoverFirstClassRenderedDefects(t *testing.T) {
+	for _, code := range slideJuryBlockerCodes {
+		page := 2
+		if code == "weak_cover_hierarchy" {
+			page = 1
+		}
+		card := slideJurySeatScorecard{Pages: []slideJuryPageScore{{Page: page, Score: 8, Fix: "Apply the exact rendered repair.", Blockers: []string{code}}}}
+		if err := validateSlideJurySeatScorecard(card, []int{page}); err != nil {
+			t.Errorf("supported blocker %q was rejected: %v", code, err)
+		}
+	}
+	for name, card := range map[string]slideJurySeatScorecard{
+		"unknown":              {Pages: []slideJuryPageScore{{Page: 1, Score: 8, Fix: "Repair it.", Blockers: []string{"vague_vibes"}}}},
+		"cover code off cover": {Pages: []slideJuryPageScore{{Page: 2, Score: 8, Fix: "Repair it.", Blockers: []string{"weak_cover_hierarchy"}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateSlideJurySeatScorecard(card, []int{card.Pages[0].Page}); err == nil {
+				t.Fatalf("invalid rendered blocker was admitted: %+v", card)
+			}
+		})
 	}
 }
 

@@ -2158,13 +2158,24 @@ func configureExternalEvidenceV2Request(app *kanbanBoardApp, thread scoutAgentTh
 	if agentThreadUsesExternalEvidenceV2Contract(thread) {
 		request.JSONSchema = externalEvidenceJSONSchema()
 		authority := cloneExternalEvidenceFrozenAuthority(request.ExternalEvidenceAuthority)
-		if authority == nil || len(authority.Questions) == 0 {
+		request.Attachments = nil
+		if authority == nil || len(authority.Questions) == 0 || len(authority.Questions) > externalEvidenceMaxResearchQuestions ||
+			!isHexDigest(authority.QuestionAuthorityDigest) || !isHexDigest(authority.SourceAuthorityDigest) {
 			request.PreflightError = fmt.Errorf("external evidence authority was not frozen before provider handoff")
 		} else {
-			request.PreflightError = nil
+			rawQuestions, err := json.Marshal(authority.Questions)
+			if err != nil {
+				request.PreflightError = fmt.Errorf("external evidence questions could not be encoded")
+			} else {
+				// Hosted search receives only the exact server-authorized questions.
+				// The inherited child query, source packet, Brain context, memory, and
+				// attachments are intentionally excluded from this least-privilege lane.
+				request.Input = string(rawQuestions)
+				request.PreflightError = nil
+			}
 		}
 		request.NormalizeOutput = func(body string) (string, error) {
-			if authority == nil || len(authority.Questions) == 0 {
+			if authority == nil || len(authority.Questions) == 0 || !isHexDigest(authority.QuestionAuthorityDigest) || !isHexDigest(authority.SourceAuthorityDigest) {
 				return "", fmt.Errorf("external evidence authority was not frozen before provider handoff")
 			}
 			if err := validateFrozenExternalEvidenceAuthorityForThread(app, thread, authority); err != nil {
@@ -2558,7 +2569,11 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 	if raw, ok := rawDocumentContractInstructions(thread.Artifact.Metadata["outputContract"]); ok {
 		return strings.TrimSpace(raw + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
 	}
-	return strings.TrimSpace(agentThreadInstructions(thread.Mode) + "\n\n" + identityContext)
+	return strings.TrimSpace(strings.Join([]string{
+		agentThreadInstructions(thread.Mode),
+		coworkerWorkflowProfileInstruction(thread.Artifact.Metadata),
+		identityContext,
+	}, "\n\n"))
 }
 
 // agentThreadRequesterRelationshipInstruction makes the authenticated human

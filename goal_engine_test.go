@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -219,7 +220,8 @@ func waitForGoalStage(t *testing.T, app *kanbanBoardApp, parentID string, want s
 		time.Sleep(5 * time.Millisecond)
 	}
 	artifact, _ := app.osArtifactByID(parentID)
-	t.Fatalf("goal never reached %q; last stage=%q", want, artifact.Metadata["currentStage"])
+	plan, _ := decodeGoalPlan(artifact.Metadata["goalPlan"])
+	t.Fatalf("goal never reached %q; last stage=%q blocker=%q subtasks=%+v\n%s", want, artifact.Metadata["currentStage"], plan.Blocker, plan.Subtasks, artifact.Text)
 	return goalPlan{}
 }
 
@@ -3007,6 +3009,44 @@ func TestRunGoalPanelDegradesPerSeatAndFailsWhenAllSeatsFail(t *testing.T) {
 		t.Fatalf("synthesizer was not told about the failed seat:\n%s", synthesisUser)
 	}
 
+	// Quality-critical panels require two real seats. One live seat must fail
+	// before synthesis, even though the generic/default primitive degrades.
+	synthesisCalls := 0
+	quorumResponder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		switch {
+		case strings.Contains(request.System, "PERSONA-OK"):
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(`{"vote":"ok"}`)}}, nil
+		case strings.Contains(request.System, "PERSONA-DOWN"):
+			return anthropicMessagesResponse{}, errors.New("seat is down")
+		default:
+			synthesisCalls++
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("must not run")}}, nil
+		}
+	}
+	engine = newPanelTestEngine(t, quorumResponder)
+	if _, err := engine.runGoalPanel(context.Background(), goalPanelSpec{
+		Task: "task", MinSuccessfulSeats: 2,
+		Personas: []goalPanelPersona{{Name: "ok", System: "PERSONA-OK"}, {Name: "down", System: "PERSONA-DOWN"}},
+	}); err == nil || !strings.Contains(err.Error(), "panel quorum failed") || synthesisCalls != 0 {
+		t.Fatalf("one-seat quorum err=%v synthesisCalls=%d, want fail before synthesis", err, synthesisCalls)
+	}
+
+	// A provider-success with a blank body is not a successful independent
+	// judgment, and duplicate persona labels cannot manufacture distinct seats.
+	blankEngine := newPanelTestEngine(t, func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if strings.Contains(request.System, "BLANK") {
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("   ")}}, nil
+		}
+		t.Fatalf("blank panel must fail before synthesis; got %q", request.System)
+		return anthropicMessagesResponse{}, nil
+	})
+	if _, err := blankEngine.runGoalPanel(context.Background(), goalPanelSpec{Task: "task", Personas: []goalPanelPersona{{Name: "blank", System: "BLANK"}}}); err == nil || !strings.Contains(err.Error(), "panel quorum failed") {
+		t.Fatalf("blank seat was counted as successful: %v", err)
+	}
+	if _, err := engine.runGoalPanel(context.Background(), goalPanelSpec{Task: "task", Personas: []goalPanelPersona{{Name: "Judge", System: "A"}, {Name: " judge ", System: "B"}}}); err == nil || !strings.Contains(err.Error(), "distinct") {
+		t.Fatalf("duplicate persona labels manufactured quorum: %v", err)
+	}
+
 	// All seats down: error, no synthesis call.
 	allDown := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		if !strings.Contains(request.System, "PERSONA-DOWN") {
@@ -3944,9 +3984,232 @@ func TestProcessPanelStageRunsInlineThroughRunGoalPanel(t *testing.T) {
 			t.Fatalf("panel artifact missing voice %q: %q", persona, record.Text)
 		}
 	}
+	if record.Metadata["panelArtifactContract"] != processPanelArtifactContract || record.Metadata["panelSeatCount"] != "2" || record.Metadata["panelSuccessfulSeats"] != "2" || record.Metadata["panelRequiredSeats"] != "1" {
+		t.Fatalf("panel audit/quorum metadata is incomplete: %v", record.Metadata)
+	}
+	forwarded, err := processStageArtifactForwardText(record)
+	if err != nil {
+		t.Fatalf("extract panel synthesis: %v", err)
+	}
+	if forwarded != "Synthesis: the rivals agree on direction B." || strings.Contains(forwarded, "Skeptical LP") || strings.Contains(forwarded, "the persona speaks") {
+		t.Fatalf("panel forwarding leaked raw voices: %q", forwarded)
+	}
+	inputs, err := newGoalEngine(app).processStageInputsAuthorized(&plan, thread.Artifact.ID, ProcessStage{ID: "downstream", InputFrom: []string{"judge"}})
+	if err != nil || !strings.Contains(inputs, forwarded) || strings.Contains(inputs, "Skeptical LP") || strings.Contains(inputs, "the persona speaks") {
+		t.Fatalf("downstream panel input was not synthesis-only: err=%v\n%s", err, inputs)
+	}
+	task, err := newGoalEngine(app).processStageTaskAuthorized(context.Background(), &plan, thread.Artifact.ID, &goalSubtask{ID: "downstream"}, ProcessStage{ID: "downstream", Title: "Use the judgment", InputFrom: []string{"judge"}})
+	if err != nil || !strings.Contains(task, forwarded) || strings.Contains(task, "Skeptical LP") || strings.Contains(task, "the persona speaks") {
+		t.Fatalf("authorized stage task did not reuse the exact synthesis-only input snapshot: err=%v\n%s", err, task)
+	}
+	if _, err := newGoalEngine(app).processStageInputsAuthorized(&plan, thread.Artifact.ID, ProcessStage{ID: "downstream", InputFrom: []string{"missing"}}); err == nil {
+		t.Fatal("missing declared process input was silently dropped")
+	}
+	missingArtifactPlan := plan
+	missingArtifactPlan.Subtasks = append([]goalSubtask(nil), plan.Subtasks...)
+	missingArtifactPlan.subtaskByID("judge").ArtifactID = ""
+	if _, err := newGoalEngine(app).processStageInputsAuthorized(&missingArtifactPlan, thread.Artifact.ID, ProcessStage{ID: "downstream", InputFrom: []string{"judge"}}); err == nil {
+		t.Fatal("declared process input with no artifact was silently dropped")
+	}
+	emptyArtifact, _, err := app.memory.appendOSArtifact("empty-panel-input", "", map[string]string{
+		"goalParentId": plan.GoalID, "goalSubtaskId": "judge", "processId": plan.ProcessID, "processStage": "judge",
+	})
+	if err != nil {
+		t.Fatalf("seed empty process input: %v", err)
+	}
+	emptyArtifactPlan := plan
+	emptyArtifactPlan.Subtasks = append([]goalSubtask(nil), plan.Subtasks...)
+	emptyArtifactPlan.subtaskByID("judge").ArtifactID = emptyArtifact.ID
+	if _, err := newGoalEngine(app).processStageInputsAuthorized(&emptyArtifactPlan, thread.Artifact.ID, ProcessStage{ID: "downstream", InputFrom: []string{"judge"}}); err == nil {
+		t.Fatal("empty declared process input was silently dropped")
+	}
+	crossParentMetadata := cloneEvidenceMetadataForTest(record.Metadata)
+	crossParentMetadata["goalParentId"] = "os-artifact-another-goal"
+	crossParentArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Cross-parent panel record", record.Text, scoutParticipantName, crossParentMetadata)
+	if err != nil {
+		t.Fatalf("seed cross-parent process input: %v", err)
+	}
+	crossParentPlan := plan
+	crossParentPlan.Subtasks = append([]goalSubtask(nil), plan.Subtasks...)
+	crossParentPlan.subtaskByID("judge").ArtifactID = crossParentArtifact.ID
+	if _, err := newGoalEngine(app).processStageInputsAuthorized(&crossParentPlan, thread.Artifact.ID, ProcessStage{ID: "downstream", InputFrom: []string{"judge"}}); err == nil {
+		t.Fatal("cross-parent process input was accepted")
+	}
+	tampered := record
+	tampered.Metadata = cloneEvidenceMetadataForTest(record.Metadata)
+	tampered.Metadata["panelSynthesisBytes"] = "1"
+	if _, err := processStageArtifactForwardText(tampered); err == nil {
+		t.Fatal("tampered panel synthesis boundary was forwarded")
+	}
 	// The panel ran inline: only the writer dispatched.
 	if len(*launched) != 1 || (*launched)[0].subtaskID != "w1" {
 		t.Fatalf("launched=%+v, want only the writer (the panel is one engine step)", *launched)
+	}
+}
+
+func TestProcessCompileStageAuthorizesDeclaredInputsBeforeCompiler(t *testing.T) {
+	const (
+		parentID  = "os-artifact-compile-authority-goal"
+		processID = "process_compile_authority_probe"
+		synthesis = "Synthesis: approved direction."
+	)
+	tests := []struct {
+		name     string
+		mutate   func(*testing.T, *kanbanBoardApp, meetingMemoryEntry, *goalPlan)
+		wantCall bool
+	}{
+		{name: "valid synthesis-bound exact input", wantCall: true},
+		{
+			name: "missing artifact",
+			mutate: func(t *testing.T, _ *kanbanBoardApp, _ meetingMemoryEntry, plan *goalPlan) {
+				t.Helper()
+				plan.subtaskByID("judge").ArtifactID = "os-artifact-missing-compile-input"
+			},
+		},
+		{
+			name: "missing body",
+			mutate: func(t *testing.T, app *kanbanBoardApp, artifact meetingMemoryEntry, _ *goalPlan) {
+				t.Helper()
+				app.memory.mu.Lock()
+				defer app.memory.mu.Unlock()
+				for index := range app.memory.entries {
+					if app.memory.entries[index].ID == artifact.ID {
+						// A blank artifact cannot be authored through the public store,
+						// so corrupt the in-memory test record to prove the defensive
+						// compile boundary still fails closed on legacy/disk damage.
+						app.memory.entries[index].Text = ""
+						return
+					}
+				}
+				t.Fatalf("input artifact %s was not found in the test store", artifact.ID)
+			},
+		},
+		{
+			name: "cross-parent artifact",
+			mutate: func(t *testing.T, app *kanbanBoardApp, artifact meetingMemoryEntry, _ *goalPlan) {
+				t.Helper()
+				if _, changed, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, "test", map[string]string{
+					"goalParentId": "os-artifact-another-goal",
+				}); err != nil || !changed {
+					t.Fatalf("move compile input to another parent: changed=%v err=%v", changed, err)
+				}
+			},
+		},
+		{
+			name: "tampered panel synthesis",
+			mutate: func(t *testing.T, app *kanbanBoardApp, artifact meetingMemoryEntry, _ *goalPlan) {
+				t.Helper()
+				tampered := strings.Replace(artifact.Text, "approved", "tampered", 1)
+				if tampered == artifact.Text {
+					t.Fatal("panel synthesis tamper did not change the artifact")
+				}
+				if _, changed, err := app.updateOSArtifactWithMetadata(artifact.ID, "", tampered, "test", nil); err != nil || !changed {
+					t.Fatalf("tamper panel synthesis: changed=%v err=%v", changed, err)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			durableSynthesis := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, synthesis)
+			durableBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, synthesis+"\n\n## Panel voices\n\n### Design critic\nThe direction is coherent.\n")
+			if !strings.HasPrefix(durableBody, durableSynthesis) || len(durableBody) <= len(durableSynthesis) {
+				t.Fatal("probe panel body does not preserve the synthesis boundary")
+			}
+			voices := durableBody[len(durableSynthesis):]
+			artifact, appended, err := app.memory.appendOSArtifact("os-artifact-compile-authority-input", durableBody, map[string]string{
+				"source":                "process_stage",
+				"goalParentId":          parentID,
+				"goalSubtaskId":         "judge",
+				"processId":             processID,
+				"processStage":          "judge",
+				"processRole":           processRoleJudges,
+				"status":                "complete",
+				"panelArtifactContract": processPanelArtifactContract,
+				"panelSynthesisBytes":   strconv.Itoa(len(durableSynthesis)),
+				"panelSynthesisDigest":  sha256Hex([]byte(durableSynthesis)),
+				"panelVoicesDigest":     sha256Hex([]byte(voices)),
+				"panelSeatCount":        "1",
+				"panelSuccessfulSeats":  "1",
+				"panelRequiredSeats":    "1",
+			})
+			if err != nil || !appended {
+				t.Fatalf("seed exact panel input: appended=%v err=%v", appended, err)
+			}
+			plan := &goalPlan{
+				GoalID:    parentID,
+				ProcessID: processID,
+				Subtasks: []goalSubtask{
+					{ID: "judge", Title: "Judge", Status: subtaskComplete, ArtifactID: artifact.ID},
+					{ID: "compile", Title: "Compile", Role: processRoleCompile, Status: subtaskRunning},
+				},
+			}
+			if test.mutate != nil {
+				test.mutate(t, app, artifact, plan)
+			}
+
+			compileCalls := 0
+			stage := ProcessStage{
+				ID:        "compile",
+				Title:     "Compile",
+				Role:      processRoleCompile,
+				InputFrom: []string{"judge"},
+				Internal:  true,
+				Compile: func(app *kanbanBoardApp, runtimePlan *goalPlan, _ string, _ ProcessStage) (string, map[string]string, error) {
+					compileCalls++
+					source := runtimePlan.subtaskByID("judge")
+					input, ok := app.osArtifactByID(source.ArtifactID)
+					if !ok {
+						return "", nil, fmt.Errorf("probe compiler could not resolve its input")
+					}
+					forwarded, err := processStageArtifactForwardText(input)
+					if err != nil {
+						return "", nil, err
+					}
+					if forwarded != durableSynthesis {
+						return "", nil, fmt.Errorf("probe compiler received %q, want exact synthesis %q", forwarded, durableSynthesis)
+					}
+					return "Compile record", nil, nil
+				},
+			}
+			compileSubtask := plan.subtaskByID("compile")
+			newGoalEngine(app).runProcessCompileStage(plan, parentID, compileSubtask, stage)
+
+			if test.wantCall {
+				if compileCalls != 1 || compileSubtask.Status != subtaskComplete || strings.TrimSpace(compileSubtask.ArtifactID) == "" {
+					t.Fatalf("valid compile calls=%d status=%q artifact=%q", compileCalls, compileSubtask.Status, compileSubtask.ArtifactID)
+				}
+				return
+			}
+			if compileCalls != 0 {
+				t.Fatalf("unauthorized compile invoked compiler %d time(s)", compileCalls)
+			}
+			if compileSubtask.Status != subtaskFailed || compileSubtask.Review == nil || !strings.Contains(compileSubtask.Review.Reasons, "input authorization failed") {
+				t.Fatalf("unauthorized compile did not fail at admission: %+v", compileSubtask)
+			}
+		})
+	}
+}
+
+func TestFreshStoryAndIdentityPanelsRequireTwoSuccessfulSeats(t *testing.T) {
+	for _, test := range []struct {
+		processID string
+		stageID   string
+		role      string
+	}{
+		{packagingStudioProcessID, "story_architects", processRolePanel},
+		{packagingStudioProcessID, "identity", processRoleJudges},
+		{documentReportProcessID, "story", processRolePanel},
+	} {
+		plan := &goalPlan{ProcessID: test.processID}
+		if got := processPanelRequiredSeats(plan, ProcessStage{ID: test.stageID, Role: test.role}); got != 2 {
+			t.Errorf("%s/%s requires %d seats, want 2", test.processID, test.stageID, got)
+		}
+	}
+	if got := processPanelRequiredSeats(&goalPlan{ProcessID: "other"}, ProcessStage{ID: "judge", Role: processRoleJudges}); got != 1 {
+		t.Fatalf("generic panel default=%d, want backward-compatible one-seat degradation", got)
 	}
 }
 

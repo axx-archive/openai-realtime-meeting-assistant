@@ -64,7 +64,9 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 	}
 	for _, want := range []string{
 		"scout-chat-deck-result",
-		"renderArtifactDeck(result, artifact)",
+		"renderArtifactDeck(result, artifact, {",
+		"canPresent: message?.thread?.resultCanPresent === true",
+		"canExport: message?.thread?.resultCanExport === true",
 		"candidate?.thread?.resultArtifactId",
 		"deliveredInManifest",
 		"candidate?.manifest?.deliverables",
@@ -111,9 +113,11 @@ func TestIndexCompletedMarkdownResultOwnsOneBoundedEditableFeedCard(t *testing.T
 		"message?.thread?.resultArtifactId",
 		"artifactIsMarkdownDocument(artifact, declaredType)",
 		"scout-chat-document-result",
-		"renderArtifactRead(preview, artifact)",
-		"openArtifactStage(resultId, title, { canEdit: message?.thread?.resultCanEdit === true })",
-		"openDocumentStudio(resultId, title, { entry: artifact })",
+		"renderArtifactRead(preview, artifact, { allowFinalExport: message?.thread?.resultCanExport === true })",
+		"openArtifactStage(resultId, title, {",
+		"canExport: message?.thread?.resultCanExport === true",
+		"openDocumentStudio(resultId, title, {",
+		"qualityState",
 		"if (message?.thread?.resultCanEdit === true) actions.appendChild(edit)",
 		"preview.setAttribute('inert', '')",
 	} {
@@ -230,7 +234,7 @@ func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 		t.Error("responsive conversation refs must not fall back to the legacy goal/runtime card")
 	}
 	// the rebuild pass detaches cached cards and re-mounts this thread's own
-	render := functionBody(html, "function renderActiveScoutThread()")
+	render := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	if render == "" {
 		t.Fatal("could not extract renderActiveScoutThread body")
 	}

@@ -2002,7 +2002,11 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref.ResultTitle = ""
 	ref.ResultPreview = ""
 	ref.ResultApprovalState = ""
+	ref.ResultQualityState = ""
 	ref.ResultCanEdit = false
+	ref.ResultCanContinue = false
+	ref.ResultCanPresent = false
+	ref.ResultCanExport = false
 	artifact, found := index.byID[strings.TrimSpace(ref.ArtifactID)]
 	if !found || !app.scoutChatIndexedArtifactCurrent(artifact) {
 		return
@@ -2039,7 +2043,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		return
 	}
 	result = currentResult
-	ref.ResultCanEdit = artifactAuthorized(ctx, viewer, ACLWrite, result)
+	resultCanEdit := artifactAuthorized(ctx, viewer, ACLWrite, result)
 	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
 		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, artifactCapabilityDigest(result))) {
 		acceptedBinding.State = scoutChatResultApprovalEdited
@@ -2056,11 +2060,24 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	if !goalResult && !scoutChatStandaloneTerminalResult(result, ref) {
 		return
 	}
+	resultQualityState := authoredResultQualityDraftNeedsAttention
+	resultCanContinue := false
+	if goalResult {
+		plan := index.goalPlanByID[artifact.ID]
+		resultQualityState = app.authoredGoalResultQuality(plan, artifact.ID, result)
+		resultCanContinue = resultCanEdit && artifactAuthorized(ctx, viewer, ACLWrite, artifact) && ((resultQualityState == authoredResultQualityDraftNeedsAttention && plan.State == goalStateBlocked) ||
+			(resultQualityState == authoredResultQualityEditedAfterAdmission && plan.State == goalStateVerified))
+	}
 	resultType := artifactType(result)
 	if resultType == artifactTypeHTMLDeck && artifactIsHTMLDocument(result) {
 		ref.ResultArtifactID = result.ID
 		ref.ResultArtifactType = artifactTypeHTMLDeck
 		ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Presentation")
+		ref.ResultQualityState = resultQualityState
+		ref.ResultCanEdit = resultCanEdit
+		ref.ResultCanContinue = resultCanContinue
+		ref.ResultCanPresent = resultQualityState == authoredResultQualityAdmitted
+		ref.ResultCanExport = resultQualityState == authoredResultQualityAdmitted
 		if selectedAcceptedDeck {
 			ref.ResultApprovalState = acceptedBinding.State
 		}
@@ -2073,6 +2090,10 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref.ResultArtifactType = artifactTypeMarkdown
 	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Document")
 	ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
+	ref.ResultQualityState = resultQualityState
+	ref.ResultCanEdit = resultCanEdit
+	ref.ResultCanContinue = resultCanContinue
+	ref.ResultCanExport = resultQualityState == authoredResultQualityAdmitted
 }
 
 // authorizedScoutChatResultArtifact performs the authorization check against
@@ -2134,7 +2155,11 @@ func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
 	ref.ResultTitle = ""
 	ref.ResultPreview = ""
 	ref.ResultApprovalState = ""
+	ref.ResultQualityState = ""
 	ref.ResultCanEdit = false
+	ref.ResultCanContinue = false
+	ref.ResultCanPresent = false
+	ref.ResultCanExport = false
 	message.Thread = &ref
 }
 

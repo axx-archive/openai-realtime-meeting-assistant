@@ -280,6 +280,8 @@ func (app *kanbanBoardApp) buildCodexAgentJobPrompt(job AgentJob, now time.Time,
 		builder.WriteString("\n\nApproved coworker identity:\n")
 		builder.WriteString(persona)
 	}
+	builder.WriteString("\n\n")
+	builder.WriteString(coworkerWorkflowProfileInstruction(thread.Artifact.Metadata))
 	builder.WriteString("\n\nFollow this goal loop in order:\n")
 	builder.WriteString("1. Identify and restate the goal.\n")
 	builder.WriteString("2. Decompose the work.\n")

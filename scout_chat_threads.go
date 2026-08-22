@@ -225,13 +225,24 @@ type scoutChatThreadRef struct {
 	// checkpoint state; clients must not infer the output from its title or
 	// mode. This explicit projection lets web and native render the same deck
 	// while the parent is still parked at final review.
-	ResultArtifactID    string                      `json:"resultArtifactId,omitempty"`
-	ResultArtifactType  string                      `json:"resultArtifactType,omitempty"`
-	ResultTitle         string                      `json:"resultTitle,omitempty"`
-	ResultPreview       string                      `json:"resultPreview,omitempty"`
-	ResultApprovalState string                      `json:"resultApprovalState,omitempty"`
-	ResultCanEdit       bool                        `json:"resultCanEdit,omitempty"`
-	Checkpoint          *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	ResultArtifactID    string `json:"resultArtifactId,omitempty"`
+	ResultArtifactType  string `json:"resultArtifactType,omitempty"`
+	ResultTitle         string `json:"resultTitle,omitempty"`
+	ResultPreview       string `json:"resultPreview,omitempty"`
+	ResultApprovalState string `json:"resultApprovalState,omitempty"`
+	// ResultQualityState is the server-owned publication truth for an authored
+	// deck/document. Clients must not infer readiness from the child artifact's
+	// generic complete status: a blocked goal can intentionally expose its best
+	// saved draft, and an admitted artifact can later be edited in Studio.
+	ResultQualityState string `json:"resultQualityState,omitempty"`
+	// ResultCan* are exact, viewer-scoped capabilities derived after the current
+	// result revision and ACL have both been revalidated. In particular,
+	// Present/final export are true only for the exact admitted revision.
+	ResultCanEdit     bool                        `json:"resultCanEdit,omitempty"`
+	ResultCanContinue bool                        `json:"resultCanContinue,omitempty"`
+	ResultCanPresent  bool                        `json:"resultCanPresent,omitempty"`
+	ResultCanExport   bool                        `json:"resultCanExport,omitempty"`
+	Checkpoint        *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
 }
 
 // scoutChatWorkCheckpointRef is the bounded, display-safe checkpoint carried
@@ -3280,6 +3291,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	if addressedAgentResolved {
 		bindAddressedWork := func(work *conversationWorkDecision) bool {
+			// A native authored-output process is server-owned. Allow the exact
+			// deterministic Studio route without assigning the addressed seat or
+			// widening its capabilities. Every other direct-agent work decision
+			// remains capability-bound to a workstream below.
+			if routedIntent.Source == proposalSourceDeterministicGuard && scoutServerOwnedAuthoredOutputWork(work) {
+				return true
+			}
 			if work == nil || work.Kind != conversationWorkWorkstream {
 				return false
 			}
@@ -3673,7 +3691,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 		if routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
 			work := *routedIntent.Work
-			if addressedAgentResolved {
+			if addressedAgentResolved && work.Kind == conversationWorkWorkstream {
 				work.AgentID = addressedAgent.AgentID
 				work.AgentName = addressedAgent.DisplayName
 			}

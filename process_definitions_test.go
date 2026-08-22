@@ -115,7 +115,7 @@ func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
 	if err := validateProcessDefinition(def); err != nil {
 		t.Fatalf("document report process does not validate: %v", err)
 	}
-	wantStages := []string{"context_snapshot", "external_research", "source_snapshot", "evidence_entailment", "evidence", "story", "write", "quality_gate"}
+	wantStages := []string{"context_snapshot", "external_research", "source_snapshot", "evidence_entailment", "evidence", "story", "write", "quality_gate", documentReportDraftRenderStageID, documentReportJuryStageID, documentReportRenderedAdmissionID, documentReportPublishStageID}
 	if len(def.Stages) != len(wantStages) {
 		t.Fatalf("stages=%d, want %d", len(def.Stages), len(wantStages))
 	}
@@ -126,6 +126,17 @@ func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
 		if def.Stages[index].Role == processRoleHumanCheckpoint {
 			t.Fatalf("routine human checkpoint leaked into document process: %+v", def.Stages[index])
 		}
+	}
+	if def.Stages[0].OutputContract != "report_context_snapshot_v2" {
+		t.Fatalf("document context snapshot contract=%q, want strict v2", def.Stages[0].OutputContract)
+	}
+	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform audit"} {
+		if !strings.Contains(def.Stages[0].PromptBody, contract) {
+			t.Errorf("document context snapshot does not keep research proportional: missing %q", contract)
+		}
+	}
+	if strings.Contains(def.Stages[0].PromptBody, "plain strings") || strings.Contains(def.Stages[0].PromptBody, "1 to 5") {
+		t.Fatalf("document context snapshot retained a loose or over-broad research contract: %q", def.Stages[0].PromptBody)
 	}
 	research := def.Stages[1]
 	if research.Mode != "research" || research.OutputContract != packagingStudioExternalEvidenceContract || research.RunIf == nil ||
@@ -158,7 +169,20 @@ func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
 		strings.Join(gate.GateSpec.Dimensions, "|") != strings.Join(wantDimensions, "|") {
 		t.Fatalf("quality gate=%+v", gate.GateSpec)
 	}
-	if def.Version != 2 || def.ImplementationRevision != "document_report.runtime.v2" || def.Budgets.MaxSubtasks != 8 {
+	render, jury, admission, publish := def.Stages[8], def.Stages[9], def.Stages[10], def.Stages[11]
+	if render.Role != processRoleCompile || render.Compile == nil || render.OutputContract != documentReportRenderContract || strings.Join(render.InputFrom, "|") != "write|quality_gate" {
+		t.Fatalf("draft render stage=%+v", render)
+	}
+	if jury.Role != processRoleCompile || jury.Compile == nil || jury.OutputContract != documentReportJuryContract || strings.Join(jury.InputFrom, "|") != documentReportDraftRenderStageID {
+		t.Fatalf("rendered document jury stage=%+v", jury)
+	}
+	if admission.Role != processRoleGate || admission.GateSpec == nil || admission.GateSpec.RepairTarget != "write" || admission.GateSpec.Threshold != documentReportReadyAverageFloor || !admission.GateSpec.HoldOnFailure {
+		t.Fatalf("rendered admission stage=%+v", admission)
+	}
+	if publish.Role != processRoleCompile || publish.Compile == nil || strings.Join(publish.InputFrom, "|") != documentReportRenderedAdmissionID {
+		t.Fatalf("publish stage=%+v", publish)
+	}
+	if def.Version != 3 || def.ImplementationRevision != "document_report.runtime.v3.rendered-admission.v1" || def.Budgets.MaxSubtasks != 12 {
 		t.Fatalf("document process identity/budget=%d/%q/%+v", def.Version, def.ImplementationRevision, def.Budgets)
 	}
 }
@@ -173,8 +197,8 @@ func TestStudioProcessSourceEntailmentGraphsAreIdentityPinned(t *testing.T) {
 		resultStage    string
 		resultContract string
 	}{
-		{name: "presentation", def: packagingStudioDefinition(), version: 4, implementation: "packaging_studio.runtime.v4", maxSubtasks: 18, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
-		{name: "document", def: documentReportDefinition(), version: 2, implementation: "document_report.runtime.v2", maxSubtasks: 8, resultStage: "write", resultContract: documentReportOutputContract},
+		{name: "presentation", def: packagingStudioDefinition(), version: 5, implementation: "packaging_studio.runtime.v5", maxSubtasks: 16, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
+		{name: "document", def: documentReportDefinition(), version: 3, implementation: "document_report.runtime.v3.rendered-admission.v1", maxSubtasks: 12, resultStage: "write", resultContract: documentReportOutputContract},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			identity, err := processDefinitionIdentityFor(fixture.def)

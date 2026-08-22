@@ -150,7 +150,7 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   // the feed. Its two direct actions reach the reader and native editor; a
   // process artifact without resultArtifactId never enters this function.
   await desktop.evaluate(({documentId})=>{
-    const artifact={id:documentId,title:'Insights report',text:'# Insights report\n\n## Opportunity\n\nA western-culture engagement network can turn distributed creator trust into on-demand launch energy.\n\n## Proof points\n\nThe report separates measured evidence from assumptions.',version:3,metadata:{title:'Insights report',type:'markdown',status:'complete',mode:'report',artifactVersion:'3'}};
+    const artifact={id:documentId,title:'Insights report',text:'# Insights report\n\n## Opportunity\n\nA western-culture engagement network can turn distributed creator trust into on-demand launch energy.\n\n## Signal table\n\n| Signal | What it suggests | Decision use |\n|---|---|---|\n| Distributed creator trust across regional communities | Thousands of creators can coordinate around experience launches without flattening their individual voices | Test a measured activation cohort before scaling the network |\n| On-demand posting moments | Concentrated release windows can create useful reach while preserving source attribution | Define opt-in briefs, disclosure rules, and outcome instrumentation |\n\n## Proof points\n\nThe report separates measured evidence from assumptions.',version:3,metadata:{title:'Insights report',type:'markdown',status:'complete',mode:'report',artifactVersion:'3'}};
     const message={id:'document-result-message',kind:'thread',thread:{artifactId:'goal-document',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultTitle:'Insights report',resultCanEdit:true}};
     artifactEntries=[artifact];
     scoutChatThreads=[{id:'document-result-thread',messages:[message]}];
@@ -173,6 +173,16 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   await resultReader.waitFor({state:'visible'});
   await resultReader.getByRole('button',{name:'Close'}).click();
   await resultReader.waitFor({state:'detached'});
+
+  await desktop.setViewportSize({width:390,height:844});await desktop.waitForTimeout(60);
+  const teaserGeometry=await documentResult.evaluate(card=>{const rect=node=>node.getBoundingClientRect().toJSON();const preview=card.querySelector('.scout-chat-document-result__preview');const wrap=card.querySelector('.artifact-read__table-wrap');const table=card.querySelector('.artifact-read__table');const controls=Array.from(card.querySelectorAll('button')).filter(button=>{const style=getComputedStyle(button);const bounds=button.getBoundingClientRect();return !button.hidden&&style.display!=='none'&&style.visibility!=='hidden'&&bounds.width>0&&bounds.height>0;}).map(button=>({name:button.getAttribute('aria-label')||button.textContent.trim(),rect:rect(button)}));return {card:rect(card),preview:rect(preview),wrap:rect(wrap),table:rect(table),wrapClientWidth:wrap.clientWidth,tableScrollWidth:table.scrollWidth,cellWhiteSpace:getComputedStyle(table.querySelector('td')).whiteSpace,controls,scrollWidth:document.documentElement.scrollWidth};});
+  assert.ok(teaserGeometry.card.left>=0&&teaserGeometry.card.right<=390&&teaserGeometry.scrollWidth<=390,JSON.stringify(teaserGeometry));
+  assert.ok(teaserGeometry.wrap.left>=teaserGeometry.preview.left&&teaserGeometry.wrap.right<=teaserGeometry.preview.right+1,JSON.stringify(teaserGeometry));
+  assert.ok(teaserGeometry.table.left>=teaserGeometry.wrap.left&&teaserGeometry.table.right<=teaserGeometry.wrap.right+1,JSON.stringify(teaserGeometry));
+  assert.ok(teaserGeometry.tableScrollWidth<=teaserGeometry.wrapClientWidth+1,JSON.stringify(teaserGeometry));
+  assert.equal(teaserGeometry.cellWhiteSpace,'normal',JSON.stringify(teaserGeometry));
+  teaserGeometry.controls.forEach(control=>assert.ok(control.rect.height>=44,JSON.stringify(teaserGeometry)));
+  if(process.env.STUDIO_RESULT_PHONE_SCREENSHOT){await desktop.screenshot({path:process.env.STUDIO_RESULT_PHONE_SCREENSHOT,fullPage:true});}
 
   // Authentication and route validation happen before artifact retrieval.
   const artifactRequestsBeforeGuards=requests.length;

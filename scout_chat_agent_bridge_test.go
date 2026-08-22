@@ -112,45 +112,142 @@ func TestDirectColtonThreadUsesSharedConversationRouterWithExactlyOnceWork(t *te
 	}
 }
 
-func TestDirectNamedAgentCannotMaskRegistryWorkOrProviderTelemetry(t *testing.T) {
-	fixture := newSTRIDEProjectAuthorityFixture(t)
-	fixture.app.apiKey = "openai-router-test"
-	directThreadID := strideProductAgentDirectThreadPrefix + "colton_registry_reject_test"
-	_ = hireResearchAgentForBridgeTest(t, fixture, "colton-research", directThreadID)
-	thread, _, err := fixture.app.ensureScoutChatThread(directThreadID, fixture.user.Email, fixture.user.Name, "Colton · agent", scoutChatVisibilityPrivate, nil)
-	if err != nil {
-		t.Fatal(err)
+func TestDirectNamedAgentAuthoredOutputsUseServerOwnedStudios(t *testing.T) {
+	cases := []struct {
+		name        string
+		request     string
+		processID   string
+		visibleText string
+	}{
+		{name: "presentation", request: "Create a ten-slide investor presentation", processID: packagingStudioProcessID, visibleText: "Presentation in progress"},
+		{name: "substantial document", request: "Write a market opportunity report for Country+Golf", processID: documentReportProcessID, visibleText: "Document in progress"},
 	}
-	previousGoalStarter := startGoalThreadAsync
-	var launches atomic.Int64
-	var routerCalls atomic.Int64
-	startGoalThreadAsync = func(*kanbanBoardApp, string) { launches.Add(1) }
-	t.Cleanup(func() { startGoalThreadAsync = previousGoalStarter })
-	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if request.Workflow != "scout_route" {
-			t.Fatalf("unexpected direct-agent workflow %q", request.Workflow)
-		}
-		routerCalls.Add(1)
-		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
-			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: packagingStudioProcessID,
-			Objective: "Create a polished ten-slide investor presentation",
-		}), nil
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSTRIDEProjectAuthorityFixture(t)
+			fixture.app.apiKey = "openai-router-test"
+			directThreadID := strideProductAgentDirectThreadPrefix + "colton_authored_output_" + strings.ReplaceAll(tc.name, " ", "_")
+			_ = hireResearchAgentForBridgeTest(t, fixture, "colton-research", directThreadID)
+			thread, _, err := fixture.app.ensureScoutChatThread(directThreadID, fixture.user.Email, fixture.user.Name, "Colton · agent", scoutChatVisibilityPrivate, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			previousGoalStarter := startGoalThreadAsync
+			var launches atomic.Int64
+			startGoalThreadAsync = func(*kanbanBoardApp, string) { launches.Add(1) }
+			t.Cleanup(func() { startGoalThreadAsync = previousGoalStarter })
+			swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+				t.Fatalf("deterministic authored output unexpectedly called provider workflow %q", request.Workflow)
+				return "", nil
+			})
 
-	response, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, thread.ID, "Create a ten-slide investor presentation", nil, "")
-	if err != nil {
-		t.Fatal(err)
+			operation := conversationTurnOperation{
+				ID:         "direct-authored-output-" + strings.ReplaceAll(tc.name, " ", "-"),
+				BodyDigest: sha256Hex([]byte(tc.request)),
+			}
+			response, err := fixture.app.appendScoutChatThreadMessage(withConversationTurnOperation(context.Background(), operation), fixture.user, thread.ID, tc.request, nil, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			launched, ok := response["agentThread"].(scoutAgentThread)
+			if !ok || launches.Load() != 1 || response["intentOutcome"] != string(conversationIntentStartPrivateWork) || response["proposal"] != nil || asInt(response["providerCalls"]) != 0 {
+				t.Fatalf("launches=%d response=%#v", launches.Load(), response)
+			}
+			metadata := launched.Artifact.Metadata
+			if launched.Mode != "goal" || metadata["processId"] != tc.processID || metadata["visibility"] != scoutChatVisibilityPrivate ||
+				normalizeAccountEmail(metadata["ownerEmail"]) != normalizeAccountEmail(fixture.user.Email) ||
+				normalizeAccountEmail(metadata["requestedBy"]) != normalizeAccountEmail(fixture.user.Email) ||
+				metadata["originKind"] != agentThreadOriginPrivateThread || metadata["originSurface"] != "chat:"+thread.ID {
+				t.Fatalf("launched=%+v metadata=%v", launched, metadata)
+			}
+			if metadata["agentId"] != "" || metadata["agentName"] != "" {
+				t.Fatalf("server-owned studio borrowed addressed-seat identity: metadata=%v", metadata)
+			}
+			saved := response["thread"].(scoutChatThreadRecord)
+			answer := saved.Messages[len(saved.Messages)-1]
+			if answer.AuthorName != scoutParticipantName || answer.Thread == nil || answer.Thread.AgentID != "" || answer.Thread.AgentName != "" ||
+				answer.Thread.ArtifactID != launched.Artifact.ID || answer.IntentOutcome != string(conversationIntentStartPrivateWork) || answer.Text != tc.visibleText {
+				t.Fatalf("authored-output projection=%+v", answer)
+			}
+		})
 	}
-	if launches.Load() != 0 || response["intentOutcome"] != string(conversationIntentUnavailable) {
-		t.Fatalf("named agent widened capability: launches=%d response=%#v", launches.Load(), response)
+}
+
+func TestDirectAgentAuthoredOutputRoutingMatrix(t *testing.T) {
+	cases := []struct {
+		name              string
+		request           string
+		wantToolID        string
+		wantProviderCalls int64
+	}{
+		{name: "deck", request: "@Scout build a polished pitch deck for Country+Golf", wantToolID: packagingStudioProcessID},
+		{name: "generate presentation", request: "@Scout generate a presentation about the western creator market", wantToolID: packagingStudioProcessID},
+		{name: "prepare slides", request: "@Scout prepare slides about the engagement-army opportunity", wantToolID: packagingStudioProcessID},
+		{name: "produce presentation", request: "@Scout produce a presentation for next week's review", wantToolID: packagingStudioProcessID},
+		{name: "develop deck", request: "@Scout develop the deck for the creator strategy", wantToolID: packagingStudioProcessID},
+		{name: "analysis plus deck", request: "@Scout analyze these sources and prepare a ten-slide presentation", wantToolID: packagingStudioProcessID},
+		{name: "substantial report", request: "@Scout prepare a strategy document on the Country+Golf market opportunity", wantToolID: documentReportProcessID},
+		{name: "analysis plus report", request: "@Scout analyze these sources and draft a market opportunity report", wantToolID: documentReportProcessID},
+		{name: "analysis only", request: "Analyze these sources and tell me what matters", wantProviderCalls: 0},
+		{name: "deck feedback", request: "@Scout I want feedback on these slides", wantProviderCalls: 1},
+		{name: "presentation help", request: "I need help understanding this presentation", wantProviderCalls: 1},
+		{name: "deck critique", request: "Give me a critique of this deck", wantProviderCalls: 0},
+		{name: "report feedback", request: "I want feedback on this report", wantProviderCalls: 1},
+		{name: "document takeaways", request: "Give me the key takeaways from this document", wantProviderCalls: 1},
+		{name: "review draft presentation", request: "Review this draft presentation", wantProviderCalls: 1},
+		{name: "critique draft report", request: "Critique the draft report", wantProviderCalls: 0},
+		{name: "analyze presentation design", request: "Analyze the presentation design", wantProviderCalls: 0},
+		{name: "critique scheduled deck", request: "Critique the deck for tomorrow", wantProviderCalls: 0},
+		{name: "review board presentation", request: "Review the presentation for the board", wantProviderCalls: 1},
+		{name: "analyze pitch deck", request: "Analyze this pitch deck", wantProviderCalls: 0},
+		{name: "slide deck feedback", request: "Give me feedback on this slide deck", wantProviderCalls: 1},
+		{name: "prepare questions not deck", request: "Review this presentation and prepare questions", wantProviderCalls: 1},
+		{name: "produce feedback not deck", request: "Analyze this deck and produce feedback", wantProviderCalls: 0},
+		{name: "write takeaways not report", request: "Summarize this report and write three takeaways", wantProviderCalls: 1},
+		{name: "create questions not deck", request: "@Scout create questions and review this presentation", wantProviderCalls: 1},
+		{name: "prepare questions for presentation", request: "@Scout prepare questions for this presentation", wantProviderCalls: 1},
+		{name: "write takeaways from report", request: "@Scout write takeaways from this report", wantProviderCalls: 1},
+		{name: "create critique of deck", request: "@Scout create a critique of this deck", wantProviderCalls: 0},
+		{name: "write summary of report", request: "@Scout write a summary of this report", wantProviderCalls: 1},
+		{name: "lightweight list", request: "What are 10 ways to recruit western creators?", wantProviderCalls: 1},
+		{name: "simple question", request: "What did Tyler share about Country+Golf last week?", wantProviderCalls: 1},
+		{name: "ambiguous edit", request: "Edit the existing deck", wantProviderCalls: 1},
 	}
-	if routerCalls.Load() != 1 || response["providerCalls"] != 1 {
-		t.Fatalf("unavailable telemetry routerCalls=%d providerCalls=%v, want one truthful attempted call", routerCalls.Load(), response["providerCalls"])
-	}
-	saved := response["thread"].(scoutChatThreadRecord)
-	answer := saved.Messages[len(saved.Messages)-1]
-	if answer.AuthorName != "Colton" || answer.Thread != nil || answer.IntentOutcome != string(conversationIntentUnavailable) {
-		t.Fatalf("named unavailable projection=%+v", answer)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			app.apiKey = "openai-router-test"
+			var providerCalls atomic.Int64
+			swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+				if request.Workflow != "scout_route" {
+					t.Fatalf("unexpected workflow %q", request.Workflow)
+				}
+				providerCalls.Add(1)
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Outcome: string(conversationIntentConversationalReply)}), nil
+			})
+			decision := app.routeConversationIntent(context.Background(), conversationIntentTurn{
+				Text: tc.request, Modality: conversationModalityDirectAgentChat, AddressedAgentID: "agent-colton",
+			}, nil)
+			if err := decision.validate(); err != nil {
+				t.Fatalf("decision=%+v err=%v", decision, err)
+			}
+			if providerCalls.Load() != tc.wantProviderCalls {
+				t.Fatalf("provider calls=%d, want %d; decision=%+v", providerCalls.Load(), tc.wantProviderCalls, decision)
+			}
+			if tc.wantToolID == "" {
+				if decision.Outcome != conversationIntentConversationalReply || decision.Work != nil || decision.Approval != nil {
+					t.Fatalf("lightweight/ambiguous turn became durable work: %+v", decision)
+				}
+				return
+			}
+			work := decision.Work
+			if work == nil && decision.Approval != nil {
+				work = decision.Approval.Work
+			}
+			if decision.Outcome != conversationIntentStartPrivateWork || work == nil || work.Kind != conversationWorkRegistryTool || work.ToolID != tc.wantToolID || work.AgentID != "" || work.AgentName != "" {
+				t.Fatalf("authored-output decision=%+v, want server-owned %q", decision, tc.wantToolID)
+			}
+		})
 	}
 }
 

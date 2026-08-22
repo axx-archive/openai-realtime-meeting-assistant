@@ -88,11 +88,35 @@ func launchStudioShipChildAndCompileForScopeTest(t *testing.T, app *kanbanBoardA
 		}
 		t.Fatalf("seeded evidence dossier is invalid before launch: %v receipt=%q metadata=%q actual=%q expected_process=%q", err, matches, evidenceArtifact.Metadata["evidenceAdmissionDigest"], actualDigest, plan.ProcessID)
 	}
-	plan.Subtasks[1].Status, plan.Subtasks[1].ArtifactID = subtaskComplete, evidenceArtifact.ID
-	if err := engine.launchSubtask(&plan, &plan.Subtasks[2], work.Artifact.ID); err != nil {
+	seededInputs := []goalSubtask{{ID: "context_snapshot", Status: subtaskComplete, ArtifactID: contextArtifact.ID}}
+	for _, inputID := range stage.InputFrom {
+		inputArtifact := evidenceArtifact
+		if inputID != "evidence" {
+			inputStage, found := definition.stageByID(inputID)
+			if !found {
+				t.Fatalf("ship_deck input stage %q is unavailable", inputID)
+			}
+			inputArtifact, _, err = app.createOSArtifactWithMetadata("workflow", inputStage.Title, "Exact scope-test input from "+inputID, scoutParticipantName, map[string]string{
+				"goalParentId": work.Artifact.ID, "goalSubtaskId": inputID, "processId": plan.ProcessID,
+				"processStage": inputID, "status": "complete", "threadStatus": "complete",
+			})
+			if err != nil {
+				t.Fatalf("seed ship_deck input %s: %v", inputID, err)
+			}
+		}
+		seededInputs = append(seededInputs, goalSubtask{ID: inputID, Title: inputID, Status: subtaskComplete, ArtifactID: inputArtifact.ID})
+	}
+	seededInputs = append(seededInputs, goalSubtask{
+		ID: stage.ID, Title: stage.Title, Detail: stage.PromptBody, Mode: processStageThreadMode(stage),
+		Authority: normalizeCodexJobAuthority(plan.Authority), Runner: agentRunnerOpenAIText, Role: stage.Role,
+		Status: subtaskRunning, Attempts: 1,
+	})
+	plan.Subtasks = seededInputs
+	ship := plan.subtaskByID(stage.ID)
+	if err := engine.launchSubtask(&plan, ship, work.Artifact.ID); err != nil {
 		t.Fatalf("launch packaging child: %v", err)
 	}
-	child, ok := app.osArtifactByID(plan.Subtasks[2].ArtifactID)
+	child, ok := app.osArtifactByID(ship.ArtifactID)
 	if !ok {
 		t.Fatal("packaging child was not persisted")
 	}
@@ -183,7 +207,7 @@ func TestPackagingStudioPublicChildAndDeckRemainOnPublicChannel(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioDeliveredDeckIsImmediatelyNativePreviewableAndPPTXExportable(t *testing.T) {
+func TestPackagingStudioDraftIsImmediatelyNativePreviewableButFinalPPTXWaitsForAdmission(t *testing.T) {
 	setupAuthTestEnv(t)
 	setupIsolatedBlobStore(t)
 	app := newIsolatedKanbanBoardApp(t)
@@ -233,11 +257,8 @@ func TestPackagingStudioDeliveredDeckIsImmediatelyNativePreviewableAndPPTXExport
 	}
 
 	pptx := deckPPTXRequest(t, deckArtifact, cookies, nil)
-	if pptx.Code != http.StatusOK || pptx.Header().Get("Content-Type") != deckPPTXContentType {
-		t.Fatalf("fresh PPTX status=%d content-type=%q body=%s", pptx.Code, pptx.Header().Get("Content-Type"), pptx.Body.String())
-	}
-	if _, ok := deckPPTXZipParts(t, pptx.Body.Bytes())["ppt/slides/slide2.xml"]; !ok {
-		t.Fatal("fresh PPTX export lost the second generated slide")
+	if pptx.Code != http.StatusConflict || !strings.Contains(pptx.Body.String(), "must pass review") {
+		t.Fatalf("unadmitted draft PPTX status=%d body=%s", pptx.Code, pptx.Body.String())
 	}
 	after, ok := app.osArtifactByID(deckArtifact.ID)
 	if !ok || artifactVersion(after) != artifactVersion(deckArtifact) || after.Metadata[deckSceneRefMetadataKey] != sceneRef {
@@ -413,13 +434,16 @@ func TestLegacyPackagingStudioV2StageWiring(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioV4IsInvisibleConditionalAndFailClosed(t *testing.T) {
+func TestPackagingStudioV5IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	def := packagingStudioDefinition()
-	if def.Version != 4 || def.ImplementationRevision != "packaging_studio.runtime.v4" || def.Budgets.MaxSubtasks != 18 {
-		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v4 runtime v4 and 18 stages", def.Version, def.ImplementationRevision, def.Budgets)
+	if def.Version != 5 || def.ImplementationRevision != "packaging_studio.runtime.v5" || def.Budgets.MaxSubtasks != 16 {
+		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v5 runtime v5 and 16 stages", def.Version, def.ImplementationRevision, def.Budgets)
+	}
+	if len(def.Stages) != 16 {
+		t.Fatalf("v5 stage count=%d, want exactly 16", len(def.Stages))
 	}
 	if def.Stages[0].ID != "context_snapshot" || def.Stages[len(def.Stages)-1].ID != "ship_compile" {
-		t.Fatalf("unexpected v4 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
+		t.Fatalf("unexpected v5 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
 	}
 	for _, stage := range def.Stages {
 		if stage.Role == processRoleHumanCheckpoint {
@@ -428,6 +452,18 @@ func TestPackagingStudioV4IsInvisibleConditionalAndFailClosed(t *testing.T) {
 		if stage.ID != "ship_compile" && !stage.Internal {
 			t.Errorf("internal stage %q would clutter the channel", stage.ID)
 		}
+	}
+	contextSnapshot := packagingStudioStage(t, def, "context_snapshot")
+	if contextSnapshot.OutputContract != "deck_context_snapshot_v3" {
+		t.Fatalf("context snapshot contract=%q, want strict v3", contextSnapshot.OutputContract)
+	}
+	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform performance audit"} {
+		if !strings.Contains(contextSnapshot.PromptBody, contract) {
+			t.Errorf("context snapshot prompt does not keep research proportional: missing %q", contract)
+		}
+	}
+	if strings.Contains(contextSnapshot.PromptBody, "plain strings") || strings.Contains(contextSnapshot.PromptBody, "1 to 5") {
+		t.Fatalf("context snapshot retained a loose or over-broad research contract: %q", contextSnapshot.PromptBody)
 	}
 	research := packagingStudioStage(t, def, "external_research")
 	if research.RunIf == nil || research.RunIf.StageID != "context_snapshot" || research.RunIf.Field != "research_mode" || research.RunIf.Equals != "external" {
@@ -455,7 +491,7 @@ func TestPackagingStudioV4IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	}
 	for before, after := range map[string]string{
 		"external_research": "source_snapshot", "source_snapshot": "evidence_entailment", "evidence_entailment": "evidence",
-		"story_architects": "write", "write": "identity", "identity": "imagery_direction",
+		"story_architects": "write", "write": "identity", "identity": "imagery_generate",
 		"ship_deck": "draft_compile", "draft_compile": "slide_jury", "slide_jury": "quality_gate", "quality_gate": "ship_compile",
 	} {
 		if index[before] >= index[after] {
@@ -471,6 +507,18 @@ func TestPackagingStudioV4IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	identity := packagingStudioStage(t, def, "identity")
 	if !containsString(identity.InputFrom, "gate") {
 		t.Fatalf("identity inputFrom=%v, must wait for the story/copy gate before designing against locked copy", identity.InputFrom)
+	}
+	write := packagingStudioStage(t, def, "write")
+	for _, cue := range []string{"presenter_note", "proportional", "10-45 second", "[BEAT] only when", "Never add filler", "complete admitted claim verbatim"} {
+		if !strings.Contains(write.PromptBody, cue) {
+			t.Errorf("write stage does not own integrated presenter notes: missing %q", cue)
+		}
+	}
+	if strings.Contains(write.PromptBody, "exactly one [BEAT]") || strings.Contains(write.PromptBody, "25-45 second") {
+		t.Fatalf("write stage retained formulaic presenter-note requirements: %q", write.PromptBody)
+	}
+	if _, found := def.stageByID("voice"); found {
+		t.Fatal("v5 retained the redundant standalone presenter-notes stage")
 	}
 	compile := packagingStudioStage(t, def, "ship_compile")
 	if len(compile.InputFrom) != 2 || !containsString(compile.InputFrom, "quality_gate") || compile.Internal {
@@ -626,6 +674,50 @@ func TestPackagingStudioQualityGateRepairsDeckAndRerunsRenderedReview(t *testing
 	}
 }
 
+func TestPackagingStudioQualityGateBindsJuryMetricsAndReadyFloor(t *testing.T) {
+	t.Run("valid ready binding", func(t *testing.T) {
+		fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
+		review, err := resolvePackagingStudioQualityGateReview(fixture.app, &fixture.plan, fixture.parentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if review.Verdict != "ready" || review.MinimumAverage != 9.25 || review.ParsedSeats != 3 {
+			t.Fatalf("bound review=%+v", review)
+		}
+	})
+
+	for _, test := range []struct {
+		name       string
+		stagePatch map[string]string
+		scorePatch map[string]string
+		want       string
+	}{
+		{name: "minimum average mirror mismatch", stagePatch: map[string]string{"minimumAverage": "9.00"}, want: "findings do not match"},
+		{name: "parsed seat mirror mismatch", stagePatch: map[string]string{"parsedSeats": "2"}, want: "findings do not match"},
+		{name: "ready metadata cannot lower the scorecards", stagePatch: map[string]string{"minimumAverage": "8.00"}, scorePatch: map[string]string{"minimumAverage": "8.00"}, want: "does not match its exact seat scorecards"},
+		{name: "non-finite metadata cannot replace the scorecards", stagePatch: map[string]string{"minimumAverage": "NaN"}, scorePatch: map[string]string{"minimumAverage": "NaN"}, want: "does not match its exact seat scorecards"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
+			juryRecord := mustArtifact(t, fixture.app, fixture.plan.subtaskByID("slide_jury").ArtifactID)
+			if len(test.stagePatch) > 0 {
+				if _, _, err := fixture.app.updateOSArtifactWithMetadata(juryRecord.ID, "", juryRecord.Text, scoutParticipantName, test.stagePatch); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(test.scorePatch) > 0 {
+				scoreboard := mustArtifact(t, fixture.app, juryRecord.Metadata["slideJuryArtifactId"])
+				if _, _, err := fixture.app.updateOSArtifactWithMetadata(scoreboard.ID, "", scoreboard.Text, scoutParticipantName, test.scorePatch); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := resolvePackagingStudioQualityGateReview(fixture.app, &fixture.plan, fixture.parentID); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 // ship_deck must hand the writer the REQUIRED print chassis so the exported PDF
 // contains every slide, not just the on-screen frame — the fix for the
 // one-page-deck defect. The prompt carries the @page/@media-print contract, the
@@ -651,6 +743,15 @@ func TestPackagingStudioShipDeckCarriesFirstClassDesignAndEditorContract(t *test
 		if !strings.Contains(shipDeck.PromptBody, need) {
 			t.Errorf("ship_deck prompt missing first-class design contract %q:\n%s", need, shipDeck.PromptBody)
 		}
+	}
+	for _, need := range []string{"non-empty matching presenter_note", "[BEAT] only when", "do not invent a pause marker"} {
+		if !strings.Contains(shipDeck.PromptBody, need) {
+			t.Errorf("ship_deck prompt missing proportional presenter-note contract %q:\n%s", need, shipDeck.PromptBody)
+		}
+	}
+	rawInstructions, ok := rawDocumentContractInstructions(packagingStudioDeckContract)
+	if !ok || !strings.Contains(rawInstructions, "locked presenter_note in the deck copy") || strings.Contains(rawInstructions, "VOICE script") {
+		t.Fatalf("raw deck chassis retained stale presenter-note ownership: %q", rawInstructions)
 	}
 }
 
@@ -699,33 +800,27 @@ func TestPackagingDeckPrintCSSDerivesFromChassis(t *testing.T) {
 	}
 }
 
-// Imagery is ART-DIRECTED: a writer direction stage + an authored generation
-// compile stage sit AFTER identity + the chosen narrative and BEFORE ship_deck,
-// which reads both. ship_deck stays the last writer (the deck is the
-// deliverable). The director's prompt carries the editorial + chassis laws and
-// permits a zero-image typographic package.
+// Imagery is directed inside the locked identity decision, so the studio pays
+// for one coherent art-direction pass rather than a second writer call. The
+// authored generation compile remains optional and disclosed, and ship_deck
+// stays the last writer/deliverable.
 func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 	def := packagingStudioDefinition()
 
-	direction := packagingStudioStage(t, def, "imagery_direction")
-	if direction.Role != processRoleWriter {
-		t.Fatalf("imagery_direction role=%q, want writer", direction.Role)
+	identity := packagingStudioStage(t, def, "identity")
+	if identity.Role != processRoleJudges || identity.OutputContract != "identity_direction_v3" {
+		t.Fatalf("identity role/contract=%q/%q, want judges/identity_direction_v3", identity.Role, identity.OutputContract)
 	}
 	gen := packagingStudioStage(t, def, "imagery_generate")
 	if gen.Role != processRoleCompile || gen.Compile == nil {
 		t.Fatalf("imagery_generate must be an authored compile stage (role=%q, hasCompile=%v)", gen.Role, gen.Compile != nil)
 	}
 
-	for _, need := range []string{"identity", "write", "voice"} {
-		if !containsString(direction.InputFrom, need) {
-			t.Errorf("imagery_direction inputFrom=%v, missing %q", direction.InputFrom, need)
-		}
-	}
-	if !containsString(gen.InputFrom, "imagery_direction") {
-		t.Errorf("imagery_generate inputFrom=%v, must read imagery_direction", gen.InputFrom)
+	if len(gen.InputFrom) != 1 || !containsString(gen.InputFrom, "identity") {
+		t.Errorf("imagery_generate inputFrom=%v, must read only the locked identity", gen.InputFrom)
 	}
 	shipDeck := packagingStudioStage(t, def, "ship_deck")
-	for _, need := range []string{"imagery_direction", "imagery_generate"} {
+	for _, need := range []string{"identity", "imagery_generate"} {
 		if !containsString(shipDeck.InputFrom, need) {
 			t.Errorf("ship_deck inputFrom=%v, missing %q", shipDeck.InputFrom, need)
 		}
@@ -735,7 +830,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 	for i, s := range def.Stages {
 		idx[s.ID] = i
 	}
-	order := []string{"write", "identity", "imagery_direction", "imagery_generate", "ship_deck"}
+	order := []string{"write", "identity", "imagery_generate", "ship_deck"}
 	for i := 1; i < len(order); i++ {
 		if idx[order[i-1]] >= idx[order[i]] {
 			t.Fatalf("stage order broken: %s(%d) must precede %s(%d)", order[i-1], idx[order[i-1]], order[i], idx[order[i]])
@@ -752,44 +847,286 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 		t.Fatalf("last writer stage=%q, want ship_deck (the deck must stay the deliverable)", lastWriter)
 	}
 
-	for _, need := range []string{"emotional", "full bleeds", "crescendo", "typographic", "JSON"} {
-		if !strings.Contains(direction.PromptBody, need) {
-			t.Errorf("imagery_direction prompt missing the art-direction/chassis cue %q", need)
+	for _, need := range []string{"emotional", "full-bleed", "crescendo", "typographic", "JSON", "one to three", "zero to four", "exactly strategy, visual_system, identity, and shots"} {
+		if !strings.Contains(identity.PromptBody, need) {
+			t.Errorf("identity prompt missing the integrated art-direction cue %q", need)
 		}
+	}
+	if packagingStudioImageryMaxShots != 4 {
+		t.Fatalf("v5 imagery runtime cap=%d, want 4", packagingStudioImageryMaxShots)
+	}
+	if _, found := def.stageByID("imagery_direction"); found {
+		t.Fatal("v5 retained the redundant standalone imagery_direction stage")
 	}
 }
 
-// The director's JSON maps to generator shots; shots missing a subject or a
-// named temperature are dropped (the generator requires both); a garbled or
-// empty block is a valid ZERO-image typographic outcome, never an error.
+func packagingIdentityDirectionValueForTest() map[string]any {
+	return map[string]any{
+		"strategy":      "Use type for proof and imagery only for emotional turns.",
+		"visual_system": "warm paper, ink black, one clay accent, natural photography",
+		"identity": map[string]any{
+			"palette": "paper, ink, clay", "type": "grotesk plus editorial serif", "spacing": "8px base rhythm",
+			"grid": "12 columns", "graphic_motif": "thin evidence rules", "image_treatment": "natural color with quiet grain",
+			"data_viz_treatment": "direct labels, no legends", "refusals": "no gradients, glass, or decorative charts",
+		},
+		"shots": []any{
+			map[string]any{
+				"fig": 1, "slide_id": "cover", "slot": "bleed", "subject": "a rooftop crowd mid-laugh",
+				"composition": "wide eyeline with negative space on the left", "temperature": "joy",
+				"treatment": "natural 35mm grain; the single crescendo", "aspect": "landscape",
+				"caption": "FIG. 1 — the room", "place": "", "why": "opens on shared belief",
+			},
+			map[string]any{
+				"fig": 2, "slide_id": "proof", "slot": "plate", "subject": "hands arranging evidence cards",
+				"composition": "top-down crop with clear center detail", "temperature": "focus",
+				"treatment": "natural color, restrained grain", "aspect": "square",
+				"caption": "FIG. 2 — proof in hand", "place": "Nashville", "why": "makes the operating proof tangible",
+			},
+		},
+	}
+}
+
+func fencedIdentityDirectionForTest(t *testing.T, value map[string]any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "```json\n" + string(raw) + "\n```"
+}
+
+func cloneIdentityShotForTest(t *testing.T, shot map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(shot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(raw, &clone); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
+// Only a complete, exact identity_direction_v3 with an explicit shots array is
+// accepted. Every validated placement and art-direction field reaches the image
+// generator prompt; a valid empty array remains an intentional typographic deck.
 func TestParseImageryDirection(t *testing.T) {
-	body := "Here is the direction.\n\n```json\n" + `{
-  "visual_system": "deep warm blacks, one red accent, 35mm",
-  "shots": [
-    {"fig": 1, "slot": "bleed", "subject": "a rooftop crowd mid-laugh", "composition": "wide, eyeline high", "temperature": "joy", "caption": "FIG. 1 — the room", "why": "opens on shared belief"},
-    {"fig": 2, "slot": "plate", "subject": "", "temperature": "drama"},
-    {"fig": 3, "slot": "plate", "subject": "cranes at dawn", "temperature": ""},
-    {"fig": 4, "slot": "bleed", "subject": "the founder on stage", "composition": "tight", "temperature": "resolve", "place": "the Ryman"}
-  ]
-}` + "\n```\n"
-	vs, shots := parseImageryDirection(body)
-	if vs == "" {
-		t.Fatal("visual system not parsed")
+	allowed := map[string]struct{}{"cover": {}, "proof": {}}
+	doc, err := parseImageryDirection(fencedIdentityDirectionForTest(t, packagingIdentityDirectionValueForTest()), allowed)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(shots) != 2 {
-		t.Fatalf("parsed %d shots, want 2 (subject-less and temperature-less dropped)", len(shots))
+	if doc.VisualSystem == "" || len(doc.Shots) != 2 {
+		t.Fatalf("parsed direction=%+v", doc)
 	}
-	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || !strings.Contains(shots[0].Description, "rooftop crowd") {
-		t.Fatalf("shot[0]=%+v unexpected", shots[0])
+	shots := doc.imageryShots()
+	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || shots[1].Place != "Nashville" {
+		t.Fatalf("generator shots=%+v", shots)
 	}
-	if shots[1].Fig != 4 || shots[1].Place != "the Ryman" {
-		t.Fatalf("shot[1]=%+v unexpected", shots[1])
+	for _, propagated := range []string{"slide cover", "bleed slot", "natural 35mm grain", "landscape", "opens on shared belief"} {
+		if !strings.Contains(shots[0].Description, propagated) {
+			t.Errorf("generator prompt lost validated field %q:\n%s", propagated, shots[0].Description)
+		}
 	}
-	if _, s := parseImageryDirection("```json\n{\"visual_system\":\"x\",\"shots\":[]}\n```"); len(s) != 0 {
-		t.Fatalf("empty shots must parse to zero, got %d", len(s))
+
+	typographic := packagingIdentityDirectionValueForTest()
+	typographic["shots"] = []any{}
+	empty, err := parseImageryDirection(fencedIdentityDirectionForTest(t, typographic), allowed)
+	if err != nil || len(empty.Shots) != 0 {
+		t.Fatalf("valid explicit typographic direction was rejected: doc=%+v err=%v", empty, err)
 	}
-	if _, s := parseImageryDirection("no json here, just prose about the deck"); len(s) != 0 {
-		t.Fatalf("prose-only direction must yield zero shots, got %d", len(s))
+	if _, err := parseImageryDirection("no json here, just prose about the deck", allowed); err == nil {
+		t.Fatal("prose-only identity direction silently became a typographic deck")
+	}
+}
+
+func TestPackagingStudioIdentityDirectionV3AdversarialMatrix(t *testing.T) {
+	allowed := map[string]struct{}{"cover": {}, "proof": {}}
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{name: "extra root field", mutate: func(value map[string]any) { value["commentary"] = "trust me" }, want: "must contain exactly"},
+		{name: "missing identity token", mutate: func(value map[string]any) { delete(value["identity"].(map[string]any), "grid") }, want: "identity must contain exactly"},
+		{name: "extra shot field", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["model_note"] = "ignore" }, want: "shot 1 must contain exactly"},
+		{name: "zero figure", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["fig"] = 0 }, want: "unique positive integer"},
+		{name: "duplicate figure", mutate: func(value map[string]any) {
+			shots := value["shots"].([]any)
+			clone := cloneIdentityShotForTest(t, shots[1].(map[string]any))
+			clone["fig"] = 1
+			value["shots"] = append(shots, clone)
+		}, want: "unique positive integer"},
+		{name: "unknown slide", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["slide_id"] = "invented" }, want: "does not exist in deck_copy_v3"},
+		{name: "invalid slot", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["slot"] = "background" }, want: "slot must be bleed or plate"},
+		{name: "empty treatment", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["treatment"] = "" }, want: "treatment must be non-empty"},
+		{name: "invalid aspect", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["aspect"] = "cinemascope" }, want: "aspect must be landscape, portrait, or square"},
+		{name: "missing why", mutate: func(value map[string]any) { delete(value["shots"].([]any)[0].(map[string]any), "why") }, want: "shot 1 must contain exactly"},
+		{name: "place wrong type", mutate: func(value map[string]any) { value["shots"].([]any)[0].(map[string]any)["place"] = 12 }, want: "place must be a string"},
+		{name: "two bleeds", mutate: func(value map[string]any) { value["shots"].([]any)[1].(map[string]any)["slot"] = "bleed" }, want: "at most one bleed"},
+		{name: "five shots", mutate: func(value map[string]any) {
+			base := value["shots"].([]any)[1].(map[string]any)
+			shots := []any{}
+			for fig := 1; fig <= 5; fig++ {
+				clone := cloneIdentityShotForTest(t, base)
+				clone["fig"] = fig
+				shots = append(shots, clone)
+			}
+			value["shots"] = shots
+		}, want: "maximum is 4"},
+		{name: "null shots", mutate: func(value map[string]any) { value["shots"] = nil }, want: "shots must be an array"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := packagingIdentityDirectionValueForTest()
+			test.mutate(value)
+			if _, err := parseImageryDirection(fencedIdentityDirectionForTest(t, value), allowed); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v, want %q", err, test.want)
+			}
+		})
+	}
+
+	valid := fencedIdentityDirectionForTest(t, packagingIdentityDirectionValueForTest())
+	for name, body := range map[string]string{
+		"raw object without fence": strings.TrimSuffix(strings.TrimPrefix(valid, "```json\n"), "\n```"),
+		"prose before fence":       "Here is the direction.\n" + valid,
+		"prose after fence":        valid + "\nLooks good.",
+		"unterminated fence":       strings.TrimSuffix(valid, "```"),
+		"panel voice rescue":       "identity synthesis failed\n\n## Panel voices\n" + valid,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseImageryDirection(body, allowed); err == nil {
+				t.Fatalf("invalid identity contract was accepted: %q", body)
+			}
+		})
+	}
+}
+
+func TestPackagingStudioV5ImageryCompileReadsIntegratedIdentityDirection(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	value := packagingIdentityDirectionValueForTest()
+	value["shots"] = []any{}
+	identity, _, err := app.createOSArtifactWithMetadata("workflow", "Integrated identity", fencedIdentityDirectionForTest(t, value), scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write, _, err := app.createOSArtifactWithMetadata("workflow", "Locked deck copy", `{"slides":[{"slide_id":"cover"}]}`, scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, ProcessVersion: 5, ProcessImplementationRevision: "packaging_studio.runtime.v5", Subtasks: []goalSubtask{
+		{ID: "write", Status: subtaskComplete, ArtifactID: write.ID},
+		{ID: "identity", Status: subtaskComplete, ArtifactID: identity.ID},
+	}}
+	body, metadata, err := compilePackagingStudioImagery(app, plan, "goal-v5-identity", ProcessStage{ID: "imagery_generate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata["imageryShots"] != "0" || !strings.Contains(body, "typographic") {
+		t.Fatalf("integrated identity zero-shot direction was not honored: metadata=%v body=%q", metadata, body)
+	}
+}
+
+func TestPackagingStudioV5ImageryCompileRejectsMalformedIdentityBeforeTypographicFallback(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	write, _, err := app.createOSArtifactWithMetadata("workflow", "Locked deck copy", `{"slides":[{"slide_id":"cover"}]}`, scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, _, err := app.createOSArtifactWithMetadata("workflow", "Broken identity", "no JSON", scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, ProcessVersion: 5, Subtasks: []goalSubtask{
+		{ID: "write", Status: subtaskComplete, ArtifactID: write.ID},
+		{ID: "identity", Status: subtaskComplete, ArtifactID: identity.ID},
+	}}
+	if body, metadata, err := compilePackagingStudioImagery(app, plan, "goal-v5-invalid-identity", ProcessStage{ID: "imagery_generate"}); err == nil || body != "" || metadata != nil {
+		t.Fatalf("malformed identity silently degraded: body=%q metadata=%v err=%v", body, metadata, err)
+	}
+}
+
+func TestPackagingStudioGeneratedPlacementsPreserveValidatedDirection(t *testing.T) {
+	doc, err := parseImageryDirection(fencedIdentityDirectionForTest(t, packagingIdentityDirectionValueForTest()), map[string]struct{}{"cover": {}, "proof": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	placements, err := enrichedPackagingStudioGeneratedShots([]imageryGeneratedShot{{Fig: 2, Ref: "sha256:abc", Mime: "image/png"}}, doc.Shots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(placements) != 1 {
+		t.Fatalf("placements=%+v", placements)
+	}
+	placement := placements[0]
+	if placement.SlideID != "proof" || placement.Slot != "plate" || placement.Treatment == "" || placement.Aspect != "square" || placement.Why == "" || placement.Caption == "" || placement.Subject == "" || placement.Composition == "" || placement.Temperature == "" || placement.Place != "Nashville" {
+		t.Fatalf("validated direction was not propagated: %+v", placement)
+	}
+}
+
+func TestPackagingStudioV5ImageryPromptUsesBoundSynthesisNotRejectedPanelVoices(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("OPENAI_API_KEY", "test-image-key")
+
+	selected := packagingIdentityDirectionValueForTest()
+	selected["shots"] = selected["shots"].([]any)[:1]
+	synthesis := fencedIdentityDirectionForTest(t, selected)
+	rejected := packagingIdentityDirectionValueForTest()
+	rejectedShot := rejected["shots"].([]any)[0].(map[string]any)
+	rejectedShot["subject"] = "RAW-VOICE-REJECTED-SENTINEL"
+	rejectedVoice := fencedIdentityDirectionForTest(t, rejected)
+	durableBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, synthesis+"\n\n## Panel voices\n\n### rejected_direction\n"+rejectedVoice+"\n")
+	durableSynthesis := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, synthesis)
+	if !strings.HasPrefix(durableBody, durableSynthesis) {
+		t.Fatal("test panel body does not preserve its synthesis boundary")
+	}
+	voicesRecord := durableBody[len(durableSynthesis):]
+	identity, _, err := app.createOSArtifactWithMetadata("workflow", "Integrated identity panel", durableBody, scoutParticipantName, map[string]string{
+		"processRole":           processRoleJudges,
+		"panelArtifactContract": processPanelArtifactContract,
+		"panelSynthesisBytes":   strconv.Itoa(len(durableSynthesis)),
+		"panelSynthesisDigest":  sha256Hex([]byte(durableSynthesis)),
+		"panelVoicesDigest":     sha256Hex([]byte(voicesRecord)),
+		"panelSeatCount":        "3",
+		"panelSuccessfulSeats":  "3",
+		"panelRequiredSeats":    "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write, _, err := app.createOSArtifactWithMetadata("workflow", "Locked deck copy", `{"slides":[{"slide_id":"cover"},{"slide_id":"proof"}]}`, scoutParticipantName, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, ProcessVersion: 5, Subtasks: []goalSubtask{
+		{ID: "write", Status: subtaskComplete, ArtifactID: write.ID},
+		{ID: "identity", Status: subtaskComplete, ArtifactID: identity.ID},
+	}}
+
+	capturedPrompt := ""
+	withFakeImagesAPI(t, func(w http.ResponseWriter, request *http.Request) {
+		var payload openAIImagePayload
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Errorf("decode image payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		capturedPrompt = payload.Prompt
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":          []map[string]string{{"b64_json": "iVBORw0KGgo="}},
+			"output_format": "png",
+		})
+	})
+	body, metadata, err := compilePackagingStudioImagery(app, plan, "goal-v5-panel-boundary", ProcessStage{ID: "imagery_generate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capturedPrompt == "" || !strings.Contains(capturedPrompt, "rooftop crowd mid-laugh") || strings.Contains(capturedPrompt, "RAW-VOICE-REJECTED-SENTINEL") {
+		t.Fatalf("image prompt crossed the synthesis boundary:\n%s", capturedPrompt)
+	}
+	if metadata["imageryShots"] != "1" || strings.Contains(metadata["imageryFigs"], "RAW-VOICE-REJECTED-SENTINEL") || !strings.Contains(body, "1 of 1") {
+		t.Fatalf("imagery result crossed the synthesis boundary: metadata=%v body=%q", metadata, body)
 	}
 }
 
@@ -981,7 +1318,7 @@ func TestPackagingStudioModelWrittenStagesUseBoundedOpenAIWriter(t *testing.T) {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}
 	assignGoalRunners(plan)
-	for _, stageID := range []string{"voice", "imagery_direction", "ship_deck"} {
+	for _, stageID := range []string{"layout_plan", "ship_deck"} {
 		stage := packagingStudioStage(t, def, stageID)
 		if stage.Role != processRoleWriter || processStageThreadMode(stage) != "artifacts" {
 			t.Fatalf("stage %s role/mode=%s/%s, want writer/artifacts", stageID, stage.Role, processStageThreadMode(stage))
@@ -1017,7 +1354,7 @@ func TestPackagingStudioContextSnapshotCarriesAuthorizedSourceRefs(t *testing.T)
 		t.Fatalf("company context leaked an unauthorized sibling:\n%s", companyContext)
 	}
 	contextSnapshot := packagingStudioStage(t, packagingStudioDefinition(), "context_snapshot")
-	task, err := engine.processStageTaskAuthorized(context.Background(), plan, &goalSubtask{ID: "context_snapshot"}, contextSnapshot)
+	task, err := engine.processStageTaskAuthorized(context.Background(), plan, "", &goalSubtask{ID: "context_snapshot"}, contextSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1037,18 +1374,18 @@ func TestPackagingStudioRetryReassignmentPreservesBlockedPlan(t *testing.T) {
 	write := plan.subtaskByID("write")
 	write.Status = subtaskComplete
 	write.ArtifactID = "saved-write"
-	voice := plan.subtaskByID("voice")
-	voice.Status = subtaskBlocked
-	voice.Revisions = goalMaxRevisions
-	voice.Runner = agentRunnerStub
+	layout := plan.subtaskByID("layout_plan")
+	layout.Status = subtaskBlocked
+	layout.Revisions = goalMaxRevisions
+	layout.Runner = agentRunnerStub
 
 	assignGoalRunners(plan)
 
-	if voice.Runner != agentRunnerOpenAIText {
-		t.Fatalf("blocked voice runner=%q, want repaired openai_text lane", voice.Runner)
+	if layout.Runner != agentRunnerOpenAIText {
+		t.Fatalf("blocked layout runner=%q, want repaired openai_text lane", layout.Runner)
 	}
-	if voice.Status != subtaskBlocked || voice.Revisions != goalMaxRevisions {
-		t.Fatalf("runner refresh rewrote blocked retry state: %+v", voice)
+	if layout.Status != subtaskBlocked || layout.Revisions != goalMaxRevisions {
+		t.Fatalf("runner refresh rewrote blocked retry state: %+v", layout)
 	}
 	if write.Status != subtaskComplete || write.ArtifactID != "saved-write" {
 		t.Fatalf("runner refresh rewrote completed stage: %+v", write)

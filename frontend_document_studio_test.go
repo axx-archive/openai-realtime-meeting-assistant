@@ -35,7 +35,7 @@ func TestDocumentStudioFrontendContract(t *testing.T) {
 		"data-doc-action=\"source\"",
 		"data-doc-action=\"pdf\"",
 		"data-doc-action=\"save-copy\"",
-		"openDocumentStudio(entry.id, stageTitle, { entry })",
+		"openDocumentStudio(entry.id, stageTitle, { entry, qualityState: stageQualityState, canExport: stageCanExport })",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing Document Studio contract %q", want)
@@ -105,9 +105,16 @@ const server=http.createServer((req,res)=>{
  const bold=editor.getByRole('button',{name:'Bold',exact:true});
  await bold.focus();await page.keyboard.press('ArrowRight');
  assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Italic');
+ await editor.locator('[data-doc-mobile-status]').click();
+ const compactInspector=await editor.locator('.document-editor__inspector').evaluate(node=>{const style=getComputedStyle(node);const rect=node.getBoundingClientRect();return {rect:rect.toJSON(),bottom:style.bottom,maxHeight:style.maxHeight,overflowY:style.overflowY,scrollHeight:node.scrollHeight,viewportHeight:innerHeight};});
+ assert.equal(compactInspector.overflowY,'auto',JSON.stringify(compactInspector));
+ assert.ok(compactInspector.rect.height<compactInspector.viewportHeight-100,JSON.stringify(compactInspector));
+ assert.ok(parseFloat(compactInspector.bottom)>100,JSON.stringify(compactInspector));
+ assert.ok(parseFloat(compactInspector.maxHeight)<=compactInspector.viewportHeight-80,JSON.stringify(compactInspector));
  await editor.getByRole('button',{name:'Reload current version'}).focus();
  await page.keyboard.press('Tab');
- assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Close Document Studio');
+	 assert.ok(['Close Document Studio','Close document inspector'].includes(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label'))));
+	 await editor.getByRole('button',{name:'Close document inspector'}).click();
 
  // iPad landscape keeps the document wide and moves formatting to a complete
  // second row instead of sacrificing the page to two side rails.
@@ -119,10 +126,11 @@ const server=http.createServer((req,res)=>{
  assert.ok(ipad.scrollWidth<=1024,JSON.stringify(ipad));
  await editor.locator('[data-doc-mobile-status]').click();
  await page.waitForFunction(()=>document.querySelector('.document-editor__inspector')?.getBoundingClientRect().right<=innerWidth-11);
- const ipadInspector=await editor.locator('.document-editor__inspector').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),hidden:node.getAttribute('aria-hidden'),inert:node.inert,visibility:getComputedStyle(node).visibility}));
+ const ipadInspector=await editor.locator('.document-editor__inspector').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),hidden:node.getAttribute('aria-hidden'),inert:node.inert,visibility:getComputedStyle(node).visibility,bottom:getComputedStyle(node).bottom,maxHeight:getComputedStyle(node).maxHeight,overflowY:getComputedStyle(node).overflowY}));
  assert.ok(ipadInspector.rect.left>=0&&ipadInspector.rect.right<=1024&&ipadInspector.rect.top>=0&&ipadInspector.rect.bottom<=768,JSON.stringify(ipadInspector));assert.equal(ipadInspector.hidden,null);assert.equal(ipadInspector.inert,false);assert.equal(ipadInspector.visibility,'visible');
+ assert.ok(parseFloat(ipadInspector.bottom)>24,JSON.stringify(ipadInspector));assert.equal(ipadInspector.overflowY,'auto',JSON.stringify(ipadInspector));assert.ok(ipadInspector.rect.height<744,JSON.stringify(ipadInspector));
  if(process.env.DOCUMENT_STUDIO_TABLET_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_TABLET_SCREENSHOT,fullPage:true});}
- await editor.getByRole('button',{name:'Close document status'}).click();
+	 await editor.getByRole('button',{name:'Close document inspector'}).click();
 
  // Portrait tablet collapses the outline so the editable page remains the
  // dominant surface and never clips outside the viewport.
@@ -135,9 +143,33 @@ const server=http.createServer((req,res)=>{
  await source.evaluate(node=>{node.focus();const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while(text=walker.nextNode()){const start=text.nodeValue.indexOf('useful');if(start>=0){const range=document.createRange();range.setStart(text,start);range.setEnd(text,start+'useful'.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return;}}throw new Error('selection text missing');});
  await editor.getByRole('button',{name:'Bold',exact:true}).click();
  await source.evaluate(node=>{const heading=document.createElement('h2');heading.textContent='Recommendation';const paragraph=document.createElement('p');paragraph.textContent='Ship the stronger story.';node.append(heading,paragraph);node.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));node.focus();const range=document.createRange();range.selectNodeContents(paragraph);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await editor.getByRole('button',{name:'Table',exact:true}).click();
- assert.equal(await source.locator('table').count(),1);
- assert.match(await editor.locator('[data-doc-status]').textContent(),/Unsaved changes/);
+	 await editor.getByRole('button',{name:'Table',exact:true}).click();
+	 assert.equal(await source.locator('table').count(),1);
+	 const table=source.locator('table').first();
+	 await table.locator('td').first().click();
+	 await editor.getByRole('button',{name:'Table',exact:true}).click();
+	 assert.equal(await editor.locator('[data-doc-inspector-title]').textContent(),'Table');
+	 await page.waitForFunction(()=>getComputedStyle(document.querySelector('.document-editor__inspector')).opacity==='1');
+	 if(process.env.DOCUMENT_STUDIO_TABLE_TOOLS_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_TABLE_TOOLS_SCREENSHOT,fullPage:true});}
+	 await editor.getByRole('button',{name:'Row below',exact:true}).click();
+	 assert.equal(await table.locator('tr').count(),4);
+	 await editor.getByRole('button',{name:'Column after',exact:true}).click();
+	 assert.equal(await table.locator('tr').nth(1).locator('td,th').count(),4);
+	 await editor.getByRole('button',{name:'Toggle header row',exact:true}).click();
+	 assert.equal(await table.locator('tr').first().locator('th').count(),0);
+	 await editor.getByRole('button',{name:'Delete row',exact:true}).click();
+	 assert.equal(await table.locator('tr').count(),3);
+	 await editor.getByRole('button',{name:'Delete column',exact:true}).click();
+	 assert.equal(await table.locator('tr').nth(1).locator('td,th').count(),3);
+	 await editor.getByRole('button',{name:'Toggle header row',exact:true}).click();
+	 assert.equal(await table.locator('tr').first().locator('th').count(),3);
+	 await editor.getByRole('button',{name:'Delete table',exact:true}).click();
+	 assert.equal(await source.locator('table').count(),0);
+	 await source.evaluate(node=>{node.focus();const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
+	 await editor.getByRole('button',{name:'Table',exact:true}).click();
+	 assert.equal(await source.locator('table').count(),1);
+	 await editor.getByRole('button',{name:'Close document inspector'}).click();
+	 assert.match(await editor.locator('[data-doc-status]').textContent(),/Unsaved changes/);
  assert.equal(await editor.locator('.document-editor__outline-item').count(),3);
  await editor.getByRole('button',{name:'Source',exact:true}).click();
  const markdownSource=editor.getByRole('textbox',{name:'Markdown source'});
@@ -173,14 +205,22 @@ const server=http.createServer((req,res)=>{
  assert.equal(await editor.locator('[data-doc-mobile-status]').textContent(),'Saved');
  assert.notEqual(await editor.locator('[data-doc-mobile-status]').evaluate(node=>getComputedStyle(node).display),'none');
  const formatToolbar=editor.locator('[role="toolbar"]');
- await editor.locator('[data-doc-action="source"]').focus();
- const focusedFormat=await formatToolbar.evaluate(node=>{const active=document.activeElement.getBoundingClientRect();const toolbar=node.getBoundingClientRect();return {active:active.toJSON(),toolbar:toolbar.toJSON(),scrollLeft:node.scrollLeft,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth};});
- assert.ok(focusedFormat.scrollWidth>focusedFormat.clientWidth&&focusedFormat.scrollLeft>0,JSON.stringify(focusedFormat));
- assert.ok(focusedFormat.active.left>=focusedFormat.toolbar.left&&focusedFormat.active.right<=focusedFormat.toolbar.right,JSON.stringify(focusedFormat));
+	 const mobileFormat=await formatToolbar.evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,wrap:getComputedStyle(node).flexWrap}));
+	 assert.equal(mobileFormat.wrap,'wrap',JSON.stringify(mobileFormat));
+	 assert.ok(mobileFormat.scrollWidth<=mobileFormat.clientWidth+1,JSON.stringify(mobileFormat));
+	 await editor.getByRole('button',{name:'More',exact:true}).click();
+	 const moreMenu=editor.getByRole('menu',{name:'More document tools'});
+	 await moreMenu.waitFor({state:'visible'});
+	 const moreRect=await moreMenu.boundingBox();
+	 assert.ok(moreRect.x>=0&&moreRect.x+moreRect.width<=390&&moreRect.y+moreRect.height<=844,JSON.stringify(moreRect));
+	 assert.equal(await moreMenu.getByRole('menuitem',{name:'Source',exact:true}).count(),1);
+	 await page.keyboard.press('Escape');
+	 assert.equal(await editor.getByRole('button',{name:'More',exact:true}).getAttribute('aria-expanded'),'false');
+	 assert.equal(await moreMenu.isHidden(),true);
  const mobileCopy=await editor.getByRole('button',{name:'Save a copy…',exact:true}).evaluate(node=>{const rect=node.getBoundingClientRect();const style=getComputedStyle(node);return {rect:rect.toJSON(),display:style.display,visibility:style.visibility,opacity:style.opacity,hidden:node.hidden,connected:node.isConnected,viewport:{width:innerWidth,height:innerHeight}};});
  assert.ok(mobileCopy.display!=='none'&&mobileCopy.visibility!=='hidden'&&mobileCopy.rect.width>0&&mobileCopy.rect.height>0&&mobileCopy.rect.right>0&&mobileCopy.rect.left<mobileCopy.viewport.width&&mobileCopy.rect.bottom>0&&mobileCopy.rect.top<mobileCopy.viewport.height,JSON.stringify(mobileCopy));
- const mobileTargets=await editor.evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
- mobileTargets.forEach(target=>assert.ok(target.rect.height>=40,JSON.stringify(target)));
+ const mobileTargets=await editor.evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>{const style=getComputedStyle(control);const rect=control.getBoundingClientRect();return !control.hidden&&!control.closest('[hidden],[aria-hidden="true"],[inert]')&&style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0;}).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ mobileTargets.forEach(target=>assert.ok(target.rect.height>=44,JSON.stringify(target)));
 
  // A revision conflict opens the full actionable status sheet on phone; the
  // person can read the real error and reload without hunting for hidden UI.
@@ -203,7 +243,7 @@ const server=http.createServer((req,res)=>{
  await touchPage.evaluate(id=>openDocumentStudio(id,'Field Notes',{}),artifactId);
  await touchPage.locator('[data-doc-mobile-status]').click();
  await touchPage.waitForFunction(()=>document.querySelector('.document-editor__inspector')?.getBoundingClientRect().bottom<=innerHeight);
- const touchTargets=await touchPage.locator('.document-editor').evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ const touchTargets=await touchPage.locator('.document-editor').evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>{const style=getComputedStyle(control);const rect=control.getBoundingClientRect();return !control.hidden&&!control.closest('[hidden],[aria-hidden="true"],[inert]')&&style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0;}).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
  touchTargets.forEach(target=>assert.ok(target.rect.height>=44,JSON.stringify(target)));
  if(process.env.DOCUMENT_STUDIO_PHONE_SCREENSHOT){await touchPage.screenshot({path:process.env.DOCUMENT_STUDIO_PHONE_SCREENSHOT,fullPage:true});}
  await touchContext.close();
@@ -351,11 +391,14 @@ const server=http.createServer((req,res)=>{
  assert.equal(await imageBlock.getAttribute('data-align'),'right');
  assert.equal(await imageBlock.evaluate(node=>node.style.width),'50%');
  assert.match(await imageBlock.textContent(),/coordinated creator cohort/);
- const imageToolsStyle=await editor.locator('[data-doc-image-tools]').evaluate(node=>({radius:getComputedStyle(node).borderRadius,background:getComputedStyle(node).backgroundColor,shadow:getComputedStyle(node).boxShadow,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));
- assert.notEqual(imageToolsStyle.radius,'0px',JSON.stringify(imageToolsStyle));
- assert.notEqual(imageToolsStyle.background,'rgba(0, 0, 0, 0)',JSON.stringify(imageToolsStyle));
- assert.notEqual(imageToolsStyle.shadow,'none',JSON.stringify(imageToolsStyle));
- assert.ok(imageToolsStyle.scrollWidth<=imageToolsStyle.clientWidth,JSON.stringify(imageToolsStyle));
+	 const imageToolsStyle=await editor.locator('[data-doc-image-tools]').evaluate(node=>{const panel=node.closest('.document-editor__inspector');return {tools:{radius:getComputedStyle(node).borderRadius,background:getComputedStyle(node).backgroundColor,shadow:getComputedStyle(node).boxShadow,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth},panel:{radius:getComputedStyle(panel).borderRadius,background:getComputedStyle(panel).backgroundColor,shadow:getComputedStyle(panel).boxShadow}};});
+	 assert.equal(imageToolsStyle.tools.radius,'0px',JSON.stringify(imageToolsStyle));
+	 assert.equal(imageToolsStyle.tools.background,'rgba(0, 0, 0, 0)',JSON.stringify(imageToolsStyle));
+	 assert.equal(imageToolsStyle.tools.shadow,'none',JSON.stringify(imageToolsStyle));
+	 assert.notEqual(imageToolsStyle.panel.radius,'0px',JSON.stringify(imageToolsStyle));
+	 assert.notEqual(imageToolsStyle.panel.background,'rgba(0, 0, 0, 0)',JSON.stringify(imageToolsStyle));
+	 assert.notEqual(imageToolsStyle.panel.shadow,'none',JSON.stringify(imageToolsStyle));
+	 assert.ok(imageToolsStyle.tools.scrollWidth<=imageToolsStyle.tools.clientWidth,JSON.stringify(imageToolsStyle));
  if(process.env.DOCUMENT_STUDIO_IMAGE_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_IMAGE_SCREENSHOT,fullPage:true});}
 
  await rich.click({position:{x:8,y:8}});

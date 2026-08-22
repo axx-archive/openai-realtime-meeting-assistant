@@ -854,16 +854,72 @@ func scoutArtifactCreationDeliberationDetected(text string) bool {
 	return hasAssistantPhrase(normalized, "whether we should ", "whether i should ", "decide whether to ", "decide if we should ", "decide if i should ")
 }
 
+// scoutCreationVerbLeadsArtifact disambiguates creation verbs that are also
+// common artifact adjectives ("draft presentation", "report design"). The
+// verb must occur in an imperative/auxiliary/conjunction position and lead an
+// artifact noun within the same short clause; a determiner or preposition
+// before it keeps review/analysis prose conversational.
+func scoutCreationVerbLeadsArtifact(text string, verbs []string, artifacts []string) bool {
+	fields := strings.Fields(strings.ToLower(text))
+	canonical := func(value string) string {
+		return strings.Trim(value, " \t\r\n.,!?;:()[]{}\"'’‘")
+	}
+	verbSet := map[string]struct{}{}
+	artifactSet := map[string]struct{}{}
+	for _, value := range verbs {
+		verbSet[canonical(value)] = struct{}{}
+	}
+	for _, value := range artifacts {
+		artifactSet[canonical(value)] = struct{}{}
+	}
+	allowedPrevious := map[string]struct{}{
+		"": {}, "@scout": {}, "scout": {}, "and": {}, "then": {}, "to": {}, "please": {}, "i": {}, "we": {}, "you": {},
+		"can": {}, "could": {}, "would": {}, "will": {}, "must": {}, "lets": {}, "let's": {},
+	}
+	objectBoundary := map[string]struct{}{
+		"and": {}, "then": {}, "but": {}, "or": {}, "for": {}, "from": {}, "of": {}, "about": {},
+		"on": {}, "with": {}, "into": {}, "using": {}, "after": {}, "before": {}, "while": {},
+	}
+	for index, raw := range fields {
+		if _, ok := verbSet[canonical(raw)]; !ok {
+			continue
+		}
+		previous := ""
+		if index > 0 {
+			previous = canonical(fields[index-1])
+		}
+		if _, ok := allowedPrevious[previous]; !ok {
+			continue
+		}
+		limit := index + 12
+		if limit > len(fields) {
+			limit = len(fields)
+		}
+		for _, candidate := range fields[index+1 : limit] {
+			word := canonical(candidate)
+			if _, stop := objectBoundary[word]; stop {
+				break
+			}
+			if _, ok := artifactSet[word]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func scoutChatDeckRequestDetected(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+	if normalized == "" {
 		return false
 	}
-	if scoutArtifactCreationDeliberationDetected(lower) {
+	if scoutArtifactCreationDeliberationDetected(normalized) {
 		return false
 	}
-	// Must mention deck or presentation or slides
-	hasDeckWord := strings.Contains(lower, "deck") || strings.Contains(lower, "presentation") || strings.Contains(lower, "slides")
+	// Require an exact presentation noun, not a substring. This keeps ordinary
+	// analysis conversational while making every explicit authored-output verb
+	// deterministic rather than dependent on the model router's paraphrase.
+	hasDeckWord := scoutTextHasWord(normalized, "deck", "presentation", "slides") || hasAssistantPhrase(normalized, "slide deck")
 	if !hasDeckWord {
 		return false
 	}
@@ -873,28 +929,46 @@ func scoutChatDeckRequestDetected(text string) bool {
 	// Exclude outline-only asks
 	outlineOnly := []string{"outline only", "just the outline", "just an outline", "only the outline", "give me the outline", "slide outline"}
 	for _, phrase := range outlineOnly {
-		if strings.Contains(lower, phrase) {
+		if strings.Contains(normalized, phrase) {
 			return false
 		}
 	}
-	// Match deck/presentation creation phrases
-	deckPhrases := []string{
-		"make a deck", "create a deck", "build a deck", "make me a deck",
-		"make a presentation", "create a presentation", "build a presentation",
-		"make me a presentation", "create me a presentation", "build me a presentation",
+	if hasAssistantPhrase(normalized,
+		"edit the deck", "edit the presentation", "edit the slides",
+		"revise the deck", "revise the presentation", "revise the slides",
+		"update the deck", "update the presentation", "update the slides",
+		"rewrite the deck", "rewrite the presentation", "rewrite the slides",
+	) {
+		return false
+	}
+	if scoutCreationVerbLeadsArtifact(normalized,
+		[]string{"make", "create", "build", "prepare", "produce", "generate", "develop", "draft", "design"},
+		[]string{"deck", "presentation", "slides"}) ||
+		hasAssistantPhrase(normalized,
+			"put together a deck", "put together the deck", "put together a presentation", "put together the presentation", "put together slides") {
+		return true
+	}
+	if hasAssistantPhrase(normalized,
+		"draft a deck", "draft the deck", "draft a presentation", "draft the presentation", "draft slides",
+		"design a deck", "design the deck", "design a presentation", "design the presentation", "design slides",
 		"need a deck", "need the deck", "need a presentation", "need the presentation", "need slides",
 		"want a deck", "want the deck", "want a presentation", "want the presentation", "want slides",
-		"presentation for", "deck for", "slides for",
-		"slide deck", "pitch deck", "5-slide", "5 slide", "five-slide", "five slide",
+		"make me a deck", "make me a presentation", "make me slides",
+		"give me a deck", "give me a presentation", "give me slides",
+	) {
+		return true
+	}
+	if scoutTextHasWord(normalized, "analyze", "analyse", "critique", "review", "assess") ||
+		hasAssistantPhrase(normalized, "feedback on", "key takeaways", "help understanding") {
+		return false
+	}
+	// Compact request shorthand remains deterministic: "pitch deck for the
+	// board" and an exact slide-count ask name the product even without a verb.
+	return hasAssistantPhrase(normalized,
+		"presentation for", "deck for", "slides for", "slide deck", "pitch deck",
+		"5-slide", "5 slide", "five-slide", "five slide",
 		"10-slide", "10 slide", "ten-slide", "ten slide",
-		"make slides", "create slides", "build slides", "make me slides",
-	}
-	for _, phrase := range deckPhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
+	)
 }
 
 // scoutInsightsReportRequestDetected recognizes the named STRIDE report. It is
@@ -936,8 +1010,21 @@ func scoutDocumentReportRequestDetected(text string) bool {
 	if hasAssistantPhrase(normalized, "edit the report", "edit the document", "edit the memo", "revise the report", "revise the document", "revise the memo", "update the report", "update the document", "update the memo", "rewrite the report", "rewrite the document", "rewrite the memo") {
 		return false
 	}
-	return scoutTextHasWord(normalized, "create", "write", "draft", "prepare", "build", "produce", "generate", "develop", "need", "want") ||
-		hasAssistantPhrase(normalized, "put together", "make me", "give me")
+	if scoutCreationVerbLeadsArtifact(normalized,
+		[]string{"create", "write", "prepare", "build", "produce", "generate", "develop", "draft", "design"},
+		[]string{"report", "document", "memo"}) ||
+		hasAssistantPhrase(normalized,
+			"put together a report", "put together the report", "put together a document", "put together the document", "put together a memo", "put together the memo") {
+		return true
+	}
+	return hasAssistantPhrase(normalized,
+		"draft a report", "draft the report", "draft a document", "draft the document", "draft a memo", "draft the memo",
+		"design a report", "design the report", "design a document", "design the document", "design a memo", "design the memo",
+		"need a report", "need the report", "need a document", "need the document", "need a memo", "need the memo",
+		"want a report", "want the report", "want a document", "want the document", "want a memo", "want the memo",
+		"make me a report", "make me a document", "make me a memo",
+		"give me a report", "give me a document", "give me a memo",
+	)
 }
 
 func scoutDocumentReportObjective(text string) string {
@@ -1139,13 +1226,13 @@ func scoutAgentWorkerAvailable() bool {
 	return selectedAgentRunnerName() != agentRunnerStub
 }
 
-// scoutRegistryWorkAvailableWithoutAgentWorker reports the process-backed
-// deliverables whose goal engine remains the truthful execution carrier even
-// when the free-form agent-thread runner is closed. Packaging Studio and the
-// deck-outline process are server-owned pipelines; degrading either one into a
-// conversational answer recreates the exact failure where Scout returns prose
-// (or ad-hoc HTML) after the person explicitly asked for a durable deck.
-func scoutRegistryWorkAvailableWithoutAgentWorker(work *conversationWorkDecision) bool {
+// scoutServerOwnedAuthoredOutputWork reports the durable authored-output lanes
+// whose process contract, rather than a named free-form agent seat, owns the
+// execution. That distinction is load-bearing in direct-agent conversations:
+// an explicit presentation or document request must reach the same native
+// studio as it would in Scout chat, without borrowing or widening the addressed
+// seat's capabilities or attribution.
+func scoutServerOwnedAuthoredOutputWork(work *conversationWorkDecision) bool {
 	if work == nil || work.Kind != conversationWorkRegistryTool {
 		return false
 	}
@@ -1155,6 +1242,14 @@ func scoutRegistryWorkAvailableWithoutAgentWorker(work *conversationWorkDecision
 	default:
 		return false
 	}
+}
+
+// scoutRegistryWorkAvailableWithoutAgentWorker reports the process-backed
+// deliverables whose goal engine remains the truthful execution carrier even
+// when the free-form agent-thread runner is closed. Degrading one of these into
+// conversational prose would violate the user's explicit output intent.
+func scoutRegistryWorkAvailableWithoutAgentWorker(work *conversationWorkDecision) bool {
+	return scoutServerOwnedAuthoredOutputWork(work)
 }
 
 func deterministicScoutRegistryWorkDecision(toolID, objective, query string) (conversationIntentDecision, bool) {
@@ -1334,16 +1429,13 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		return decision
 	}
 	imageRequest := openAIImageGenerationAvailable() && scoutChatImageRequestDetected(intentText)
-	if !imageRequest && scoutChatInlineAnalysisRequest(intentText) {
-		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
-		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
-		return decision
-	}
 	// An explicit substantial report/document request is one durable native
 	// document. Route it through the server-authored, researched-when-needed
 	// report process before the model can flatten it into a generic research
-	// workstream. Public callers still hold work at their audience boundary.
-	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
+	// workstream. Output intent outranks direct-agent modality: the process owns
+	// this artifact without widening or impersonating the addressed seat. Public
+	// callers still hold work at their audience boundary.
+	if !imageRequest {
 		if decision, ok := scoutDocumentReportDecision(intentText); ok {
 			recordConversationIntentOutcome(decision, map[string]any{"guard": "document_report_output"})
 			return decision
@@ -1351,10 +1443,10 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 	}
 	// A direct deck ask is already a complete output decision. Route it before
 	// the model so channel history can never turn "make the actual deck" into an
-	// outline or a conversational HTML blob. Direct-agent chats remain model
-	// routed because the assigned seat's capability verdict and provider attempt
-	// are part of that surface's telemetry contract.
-	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
+	// outline or a conversational HTML blob. The same output contract applies in
+	// a direct-agent thread; the named seat remains relevant to ordinary answers
+	// and admitted workstreams, never to the studio process's authority.
+	if !imageRequest {
 		toolID := ""
 		switch {
 		case scoutChatSimpleOutlineRequestDetected(intentText):
@@ -1368,6 +1460,15 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 				return decision
 			}
 		}
+	}
+	// Source analysis by itself is an immediate answer. It is deliberately
+	// classified only after explicit authored-output intent: "analyze these
+	// sources and draft a report/deck" still promises a durable native artifact,
+	// while "analyze these sources" does not invent one.
+	if !imageRequest && scoutChatInlineAnalysisRequest(intentText) {
+		decision := conversationalReplyDecision(proposalSourceDeterministicGuard)
+		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
+		return decision
 	}
 	// Outlines and decks are durable products even when the free-form agent
 	// runner is closed. The deterministic guard below routes them into the

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -351,7 +352,7 @@ func TestScoutChatViewerProjectionRequiresCurrentResultACL(t *testing.T) {
 		t.Fatalf("owner lost authorized report: %+v", owner.Messages[0].Thread)
 	}
 	other := app.projectScoutChatThreadForViewer("tim@shareability.com", thread)
-	if ref := other.Messages[0].Thread; ref.ResultArtifactID != "" || ref.ResultTitle != "" || ref.ResultPreview != "" {
+	if ref := other.Messages[0].Thread; ref.ResultArtifactID != "" || ref.ResultTitle != "" || ref.ResultPreview != "" || ref.ResultQualityState != "" || ref.ResultCanEdit || ref.ResultCanContinue || ref.ResultCanPresent || ref.ResultCanExport {
 		t.Fatalf("private result leaked to non-owner: %+v", ref)
 	}
 }
@@ -412,12 +413,16 @@ func TestScoutChatViewerProjectionUsesOnlyExactBlockedDeckSalvage(t *testing.T) 
 	}
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "needs_attention", ArtifactID: goal.ID}}}}
 	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
-	if got := projected.Messages[0].Thread.ResultArtifactID; got != salvage.ID || got == newer.ID {
+	ref := projected.Messages[0].Thread
+	if got := ref.ResultArtifactID; got != salvage.ID || got == newer.ID {
 		t.Fatalf("blocked deck result=%q, want exact salvage %q and never newer %q", got, salvage.ID, newer.ID)
+	}
+	if ref.ResultQualityState != authoredResultQualityDraftNeedsAttention || !ref.ResultCanEdit || !ref.ResultCanContinue || ref.ResultCanPresent || ref.ResultCanExport {
+		t.Fatalf("blocked deck salvage projected publication capability: %+v", ref)
 	}
 }
 
-func TestScoutChatAcceptedDeckBindsExactRevisionAndLabelsLaterEdits(t *testing.T) {
+func TestScoutChatHumanAcceptedDeckNeverBypassesRenderedAdmission(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Approved deck goal", "goal", "AJ", map[string]string{
 		"mode": "goal", "status": "complete", "threadStatus": "complete",
@@ -443,8 +448,8 @@ func TestScoutChatAcceptedDeckBindsExactRevisionAndLabelsLaterEdits(t *testing.T
 	}}}
 	exact := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	exactRef := exact.Messages[0].Thread
-	if exactRef.ResultArtifactID != deck.ID || exactRef.ResultApprovalState != scoutChatResultApprovalExact || !exactRef.ResultCanEdit {
-		t.Fatalf("exact approved binding projection=%+v", exactRef)
+	if exactRef.ResultArtifactID != deck.ID || exactRef.ResultApprovalState != scoutChatResultApprovalExact || !exactRef.ResultCanEdit || exactRef.ResultQualityState != authoredResultQualityDraftNeedsAttention || exactRef.ResultCanPresent || exactRef.ResultCanExport {
+		t.Fatalf("human acceptance bypassed rendered admission: %+v", exactRef)
 	}
 
 	edited, _, err := app.updateOSArtifact(deck.ID, "Approved deck", "<!doctype html><html><body><section class=\"pg\">edited after approval</section></body></html>", "AJ")
@@ -456,8 +461,208 @@ func TestScoutChatAcceptedDeckBindsExactRevisionAndLabelsLaterEdits(t *testing.T
 	}
 	postEdit := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	postEditRef := postEdit.Messages[0].Thread
-	if postEditRef.ResultArtifactID != deck.ID || postEditRef.ResultApprovalState != scoutChatResultApprovalEdited {
+	if postEditRef.ResultArtifactID != deck.ID || postEditRef.ResultApprovalState != scoutChatResultApprovalEdited || postEditRef.ResultQualityState != authoredResultQualityDraftNeedsAttention || postEditRef.ResultCanPresent || postEditRef.ResultCanExport {
 		t.Fatalf("post-approval edit was represented as exact approval: %+v", postEditRef)
+	}
+}
+
+func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T) {
+	fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
+	var scorerCalls atomic.Int32
+	fixture.runQualityGate(t, packagingQualityScoreJSON(9.4, "ready"), &scorerCalls)
+	if scorerCalls.Load() != 0 {
+		t.Fatalf("deterministic ready jury called a second scorer %d time(s)", scorerCalls.Load())
+	}
+	ship := fixture.plan.subtaskByID("ship_compile")
+	ship.Status = subtaskRunning
+	shipStage := packagingStudioStage(t, fixture.def, "ship_compile")
+	body, metadata, err := compilePackagingStudioShip(fixture.app, &fixture.plan, fixture.parentID, shipStage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.engine.completeProcessStage(&fixture.plan, fixture.parentID, ship, shipStage, body, "published fixture", metadata)
+	fixture.plan.State = goalStateVerified
+	fixture.plan.Report.DeliverableArtifactID = fixture.deck.ID
+	rawPlan, _ := json.Marshal(fixture.plan)
+	parent := mustArtifact(t, fixture.app, fixture.parentID)
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "Scout", map[string]string{"goalPlan": string(rawPlan), "status": "complete", "threadStatus": "complete"}); err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
+		ID: "published-goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: parent.ID, Mode: "goal", Status: "complete", ArtifactID: parent.ID},
+	}}}
+	projected := fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	ref := projected.Messages[0].Thread
+	if ref.ResultArtifactID != fixture.deck.ID || ref.ResultQualityState != authoredResultQualityAdmitted || !ref.ResultCanPresent || !ref.ResultCanExport {
+		t.Fatalf("exact rendered publication was not admitted: %+v", ref)
+	}
+
+	edited, _, err := fixture.app.updateOSArtifact(fixture.deck.ID, "", fixture.deck.Text+"\n<!-- edited -->", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifactVersion(edited) == artifactVersion(fixture.deck) {
+		t.Fatal("fixture edit did not advance the admitted deck revision")
+	}
+	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	ref = projected.Messages[0].Thread
+	if ref.ResultArtifactID != fixture.deck.ID || ref.ResultQualityState != authoredResultQualityEditedAfterAdmission || !ref.ResultCanContinue || ref.ResultCanPresent || ref.ResultCanExport {
+		t.Fatalf("post-admission edit retained final capabilities: %+v", ref)
+	}
+	qualityStage := fixture.plan.subtaskByID("quality_gate")
+	qualityRecord := mustArtifact(t, fixture.app, qualityStage.ArtifactID)
+	juryDigest := qualityRecord.Metadata["slideJuryArtifactDigest"]
+	if juryDigest == "" {
+		t.Fatal("ready fixture did not bind the slide jury digest")
+	}
+	if _, _, err := fixture.app.memory.updateOSArtifactMetadata(qualityRecord.ID, map[string]string{"slideJuryArtifactDigest": ""}); err != nil {
+		t.Fatal(err)
+	}
+	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if incomplete := projected.Messages[0].Thread; incomplete.ResultQualityState != authoredResultQualityDraftNeedsAttention || incomplete.ResultCanContinue || incomplete.ResultCanPresent || incomplete.ResultCanExport {
+		t.Fatalf("incomplete gate tuple represented the edit as previously admitted: %+v", incomplete)
+	}
+	if _, _, err := fixture.app.memory.updateOSArtifactMetadata(qualityRecord.ID, map[string]string{"slideJuryArtifactDigest": juryDigest}); err != nil {
+		t.Fatal(err)
+	}
+	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if restored := projected.Messages[0].Thread; restored.ResultQualityState != authoredResultQualityEditedAfterAdmission || !restored.ResultCanContinue {
+		t.Fatalf("restored exact jury tuple did not recover edited-review state: %+v", restored)
+	}
+
+	previousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	assertExportHeld := func(handler http.HandlerFunc, path, body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range adminCookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		handler(recorder, req)
+		if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "must pass review") {
+			t.Fatalf("edited authored export status=%d body=%s, want exact-admission conflict", recorder.Code, recorder.Body.String())
+		}
+	}
+	assertExportHeld(artifactExportPDFHandler, "/artifacts/export-pdf", fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, edited.ID, artifactVersion(edited)))
+	assertExportHeld(deckPPTXExportHandler, "/artifacts/export-pptx", fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d,"sceneRef":%q}`, edited.ID, artifactVersion(edited), edited.Metadata[deckSceneRefMetadataKey]))
+
+	previousFeedbackStart := startGoalFeedbackResumeAsync
+	startedReview := false
+	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
+	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, edited.ID))
+	if review.Code != http.StatusAccepted {
+		t.Fatalf("review changes status=%d body=%s", review.Code, review.Body.String())
+	}
+	if !startedReview {
+		t.Fatal("review changes did not schedule the persisted goal re-drive")
+	}
+	reopened := mustGoalPlan(t, fixture.app, parent.ID)
+	if reopened.State != goalStateExecute || reopened.subtaskByID("ship_deck").ArtifactID != edited.ID || reopened.subtaskByID("draft_compile").Status != subtaskReady {
+		t.Fatalf("edited deck was not rebound into the rendered-review tail: state=%q ship=%+v render=%+v", reopened.State, reopened.subtaskByID("ship_deck"), reopened.subtaskByID("draft_compile"))
+	}
+}
+
+func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "document-review-test-key")
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerOpenAIText)
+	installFakeChildRunner(t)
+	fixture := seedDocumentReportQualityFixture(t, 2)
+	fixture.app.apiKey = "document-review-test-key"
+	previousStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStart })
+	work, err := launchConversationOwnedGoalForTest(t, fixture.app, goalLaunchSpec{
+		Objective: "Write the western creator opportunity report", CreatedBy: "aj@shareability.com", ToolTemplate: documentReportProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, fixture.app, work.Artifact.ID)
+	engine := newGoalEngine(fixture.app)
+	if err := engine.prepareGoalRoute(&plan, work.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	resultMetadata := map[string]string{"goalParentId": work.Artifact.ID, "goalSubtaskId": "write", "goalDeliverable": "true"}
+	for key, value := range goalRouteChildBindingMetadata(&plan) {
+		resultMetadata[key] = value
+	}
+	report, changed, err := fixture.app.memory.updateOSArtifactWithMetadata(fixture.report.ID, "", fixture.report.Text, "AJ", resultMetadata)
+	if err != nil || !changed {
+		t.Fatalf("bind report to authored goal: changed=%t err=%v", changed, err)
+	}
+	fixture.parentID = work.Artifact.ID
+	fixture.report = report
+	fixture.plan = &plan
+	plan.Subtasks = []goalSubtask{
+		{ID: "write", Role: processRoleWriter, Status: subtaskComplete, ArtifactID: report.ID},
+		{ID: "quality_gate", Role: processRoleGate, Status: subtaskComplete, DependsOn: []string{"write"}, Review: &goalSubtaskReview{Verdict: goalReviewPass}},
+		{ID: documentReportDraftRenderStageID, Role: processRoleCompile, Status: subtaskComplete, DependsOn: []string{"write", "quality_gate"}},
+		{ID: documentReportJuryStageID, Role: processRoleCompile, Status: subtaskComplete, DependsOn: []string{documentReportDraftRenderStageID}},
+	}
+	attachFreshDocumentRender(t, &fixture)
+	fixture.fileJury(t, 9.4, documentReportMinimumJurySeats, "KEEP")
+	fileAdmittedPublishedDocument(t, &fixture)
+	admission := plan.subtaskByID(documentReportRenderedAdmissionID)
+	admission.DependsOn = []string{documentReportJuryStageID, documentReportDraftRenderStageID, "write"}
+	publish := plan.subtaskByID(documentReportPublishStageID)
+	publish.DependsOn = []string{documentReportRenderedAdmissionID}
+	plan.State = goalStateVerified
+	plan.Report.DeliverableArtifactID = fixture.report.ID
+	rawPlan, _ := json.Marshal(plan)
+	parent := mustArtifact(t, fixture.app, work.Artifact.ID)
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "Scout", map[string]string{
+		"goalPlan": string(rawPlan), "status": "complete", "threadStatus": "complete",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	current := mustArtifact(t, fixture.app, fixture.report.ID)
+	if quality := fixture.app.authoredResultQualityForArtifact(current); quality != authoredResultQualityAdmitted {
+		t.Fatalf("exact published document quality=%q, want admitted", quality)
+	}
+
+	edited, _, err := fixture.app.updateOSArtifact(current.ID, "", current.Text+"\n\n## Edited conclusion\n\nRun the bounded pilot.", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quality := fixture.app.authoredResultQualityForArtifact(edited); quality != authoredResultQualityEditedAfterAdmission {
+		t.Fatalf("edited published document quality=%q, want edited_after_admission", quality)
+	}
+
+	previousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	request := httptest.NewRequest(http.MethodPost, "/artifacts/export-pdf", strings.NewReader(fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, edited.ID, artifactVersion(edited))))
+	request.Header.Set("Content-Type", "application/json")
+	for _, cookie := range adminCookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	artifactExportPDFHandler(recorder, request)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "must pass review") {
+		t.Fatalf("edited document PDF status=%d body=%s, want exact-admission conflict", recorder.Code, recorder.Body.String())
+	}
+
+	previousFeedbackStart := startGoalFeedbackResumeAsync
+	startedReview := false
+	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
+	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, edited.ID))
+	if review.Code != http.StatusAccepted {
+		t.Fatalf("document review changes status=%d body=%s", review.Code, review.Body.String())
+	}
+	if !startedReview {
+		t.Fatal("document review changes did not schedule the persisted goal re-drive")
+	}
+	reopened := mustGoalPlan(t, fixture.app, parent.ID)
+	if reopened.State != goalStateExecute || reopened.subtaskByID("write").ArtifactID != edited.ID || reopened.subtaskByID(documentReportDraftRenderStageID).Status != subtaskReady {
+		t.Fatalf("edited document was not rebound into rendered review: state=%q write=%+v render=%+v", reopened.State, reopened.subtaskByID("write"), reopened.subtaskByID(documentReportDraftRenderStageID))
 	}
 }
 
@@ -528,8 +733,12 @@ func TestScoutChatBlockedReportProjectsOnlyExactWriterSalvage(t *testing.T) {
 		t.Fatal(err)
 	}
 	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
-	if got := projected.Messages[0].Thread.ResultArtifactID; got != draft.ID {
+	ref := projected.Messages[0].Thread
+	if got := ref.ResultArtifactID; got != draft.ID {
 		t.Fatalf("exact writer salvage=%q, want %q", got, draft.ID)
+	}
+	if ref.ResultQualityState != authoredResultQualityDraftNeedsAttention || !ref.ResultCanEdit || !ref.ResultCanContinue || ref.ResultCanPresent || ref.ResultCanExport {
+		t.Fatalf("blocked document salvage projected publication capability: %+v", ref)
 	}
 }
 

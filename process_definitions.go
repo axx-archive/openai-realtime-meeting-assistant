@@ -382,7 +382,7 @@ func rawDocumentContractInstructions(contract string) (string, bool) {
 			"Your ENTIRE response is the deliverable FILE ITSELF: one complete, self-contained HTML document.",
 			"The FIRST characters of your response must be <!doctype html> and it must end with </html> — no preamble, no markdown, no code fences, no Vision line, no section headings, no commentary before or after the file.",
 			"A plan, outline, or description of the deck is a FAILED deliverable — the law sweep rejects anything that is not the document itself.",
-			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, inert per-slide .notes from the VOICE script, and a .fig-N slot for each generated image. Do not add custom JavaScript or presenter chrome; the native app owns presentation behavior.",
+			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, inert per-slide .notes from the locked presenter_note in the deck copy, and a .fig-N slot for each generated image. Do not add custom JavaScript or presenter chrome; the native app owns presentation behavior.",
 			"The file must round-trip through Deck Studio faithfully: stable data-deck ids/types plus explicit inline position, size, z-index, opacity, rotation, typography, fills, and image-fit for every editable element. A visually plausible but non-editable HTML page fails the deterministic law sweep.",
 		}, "\n"), true
 	case documentReportOutputContract:
@@ -939,13 +939,13 @@ func documentReportDefinition() ProcessDefinition {
 	internal := true
 	return ProcessDefinition{
 		ID:                     documentReportProcessID,
-		Version:                2,
+		Version:                3,
 		Title:                  "Document Studio",
 		Description:            "Turn a substantial document or report request and authorized company context into a researched-when-needed, reviewed, editable native document.",
 		Group:                  toolGroupProcesses,
 		Authority:              toolAuthorityWorkspaceWrite,
-		ImplementationRevision: "document_report.runtime.v2",
-		Budgets:                ProcessBudgets{MaxSubtasks: 8, MaxTokens: 48000, WallClock: 20 * time.Minute},
+		ImplementationRevision: "document_report.runtime.v3.rendered-admission.v1",
+		Budgets:                ProcessBudgets{MaxSubtasks: 12, MaxTokens: 64000, WallClock: 25 * time.Minute},
 		Stages: []ProcessStage{
 			{
 				ID:       "context_snapshot",
@@ -953,12 +953,13 @@ func documentReportDefinition() ProcessDefinition {
 				Role:     processRoleSynthesizer,
 				Internal: internal,
 				PromptBody: strings.Join([]string{
-					"Turn the direct approved request, exact reply-thread/source packet, and authorized Company Brain context into report_context_snapshot_v1. The current request is authoritative; older company context may support it but never override it.",
+					"Turn the direct approved request, exact reply-thread/source packet, and authorized Company Brain context into report_context_snapshot_v2. The current request is authoritative; older company context may support it but never override it.",
 					"Resolve the reader, decision or job to be done, intended use, scope, voice, useful document shape, known constraints, exact language worth preserving, settled internal facts, and genuinely open claims. Prefer a safe reversible inference over a routine clarification and label it.",
-					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, comparative claims, or credibility-critical numbers could materially change the report. Every external research question must name the concrete entity, audience, category, or market whose answer matters so a returned fact can be checked for direct relevance. A synthesis, internal memo, narrative draft, or answer fully supported by authorized sources does not need web research.",
+					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, comparative claims, or credibility-critical numbers could materially change the report. Use the fewest decision-driving questions: one decisive lane is better than a broad scan. Do not ask hosted web research to reconstruct private account analytics or perform a broad multi-platform audit; record that as an internal data need instead. A synthesis, internal memo, narrative draft, or answer fully supported by authorized sources does not need web research.",
+					"When research_mode is external, research_questions must contain 1 to 3 atomic single-line objects and no other shape. Each object has exactly question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance. research_kind is direct_evidence, comparative_evidence, or current_constraint. decision_effect is recommendation, scope, sequence, guardrail, or measurement. The question has exactly one question mark. Copy source_ref exactly as the full text inside one SOURCE [...] header, excluding only the literal brackets. Copy authority_quote exactly from that same source. scope_anchor is an exact 2 to 12 material-word phrase present in the direct ask, the authority_quote, the question, and decision_relevance; a company name or generic word such as market is insufficient. decision_relevance repeats that anchor and states concretely how the answer could change a recommendation, decision, pilot, sequence, scope, guardrail, or measurement in this report. direct_evidence must preserve the authorized entity, population, measure, predicate, geography, and time window. comparative_evidence may introduce named comparators only when the question explicitly asks for a comparison or benchmark and stays within one measure lane. current_constraint may introduce a regulator or platform only to ask for current rules, policy, regulation, or requirements; it must not bundle market, spend, reach, or performance claims. When research_mode is none or internal, research_questions is an empty array.",
 					"Return one JSON object with keys direct_ask, reader, decision, intended_use, document_shape, scope, voice, constraints, context_used, settled_facts, open_claims, research_mode, research_questions, reversible_inferences, and success_criteria. settled_facts must be an array of objects with claim, exact_quote, and source_ref. Copy claim and exact_quote verbatim from one authorized source and make them identical after whitespace normalization. Copy the complete bracketed reference exactly from the same SOURCE [...] block or source-linked Company Brain line into source_ref, including every id, revision, and digest field; never synthesize or combine a reference. If that same-source proof is unavailable, put the item in open_claims instead.",
 				}, "\n"),
-				OutputContract: "report_context_snapshot_v1",
+				OutputContract: "report_context_snapshot_v2",
 			},
 			{
 				ID:        "external_research",
@@ -1041,6 +1042,47 @@ func documentReportDefinition() ProcessDefinition {
 						"Direct-request fidelity", "Decision usefulness", "Narrative coherence", "Evidence integrity", "Human voice", "Specificity and actionability", "Document completeness",
 					},
 				},
+			},
+			{
+				ID:             documentReportDraftRenderStageID,
+				Title:          "Render the exact document draft",
+				Role:           processRoleCompile,
+				Internal:       internal,
+				InputFrom:      []string{"write", "quality_gate"},
+				PromptBody:     "Convert the exact text-approved native Markdown revision into the branded text-native PDF, persist every rendered page image, and bind artifact id, revision, content digest, PDF, and ordered page set. A missing, failed, stale, partial, or timed-out render becomes needs_attention; it never degrades into a text-only pass.",
+				OutputContract: documentReportRenderContract,
+				Compile:        compileDocumentReportDraftRender,
+			},
+			{
+				ID:             documentReportJuryStageID,
+				Title:          "Review the rendered document",
+				Role:           processRoleCompile,
+				Internal:       internal,
+				InputFrom:      []string{documentReportDraftRenderStageID},
+				PromptBody:     "Put every exact rendered page before distinct visual document critics. Judge hierarchy, density, tables, page breaks, orphans and widows, captions, citations and links, accessibility and contrast, and print/PDF completeness. Preserve page-specific executable repairs and fail closed as needs_attention when the render, provider, page coverage, or seat quorum is unavailable.",
+				OutputContract: documentReportJuryContract,
+				Compile:        compileDocumentReportJury,
+			},
+			{
+				ID:         documentReportRenderedAdmissionID,
+				Title:      "Admit the rendered document",
+				Role:       processRoleGate,
+				Internal:   internal,
+				InputFrom:  []string{documentReportJuryStageID, documentReportDraftRenderStageID, "write"},
+				PromptBody: "Deterministically admit only the exact rendered document revision whose complete page set received at least two distinct valid jury seats and whose minimum per-page average is at least 8.5. Route exact executable page repairs back to the document writer; needs_attention cannot be overridden by a text scorer.",
+				GateSpec: &ProcessGateSpec{
+					Threshold: documentReportReadyAverageFloor, Floor: documentReportReadyAverageFloor, MaxRounds: 2, RepairTarget: "write", HoldOnFailure: true,
+					Dimensions: []string{"Hierarchy", "Density", "Tables", "Page breaks", "Orphans and widows", "Captions", "Citations and links", "Accessibility and contrast", "Print/PDF completeness"},
+				},
+			},
+			{
+				ID:         documentReportPublishStageID,
+				Title:      "Publish the admitted document",
+				Role:       processRoleCompile,
+				Internal:   internal,
+				InputFrom:  []string{documentReportRenderedAdmissionID},
+				PromptBody: "Publish the exact editable report and its already-bound PDF only after deterministic rendered admission. Re-read every binding immediately before delivery; do not mutate the reviewed report revision after admission.",
+				Compile:    compileDocumentReportPublish,
 			},
 		},
 	}

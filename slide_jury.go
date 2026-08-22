@@ -55,6 +55,9 @@ const (
 	// an unbounded requeue prompt while preserving every admitted fix verbatim.
 	slideJuryRepairFixMaxChars = 600
 	slideJuryRepairFixMaxCount = 36
+	// The minimum per-page average for a presentation-ready rendered deck. A
+	// few excellent pages cannot hide one bland 7–8 page.
+	slideJuryReadyAverageFloor = 8.5
 )
 
 // slideJuryPollInterval is how often the studio stage re-checks the deck for
@@ -222,7 +225,20 @@ func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEnt
 // the literal word KEEP — a jury that says "make it better" is slop.
 const slideJurySchema = `Return STRICT JSON only, no prose outside it:
 {"pages":[{"page":1,"score":0,"fix":"one executable change, or the literal word KEEP","blockers":["text_overlap"]}],"weakest_three":[1,2,3],"strongest_three":[4,5,6]}
-Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
+Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim, low_contrast, unreadable_citation, unreadable_chart, bad_crop, repetitive_rhythm, weak_cover_hierarchy. weak_cover_hierarchy is valid only on page 1. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
+
+var slideJuryBlockerCodes = []string{
+	"text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim",
+	"low_contrast", "unreadable_citation", "unreadable_chart", "bad_crop", "repetitive_rhythm", "weak_cover_hierarchy",
+}
+
+func validSlideJuryBlocker(code string, page int) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if !slices.Contains(slideJuryBlockerCodes, code) {
+		return false
+	}
+	return code != "weak_cover_hierarchy" || page == 1
+}
 
 type slideJuryPageScore struct {
 	Page     int      `json:"page"`
@@ -277,7 +293,7 @@ func validateSlideJurySeatScorecard(card slideJurySeatScorecard, expectedPages [
 		}
 		for _, blocker := range page.Blockers {
 			blocker = strings.ToLower(strings.TrimSpace(blocker))
-			if !oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim") {
+			if !validSlideJuryBlocker(blocker, page.Page) {
 				return fmt.Errorf("scorecard page %d has unsupported blocker %q", page.Page, blocker)
 			}
 		}
@@ -307,8 +323,17 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 	}
 	pages := map[int]*pageVotes{}
 	parsedSeats := 0
+	validPersonas := map[string]bool{}
+	for _, persona := range slideJuryPersonas() {
+		validPersonas[strings.ToLower(strings.TrimSpace(persona.Name))] = true
+	}
+	seenPersonas := map[string]bool{}
 	for _, voice := range voices {
 		if voice.Err != nil {
+			continue
+		}
+		persona := strings.ToLower(strings.TrimSpace(voice.Persona))
+		if !validPersonas[persona] || seenPersonas[persona] {
 			continue
 		}
 		var card slideJurySeatScorecard
@@ -322,6 +347,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			continue
 		}
 		parsedSeats++
+		seenPersonas[persona] = true
 		for _, page := range card.Pages {
 			fix := strings.TrimSpace(page.Fix)
 			vote := pages[page.Page]
@@ -344,7 +370,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 					continue
 				}
 				seenBlockers[blocker] = struct{}{}
-				if oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim") {
+				if validSlideJuryBlocker(blocker, page.Page) {
 					vote.blockers[blocker]++
 				}
 			}
@@ -373,7 +399,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 				break
 			}
 		}
-		if votes.low >= 2 || structuralAgreement {
+		if average < slideJuryReadyAverageFloor || votes.low >= 2 || structuralAgreement {
 			result.BlockingPages = append(result.BlockingPages, page)
 		}
 	}
@@ -395,6 +421,65 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 		}
 	}
 	return result
+}
+
+// slideJuryVoicesFromRecord reconstructs only the exact server-authored jury
+// seat section. The merged prose scoreboard is deliberately ignored: rendered
+// admission is recomputed from the independent machine scorecards, not from a
+// summary that could drift from them.
+func slideJuryVoicesFromRecord(jury meetingMemoryEntry) []goalPanelVoice {
+	text := strings.ReplaceAll(jury.Text, "\r\n", "\n")
+	const voicesMarker = "\n## Jury voices\n"
+	markerIndex := strings.Index(text, voicesMarker)
+	if markerIndex < 0 {
+		voices := make([]goalPanelVoice, 0, len(slideJuryPersonas()))
+		for _, persona := range slideJuryPersonas() {
+			voices = append(voices, goalPanelVoice{Persona: persona.Name, Err: fmt.Errorf("seat scorecard is missing")})
+		}
+		return voices
+	}
+	voicesText := text[markerIndex+len(voicesMarker):]
+	voices := make([]goalPanelVoice, 0, len(slideJuryPersonas()))
+	for _, persona := range slideJuryPersonas() {
+		marker := "### " + persona.Name + "\n"
+		start := strings.Index(voicesText, marker)
+		if start < 0 {
+			voices = append(voices, goalPanelVoice{Persona: persona.Name, Err: fmt.Errorf("seat scorecard is missing")})
+			continue
+		}
+		start += len(marker)
+		end := len(voicesText)
+		if next := strings.Index(voicesText[start:], "\n### "); next >= 0 {
+			end = start + next
+		}
+		payload := strings.TrimSpace(voicesText[start:end])
+		if !strings.HasPrefix(stripJSONCodeFence(payload), "{") {
+			voices = append(voices, goalPanelVoice{Persona: persona.Name, Err: fmt.Errorf("seat scorecard is unavailable")})
+			continue
+		}
+		voices = append(voices, goalPanelVoice{Persona: persona.Name, Text: payload})
+	}
+	return voices
+}
+
+// validateSlideJuryReadinessMetadata makes the raw seat scorecards the
+// deterministic source of truth. Every mirrored verdict/score/repair field on
+// the scoreboard must equal a fresh evaluation of those exact seats.
+func validateSlideJuryReadinessMetadata(jury meetingMemoryEntry, expectedPages int) (slideJuryReadiness, error) {
+	readiness := evaluateSlideJuryReadiness(slideJuryVoicesFromRecord(jury), expectedPages)
+	repairs := readiness.Repairs
+	if repairs == nil {
+		repairs = []slideJuryRepair{}
+	}
+	repairsRaw, _ := json.Marshal(repairs)
+	if strings.TrimSpace(jury.Metadata["reviewVerdict"]) != readiness.Verdict ||
+		strings.TrimSpace(jury.Metadata["blockingPages"]) != slideJuryPageList(readiness.BlockingPages) ||
+		strings.TrimSpace(jury.Metadata["minimumAverage"]) != strconv.FormatFloat(readiness.MinimumAverage, 'f', 2, 64) ||
+		strings.TrimSpace(jury.Metadata["parsedSeats"]) != strconv.Itoa(readiness.ParsedSeats) ||
+		strings.TrimSpace(jury.Metadata["repairFixes"]) != string(repairsRaw) {
+		return slideJuryReadiness{}, fmt.Errorf("slide jury metadata does not match its exact seat scorecards")
+	}
+	return readiness, nil
 }
 
 func slideJuryPageList(pages []int) string {
@@ -421,7 +506,7 @@ func slideJuryPersonas() []goalPanelPersona {
 		},
 		{
 			Name:   "design_eye",
-			System: "You are the DESIGN EYE on Bonfire's slide jury, looking at the RENDERED pages of a shipped deck. You judge what the page looks like: hierarchy, type scale, alignment, color discipline, whether the eye knows where to go first, whether a chart reads at presentation distance. When a page carries a photographic image, judge whether it EARNS its place: does it drive the emotional beat and advance the story, or is it decoration a cleaner typographic page would beat? An image that earns nothing costs the page — your fix names it ('drop the image, let the headline carry the page' / 'replace with a shot of X') or KEEP. These are ADVISORY revision notes, never auto-applied. Score every page; your fixes are concrete layout/type/color/imagery changes, or KEEP.",
+			System: "You are the DESIGN EYE on Bonfire's slide jury, looking at the RENDERED pages of a shipped deck. You judge what the page looks like: hierarchy, type scale, alignment, color discipline, whether the eye knows where to go first, whether a chart and its citations read at presentation distance, whether contrast is sufficient, whether image crops damage the subject, whether page-to-page composition has rhythm, and whether the cover has an unmistakable first hierarchy. Use the exact blocker codes low_contrast, unreadable_citation, unreadable_chart, bad_crop, repetitive_rhythm, and weak_cover_hierarchy when those defects exist. When a page carries a photographic image, judge whether it EARNS its place: does it drive the emotional beat and advance the story, or is it decoration a cleaner typographic page would beat? An image that earns nothing costs the page — your fix names it ('drop the image, let the headline carry the page' / 'replace with a shot of X') or KEEP. These are ADVISORY revision notes, never auto-applied. Score every page; your fixes are concrete layout/type/color/imagery changes, or KEEP.",
 		},
 		{
 			Name:   "room_gut",
@@ -679,11 +764,12 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 		engine := newGoalEngine(app)
 		engine.openAIResponder = withSlideJuryOpenAIPageContent(engine.openAIResponder, pageContent)
 		panelSpec := goalPanelSpec{
-			Task:      strings.Join(taskLines, "\n"),
-			Schema:    slideJurySchema,
-			Personas:  slideJuryPersonas(),
-			Synthesis: slideJurySynthesisSystem,
-			Review:    true,
+			Task:               strings.Join(taskLines, "\n"),
+			Schema:             slideJurySchema,
+			Personas:           slideJuryPersonas(),
+			Synthesis:          slideJurySynthesisSystem,
+			Review:             true,
+			MinSuccessfulSeats: 2,
 		}
 		var outcome goalPanelOutcome
 		var err error
@@ -750,6 +836,7 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 		body.WriteString(strings.TrimSpace(voice.Text) + "\n")
 	}
 
+	durableBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, body.String())
 	metadata := map[string]string{
 		"artifactContract":    slideJuryContract,
 		"type":                artifactTypeMarkdown,
@@ -760,6 +847,7 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 		"juryBatchCount":      strconv.Itoa(len(records)),
 		"juriedPageCount":     strconv.Itoa(len(assets)),
 		"pageCoverage":        fmt.Sprintf("%d/%d", len(assets), len(assets)),
+		"jurySeatsDigest":     sha256Hex([]byte(durableBody)),
 	}
 	readiness := evaluateSlideJuryReadiness(outcome.Voices, len(assets))
 	metadata["reviewVerdict"] = readiness.Verdict
@@ -779,7 +867,7 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 	if packageID := strings.TrimSpace(artifact.Metadata["packageId"]); packageID != "" {
 		metadata["packageId"] = packageID
 	}
-	filed, appended, err := app.createOSArtifactWithMetadata("workflow", "Slide jury — merged scoreboard", body.String(), scoutParticipantName, metadata)
+	filed, appended, err := app.createOSArtifactWithMetadata("workflow", "Slide jury — merged scoreboard", durableBody, scoutParticipantName, metadata)
 	if err != nil {
 		return meetingMemoryEntry{}, fmt.Errorf("file slide jury scoreboard: %w", err)
 	}

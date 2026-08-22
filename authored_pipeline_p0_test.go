@@ -59,7 +59,10 @@ func newPackagingQualityGateFixture(t *testing.T, verdict string, repairs []slid
 	}
 	plan.State = goalStateExecute
 
-	shipArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "ship_deck", studioTestDeckHTML(), scoutParticipantName, map[string]string{})
+	shipArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "ship_deck", studioTestDeckHTML(), scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": run.Artifact.ID, "goalSubtaskId": "ship_deck",
+		"processId": packagingStudioProcessID, "processStage": "ship_deck", "status": "complete", "threadStatus": "complete",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,9 +114,35 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 	if err != nil {
 		t.Fatal(err)
 	}
+	repairByPage := map[int]string{}
+	for _, repair := range repairs {
+		if len(repair.Fixes) > 0 {
+			repairByPage[repair.Page] = repair.Fixes[0]
+		}
+	}
+	pageCount := renderedDeckSlideCount(fixture.deck.Text)
+	var juryBody strings.Builder
+	juryBody.WriteString("Exact rendered scoreboard\n\n## Jury voices\n")
+	for _, persona := range slideJuryPersonas() {
+		card := slideJurySeatScorecard{Pages: make([]slideJuryPageScore, 0, pageCount)}
+		for page := 1; page <= pageCount; page++ {
+			score := 9.25
+			fix := "KEEP"
+			if exactFix := repairByPage[page]; exactFix != "" {
+				score, fix = 6.5, exactFix
+			}
+			card.Pages = append(card.Pages, slideJuryPageScore{Page: page, Score: score, Fix: fix})
+		}
+		raw, marshalErr := json.Marshal(card)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		juryBody.WriteString("\n### " + persona.Name + "\n" + string(raw) + "\n")
+	}
+	scoreboardBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, juryBody.String())
 	deckVersion := fmt.Sprintf("%d", artifactVersion(fixture.deck))
 	deckDigest := artifactCapabilityDigest(fixture.deck)
-	scoreboard, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "Slide jury — merged scoreboard", "exact rendered scoreboard", scoutParticipantName, map[string]string{
+	scoreboard, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "Slide jury — merged scoreboard", scoreboardBody, scoutParticipantName, map[string]string{
 		"artifactContract":    slideJuryContract,
 		"source":              slideJurySource,
 		"goalId":              fixture.parentID,
@@ -125,20 +154,23 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 		"minimumAverage":      minimum,
 		"parsedSeats":         "3",
 		"repairFixes":         string(repairJSON),
+		"jurySeatsDigest":     sha256Hex([]byte(scoreboardBody)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.engine.completeProcessStage(&fixture.plan, fixture.parentID, stage, stageDef,
 		"Slide jury linked to "+scoreboard.ID, "jury fixture", map[string]string{
-			"slideJuryArtifactId": scoreboard.ID,
-			"reviewVerdict":       verdict,
-			"blockingPages":       blocking,
-			"minimumAverage":      minimum,
-			"parsedSeats":         "3",
-			"repairFixes":         string(repairJSON),
-			"deckArtifactVersion": deckVersion,
-			"deckContentDigest":   deckDigest,
+			"slideJuryArtifactId":     scoreboard.ID,
+			"slideJuryArtifactDigest": artifactCapabilityDigest(scoreboard),
+			"jurySeatsDigest":         sha256Hex([]byte(scoreboardBody)),
+			"reviewVerdict":           verdict,
+			"blockingPages":           blocking,
+			"minimumAverage":          minimum,
+			"parsedSeats":             "3",
+			"repairFixes":             string(repairJSON),
+			"deckArtifactVersion":     deckVersion,
+			"deckContentDigest":       deckDigest,
 		})
 }
 
@@ -160,7 +192,7 @@ func TestAuthoredProcessLateReviewCascadeInvalidatesEveryTransitiveDependent(t *
 	if err := instantiateProcessPlan(def, &base); err != nil {
 		t.Fatal(err)
 	}
-	for _, targetID := range []string{"external_research", "voice", "layout_plan", "ship_deck"} {
+	for _, targetID := range []string{"external_research", "identity", "layout_plan", "ship_deck"} {
 		t.Run(targetID, func(t *testing.T) {
 			plan := base
 			plan.Subtasks = append([]goalSubtask(nil), base.Subtasks...)
@@ -235,23 +267,23 @@ func TestGenericLateReviewRequeueUsesReviewCascade(t *testing.T) {
 		plan.Subtasks[index].Status = subtaskComplete
 		plan.Subtasks[index].Review = &goalSubtaskReview{Verdict: goalReviewPass, By: "fixture"}
 	}
-	voice := plan.subtaskByID("voice")
-	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "voice", "Presenter notes that drifted", scoutParticipantName, map[string]string{})
+	layout := plan.subtaskByID("layout_plan")
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "layout", "Slide geometry that drifted", scoutParticipantName, map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice.ArtifactID, voice.Review = artifact.ID, nil
+	layout.ArtifactID, layout.Review = artifact.ID, nil
 	engine := newGoalEngine(app)
 	engine.openAIResponder = func(context.Context, string, openAITextRequest) (string, error) {
-		return `{"verdict":"revise","score":6,"reasons":"the notes drift from the locked story","strengths_to_keep":[]}`, nil
+		return `{"verdict":"revise","score":6,"reasons":"the geometry drifts from the locked identity","strengths_to_keep":[]}`, nil
 	}
 	if outcome := engine.reviewSubtasks(context.Background(), &plan); outcome != goalReviewOutcomeRequeue {
 		t.Fatalf("review outcome=%v, want requeue", outcome)
 	}
-	if voice.Status != subtaskReady || voice.Revisions != 1 {
-		t.Fatalf("voice was not requeued: %+v", voice)
+	if layout.Status != subtaskReady || layout.Revisions != 1 {
+		t.Fatalf("layout was not requeued: %+v", layout)
 	}
-	for _, id := range []string{"imagery_direction", "layout_plan", "ship_deck", "draft_compile", "slide_jury", "quality_gate", "ship_compile"} {
+	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury", "quality_gate", "ship_compile"} {
 		stage := plan.subtaskByID(id)
 		if stage.Status != subtaskPending || stage.Review == nil || stage.Review.By != "review_cascade" {
 			t.Fatalf("%s retained stale completion after generic review: %+v", id, stage)
@@ -274,17 +306,17 @@ func TestExhaustedAuthoredReviewStillInvalidatesDependentsBeforeHumanRetry(t *te
 		plan.Subtasks[index].Status = subtaskComplete
 		plan.Subtasks[index].Review = &goalSubtaskReview{Verdict: goalReviewPass, By: "fixture"}
 	}
-	voice := plan.subtaskByID("voice")
-	voice.Status = subtaskFailed
-	voice.Revisions = goalMaxRevisions
+	layout := plan.subtaskByID("layout_plan")
+	layout.Status = subtaskFailed
+	layout.Revisions = goalMaxRevisions
 	engine := newGoalEngine(app)
 	if outcome := engine.reviewSubtasks(context.Background(), &plan); outcome != goalReviewOutcomeBlocked {
 		t.Fatalf("review outcome=%v, want blocked", outcome)
 	}
-	if voice.Status != subtaskBlocked {
-		t.Fatalf("exhausted voice stage=%+v, want blocked", voice)
+	if layout.Status != subtaskBlocked {
+		t.Fatalf("exhausted layout stage=%+v, want blocked", layout)
 	}
-	for _, id := range []string{"imagery_direction", "layout_plan", "ship_deck", "draft_compile", "slide_jury", "quality_gate", "ship_compile"} {
+	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury", "quality_gate", "ship_compile"} {
 		stage := plan.subtaskByID(id)
 		if stage.Status != subtaskPending || stage.Review == nil || stage.Review.By != "review_cascade" {
 			t.Fatalf("%s survived the exhausted review and could be reused after Retry: %+v", id, stage)
@@ -359,16 +391,21 @@ func TestPackagingQualityGateReadyScoresThenShipsExactReviewedRevision(t *testin
 	beforeDigest := artifactCapabilityDigest(fixture.deck)
 	var calls atomic.Int32
 	fixture.runQualityGate(t, packagingQualityScoreJSON(9.2, "ready at presentation distance"), &calls)
-	if calls.Load() != 1 {
-		t.Fatalf("ready binding spent %d scorer calls, want one", calls.Load())
+	if calls.Load() != 0 {
+		t.Fatalf("authoritative rendered-ready verdict spent %d second-scorer calls, want zero", calls.Load())
 	}
 	quality := fixture.plan.subtaskByID("quality_gate")
 	if quality.Status != subtaskComplete {
 		t.Fatalf("ready quality gate did not complete: %+v", quality)
 	}
 	gateRecord := mustArtifact(t, fixture.app, quality.ArtifactID)
-	if gateRecord.Metadata["reviewedDeckArtifactId"] != fixture.deck.ID || gateRecord.Metadata["reviewedDeckArtifactVersion"] != fmt.Sprintf("%d", beforeVersion) || gateRecord.Metadata["reviewedDeckContentDigest"] != beforeDigest {
+	juryStage := fixture.plan.subtaskByID("slide_jury")
+	juryRecord := mustArtifact(t, fixture.app, juryStage.ArtifactID)
+	if gateRecord.Metadata["reviewedDeckArtifactId"] != fixture.deck.ID || gateRecord.Metadata["reviewedDeckArtifactVersion"] != fmt.Sprintf("%d", beforeVersion) || gateRecord.Metadata["reviewedDeckContentDigest"] != beforeDigest || gateRecord.Metadata["slideJuryArtifactId"] != juryRecord.Metadata["slideJuryArtifactId"] {
 		t.Fatalf("quality gate did not stamp exact reviewed identity: %v", gateRecord.Metadata)
+	}
+	if !strings.Contains(gateRecord.Text, "rendered slide jury passed the exact reviewed draft") {
+		t.Fatalf("quality gate did not name the deterministic rendered authority: %q", gateRecord.Text)
 	}
 	body, extra, err := compilePackagingStudioShip(fixture.app, &fixture.plan, fixture.parentID, packagingStudioStage(t, fixture.def, "ship_compile"))
 	if err != nil {
@@ -377,6 +414,81 @@ func TestPackagingQualityGateReadyScoresThenShipsExactReviewedRevision(t *testin
 	after := mustArtifact(t, fixture.app, extra["deckArtifactId"])
 	if after.ID != fixture.deck.ID || artifactVersion(after) != beforeVersion || artifactCapabilityDigest(after) != beforeDigest || !strings.Contains(body, "Exact reviewed candidate") {
 		t.Fatalf("final ship identity drifted: before=%s/v%d/%s after=%s/v%d/%s body=%q", fixture.deck.ID, beforeVersion, beforeDigest, after.ID, artifactVersion(after), artifactCapabilityDigest(after), body)
+	}
+}
+
+func TestPackagingStudioTerminalTailUsesOnlyExactRenderedAdmission(t *testing.T) {
+	fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
+	var modelCalls atomic.Int32
+	fixture.runQualityGate(t, packagingQualityScoreJSON(9.4, "ready"), &modelCalls)
+	if modelCalls.Load() != 0 {
+		t.Fatalf("rendered quality admission called a second scorer %d time(s)", modelCalls.Load())
+	}
+
+	ship := fixture.plan.subtaskByID("ship_compile")
+	ship.Status = subtaskRunning
+	stage := packagingStudioStage(t, fixture.def, "ship_compile")
+	body, metadata, err := compilePackagingStudioShip(fixture.app, &fixture.plan, fixture.parentID, stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.engine.completeProcessStage(&fixture.plan, fixture.parentID, ship, stage, body, "exact publication fixture", metadata)
+	for index := range fixture.plan.Subtasks {
+		fixture.plan.Subtasks[index].Status = subtaskComplete
+		// Deliberately clear generic review stamps. The authored rendered
+		// admission, not a late text model, owns terminal quality.
+		fixture.plan.Subtasks[index].Review = nil
+	}
+	fixture.plan.State = goalStateReview
+	fixture.engine.openAIResponder = func(context.Context, string, openAITextRequest) (string, error) {
+		modelCalls.Add(1)
+		return "", fmt.Errorf("no model may run after exact rendered admission")
+	}
+	fixture.engine.drive(context.Background(), &fixture.plan, fixture.parentID)
+	if modelCalls.Load() != 0 {
+		t.Fatalf("terminal authored tail made %d post-admission model call(s)", modelCalls.Load())
+	}
+	if fixture.plan.State != goalStateVerified || fixture.plan.Gate.Status != "passed" || fixture.plan.Gate.ReviewedBy != "presentation_rendered_admission" {
+		t.Fatalf("terminal authored tail did not verify exact publication: state=%q gate=%+v blocker=%q", fixture.plan.State, fixture.plan.Gate, fixture.plan.Blocker)
+	}
+	if fixture.plan.Report.Headline != "Presentation ready" || !strings.Contains(fixture.plan.Verification.Reasons, "slide jury remain bound") {
+		t.Fatalf("terminal report/verification lost exact rendered authority: report=%+v verification=%+v", fixture.plan.Report, fixture.plan.Verification)
+	}
+	admittedDeck := mustArtifact(t, fixture.app, fixture.deck.ID)
+	if err := fixture.app.requireFinalExportAdmission(admittedDeck); err != nil {
+		t.Fatalf("exact verified presentation did not unlock final export: %v", err)
+	}
+}
+
+func TestPackagingStudioJuryBodyTamperRevokesQualityPublicationAndVerification(t *testing.T) {
+	fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
+	var modelCalls atomic.Int32
+	fixture.runQualityGate(t, packagingQualityScoreJSON(9.4, "ready"), &modelCalls)
+	if modelCalls.Load() != 0 {
+		t.Fatalf("rendered admission unexpectedly called a second scorer %d time(s)", modelCalls.Load())
+	}
+	ship := fixture.plan.subtaskByID("ship_compile")
+	ship.Status = subtaskRunning
+	stage := packagingStudioStage(t, fixture.def, "ship_compile")
+	body, metadata, err := compilePackagingStudioShip(fixture.app, &fixture.plan, fixture.parentID, stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.engine.completeProcessStage(&fixture.plan, fixture.parentID, ship, stage, body, "exact publication fixture", metadata)
+
+	juryRecord := mustArtifact(t, fixture.app, fixture.plan.subtaskByID("slide_jury").ArtifactID)
+	scoreboard := mustArtifact(t, fixture.app, juryRecord.Metadata["slideJuryArtifactId"])
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(scoreboard.ID, "", scoreboard.Text+"\n\nTampered after admission.", scoutParticipantName, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolvePackagingStudioQualityGateReview(fixture.app, &fixture.plan, fixture.parentID); err == nil {
+		t.Fatal("quality resolver accepted a changed jury body")
+	}
+	if _, err := resolvePublishedPackagingStudioQuality(fixture.app, &fixture.plan, fixture.parentID); err == nil {
+		t.Fatal("publication resolver accepted a changed jury body")
+	}
+	if fixture.engine.verify(context.Background(), &fixture.plan) {
+		t.Fatal("terminal verifier accepted a changed jury body")
 	}
 }
 
@@ -396,7 +508,7 @@ func TestPackagingQualityScorerRequiresEveryExactBoundedRubricDimension(t *testi
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fixture.engine.openAIResponder = func(context.Context, string, openAITextRequest) (string, error) { return test.response, nil }
-			round := fixture.engine.scoreProcessGateRound(context.Background(), &fixture.plan, quality, stage)
+			round := fixture.engine.scoreProcessGateRound(context.Background(), &fixture.plan, fixture.parentID, quality, stage)
 			if round.Failure != goalGateFailureMalformed || len(round.Dimensions) != 0 {
 				t.Fatalf("invalid scorer response earned a judgment: %+v", round)
 			}
@@ -405,7 +517,7 @@ func TestPackagingQualityScorerRequiresEveryExactBoundedRubricDimension(t *testi
 	fixture.engine.openAIResponder = func(context.Context, string, openAITextRequest) (string, error) {
 		return packagingQualityScoreJSON(9.2, "ready"), nil
 	}
-	round := fixture.engine.scoreProcessGateRound(context.Background(), &fixture.plan, quality, stage)
+	round := fixture.engine.scoreProcessGateRound(context.Background(), &fixture.plan, fixture.parentID, quality, stage)
 	if round.Failure != "" || len(round.Dimensions) != 8 {
 		t.Fatalf("exact eight-dimension rubric was not admitted: %+v", round)
 	}
@@ -450,8 +562,13 @@ func TestPackagingQualityGateRepairedDeckShipsTheNewReviewedIdentity(t *testing.
 	reviewedDigest := artifactCapabilityDigest(fixture.deck)
 	var scorerCalls atomic.Int32
 	fixture.runQualityGate(t, packagingQualityScoreJSON(9.3, "the repaired version is clean"), &scorerCalls)
-	if scorerCalls.Load() != 1 || quality.Status != subtaskComplete {
-		t.Fatalf("repaired ready deck was not scored exactly once: calls=%d gate=%+v", scorerCalls.Load(), quality)
+	if scorerCalls.Load() != 0 || quality.Status != subtaskComplete {
+		t.Fatalf("repaired ready deck did not ship from its fresh rendered verdict alone: calls=%d gate=%+v", scorerCalls.Load(), quality)
+	}
+	gateRecord := mustArtifact(t, fixture.app, quality.ArtifactID)
+	juryRecord := mustArtifact(t, fixture.app, fixture.plan.subtaskByID("slide_jury").ArtifactID)
+	if gateRecord.Metadata["slideJuryArtifactId"] != juryRecord.Metadata["slideJuryArtifactId"] || gateRecord.Metadata["reviewedDeckArtifactVersion"] != fmt.Sprintf("%d", reviewedVersion) || gateRecord.Metadata["reviewedDeckContentDigest"] != reviewedDigest {
+		t.Fatalf("fresh repaired jury did not authorize the exact shipped revision: gate=%v jury=%v", gateRecord.Metadata, juryRecord.Metadata)
 	}
 	_, final, err := compilePackagingStudioShip(fixture.app, &fixture.plan, fixture.parentID, packagingStudioStage(t, fixture.def, "ship_compile"))
 	if err != nil {

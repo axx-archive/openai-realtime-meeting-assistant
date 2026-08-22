@@ -278,7 +278,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	for _, stageID := range []string{"context_snapshot", "evidence", "story_architects", "write", "gate"} {
 		stage := packagingStudioStage(t, packagingStudioDefinition(), stageID)
 		st := plan.subtaskByID(stageID)
-		task, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, st, stage)
+		task, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", st, stage)
 		if taskErr != nil {
 			t.Fatalf("authorized task for %s: %v", stageID, taskErr)
 		}
@@ -412,7 +412,7 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if legacyPlan.RouteReceipt.SourceSelectionDigest == "" || mustGoalPlan(t, kanbanApp, run.Artifact.ID).RouteReceipt.SourceSelectionDigest == "" {
 		t.Fatal("legacy source selection upgrade was not durably bound on the parent")
 	}
-	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, legacyPlan.subtaskByID("story_architects"), packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
+	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, "", legacyPlan.subtaskByID("story_architects"), packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if err != nil || !strings.Contains(legacyTask, "PRODUCTION_PDF_SENTINEL") {
 		t.Fatalf("pre-contextRefs live receipt did not rehydrate its exact accepted proposal source: err=%v task=%s", err, legacyTask)
 	}
@@ -422,9 +422,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	startAgentThreadAsync = func(_ *kanbanBoardApp, child scoutAgentThread) { writerQuery = child.Query }
 	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
 	plan.State = goalStateExecute
-	voice := plan.subtaskByID("voice")
-	voice.Status = subtaskReady
-	if err := engine.launchSubtask(&plan, voice, run.Artifact.ID); err != nil {
+	layout := plan.subtaskByID("layout_plan")
+	layout.Status = subtaskReady
+	if err := engine.launchSubtask(&plan, layout, run.Artifact.ID); err != nil {
 		t.Fatalf("launch production writer stage: %v", err)
 	}
 	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision} {

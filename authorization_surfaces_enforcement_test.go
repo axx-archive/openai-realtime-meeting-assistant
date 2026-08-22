@@ -70,7 +70,8 @@ func TestArtifactOpenSurveyAndActionsDenyOpaqueWithExactAction(t *testing.T) {
 
 	for action, expected := range map[string][]ACLAction{
 		"approve": {ACLReadMetadata, ACLApprove, ACLWrite}, "reject": {ACLReadMetadata, ACLApprove, ACLWrite},
-		"resume": {ACLReadContent, ACLExecute, ACLWrite}, "rerun": {ACLReadContent, ACLExecute}, "unknown": {ACLWrite},
+		"resume": {ACLReadContent, ACLExecute, ACLWrite}, "review_changes": {ACLReadContent, ACLExecute, ACLWrite},
+		"rerun": {ACLReadContent, ACLExecute}, "unknown": {ACLWrite},
 	} {
 		deny := expected[len(expected)-1]
 		actionAuthorizer := &surfaceRecordingArtifactAuthorizer{allow: func(candidate ACLAction, _ meetingMemoryEntry) bool { return candidate != deny }}

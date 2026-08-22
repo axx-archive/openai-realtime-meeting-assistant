@@ -13,6 +13,7 @@ test('blocked goal retry posts the exact root resume action and reloads without 
   const retryGoalBody = screenSource.match(/const retryGoal = useCallback\([\s\S]*?const beginRegenerateWorkArtifact/u)?.[0] ?? '';
 
   assert.match(clientSource, /resumeGoal\([\s\S]*?request\('\/artifacts\/action',[\s\S]*?body: \{ id, action: 'resume' \}/u);
+  assert.match(clientSource, /reviewEditedGoal\([\s\S]*?body: \{ id, action: 'review_changes', resultArtifactId \}/u);
   assert.match(retryGoalBody, /goalID = String\(message\.thread\?\.artifactId/u);
   assert.match(retryGoalBody, /await api\.resumeGoal\(sessionToken, goalID\)/u);
   assert.match(retryGoalBody, /await load\(\)/u);
@@ -32,14 +33,16 @@ test('blocked goal retry posts the exact root resume action and reloads without 
   try {
     const { api } = await import('../api/client');
     await api.resumeGoal('native-session', 'goal-root-123');
+    await api.reviewEditedGoal('native-session', 'goal-root-123', 'edited-deck-456');
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(requests[0].url, 'https://example.test/artifacts/action');
   assert.equal(requests[0].init?.method, 'POST');
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { id: 'goal-root-123', action: 'resume' });
   assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer native-session');
+  assert.deepEqual(JSON.parse(String(requests[1].init?.body)), { id: 'goal-root-123', action: 'review_changes', resultArtifactId: 'edited-deck-456' });
 });
 
 test('goal drafts use resume while standalone research keeps regenerate', async () => {
@@ -86,6 +89,7 @@ test('goal drafts use resume while standalone research keeps regenerate', async 
     thread: {
       id: 'goal-run', mode: 'goal', status: 'needs_attention', artifactId: 'goal-root',
       resultArtifactId: 'deck-draft', resultArtifactType: 'html_deck', resultTitle: 'Draft presentation',
+      resultQualityState: 'draft_needs_attention', resultCanEdit: true, resultCanContinue: true,
     },
   };
   let renderer: import('react-test-renderer').ReactTestRenderer;
@@ -94,8 +98,24 @@ test('goal drafts use resume while standalone research keeps regenerate', async 
       message: goal, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal, ...callbacks,
     }));
   });
-  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Retry draft from here' }).props.onPress(); });
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Continue draft review' }).props.onPress(); });
   assert.deepEqual({ resumed, regenerated }, { resumed: 1, regenerated: 0 });
+
+  const editedGoal = {
+    ...goal,
+    id: 'edited-goal',
+    thread: {
+      ...goal.thread, status: 'complete', resultQualityState: 'edited_after_admission', resultCanContinue: true,
+    },
+  };
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: editedGoal, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal, ...callbacks,
+    }));
+  });
+  assert.equal(renderer!.root.findByType('InlineArtifactPreview' as any).props.onPresent, undefined);
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Review saved changes' }).props.onPress(); });
+  assert.deepEqual({ resumed, regenerated }, { resumed: 2, regenerated: 0 });
 
   const research = {
     id: 'failed-research', kind: 'thread', role: 'scout', text: 'Research needs attention.', createdAt: '2026-08-21T15:01:00Z',
@@ -107,5 +127,5 @@ test('goal drafts use resume while standalone research keeps regenerate', async 
     }));
   });
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Retry research' }).props.onPress(); });
-  assert.deepEqual({ resumed, regenerated }, { resumed: 1, regenerated: 1 });
+  assert.deepEqual({ resumed, regenerated }, { resumed: 2, regenerated: 1 });
 });

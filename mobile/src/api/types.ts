@@ -412,7 +412,12 @@ export type ScoutWorkThreadRef = {
   resultTitle?: string;
   resultPreview?: string;
   resultApprovalState?: 'approved_exact' | 'edited_after_approval' | 'legacy_approval_binding' | string;
+  /** Server-owned rendered-admission truth for an authored result revision. */
+  resultQualityState?: 'admitted' | 'draft_needs_attention' | 'edited_after_admission' | string;
   resultCanEdit?: boolean;
+  resultCanContinue?: boolean;
+  resultCanPresent?: boolean;
+  resultCanExport?: boolean;
   provenance?: string;
   checkpoint?: {
     id: string;

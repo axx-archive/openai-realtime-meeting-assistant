@@ -177,6 +177,11 @@ const server=http.createServer((req,res)=>{
   // editor, source, outline, counts, and status all reflect the server version.
   await source.fill(proofMarkdown+'\n\nUnsaved local paragraph.');
   assert.equal(await undo.isDisabled(),false);
+  // Reload now lives in the contextual Document details inspector. Exercise
+  // the same discoverable path a user takes instead of reaching through the
+  // intentionally inert, closed inspector.
+  await editor.getByRole('button',{name:'Open document details'}).click();
+  await editor.getByRole('button',{name:'Reload current version'}).waitFor({state:'visible'});
   page.once('dialog',dialog=>dialog.accept());
   await editor.getByRole('button',{name:'Reload current version'}).click();
   await page.waitForFunction(()=>document.querySelector('[data-doc-status]')?.textContent==='Current version loaded');

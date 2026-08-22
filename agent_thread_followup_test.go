@@ -492,7 +492,7 @@ func TestFollowUpIgnoresAnthropicKeyAndUsesOpenAI(t *testing.T) {
 	}
 }
 
-func TestGovernedImageDirectionChildUsesTerraHighRoute(t *testing.T) {
+func TestGovernedIdentityPanelChildKeepsBoundGeneralRoute(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-test-key"
@@ -515,12 +515,12 @@ func TestGovernedImageDirectionChildUsesTerraHighRoute(t *testing.T) {
 	if !ok {
 		t.Fatal("packaging process did not resolve")
 	}
-	stage, ok := definition.stageByID("imagery_direction")
+	stage, ok := definition.stageByID("identity")
 	if !ok {
-		t.Fatal("imagery direction stage missing")
+		t.Fatal("identity direction stage missing")
 	}
 	plan.Subtasks = []goalSubtask{{
-		ID: stage.ID, Title: stage.Title, Mode: stage.Mode, Authority: codexJobAuthorityReadOnly,
+		ID: stage.ID, Title: stage.Title, Mode: processStageThreadMode(stage), Authority: codexJobAuthorityReadOnly,
 		Runner: agentRunnerOpenAIText, Role: stage.Role, Status: subtaskPending,
 	}}
 	plan.State = goalStateExecute
@@ -537,14 +537,14 @@ func TestGovernedImageDirectionChildUsesTerraHighRoute(t *testing.T) {
 	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) {}
 	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
 	childSpec := agentThreadGoalSpec{
-		Objective: "Direct imagery for the investor deck", RequestedBy: receipt.Requester,
+		Objective: "Create the visual identity and imagery direction for the investor deck", RequestedBy: receipt.Requester,
 		Authority: codexJobAuthorityReadOnly, ParentGoalID: parent.Artifact.ID, SubtaskID: stage.ID,
-		AssignedRunner: agentRunnerOpenAIText, OutputContract: stage.OutputContract, Deliverable: true,
+		AssignedRunner: agentRunnerOpenAIText, OutputContract: stage.OutputContract, Deliverable: false,
 		SourceMessageID: receipt.SourceMessageID, SourceMessageDigest: receipt.SourceMessageDigest,
 		SourceWindowDigest: receipt.SourceWindowDigest, OperationID: receipt.OperationID,
 		OperationBodyDigest: receipt.OperationBodyDigest, ParentGoalRouteDigest: receipt.Digest,
 	}
-	thread, err := app.launchGoalAgentThreadScaffold(stage.Mode, "Direct imagery for the investor deck", "AJ", origin, childSpec)
+	thread, err := app.launchGoalAgentThreadScaffold(processStageThreadMode(stage), "Create the visual identity and imagery direction for the investor deck", "AJ", origin, childSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,8 +565,8 @@ func TestGovernedImageDirectionChildUsesTerraHighRoute(t *testing.T) {
 	if _, err := app.agentThreadProviderContext(context.Background(), thread); err != nil {
 		t.Fatalf("governed image-direction child failed provider admission: %v", err)
 	}
-	if gotModel, gotEffort := agentThreadTextModel(thread), agentThreadTextReasoningEffort(thread); gotModel != defaultScoutImageDirectionModel || gotEffort != defaultScoutImageDirectionEffort {
-		t.Fatalf("image-direction route=%s/%s, want %s/%s", gotModel, gotEffort, defaultScoutImageDirectionModel, defaultScoutImageDirectionEffort)
+	if gotModel, gotEffort := agentThreadTextModel(thread), agentThreadTextReasoningEffort(thread); gotModel != defaultMeetingBrainModel || gotEffort != defaultMeetingBrainReasoningEffort {
+		t.Fatalf("identity-panel route=%s/%s, want %s/%s", gotModel, gotEffort, defaultMeetingBrainModel, defaultMeetingBrainReasoningEffort)
 	}
 }
 

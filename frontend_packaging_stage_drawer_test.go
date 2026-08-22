@@ -213,9 +213,9 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  const quietChannel=await page.evaluate(parent=>{
    document.getElementById('appShell').dataset.tool='chat';
    document.getElementById('chatTool').style.display='flex';
-   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:parent.id,status:'running',progressPercent:11,query:'Like A Farmer presentation'}};
+   const message={id:'goal-message',kind:'thread',role:'scout',thread:{id:'packaging-run',mode:'goal',artifactId:parent.id,status:'running',progressPercent:11,query:'Like A Farmer presentation',projectTitle:'Like A Farmer'}};
    const card=scoutDesktopGoalWorkCardNode(message,parent);
-   document.body.appendChild(card);
+   document.getElementById('chatTool').appendChild(card);
    return {
      title:card.querySelector('.scout-chat-work-card__title')?.textContent,
      eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,
@@ -226,13 +226,24 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    };
  },parent);
  assert.equal(quietChannel.title,'Packaging Studio');
- assert.equal(quietChannel.eyebrow,'Presentation · Phase 2 of 5');
+ assert.equal(quietChannel.eyebrow,'Presentation · Draft · Phase 2 of 5');
  assert.match(quietChannel.meta,/verifying the proof points/i);
  assert.match(quietChannel.meta,/11%/);
  assert.equal(quietChannel.checkpoints,0);
  assert.doesNotMatch(quietChannel.eyebrow+quietChannel.meta,/Needs input/i);
  assert.equal(quietChannel.runlogs,0);
  assert.equal(quietChannel.progressbars,0);
+ await page.setViewportSize({width:390,height:844});await page.waitForTimeout(60);
+ const compactProgress=await page.locator('[data-work-artifact-id="packaging-run"].scout-chat-work-card--presentation').evaluate(card=>{const rect=node=>node.getBoundingClientRect().toJSON();const title=card.querySelector('.scout-chat-work-card__title');const project=card.querySelector('.scout-chat-work-card__project');const eyebrow=card.querySelector('.scout-chat-work-card__eyebrow');return {className:card.className,card:rect(card),title:rect(title),project:rect(project),eyebrow:eyebrow.textContent,titleText:title.textContent,projectText:project.textContent,titleWhiteSpace:getComputedStyle(title).whiteSpace,projectWhiteSpace:getComputedStyle(project).whiteSpace,scrollWidth:document.documentElement.scrollWidth};});
+ assert.equal(compactProgress.eyebrow,'Presentation · Draft · Phase 2 of 5');
+ assert.equal(compactProgress.titleText,'Packaging Studio');
+ assert.equal(compactProgress.projectText,'Like A Farmer');
+ assert.equal(compactProgress.titleWhiteSpace,'nowrap',JSON.stringify(compactProgress));
+ assert.equal(compactProgress.projectWhiteSpace,'nowrap',JSON.stringify(compactProgress));
+ assert.ok(compactProgress.title.width>80&&compactProgress.project.width>40,JSON.stringify(compactProgress));
+ assert.ok(compactProgress.card.left>=0&&compactProgress.card.right<=390&&compactProgress.scrollWidth<=390,JSON.stringify(compactProgress));
+ if(process.env.PACKAGING_PROGRESS_PHONE_SCREENSHOT){await page.screenshot({path:process.env.PACKAGING_PROGRESS_PHONE_SCREENSHOT,fullPage:true});}
+ await page.setViewportSize({width:1280,height:820});await page.waitForTimeout(60);
  await page.locator('.scout-chat-work-card--presentation').getByRole('button',{name:/View .* activity/}).click();
  const activityDrawer=page.locator('#chatContextRail');
  await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false);
@@ -292,7 +303,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    document.body.appendChild(card);
    return {text:card.textContent,eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,meta:card.querySelector('.scout-chat-work-card__meta')?.textContent,checkpoints:card.querySelectorAll('.scout-chat-work-card__checkpoint').length};
  },parent);
- assert.equal(blockedWithoutDecision.eyebrow,'Presentation · Phase 2 of 5');
+ assert.equal(blockedWithoutDecision.eyebrow,'Presentation · Blocked · Phase 2 of 5');
  assert.match(blockedWithoutDecision.meta,/recovering from an evidence check/i);
  assert.equal(blockedWithoutDecision.checkpoints,0);
  assert.doesNotMatch(blockedWithoutDecision.text,/Needs input/i);

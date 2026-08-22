@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -63,6 +65,7 @@ const (
 	// source revision or native scene they attach to.
 	renderSourceArtifactVersionMetadataKey = "renderSourceArtifactVersion"
 	renderSourceSceneRefMetadataKey        = "renderSourceSceneRef"
+	renderSourceContentDigestMetadataKey   = "renderSourceContentDigest"
 	renderPDFArtifactVersionMetadataKey    = "renderPdfArtifactVersion"
 	renderPDFSourceVersionMetadataKey      = "renderPdfSourceArtifactVersion"
 	renderPDFSourceSceneRefMetadataKey     = "renderPdfSourceSceneRef"
@@ -101,6 +104,27 @@ type renderRunnerJob struct {
 type renderRunnerJobStore struct {
 	dir string
 }
+
+// renderPDFJobBinding is the idempotency identity for one editable artifact
+// export. Artifact id alone is not enough: a later document revision or native
+// deck scene must never inherit an older job. The digest is over the exact HTML
+// and server-owned print kind that cross the isolated render boundary.
+type renderPDFJobBinding struct {
+	ArtifactID            string
+	Kind                  string
+	HTML                  string
+	Title                 string
+	SourceArtifactVersion int
+	SourceSceneRef        string
+	SourceContentDigest   string
+}
+
+// The application is a single Compose service today. Serializing the small
+// queue scan + write critical section prevents concurrent HTTP retries from
+// minting duplicate work before either request can stamp the artifact. The
+// durable identity still lives in the job file and artifact metadata, so
+// restart retries do not depend on this process-local lock.
+var renderPDFEnqueueMu sync.Mutex
 
 // renderRunnerCanaryResult is deliberately body- and secret-free. The runner
 // emits it only after the exact production pipeline has printed minimal HTML
@@ -209,14 +233,24 @@ func normalizeRenderJobKind(value string) string {
 // impersonating another; the source version and native scene prevent that
 // legitimate job from landing after its input changed.
 func queuedRenderMetadata(artifact meetingMemoryEntry, jobID string, kind string) map[string]string {
+	return queuedRenderMetadataForInput(artifact, jobID, kind, renderPDFContentDigest(kind, artifact.Text))
+}
+
+func queuedRenderMetadataForInput(artifact meetingMemoryEntry, jobID string, kind string, contentDigest string) map[string]string {
 	return map[string]string{
 		"renderJobId":                          strings.TrimSpace(jobID),
 		"renderStatus":                         renderJobStatusQueued,
 		"renderKind":                           normalizeRenderJobKind(kind),
 		renderSourceArtifactVersionMetadataKey: strconv.Itoa(artifactVersion(artifact)),
 		renderSourceSceneRefMetadataKey:        strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]),
+		renderSourceContentDigestMetadataKey:   strings.TrimSpace(contentDigest),
 		"renderError":                          "",
 	}
+}
+
+func renderPDFContentDigest(kind string, html string) string {
+	digest := sha256.Sum256([]byte(normalizeRenderJobKind(kind) + "\x00" + html))
+	return fmt.Sprintf("%x", digest[:])
 }
 
 // serverRenderKindForArtifact owns the print path: the flatten law is
@@ -347,6 +381,62 @@ func (store *renderRunnerJobStore) read(filename string) (*renderRunnerJob, erro
 	return &job, nil
 }
 
+// reusableBoundJob returns the one queued/running job whose durable source
+// binding exactly matches the retry. A terminal job is never adopted here: a
+// failed export may be retried, while a completed export is resolved through
+// its artifact callback/asset rather than silently re-queued.
+func (store *renderRunnerJobStore) reusableBoundJob(binding renderPDFJobBinding) (*renderRunnerJob, error) {
+	entries, err := os.ReadDir(store.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read render runner queue: %w", err)
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		job, readErr := store.read(entry.Name())
+		if readErr != nil {
+			return nil, readErr
+		}
+		if job.Status != renderJobStatusQueued && job.Status != renderJobStatusRunning {
+			continue
+		}
+		if renderRunnerJobMatchesBinding(*job, binding) {
+			return job, nil
+		}
+	}
+	return nil, nil
+}
+
+func renderRunnerJobMatchesBinding(job renderRunnerJob, binding renderPDFJobBinding) bool {
+	if strings.TrimSpace(job.ArtifactID) != strings.TrimSpace(binding.ArtifactID) ||
+		normalizeRenderJobKind(job.Kind) != normalizeRenderJobKind(binding.Kind) {
+		return false
+	}
+	digest := strings.TrimSpace(job.Metadata[renderSourceContentDigestMetadataKey])
+	if digest == "" {
+		// Jobs queued before the durable digest field shipped remain safely
+		// comparable because their exact immutable HTML is still in the queue.
+		digest = renderPDFContentDigest(job.Kind, job.HTML)
+	}
+	if digest != strings.TrimSpace(binding.SourceContentDigest) {
+		return false
+	}
+	if version := strings.TrimSpace(job.Metadata[renderSourceArtifactVersionMetadataKey]); version != "" &&
+		version != strconv.Itoa(binding.SourceArtifactVersion) {
+		return false
+	}
+	if sceneRef := strings.TrimSpace(job.Metadata[renderSourceSceneRefMetadataKey]); sceneRef != "" &&
+		sceneRef != strings.TrimSpace(binding.SourceSceneRef) {
+		return false
+	}
+	return true
+}
+
 func (store *renderRunnerJobStore) jobPath(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -395,6 +485,54 @@ func enqueueRenderExportPDFJob(artifactID string, kind string, html string, titl
 			"workerBoundary": "render_sidecar_queue",
 		},
 	})
+}
+
+// enqueueBoundRenderExportPDFJob is the Studio-safe trigger. A retry after a
+// browser polling timeout reuses the durable queued/running job for the exact
+// source revision instead of creating a second render or invalidating the
+// first job's eventual callback.
+func enqueueBoundRenderExportPDFJob(binding renderPDFJobBinding) (renderRunnerJob, bool, error) {
+	binding.ArtifactID = strings.TrimSpace(binding.ArtifactID)
+	binding.Kind = normalizeRenderJobKind(binding.Kind)
+	binding.SourceSceneRef = strings.TrimSpace(binding.SourceSceneRef)
+	if binding.ArtifactID == "" {
+		return renderRunnerJob{}, false, fmt.Errorf("artifact id is required for PDF export")
+	}
+	if strings.TrimSpace(binding.HTML) == "" {
+		return renderRunnerJob{}, false, fmt.Errorf("artifact HTML body is required for PDF export")
+	}
+	if len(binding.HTML) > defaultRenderMaxHTMLBytes {
+		return renderRunnerJob{}, false, fmt.Errorf("artifact HTML body is %d bytes, above the %d-byte render queue limit", len(binding.HTML), defaultRenderMaxHTMLBytes)
+	}
+	if binding.SourceArtifactVersion < 1 {
+		return renderRunnerJob{}, false, fmt.Errorf("source artifact version is required for PDF export")
+	}
+	if strings.TrimSpace(binding.SourceContentDigest) == "" {
+		binding.SourceContentDigest = renderPDFContentDigest(binding.Kind, binding.HTML)
+	}
+
+	renderPDFEnqueueMu.Lock()
+	defer renderPDFEnqueueMu.Unlock()
+	store := newRenderRunnerJobStore(renderRunnerQueuePath())
+	if reusable, err := store.reusableBoundJob(binding); err != nil {
+		return renderRunnerJob{}, false, err
+	} else if reusable != nil {
+		return *reusable, true, nil
+	}
+	job, err := store.enqueue(renderRunnerJob{
+		Type:       renderJobTypeExportPDF,
+		ArtifactID: binding.ArtifactID,
+		Kind:       binding.Kind,
+		HTML:       binding.HTML,
+		Title:      strings.TrimSpace(binding.Title),
+		Metadata: map[string]string{
+			"workerBoundary":                       "render_sidecar_queue",
+			renderSourceArtifactVersionMetadataKey: strconv.Itoa(binding.SourceArtifactVersion),
+			renderSourceSceneRefMetadataKey:        binding.SourceSceneRef,
+			renderSourceContentDigestMetadataKey:   binding.SourceContentDigest,
+		},
+	})
+	return job, false, err
 }
 
 // runRenderRunnerLoop is the sidecar entrypoint. Stage B wires the
@@ -692,6 +830,48 @@ func resolveRenderBinary(label string, bin string, envName string) (string, erro
 	return path, nil
 }
 
+func orderedRenderRasterPagePaths(paths []string) ([]string, error) {
+	type numberedPath struct {
+		page int
+		path string
+	}
+	ordered := make([]numberedPath, 0, len(paths))
+	for _, path := range paths {
+		name := filepath.Base(path)
+		if !strings.HasPrefix(name, "page-") || !strings.HasSuffix(name, ".jpg") {
+			return nil, fmt.Errorf("rasterized page %q has no numeric page identity", name)
+		}
+		raw := strings.TrimSuffix(strings.TrimPrefix(name, "page-"), ".jpg")
+		if raw == "" {
+			return nil, fmt.Errorf("rasterized page %q has no numeric page identity", name)
+		}
+		for _, digit := range raw {
+			if digit < '0' || digit > '9' {
+				return nil, fmt.Errorf("rasterized page %q has no numeric page identity", name)
+			}
+		}
+		page, err := strconv.Atoi(raw)
+		if err != nil || page < 1 {
+			return nil, fmt.Errorf("rasterized page %q has no valid page identity", name)
+		}
+		ordered = append(ordered, numberedPath{page: page, path: path})
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].page != ordered[j].page {
+			return ordered[i].page < ordered[j].page
+		}
+		return ordered[i].path < ordered[j].path
+	})
+	result := make([]string, len(ordered))
+	for index, page := range ordered {
+		if page.page != index+1 {
+			return nil, fmt.Errorf("rasterized pages are missing, duplicated, or out of sequence at page %d", index+1)
+		}
+		result[index] = page.path
+	}
+	return result, nil
+}
+
 // executeRenderExportPDF runs the export_pdf pipeline for one claimed job and
 // persists the outputs to resultsDir on the shared volume.
 func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job renderRunnerJob, resultsDir string) (renderExportPDFResult, error) {
@@ -788,9 +968,12 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 	if err != nil {
 		return renderExportPDFResult{}, fmt.Errorf("collect rasterized pages: %w", err)
 	}
-	sort.Strings(jpegPaths)
 	if len(jpegPaths) == 0 {
 		return renderExportPDFResult{}, fmt.Errorf("pdftoppm produced no page images")
+	}
+	jpegPaths, err = orderedRenderRasterPagePaths(jpegPaths)
+	if err != nil {
+		return renderExportPDFResult{}, err
 	}
 	jpegPages := make([][]byte, 0, len(jpegPaths))
 	for _, path := range jpegPaths {
