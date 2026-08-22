@@ -331,9 +331,14 @@ type kanbanBoardApp struct {
 	// global) lets isolated pipeline tests synchronize one app without changing
 	// another test's wait policy.
 	slideJuryDeckObserved func(meetingMemoryEntry)
-	apiKey                string
-	assistantStatus       string
-	serverRestarting      bool
+	// externalEvidenceSourcePacket is an app-local test seam for proving that a
+	// source-packet failure stops before provider reservation and that a frozen
+	// authority is not reconstructed after provider output. Production leaves it
+	// nil and uses goalEngine.processStageSourcePacket.
+	externalEvidenceSourcePacket func(context.Context, *goalPlan) (string, error)
+	apiKey                       string
+	assistantStatus              string
+	serverRestarting             bool
 	// Exact goal-child artifacts activated by this process instance. This map
 	// is intentionally not durable: a real restart must treat a preexisting
 	// `started` marker as ambiguous, while duplicate reconciliation in one boot

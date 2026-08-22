@@ -563,7 +563,17 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 				return validateAgentThreadTerminalArtifactWithApp(app, run.thread, text)
 			},
 		}
+		if agentThreadUsesExternalEvidenceV2Contract(run.thread) {
+			authority, authorityErr := freezeExternalEvidenceAuthorityForThread(app, run.thread)
+			if authorityErr != nil {
+				return "", fmt.Errorf("external evidence authority is invalid before provider handoff: %w", authorityErr)
+			}
+			request.ExternalEvidenceAuthority = authority
+		}
 		request = configureExternalEvidenceV2Request(app, run.thread, request)
+		if request.PreflightError != nil {
+			return "", request.PreflightError
+		}
 		raw, responderErr = responder(ctx, apiKey, request)
 		if responderErr != nil {
 			return "", responderErr

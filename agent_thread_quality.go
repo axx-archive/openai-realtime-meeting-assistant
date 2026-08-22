@@ -353,13 +353,40 @@ func externalEvidenceV2ContractInstructions() string {
 	}, "\n")
 }
 
-func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+type externalEvidenceFrozenAuthority struct {
+	ParentArtifactID              string   `json:"parentArtifactId"`
+	GoalID                        string   `json:"goalId"`
+	ProcessID                     string   `json:"processId"`
+	ProcessVersion                int      `json:"processVersion"`
+	ProcessDigest                 string   `json:"processDigest"`
+	ProcessImplementationRevision string   `json:"processImplementationRevision"`
+	RouteDigest                   string   `json:"routeDigest"`
+	ChildArtifactID               string   `json:"childArtifactId"`
+	ChildThreadID                 string   `json:"childThreadId"`
+	ChildBindingDigest            string   `json:"childBindingDigest"`
+	ContextArtifactID             string   `json:"contextArtifactId"`
+	ContextArtifactRevision       int      `json:"contextArtifactRevision"`
+	ContextArtifactBodyDigest     string   `json:"contextArtifactBodyDigest"`
+	ContextBindingDigest          string   `json:"contextBindingDigest"`
+	Questions                     []string `json:"questions"`
+}
+
+func cloneExternalEvidenceFrozenAuthority(authority *externalEvidenceFrozenAuthority) *externalEvidenceFrozenAuthority {
+	if authority == nil {
+		return nil
+	}
+	clone := *authority
+	clone.Questions = append([]string(nil), authority.Questions...)
+	return &clone
+}
+
+func externalEvidenceContextArtifact(app *kanbanBoardApp, plan *goalPlan, parentID string) (meetingMemoryEntry, error) {
 	if app == nil || plan == nil || strings.TrimSpace(parentID) == "" {
-		return nil, fmt.Errorf("authorized research brief is unavailable")
+		return meetingMemoryEntry{}, fmt.Errorf("authorized research brief is unavailable")
 	}
 	contextStage := plan.subtaskByID("context_snapshot")
 	if contextStage == nil || contextStage.Status != subtaskComplete || strings.TrimSpace(contextStage.ArtifactID) == "" {
-		return nil, fmt.Errorf("completed context snapshot is required before external research")
+		return meetingMemoryEntry{}, fmt.Errorf("completed context snapshot is required before external research")
 	}
 	artifact, ok := app.osArtifactByID(contextStage.ArtifactID)
 	if !ok || strings.TrimSpace(artifact.Metadata["goalParentId"]) != strings.TrimSpace(parentID) ||
@@ -367,7 +394,15 @@ func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goal
 		strings.TrimSpace(artifact.Metadata["processId"]) != plan.ProcessID ||
 		strings.TrimSpace(artifact.Metadata["processStage"]) != "context_snapshot" ||
 		strings.TrimSpace(artifact.Metadata["status"]) != "complete" {
-		return nil, fmt.Errorf("context snapshot is not the exact completed process artifact")
+		return meetingMemoryEntry{}, fmt.Errorf("context snapshot is not the exact completed process artifact")
+	}
+	return artifact, nil
+}
+
+func externalEvidenceResearchQuestionsFromContext(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+	artifact, err := externalEvidenceContextArtifact(app, plan, parentID)
+	if err != nil {
+		return nil, err
 	}
 	var object map[string]any
 	if err := json.Unmarshal([]byte(extractJSONObject(artifact.Text)), &object); err != nil {
@@ -406,10 +441,24 @@ func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goal
 		seen[question] = true
 		questions = append(questions, question)
 	}
-	authorityText := strings.TrimSpace(plan.Objective)
-	if packet, packetErr := newGoalEngine(app).processStageSourcePacket(context.Background(), plan); packetErr == nil {
-		authorityText = strings.TrimSpace(authorityText + "\n" + packet)
+	return questions, nil
+}
+
+func authorizedExternalEvidenceResearchQuestions(app *kanbanBoardApp, plan *goalPlan, parentID string) ([]string, error) {
+	questions, err := externalEvidenceResearchQuestionsFromContext(app, plan, parentID)
+	if err != nil {
+		return nil, err
 	}
+	var packet string
+	if app.externalEvidenceSourcePacket != nil {
+		packet, err = app.externalEvidenceSourcePacket(context.Background(), plan)
+	} else {
+		packet, err = newGoalEngine(app).processStageSourcePacket(context.Background(), plan)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("authorized research source packet is unavailable: %w", err)
+	}
+	authorityText := strings.TrimSpace(plan.Objective + "\n" + packet)
 	for index, question := range questions {
 		if !externalEvidenceQuestionBoundToAuthority(question, authorityText) {
 			return nil, fmt.Errorf("context snapshot research question %d is not materially bound to the direct request or authorized source packet", index+1)
@@ -430,31 +479,131 @@ func validateExternalEvidenceResearchQuestions(actual, authorized []string) erro
 	return nil
 }
 
-func authorizedExternalEvidenceResearchQuestionsForThread(app *kanbanBoardApp, thread scoutAgentThread) ([]string, error) {
+func externalEvidenceResearchPlanForThread(app *kanbanBoardApp, thread scoutAgentThread) (goalPlan, string, meetingMemoryEntry, error) {
 	if app == nil || !agentThreadUsesExternalEvidenceV2Contract(thread) {
-		return nil, fmt.Errorf("external evidence writer is not authority-bound")
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence writer is not authority-bound")
 	}
 	parentID := strings.TrimSpace(thread.Artifact.Metadata["goalParentId"])
 	parent, ok := app.osArtifactByID(parentID)
 	if !ok {
-		return nil, fmt.Errorf("external evidence parent goal is unavailable")
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence parent goal is unavailable")
 	}
 	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
 	if !ok || strings.TrimSpace(plan.GoalID) != strings.TrimSpace(parent.Metadata["threadId"]) || (plan.ProcessID != packagingStudioProcessID && plan.ProcessID != documentReportProcessID) {
-		return nil, fmt.Errorf("external evidence parent goal identity is invalid")
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence parent goal identity is invalid")
 	}
 	engine := newGoalEngine(app)
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
-		return nil, fmt.Errorf("external evidence parent route is no longer authorized: %w", err)
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence parent route is no longer authorized: %w", err)
 	}
 	if _, err := resolvePinnedProcessDefinition(&plan); err != nil {
-		return nil, fmt.Errorf("external evidence process identity changed: %w", err)
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence process identity changed: %w", err)
 	}
 	writer := plan.subtaskByID("external_research")
 	if writer == nil || strings.TrimSpace(writer.ArtifactID) != strings.TrimSpace(thread.Artifact.ID) || strings.TrimSpace(writer.ThreadID) != strings.TrimSpace(thread.ID) {
-		return nil, fmt.Errorf("external evidence writer is not the exact current goal child")
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence writer is not the exact current goal child")
+	}
+	child, ok := app.osArtifactByID(thread.Artifact.ID)
+	if !ok || strings.TrimSpace(child.Metadata["threadId"]) != strings.TrimSpace(thread.ID) || !agentThreadUsesExternalEvidenceV2Contract(scoutAgentThread{ID: thread.ID, Artifact: child}) {
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence writer artifact is unavailable or changed")
+	}
+	if err := app.verifyGoalChildRoute(child); err != nil {
+		return goalPlan{}, "", meetingMemoryEntry{}, fmt.Errorf("external evidence writer route changed: %w", err)
+	}
+	return plan, parentID, child, nil
+}
+
+func authorizedExternalEvidenceResearchQuestionsForThread(app *kanbanBoardApp, thread scoutAgentThread) ([]string, error) {
+	plan, parentID, _, err := externalEvidenceResearchPlanForThread(app, thread)
+	if err != nil {
+		return nil, err
 	}
 	return authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
+}
+
+// The child digest contains only execution-authority metadata that must remain
+// stable while the provider runs. Progress/body revisions are intentionally not
+// included; the context artifact below is the immutable research brief.
+func externalEvidenceChildBindingDigest(child meetingMemoryEntry) string {
+	metadata := child.Metadata
+	return sha256Hex([]byte(strings.Join([]string{
+		child.ID, metadata["threadId"], metadata["goalParentId"], metadata["goalSubtaskId"], metadata["processId"], metadata["processStage"],
+		metadata["outputContract"], metadata["assignedRunner"], metadata["authority"], metadata["goalRouteDigest"], metadata["operationId"],
+		metadata["operationBodyDigest"], normalizeAccountEmail(metadata["requestedBy"]), normalizeAgentThreadMode(metadata["mode"]), metadata["goalChildActivationState"],
+		metadata["status"], metadata["threadStatus"], metadata["goalStatus"],
+	}, "\x00")))
+}
+
+func externalEvidenceContextBindingDigest(artifact meetingMemoryEntry) string {
+	metadata := artifact.Metadata
+	return sha256Hex([]byte(strings.Join([]string{
+		artifact.ID, strconv.Itoa(artifactVersion(artifact)), sha256Hex([]byte(artifact.Text)), metadata[artifactContentDigestMetadataKey],
+		metadata["goalParentId"], metadata["goalSubtaskId"], metadata["processId"], metadata["processStage"], metadata["outputContract"],
+		metadata["status"], metadata["threadStatus"],
+	}, "\x00")))
+}
+
+func freezeExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutAgentThread) (*externalEvidenceFrozenAuthority, error) {
+	plan, parentID, child, err := externalEvidenceResearchPlanForThread(app, thread)
+	if err != nil {
+		return nil, err
+	}
+	questions, err := authorizedExternalEvidenceResearchQuestions(app, &plan, parentID)
+	if err != nil {
+		return nil, err
+	}
+	contextArtifact, err := externalEvidenceContextArtifact(app, &plan, parentID)
+	if err != nil {
+		return nil, err
+	}
+	routeDigest := ""
+	if plan.RouteReceipt != nil {
+		routeDigest = plan.RouteReceipt.Digest
+	}
+	return &externalEvidenceFrozenAuthority{
+		ParentArtifactID: parentID, GoalID: plan.GoalID, ProcessID: plan.ProcessID, ProcessVersion: plan.ProcessVersion,
+		ProcessDigest: plan.ProcessDigest, ProcessImplementationRevision: plan.ProcessImplementationRevision, RouteDigest: routeDigest,
+		ChildArtifactID: child.ID, ChildThreadID: thread.ID, ChildBindingDigest: externalEvidenceChildBindingDigest(child),
+		ContextArtifactID: contextArtifact.ID, ContextArtifactRevision: artifactVersion(contextArtifact), ContextArtifactBodyDigest: sha256Hex([]byte(contextArtifact.Text)),
+		ContextBindingDigest: externalEvidenceContextBindingDigest(contextArtifact), Questions: append([]string(nil), questions...),
+	}, nil
+}
+
+// validateFrozenExternalEvidenceAuthorityForThread rechecks only durable
+// route/process/child/context identity after a provider has run. The full
+// material-binding check already happened before the hashed provider request
+// was reserved; repeating transient source-packet reconstruction here could
+// reject the same authority after a paid call.
+func validateFrozenExternalEvidenceAuthorityForThread(app *kanbanBoardApp, thread scoutAgentThread, frozen *externalEvidenceFrozenAuthority) error {
+	if frozen == nil || len(frozen.Questions) == 0 {
+		return fmt.Errorf("external evidence authority was not frozen before provider handoff")
+	}
+	plan, parentID, child, err := externalEvidenceResearchPlanForThread(app, thread)
+	if err != nil {
+		return err
+	}
+	routeDigest := ""
+	if plan.RouteReceipt != nil {
+		routeDigest = plan.RouteReceipt.Digest
+	}
+	if parentID != frozen.ParentArtifactID || plan.GoalID != frozen.GoalID || plan.ProcessID != frozen.ProcessID || plan.ProcessVersion != frozen.ProcessVersion ||
+		plan.ProcessDigest != frozen.ProcessDigest || plan.ProcessImplementationRevision != frozen.ProcessImplementationRevision || routeDigest != frozen.RouteDigest ||
+		child.ID != frozen.ChildArtifactID || strings.TrimSpace(child.Metadata["threadId"]) != frozen.ChildThreadID || externalEvidenceChildBindingDigest(child) != frozen.ChildBindingDigest {
+		return fmt.Errorf("external evidence parent, process, or child binding changed")
+	}
+	contextArtifact, err := externalEvidenceContextArtifact(app, &plan, parentID)
+	if err != nil {
+		return err
+	}
+	if contextArtifact.ID != frozen.ContextArtifactID || artifactVersion(contextArtifact) != frozen.ContextArtifactRevision ||
+		sha256Hex([]byte(contextArtifact.Text)) != frozen.ContextArtifactBodyDigest || externalEvidenceContextBindingDigest(contextArtifact) != frozen.ContextBindingDigest {
+		return fmt.Errorf("external evidence context artifact changed")
+	}
+	current, err := externalEvidenceResearchQuestionsFromContext(app, &plan, parentID)
+	if err != nil {
+		return err
+	}
+	return validateExternalEvidenceResearchQuestions(current, frozen.Questions)
 }
 
 func externalEvidenceEntailmentContractInstructions() string {

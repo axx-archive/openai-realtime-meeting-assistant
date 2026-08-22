@@ -677,8 +677,40 @@ func (app *kanbanBoardApp) activateReservedGoalAgentThread(thread scoutAgentThre
 		return fmt.Errorf("goal child activation was not durable")
 	}
 	thread.Artifact = activated
+	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		prepared, prepareErr := app.preparePublicConversationProviderRequest(thread)
+		if prepareErr != nil {
+			_, _, _ = app.updateOSArtifactWithMetadata(activated.ID, "", activated.Text, "external_evidence_preflight", map[string]string{
+				"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "reviewGate": "blocked",
+				"error": prepareErr.Error(), "completedAt": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			return fmt.Errorf("goal child provider request could not be frozen: %w", prepareErr)
+		}
+		thread = prepared
+	}
 	app.markGoalChildStartedInProcess(activated.ID)
 	app.activateAgentThreadLaunch(thread, spec, createdBy)
+	return nil
+}
+
+// replayStartedGoalExternalEvidenceThread is the one narrow exception to the
+// ordinary fail-closed rule for a started goal child after process loss. It is
+// safe only when the exact external-evidence request was privately persisted:
+// prepare reauthorizes the live route/context, validates the hash-bound snapshot
+// without rebuilding its source packet, and the provider idempotency key remains
+// identical to the pre-crash attempt.
+func (app *kanbanBoardApp) replayStartedGoalExternalEvidenceThread(thread scoutAgentThread) error {
+	if app == nil || !agentThreadUsesExternalEvidenceV2Contract(thread) ||
+		strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) != goalChildActivationStarted ||
+		strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) == "" {
+		return fmt.Errorf("goal child provider replay is unavailable")
+	}
+	prepared, err := app.preparePublicConversationProviderRequest(thread)
+	if err != nil {
+		return err
+	}
+	app.markGoalChildStartedInProcess(prepared.Artifact.ID)
+	startAgentThreadAsync(app, prepared)
 	return nil
 }
 
@@ -1046,7 +1078,7 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 
 	workerResult, err := app.produceAgentThreadArtifactWithWorkerAuthorized(ctx, thread, createOpenAITextResponse)
 	output := workerResult.Text
-	if err == nil && workerResult.Terminal && strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" && publicConversationWorkAfterProviderAcceptedProbe != nil {
+	if err == nil && workerResult.Terminal && strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" && publicConversationWorkAfterProviderAcceptedProbe != nil {
 		if publicConversationWorkAfterProviderAcceptedProbe(thread, workerResult) != nil {
 			// Test-only lost-local-ack seam: a real process loss stops here. The
 			// next boot reuses the deterministic provider operation and current
@@ -1133,6 +1165,10 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 			metadata[publicConversationWorkActivationState] = publicConversationWorkNeedsAttention
 		}
 	}
+	if strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" {
+		metadata[publicConversationProviderRequestKey] = ""
+		metadata[publicConversationProviderRequestHash] = ""
+	}
 	if thread.Artifact.Metadata["originKind"] == agentThreadOriginRoom && strings.TrimSpace(thread.Artifact.Metadata[roomWorkActivationMetadataKey]) != "" {
 		if err == nil {
 			metadata[roomWorkActivationMetadataKey] = roomWorkActivationComplete
@@ -1167,6 +1203,22 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 			)
 			if innerErr == nil && !changed {
 				innerErr = fmt.Errorf("public conversation work terminal effect was already claimed")
+			}
+			return innerErr
+		}
+		if strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" && strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) == goalChildActivationStarted {
+			var changed bool
+			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderAndMetadataMatch(
+				artifactAuthorizationHeaderFromEntry(thread.Artifact),
+				map[string]string{
+					"goalChildActivationState":            goalChildActivationStarted,
+					publicConversationProviderRequestKey:  thread.Artifact.Metadata[publicConversationProviderRequestKey],
+					publicConversationProviderRequestHash: thread.Artifact.Metadata[publicConversationProviderRequestHash],
+				},
+				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata,
+			)
+			if innerErr == nil && !changed {
+				innerErr = fmt.Errorf("goal child provider terminal effect was already claimed")
 			}
 			return innerErr
 		}
@@ -1951,21 +2003,22 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 }
 
 type durableOpenAITextRequest struct {
-	Model           string               `json:"model"`
-	Instructions    string               `json:"instructions"`
-	Input           string               `json:"input"`
-	IdempotencyKey  string               `json:"idempotencyKey"`
-	Attachments     []openAIInputContent `json:"attachments,omitempty"`
-	ReasoningEffort string               `json:"reasoningEffort,omitempty"`
-	Verbosity       string               `json:"verbosity,omitempty"`
-	MaxOutputTokens int                  `json:"maxOutputTokens,omitempty"`
-	Seat            string               `json:"seat,omitempty"`
-	Workflow        string               `json:"workflow,omitempty"`
-	ServiceTier     string               `json:"serviceTier,omitempty"`
-	JSONSchema      *openAIJSONSchema    `json:"jsonSchema,omitempty"`
-	EnableWebSearch bool                 `json:"enableWebSearch,omitempty"`
-	MaxToolCalls    int                  `json:"maxToolCalls,omitempty"`
-	LongRunning     bool                 `json:"longRunning,omitempty"`
+	Model                     string                           `json:"model"`
+	Instructions              string                           `json:"instructions"`
+	Input                     string                           `json:"input"`
+	IdempotencyKey            string                           `json:"idempotencyKey"`
+	Attachments               []openAIInputContent             `json:"attachments,omitempty"`
+	ReasoningEffort           string                           `json:"reasoningEffort,omitempty"`
+	Verbosity                 string                           `json:"verbosity,omitempty"`
+	MaxOutputTokens           int                              `json:"maxOutputTokens,omitempty"`
+	Seat                      string                           `json:"seat,omitempty"`
+	Workflow                  string                           `json:"workflow,omitempty"`
+	ServiceTier               string                           `json:"serviceTier,omitempty"`
+	JSONSchema                *openAIJSONSchema                `json:"jsonSchema,omitempty"`
+	EnableWebSearch           bool                             `json:"enableWebSearch,omitempty"`
+	MaxToolCalls              int                              `json:"maxToolCalls,omitempty"`
+	LongRunning               bool                             `json:"longRunning,omitempty"`
+	ExternalEvidenceAuthority *externalEvidenceFrozenAuthority `json:"externalEvidenceAuthority,omitempty"`
 }
 
 type publicConversationProviderAuthorityEntry struct {
@@ -2053,6 +2106,7 @@ func durableOpenAIRequest(request openAITextRequest) durableOpenAITextRequest {
 		Attachments: request.Attachments, ReasoningEffort: request.ReasoningEffort, Verbosity: request.Verbosity,
 		MaxOutputTokens: request.MaxOutputTokens, Seat: request.Seat, Workflow: request.Workflow,
 		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch, MaxToolCalls: request.MaxToolCalls, LongRunning: request.LongRunning,
+		ExternalEvidenceAuthority: cloneExternalEvidenceFrozenAuthority(request.ExternalEvidenceAuthority),
 	}
 }
 
@@ -2062,7 +2116,8 @@ func (snapshot durableOpenAITextRequest) request(app *kanbanBoardApp, thread sco
 		Attachments: snapshot.Attachments, ReasoningEffort: snapshot.ReasoningEffort, Verbosity: snapshot.Verbosity,
 		MaxOutputTokens: snapshot.MaxOutputTokens, Seat: snapshot.Seat, Workflow: snapshot.Workflow,
 		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch, MaxToolCalls: snapshot.MaxToolCalls, LongRunning: snapshot.LongRunning,
-		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifactWithApp(app, thread, text) },
+		ExternalEvidenceAuthority: cloneExternalEvidenceFrozenAuthority(snapshot.ExternalEvidenceAuthority),
+		ValidateOutput:            func(text string) error { return validateAgentThreadTerminalArtifactWithApp(app, thread, text) },
 	}
 	return configureExternalEvidenceV2Request(app, thread, request)
 }
@@ -2102,12 +2157,20 @@ func configureExternalEvidenceV2Request(app *kanbanBoardApp, thread scoutAgentTh
 	}
 	if agentThreadUsesExternalEvidenceV2Contract(thread) {
 		request.JSONSchema = externalEvidenceJSONSchema()
+		authority := cloneExternalEvidenceFrozenAuthority(request.ExternalEvidenceAuthority)
+		if authority == nil || len(authority.Questions) == 0 {
+			request.PreflightError = fmt.Errorf("external evidence authority was not frozen before provider handoff")
+		} else {
+			request.PreflightError = nil
+		}
 		request.NormalizeOutput = func(body string) (string, error) {
-			questions, err := authorizedExternalEvidenceResearchQuestionsForThread(app, thread)
-			if err != nil {
+			if authority == nil || len(authority.Questions) == 0 {
+				return "", fmt.Errorf("external evidence authority was not frozen before provider handoff")
+			}
+			if err := validateFrozenExternalEvidenceAuthorityForThread(app, thread, authority); err != nil {
 				return "", err
 			}
-			return normalizeExternalEvidenceArtifactWithQuestions(body, questions)
+			return normalizeExternalEvidenceArtifactWithQuestions(body, authority.Questions)
 		}
 		request.MaxToolCalls = externalEvidenceMaxToolCalls
 	}
@@ -2130,12 +2193,20 @@ func (app *kanbanBoardApp) decodeDurablePublicConversationProviderRequest(thread
 	if snapshot.Version != 1 || snapshot.Request.IdempotencyKey == "" || snapshot.Request.IdempotencyKey != publicConversationProviderOperationKey(thread) {
 		return openAITextRequest{}, false, fmt.Errorf("public conversation provider request binding changed")
 	}
+	if agentThreadUsesExternalEvidenceV2Contract(thread) && (snapshot.Request.ExternalEvidenceAuthority == nil || len(snapshot.Request.ExternalEvidenceAuthority.Questions) == 0) {
+		return openAITextRequest{}, false, fmt.Errorf("public conversation provider request has no frozen external evidence authority")
+	}
 	currentAuthority, err := publicConversationProviderAuthority(thread, currentMemory)
 	if err != nil {
 		return openAITextRequest{}, false, err
 	}
 	if !samePublicConversationProviderAuthority(snapshot.Authority, currentAuthority) {
 		return openAITextRequest{}, false, fmt.Errorf("public conversation provider authority manifest changed")
+	}
+	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		if err := validateFrozenExternalEvidenceAuthorityForThread(app, thread, snapshot.Request.ExternalEvidenceAuthority); err != nil {
+			return openAITextRequest{}, false, fmt.Errorf("public conversation provider external evidence authority changed: %w", err)
+		}
 	}
 	return snapshot.Request.request(app, thread), true, nil
 }
@@ -2149,15 +2220,6 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 		return thread, fmt.Errorf("public conversation provider reservation is unavailable")
 	}
 	thread.Artifact = current
-	// Validate the immutable research authority before a hosted-search request
-	// is frozen or sent. Output normalization repeats this check after the
-	// provider returns, but doing it here prevents deterministic context-shape
-	// errors from consuming a provider call on every automatic revision.
-	if agentThreadUsesExternalEvidenceV2Contract(thread) {
-		if _, err := authorizedExternalEvidenceResearchQuestionsForThread(app, thread); err != nil {
-			return thread, fmt.Errorf("external evidence authority is invalid before provider handoff: %w", err)
-		}
-	}
 	refreshed, err := app.reauthorizeAgentThreadProfile(thread)
 	if err != nil {
 		return thread, err
@@ -2173,11 +2235,30 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 	} else if found {
 		return refreshed, nil
 	}
+	// Only a request that has never been frozen performs material binding. A
+	// lost-ack/restart replay above reuses the hash-bound request without touching
+	// the transient source packet after the provider may already have accepted it.
+	var externalEvidenceAuthority *externalEvidenceFrozenAuthority
+	if agentThreadUsesExternalEvidenceV2Contract(refreshed) {
+		authority, err := freezeExternalEvidenceAuthorityForThread(app, refreshed)
+		if err != nil {
+			return thread, fmt.Errorf("external evidence authority is invalid before provider handoff: %w", err)
+		}
+		externalEvidenceAuthority = authority
+	}
 	authority, err := publicConversationProviderAuthority(refreshed, providerContext.Memory)
 	if err != nil {
 		return thread, err
 	}
-	snapshot := durablePublicConversationProviderRequest{Version: 1, Request: durableOpenAIRequest(app.buildAgentThreadOpenAIRequest(refreshed, job, time.Now())), Authority: authority}
+	request := app.buildAgentThreadOpenAIRequest(refreshed, job, time.Now())
+	if agentThreadUsesExternalEvidenceV2Contract(refreshed) {
+		request.ExternalEvidenceAuthority = cloneExternalEvidenceFrozenAuthority(externalEvidenceAuthority)
+		request = configureExternalEvidenceV2Request(app, refreshed, request)
+		if request.PreflightError != nil {
+			return thread, request.PreflightError
+		}
+	}
+	snapshot := durablePublicConversationProviderRequest{Version: 1, Request: durableOpenAIRequest(request), Authority: authority}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return thread, fmt.Errorf("encode public conversation provider request snapshot: %w", err)
@@ -2196,12 +2277,13 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 		_ = os.Remove(filepath.Join(filepath.Dir(meetingMemoryPath()), "private-operation-blobs", digest+".json"))
 		return thread, fmt.Errorf("private provider request retention cap would be exceeded")
 	}
+	expected, err := providerRequestReservationExpectedMetadata(current)
+	if err != nil {
+		return thread, err
+	}
 	updated, changed, err := app.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(
 		artifactAuthorizationHeaderFromEntry(current),
-		map[string]string{
-			publicConversationWorkActivationState: publicConversationWorkStarted,
-			publicConversationWorkActivationOwner: current.Metadata[publicConversationWorkActivationOwner],
-		},
+		expected,
 		current.ID,
 		map[string]string{
 			publicConversationProviderRequestKey:  ref,
@@ -2241,6 +2323,16 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 			return "", fmt.Errorf("public conversation provider request snapshot is unavailable")
 		}
 		request = frozen
+	} else if agentThreadUsesExternalEvidenceV2Contract(thread) {
+		authority, authorityErr := freezeExternalEvidenceAuthorityForThread(app, thread)
+		if authorityErr != nil {
+			return "", fmt.Errorf("external evidence authority is invalid before provider handoff: %w", authorityErr)
+		}
+		request.ExternalEvidenceAuthority = authority
+		request = configureExternalEvidenceV2Request(app, thread, request)
+	}
+	if request.PreflightError != nil {
+		return "", request.PreflightError
 	}
 	output, err := responder(ctx, apiKey, request)
 	if err != nil {

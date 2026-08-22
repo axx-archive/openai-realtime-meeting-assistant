@@ -4995,6 +4995,16 @@ func (e *goalEngine) recoverCheckpointDrive(plan *goalPlan, parentID string) (bo
 		if childFound && e.app.goalChildStartedInProcess(child.ID) {
 			return true, nil
 		}
+		if childFound && strings.TrimSpace(child.Metadata[publicConversationProviderRequestKey]) != "" {
+			thread := scoutAgentThread{
+				ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Mode: normalizeAgentThreadMode(child.Metadata["mode"]),
+				Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), Status: "running", Artifact: child,
+			}
+			if err := e.app.replayStartedGoalExternalEvidenceThread(thread); err != nil {
+				return false, fmt.Errorf("saved goal child provider replay is unavailable")
+			}
+			return true, nil
+		}
 		// Match the ordinary boot reconciler's fail-closed stance for an
 		// activated child whose provider state was lost across process death.
 		plan.State = goalStateBlocked
@@ -5721,6 +5731,16 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 			// An earlier reconcile in this same boot already activated this exact
 			// child. Do not duplicate it or condemn its legitimate in-flight work.
 			// A real process restart has an empty map and fails closed below.
+			return
+		}
+		if strings.TrimSpace(child.Metadata[publicConversationProviderRequestKey]) != "" {
+			thread := scoutAgentThread{
+				ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Mode: normalizeAgentThreadMode(child.Metadata["mode"]),
+				Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), Status: "running", Artifact: child,
+			}
+			if err := app.replayStartedGoalExternalEvidenceThread(thread); err != nil {
+				engine.fail(&plan, parentID, "saved goal child provider replay is unavailable; nothing was replayed")
+			}
 			return
 		}
 		engine.fail(&plan, parentID, "goal child execution state is unknown after restart; nothing was replayed")

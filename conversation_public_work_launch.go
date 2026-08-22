@@ -42,12 +42,52 @@ var publicConversationWorkAfterTerminalCommitProbe func(meetingMemoryEntry) erro
 
 func publicConversationProviderOperationKey(thread scoutAgentThread) string {
 	metadata := thread.Artifact.Metadata
-	if strings.TrimSpace(metadata[publicConversationWorkActivationState]) == "" || strings.TrimSpace(metadata["operationId"]) == "" || strings.TrimSpace(metadata["operationBodyDigest"]) == "" {
+	if strings.TrimSpace(metadata["operationId"]) == "" || strings.TrimSpace(metadata["operationBodyDigest"]) == "" {
 		return ""
+	}
+	if strings.TrimSpace(metadata[publicConversationWorkActivationState]) == "" {
+		if !agentThreadUsesExternalEvidenceV2Contract(thread) ||
+			strings.TrimSpace(metadata["goalChildActivationState"]) != goalChildActivationStarted ||
+			strings.TrimSpace(metadata["goalParentId"]) == "" || strings.TrimSpace(metadata["goalSubtaskId"]) == "" {
+			return ""
+		}
+		return "goal-child-work-" + sha256Hex([]byte(strings.Join([]string{
+			"goal-child-provider-operation/v1", metadata["operationId"], metadata["operationBodyDigest"],
+			metadata["goalParentId"], metadata["goalSubtaskId"], metadata["goalRouteDigest"], thread.ID, thread.Artifact.ID,
+		}, "\x00")))
 	}
 	return "public-work-" + sha256Hex([]byte(strings.Join([]string{
 		"public-conversation-provider-operation/v1", metadata["operationId"], metadata["operationBodyDigest"], thread.ID, thread.Artifact.ID,
 	}, "\x00")))
+}
+
+func providerRequestReservationExpectedMetadata(artifact meetingMemoryEntry) (map[string]string, error) {
+	metadata := artifact.Metadata
+	if strings.TrimSpace(metadata[publicConversationWorkActivationState]) != "" {
+		if strings.TrimSpace(metadata[publicConversationWorkActivationState]) != publicConversationWorkStarted {
+			return nil, fmt.Errorf("public conversation provider request activation is not current")
+		}
+		return map[string]string{
+			publicConversationWorkActivationState: publicConversationWorkStarted,
+			publicConversationWorkActivationOwner: metadata[publicConversationWorkActivationOwner],
+		}, nil
+	}
+	if strings.TrimSpace(metadata["goalChildActivationState"]) == goalChildActivationStarted {
+		return map[string]string{
+			"goalChildActivationState": goalChildActivationStarted,
+			"goalParentId":             metadata["goalParentId"],
+			"goalSubtaskId":            metadata["goalSubtaskId"],
+			"threadId":                 metadata["threadId"],
+		}, nil
+	}
+	return nil, fmt.Errorf("provider request activation is unavailable")
+}
+
+func artifactRetainsPrivateProviderRequest(artifact meetingMemoryEntry) bool {
+	metadata := artifact.Metadata
+	return oneOf(strings.TrimSpace(metadata[publicConversationWorkActivationState]), publicConversationWorkReserved, publicConversationWorkStarted) ||
+		(strings.TrimSpace(metadata["goalChildActivationState"]) == goalChildActivationStarted &&
+			agentThreadUsesExternalEvidenceV2Contract(scoutAgentThread{ID: metadata["threadId"], Artifact: artifact}))
 }
 
 func validPrivateProviderDigest(value string) bool {
@@ -188,7 +228,7 @@ func (app *kanbanBoardApp) gcPrivatePublicConversationProviderRequestsLocked() (
 	referenced := map[string]struct{}{}
 	if app != nil && app.memory != nil {
 		for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
-			if !oneOf(strings.TrimSpace(artifact.Metadata[publicConversationWorkActivationState]), publicConversationWorkReserved, publicConversationWorkStarted) {
+			if !artifactRetainsPrivateProviderRequest(artifact) {
 				continue
 			}
 			ref := strings.TrimSpace(artifact.Metadata[publicConversationProviderRequestKey])

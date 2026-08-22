@@ -71,6 +71,16 @@ type openAITextRequest struct {
 	// artifact generation. It changes only the HTTP deadline; it is never sent
 	// to the provider and ordinary chat/routing calls leave it false.
 	LongRunning bool
+	// ExternalEvidenceAuthority is server-only durable authority for the
+	// external-evidence contract. It is frozen before provider handoff and is
+	// never serialized onto the Responses wire. Output normalization compares
+	// the live route/process/child/context identity to this exact snapshot instead
+	// of rebuilding a transient source packet after the provider has run.
+	ExternalEvidenceAuthority *externalEvidenceFrozenAuthority
+	// PreflightError prevents any request whose server-owned authority could not
+	// be frozen from reaching the provider. It is intentionally not durable;
+	// decoded durable requests reconstruct it from their bound fields.
+	PreflightError error
 	// ValidateOutput runs before a wire response is accepted. It is deliberately
 	// request-local so strict lanes can book wire success separately from a
 	// parse/schema rejection while ordinary text callers remain unchanged.
@@ -314,6 +324,9 @@ func validOpenAIReasoningEffort(effort string) bool {
 }
 
 func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
+	if request.PreflightError != nil {
+		return "", request.PreflightError
+	}
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")

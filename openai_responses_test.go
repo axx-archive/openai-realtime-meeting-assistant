@@ -18,6 +18,16 @@ type openAIResponsesTestTransport struct {
 	target *url.URL
 }
 
+func TestCreateOpenAITextResponseStopsPreflightFailureBeforeNetwork(t *testing.T) {
+	preflightErr := fmt.Errorf("external evidence authority was not frozen")
+	_, err := createOpenAITextResponseHTTP(context.Background(), "unused-provider-key", openAITextRequest{
+		Model: meetingBrainModel(), Input: "must never reach the wire", PreflightError: preflightErr,
+	})
+	if err != preflightErr {
+		t.Fatalf("preflight error=%v, want exact server-owned failure %v", err, preflightErr)
+	}
+}
+
 func (transport openAIResponsesTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil || request.URL == nil || request.URL.String() != defaultOpenAIResponsesBaseURL+"/responses" {
 		return nil, fmt.Errorf("unexpected OpenAI Responses test target")

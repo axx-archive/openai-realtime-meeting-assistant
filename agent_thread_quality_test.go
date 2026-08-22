@@ -183,6 +183,7 @@ func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetc
 		t.Fatal(err)
 	}
 	researchThreadID := "research-fixture-" + sha256Hex([]byte(t.Name()))[:20]
+	researchStage := plan.subtaskByID("external_research")
 	researchMetadata := map[string]string{
 		"goalDeliverable": "true", "originKind": agentThreadOriginPrivateThread, "originId": plan.RouteReceipt.OriginID,
 		"originSurface": "chat:" + plan.RouteReceipt.OriginID, "visibility": scoutChatVisibilityPrivate,
@@ -191,6 +192,11 @@ func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetc
 		"processId": packagingStudioProcessID, "processStage": "external_research", "status": "complete", "threadStatus": "complete",
 		"researchAcceptedContentDigest": sha256Hex([]byte(normalizedEvidence)), "researchAcceptedArtifactVersion": "1",
 		"threadId": researchThreadID, "threadQuery": "Research only the authorized question: " + authorizedQuestion, "mode": "research",
+		"assignedRunner": researchStage.Runner, "authority": goalChildAuthority(researchStage.Authority, plan.Authority),
+		"goalChildActivationState": goalChildActivationStarted,
+	}
+	for key, value := range goalRouteChildBindingMetadata(&plan) {
+		researchMetadata[key] = value
 	}
 	for key, value := range researchArtifactEvidenceMetadata(scoutAgentThread{Mode: "research"}, normalizedEvidence) {
 		researchMetadata[key] = value
@@ -199,7 +205,6 @@ func focusedEntailmentThreadForTest(t *testing.T, candidateFact, sourceURL, fetc
 	if err != nil {
 		t.Fatal(err)
 	}
-	researchStage := plan.subtaskByID("external_research")
 	researchStage.Status, researchStage.ArtifactID, researchStage.ThreadID = subtaskComplete, research.ID, researchThreadID
 
 	if strings.TrimSpace(fetchedText) == "" {
@@ -641,8 +646,6 @@ func authorizedExternalEvidenceResearchThreadForTest(t *testing.T, app *kanbanBo
 		"threadId": threadID, "threadQuery": "Research the authorized context snapshot.", "mode": "research",
 		"assignedRunner": writer.Runner, "authority": goalChildAuthority(writer.Authority, plan.Authority),
 		"goalDeliverable": "true", "goalChildActivationState": goalChildActivationStarted,
-		publicConversationWorkActivationState: publicConversationWorkStarted,
-		publicConversationWorkActivationOwner: "external-evidence-context-test-worker",
 	}
 	for key, value := range goalRouteChildBindingMetadata(&plan) {
 		researchMetadata[key] = value
@@ -710,9 +713,293 @@ func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *test
 	if err != nil || !found || request.NormalizeOutput == nil || request.JSONSchema == nil || request.MaxToolCalls != externalEvidenceMaxToolCalls {
 		t.Fatalf("decoded provider request lost the exact evidence contract: found=%t schema=%t normalize=%t calls=%d err=%v", found, request.JSONSchema != nil, request.NormalizeOutput != nil, request.MaxToolCalls, err)
 	}
+	if request.ExternalEvidenceAuthority == nil || len(request.ExternalEvidenceAuthority.Questions) != 1 || request.ExternalEvidenceAuthority.Questions[0] != question {
+		t.Fatalf("decoded provider request authority=%+v, want exact frozen question %q", request.ExternalEvidenceAuthority, question)
+	}
 	retained, err := authorizedExternalEvidenceResearchQuestionsForThread(app, prepared)
 	if err != nil || len(retained) != 1 || retained[0] != question {
 		t.Fatalf("decoded provider request lost normalized question authority: questions=%v err=%v", retained, err)
+	}
+}
+
+func TestExternalEvidenceProviderRequestUsesOneFrozenAuthorityAcrossProviderReturn(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "frozen-research-authority")
+	packetCalls := 0
+	app.externalEvidenceSourcePacket = func(_ context.Context, current *goalPlan) (string, error) {
+		packetCalls++
+		return current.Objective, nil
+	}
+	prepared, err := app.preparePublicConversationProviderRequest(thread)
+	if err != nil {
+		t.Fatalf("freeze external evidence provider request: %v", err)
+	}
+	if packetCalls != 1 {
+		t.Fatalf("source packet calls before provider=%d, want exactly one material-binding check", packetCalls)
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, found, err := app.decodeDurablePublicConversationProviderRequest(prepared, providerContext.Memory)
+	if err != nil || !found || request.NormalizeOutput == nil || request.PreflightError != nil {
+		t.Fatalf("decode frozen provider request: found=%t normalize=%t preflight=%v err=%v", found, request.NormalizeOutput != nil, request.PreflightError, err)
+	}
+	if packetCalls != 1 {
+		t.Fatalf("durable decode rebuilt the material-binding packet: calls=%d", packetCalls)
+	}
+	frozenRef := prepared.Artifact.Metadata[publicConversationProviderRequestKey]
+	frozenHash := prepared.Artifact.Metadata[publicConversationProviderRequestHash]
+	app.externalEvidenceSourcePacket = func(context.Context, *goalPlan) (string, error) {
+		packetCalls++
+		return "", errors.New("transient source packet failure")
+	}
+	replayed, err := app.preparePublicConversationProviderRequest(prepared)
+	if err != nil {
+		t.Fatalf("reuse frozen provider request after transient packet failure: %v", err)
+	}
+	if packetCalls != 1 || replayed.Artifact.Metadata[publicConversationProviderRequestKey] != frozenRef || replayed.Artifact.Metadata[publicConversationProviderRequestHash] != frozenHash {
+		t.Fatalf("frozen request was rebuilt on replay: calls=%d ref=%q/%q hash=%q/%q", packetCalls, replayed.Artifact.Metadata[publicConversationProviderRequestKey], frozenRef, replayed.Artifact.Metadata[publicConversationProviderRequestHash], frozenHash)
+	}
+	question := request.ExternalEvidenceAuthority.Questions[0]
+	sourceURL := "https://example.org/official-program"
+	body := appendOpenAIResponseWebSources(externalEvidenceJSONForTest(t, externalEvidenceEnvelope{
+		ResearchQuestions: []string{question},
+		Evidence: []externalEvidenceEnvelopeRow{{
+			ResearchQuestion: question, SourceFact: "The official program has 4,200 opted-in creators in 2026.",
+			SourceTitle: "Official program", URL: sourceURL, PublishedOrUpdated: "Accessed 2026-08-22",
+			Units: "creators", Confidence: "High", DeckImplication: "Use the count as a bounded proof point.",
+		}},
+	}), openAIResponseWebEvidence{ResponseID: "resp_frozen_authority", SearchCalls: 1, Citations: []openAIResponseWebCitation{{Title: "Official program", URL: sourceURL}}})
+	// A transient source-packet failure after provider admission must not change
+	// the authority that was already validated and hash-bound to this request.
+	if _, err := request.NormalizeOutput(body); err != nil {
+		t.Fatalf("post-provider normalization rebuilt transient authority: %v", err)
+	}
+	if packetCalls != 1 {
+		t.Fatalf("post-provider normalization rebuilt the source packet: calls=%d", packetCalls)
+	}
+
+	contextStage := plan.subtaskByID("context_snapshot")
+	contextArtifact, _ := app.osArtifactByID(contextStage.ArtifactID)
+	changed := strings.Replace(contextArtifact.Text, question, "What unrelated market question should replace the approved one?", 1)
+	if _, _, err := app.updateOSArtifactWithMetadata(contextArtifact.ID, "", changed, scoutParticipantName, contextArtifact.Metadata); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.NormalizeOutput(body); err == nil || !strings.Contains(err.Error(), "context artifact changed") {
+		t.Fatalf("changed context question passed frozen post-provider authority: %v", err)
+	}
+	if packetCalls != 1 {
+		t.Fatalf("changed-context validation rebuilt the source packet: calls=%d", packetCalls)
+	}
+}
+
+func TestExternalEvidenceGoalChildActivationFreezesDurableRequestBeforeStart(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "real-goal-child-provider-reservation")
+	reserved, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, map[string]string{
+		"goalChildActivationState": goalChildActivationReserved,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread.Artifact = reserved
+	packetCalls := 0
+	app.externalEvidenceSourcePacket = func(_ context.Context, current *goalPlan) (string, error) {
+		packetCalls++
+		return current.Objective, nil
+	}
+	previousStart := startAgentThreadAsync
+	var launched scoutAgentThread
+	startAgentThreadAsync = func(_ *kanbanBoardApp, current scoutAgentThread) { launched = current }
+	t.Cleanup(func() { startAgentThreadAsync = previousStart })
+	if err := app.activateReservedGoalAgentThread(thread, agentThreadGoalSpec{ParentGoalID: parentID, RequestedBy: "aj@shareability.com"}, "AJ"); err != nil {
+		t.Fatalf("activate real external-evidence goal child: %v", err)
+	}
+	if launched.ID != thread.ID || packetCalls != 1 {
+		t.Fatalf("goal child launch=%q packetCalls=%d, want exact launch after one material-binding pass", launched.ID, packetCalls)
+	}
+	if strings.TrimSpace(launched.Artifact.Metadata[publicConversationProviderRequestKey]) == "" || strings.TrimSpace(launched.Artifact.Metadata[publicConversationProviderRequestHash]) == "" {
+		t.Fatal("real goal child reached start without a durable provider request")
+	}
+	if key := publicConversationProviderOperationKey(launched); strings.TrimSpace(key) == "" {
+		t.Fatal("real goal child durable request has no provider idempotency key")
+	}
+	providerContext, err := app.agentThreadProviderContext(context.Background(), launched)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, found, err := app.decodeDurablePublicConversationProviderRequest(launched, providerContext.Memory)
+	if err != nil || !found || request.ExternalEvidenceAuthority == nil || request.IdempotencyKey == "" {
+		t.Fatalf("decode real goal-child frozen request: found=%t authority=%+v key=%q err=%v", found, request.ExternalEvidenceAuthority, request.IdempotencyKey, err)
+	}
+	ref, digest := launched.Artifact.Metadata[publicConversationProviderRequestKey], launched.Artifact.Metadata[publicConversationProviderRequestHash]
+	app.externalEvidenceSourcePacket = func(context.Context, *goalPlan) (string, error) {
+		packetCalls++
+		return "", errors.New("must not rebuild packet during replay")
+	}
+	app.forgetGoalChildStartedInProcess(launched.Artifact.ID)
+	launched = scoutAgentThread{}
+	if err := app.replayStartedGoalExternalEvidenceThread(threadFromArtifactForTest(t, app, thread.Artifact.ID)); err != nil {
+		t.Fatalf("replay frozen goal-child provider request: %v", err)
+	}
+	if launched.ID != thread.ID || packetCalls != 1 || launched.Artifact.Metadata[publicConversationProviderRequestKey] != ref || launched.Artifact.Metadata[publicConversationProviderRequestHash] != digest {
+		t.Fatalf("replay changed frozen request: launched=%q calls=%d ref=%q/%q digest=%q/%q", launched.ID, packetCalls, launched.Artifact.Metadata[publicConversationProviderRequestKey], ref, launched.Artifact.Metadata[publicConversationProviderRequestHash], digest)
+	}
+}
+
+func threadFromArtifactForTest(t *testing.T, app *kanbanBoardApp, artifactID string) scoutAgentThread {
+	t.Helper()
+	artifact, ok := app.osArtifactByID(artifactID)
+	if !ok {
+		t.Fatalf("artifact %s is unavailable", artifactID)
+	}
+	return scoutAgentThread{
+		ID: artifact.Metadata["threadId"], Mode: artifact.Metadata["mode"], Query: firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["query"]),
+		Status: firstNonEmptyString(artifact.Metadata["threadStatus"], "running"), Artifact: artifact,
+	}
+}
+
+func TestExternalEvidenceFrozenAuthorityRejectsExactBindingMutations(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *kanbanBoardApp, *goalPlan, string, scoutAgentThread)
+		want   string
+	}{
+		{
+			name: "same questions but context body changed",
+			mutate: func(t *testing.T, app *kanbanBoardApp, plan *goalPlan, _ string, _ scoutAgentThread) {
+				stage := plan.subtaskByID("context_snapshot")
+				artifact, _ := app.osArtifactByID(stage.ArtifactID)
+				changed := strings.Replace(artifact.Text, `"audience":"decision makers"`, `"audience":"a different audience"`, 1)
+				if changed == artifact.Text {
+					t.Fatal("fixture context audience was not found")
+				}
+				if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", changed, scoutParticipantName, artifact.Metadata); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "context artifact changed",
+		},
+		{
+			name: "same body but context artifact replaced",
+			mutate: func(t *testing.T, app *kanbanBoardApp, plan *goalPlan, parentID string, _ scoutAgentThread) {
+				stage := plan.subtaskByID("context_snapshot")
+				original, _ := app.osArtifactByID(stage.ArtifactID)
+				replacement, _, err := app.createOSArtifactWithMetadata("workflow", "Replacement context", original.Text, scoutParticipantName, original.Metadata)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stage.ArtifactID = replacement.ID
+				encoded, _ := json.Marshal(plan)
+				parent, _ := app.osArtifactByID(parentID)
+				if _, _, err := app.updateOSArtifactWithMetadata(parentID, "", parent.Text, scoutParticipantName, map[string]string{"goalPlan": string(encoded)}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "context artifact changed",
+		},
+		{
+			name: "current child binding changed",
+			mutate: func(t *testing.T, app *kanbanBoardApp, _ *goalPlan, _ string, thread scoutAgentThread) {
+				child, _ := app.osArtifactByID(thread.Artifact.ID)
+				if _, _, err := app.updateOSArtifactWithMetadata(child.ID, "", child.Text, scoutParticipantName, map[string]string{"assignedRunner": "changed-runner"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "writer route changed",
+		},
+		{
+			name: "pinned process binding changed",
+			mutate: func(t *testing.T, app *kanbanBoardApp, plan *goalPlan, parentID string, _ scoutAgentThread) {
+				plan.ProcessDigest = strings.Repeat("f", 64)
+				encoded, _ := json.Marshal(plan)
+				parent, _ := app.osArtifactByID(parentID)
+				if _, _, err := app.updateOSArtifactWithMetadata(parentID, "", parent.Text, scoutParticipantName, map[string]string{"goalPlan": string(encoded)}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "parent route",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+			thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "binding-mutation-"+strings.ReplaceAll(test.name, " ", "-"))
+			authority, err := freezeExternalEvidenceAuthorityForThread(app, thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(t, app, &plan, parentID, thread)
+			if err := validateFrozenExternalEvidenceAuthorityForThread(app, thread, authority); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("mutation error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestExternalEvidenceOldDurableSnapshotWithoutFrozenAuthorityFailsClosed(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "legacy-missing-frozen-authority")
+	prepared, err := app.preparePublicConversationProviderRequest(thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := loadPrivatePublicConversationProviderRequest(prepared.Artifact.Metadata[publicConversationProviderRequestKey], prepared.Artifact.Metadata[publicConversationProviderRequestHash])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot durablePublicConversationProviderRequest
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Request.ExternalEvidenceAuthority = nil
+	legacyRaw, _ := json.Marshal(snapshot)
+	legacyRef, legacyDigest, err := storePrivatePublicConversationProviderRequest(legacyRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupPrivatePublicConversationProviderRequest(legacyRef) })
+	legacyArtifact, _, err := app.updateOSArtifactWithMetadata(prepared.Artifact.ID, "", prepared.Artifact.Text, scoutParticipantName, map[string]string{
+		publicConversationProviderRequestKey: legacyRef, publicConversationProviderRequestHash: legacyDigest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Artifact = legacyArtifact
+	providerContext, err := app.agentThreadProviderContext(context.Background(), prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.decodeDurablePublicConversationProviderRequest(prepared, providerContext.Memory); err == nil || !strings.Contains(err.Error(), "no frozen external evidence authority") {
+		t.Fatalf("legacy snapshot error=%v, want fail-closed frozen-authority rejection", err)
+	}
+}
+
+func TestProviderOperationKeyStaysEmptyForOrdinaryGoalChild(t *testing.T) {
+	thread := scoutAgentThread{ID: "ordinary-goal-child", Artifact: meetingMemoryEntry{ID: "ordinary-artifact", Metadata: map[string]string{
+		"goalChildActivationState": goalChildActivationStarted, "goalParentId": "goal", "goalSubtaskId": "write",
+		"operationId": "operation", "operationBodyDigest": strings.Repeat("a", 64), "outputContract": "deck_copy_v1",
+	}}}
+	if key := publicConversationProviderOperationKey(thread); key != "" {
+		t.Fatalf("ordinary goal child unexpectedly received durable external-evidence key %q", key)
+	}
+}
+
+func TestExternalEvidenceSourcePacketFailureStopsBeforeProviderReservation(t *testing.T) {
+	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
+	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "unavailable-source-packet")
+	app.externalEvidenceSourcePacket = func(context.Context, *goalPlan) (string, error) {
+		return "", errors.New("approved source is temporarily unavailable")
+	}
+	if _, err := app.preparePublicConversationProviderRequest(thread); err == nil ||
+		!strings.Contains(err.Error(), "authorized research source packet is unavailable") ||
+		!strings.Contains(err.Error(), "before provider handoff") {
+		t.Fatalf("preflight error=%v, want explicit source-packet rejection", err)
+	}
+	current, _ := app.osArtifactByID(thread.Artifact.ID)
+	if strings.TrimSpace(current.Metadata[publicConversationProviderRequestKey]) != "" || strings.TrimSpace(current.Metadata[publicConversationProviderRequestHash]) != "" {
+		t.Fatal("source-packet failure must not reserve a durable provider request")
 	}
 }
 
