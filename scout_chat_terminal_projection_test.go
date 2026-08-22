@@ -304,10 +304,17 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 	if err != nil {
 		t.Fatal(err)
 	}
+	standaloneDeck, _, err := app.createOSArtifactWithMetadata("workflow", "Standalone deck", "<!doctype html><html><body><section class=\"pg\">A complete deck.</section></body></html>", "Scout", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "threadId": "standalone-deck", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{
 		{ID: "stage", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "stage-run", Mode: "artifacts", Status: "complete", ArtifactID: stage.ID}},
 		{ID: "child", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "research-child", Mode: "research", Status: "complete", ArtifactID: child.ID}},
 		{ID: "standalone", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "standalone-report", Mode: "research", Status: "complete", ArtifactID: standalone.ID}},
+		{ID: "standalone-deck", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "standalone-deck", Mode: "presentation", Status: "complete", ArtifactID: standaloneDeck.ID}},
 	}}
 	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	if projected.Messages[0].Thread.ResultArtifactID != "" || projected.Messages[1].Thread.ResultArtifactID != "" {
@@ -316,6 +323,13 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 	ref := projected.Messages[2].Thread
 	if ref.ResultArtifactID != standalone.ID || ref.ResultArtifactType != artifactTypeMarkdown || !strings.Contains(ref.ResultPreview, "channel-facing document paragraph") || len(ref.ResultPreview) > 1200 {
 		t.Fatalf("standalone terminal projection=%+v", ref)
+	}
+	if ref.ResultQualityState != "" || !ref.ResultCanEdit || ref.ResultCanContinue || ref.ResultCanPresent || !ref.ResultCanExport {
+		t.Fatalf("standalone document lost ordinary Studio capabilities: %+v", ref)
+	}
+	deckRef := projected.Messages[3].Thread
+	if deckRef.ResultArtifactID != standaloneDeck.ID || deckRef.ResultArtifactType != artifactTypeHTMLDeck || deckRef.ResultQualityState != "" || !deckRef.ResultCanEdit || deckRef.ResultCanContinue || !deckRef.ResultCanPresent || !deckRef.ResultCanExport {
+		t.Fatalf("standalone deck lost ordinary Studio capabilities: %+v", deckRef)
 	}
 }
 

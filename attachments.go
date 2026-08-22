@@ -2060,7 +2060,11 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	if !goalResult && !scoutChatStandaloneTerminalResult(result, ref) {
 		return
 	}
-	resultQualityState := authoredResultQualityDraftNeedsAttention
+	// Standalone terminal artifacts predate and sit outside the authored-goal
+	// admission contract. Keep their quality state empty and preserve their
+	// ordinary Studio present/export capabilities. Only goal-owned results are
+	// gated by the exact rendered jury and publication tuple.
+	resultQualityState := ""
 	resultCanContinue := false
 	if goalResult {
 		plan := index.goalPlanByID[artifact.ID]
@@ -2076,8 +2080,8 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		ref.ResultQualityState = resultQualityState
 		ref.ResultCanEdit = resultCanEdit
 		ref.ResultCanContinue = resultCanContinue
-		ref.ResultCanPresent = resultQualityState == authoredResultQualityAdmitted
-		ref.ResultCanExport = resultQualityState == authoredResultQualityAdmitted
+		ref.ResultCanPresent = !goalResult || resultQualityState == authoredResultQualityAdmitted
+		ref.ResultCanExport = !goalResult || resultQualityState == authoredResultQualityAdmitted
 		if selectedAcceptedDeck {
 			ref.ResultApprovalState = acceptedBinding.State
 		}
@@ -2093,7 +2097,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref.ResultQualityState = resultQualityState
 	ref.ResultCanEdit = resultCanEdit
 	ref.ResultCanContinue = resultCanContinue
-	ref.ResultCanExport = resultQualityState == authoredResultQualityAdmitted
+	ref.ResultCanExport = !goalResult || resultQualityState == authoredResultQualityAdmitted
 }
 
 // authorizedScoutChatResultArtifact performs the authorization check against
