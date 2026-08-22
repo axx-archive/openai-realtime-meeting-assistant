@@ -655,6 +655,21 @@ export const api = {
     });
   },
 
+  artifactStudioAccess(
+    sessionToken: string,
+    artifactId: string,
+    kind: "deck" | "document",
+  ): Promise<{ ok: boolean; canWrite: boolean }> {
+    const normalizedId = artifactId.trim();
+    if (!normalizedId || (kind !== "deck" && kind !== "document")) {
+      return Promise.reject(new Error("That Studio destination is invalid."));
+    }
+    return request(
+      `/artifacts/${kind}?id=${encodeURIComponent(normalizedId)}`,
+      { sessionToken },
+    );
+  },
+
   artifactRenderToken(
     sessionToken: string,
     artifactId: string,
@@ -676,6 +691,17 @@ export const api = {
     return request('/artifacts/action', {
       method: 'POST',
       body: { ...body, action: 'approve' },
+      sessionToken,
+    });
+  },
+
+  resumeGoal(
+    sessionToken: string,
+    id: string,
+  ): Promise<{ ok: boolean; replayed?: boolean }> {
+    return request('/artifacts/action', {
+      method: 'POST',
+      body: { id, action: 'resume' },
       sessionToken,
     });
   },

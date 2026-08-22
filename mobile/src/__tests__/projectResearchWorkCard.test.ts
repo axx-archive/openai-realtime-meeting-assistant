@@ -29,7 +29,7 @@ test('Project-bound Research uses governed actions while Project presentations k
         'project-work-card-stub:./messageGestures': `export const messageLongPressDelayMs=350;`,
         'project-work-card-stub:./scoutReplyLifecycle': `export const scoutReplyLifecyclePresentation=()=>null;`,
         'project-work-card-stub:./messagePresentation': `export const extractHttpUrls=()=>[]; export const groupMessageReactions=()=>[]; export const parseMessageTextSegments=()=>[];`,
-        'project-work-card-stub:./workPresentation': `export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'?'Presentation':'Research'; export const workProgressPresentation=ref=>({phase:null,phaseLabel:'Delivered',percent:Number(ref?.progressPercent||0),needsInput:Boolean(ref?.checkpoint),progressCopy:'Delivered'});`,
+        'project-work-card-stub:./workPresentation': `export const workFamilyLabel=ref=>String(ref?.mode||'').toLowerCase()==='presentation'||String(ref?.processId||'').startsWith('packaging_studio')?'Presentation':'Research'; export const workProgressPresentation=ref=>({phase:null,phaseLabel:'Delivered',percent:Number(ref?.progressPercent||0),needsInput:Boolean(ref?.checkpoint),progressCopy:'Delivered'});`,
         'project-work-card-stub:./InlineArtifactPreview': `export const InlineArtifactPreview='InlineArtifactPreview';`,
   });
   (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;
@@ -82,6 +82,34 @@ test('Project-bound Research uses governed actions while Project presentations k
   await act(async () => { deck.props.onPresent(); });
   assert.equal(presented, 1);
 
+  const runningGoal = {
+    id: 'running-goal', kind: 'thread', role: 'scout', text: 'Building the presentation.', createdAt: '2026-08-13T18:06:00Z',
+    thread: { id: 'run-goal', mode: 'goal', processId: 'packaging_studio_v3', query: 'Build the deck', status: 'running', artifactId: 'goal-root-not-a-deck' },
+  };
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: runningGoal, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+    } as any));
+  });
+  const runningPreview = renderer!.root.findByType('InlineArtifactPreview' as any);
+  assert.equal(runningPreview.props.loading, true);
+  assert.equal(runningPreview.props.artifactId, undefined);
+  assert.equal(runningPreview.props.onEdit, undefined);
+  assert.equal(runningPreview.props.onPresent, undefined);
+
+  const blockedGoal = {
+    ...runningGoal,
+    id: 'blocked-goal',
+    thread: { ...runningGoal.thread, status: 'needs_attention' },
+  };
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: blockedGoal, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+    } as any));
+  });
+  assert.equal(renderer!.root.findAllByType('InlineArtifactPreview' as any).length, 0);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'View presentation failure details' }).length, 1);
+
   const goalWithDeck = {
     id: 'goal-with-deck', kind: 'thread', role: 'scout', text: 'Ready for your decision.', createdAt: '2026-08-13T18:10:00Z',
     thread: {
@@ -103,4 +131,22 @@ test('Project-bound Research uses governed actions while Project presentations k
   const approve = renderer!.root.findByProps({ accessibilityLabel: 'Approve and share' });
   await act(async () => { approve.props.onPress(); });
   assert.equal(checkpointChoice, 'approve-final');
+
+  const reportGoal = {
+    id: 'goal-with-report', kind: 'thread', role: 'scout', text: 'Report delivered.', createdAt: '2026-08-13T18:12:00Z',
+    thread: {
+      id: 'run-goal-report', mode: 'goal', processId: 'document_report_v1', query: 'Write the opportunity report', status: 'complete', artifactId: 'goal-report-root',
+      resultArtifactId: 'report-artifact', resultArtifactType: 'markdown', resultTitle: 'Insights & Opportunities',
+      resultPreview: '# Insights & Opportunities\n\nThe engagement army is an activation network, not a reach product.',
+    },
+  };
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: reportGoal, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+    } as any));
+  });
+  const report = renderer!.root.findByType('InlineArtifactPreview' as any);
+  assert.equal(report.props.kind, 'document');
+  assert.equal(report.props.artifactId, 'report-artifact');
+  assert.match(report.props.text, /activation network, not a reach product/u);
 });

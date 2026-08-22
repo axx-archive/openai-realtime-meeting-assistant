@@ -16,9 +16,10 @@ package main
 //      blob store, and runs the /packaging jury trio (headline ear / design
 //      eye / the domain-literate room gut) as a 3-seat panel via the engine's
 //      runGoalPanel primitive. The image blocks ride the raw-content seam
-//      through a responder wrapper, so EVERY jury call — the three seats and
-//      the synthesis — sees ALL pages. The merged scoreboard files as a
-//      slide_jury_v1 artifact.
+//      through a responder wrapper. Decks that exceed one provider request are
+//      reviewed in bounded batches: every seat sees every authored page, then
+//      the exact per-seat scorecards are reassembled and synthesized across the
+//      complete deck. The merged scoreboard files as a slide_jury_v1 artifact.
 //
 // The jury's copy/layout findings land as revision notes, while its structured
 // readiness stamp changes the final checkpoint language so a deck with
@@ -48,6 +49,12 @@ const (
 
 	// slideJurySource is the artifact provenance stamp.
 	slideJurySource = "slide_jury"
+
+	// Structured fixes are carried from the independent seat scorecards into
+	// the deterministic repair gate. Bounds keep one jury artifact from growing
+	// an unbounded requeue prompt while preserving every admitted fix verbatim.
+	slideJuryRepairFixMaxChars = 600
+	slideJuryRepairFixMaxCount = 36
 )
 
 // slideJuryPollInterval is how often the studio stage re-checks the deck for
@@ -217,12 +224,22 @@ const slideJurySchema = `Return STRICT JSON only, no prose outside it:
 {"pages":[{"page":1,"score":0,"fix":"one executable change, or the literal word KEEP","blockers":["text_overlap"]}],"weakest_three":[1,2,3],"strongest_three":[4,5,6]}
 Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
 
+type slideJuryPageScore struct {
+	Page     int      `json:"page"`
+	Score    float64  `json:"score"`
+	Fix      string   `json:"fix"`
+	Blockers []string `json:"blockers"`
+}
+
 type slideJurySeatScorecard struct {
-	Pages []struct {
-		Page     int      `json:"page"`
-		Score    float64  `json:"score"`
-		Blockers []string `json:"blockers"`
-	} `json:"pages"`
+	Pages          []slideJuryPageScore `json:"pages"`
+	WeakestThree   []int                `json:"weakest_three,omitempty"`
+	StrongestThree []int                `json:"strongest_three,omitempty"`
+}
+
+type slideJuryRepair struct {
+	Page  int      `json:"page"`
+	Fixes []string `json:"fixes"`
 }
 
 type slideJuryReadiness struct {
@@ -230,6 +247,50 @@ type slideJuryReadiness struct {
 	BlockingPages  []int
 	MinimumAverage float64
 	ParsedSeats    int
+	Repairs        []slideJuryRepair
+}
+
+// validateSlideJurySeatScorecard admits a seat only when it covers the exact
+// requested page set once. Batch aggregation uses global page numbers, so a
+// plausible-looking 1..N response for the wrong batch can never be spliced
+// into a full-deck verdict.
+func validateSlideJurySeatScorecard(card slideJurySeatScorecard, expectedPages []int) error {
+	if len(card.Pages) != len(expectedPages) {
+		return fmt.Errorf("scorecard carries %d pages, want %d", len(card.Pages), len(expectedPages))
+	}
+	expected := make(map[int]struct{}, len(expectedPages))
+	for _, page := range expectedPages {
+		expected[page] = struct{}{}
+	}
+	seen := make(map[int]struct{}, len(card.Pages))
+	for _, page := range card.Pages {
+		if _, ok := expected[page.Page]; !ok {
+			return fmt.Errorf("scorecard page %d is outside the requested page set", page.Page)
+		}
+		if _, duplicate := seen[page.Page]; duplicate {
+			return fmt.Errorf("scorecard repeats page %d", page.Page)
+		}
+		seen[page.Page] = struct{}{}
+		fix := strings.TrimSpace(page.Fix)
+		if page.Score < 0 || page.Score > 10 || fix == "" || len(fix) > slideJuryRepairFixMaxChars || (strings.EqualFold(fix, "KEEP") && fix != "KEEP") {
+			return fmt.Errorf("scorecard page %d has an invalid score or fix", page.Page)
+		}
+		for _, blocker := range page.Blockers {
+			blocker = strings.ToLower(strings.TrimSpace(blocker))
+			if !oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim") {
+				return fmt.Errorf("scorecard page %d has unsupported blocker %q", page.Page, blocker)
+			}
+		}
+	}
+	return nil
+}
+
+func slideJuryExpectedPages(first int, count int) []int {
+	pages := make([]int, count)
+	for index := range pages {
+		pages[index] = first + index
+	}
+	return pages
 }
 
 // evaluateSlideJuryReadiness turns the independent seat scorecards into a
@@ -242,6 +303,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 		count    int
 		low      int
 		blockers map[string]int
+		fixes    []string
 	}
 	pages := map[int]*pageVotes{}
 	parsedSeats := 0
@@ -250,19 +312,18 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			continue
 		}
 		var card slideJurySeatScorecard
-		if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(voice.Text))), &card); err != nil || len(card.Pages) == 0 {
+		if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(voice.Text))), &card); err != nil {
+			continue
+		}
+		// Validate the whole seat before counting any vote. A missing fix is not
+		// a usable scoreboard: every page must carry an exact executable change
+		// or the literal KEEP, as promised by slideJurySchema.
+		if err := validateSlideJurySeatScorecard(card, slideJuryExpectedPages(1, expectedPages)); err != nil {
 			continue
 		}
 		parsedSeats++
-		seen := map[int]struct{}{}
 		for _, page := range card.Pages {
-			if page.Page < 1 || page.Page > expectedPages || page.Score < 0 || page.Score > 10 {
-				continue
-			}
-			if _, duplicate := seen[page.Page]; duplicate {
-				continue
-			}
-			seen[page.Page] = struct{}{}
+			fix := strings.TrimSpace(page.Fix)
 			vote := pages[page.Page]
 			if vote == nil {
 				vote = &pageVotes{blockers: map[string]int{}}
@@ -273,6 +334,9 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			if page.Score < 7 {
 				vote.low++
 			}
+			if !strings.EqualFold(fix, "KEEP") && !slices.Contains(vote.fixes, fix) {
+				vote.fixes = append(vote.fixes, fix)
+			}
 			seenBlockers := map[string]struct{}{}
 			for _, blocker := range page.Blockers {
 				blocker = strings.ToLower(strings.TrimSpace(blocker))
@@ -280,7 +344,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 					continue
 				}
 				seenBlockers[blocker] = struct{}{}
-				if oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable") {
+				if oneOf(blocker, "text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim") {
 					vote.blockers[blocker]++
 				}
 			}
@@ -316,6 +380,19 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 	slices.Sort(result.BlockingPages)
 	if len(result.BlockingPages) > 0 {
 		result.Verdict = "needs_changes"
+		totalFixes := 0
+		for _, page := range result.BlockingPages {
+			fixes := append([]string(nil), pages[page].fixes...)
+			if len(fixes) == 0 || totalFixes+len(fixes) > slideJuryRepairFixMaxCount {
+				// A blocking verdict without an executable exact repair cannot be
+				// auto-routed back to the deck writer.
+				result.Verdict = "needs_attention"
+				result.Repairs = nil
+				return result
+			}
+			totalFixes += len(fixes)
+			result.Repairs = append(result.Repairs, slideJuryRepair{Page: page, Fixes: fixes})
+		}
 	}
 	return result
 }
@@ -334,8 +411,8 @@ func slideJuryPageList(pages []int) string {
 const slideJurySynthesisSystem = "You are Scout's slide jury synthesizer for Stride. Merge the seats' per-page scoreboards into ONE merged scoreboard: for every page, the average score, the seats' verdicts side by side, and ONE executable fix (or KEEP when the seats agree it stands). Then name the consensus weakest_three and strongest_three pages. Weigh agreement heavily; name genuine disagreement instead of averaging it away. These are REVISION NOTES for a human — decisive, executable, never auto-applied."
 
 // slideJuryPersonas is the /packaging jury trio: the headline ear, the design
-// eye, and the domain-literate room gut. Each seat sees ALL rendered pages
-// (the responder wrapper attaches every page to every call).
+// eye, and the domain-literate room gut. Each seat sees every rendered page;
+// larger decks are split into exact bounded batches and reassembled by seat.
 func slideJuryPersonas() []goalPanelPersona {
 	return []goalPanelPersona{
 		{
@@ -353,7 +430,7 @@ func slideJuryPersonas() []goalPanelPersona {
 	}
 }
 
-// --- Page budgeting --------------------------------------------------------------
+// --- Page batching -------------------------------------------------------------
 
 // slideJuryPage is one rendered page the jury sees: its 1-based page number
 // and the raw JPEG bytes from the blob store.
@@ -362,29 +439,132 @@ type slideJuryPage struct {
 	Data   []byte
 }
 
-// capSlideJuryPages enforces the wire-layer image budget BEFORE the request is
-// assembled: at most anthropicMaxRequestImages pages and
-// ~anthropicMaxRequestImageBytes of raw JPEG. Dropped pages are disclosed in
-// the returned note (spliced into the jury task), never silently vanished.
-func capSlideJuryPages(pages []slideJuryPage) ([]slideJuryPage, string) {
-	capped := pages
-	if len(capped) > anthropicMaxRequestImages {
-		capped = capped[:anthropicMaxRequestImages]
+// slideJuryBatchCanAccept is the single source of truth for the per-request
+// provider envelope. The runtime starts another batch when this returns false;
+// it never truncates the deck. A page that cannot fit an empty batch is an
+// explicit error because no provider call could review it truthfully.
+func slideJuryBatchCanAccept(currentPages int, currentBytes int, nextBytes int) bool {
+	if currentPages < 0 || currentBytes < 0 || nextBytes < 0 || currentPages >= anthropicMaxRequestImages {
+		return false
 	}
-	total := 0
-	for index, page := range capped {
-		total += len(page.Data)
-		if total > anthropicMaxRequestImageBytes {
-			capped = capped[:index]
-			break
+	if nextBytes > anthropicMaxRequestImageBytes {
+		return false
+	}
+	return currentBytes <= anthropicMaxRequestImageBytes-nextBytes
+}
+
+type slideJuryBatchRecord struct {
+	Pages   []int
+	Outcome goalPanelOutcome
+}
+
+func slideJuryPageNumbers(pages []slideJuryPage) []int {
+	numbers := make([]int, len(pages))
+	for index, page := range pages {
+		numbers[index] = page.Number
+	}
+	return numbers
+}
+
+func slideJuryVoiceForPersona(voices []goalPanelVoice, persona string) (goalPanelVoice, bool) {
+	for _, voice := range voices {
+		if voice.Persona == persona {
+			return voice, true
 		}
 	}
-	if len(capped) == len(pages) {
-		return capped, ""
+	return goalPanelVoice{}, false
+}
+
+func finalizeSlideJurySeatScorecard(card *slideJurySeatScorecard) {
+	if card == nil {
+		return
 	}
-	return capped, fmt.Sprintf(
-		"DISCLOSED: only the first %d of %d rendered pages are attached (request image budget: %d images, ~%dMB). Score what you see; note that later pages went unjuried.",
-		len(capped), len(pages), anthropicMaxRequestImages, anthropicMaxRequestImageBytes>>20)
+	slices.SortFunc(card.Pages, func(a, b slideJuryPageScore) int {
+		if a.Page < b.Page {
+			return -1
+		}
+		if a.Page > b.Page {
+			return 1
+		}
+		return 0
+	})
+	for index := range card.Pages {
+		card.Pages[index].Fix = strings.TrimSpace(card.Pages[index].Fix)
+		if card.Pages[index].Blockers == nil {
+			card.Pages[index].Blockers = []string{}
+		}
+	}
+	ranked := append([]slideJuryPageScore(nil), card.Pages...)
+	slices.SortFunc(ranked, func(a, b slideJuryPageScore) int {
+		if a.Score < b.Score {
+			return -1
+		}
+		if a.Score > b.Score {
+			return 1
+		}
+		if a.Page < b.Page {
+			return -1
+		}
+		if a.Page > b.Page {
+			return 1
+		}
+		return 0
+	})
+	limit := min(3, len(ranked))
+	card.WeakestThree = make([]int, 0, limit)
+	for _, page := range ranked[:limit] {
+		card.WeakestThree = append(card.WeakestThree, page.Page)
+	}
+	card.StrongestThree = make([]int, 0, limit)
+	for index := len(ranked) - 1; index >= len(ranked)-limit; index-- {
+		card.StrongestThree = append(card.StrongestThree, ranked[index].Page)
+	}
+}
+
+// mergeSlideJuryBatchVoices reconstitutes one full-deck scorecard per persona.
+// A persona is admitted only if every batch returned the exact global page set;
+// a missing or malformed batch marks that whole seat unavailable, preserving
+// the existing two-complete-seat readiness floor without manufacturing votes.
+func mergeSlideJuryBatchVoices(records []slideJuryBatchRecord, expectedPages int) []goalPanelVoice {
+	personas := slideJuryPersonas()
+	merged := make([]goalPanelVoice, len(personas))
+	for personaIndex, persona := range personas {
+		voice := goalPanelVoice{Persona: persona.Name}
+		card := slideJurySeatScorecard{Pages: make([]slideJuryPageScore, 0, expectedPages)}
+		for batchIndex, record := range records {
+			part, ok := slideJuryVoiceForPersona(record.Outcome.Voices, persona.Name)
+			if !ok {
+				voice.Err = fmt.Errorf("jury batch %d (%s) omitted the %s seat", batchIndex+1, slideJuryPageList(record.Pages), persona.Name)
+				break
+			}
+			if part.Err != nil {
+				voice.Err = fmt.Errorf("jury batch %d (%s), %s seat: %w", batchIndex+1, slideJuryPageList(record.Pages), persona.Name, part.Err)
+				break
+			}
+			var batchCard slideJurySeatScorecard
+			if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(part.Text))), &batchCard); err != nil {
+				voice.Err = fmt.Errorf("jury batch %d (%s), %s seat returned invalid JSON: %w", batchIndex+1, slideJuryPageList(record.Pages), persona.Name, err)
+				break
+			}
+			if err := validateSlideJurySeatScorecard(batchCard, record.Pages); err != nil {
+				voice.Err = fmt.Errorf("jury batch %d (%s), %s seat: %w", batchIndex+1, slideJuryPageList(record.Pages), persona.Name, err)
+				break
+			}
+			card.Pages = append(card.Pages, batchCard.Pages...)
+		}
+		if voice.Err == nil {
+			finalizeSlideJurySeatScorecard(&card)
+			if err := validateSlideJurySeatScorecard(card, slideJuryExpectedPages(1, expectedPages)); err != nil {
+				voice.Err = fmt.Errorf("full-deck %s scorecard: %w", persona.Name, err)
+			} else if payload, err := json.Marshal(card); err != nil {
+				voice.Err = fmt.Errorf("marshal full-deck %s scorecard: %w", persona.Name, err)
+			} else {
+				voice.Text = string(payload)
+			}
+		}
+		merged[personaIndex] = voice
+	}
+	return merged
 }
 
 // --- The jury run ----------------------------------------------------------------
@@ -439,66 +619,121 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 	if len(assets) == 0 {
 		return meetingMemoryEntry{}, fmt.Errorf("deck %s carries no page-image assets — nothing for the jury to see", artifact.ID)
 	}
-	// Cap BEFORE loading: blobs load only until the request budget is met
-	// (anthropicMaxRequestImages pages / ~anthropicMaxRequestImageBytes), so an
-	// unbounded asset count never sits fully resident — a 300-page deck loads
-	// ~12 pages, not 300, and a bad blob past the budget can never abort the
-	// jury because it is never read.
-	pages := make([]slideJuryPage, 0, min(len(assets), anthropicMaxRequestImages))
-	totalBytes := 0
-	for index, asset := range assets {
-		if len(pages) >= anthropicMaxRequestImages || totalBytes >= anthropicMaxRequestImageBytes {
-			break
-		}
-		data, _, err := getBlob(asset.Ref)
-		if err != nil {
-			return meetingMemoryEntry{}, fmt.Errorf("load page image %d (%s): %w", index+1, asset.Ref, err)
-		}
-		pages = append(pages, slideJuryPage{Number: index + 1, Data: data})
-		totalBytes += len(data)
-	}
-	// capSlideJuryPages trims the page that overflowed the byte budget; the
-	// disclosure is recomputed against the FULL asset count, since unloaded
-	// pages were dropped by the pre-load cap above.
-	capped, _ := capSlideJuryPages(pages)
-	if len(capped) == 0 {
-		return meetingMemoryEntry{}, fmt.Errorf("no page image fits the %dMB request image budget", anthropicMaxRequestImageBytes>>20)
-	}
-	capNote := ""
-	if len(capped) < len(assets) {
-		capNote = fmt.Sprintf(
-			"DISCLOSED: only the first %d of %d rendered pages are attached (request image budget: %d images, ~%dMB). Score what you see; note that later pages went unjuried.",
-			len(capped), len(assets), anthropicMaxRequestImages, anthropicMaxRequestImageBytes>>20)
-	}
-
-	pageContent := make([]openAIInputContent, 0, 2*len(capped))
-	for _, page := range capped {
-		pageContent = append(pageContent,
-			openAIInputContent{Type: "input_text", Text: fmt.Sprintf("Rendered page %d of %d:", page.Number, len(assets))},
-			openAIInputContent{Type: "input_image", ImageURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(page.Data)},
-		)
-	}
-
 	deckTitle := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), "the shipped deck")
-	taskLines := []string{
-		"Slide jury: judge the RENDERED pages of \"" + deckTitle + "\" exactly as a room will see them — the images above are the deliverable, not a draft.",
-		fmt.Sprintf("You were shown %d page(s). Score EVERY page per your seat's lens, name your weakest_three and strongest_three, and make every fix executable or the literal word KEEP.", len(capped)),
-	}
-	if capNote != "" {
-		taskLines = append(taskLines, capNote)
+
+	// Load and review one bounded batch at a time. At most one not-yet-admitted
+	// page is held beside the current <=20MB batch, so a 100-page artifact never
+	// becomes a 100-image in-memory request. Crucially, the cursor continues until
+	// every asset has been sent to every seat; request limits start a new batch,
+	// never a truncation path.
+	var records []slideJuryBatchRecord
+	cursor := 0
+	var pending *slideJuryPage
+	for cursor < len(assets) || pending != nil {
+		pages := make([]slideJuryPage, 0, min(len(assets)-cursor+1, anthropicMaxRequestImages))
+		batchBytes := 0
+		for len(pages) < anthropicMaxRequestImages && (cursor < len(assets) || pending != nil) {
+			var page slideJuryPage
+			if pending != nil {
+				page = *pending
+				pending = nil
+			} else {
+				asset := assets[cursor]
+				data, _, err := getBlob(asset.Ref)
+				if err != nil {
+					return meetingMemoryEntry{}, fmt.Errorf("load page image %d (%s): %w", cursor+1, asset.Ref, err)
+				}
+				page = slideJuryPage{Number: cursor + 1, Data: data}
+				cursor++
+			}
+			if len(page.Data) == 0 {
+				return meetingMemoryEntry{}, fmt.Errorf("page image %d is empty — the jury cannot see it", page.Number)
+			}
+			if len(page.Data) > anthropicMaxRequestImageBytes {
+				return meetingMemoryEntry{}, fmt.Errorf("page image %d is ~%dMB, above the %dMB per-request image budget — the jury cannot review every page", page.Number, len(page.Data)>>20, anthropicMaxRequestImageBytes>>20)
+			}
+			if !slideJuryBatchCanAccept(len(pages), batchBytes, len(page.Data)) {
+				pageCopy := page
+				pending = &pageCopy
+				break
+			}
+			pages = append(pages, page)
+			batchBytes += len(page.Data)
+		}
+		if len(pages) == 0 {
+			return meetingMemoryEntry{}, fmt.Errorf("no page image fits the %dMB request image budget", anthropicMaxRequestImageBytes>>20)
+		}
+
+		pageContent := make([]openAIInputContent, 0, 2*len(pages))
+		for _, page := range pages {
+			pageContent = append(pageContent,
+				openAIInputContent{Type: "input_text", Text: fmt.Sprintf("Rendered page %d of %d:", page.Number, len(assets))},
+				openAIInputContent{Type: "input_image", ImageURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(page.Data)},
+			)
+		}
+		pageNumbers := slideJuryPageNumbers(pages)
+		taskLines := []string{
+			"Slide jury: judge the RENDERED pages of \"" + deckTitle + "\" exactly as a room will see them — the images above are the deliverable, not a draft.",
+			fmt.Sprintf("This bounded review batch contains global page(s) %s of %d. Score EVERY attached page per your seat's lens using those exact global page numbers; name this batch's weakest_three and strongest_three, and make every fix executable or the literal word KEEP.", slideJuryPageList(pageNumbers), len(assets)),
+		}
+		engine := newGoalEngine(app)
+		engine.openAIResponder = withSlideJuryOpenAIPageContent(engine.openAIResponder, pageContent)
+		panelSpec := goalPanelSpec{
+			Task:      strings.Join(taskLines, "\n"),
+			Schema:    slideJurySchema,
+			Personas:  slideJuryPersonas(),
+			Synthesis: slideJurySynthesisSystem,
+			Review:    true,
+		}
+		var outcome goalPanelOutcome
+		var err error
+		hasAnotherBatch := pending != nil || cursor < len(assets)
+		if len(records) == 0 && !hasAnotherBatch {
+			// Preserve the compact one-batch path: three image reviews plus one
+			// image-aware synthesis. Larger decks must not pay for throwaway
+			// per-batch syntheses that can fail after all seats already succeeded.
+			outcome, err = engine.runGoalPanel(ctx, panelSpec)
+		} else {
+			outcome, err = engine.runGoalPanelVoices(ctx, panelSpec)
+		}
+		if err != nil {
+			return meetingMemoryEntry{}, fmt.Errorf("slide jury panel for page(s) %s: %w", slideJuryPageList(pageNumbers), err)
+		}
+		records = append(records, slideJuryBatchRecord{Pages: pageNumbers, Outcome: outcome})
 	}
 
-	engine := newGoalEngine(app)
-	engine.openAIResponder = withSlideJuryOpenAIPageContent(engine.openAIResponder, pageContent)
-	outcome, err := engine.runGoalPanel(ctx, goalPanelSpec{
-		Task:      strings.Join(taskLines, "\n"),
-		Schema:    slideJurySchema,
-		Personas:  slideJuryPersonas(),
-		Synthesis: slideJurySynthesisSystem,
-		Review:    true,
-	})
-	if err != nil {
-		return meetingMemoryEntry{}, fmt.Errorf("slide jury panel: %w", err)
+	// A one-batch deck preserves the historical four-call path byte-for-byte.
+	// Multi-batch decks assemble each persona's exact full-deck JSON first, then
+	// make their only synthesis call over those validated scorecards. The
+	// synthesizer never substitutes for image review; it only merges reviews
+	// whose page coverage was proven above.
+	outcome := records[0].Outcome
+	if len(records) > 1 {
+		outcome.Voices = mergeSlideJuryBatchVoices(records, len(assets))
+		var replies strings.Builder
+		completeSeats := 0
+		for _, voice := range outcome.Voices {
+			replies.WriteString("### Panelist: " + voice.Persona + "\n")
+			if voice.Err != nil {
+				replies.WriteString("(this panelist did not complete every batch: " + compactAssistantLine(voice.Err.Error()) + ")\n\n")
+				continue
+			}
+			completeSeats++
+			replies.WriteString(voice.Text + "\n\n")
+		}
+		if completeSeats == 0 {
+			outcome.Synthesis = "Full-deck synthesis unavailable: no jury seat returned a valid scorecard for every rendered page."
+		} else {
+			synthesisTask := fmt.Sprintf(
+				"Synthesize the complete %d-page slide jury for \"%s\". Every scorecard below has already been validated against exact global page coverage across %d bounded image batches. Return one full-deck merged scoreboard covering every page; name the consensus weakest_three and strongest_three.\n\nThe jury's complete scorecards:\n\n%s",
+				len(assets), deckTitle, len(records), strings.TrimSpace(replies.String()))
+			synthesisEngine := newGoalEngine(app)
+			synthesis, err := synthesisEngine.callReviewModel(ctx, slideJurySynthesisSystem, synthesisTask)
+			if err != nil {
+				return meetingMemoryEntry{}, fmt.Errorf("full-deck slide jury synthesis: %w", err)
+			}
+			outcome.Synthesis = strings.TrimSpace(synthesis)
+		}
 	}
 
 	// The merged scoreboard leads; every seat's raw scoreboard stays on the
@@ -516,16 +751,28 @@ func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artif
 	}
 
 	metadata := map[string]string{
-		"artifactContract": slideJuryContract,
-		"type":             artifactTypeMarkdown,
-		"source":           slideJurySource,
-		"deckArtifactId":   artifact.ID,
+		"artifactContract":    slideJuryContract,
+		"type":                artifactTypeMarkdown,
+		"source":              slideJurySource,
+		"deckArtifactId":      artifact.ID,
+		"deckArtifactVersion": strconv.Itoa(artifactVersion(artifact)),
+		"deckContentDigest":   artifactCapabilityDigest(artifact),
+		"juryBatchCount":      strconv.Itoa(len(records)),
+		"juriedPageCount":     strconv.Itoa(len(assets)),
+		"pageCoverage":        fmt.Sprintf("%d/%d", len(assets), len(assets)),
 	}
 	readiness := evaluateSlideJuryReadiness(outcome.Voices, len(assets))
 	metadata["reviewVerdict"] = readiness.Verdict
 	metadata["blockingPages"] = slideJuryPageList(readiness.BlockingPages)
 	metadata["minimumAverage"] = strconv.FormatFloat(readiness.MinimumAverage, 'f', 2, 64)
 	metadata["parsedSeats"] = strconv.Itoa(readiness.ParsedSeats)
+	repairsForMetadata := readiness.Repairs
+	if repairsForMetadata == nil {
+		repairsForMetadata = []slideJuryRepair{}
+	}
+	if repairs, marshalErr := json.Marshal(repairsForMetadata); marshalErr == nil {
+		metadata["repairFixes"] = string(repairs)
+	}
 	if goalID = strings.TrimSpace(goalID); goalID != "" {
 		metadata["goalId"] = goalID
 	}

@@ -560,10 +560,10 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			MaxOutputTokens: agentThreadMaxOutputTokensForThread(run.thread),
 			EnableWebSearch: liveWebSearch,
 			ValidateOutput: func(text string) error {
-				return validateAgentThreadTerminalArtifact(run.thread, text)
+				return validateAgentThreadTerminalArtifactWithApp(app, run.thread, text)
 			},
 		}
-		request = configureExternalEvidenceV2Request(run.thread, request)
+		request = configureExternalEvidenceV2Request(app, run.thread, request)
 		raw, responderErr = responder(ctx, apiKey, request)
 		if responderErr != nil {
 			return "", responderErr
@@ -575,7 +575,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 		if _, authErr := app.agentThreadProviderContext(ctx, run.thread); authErr != nil {
 			return "", authErr
 		}
-		if qualityErr := validateAgentThreadTerminalArtifact(run.thread, raw); qualityErr != nil {
+		if qualityErr := validateAgentThreadTerminalArtifactWithApp(app, run.thread, raw); qualityErr != nil {
 			return "", qualityErr
 		}
 		return raw, nil
@@ -636,7 +636,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			metadata[key] = value
 		}
 	}
-	for key, value := range researchArtifactEvidenceMetadata(run.thread, output) {
+	for key, value := range researchArtifactEvidenceMetadataAtVersion(run.thread, newText, artifactVersion(prev)+1) {
 		metadata[key] = value
 	}
 	if value := strings.TrimSpace(run.thread.Artifact.Metadata["agentReauthorizedAt"]); value != "" {

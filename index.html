@@ -12244,7 +12244,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        min-height: 40px;
+        min-height: 48px;
         padding: 4px;
         border: 1px solid rgba(255,255,255,.2);
         border-radius: 999px;
@@ -12256,8 +12256,8 @@
       .chat-deck__nav button {
         display: grid;
         place-items: center;
-        width: 32px;
-        height: 32px;
+        width: 40px;
+        height: 40px;
         padding: 0;
         border: 0;
         border-radius: 999px;
@@ -12351,10 +12351,10 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
-        height: 32px;
+        min-height: 40px;
         padding: 0 14px;
         border: none;
-        border-radius: 16px;
+        border-radius: 20px;
         font: var(--type-body-sm);
         font-weight: 500;
         cursor: pointer;
@@ -12428,9 +12428,111 @@
         min-width: 0;
         max-width: none;
       }
+      .scout-chat-deck-result__approval-note {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        margin-top: 8px;
+        padding: 5px 10px;
+        border: 1px solid color-mix(in srgb, var(--ember-500) 42%, var(--line-1));
+        border-radius: var(--r-full);
+        color: var(--text-2);
+        background: color-mix(in srgb, var(--ember-500) 8%, var(--surface-1));
+        font: var(--type-label);
+      }
+      .scout-chat-document-result {
+        width: min(100%, 720px);
+        margin: 14px 0 18px;
+        overflow: hidden;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-2);
+      }
+      .scout-chat-document-result__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .scout-chat-document-result__identity { min-width: 0; }
+      .scout-chat-document-result__kicker {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .scout-chat-document-result__title {
+        margin: 0;
+        overflow: hidden;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .scout-chat-document-result__actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: none;
+      }
+      .scout-chat-document-result__action {
+        display: inline-flex;
+        min-height: 36px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 14px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .scout-chat-document-result__action:hover { background: var(--surface-3); }
+      .scout-chat-document-result__action:active { transform: scale(var(--press-scale)); }
+      .scout-chat-document-result__action--primary {
+        border-color: transparent;
+        background: var(--text-1);
+        color: var(--bg-app);
+      }
+      .scout-chat-document-result__action--primary:hover { background: var(--text-2); }
+      .scout-chat-document-result__preview.artifact-read {
+        position: relative;
+        width: 100%;
+        min-height: 210px;
+        max-height: 330px;
+        margin: 0;
+        overflow: hidden;
+        padding: 22px 24px 56px;
+        border: 0;
+        border-radius: 0;
+        background: var(--surface-1);
+        pointer-events: none;
+      }
+      .scout-chat-document-result__preview::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 76px;
+        background: linear-gradient(to bottom, transparent, var(--surface-1) 78%);
+      }
       @media (max-width: 640px) {
         .chat-deck { min-width: 0; max-width: 100%; }
-        .scout-chat-deck-result { width: 100%; }
+        .scout-chat-deck-result,
+        .scout-chat-document-result { width: 100%; }
+        .scout-chat-document-result__head { align-items: flex-start; padding: 15px 16px; }
+        .scout-chat-document-result__actions { gap: 6px; }
+        .scout-chat-document-result__action { min-width: 56px; padding-inline: 11px; }
+        .scout-chat-document-result__preview.artifact-read { min-height: 190px; max-height: 280px; padding: 18px 16px 48px; }
       }
 
       /* ---------- Deck Studio ----------
@@ -12493,6 +12595,24 @@
         text-overflow: ellipsis;
         max-width: 240px;
       }
+      .deck-editor__save-state {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 8px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-3);
+        font: var(--type-caption);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .deck-editor__save-state[data-state="dirty"] { color: var(--ember-text); border-color: color-mix(in srgb, var(--ember) 38%, var(--line-1)); }
+      .deck-editor__save-state[data-state="saving"] { color: var(--accent); }
+      .deck-editor__save-state[data-state="error"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--line-1)); }
+      .deck-editor__save-state[data-state="saved"] { color: var(--live); }
       .deck-editor__divider {
         width: 1px;
         height: 24px;
@@ -12670,9 +12790,9 @@
       /* Canvas area */
       .deck-editor__canvas-wrap {
         flex: 1;
-        display: grid;
-        align-items: center;
-        justify-content: center;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
         padding: 24px;
         background: var(--surface-3);
         overflow: auto;
@@ -12681,10 +12801,10 @@
       }
       .deck-editor__canvas {
         position: relative;
+        flex: 0 0 auto;
+        margin: auto;
         width: 100%;
         height: 100%;
-        max-width: 100%;
-        max-height: 100%;
         aspect-ratio: 16 / 9;
         background: var(--deck-background, #111);
         border-radius: var(--r-md);
@@ -12803,7 +12923,7 @@
         flex: none;
         width: 320px;
         min-width: 0;
-        background: var(--surface-1);
+        background: var(--surface-2);
         border-left: 1px solid var(--line-1);
         overflow: hidden;
         padding: 0;
@@ -12816,8 +12936,10 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 3px;
-        padding: 16px 16px 13px;
+        min-height: 78px;
+        padding: 14px 16px 12px;
         border-bottom: 1px solid var(--line-1);
+        background: var(--surface-1);
       }
       .deck-editor__inspector-head > :not(.deck-editor__inspector-close) { grid-column: 1; }
       .deck-editor__inspector-close {
@@ -12829,6 +12951,7 @@
       .deck-editor__inspector-eyebrow {
         color: var(--text-3);
         font: var(--type-label);
+        font-variant-numeric: tabular-nums;
         letter-spacing: var(--track-label);
         text-transform: uppercase;
       }
@@ -12842,6 +12965,16 @@
         margin: 0;
         color: var(--text-3);
         font: var(--type-caption);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .deck-editor__scout .deck-editor__inspector-hint {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        line-height: 1.45;
       }
       .deck-editor__tabs {
         flex: none;
@@ -12850,11 +12983,11 @@
         gap: 4px;
         padding: 8px;
         border-bottom: 1px solid var(--line-1);
-        background: var(--surface-2);
+        background: var(--surface-1);
       }
       .deck-editor__tab {
         min-width: 0;
-        min-height: 36px;
+        min-height: 40px;
         padding: 0 8px;
         border: 0;
         border-radius: var(--r-sm);
@@ -12867,17 +13000,20 @@
         transition-timing-function: var(--ease);
       }
       .deck-editor__tab:hover { color: var(--text-1); background: var(--surface-3); }
-      .deck-editor__tab:active { transform: scale(.97); }
+      .deck-editor__tab:active { transform: scale(.96); }
       .deck-editor__tab[aria-selected="true"] {
         color: var(--text-1);
-        background: var(--surface-1);
-        box-shadow: 0 1px 2px rgba(0,0,0,.08);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.06);
       }
       .deck-editor__panel {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
+        padding: 10px 10px calc(18px + env(safe-area-inset-bottom));
+        background: var(--surface-2);
+        scrollbar-width: thin;
       }
       .deck-editor__panel[hidden] { display: none; }
       .deck-editor__prop-section {
@@ -12885,15 +13021,24 @@
         flex-direction: column;
         gap: 10px;
         min-width: 0;
-        padding: 15px 16px;
-        border-bottom: 1px solid var(--line-1);
+        margin: 0 0 10px;
+        padding: 14px;
+        border-radius: 14px;
+        background: var(--surface-1);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.04);
       }
       .deck-editor__prop-section[hidden] { display: none; }
       .deck-editor__prop-label {
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        text-wrap: balance;
+      }
+      .deck-editor__prop-copy {
+        margin: -3px 0 1px;
         color: var(--text-3);
-        text-transform: uppercase;
+        font: var(--type-caption);
+        line-height: 1.45;
+        text-wrap: pretty;
       }
       .deck-editor__prop-row {
         display: flex;
@@ -12911,7 +13056,7 @@
         display: grid;
         gap: 5px;
         min-width: 0;
-        color: var(--text-3);
+        color: var(--text-2);
         font: var(--type-caption);
       }
       .deck-editor__field--wide { grid-column: 1 / -1; }
@@ -12942,6 +13087,7 @@
       .deck-editor__prop-input:focus {
         outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
       }
       .deck-editor__notes {
         width: 100%;
@@ -12955,26 +13101,67 @@
         font: var(--type-body-sm);
         line-height: 1.45;
       }
-      .deck-editor__notes:focus { outline: none; border-color: var(--accent); }
+      .deck-editor__notes:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
       .deck-editor__color {
-        width: 100%;
-        min-width: 0;
+        width: 52px;
+        min-width: 52px;
         height: 40px;
-        padding: 2px;
+        padding: 3px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-sm);
         background: var(--surface-2);
+        cursor: pointer;
+      }
+      .deck-editor__field--color {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+      }
+      .deck-editor__color-copy { display: grid; gap: 2px; min-width: 0; }
+      .deck-editor__color-value {
+        color: var(--text-3);
+        font: var(--type-caption);
+        font-variant-numeric: tabular-nums;
+        text-transform: uppercase;
       }
       .deck-editor__range {
         flex: 1;
         min-width: 0;
       }
+      .deck-editor__slide-quick {
+        display: grid;
+        gap: 9px;
+        padding-top: 4px;
+      }
+      .deck-editor__quick-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .deck-editor__quick-actions .deck-editor__btn { min-width: 0; padding-inline: 8px; }
+      .deck-editor__quick-scout {
+        width: 100%;
+        border-color: color-mix(in srgb, var(--ember) 25%, var(--line-1));
+        background: color-mix(in srgb, var(--ember) 8%, var(--surface-1));
+        color: var(--ember-text);
+      }
+      .deck-editor__quick-scout:hover {
+        border-color: color-mix(in srgb, var(--ember) 42%, var(--line-1));
+        background: color-mix(in srgb, var(--ember) 13%, var(--surface-1));
+        color: var(--ember-text);
+      }
       .deck-editor__scout {
-        min-height: 100%;
-        border-bottom: 0;
+        min-height: calc(100% - 10px);
+        margin-bottom: 0;
         background:
-          radial-gradient(circle at 100% 0, color-mix(in srgb, var(--ember) 10%, transparent), transparent 42%),
+          radial-gradient(circle at 100% 0, color-mix(in srgb, var(--ember) 13%, transparent), transparent 44%),
           var(--surface-1);
+      }
+      .deck-editor__scout-heading {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        text-wrap: balance;
       }
       .deck-editor__scout textarea {
         width: 100%;
@@ -12982,9 +13169,14 @@
         resize: vertical;
       }
       .deck-editor__scout-status {
-        min-height: 18px;
+        min-height: 38px;
+        padding: 9px 10px;
+        border-radius: 9px;
+        background: var(--surface-2);
         color: var(--text-3);
         font: var(--type-caption);
+        line-height: 1.4;
+        text-wrap: pretty;
       }
       .deck-editor__scout-status[data-state="working"] {
         color: var(--accent);
@@ -13008,9 +13200,10 @@
         flex: 1;
         min-width: 0;
         min-height: 40px;
-        border: 1px solid var(--line-1);
+        border: 0;
         border-radius: var(--r-sm);
         background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent);
         color: var(--text-2);
         font: var(--type-body-sm);
         cursor: pointer;
@@ -13022,6 +13215,7 @@
       .deck-editor__zorder button:hover {
         background: var(--surface-3);
         color: var(--text-1);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 12%, transparent);
       }
       /* Slide color is document state, not app-theme chrome. */
       [data-theme="dark"] .deck-editor__canvas {
@@ -13165,7 +13359,7 @@
           max-height: min(72vh, 680px);
           border-top: 1px solid var(--line-1);
           border-left: 1px solid var(--line-1);
-          border-radius: var(--r-lg) 0 0 0;
+          border-radius: 22px 0 0 0;
           box-shadow: 0 -18px 52px rgba(0,0,0,.18);
           opacity: 0;
           pointer-events: none;
@@ -13190,12 +13384,17 @@
         .deck-editor__props {
           left: 0;
           border-left: 0;
-          border-radius: var(--r-lg) var(--r-lg) 0 0;
+          border-radius: 22px 22px 0 0;
         }
         .deck-editor__title { max-width: calc(100vw - 80px); }
       }
       @media (pointer: coarse) {
         .deck-editor__handle::after { inset: -16px; }
+        .deck-editor__btn,
+        .deck-editor__tab,
+        .deck-editor__prop-input,
+        .deck-editor__color,
+        .deck-editor__zorder button,
         .deck-editor__slide-actions .deck-editor__btn { min-height: 44px; }
       }
 
@@ -13210,19 +13409,40 @@
       }
       .document-editor__toolbar {
         display: grid;
-        grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+        grid-template-columns: minmax(200px, .9fr) minmax(0, 3.6fr) auto;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         padding: 9px 14px;
         border-bottom: 1px solid var(--line-1);
         background: var(--surface-1);
       }
       .document-editor__group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .document-editor__toolbar > [role="toolbar"] {
+        gap: 2px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        padding: 3px;
+        border-radius: 12px;
+        background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent);
+        scrollbar-width: none;
+      }
+      .document-editor__toolbar > [role="toolbar"]::-webkit-scrollbar { display: none; }
+      .document-editor__toolbar > [role="toolbar"] .deck-editor__btn,
+      .document-editor__toolbar > [role="toolbar"] .document-editor__block-select {
+        border: 0;
+        background: transparent;
+      }
+      .document-editor__toolbar > [role="toolbar"] .deck-editor__btn:hover,
+      .document-editor__toolbar > [role="toolbar"] .document-editor__block-select:hover {
+        background: var(--surface-1);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent);
+      }
       .document-editor__group--right { justify-content: flex-end; }
       .document-editor__mobile-status {
         display: none;
         flex: none;
-        min-height: 28px;
+        min-height: 40px;
         align-items: center;
         padding: 0 9px;
         border-radius: var(--r-full);
@@ -13237,8 +13457,8 @@
       .document-editor__mobile-status[data-state="saved"] { color: var(--live); }
       .document-editor__title {
         min-width: 0;
-        max-width: 360px;
-        height: 36px;
+        max-width: 300px;
+        height: 40px;
         padding: 0 10px;
         border: 1px solid transparent;
         border-radius: 8px;
@@ -13253,7 +13473,7 @@
       .document-editor__inspector {
         min-height: 0;
         overflow-y: auto;
-        padding: 18px 14px;
+        padding: 20px 14px;
         background: var(--surface-1);
       }
       .document-editor__outline { border-right: 1px solid var(--line-1); }
@@ -13270,14 +13490,14 @@
       .document-editor__side-label {
         display: block;
         margin: 0 0 11px;
-        color: var(--text-3);
+        color: var(--text-2);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         text-transform: uppercase;
       }
       .document-editor__outline-list { display: grid; gap: 2px; }
       .document-editor__outline-item {
-        min-height: 34px;
+        min-height: 40px;
         padding: 7px 9px;
         border: 0;
         border-radius: 8px;
@@ -13332,7 +13552,7 @@
         box-shadow: none;
       }
       .document-editor__paper:focus-within {
-        box-shadow: 0 0 0 2px color-mix(in srgb, var(--ember) 38%, transparent), 0 18px 60px rgba(0,0,0,.09);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember) 30%, transparent), 0 18px 60px rgba(0,0,0,.09);
       }
       .document-editor__rich:empty::before {
         content: 'Start writing…';
@@ -13354,10 +13574,10 @@
       .document-editor__rich h1 { font-size: clamp(30px, 4vw, 44px); }
       .document-editor__rich h2 { font-size: 28px; }
       .document-editor__rich h3 { font-size: 21px; }
-      .document-editor__rich p { margin: 0 0 1em; }
+      .document-editor__rich p { margin: 0 0 1em; text-wrap: pretty; }
       .document-editor__rich ul,
       .document-editor__rich ol { margin: 0 0 1em; padding-left: 1.5em; }
-      .document-editor__rich li { margin: .22em 0; }
+      .document-editor__rich li { margin: .22em 0; text-wrap: pretty; }
       .document-editor__rich blockquote {
         margin: 1.2em 0;
         padding: .1em 0 .1em 18px;
@@ -13395,7 +13615,136 @@
       .document-editor__rich th { background: var(--surface-2); font-weight: 650; }
       .document-editor__rich tr:last-child > * { border-bottom: 0; }
       .document-editor__rich tr > *:last-child { border-right: 0; }
-      .document-editor__rich img { max-width: 100%; height: auto; outline: 1px solid var(--line-1); outline-offset: -1px; }
+      .document-editor__rich img { max-width: 100%; height: auto; outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px; }
+      [data-theme="dark"] .document-editor__rich img { outline-color: rgba(255, 255, 255, .1); }
+      .document-editor__image-block {
+        display: block;
+        position: relative;
+        max-width: 100%;
+        margin: 1.35em auto;
+        border-radius: var(--r-md);
+        cursor: pointer;
+        text-align: center;
+      }
+      .document-editor__image-block[data-align="left"] { margin-left: 0; margin-right: auto; text-align: left; }
+      .document-editor__image-block[data-align="right"] { margin-left: auto; margin-right: 0; text-align: right; }
+      .document-editor__image-block[data-selected="true"] {
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 58%, transparent);
+      }
+      .document-editor__image-block:focus-visible {
+        outline: 3px solid color-mix(in srgb, var(--ember) 58%, transparent);
+        outline-offset: 3px;
+      }
+      .document-editor__image-block img {
+        display: block;
+        width: 100%;
+        border-radius: inherit;
+      }
+      .document-editor__image-block[data-image-state="loading"] > img,
+      .document-editor__image-block[data-image-state="error"] > img {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .document-editor__image-placeholder {
+        display: none;
+        min-height: clamp(112px, 18vw, 220px);
+        align-content: center;
+        justify-items: center;
+        gap: 5px;
+        padding: 22px;
+        border-radius: inherit;
+        background:
+          radial-gradient(circle at 50% 15%, color-mix(in srgb, var(--ember) 8%, transparent), transparent 48%),
+          var(--surface-2);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-1) 9%, transparent);
+        color: var(--text-2);
+        text-align: center;
+      }
+      .document-editor__image-block[data-image-state="loading"] > .document-editor__image-placeholder,
+      .document-editor__image-block[data-image-state="error"] > .document-editor__image-placeholder {
+        display: grid;
+      }
+      .document-editor__image-placeholder-mark {
+        position: relative;
+        display: grid;
+        min-width: 42px;
+        min-height: 28px;
+        place-items: center;
+        margin-bottom: 4px;
+        border-radius: 7px;
+        background: var(--surface-1);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 10%, transparent), 0 3px 10px rgba(0,0,0,.06);
+        color: var(--text-3);
+        font: 700 9px/1 var(--font-mono);
+        letter-spacing: .08em;
+      }
+      .document-editor__image-placeholder-mark::before {
+        content: '';
+        position: absolute;
+        top: 7px;
+        right: 8px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: .62;
+      }
+      .document-editor__image-placeholder-mark::after {
+        content: '';
+        position: absolute;
+        right: 7px;
+        bottom: 6px;
+        left: 7px;
+        height: 10px;
+        background: currentColor;
+        clip-path: polygon(0 100%, 29% 42%, 46% 69%, 67% 20%, 100% 100%);
+        opacity: .62;
+      }
+      .document-editor__image-placeholder-mark--unsafe::before {
+        content: '!';
+        inset: 0;
+        display: grid;
+        width: auto;
+        height: auto;
+        place-items: center;
+        background: transparent;
+        font: 700 15px/1 var(--font-sans);
+        opacity: .72;
+      }
+      .document-editor__image-placeholder-mark--unsafe::after { display: none; }
+      .document-editor__image-placeholder-title {
+        color: var(--text-1);
+        font: 600 14px/1.4 var(--font-sans);
+        text-wrap: balance;
+      }
+      .document-editor__image-placeholder-context {
+        max-width: 42ch;
+        color: var(--text-3);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+      .document-editor__image-omitted {
+        display: block;
+        margin: 1.35em 0;
+        border-radius: var(--r-md);
+      }
+      .document-editor__image-omitted .document-editor__image-placeholder {
+        display: grid;
+        min-height: 112px;
+      }
+      .document-editor__image-caption {
+        display: block;
+        padding: 8px 4px 0;
+        color: var(--text-3);
+        font: var(--type-caption);
+        text-align: inherit;
+        text-wrap: pretty;
+      }
+      .document-editor__image-caption:empty { display: none; }
       .document-editor__rich[hidden], .document-editor__source[hidden] { display: none; }
       .document-editor__block-select {
         min-width: 126px;
@@ -13412,10 +13761,47 @@
         border-color: color-mix(in srgb, var(--accent) 45%, var(--line-1));
         color: var(--accent);
       }
-      .document-editor__meta { display: grid; gap: 12px; color: var(--text-2); font: var(--type-caption); }
-      .document-editor__meta strong { display: block; color: var(--text-1); font: var(--type-caption-medium); }
+      .document-editor__meta { display: grid; gap: 8px; color: var(--text-2); font: var(--type-caption); }
+      .document-editor__meta p {
+        margin: 0;
+        padding: 11px 12px;
+        border-radius: 11px;
+        background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 6%, transparent);
+        line-height: 1.45;
+        text-wrap: pretty;
+      }
+      .document-editor__meta strong { display: block; margin-bottom: 2px; color: var(--text-1); font: var(--type-caption-medium); }
+      .document-editor__meta > .deck-editor__btn { margin-top: 2px; }
       .document-editor__status[data-state="error"] { color: var(--danger); }
       .document-editor__status[data-state="saved"] { color: var(--live); }
+      .document-editor__image-tools {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 14px;
+        background: var(--surface-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 7%, transparent), 0 1px 2px rgba(0,0,0,.04);
+      }
+      .document-editor__image-tools[hidden] { display: none; }
+      .document-editor__field { display: grid; gap: 6px; color: var(--text-3); font: var(--type-label); }
+      .document-editor__field input,
+      .document-editor__field select {
+        width: 100%;
+        min-height: 40px;
+        padding: 0 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-body-sm);
+      }
+      .document-editor__image-align { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+      .document-editor__image-align .deck-editor__btn { min-width: 0; }
+      .document-editor__image-align .deck-editor__btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+      .document-editor__image-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .document-editor__toolbar [data-doc-action="save-copy"] { white-space: nowrap; }
       @media (max-width: 1100px) {
         .document-editor__toolbar { grid-template-columns: minmax(0, 1fr) auto; }
         .document-editor__toolbar > .document-editor__group:nth-child(2) {
@@ -13495,6 +13881,15 @@
           transform: translateY(calc(100% + 16px));
         }
         .document-editor[data-inspector-open="true"] .document-editor__inspector { transform: translateY(0); }
+      }
+      @media (pointer: coarse) {
+        .document-editor .deck-editor__btn,
+        .document-editor__block-select,
+        .document-editor__mobile-status,
+        .document-editor__title,
+        .document-editor__outline-item,
+        .document-editor__field input,
+        .document-editor__field select { min-height: 44px; }
       }
       @media (prefers-reduced-motion: reduce) {
         .document-editor__paper { animation: none; }
@@ -39275,6 +39670,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          setNotificationPanelOpen(false)
 	        }
 	        loadNotifications().then(() => { if (typeof routeBellDeepLink === 'function') routeBellDeepLink() })
+	        if (authedUser && typeof routeStudioDeepLink === 'function') void routeStudioDeepLink()
 	      }
 
       /* ---------- guest boot ----------
@@ -43484,6 +43880,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function closeArtifactStage() {
         if (!artifactStageNode) return
+		const deepLink = activeStudioDeepLink?.kind === 'document' && activeStudioDeepLink?.mode === 'view'
+		  ? { ...activeStudioDeepLink }
+		  : null
         artifactStageNode.remove()
         artifactStageNode = null
         syncStudioBackgroundInert()
@@ -43491,6 +43890,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const back = artifactStageReturnFocus
         artifactStageReturnFocus = null
         if (back && back.isConnected && typeof back.focus === 'function') back.focus()
+		if (deepLink) settleStudioDeepLink(deepLink.kind, deepLink.mode, deepLink.artifactId)
       }
 
       // kicker: kind · gate score · outcome — the same provenance the
@@ -43539,9 +43939,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const packagingStudioStagePresentation = {
         intake: { label: 'Choose the visual direction', note: 'visual direction confirmed' },
         context_snapshot: { label: 'Understand the request and company context', note: 'context assembled' },
+        external_research: { label: 'Verify what matters', note: 'external evidence checked' },
         evidence: { label: 'Build the evidence dossier', note: 'claims checked' },
         red_team: { label: 'Stress-test the brief', note: 'brief reviewed' },
         identity: { label: 'Build the visual system', note: 'visual direction selected' },
+        story_architects: { label: 'Find the strongest story', note: 'story directions compared' },
         compete_architects: { label: 'Explore narrative directions', note: 'three story directions developed' },
         compete_judges: { label: 'Choose the strongest story', note: 'story directions compared' },
         compete_choice: { label: 'Lock the narrative direction', note: 'story locked' },
@@ -43554,8 +43956,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         imagery_generate: { label: 'Generate the selected imagery', note: 'imagery ready' },
         layout_plan: { label: 'Compose every slide', note: 'layout locked' },
         ship_deck: { label: 'Build the editable presentation', note: 'presentation built' },
+        draft_compile: { label: 'Render the draft for review', note: 'draft rendered' },
         ship_compile: { label: 'Assemble the presentation package', note: 'package assembled' },
         slide_jury: { label: 'Review every rendered slide', note: 'visual review complete' },
+        quality_gate: { label: 'Resolve the rendered review', note: 'rendered review resolved' },
         ship_approval: { label: 'Final deck review', note: 'final decision recorded' }
       }
 
@@ -43563,7 +43967,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // customer should only have to understand the five outcomes that graph
       // advances. This is the single web presentation contract: the channel
       // card, legacy goal card, and right-side Activity rail all project from
-      // this map while preserving every raw stage under Technical details.
+      // this map. Exact stage evidence remains available through Inspect work;
+      // the normal activity surface never spills the internal execution graph.
       const packagingStudioCustomerPhases = [
         {
           id: 'frame', label: 'Frame the decision',
@@ -43574,7 +43979,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         },
         {
           id: 'ground', label: 'Ground the recommendation',
-          stages: ['external_research', 'evidence'],
+          stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence'],
           working: 'Scout is verifying the proof points that can change the recommendation.',
           complete: 'The recommendation is grounded in verified company context and evidence.',
           recovering: 'Scout is recovering from an evidence check before the story moves forward.'
@@ -43597,7 +44002,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           id: 'finish', label: 'Finish the presentation',
           stages: ['ship_deck', 'draft_compile', 'ship_compile', 'slide_jury', 'quality_gate', 'ship_approval'],
           working: 'Scout is building, rendering, and reviewing the editable presentation.',
-          complete: 'The editable presentation and downloads are ready.',
+          complete: 'The reviewed editable presentation is ready, with current export status shown on its card.',
           recovering: 'Scout is repairing issues found in the rendered slides.'
         }
       ]
@@ -43624,7 +44029,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const hasFailure = taskStatuses.some(value => ['failed', 'blocked', 'needs_attention', 'rejected', 'error'].includes(value))
           const hasWork = taskStatuses.some(value => ['running', 'ready', 'in_progress', 'queued'].includes(value))
           const complete = tasks.length > 0 && taskStatuses.every(value => ['complete', 'completed', 'skipped'].includes(value))
-          let phaseStatus = complete ? 'complete' : ownsCheckpoint ? 'needs_decision' : hasWork ? 'working' : hasFailure ? (stalled ? 'blocked' : 'recovering') : 'pending'
+          let phaseStatus = complete ? 'complete' : ownsCheckpoint ? 'needs_decision' : hasFailure ? (stalled ? 'blocked' : 'recovering') : hasWork ? 'working' : 'pending'
           if (terminal && index === packagingStudioCustomerPhases.length - 1) phaseStatus = 'complete'
           const sentence = phaseStatus === 'complete'
             ? definition.complete
@@ -43635,9 +44040,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 : definition.working
           return { ...definition, index, tasks, status: phaseStatus, sentence }
         })
+        // Packaging work is dependency ordered. A later task can be marked
+        // ready while an earlier phase is still running or blocked; presenting
+        // that later phase as current makes the UI claim progress the engine
+        // has not earned. Always anchor on the earliest incomplete outcome.
         let current = phases.find(phase => phase.status === 'needs_decision')
-          || phases.find(phase => phase.status === 'working')
-          || phases.find(phase => phase.status === 'recovering' || phase.status === 'blocked')
           || phases.find(phase => phase.status !== 'complete')
           || phases[phases.length - 1]
         if (terminal) current = phases[phases.length - 1]
@@ -44232,7 +44639,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       async function openArtifactStage(artifactId, fallbackTitle, options) {
         const id = String(artifactId || '').trim()
-        if (!id) return
+		if (!id) return false
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
         if (!entry && canUseArtifactLibrary()) {
           entry = await fetchArtifactEntryById(id)
@@ -44252,7 +44659,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // the stage can't show what the library doesn't hold — fall back
           // to the data room rather than an empty panel
           openAgentArtifact({ id })
-          return
+		  return false
         }
         // a deck handed in by the manifest may name a deck artifact the loaded
         // window doesn't hold — synthesize the minimal entry the chrome needs
@@ -44332,7 +44739,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // itself onto Files — it offers a Save-to-Files action from the stage.
         const saveToFilesControl = artifactSaveToFilesControl(entry)
         if (saveToFilesControl) headActions.appendChild(saveToFilesControl)
-	        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim()) {
+	        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim() && options?.canEdit !== false && options?.hideEdit !== true) {
 	          const editDocument = bfEl('button', 'artifact-stage__pdf-btn', 'Edit document')
 	          editDocument.type = 'button'
 	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry }))
@@ -44405,6 +44812,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
         close.focus()
+		return true
       }
 
       function handleOSAssistantActions(actions) {
@@ -44695,15 +45103,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const metadata = entry?.metadata || {}
         const citations = Number(metadata.researchCitationCount)
         const domains = Number(metadata.researchSourceDomainCount)
-        const verified = String(metadata.researchQualityGate || '').trim().toLowerCase() === 'passed'
+        const providerBound = String(metadata.researchQualityGate || '').trim().toLowerCase() === 'passed'
+          && String(metadata.researchEvidenceBinding || '').trim().toLowerCase() === 'provider_fetched_urls'
           && /^[a-f0-9]{64}$/i.test(String(metadata.researchSourceWindowDigest || '').trim())
-        if (verified && Number.isSafeInteger(citations) && citations > 0 && citations <= 10000 && Number.isSafeInteger(domains) && domains > 0 && domains <= 10000) {
+        if (providerBound && Number.isSafeInteger(citations) && citations > 0 && citations <= 10000 && Number.isSafeInteger(domains) && domains > 0 && domains <= 10000) {
           const label = `${citations} cited source link${citations === 1 ? '' : 's'} · ${domains} domain${domains === 1 ? '' : 's'}`
           return {
             count: citations,
             label,
             preview: label,
-            authority: 'verified_current_metadata'
+            authority: 'provider_fetched_current_metadata'
           }
         }
         return {
@@ -45007,6 +45416,83 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // REAL editing of slide content — not just overlay stickers.
       var activeDeckEditor = null
       var activeDocumentEditor = null
+      var activeStudioDeepLink = null
+      var studioDeepLinkRouting = false
+      var studioDeepLinkConsumed = ''
+
+      function studioDeepLinkRequest() {
+        const match = location.pathname.match(/^\/studio\/(deck|document)\/([^/]+)$/)
+        if (!match) return null
+        let artifactId = ''
+        try { artifactId = decodeURIComponent(match[2]) } catch { return null }
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(artifactId)) return null
+        const kind = match[1]
+        const mode = new URLSearchParams(location.search).get('mode') || 'edit'
+        if (kind === 'deck' && !['edit', 'present'].includes(mode)) return null
+		if (kind === 'document' && !['edit', 'view'].includes(mode)) return null
+        return { kind, mode, artifactId, key: `${kind}:${mode}:${artifactId}` }
+      }
+
+      async function routeStudioDeepLink() {
+        const request = studioDeepLinkRequest()
+        if (!request || !authedUser || guestMode || studioDeepLinkRouting || studioDeepLinkConsumed === request.key) return false
+        studioDeepLinkRouting = true
+        let opened = false
+        try {
+          if (request.kind === 'deck' && request.mode === 'present') opened = await openDeckPresentation(request.artifactId, '')
+          else if (request.kind === 'deck') opened = await openDeckStudio(request.artifactId, '', { deepLink: true })
+		  else if (request.mode === 'view') opened = await openArtifactStage(request.artifactId, '', { deepLink: true, hideEdit: true })
+		  else opened = await openDocumentStudio(request.artifactId, '', { deepLink: true })
+          if (opened) {
+            studioDeepLinkConsumed = request.key
+            activeStudioDeepLink = request
+          } else {
+            showToast({ text: request.kind === 'deck' ? 'This presentation could not be opened.' : 'This document could not be opened.', kind: 'error' })
+          }
+          return opened
+        } finally {
+          studioDeepLinkRouting = false
+        }
+      }
+
+      function postNativeStudioClose(kind, mode, artifactId) {
+        const request = studioDeepLinkRequest()
+        if (!request || request.kind !== kind || request.mode !== mode || request.artifactId !== artifactId) return false
+        if (!String(navigator.userAgent || '').includes('Stride-Expo')) return false
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(artifactId)) return false
+        const bridge = window.ReactNativeWebView
+        if (!bridge || typeof bridge.postMessage !== 'function') return false
+        try {
+          bridge.postMessage(JSON.stringify({
+            type: 'stride.studio.close',
+            version: 1,
+            kind,
+            mode,
+            artifactId
+          }))
+          return true
+        } catch (_) {
+          return false
+        }
+      }
+
+      function settleStudioDeepLink(kind, mode, artifactId) {
+        if (activeStudioDeepLink?.kind !== kind || activeStudioDeepLink?.mode !== mode || activeStudioDeepLink?.artifactId !== artifactId) return
+		const nativeClosed = postNativeStudioClose(kind, mode, artifactId)
+        activeStudioDeepLink = null
+        // The native shell owns the modal navigation stack. A studio Close
+        // message is accepted only for the exact validated route currently
+        // open; desktop/web keeps its normal return to Files behavior.
+		// Keep the route consumed until the native WebView is dismissed; clearing
+		// it while the Studio URL is still mounted would immediately reopen the
+		// reader/editor behind the Close bridge.
+		if (nativeClosed) return
+		studioDeepLinkConsumed = ''
+        if (location.pathname.startsWith('/studio/')) {
+          history.replaceState({ view: 'pd1', destination: 'Files' }, '', '/files')
+          if (typeof selectPD1Destination === 'function') selectPD1Destination('Files', { push: false, focus: false })
+        }
+      }
 
       function openDeckEditor(htmlContent, title, options = {}) {
         if (activeDeckEditor) {
@@ -45742,6 +46228,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         activeDeckEditor = {
           element: editor,
+          artifactId,
           cleanup: () => document.removeEventListener('keydown', handleKey),
           getHtml: () => state.dirty ? buildUpdatedHtml() : state.originalHtml
         }
@@ -45889,37 +46376,40 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function closeDocumentStudio() {
         if (!activeDocumentEditor) return
         const returnFocus = activeDocumentEditor.returnFocus
+        const artifactId = activeDocumentEditor.artifactId
         activeDocumentEditor.cleanup?.()
         activeDocumentEditor.element?.remove()
         activeDocumentEditor = null
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
+        settleStudioDeepLink('document', 'edit', artifactId)
         if (returnFocus?.isConnected) returnFocus.focus()
       }
 
       function appendDocumentInlineMarkdown(parent, value) {
         const text = String(value || '')
-        const token = /(!\[([^\]\n]*)\]\(((?:https?:\/\/|\/)[^\s<>)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|~~([^~]+)~~)/g
+        const token = /(!\[([^\]\n]*)\]\(((?:[^()\n]|\([^()\n]*\))+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|~~([^~]+)~~)/g
         let cursor = 0
         for (const match of text.matchAll(token)) {
-          if (match.index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, match.index)))
+          const escapedUnsafeImage = match[2] !== undefined && match.index > cursor && text[match.index - 1] === '\\' && !safeDocumentImageSource(match[3])
+          const prefixEnd = escapedUnsafeImage ? match.index - 1 : match.index
+          if (prefixEnd > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, prefixEnd)))
           let node
           let content = ''
+          let imageNode = false
           if (match[2] !== undefined) {
             const src = safeDocumentImageSource(match[3])
-            if (!src) { parent.appendChild(document.createTextNode(match[0])); cursor = match.index + match[0].length; continue }
-            node = document.createElement('img')
-            node.src = src
-            node.alt = sanitizeDocumentImageAlt(match[2])
-            node.loading = 'lazy'
-            node.decoding = 'async'
+            node = src
+              ? documentImageBlock(src, sanitizeDocumentImageAlt(match[2]))
+              : documentUnsafeImageBlock(match[0], sanitizeDocumentImageAlt(match[2]))
+            imageNode = true
           } else if (match[4] || match[5]) { node = document.createElement('strong'); content = match[4] || match[5] }
           else if (match[6] || match[7]) { node = document.createElement('em'); content = match[6] || match[7] }
           else if (match[8]) { node = document.createElement('code'); content = match[8] }
           else if (match[9]) { node = document.createElement('a'); node.href = match[10]; node.target = '_blank'; node.rel = 'noreferrer noopener'; content = match[9] }
           else { node = document.createElement('s'); content = match[11] || '' }
-          if (node.tagName !== 'IMG') node.textContent = content
+          if (!imageNode) node.textContent = content
           parent.appendChild(node)
           cursor = match.index + match[0].length
         }
@@ -45941,6 +46431,128 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function sanitizeDocumentImageAlt(value) {
         return String(value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+      }
+
+      const documentImagePresentationMarker = '#stride-doc-image?'
+      function documentImagePresentation(source) {
+        const value = String(source || '')
+        const marker = value.indexOf(documentImagePresentationMarker)
+        const params = marker >= 0 ? new URLSearchParams(value.slice(marker + documentImagePresentationMarker.length)) : new URLSearchParams()
+        const width = [25, 50, 75, 100].includes(Number(params.get('width'))) ? Number(params.get('width')) : 100
+        const align = ['left', 'center', 'right'].includes(params.get('align')) ? params.get('align') : 'center'
+        return { source: marker >= 0 ? value.slice(0, marker) : value, width, align, caption: sanitizeDocumentImageAlt(params.get('caption') || '') }
+      }
+
+      function documentImageSourceWithPresentation(source, presentation = {}) {
+        const current = documentImagePresentation(source)
+        const baseSource = current.source.replace(/#.*$/, '')
+        const params = new URLSearchParams()
+        params.set('width', String([25, 50, 75, 100].includes(Number(presentation.width)) ? Number(presentation.width) : current.width))
+        params.set('align', ['left', 'center', 'right'].includes(presentation.align) ? presentation.align : current.align)
+        const caption = sanitizeDocumentImageAlt(presentation.caption ?? current.caption)
+        if (caption) params.set('caption', caption)
+        return `${baseSource}${documentImagePresentationMarker}${params.toString()}`
+      }
+
+      function documentImagePlaceholder() {
+        const placeholder = document.createElement('span')
+        placeholder.className = 'document-editor__image-placeholder'
+        placeholder.dataset.docImagePlaceholder = 'true'
+        const mark = document.createElement('span')
+        mark.className = 'document-editor__image-placeholder-mark'
+        mark.setAttribute('aria-hidden', 'true')
+        const title = document.createElement('span')
+        title.className = 'document-editor__image-placeholder-title'
+        const context = document.createElement('span')
+        context.className = 'document-editor__image-placeholder-context'
+        placeholder.append(mark, title, context)
+        return placeholder
+      }
+
+      function syncDocumentImageRuntimeState(image, imageState) {
+        const block = image?.closest?.('[data-doc-image-block]')
+        if (!block) return false
+        const state = ['loading', 'ready', 'error'].includes(imageState) ? imageState : 'loading'
+        const alt = sanitizeDocumentImageAlt(image.getAttribute('alt'))
+        const placeholder = block.querySelector('[data-doc-image-placeholder]')
+        const title = placeholder?.querySelector('.document-editor__image-placeholder-title')
+        const context = placeholder?.querySelector('.document-editor__image-placeholder-context')
+        block.dataset.imageState = state
+        block.setAttribute('aria-busy', String(state === 'loading'))
+        block.setAttribute('aria-label', `${state === 'error' ? 'Edit unavailable image' : 'Edit image'}${alt ? `: ${alt}` : ''}`)
+        if (title) title.textContent = state === 'error' ? 'Image unavailable' : 'Loading image'
+        if (context) context.textContent = state === 'error'
+          ? (alt || 'Replace this image or remove it from the document.')
+          : (alt || 'Preparing preview…')
+        if (placeholder) {
+          if (state === 'error') {
+            placeholder.setAttribute('role', 'status')
+            placeholder.setAttribute('aria-live', 'polite')
+          } else {
+            placeholder.removeAttribute('role')
+            placeholder.removeAttribute('aria-live')
+          }
+        }
+        return true
+      }
+
+      function hydrateDocumentImageRuntimeStates(root) {
+        root?.querySelectorAll?.('[data-doc-image-block] img').forEach(image => {
+          if (image.complete) syncDocumentImageRuntimeState(image, image.naturalWidth > 0 ? 'ready' : 'error')
+          else syncDocumentImageRuntimeState(image, 'loading')
+        })
+      }
+
+      function setDocumentImageSource(image, source) {
+        const next = safeDocumentImageSource(source)
+        if (!image || !next) return false
+        const currentBase = documentImagePresentation(image.getAttribute('src')).source
+        const nextBase = documentImagePresentation(next).source
+        if (currentBase !== nextBase) syncDocumentImageRuntimeState(image, 'loading')
+        image.setAttribute('src', next)
+        if (image.complete) queueMicrotask(() => syncDocumentImageRuntimeState(image, image.naturalWidth > 0 ? 'ready' : 'error'))
+        return true
+      }
+
+      function documentUnsafeImageBlock(rawMarkdown, alt) {
+        const block = document.createElement('span')
+        block.className = 'document-editor__image-omitted'
+        block.dataset.docUnsafeImage = 'true'
+        block.dataset.docUnsafeMarkdown = encodeURIComponent(String(rawMarkdown || ''))
+        block.contentEditable = 'false'
+        block.setAttribute('role', 'note')
+        block.setAttribute('aria-label', `Image omitted because its URL is unsafe${alt ? `: ${alt}` : ''}`)
+        const placeholder = documentImagePlaceholder()
+        placeholder.querySelector('.document-editor__image-placeholder-mark').classList.add('document-editor__image-placeholder-mark--unsafe')
+        placeholder.querySelector('.document-editor__image-placeholder-title').textContent = 'Image omitted — unsafe URL'
+        placeholder.querySelector('.document-editor__image-placeholder-context').textContent = alt || 'Open Source mode to review or correct the image address.'
+        block.appendChild(placeholder)
+        return block
+      }
+
+      function documentImageBlock(source, alt) {
+        const presentation = documentImagePresentation(source)
+        const block = document.createElement('span')
+        block.className = 'document-editor__image-block'
+        block.dataset.docImageBlock = 'true'
+        block.dataset.align = presentation.align
+        block.dataset.imageState = 'loading'
+        block.style.width = `${presentation.width}%`
+        block.contentEditable = 'false'
+        block.tabIndex = 0
+        block.setAttribute('role', 'button')
+        const image = document.createElement('img')
+        image.src = safeDocumentImageSource(source)
+        image.alt = sanitizeDocumentImageAlt(alt)
+        image.loading = 'lazy'
+        image.decoding = 'async'
+        const placeholder = documentImagePlaceholder()
+        const caption = document.createElement('span')
+        caption.className = 'document-editor__image-caption'
+        caption.textContent = presentation.caption
+        block.append(image, placeholder, caption)
+        syncDocumentImageRuntimeState(image, 'loading')
+        return block
       }
 
       function documentListLine(value) {
@@ -46085,6 +46697,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         flushParagraph()
         if (!root.childNodes.length) root.appendChild(document.createElement('p'))
+        hydrateDocumentImageRuntimeStates(root)
       }
 
       function documentInlineToMarkdown(node) {
@@ -46097,6 +46710,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return ''
         const tag = node.tagName.toLowerCase()
+        if (node.matches?.('[data-doc-unsafe-image]')) {
+          let raw = ''
+          try { raw = decodeURIComponent(String(node.dataset.docUnsafeMarkdown || '')).trim() }
+          catch (_) { raw = '' }
+          return raw ? `\\${raw}` : ''
+        }
+        if (node.matches?.('[data-doc-image-block]')) {
+          const image = node.querySelector('img')
+          const src = safeDocumentImageSource(image?.getAttribute('src'))
+          if (!src) return ''
+          const alt = sanitizeDocumentImageAlt(image?.getAttribute('alt')).replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
+          return `![${alt}](${src})`
+        }
         const body = Array.from(node.childNodes).map(documentInlineToMarkdown).join('')
         if (tag === 'strong' || tag === 'b') return `**${body}**`
         if (tag === 'em' || tag === 'i') return `*${body}*`
@@ -46172,12 +46798,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (tag === 'img') {
               const src = safeDocumentImageSource(child.getAttribute('src'))
               if (!src) return
-              const image = document.createElement('img')
-              image.src = src
-              image.alt = sanitizeDocumentImageAlt(child.getAttribute('alt'))
-              image.loading = 'lazy'
-              image.decoding = 'async'
-              target.appendChild(image)
+              target.appendChild(documentImageBlock(src, sanitizeDocumentImageAlt(child.getAttribute('alt'))))
               return
             }
             const next = document.createElement(tag)
@@ -46202,7 +46823,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // formatting controls, preview, CAS saves, and named Files copies.
       async function openDocumentStudio(artifactId, title, options = {}) {
         artifactId = String(artifactId || '').trim()
-        if (!artifactId) return
+        if (!artifactId) return false
         let payload
         try {
           const response = await fetch(`/artifacts/document?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
@@ -46210,11 +46831,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!response.ok || !payload?.document) throw new Error(payload?.error || 'Document Studio is unavailable')
         } catch (error) {
           showToast({ text: error?.message || 'Document Studio is unavailable', kind: 'error' })
-          return
+          return false
         }
         if (payload.canWrite !== true) {
           showToast({ text: 'This document is view-only.', kind: 'note' })
-          return
+          return false
         }
         if (activeDocumentEditor) closeDocumentStudio()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -46243,25 +46864,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="document-editor__mobile-status" data-doc-mobile-status data-doc-action="status" aria-label="Open document status" aria-controls="document-studio-inspector" aria-expanded="false" aria-live="polite" aria-atomic="true" data-state="saved">Saved</button>
             </div>
             <div class="document-editor__group" role="toolbar" aria-label="Document formatting. Scroll horizontally for more tools.">
-              <button type="button" class="deck-editor__btn" data-doc-action="undo">Undo</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="redo">Redo</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="undo" disabled>Undo</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="redo" disabled>Redo</button>
               <span class="deck-editor__divider"></span>
               <select class="document-editor__block-select" data-doc-block aria-label="Text style"><option value="p">Paragraph</option><option value="h1">Title</option><option value="h2">Heading</option><option value="h3">Subheading</option><option value="blockquote">Quote</option></select>
               <button type="button" class="deck-editor__btn" data-doc-action="bold" aria-pressed="false" aria-label="Bold"><strong>B</strong></button>
               <button type="button" class="deck-editor__btn" data-doc-action="italic" aria-pressed="false" aria-label="Italic"><em>I</em></button>
-              <button type="button" class="deck-editor__btn" data-doc-action="bullet" aria-pressed="false">Bullets</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="ordered" aria-pressed="false">Numbered</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="bullet" aria-pressed="false" aria-label="Bullets">• List</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="ordered" aria-pressed="false" aria-label="Numbered">1. List</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="outdent" aria-label="Decrease list indent" title="Decrease list indent">⇤</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-doc-action="indent" aria-label="Increase list indent" title="Increase list indent">⇥</button>
               <button type="button" class="deck-editor__btn" data-doc-action="link">Link</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="image" aria-label="Insert image">Image</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="image" aria-label="Upload image">Image</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="image-url" aria-label="Image URL">URL</button>
               <button type="button" class="deck-editor__btn" data-doc-action="table">Table</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="divider">Divider</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="divider" aria-label="Divider">Rule</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="find">Find</button>
               <button type="button" class="deck-editor__btn" data-doc-action="source" aria-pressed="false">Source</button>
             </div>
             <div class="document-editor__group document-editor__group--right" aria-label="Document actions">
               <button type="button" class="deck-editor__btn" data-doc-action="pdf">PDF</button>
-              <button type="button" class="deck-editor__btn" data-doc-action="save-copy" aria-label="Save a copy…">Save a copy…</button>
+              <button type="button" class="deck-editor__btn" data-doc-action="save-copy" aria-label="Save a copy…">Copy</button>
               <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-doc-action="save">Save</button>
             </div>
           </header>
@@ -46270,7 +46893,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <main class="document-editor__workspace"><article class="document-editor__paper"><div class="document-editor__rich" data-doc-rich contenteditable="true" role="textbox" aria-multiline="true" aria-label="Document body" spellcheck="true"></div><textarea class="document-editor__source" data-doc-source spellcheck="false" aria-label="Markdown source" hidden></textarea></article></main>
             <aside class="document-editor__inspector" id="document-studio-inspector" aria-label="Document status and revision">
               <div class="document-editor__inspector-head"><span class="document-editor__side-label">Document</span><button type="button" class="deck-editor__btn deck-editor__btn--icon document-editor__inspector-close" data-doc-action="close-status" aria-label="Close document status">×</button></div>
-              <div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>Changes use revision-safe saving.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">All changes stay private until you save.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div>
+              <div class="document-editor__meta"><p><strong data-doc-words>0 words</strong><span data-doc-chars>0 characters</span></p><p><strong data-doc-revision>Revision ${state.version}</strong><span>If it changes elsewhere, we’ll ask before replacing it.</span></p><p class="document-editor__status" data-doc-status aria-live="polite">Changes are local until saved.</p><button type="button" class="deck-editor__btn" data-doc-action="reload">Reload current version</button></div>
+              <section class="document-editor__image-tools" data-doc-image-tools hidden aria-label="Selected image">
+                <span class="document-editor__side-label">Image</span>
+                <label class="document-editor__field">Description<input type="text" maxlength="500" data-doc-image-alt aria-label="Image description"></label>
+                <label class="document-editor__field">Caption<input type="text" maxlength="500" data-doc-image-caption aria-label="Image caption"></label>
+                <label class="document-editor__field">Width<select data-doc-image-width aria-label="Image width"><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Full width</option></select></label>
+                <div class="document-editor__image-align" role="group" aria-label="Image alignment"><button type="button" class="deck-editor__btn" data-doc-image-align="left">Left</button><button type="button" class="deck-editor__btn" data-doc-image-align="center">Center</button><button type="button" class="deck-editor__btn" data-doc-image-align="right">Right</button></div>
+                <div class="document-editor__image-actions"><button type="button" class="deck-editor__btn" data-doc-action="replace-image">Replace</button><button type="button" class="deck-editor__btn" data-doc-action="remove-image">Remove</button></div>
+                <button type="button" class="deck-editor__btn" data-doc-action="image-url">Use image URL</button>
+              </section>
             </aside>
           </div>`
         const source = editor.querySelector('[data-doc-source]')
@@ -46286,6 +46918,63 @@ Wrap the entire export in one code block. After the code block, say whether the 
         source.value = state.markdown
         markdownIntoDocumentEditor(rich, state.markdown)
         titleInput.value = state.title
+
+        const documentHistory = {
+          past: [],
+          future: [],
+          lastObserved: null,
+          pendingBeforeInput: null,
+          typingBatch: null,
+          restoring: false,
+          atomicMutation: false
+        }
+        const documentHistoryLimit = 100
+
+        function documentSnapshot() {
+          return {
+            title: titleInput.value,
+            markdown: state.sourceMode
+              ? source.value
+              : state.bodyDirty
+                ? documentEditorToMarkdown(rich)
+                : state.markdown,
+            richHTML: rich.innerHTML,
+            sourceMode: state.sourceMode
+          }
+        }
+        function documentSnapshotHasSameContent(left, right) {
+          if (!left || !right || left.title !== right.title) return false
+          if (left.sourceMode || right.sourceMode) return left.markdown === right.markdown
+          return left.richHTML === right.richHTML
+        }
+        function documentSnapshotMatchesSaved(snapshot) {
+          return snapshot.title === state.title && snapshot.markdown === state.markdown
+        }
+        function updateDocumentHistoryControls() {
+          const undo = editor.querySelector('[data-doc-action="undo"]')
+          const redo = editor.querySelector('[data-doc-action="redo"]')
+          if (undo) undo.disabled = documentHistory.past.length === 0
+          if (redo) redo.disabled = documentHistory.future.length === 0
+        }
+        function finishDocumentTypingBatch() {
+          if (documentHistory.typingBatch?.timer) clearTimeout(documentHistory.typingBatch.timer)
+          documentHistory.typingBatch = null
+          documentHistory.pendingBeforeInput = null
+        }
+        function scheduleDocumentTypingBatchEnd() {
+          if (!documentHistory.typingBatch) return
+          if (documentHistory.typingBatch.timer) clearTimeout(documentHistory.typingBatch.timer)
+          documentHistory.typingBatch.timer = setTimeout(finishDocumentTypingBatch, 700)
+        }
+        function pushDocumentHistory(snapshot) {
+          const previous = documentHistory.past[documentHistory.past.length - 1]
+          if (!documentSnapshotHasSameContent(previous, snapshot) || previous?.sourceMode !== snapshot.sourceMode) {
+            documentHistory.past.push(snapshot)
+            if (documentHistory.past.length > documentHistoryLimit) documentHistory.past.shift()
+          }
+          documentHistory.future = []
+          updateDocumentHistoryControls()
+        }
 
         function setDocumentInspectorOpen(open, focusInspector = false) {
           const responsive = responsiveDocumentMedia.matches
@@ -46348,25 +47037,111 @@ Wrap the entire export in one code block. After the code block, say whether the 
           })
           if (!outline.childElementCount) outline.appendChild(bfEl('span', 'document-editor__outline-item', 'Add headings to build an outline'))
         }
-        function syncMode() {
-          if (state.sourceMode) source.value = state.bodyDirty ? documentEditorToMarkdown(rich) : state.markdown
-          else markdownIntoDocumentEditor(rich, source.value)
+        function syncMode(preserveCurrentContent = false) {
+          if (!preserveCurrentContent) {
+            if (state.sourceMode) source.value = state.bodyDirty ? documentEditorToMarkdown(rich) : state.markdown
+            else markdownIntoDocumentEditor(rich, source.value)
+          }
           source.hidden = !state.sourceMode
           rich.hidden = state.sourceMode
           const toggle = editor.querySelector('[data-doc-action="source"]')
           toggle.setAttribute('aria-pressed', String(state.sourceMode))
           toggle.textContent = state.sourceMode ? 'Visual' : 'Source'
           editor.querySelector('[data-doc-block]').disabled = state.sourceMode
-          editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="outdent"],[data-doc-action="indent"],[data-doc-action="link"],[data-doc-action="image"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
+          editor.querySelectorAll('[data-doc-action="bold"],[data-doc-action="italic"],[data-doc-action="bullet"],[data-doc-action="ordered"],[data-doc-action="outdent"],[data-doc-action="indent"],[data-doc-action="link"],[data-doc-action="image"],[data-doc-action="image-url"],[data-doc-action="replace-image"],[data-doc-action="remove-image"],[data-doc-action="table"],[data-doc-action="divider"]').forEach(button => { button.disabled = state.sourceMode })
+          if (state.sourceMode) selectDocumentImage(null)
+          else syncDocumentImageTools()
           updateDocumentChrome()
+          documentHistory.lastObserved = documentSnapshot()
           ;(state.sourceMode ? source : rich).focus()
         }
-        function markDirty(bodyChanged = true) {
-          state.dirty = true
-          if (bodyChanged) state.bodyDirty = true
-          if (!state.sourceMode) source.value = documentEditorToMarkdown(rich)
-          setStatus('Unsaved changes')
+        function refreshDocumentMutationState(snapshot = documentSnapshot()) {
+          state.dirty = !documentSnapshotMatchesSaved(snapshot)
+          state.bodyDirty = snapshot.markdown !== state.markdown
+          if (!state.sourceMode) source.value = snapshot.markdown
+          setStatus(state.dirty ? 'Unsaved changes' : 'Saved', state.dirty ? '' : 'saved')
           updateDocumentChrome()
+          updateDocumentHistoryControls()
+        }
+        function restoreDocumentSnapshot(snapshot) {
+          documentHistory.restoring = true
+          try {
+            titleInput.value = snapshot.title
+            source.value = snapshot.markdown
+            if (snapshot.sourceMode) markdownIntoDocumentEditor(rich, snapshot.markdown)
+            else {
+              rich.innerHTML = snapshot.richHTML || ''
+              hydrateDocumentImageRuntimeStates(rich)
+            }
+            state.sourceMode = snapshot.sourceMode
+            state.bodyDirty = snapshot.markdown !== state.markdown
+            syncMode(true)
+            documentHistory.lastObserved = documentSnapshot()
+            refreshDocumentMutationState(documentHistory.lastObserved)
+            updateFormatState()
+          } finally {
+            documentHistory.restoring = false
+          }
+        }
+        function applyDocumentHistory(direction) {
+          finishDocumentTypingBatch()
+          const from = documentSnapshot()
+          const sourceStack = direction === 'undo' ? documentHistory.past : documentHistory.future
+          const destinationStack = direction === 'undo' ? documentHistory.future : documentHistory.past
+          if (!sourceStack.length) return false
+          const target = sourceStack.pop()
+          destinationStack.push(from)
+          if (destinationStack.length > documentHistoryLimit) destinationStack.shift()
+          restoreDocumentSnapshot(target)
+          updateDocumentHistoryControls()
+          return true
+        }
+        function commitDocumentMutation(mutator, bodyChanged = true) {
+          finishDocumentTypingBatch()
+          const before = documentSnapshot()
+          const bodyDirtyBefore = state.bodyDirty
+          documentHistory.atomicMutation = true
+          try { mutator() } finally { documentHistory.atomicMutation = false }
+          if (bodyChanged && !state.sourceMode && before.richHTML !== rich.innerHTML) state.bodyDirty = true
+          const after = documentSnapshot()
+          if (documentSnapshotHasSameContent(before, after)) {
+            state.bodyDirty = bodyDirtyBefore
+            documentHistory.lastObserved = documentSnapshot()
+            return false
+          }
+          pushDocumentHistory(before)
+          documentHistory.lastObserved = after
+          refreshDocumentMutationState(after)
+          return true
+        }
+        function stageDocumentBeforeInput(kind) {
+          if (documentHistory.restoring || documentHistory.atomicMutation || documentHistory.typingBatch?.kind === kind) return
+          documentHistory.pendingBeforeInput = documentHistory.lastObserved || documentSnapshot()
+        }
+        function observeDocumentInput(kind, bodyChanged = true) {
+          if (documentHistory.restoring || documentHistory.atomicMutation) return
+          const before = documentHistory.pendingBeforeInput || documentHistory.lastObserved || documentSnapshot()
+          documentHistory.pendingBeforeInput = null
+          const bodyDirtyBefore = state.bodyDirty
+          if (bodyChanged && !state.sourceMode && before.richHTML !== rich.innerHTML) state.bodyDirty = true
+          if (bodyChanged && state.sourceMode && before.markdown !== source.value) state.bodyDirty = true
+          const after = documentSnapshot()
+          if (documentSnapshotHasSameContent(before, after)) {
+            state.bodyDirty = bodyDirtyBefore
+            documentHistory.lastObserved = documentSnapshot()
+            return
+          }
+          if (documentHistory.typingBatch?.kind !== kind) {
+            finishDocumentTypingBatch()
+            pushDocumentHistory(before)
+            documentHistory.typingBatch = { kind, timer: null }
+          } else {
+            documentHistory.future = []
+            updateDocumentHistoryControls()
+          }
+          documentHistory.lastObserved = after
+          refreshDocumentMutationState(after)
+          scheduleDocumentTypingBatchEnd()
         }
         function requestDocumentClose() {
           if (state.dirty && !window.confirm('Discard unsaved changes?')) return
@@ -46374,9 +47149,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         function runRichCommand(command, value = null) {
           if (state.sourceMode) return
-          rich.focus()
-          document.execCommand(command, false, value)
-          markDirty()
+          commitDocumentMutation(() => {
+            rich.focus()
+            document.execCommand(command, false, value)
+          })
           updateFormatState()
         }
         function selectedDocumentListItem() {
@@ -46394,18 +47170,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const parentItem = list.parentElement
             const outerList = parentItem?.parentElement
             if (parentItem?.tagName !== 'LI' || !outerList || !['UL', 'OL'].includes(outerList.tagName)) return false
-            outerList.insertBefore(item, parentItem.nextSibling)
-            if (!Array.from(list.children).some(child => child.tagName === 'LI')) list.remove()
-          } else {
-            const previousItem = item.previousElementSibling
-            if (previousItem?.tagName !== 'LI') return false
-            let nested = Array.from(previousItem.children).reverse().find(child => child.tagName === list.tagName)
-            if (!nested) {
-              nested = document.createElement(list.tagName.toLowerCase())
-              previousItem.appendChild(nested)
+          } else if (item.previousElementSibling?.tagName !== 'LI') return false
+          const changed = commitDocumentMutation(() => {
+            if (outdent) {
+              const parentItem = list.parentElement
+              const outerList = parentItem.parentElement
+              outerList.insertBefore(item, parentItem.nextSibling)
+              if (!Array.from(list.children).some(child => child.tagName === 'LI')) list.remove()
+            } else {
+              const previousItem = item.previousElementSibling
+              let nested = Array.from(previousItem.children).reverse().find(child => child.tagName === list.tagName)
+              if (!nested) {
+                nested = document.createElement(list.tagName.toLowerCase())
+                previousItem.appendChild(nested)
+              }
+              nested.appendChild(item)
             }
-            nested.appendChild(item)
-          }
+          })
+          if (!changed) return false
           rich.focus()
           const ownText = Array.from(item.childNodes).find(node => node.nodeType === Node.TEXT_NODE && String(node.nodeValue || '').length)
           const range = document.createRange()
@@ -46414,20 +47196,125 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const selection = window.getSelection()
           selection.removeAllRanges()
           selection.addRange(range)
-          markDirty()
           updateFormatState()
           return true
         }
+        let selectedDocumentImageElement = null
+        const imageTools = editor.querySelector('[data-doc-image-tools]')
         function selectedDocumentImage() {
+          if (selectedDocumentImageElement?.isConnected && rich.contains(selectedDocumentImageElement)) return selectedDocumentImageElement
           const selection = window.getSelection()
           const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement
           const image = anchor?.closest?.('img') || (anchor?.tagName === 'IMG' ? anchor : null)
           return image && rich.contains(image) ? image : null
         }
-        function insertOrEditDocumentImage() {
+        function syncDocumentImageTools() {
+          const image = selectedDocumentImage()
+          imageTools.hidden = !image || state.sourceMode
+          rich.querySelectorAll('[data-doc-image-block]').forEach(block => { block.dataset.selected = String(Boolean(image && block.contains(image))) })
+          if (!image || state.sourceMode) return
+          syncDocumentImageRuntimeState(image, image.closest('[data-doc-image-block]')?.dataset.imageState)
+          const presentation = documentImagePresentation(image.getAttribute('src'))
+          editor.querySelector('[data-doc-image-alt]').value = image.getAttribute('alt') || ''
+          editor.querySelector('[data-doc-image-caption]').value = presentation.caption
+          editor.querySelector('[data-doc-image-width]').value = String(presentation.width)
+          editor.querySelectorAll('[data-doc-image-align]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.docImageAlign === presentation.align)))
+        }
+        function selectDocumentImage(image, openInspector = false) {
+          selectedDocumentImageElement = image && rich.contains(image) ? image : null
+          syncDocumentImageTools()
+          if (selectedDocumentImageElement && openInspector && responsiveDocumentMedia.matches) setDocumentInspectorOpen(true)
+        }
+        function currentDocumentInsertionRange() {
+          const selection = window.getSelection()
+          if (!selection?.rangeCount) return null
+          const range = selection.getRangeAt(0)
+          return rich.contains(range.commonAncestorContainer) ? range.cloneRange() : null
+        }
+        function insertDocumentImageBlock(block, insertionRange) {
+          commitDocumentMutation(() => {
+            const paragraph = document.createElement('p')
+            paragraph.appendChild(block)
+            let anchor = insertionRange?.commonAncestorContainer || null
+            if (anchor?.nodeType === Node.TEXT_NODE) anchor = anchor.parentElement
+            while (anchor?.parentElement && anchor.parentElement !== rich) anchor = anchor.parentElement
+            if (anchor && anchor.parentElement === rich) anchor.after(paragraph)
+            else rich.appendChild(paragraph)
+            const trailing = document.createElement('p')
+            trailing.appendChild(document.createElement('br'))
+            paragraph.after(trailing)
+            const selection = window.getSelection()
+            const range = document.createRange()
+            range.selectNodeContents(trailing)
+            range.collapse(true)
+            selection.removeAllRanges()
+            selection.addRange(range)
+          })
+          hydrateDocumentImageRuntimeStates(block)
+          selectDocumentImage(block.querySelector('img'), true)
+        }
+        function updateDocumentImagePresentation(patch) {
+          const image = selectedDocumentImage()
+          if (!image) return
+          commitDocumentMutation(() => {
+            const presentation = { ...documentImagePresentation(image.getAttribute('src')), ...patch }
+            setDocumentImageSource(image, documentImageSourceWithPresentation(image.getAttribute('src'), presentation))
+            const block = image.closest('[data-doc-image-block]')
+            if (block) {
+              block.dataset.align = presentation.align
+              block.style.width = `${presentation.width}%`
+              block.querySelector('.document-editor__image-caption').textContent = presentation.caption
+            }
+          })
+          syncDocumentImageTools()
+        }
+        async function uploadDocumentImage(file, existing, insertionRange) {
+          if (!file || !/^image\/(?:png|jpeg|webp|gif)$/i.test(file.type) || file.size < 1 || file.size > 16 * 1024 * 1024) {
+            showToast({ text: 'Choose a PNG, JPEG, WebP, or GIF under 16MB.', kind: 'error' })
+            return
+          }
+          setStatus('Uploading image…')
+          const form = new FormData()
+          form.append('artifactId', state.artifactId)
+          form.append('expectedVersion', String(state.version))
+          form.append('file', file, file.name || 'document-image')
+          try {
+            const response = await fetch('/artifacts/document/images', { method: 'POST', body: form })
+            const result = await response.json().catch(() => ({}))
+            if (!response.ok || !result?.image?.url) throw new Error(result?.error || 'Image upload failed')
+            state.version = Number(result?.artifact?.version || state.version + 1)
+            const alt = sanitizeDocumentImageAlt(String(file.name || 'Document image').replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '))
+            if (existing?.isConnected) {
+              const presentation = documentImagePresentation(existing.getAttribute('src'))
+              commitDocumentMutation(() => {
+                setDocumentImageSource(existing, documentImageSourceWithPresentation(result.image.url, presentation))
+                if (!existing.getAttribute('alt')) existing.alt = alt
+              })
+              selectDocumentImage(existing, true)
+            } else {
+              const source = documentImageSourceWithPresentation(result.image.url, { width: 100, align: 'center', caption: '' })
+              insertDocumentImageBlock(documentImageBlock(source, alt), insertionRange)
+            }
+            updateDocumentChrome()
+            setStatus('Image added · save to keep its placement')
+            showToast({ text: 'Image added to the document', kind: 'done' })
+          } catch (error) {
+            setStatus(error?.message || 'Image upload failed', 'error')
+            showToast({ text: status.textContent, kind: 'error' })
+          }
+        }
+        function chooseDocumentImageFile(existing = null) {
           if (state.sourceMode) return
-          const existing = selectedDocumentImage()
-          const requestedSource = window.prompt(existing ? 'Image URL' : 'Image URL (https://)', existing?.getAttribute('src') || 'https://')
+          const insertionRange = currentDocumentInsertionRange()
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.accept = 'image/png,image/jpeg,image/webp,image/gif'
+          input.addEventListener('change', () => uploadDocumentImage(input.files?.[0], existing, insertionRange), { once: true })
+          input.click()
+        }
+        function insertOrEditDocumentImageURL(existing = selectedDocumentImage()) {
+          if (state.sourceMode) return
+          const requestedSource = window.prompt(existing ? 'Image URL' : 'Image URL (https://)', existing ? documentImagePresentation(existing.getAttribute('src')).source : 'https://')
           if (requestedSource === null) return
           const src = safeDocumentImageSource(requestedSource)
           if (!src) {
@@ -46438,19 +47325,37 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (requestedAlt === null) return
           const alt = sanitizeDocumentImageAlt(requestedAlt)
           if (existing) {
-            existing.src = src
-            existing.alt = alt
-            existing.loading = 'lazy'
-            existing.decoding = 'async'
-            markDirty()
+            const presentation = documentImagePresentation(existing.getAttribute('src'))
+            commitDocumentMutation(() => {
+              setDocumentImageSource(existing, documentImageSourceWithPresentation(src, presentation))
+              existing.alt = alt
+            })
+            selectDocumentImage(existing, true)
             return
           }
-          const image = document.createElement('img')
-          image.src = src
-          image.alt = alt
-          image.loading = 'lazy'
-          image.decoding = 'async'
-          runRichCommand('insertHTML', image.outerHTML)
+          const source = documentImageSourceWithPresentation(src, { width: 100, align: 'center', caption: '' })
+          insertDocumentImageBlock(documentImageBlock(source, alt), currentDocumentInsertionRange())
+        }
+        function findAndReplaceDocumentText() {
+          const find = window.prompt('Find text')
+          if (!find) return
+          const replacement = window.prompt('Replace with', '')
+          if (replacement === null) return
+          let replacements = 0
+          if (state.sourceMode) {
+            const before = source.value
+            replacements = before.split(find).length - 1
+            if (replacements) commitDocumentMutation(() => { source.value = before.split(find).join(replacement) })
+          } else {
+            const walker = document.createTreeWalker(rich, NodeFilter.SHOW_TEXT)
+            const nodes = []
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              const count = String(node.nodeValue || '').split(find).length - 1
+              if (count) { nodes.push(node); replacements += count }
+            }
+            if (replacements) commitDocumentMutation(() => nodes.forEach(node => { node.nodeValue = String(node.nodeValue || '').split(find).join(replacement) }))
+          }
+          showToast({ text: replacements ? `Replaced ${replacements} occurrence${replacements === 1 ? '' : 's'}` : 'No matches found', kind: replacements ? 'done' : 'note' })
         }
         function updateFormatState() {
           if (state.sourceMode || !editor.isConnected) return
@@ -46476,6 +47381,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         async function saveDocument(closeAfter = false) {
           if (state.saving) return false
+          finishDocumentTypingBatch()
           const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(titleInput.value.trim() || state.title)
           if (!state.savedToFiles && !destination) return false
           state.saving = true
@@ -46494,6 +47400,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.title = String(result?.artifact?.title || titleInput.value)
             state.dirty = false
             state.bodyDirty = false
+            titleInput.value = state.title
+            source.value = state.markdown
+            documentHistory.lastObserved = documentSnapshot()
             const entry = { ...(options.entry || {}), id: state.artifactId, text: state.markdown, metadata: { ...(options.entry?.metadata || {}), title: state.title, type: 'markdown', artifactVersion: String(state.version) } }
             let filingError = null
             if (destination) {
@@ -46502,6 +47411,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             addArtifactEntry(entry, { select: false })
             updateDocumentChrome()
+            updateDocumentHistoryControls()
             if (filingError) {
               setStatus('Document saved. Adding it to Files failed; Save will retry the filing step.', 'error')
               showToast({ text: 'Document saved, but Files is temporarily unavailable.', kind: 'note' })
@@ -46522,6 +47432,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         async function saveCopy() {
           if (state.saving) return false
+          finishDocumentTypingBatch()
           const destination = await chooseDriveSaveOptions(`${titleInput.value.trim() || state.title} copy`)
           if (!destination) return false
           state.saving = true
@@ -46551,7 +47462,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'true', status: 'complete' } }, { select: false })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
-            setStatus(`Saved “${destination.fileName}” to Files`, 'saved')
+            setStatus(state.dirty ? `Saved copy “${destination.fileName}”; this draft still has unsaved changes` : `Saved “${destination.fileName}” to Files`, state.dirty ? '' : 'saved')
             return true
           } catch (error) {
             setStatus(error?.message || 'Document copy could not be saved', 'error')
@@ -46562,6 +47473,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
         async function reloadDocument() {
+          finishDocumentTypingBatch()
           if (state.dirty && !window.confirm('Replace your unsaved draft with the current saved revision?')) return
           const response = await fetch(`/artifacts/document?id=${encodeURIComponent(state.artifactId)}`, { cache: 'no-store' })
           const result = await response.json().catch(() => ({}))
@@ -46576,6 +47488,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.bodyDirty = false
           state.sourceMode = false
           syncMode()
+          documentHistory.past = []
+          documentHistory.future = []
+          documentHistory.lastObserved = documentSnapshot()
+          updateDocumentHistoryControls()
           setStatus('Current version loaded', 'saved')
         }
         async function exportDocumentPDF(button) {
@@ -46593,11 +47509,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const landed = await waitForArtifactPdfAsset(state.artifactId)
             if (!landed?.pdf) throw new Error('PDF is still rendering and will remain attached to this document when ready.')
             state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
-            const link = document.createElement('a')
-            link.href = artifactBlobUrl(landed.pdf)
-            link.download = String(landed.pdf.name || `${state.title}.pdf`)
-            document.body.appendChild(link); link.click(); link.remove()
-            showToast({ text: 'PDF downloaded', kind: 'done' })
+            const fileName = studioDownloadFileName(landed.pdf.name || state.title, 'report', 'pdf')
+            const href = artifactBlobUrl({ ...landed.pdf, name: fileName })
+            if (nativeStudioDownload({ kind: 'document', format: 'pdf', artifactId: state.artifactId, fileName, url: href })) {
+              showToast({ text: 'Opening iOS save options…', kind: 'done' })
+            } else {
+              const link = document.createElement('a'); link.href = href; link.download = fileName
+              document.body.appendChild(link); link.click(); link.remove()
+              showToast({ text: 'PDF downloaded', kind: 'done' })
+            }
           } catch (error) {
             showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
           } finally {
@@ -46606,6 +47526,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
         editor.addEventListener('click', event => {
+          const alignment = event.target.closest('[data-doc-image-align]')?.dataset.docImageAlign
+          if (alignment) {
+            updateDocumentImagePresentation({ align: alignment })
+            return
+          }
           const action = event.target.closest('[data-doc-action]')?.dataset.docAction
           if (!action) return
           if (action === 'close') requestDocumentClose()
@@ -46615,8 +47540,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'save-copy') saveCopy()
           else if (action === 'reload') reloadDocument()
           else if (action === 'pdf') exportDocumentPDF(event.target.closest('[data-doc-action="pdf"]'))
-          else if (action === 'source') { state.sourceMode = !state.sourceMode; syncMode() }
-          else if (action === 'undo' || action === 'redo') { (state.sourceMode ? source : rich).focus(); document.execCommand(action); markDirty() }
+          else if (action === 'source') { finishDocumentTypingBatch(); state.sourceMode = !state.sourceMode; syncMode() }
+          else if (action === 'undo' || action === 'redo') applyDocumentHistory(action)
           else if (action === 'bold') runRichCommand('bold')
           else if (action === 'italic') runRichCommand('italic')
           else if (action === 'bullet') runRichCommand('insertUnorderedList')
@@ -46627,11 +47552,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const href = window.prompt('Link URL', 'https://')
             if (href && /^(https?:|mailto:)/i.test(href.trim())) runRichCommand('createLink', href.trim())
           }
-          else if (action === 'image') insertOrEditDocumentImage()
+          else if (action === 'image') chooseDocumentImageFile()
+          else if (action === 'image-url') insertOrEditDocumentImageURL(event.target.closest('[data-doc-image-tools]') ? selectedDocumentImage() : null)
+          else if (action === 'replace-image') chooseDocumentImageFile(selectedDocumentImage())
+          else if (action === 'remove-image') {
+            const image = selectedDocumentImage()
+            if (image) {
+              commitDocumentMutation(() => (image.closest('[data-doc-image-block]') || image).remove())
+              selectDocumentImage(null)
+            }
+          }
+          else if (action === 'find') findAndReplaceDocumentText()
           else if (action === 'table') runRichCommand('insertHTML', '<table><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td><td>Cell</td></tr></table><p><br></p>')
           else if (action === 'divider') runRichCommand('insertHorizontalRule')
         })
         editor.querySelector('[data-doc-block]').addEventListener('change', event => runRichCommand('formatBlock', event.target.value))
+        editor.querySelector('[data-doc-image-alt]').addEventListener('change', event => {
+          const image = selectedDocumentImage()
+          if (image) commitDocumentMutation(() => { image.alt = sanitizeDocumentImageAlt(event.target.value) })
+          syncDocumentImageTools()
+        })
+        editor.querySelector('[data-doc-image-caption]').addEventListener('change', event => updateDocumentImagePresentation({ caption: event.target.value }))
+        editor.querySelector('[data-doc-image-width]').addEventListener('change', event => updateDocumentImagePresentation({ width: Number(event.target.value) }))
         const formattingToolbar = editor.querySelector('[role="toolbar"]')
         formattingToolbar.addEventListener('keydown', event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || event.target.tagName === 'SELECT') return
@@ -46643,15 +47585,35 @@ Wrap the entire export in one code block. After the code block, say whether the 
               : (Math.max(0, index) + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length
           controls[nextIndex]?.focus()
         })
-        rich.addEventListener('input', markDirty)
+        rich.addEventListener('beforeinput', () => stageDocumentBeforeInput('rich'))
+        rich.addEventListener('input', () => observeDocumentInput('rich'))
+        const observeDocumentImageRuntimeState = (event, imageState) => {
+          const image = event.target?.closest?.('[data-doc-image-block] img')
+          if (!image || !rich.contains(image)) return
+          syncDocumentImageRuntimeState(image, imageState)
+          documentHistory.lastObserved = documentSnapshot()
+          syncDocumentImageTools()
+        }
+        rich.addEventListener('load', event => observeDocumentImageRuntimeState(event, 'ready'), true)
+        rich.addEventListener('error', event => observeDocumentImageRuntimeState(event, 'error'), true)
+        rich.addEventListener('click', event => {
+          const imageBlock = event.target.closest?.('[data-doc-image-block]')
+          const image = imageBlock?.querySelector('img') || event.target.closest?.('img')
+          selectDocumentImage(image && rich.contains(image) ? image : null, Boolean(image))
+        })
         rich.addEventListener('paste', event => {
           event.preventDefault()
           const html = event.clipboardData?.getData('text/html')
           const plain = event.clipboardData?.getData('text/plain') || ''
-          document.execCommand(html ? 'insertHTML' : 'insertText', false, html ? sanitizedDocumentPasteHTML(html) : plain)
-          markDirty()
+          commitDocumentMutation(() => document.execCommand(html ? 'insertHTML' : 'insertText', false, html ? sanitizedDocumentPasteHTML(html) : plain))
         })
         rich.addEventListener('keydown', event => {
+          const imageBlock = event.target.closest?.('[data-doc-image-block]')
+          if (imageBlock && ['Enter', ' '].includes(event.key)) {
+            event.preventDefault()
+            selectDocumentImage(imageBlock.querySelector('img'), true)
+            return
+          }
           if (event.key !== 'Tab') return
           if (selectedDocumentListItem()) {
             event.preventDefault()
@@ -46664,19 +47626,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const cells = Array.from(cell.closest('table').querySelectorAll('th,td'))
           let index = cells.indexOf(cell) + (event.shiftKey ? -1 : 1)
           if (index >= cells.length) {
-            const table = cell.closest('table')
-            const row = table.insertRow()
-            const columns = table.rows[0]?.cells.length || 1
-            for (let column = 0; column < columns; column++) row.insertCell().textContent = 'Cell'
-            index = cells.length
-            cells.push(...Array.from(row.cells))
-            markDirty()
+            const firstNewCell = cells.length
+            commitDocumentMutation(() => {
+              const table = cell.closest('table')
+              const row = table.insertRow()
+              const columns = table.rows[0]?.cells.length || 1
+              for (let column = 0; column < columns; column++) row.insertCell().textContent = 'Cell'
+              cells.push(...Array.from(row.cells))
+            })
+            index = firstNewCell
           }
           const next = cells[Math.max(0, index)]
           if (next) { const range = document.createRange(); range.selectNodeContents(next); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range) }
         })
-        source.addEventListener('input', markDirty)
-        titleInput.addEventListener('input', () => markDirty(false))
+        source.addEventListener('beforeinput', () => stageDocumentBeforeInput('source'))
+        source.addEventListener('input', () => observeDocumentInput('source'))
+        titleInput.addEventListener('beforeinput', () => stageDocumentBeforeInput('title'))
+        titleInput.addEventListener('input', () => observeDocumentInput('title', false))
         const selectionChange = () => { if (editor.isConnected && !state.sourceMode) updateFormatState() }
         document.addEventListener('selectionchange', selectionChange)
         const keydown = event => {
@@ -46694,6 +47660,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           else if (event.key === 'Escape') requestDocumentClose()
           else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveDocument(false) }
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); applyDocumentHistory(event.shiftKey ? 'redo' : 'undo') }
+          else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); applyDocumentHistory('redo') }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); runRichCommand('bold') }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') { event.preventDefault(); runRichCommand('italic') }
           else if (!state.sourceMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); editor.querySelector('[data-doc-action="link"]')?.click() }
@@ -46701,14 +47669,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const responsiveDocumentChange = () => syncResponsiveDocumentStudio()
         responsiveDocumentMedia.addEventListener?.('change', responsiveDocumentChange)
         document.addEventListener('keydown', keydown)
-        activeDocumentEditor = { element: editor, returnFocus, cleanup: () => { document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange); responsiveDocumentMedia.removeEventListener?.('change', responsiveDocumentChange) } }
+        activeDocumentEditor = { element: editor, artifactId, returnFocus, cleanup: () => { finishDocumentTypingBatch(); document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange); responsiveDocumentMedia.removeEventListener?.('change', responsiveDocumentChange) } }
         document.body.appendChild(editor)
+        hydrateDocumentImageRuntimeStates(rich)
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
         syncResponsiveDocumentStudio()
         updateDocumentChrome()
+        syncDocumentImageTools()
+        documentHistory.lastObserved = documentSnapshot()
+        updateDocumentHistoryControls()
         rich.focus()
+        return true
       }
 
       // Structured Deck Studio. The server owns legacy-HTML import and HTML
@@ -46717,7 +47690,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         artifactId = String(artifactId || '').trim()
         if (!artifactId) {
           showToast({ text: 'Save this deck as an artifact before editing.', kind: 'note' })
-          return
+          return false
         }
         let payload
         try {
@@ -46726,11 +47699,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!response.ok || !payload?.deck) throw new Error(payload?.error || 'Deck editor is unavailable')
         } catch (error) {
           showToast({ text: error?.message || 'Deck editor is unavailable', kind: 'error' })
-          return
+          return false
         }
         if (payload?.canWrite !== true) {
           showToast({ text: String(payload?.writeBlockedReason || 'This deck is view-only. You can still present it.'), kind: 'note' })
-          return
+          return false
         }
         if (activeDeckEditor) closeDeckEditor()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -46747,6 +47720,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           future: [],
           dirty: false,
           saving: false,
+          saveError: '',
           imageGenerating: false,
           inspectorTab: 'design',
           zoom: 1,
@@ -46767,6 +47741,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <div class="deck-editor__toolbar-left">
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close Deck Studio">×</button>
               <h2 class="deck-editor__title">${escapeHtml(title || payload?.artifact?.title || 'Untitled deck')}</h2>
+              <span class="deck-editor__save-state" data-save-state data-state="saved" role="status" aria-live="polite">Saved</span>
             </div>
             <div class="deck-editor__toolbar-center">
               <button type="button" class="deck-editor__btn" data-action="undo" title="Undo">Undo</button>
@@ -46850,7 +47825,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <div class="deck-editor__panel" id="deck-inspector-panel-design" role="tabpanel" aria-labelledby="deck-inspector-tab-design" data-inspector-panel="design">
                 <div class="deck-editor__prop-section" data-slide-controls>
                   <span class="deck-editor__prop-label">Slide</span>
-                  <label class="deck-editor__field">Background<input type="color" class="deck-editor__color" data-slide-background></label>
+                  <label class="deck-editor__field deck-editor__field--color"><span class="deck-editor__color-copy"><span>Background</span><span class="deck-editor__color-value" data-slide-background-value>#111111</span></span><input type="color" class="deck-editor__color" data-slide-background aria-label="Slide background color"></label>
+                  <div class="deck-editor__slide-quick" data-slide-quick-tools>
+                    <p class="deck-editor__prop-copy" data-slide-quick-copy>Choose something to add, or select an object on the canvas.</p>
+                    <div class="deck-editor__quick-actions" aria-label="Add to slide">
+                      <button type="button" class="deck-editor__btn" data-action="add-text" aria-label="Add text to slide">Text</button>
+                      <button type="button" class="deck-editor__btn" data-action="add-image" aria-label="Upload image to slide">Upload</button>
+                      <button type="button" class="deck-editor__btn" data-action="add-rectangle" aria-label="Add rectangle to slide">Rectangle</button>
+                      <button type="button" class="deck-editor__btn" data-action="add-ellipse" aria-label="Add ellipse to slide">Ellipse</button>
+                    </div>
+                    <button type="button" class="deck-editor__btn deck-editor__quick-scout" data-action="open-scout">Create imagery with Scout</button>
+                  </div>
                 </div>
                 <div data-element-controls hidden>
                   <div class="deck-editor__prop-section">
@@ -46867,7 +47852,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
                   <div class="deck-editor__prop-section" data-text-controls hidden>
                     <span class="deck-editor__prop-label">Typography</span>
                     <div class="deck-editor__prop-grid">
-                      <label class="deck-editor__field">Color<input type="color" class="deck-editor__color" data-prop="color"></label>
+                      <label class="deck-editor__field deck-editor__field--color"><span>Color</span><input type="color" class="deck-editor__color" data-prop="color" aria-label="Text color"></label>
                       <label class="deck-editor__field">Size<input type="number" min="8" max="400" class="deck-editor__prop-input" data-prop="fontSize"></label>
                       <label class="deck-editor__field deck-editor__field--wide">Font<input type="text" class="deck-editor__prop-input" data-prop="fontFamily" placeholder="Font family"></label>
                       <label class="deck-editor__field">Weight<select class="deck-editor__prop-input" data-prop="fontWeight"><option value="400">Regular</option><option value="600">Semibold</option><option value="700">Bold</option><option value="800">Heavy</option></select></label>
@@ -46879,8 +47864,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
                   <div class="deck-editor__prop-section" data-shape-controls hidden>
                     <span class="deck-editor__prop-label">Appearance</span>
                     <div class="deck-editor__prop-grid">
-                      <label class="deck-editor__field">Fill<input type="color" class="deck-editor__color" data-prop="fill"></label>
-                      <label class="deck-editor__field">Stroke<input type="color" class="deck-editor__color" data-prop="stroke"></label>
+                      <label class="deck-editor__field deck-editor__field--color"><span>Fill</span><input type="color" class="deck-editor__color" data-prop="fill" aria-label="Shape fill color"></label>
+                      <label class="deck-editor__field deck-editor__field--color"><span>Stroke</span><input type="color" class="deck-editor__color" data-prop="stroke" aria-label="Shape stroke color"></label>
                       <label class="deck-editor__field deck-editor__field--wide">Stroke width<input type="number" min="0" max="80" step="1" class="deck-editor__prop-input" data-prop="strokeWidth"></label>
                     </div>
                   </div>
@@ -46913,14 +47898,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
               </div>
               <div class="deck-editor__panel" id="deck-inspector-panel-scout" role="tabpanel" aria-labelledby="deck-inspector-tab-scout" data-inspector-panel="scout" hidden>
                 <div class="deck-editor__prop-section deck-editor__scout">
-                  <span class="deck-editor__prop-label">Create imagery with Scout</span>
+                  <span class="deck-editor__prop-label">Scout imagery</span>
+                  <h4 class="deck-editor__scout-heading">Make the visual this slide needs</h4>
                   <p class="deck-editor__inspector-hint">Describe the composition, subject, mood, and whether the image should support text or carry the whole slide.</p>
                   <textarea class="deck-editor__prop-input" data-image-prompt placeholder="Golden-hour field correspondent at a county fair, editorial documentary photography, generous dark sky for white headline…"></textarea>
                   <div class="deck-editor__prop-row">
                     <select class="deck-editor__prop-input" data-image-placement aria-label="Image placement"><option value="image">Add as an image</option><option value="full_bleed">Fill the slide</option></select>
-                    <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="generate-image">Generate</button>
+                    <button type="button" class="deck-editor__btn deck-editor__btn--primary" data-action="generate-image">Generate image</button>
                   </div>
-                  <div class="deck-editor__scout-status" data-image-status aria-live="polite">The finished image will land directly on this slide, ready to crop, resize, and layer.</div>
+                  <div class="deck-editor__scout-status" data-image-status aria-live="polite">The finished image will land directly on this slide, ready to place, resize, and layer.</div>
                 </div>
               </div>
             </aside>
@@ -46934,6 +47920,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const indicator = editor.querySelector('[data-slide-indicator]')
         const saveButton = editor.querySelector('[data-action="save"]')
         const copyButton = editor.querySelector('[data-action="save-copy"]')
+        const saveState = editor.querySelector('[data-save-state]')
         const imageStatus = editor.querySelector('[data-image-status]')
         const downloadMenu = editor.querySelector('[data-download-menu]')
         const mobileToolsMenu = editor.querySelector('[data-mobile-tools-menu]')
@@ -46943,6 +47930,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const compactStudioMedia = matchMedia('(max-width: 768px)')
         const zoomInput = editor.querySelector('[data-zoom]')
         const zoomOutput = editor.querySelector('[data-zoom-output]')
+        let lastInspectorSelectionId = ''
 
         function normalizeDeckDocument(input) {
           const deck = input && typeof input === 'object' ? clone(input) : {}
@@ -46995,6 +47983,44 @@ Wrap the entire export in one code block. After the code block, say whether the 
           showToast({ text: 'This deck is view-only. Your changes were not sent.', kind: 'note' })
           return false
         }
+        function updateDeckSaveState() {
+          if (!saveState) return
+          const stateName = state.saveError ? 'error' : state.saving ? 'saving' : state.dirty ? 'dirty' : 'saved'
+          const label = state.saveError
+            ? 'Needs attention'
+            : state.saving
+              ? 'Saving…'
+              : state.dirty
+                ? 'Unsaved'
+                : state.savedToFiles
+                  ? 'Saved · Files'
+                  : 'Saved'
+          saveState.dataset.state = stateName
+          saveState.textContent = label
+          saveState.title = state.saveError || (state.savedToFiles ? 'Current revision is saved and filed.' : 'Current revision is saved.')
+        }
+        function clampDeckElementGeometry(element) {
+          element.width = Math.max(24, Math.min(state.deck.width, Number(element.width) || 24))
+          element.height = Math.max(24, Math.min(state.deck.height, Number(element.height) || 24))
+          element.x = Math.max(0, Math.min(state.deck.width - element.width, Number(element.x) || 0))
+          element.y = Math.max(0, Math.min(state.deck.height - element.height, Number(element.y) || 0))
+        }
+        function deckElementPropertyValue(element, prop, rawValue) {
+          if (!['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontWeight', 'lineHeight', 'strokeWidth'].includes(prop)) return rawValue
+          const parsed = Number(rawValue)
+          if (!Number.isFinite(parsed)) return element[prop]
+          if (prop === 'x') return Math.max(0, Math.min(state.deck.width - Math.min(state.deck.width, Math.max(24, Number(element.width) || 24)), parsed))
+          if (prop === 'y') return Math.max(0, Math.min(state.deck.height - Math.min(state.deck.height, Math.max(24, Number(element.height) || 24)), parsed))
+          if (prop === 'width') return Math.max(24, Math.min(state.deck.width - Math.max(0, Number(element.x) || 0), parsed))
+          if (prop === 'height') return Math.max(24, Math.min(state.deck.height - Math.max(0, Number(element.y) || 0), parsed))
+          if (prop === 'rotation') return Math.max(-360, Math.min(360, parsed))
+          if (prop === 'opacity') return Math.max(0, Math.min(1, parsed))
+          if (prop === 'fontSize') return Math.max(8, Math.min(400, parsed))
+          if (prop === 'fontWeight') return [400, 600, 700, 800].includes(parsed) ? parsed : 600
+          if (prop === 'lineHeight') return Math.max(.7, Math.min(4, parsed))
+          if (prop === 'strokeWidth') return Math.max(0, Math.min(80, parsed))
+          return parsed
+        }
         function mergeArtifactUpdate(view) {
           if (!view) return options.entry || null
           const base = options.entry && typeof options.entry === 'object' ? options.entry : {}
@@ -47012,6 +48038,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (state.history.length > 60) state.history.shift()
           state.future = []
           state.dirty = true
+          state.saveError = ''
         }
         function restore(snapshot) {
           state.deck = normalizeDeckDocument(snapshot)
@@ -47204,6 +48231,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           fitCanvas()
           renderCanvas()
           renderThumbs()
+          updateDeckSaveState()
           indicator.textContent = `${state.slideIndex + 1} / ${state.deck.slides.length}`
           editor.querySelectorAll('[data-action="prev-slide"], [data-action="move-slide-earlier"]').forEach(button => { button.disabled = state.slideIndex === 0 })
           editor.querySelectorAll('[data-action="next-slide"], [data-action="move-slide-later"]').forEach(button => { button.disabled = state.slideIndex === state.deck.slides.length - 1 })
@@ -47214,31 +48242,54 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         function setInspectorTab(tab) {
           const next = ['design', 'notes', 'scout'].includes(tab) ? tab : 'design'
+          const changed = state.inspectorTab !== next
           state.inspectorTab = next
           editor.querySelectorAll('[data-inspector-tab]').forEach(button => {
             const selected = button.dataset.inspectorTab === next
             button.setAttribute('aria-selected', String(selected))
             button.tabIndex = selected ? 0 : -1
           })
-          editor.querySelectorAll('[data-inspector-panel]').forEach(panel => { panel.hidden = panel.dataset.inspectorPanel !== next })
+          editor.querySelectorAll('[data-inspector-panel]').forEach(panel => {
+            panel.hidden = panel.dataset.inspectorPanel !== next
+            if (changed && panel.dataset.inspectorPanel === next) panel.scrollTop = 0
+          })
         }
 
         function updateProperties() {
           const element = selected()
+          // Inspector scroll belongs to the selected object. Carrying a deep
+          // Arrange/Typography scroll position onto another object can hide
+          // its identity and Transform labels, making the rail look broken.
+          if (lastInspectorSelectionId !== state.selectedId) {
+            lastInspectorSelectionId = state.selectedId
+            const designPanel = editor.querySelector('[data-inspector-panel="design"]')
+            if (designPanel) designPanel.scrollTop = 0
+          }
           const notes = editor.querySelector('[data-slide-notes]')
           if (notes) notes.value = String(slide()?.notes || '')
           const background = editor.querySelector('[data-slide-background]')
           const slideBackground = typeof slide()?.background === 'string' ? slide().background : (slide()?.background?.color || state.deck?.theme?.background || '#111111')
           if (background && /^#[0-9a-f]{6}$/i.test(slideBackground)) background.value = slideBackground
+          const backgroundValue = editor.querySelector('[data-slide-background-value]')
+          if (backgroundValue) backgroundValue.textContent = /^#[0-9a-f]{6}$/i.test(slideBackground) ? slideBackground : 'Custom'
           const eyebrow = editor.querySelector('[data-inspector-eyebrow]')
           const heading = editor.querySelector('[data-inspector-title]')
           const hint = editor.querySelector('[data-inspector-hint]')
+          const objectCount = slide()?.elements?.length || 0
           if (eyebrow) eyebrow.textContent = `Slide ${state.slideIndex + 1}`
           if (heading) heading.textContent = element ? (element.type === 'text' ? 'Text' : element.type === 'image' ? 'Image' : 'Shape') : 'Slide design'
           if (hint) hint.textContent = element
-            ? (element.type === 'text' ? String(element.text || 'Edit this text object').trim().slice(0, 92) : String(element.name || element.prompt || 'Edit the selected object').trim().slice(0, 92))
-            : 'Select an object to edit its properties.'
+            ? `${Math.round(element.x)}, ${Math.round(element.y)} · ${Math.round(element.width)} × ${Math.round(element.height)}`
+            : objectCount
+              ? `${objectCount} object${objectCount === 1 ? '' : 's'} · select one to refine`
+              : 'Blank slide · start here or ask Scout for an image'
           editor.querySelectorAll('[data-prop]').forEach(input => { input.disabled = !element })
+          const slideControls = editor.querySelector('[data-slide-controls]')
+          if (slideControls) slideControls.hidden = Boolean(element)
+          const quickCopy = editor.querySelector('[data-slide-quick-copy]')
+          if (quickCopy) quickCopy.textContent = objectCount
+            ? `Add another element, or select one of the ${objectCount} already on this slide.`
+            : 'Start with a title, shape, or image. Scout can make a custom visual directly on the slide.'
           const elementControls = editor.querySelector('[data-element-controls]')
           if (elementControls) elementControls.hidden = !element
           editor.querySelector('[data-text-controls]').hidden = element?.type !== 'text'
@@ -47540,6 +48591,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
           button.disabled = true
           button.innerHTML = '<span>Preparing PowerPoint…</span><small>.pptx</small>'
           try {
+            const fileName = studioDownloadFileName(payload?.artifact?.title || title, 'presentation', 'pptx')
+            if (nativeStudioDownload({
+              kind: 'deck', format: 'pptx', artifactId: state.artifactId, fileName,
+              expectedVersion: state.version, sceneRef: state.sceneRef
+            })) {
+              showToast({ text: 'Opening iOS save options…', kind: 'done' })
+              downloadMenu.hidden = true
+              return
+            }
             const response = await fetch('/artifacts/export-pptx', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ artifactId: state.artifactId, expectedVersion: state.version, sceneRef: state.sceneRef })
@@ -47549,7 +48609,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
               throw new Error(result?.error || 'PowerPoint export failed')
             }
             const blob = await response.blob()
-            const fileName = `${String(payload?.artifact?.title || title || 'presentation').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'presentation'}.pptx`
             triggerBlobDownload(blob, fileName)
             showToast({ text: 'PowerPoint downloaded', kind: 'done' })
             downloadMenu.hidden = true
@@ -47576,13 +48635,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const landed = await waitForArtifactPdfAsset(state.artifactId)
             if (!landed?.pdf) throw new Error('PDF is still rendering. It will stay attached to this deck when ready.')
             state.version = Number(landed.entry?.metadata?.artifactVersion || state.version)
-            const link = document.createElement('a')
-            link.href = artifactBlobUrl(landed.pdf)
-            link.download = String(landed.pdf.name || 'presentation.pdf')
-            document.body.appendChild(link)
-            link.click()
-            link.remove()
-            showToast({ text: 'PDF downloaded', kind: 'done' })
+            const fileName = studioDownloadFileName(landed.pdf.name || payload?.artifact?.title || title, 'presentation', 'pdf')
+            const href = artifactBlobUrl({ ...landed.pdf, name: fileName })
+            if (nativeStudioDownload({ kind: 'deck', format: 'pdf', artifactId: state.artifactId, fileName, url: href })) {
+              showToast({ text: 'Opening iOS save options…', kind: 'done' })
+            } else {
+              const link = document.createElement('a')
+              link.href = href
+              link.download = fileName
+              document.body.appendChild(link)
+              link.click()
+              link.remove()
+              showToast({ text: 'PDF downloaded', kind: 'done' })
+            }
             downloadMenu.hidden = true
           } catch (error) {
             showToast({ text: error?.message || 'PDF export failed', kind: 'error' })
@@ -47665,6 +48730,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const result = await response.json().catch(() => ({}))
           if (!response.ok || !result?.file) throw new Error(result?.error || 'Deck saved, but could not be added to Files.')
           state.savedToFiles = true
+          updateDeckSaveState()
           if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
           return result.file
         }
@@ -47677,6 +48743,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const destination = state.savedToFiles ? null : await chooseDriveSaveOptions(String(payload?.artifact?.title || title || 'Untitled deck'))
           if (!state.savedToFiles && !destination) return false
           state.saving = true
+          state.saveError = ''
+          updateDeckSaveState()
           saveButton.disabled = true
           saveButton.textContent = 'Saving…'
           try {
@@ -47692,6 +48760,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.history = []
             state.future = []
             state.dirty = false
+            state.saveError = ''
             const updatedEntry = mergeArtifactUpdate(result.artifact)
             if (destination) {
               await saveDeckToFiles(destination)
@@ -47709,10 +48778,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             return true
           } catch (error) {
+            state.saveError = error?.message || 'Deck save failed'
+            updateDeckSaveState()
             showToast({ text: error?.message || 'Deck save failed', kind: 'error' })
             return false
           } finally {
             state.saving = false
+            updateDeckSaveState()
             if (saveButton.isConnected) { saveButton.disabled = false; saveButton.textContent = 'Save' }
           }
         }
@@ -47870,6 +48942,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'add-image') addUploadedImage()
           else if (action === 'add-rectangle') addElement('shape', { shape: 'rectangle' })
           else if (action === 'add-ellipse') addElement('shape', { shape: 'ellipse' })
+          else if (action === 'open-scout') {
+            setInspectorTab('scout')
+            if (compactStudioMedia.matches) setInspectorOpen(true)
+            requestAnimationFrame(() => editor.querySelector('[data-image-prompt]')?.focus())
+          }
           else if (action === 'bring-front') changeLayer('front')
           else if (action === 'send-back') changeLayer('back')
           else if (action === 'bring-forward') changeLayer('forward')
@@ -47916,9 +48993,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const prop = event.target.dataset?.prop
           const element = selected()
           if (!prop || !element) return
+          const current = element[prop]
+          const next = deckElementPropertyValue(element, prop, event.target.value)
+          if (Object.is(current, next)) { renderAll(); return }
           checkpoint()
-          element[prop] = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontWeight', 'lineHeight', 'strokeWidth'].includes(prop) ? Number(event.target.value) : event.target.value
-          if (prop === 'opacity') element.opacity = Math.max(0, Math.min(1, element.opacity))
+          element[prop] = next
+          clampDeckElementGeometry(element)
           renderAll()
         })
 
@@ -48019,6 +49099,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         activeDeckEditor = {
           element: editor,
+          artifactId,
           cleanup: () => {
             document.removeEventListener('keydown', handleKey)
             compactStudioMedia.removeEventListener?.('change', responsiveDeckChange)
@@ -48035,17 +49116,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderAll()
         setInspectorTab('design')
         editor.querySelector('[data-action="close"]')?.focus()
+        return true
       }
 
       function closeDeckEditor() {
         if (!activeDeckEditor) return
         const returnFocus = activeDeckEditor.returnFocus
+        const artifactId = activeDeckEditor.artifactId
         activeDeckEditor.cleanup?.()
         activeDeckEditor.element?.remove()
         activeDeckEditor = null
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
+        settleStudioDeepLink('deck', 'edit', artifactId)
         if (returnFocus?.isConnected) returnFocus.focus()
       }
 
@@ -48189,6 +49273,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const resizeObserver = new ResizeObserver(fit)
         activeDeckPresenter = {
           element: presenter,
+          artifactId,
           cleanup: () => { document.removeEventListener('keydown', handleKey); resizeObserver.disconnect() }
         }
         document.body.appendChild(presenter)
@@ -48202,9 +49287,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function closeDeckPresentation() {
         if (!activeDeckPresenter) return
+        const artifactId = activeDeckPresenter.artifactId
         activeDeckPresenter.cleanup?.()
         activeDeckPresenter.element?.remove()
         activeDeckPresenter = null
+        settleStudioDeepLink('deck', 'present', artifactId)
       }
 
       function escapeHtml(str) {
@@ -48222,6 +49309,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const body = String(entry?.text || '').trim().toLowerCase()
         return body.startsWith('<!doctype html') || body.startsWith('<html')
+      }
+
+      function artifactIsMarkdownDocument(entry, declaredType = '') {
+        if (!entry || artifactIsHTMLDeck(entry)) return false
+        const kind = String(declaredType || entry?.metadata?.type || entry?.metadata?.artifactType || '').trim().toLowerCase()
+        return ['markdown', 'document', 'doc', 'memo', 'brief', 'text'].includes(kind)
       }
 
       // The deck body is served as real text/html by GET /artifacts/render
@@ -48983,6 +50076,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function artifactBlobUrl(asset) {
         return `/artifacts/blob?ref=${encodeURIComponent(asset.ref)}&name=${encodeURIComponent(String(asset.name || ''))}`
+      }
+
+      // The native app owns authenticated files after a Studio download. A
+      // small semantic request avoids handing WKWebView an opaque blob: URL;
+      // OSWebScreen re-validates the route, artifact, revision, host and path.
+      function studioDownloadFileName(value, fallback, format) {
+        const extension = `.${format}`
+        let base = String(value || '').trim().replace(/[\x00-\x1f\x7f\\/:*?"<>|]+/g, '-').replace(/^\.+|\.+$/g, '').trim()
+        if (base.toLowerCase().endsWith(extension)) base = base.slice(0, -extension.length).trim()
+        if (!base) base = fallback
+        return `${base.slice(0, Math.max(1, 160 - extension.length))}${extension}`
+      }
+
+      function nativeStudioDownload(payload) {
+        const bridge = window.ReactNativeWebView
+        if (!bridge || typeof bridge.postMessage !== 'function') return false
+        try {
+          bridge.postMessage(JSON.stringify({ type: 'stride.studio.download', version: 1, ...payload }))
+          return true
+        } catch {
+          return false
+        }
       }
 
       // Current revision-bound PDF, or null. New callbacks stamp the exact
@@ -58459,11 +59574,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // rising progressPercent / progressNote / currentStage metadata is
       // re-read via loadArtifacts, whose render path already repaints every
       // surface holding the running card (research stage, scout-thread
-      // research cards, library rows, agent workspaces). Trailing debounce:
-      // a burst of orchestrator turns collapses to ONE fetch ~1.5s after the
-      // last event — one timer, re-armed, never stacked. While the artifact
-      // stage dialog is up the fetch re-arms instead of firing, so a reader
-      // mid-document is never thrashed beneath.
+      // research cards, library rows, agent workspaces). A bounded throttle
+      // collapses a burst to one fetch per 1.5s window without letting a
+      // continuous child-stage event stream postpone the parent goal refresh
+      // indefinitely. While the artifact stage dialog is up, the pending
+      // refresh waits in bounded intervals so a reader mid-document is never
+      // thrashed beneath.
       const artifactProgressRefreshMs = 1500
       let artifactProgressRefreshTimer = null
 
@@ -58472,7 +59588,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         if (artifactProgressRefreshTimer) {
-          clearTimeout(artifactProgressRefreshTimer)
+          return
         }
         artifactProgressRefreshTimer = setTimeout(() => {
           artifactProgressRefreshTimer = null
@@ -64115,20 +65231,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             row.appendChild(copy)
             working.appendChild(row)
           }
-          const technical = document.createElement('details')
-          technical.className = 'goalcard__technical'
-          const summary = document.createElement('summary')
-          summary.append(bfEl('span', '', 'Technical details'), bfEl('span', 'goalcard__technical-count', `${subtasks.length} internal steps`))
-          technical.appendChild(summary)
-          const body = bfEl('div', 'goalcard__technical-body')
-          for (const task of subtasks) {
-            const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : ['failed', 'blocked'].includes(task.status) ? '✕' : '○'
-            body.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${packagingStudioTaskDisplayTitle(plan, task)}`))
-            const stageDetail = goalProcessStageDetail(task, plan)
-            if (stageDetail) body.appendChild(bfEl('div', 'goalcard__work-line goalcard__work-line--detail', stageDetail))
-          }
-          technical.appendChild(body)
-          working.appendChild(technical)
         } else for (const task of subtasks) {
           const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : task.status === 'failed' ? '✕' : '○'
           working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${packagingStudioTaskDisplayTitle(plan, task)}`))
@@ -68240,17 +69342,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const run = scoutThreadFromChatMessage(message)
 	          const resultArtifactId = String(message.thread?.resultArtifactId || '').trim()
 	          const resultArtifact = artifactEntries.find(candidate => String(candidate?.id || '') === resultArtifactId)
+	          const resultDocument = resultArtifact && artifactIsMarkdownDocument(resultArtifact, message.thread?.resultArtifactType)
 	          // P0-1: a goal ref mounts the live goalcard in the thread — for
 	          // everyone, across reloads — instead of the research run card
 	          if (run.artifact && (String(message.intentOutcome || '') === 'start_private_work' || String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
 	            const goalNode = scoutGoalRefRecordNode(message, run.artifact)
-	            if (!resultArtifact || !artifactIsHTMLDeck(resultArtifact)) return goalNode
+	            if (!resultArtifact || (!artifactIsHTMLDeck(resultArtifact) && !resultDocument)) return goalNode
 	            const group = document.createDocumentFragment()
-	            group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))
+	            if (artifactIsHTMLDeck(resultArtifact)) group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))
+	            else group.append(goalNode, scoutMarkdownDocumentRefRecordNode(message, resultArtifact))
 	            return group
 	          }
 	          if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) {
 	            return scoutHTMLDeckRefRecordNode(message, resultArtifact)
+	          }
+	          if (resultDocument) {
+	            return scoutMarkdownDocumentRefRecordNode(message, resultArtifact)
 	          }
 	          if (run.artifact && artifactIsHTMLDeck(run.artifact)) {
 	            return scoutHTMLDeckRefRecordNode(message, run.artifact)
@@ -68259,7 +69366,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // Rendering their worker receipt as a second full report card is
 	          // the feed clutter seen in production, so fold the exact bound
 	          // artifact into the same stage spine.
-	          if (run.artifact && String(run.artifact?.metadata?.goalParentId || '').trim() && packagingStudioStagePresentationFor(run.artifact)) {
+	          if (run.artifact && String(run.artifact?.metadata?.goalParentId || '').trim()
+	              && (packagingStudioStagePresentationFor(run.artifact) || String(run.artifact?.metadata?.processStage || run.artifact?.metadata?.goalSubtaskId || '').trim())) {
 	            return scoutStageArtifactNode({ ...message, kind: 'artifact' })
 	          }
 	          runlogMarkerGoalId = ''
@@ -70304,38 +71412,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (isPackagingStudio && Array.isArray(plan?.subtasks) && plan.subtasks.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Presentation activity'))
 	          worklog.appendChild(packagingStudioPhaseListNode(customerProgress))
-	          const technical = document.createElement('details')
-	          technical.className = 'chat-context-technical'
-	          const technicalSummary = document.createElement('summary')
-	          technicalSummary.append(
-	            bfEl('span', '', 'Technical details'),
-	            bfEl('span', 'chat-context-technical__count', `${plan.subtasks.length} internal steps`)
-	          )
-	          technical.appendChild(technicalSummary)
-	          const activityList = bfEl('div', 'chat-context-activity-list chat-context-technical__list')
-	          for (const task of plan.subtasks) {
-	            const taskState = String(task?.status || 'pending').toLowerCase()
-	            const row = bfEl('div', `chat-context-log-entry${taskState === 'complete' ? ' is-complete' : taskState === 'running' || taskState === 'ready' ? ' is-current' : ''}`)
-	            row.appendChild(bfEl('span', 'chat-context-log-entry__dot', ''))
-	            const rowCopy = bfEl('span', 'chat-context-log-entry__copy')
-	            rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__title', packagingStudioTaskDisplayTitle(activityPlan, task)))
-	            const taskArtifact = String(task?.artifactId || '').trim() && (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === String(task.artifactId))
-	            const stageNote = packagingStudioStagePresentation[String(task?.id || '').trim()]?.note || ''
-	            if (stageNote) rowCopy.appendChild(bfEl('span', 'chat-context-log-entry__meta', taskState === 'complete' ? stageNote : taskState.replace(/_/g, ' ')))
-	            if (taskArtifact) {
-	              row.classList.add('is-actionable')
-	              row.tabIndex = 0
-	              row.setAttribute('role', 'button')
-	              row.addEventListener('click', () => openArtifactStage(taskArtifact.id, artifactDisplayTitle(taskArtifact)))
-	              row.addEventListener('keydown', event => {
-	                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click() }
-	              })
-	            }
-	            row.appendChild(rowCopy)
-	            activityList.appendChild(row)
-	          }
-	          technical.appendChild(activityList)
-	          worklog.appendChild(technical)
 	        }
 	        if (sources.length) {
 	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Sources'))
@@ -71352,6 +72428,85 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        result.dataset.resultArtifactId = resultId
 	        result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation`)
 	        renderArtifactDeck(result, artifact)
+	        if (String(message?.thread?.resultApprovalState || '') === 'edited_after_approval') {
+	          result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation, edited after approval`)
+	          result.appendChild(bfEl('div', 'scout-chat-deck-result__approval-note', 'Edited after approval · review this version before presenting'))
+	        }
+	        return result
+	      }
+
+	      // A terminal Markdown result is a customer deliverable, not another
+	      // activity receipt. Keep one bounded, injection-safe preview in the
+	      // channel with direct routes into the reader and Document Studio. Only
+	      // an explicit resultArtifactId qualifies; internal process children do
+	      // not acquire a rich card merely because their payload is Markdown.
+	      function scoutMarkdownDocumentRefRecordNode(message, artifact) {
+	        const resultId = String(message?.thread?.resultArtifactId || '').trim()
+	        const declaredType = String(message?.thread?.resultArtifactType || '').trim()
+	        if (!resultId || String(artifact?.id || '').trim() !== resultId || !artifactIsMarkdownDocument(artifact, declaredType)) return document.createDocumentFragment()
+	        const artifactState = artifactStatusValue(artifact)
+	        const goalState = String(message?.thread?.goalStatus || '').trim().toLowerCase()
+	        if (!['complete', 'published'].includes(artifactState) && !['complete', 'completed', 'published'].includes(goalState)) return document.createDocumentFragment()
+
+	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        const metadata = artifact?.metadata || {}
+	        const sourceArtifactId = String(message?.thread?.artifactId || '').trim()
+	        const sourceArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === sourceArtifactId)
+	        const sourceMetadata = sourceArtifact?.metadata || {}
+	        const goalId = String(
+	          metadata.goalParentId ||
+	          metadata.goalId ||
+	          sourceMetadata.goalParentId ||
+	          sourceMetadata.goalId ||
+	          (String(message?.thread?.mode || '') === 'goal' ? sourceArtifactId : '')
+	        ).trim()
+	        if (goalId) {
+	          let canonicalResultId = ''
+	          for (const candidate of messages) {
+	            if (String(candidate?.thread?.artifactId || '').trim() !== goalId) continue
+	            const candidateResultId = String(candidate?.thread?.resultArtifactId || '').trim()
+	            if (candidateResultId) canonicalResultId = candidateResultId
+	          }
+	          if (canonicalResultId && canonicalResultId !== resultId) return document.createDocumentFragment()
+	        }
+	        let latestId = ''
+	        for (const candidate of messages) {
+	          if (!['thread', 'artifact'].includes(String(candidate?.kind || ''))) continue
+	          if (String(candidate?.thread?.resultArtifactId || '').trim() === resultId) latestId = String(candidate?.id || '')
+	        }
+	        if (latestId && String(message?.id || '') !== latestId) return document.createDocumentFragment()
+
+	        runlogOpen = null
+	        const title = String(message?.thread?.resultTitle || artifactDisplayTitle(artifact) || 'Untitled document').trim()
+	        const result = document.createElement('article')
+	        result.className = 'scout-chat-document-result'
+	        result.dataset.resultArtifactId = resultId
+	        result.setAttribute('aria-label', `${title} document`)
+
+	        const head = bfEl('header', 'scout-chat-document-result__head')
+	        const identity = bfEl('div', 'scout-chat-document-result__identity')
+	        identity.append(
+	          bfEl('span', 'scout-chat-document-result__kicker', message?.thread?.resultCanEdit === true ? 'document · ready to edit' : 'document · ready to read'),
+	          bfEl('h3', 'scout-chat-document-result__title', title)
+	        )
+	        const actions = bfEl('div', 'scout-chat-document-result__actions')
+	        const open = bfEl('button', 'scout-chat-document-result__action', 'Open')
+	        open.type = 'button'
+	        open.setAttribute('aria-label', `Open ${title}`)
+	        open.addEventListener('click', () => openArtifactStage(resultId, title, { canEdit: message?.thread?.resultCanEdit === true }))
+	        const edit = bfEl('button', 'scout-chat-document-result__action scout-chat-document-result__action--primary', 'Edit')
+	        edit.type = 'button'
+	        edit.setAttribute('aria-label', `Edit ${title}`)
+	        edit.addEventListener('click', () => openDocumentStudio(resultId, title, { entry: artifact }))
+	        actions.appendChild(open)
+	        if (message?.thread?.resultCanEdit === true) actions.appendChild(edit)
+	        head.append(identity, actions)
+
+	        const preview = bfEl('div', 'scout-chat-document-result__preview artifact-read')
+	        preview.setAttribute('aria-hidden', 'true')
+	        preview.setAttribute('inert', '')
+	        renderArtifactRead(preview, artifact)
+	        result.append(head, preview)
 	        return result
 	      }
 
@@ -71369,11 +72524,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resultArtifactId = String(message?.thread?.resultArtifactId || '').trim()
 	        const resultArtifact = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === resultArtifactId)
 	        if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) return scoutHTMLDeckRefRecordNode(message, resultArtifact)
+	        if (resultArtifact && artifactIsMarkdownDocument(resultArtifact, message?.thread?.resultArtifactType)) return scoutMarkdownDocumentRefRecordNode(message, resultArtifact)
 	        const stagePresentation = packagingStudioStagePresentationFor(artifact)
+	        const artifactMetadata = artifact?.metadata || {}
+	        const internalProcessChild = Boolean(
+	          String(artifactMetadata.goalParentId || '').trim()
+	          && String(artifactMetadata.processStage || artifactMetadata.goalSubtaskId || '').trim()
+	        )
 	        // Packaging Studio's durable stage artifacts remain available in the
 	        // Activity sidecar. They are process evidence, not five separate
 	        // channel deliverables.
-	        if (stagePresentation && !(resultArtifact && artifactIsHTMLDeck(resultArtifact))) return document.createDocumentFragment()
+	        if ((stagePresentation || internalProcessChild) && !(resultArtifact && artifactIsHTMLDeck(resultArtifact))) return document.createDocumentFragment()
 	        // A process-stage artifact belongs in the compact stage rail even
 	        // when its bytes happen to be a complete HTML deck. Only an explicit
 	        // resultArtifactId (the goal's stable handoff) earns a rich deck card;
@@ -72004,6 +73165,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	                : resultId
 	            }, '')
 	          : ''
+	        const goalResultApprovalState = !held
+	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((state, candidate) => {
+	              const ref = candidate?.thread || {}
+	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
+	                ? String(ref.resultApprovalState || '').trim()
+	                : state
+	            }, '')
+	          : ''
 	        const deliveredDeckArtifact = deckDeliverable
 	          ? ((typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
 	              String(candidate?.id || '') === (goalResultId || String(deckDeliverable.artifactId || '').trim())
@@ -72020,6 +73189,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
 	          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
 	          renderArtifactDeck(deckResult, deliveredDeckArtifact)
+	          if (goalResultApprovalState === 'edited_after_approval') {
+	            deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation, edited after approval`)
+	            deckResult.appendChild(bfEl('div', 'scout-chat-deck-result__approval-note', 'Edited after approval · review this version before presenting'))
+	          }
 	          card.appendChild(deckResult)
 	          const supportingCount = Math.max(0, deliverables.length - 1)
 	          if (supportingCount || skips.length) {

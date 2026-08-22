@@ -21,12 +21,11 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 		"function packagingStudioPhaseListNode(progress)",
 		"Frame the decision",
 		"Ground the recommendation",
+		"stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence']",
 		"Build the story",
 		"Design the presentation",
 		"Finish the presentation",
 		"Phase ${customerProgress.currentNumber} of ${customerProgress.count}",
-		"Technical details",
-		"internal steps",
 		"function packagingStudioTaskDisplayTitle(plan, task)",
 		"function packagingStudioCheckpointQuestion(plan, checkpoint)",
 		"Write the deck",
@@ -242,20 +241,9 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.match(await activityDrawer.locator('.chat-context-phase-entry.is-current').textContent(),/Ground the recommendation.*verifying the proof points/is);
  assert.equal(await activityDrawer.locator('.chat-context-phase-entry[data-phase="design"] .chat-context-phase-entry__sentence').count(),0);
  assert.match(await activityDrawer.locator('#chatContextMeta').textContent(),/Phase 2 of 5.*11%/);
- const technical=activityDrawer.locator('.chat-context-technical');
- assert.equal(await technical.getAttribute('open'),null);
- assert.match(await technical.locator('summary').textContent(),/Technical details.*16 internal steps/);
- const technicalGeometry=await technical.locator('summary').evaluate(node=>{const rect=node.getBoundingClientRect();const style=getComputedStyle(node);return {height:rect.height,width:rect.width,display:style.display,visibility:style.visibility};});
- assert.ok(technicalGeometry.height>=40&&technicalGeometry.width>0&&technicalGeometry.display!=='none'&&technicalGeometry.visibility!=='hidden',JSON.stringify(technicalGeometry));
- await technical.locator('summary').click();
- assert.equal(await technical.locator('.chat-context-log-entry').count(),16);
- const activityState=await technical.locator('.chat-context-log-entry').evaluateAll(nodes=>nodes.map(node=>({text:node.textContent,actionable:node.classList.contains('is-actionable')})));
- assert.ok(activityState.some(row=>row.actionable&&row.text.includes('Understand the request and company context')),JSON.stringify(activityState));
- const contextActivity=technical.locator('.chat-context-log-entry.is-actionable').first();
- await contextActivity.evaluate(node=>node.click());
- await page.locator('.artifact-stage').waitFor({state:'visible'});
- assert.match(await page.locator('.artifact-stage__kicker').textContent(),/Build the visual system/);
- await page.locator('.artifact-stage__close').click();
+ assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
+ assert.equal(await activityDrawer.getByText(/internal steps/i).count(),0);
+ assert.equal(await activityDrawer.getByRole('button',{name:'Inspect work',exact:true}).count(),1);
  await page.locator('#chatContextClose').evaluate(node=>node.click());
  await page.locator('.scout-chat-work-card--presentation').evaluate(node=>node.remove());
 
@@ -274,6 +262,21 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.equal(blockedWithoutDecision.checkpoints,0);
  assert.doesNotMatch(blockedWithoutDecision.text,/Needs input/i);
  await page.locator('[data-work-artifact-id="packaging-blocked-run"]').evaluate(node=>node.remove());
+
+ const blockedStoryPrecedesReadyDesign=await page.evaluate(parent=>{
+   const base=JSON.parse(parent.metadata.goalPlan);
+   const complete=new Set(['context_snapshot','external_research','evidence','story_architects','write']);
+   const plan={...base,state:'needs_attention',subtasks:base.subtasks.map(task=>{
+     if(complete.has(task.id))return {...task,status:'complete'};
+     if(task.id==='gate')return {...task,status:'blocked'};
+     if(task.id==='identity')return {...task,status:'ready'};
+     return {...task,status:'pending'};
+   })};
+   const artifact={...parent,metadata:{...parent.metadata,status:'needs_attention',threadStatus:'needs_attention',progressPercent:'29',goalPlan:JSON.stringify(plan)}};
+   const progress=packagingStudioCustomerProgress(plan,artifact,null,'needs_attention');
+   return {id:progress.current.id,status:progress.current.status,number:progress.currentNumber,sentence:progress.current.sentence};
+ },parent);
+ assert.deepEqual(blockedStoryPrecedesReadyDesign,{id:'story',status:'blocked',number:3,sentence:'Scout is revising the story against the brief.'});
 
  const savedGoalCopy=await page.evaluate(()=>{
    const terminal=document.createElement('div');

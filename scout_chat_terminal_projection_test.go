@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -66,6 +67,7 @@ func TestScoutTerminalProjectionUsesCurrentMetadataAndIsRestartStable(t *testing
 		"researchCitationCount":      "3",
 		"researchSourceDomainCount":  "2",
 		"researchQualityGate":        "passed",
+		"researchEvidenceBinding":    "provider_fetched_urls",
 		"researchSourceWindowDigest": strings.Repeat("a", 64),
 		"threadRuns":                 `[{"researchCitationCount":"91"}]`,
 	})
@@ -88,6 +90,7 @@ func TestScoutTerminalProjectionUsesCurrentMetadataAndIsRestartStable(t *testing
 		"researchCitationCount":      "12",
 		"researchSourceDomainCount":  "10",
 		"researchQualityGate":        "passed",
+		"researchEvidenceBinding":    "provider_fetched_urls",
 		"researchSourceWindowDigest": strings.Repeat("b", 64),
 		"threadRuns":                 `[{"researchCitationCount":"91"}]`,
 	})
@@ -166,7 +169,26 @@ func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIden
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
 		ID: "goal-card", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "run-1", Mode: "goal", Status: "approval_required", ArtifactID: goal.ID},
 	}}}
+	// A generated candidate is not a channel result while render/jury/quality
+	// are still in flight. Editing it during that window would invalidate the
+	// exact reviewed revision.
 	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != "" {
+		t.Fatalf("unreviewed candidate leaked into the channel as %q", got)
+	}
+	shipRecord, _, err := app.createOSArtifactWithMetadata("workflow", "Assemble presentation", "exact reviewed deck filed", "Scout", map[string]string{
+		"source": "process_stage", "processStage": "ship_compile", "goalParentId": goal.ID, "deckArtifactId": finalDeck.ID, "status": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyPlan := goalPlan{ProcessID: packagingStudioProcessID, State: goalStateApproval, Subtasks: []goalSubtask{{ID: "ship_compile", Status: subtaskComplete, ArtifactID: shipRecord.ID}}}
+	rawReadyPlan, _ := json.Marshal(readyPlan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "Scout", map[string]string{"goalPlan": string(rawReadyPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	ref := projected.Messages[0].Thread
 	if ref.ArtifactID != goal.ID || ref.ResultArtifactID != finalDeck.ID || ref.ResultArtifactType != artifactTypeHTMLDeck || ref.ResultTitle != "Like A Farmer — Optimization Insights" {
 		t.Fatalf("projected ref=%+v, want lifecycle goal plus explicit deck result", ref)
@@ -209,6 +231,308 @@ func TestScoutChatViewerProjectionNamesConcreteDeckResultWithoutChangingGoalIden
 	}
 }
 
+func TestScoutChatViewerProjectionExposesOnlyFinalDocumentDeliverable(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Engagement army report", "goal record", "AJ", map[string]string{
+		"mode": "goal", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediate, _, err := app.createOSArtifactWithMetadata("workflow", "Research dossier", "# Research\n\nUseful but not the report.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": goal.ID, "goalSubtaskId": "research", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _, err := app.createOSArtifactWithMetadata("workflow", "Insights & Opportunities", "# Insights & Opportunities\n\nThe final editable report.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": goal.ID, "goalSubtaskId": "write", "goalDeliverable": "true", "outputContract": documentReportOutputContract, "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{State: goalStateVerified, Subtasks: []goalSubtask{{ID: "external_research", Status: subtaskComplete, ArtifactID: intermediate.ID}, {ID: "write", Role: processRoleWriter, Status: subtaskComplete, ArtifactID: report.ID}}}
+	documentProcess, ok := processByID(documentReportProcessID)
+	if !ok {
+		t.Fatal("document report process is unavailable")
+	}
+	if err := bindGoalProcessIdentity(&plan, documentProcess); err != nil {
+		t.Fatal(err)
+	}
+	rawPlan, _ := json.Marshal(plan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "Scout", map[string]string{"goalPlan": string(rawPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
+		ID: "goal-card", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "run-report", Mode: "goal", Status: "complete", ArtifactID: goal.ID},
+	}}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	ref := projected.Messages[0].Thread
+	if ref.ArtifactID != goal.ID || ref.ResultArtifactID != report.ID || ref.ResultArtifactType != artifactTypeMarkdown || ref.ResultTitle != "Insights & Opportunities" {
+		t.Fatalf("projected ref=%+v, want exact editable report while preserving goal identity", ref)
+	}
+	if !strings.Contains(ref.ResultPreview, "The final editable report") || len(ref.ResultPreview) > 1200 {
+		t.Fatalf("document preview=%q, want bounded current report excerpt", ref.ResultPreview)
+	}
+	serialized, err := json.Marshal(projected)
+	var roundTrip scoutChatThreadRecord
+	if err != nil || json.Unmarshal(serialized, &roundTrip) != nil || !strings.HasPrefix(roundTrip.Messages[0].Thread.ResultPreview, "# Insights & Opportunities") {
+		t.Fatalf("serialized projection lost the mobile document preview: %s err=%v", serialized, err)
+	}
+}
+
+func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandaloneTerminalDocument(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	stage, _, err := app.createOSArtifactWithMetadata("workflow", "Internal stage", "# Internal\n\nDo not publish.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "process_stage", "threadId": "stage-run", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := app.createOSArtifactWithMetadata("research", "Internal research", "# Research\n\nNot the report.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "threadId": "research-child", "goalParentId": "goal-parent", "goalSubtaskId": "external_research", "goalDeliverable": "true", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	standaloneBody := "# Market note\n\nA channel-facing document paragraph.\n\n" + strings.Repeat("Useful detail. ", 200)
+	standalone, _, err := app.createOSArtifactWithMetadata("research", "Market note", standaloneBody, "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "threadId": "standalone-report", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{
+		{ID: "stage", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "stage-run", Mode: "artifacts", Status: "complete", ArtifactID: stage.ID}},
+		{ID: "child", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "research-child", Mode: "research", Status: "complete", ArtifactID: child.ID}},
+		{ID: "standalone", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "standalone-report", Mode: "research", Status: "complete", ArtifactID: standalone.ID}},
+	}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if projected.Messages[0].Thread.ResultArtifactID != "" || projected.Messages[1].Thread.ResultArtifactID != "" {
+		t.Fatalf("internal artifacts became rich results: stage=%+v child=%+v", projected.Messages[0].Thread, projected.Messages[1].Thread)
+	}
+	ref := projected.Messages[2].Thread
+	if ref.ResultArtifactID != standalone.ID || ref.ResultArtifactType != artifactTypeMarkdown || !strings.Contains(ref.ResultPreview, "channel-facing document paragraph") || len(ref.ResultPreview) > 1200 {
+		t.Fatalf("standalone terminal projection=%+v", ref)
+	}
+}
+
+func TestScoutChatViewerProjectionRequiresCurrentResultACL(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Private report goal", "goal", "Scout", map[string]string{
+		"mode": "goal", "status": "complete", "threadStatus": "complete", "visibility": "organization",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _, err := app.createOSArtifactWithMetadata("workflow", "Private report", "# Private report\n\nOwner-only finding.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": goal.ID, "goalSubtaskId": "write", "goalDeliverable": "true",
+		"outputContract": documentReportOutputContract, "status": "complete", "threadStatus": "complete", "visibility": scoutChatVisibilityPrivate, "ownerEmail": "aj@shareability.com", "requestedBy": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{State: goalStateVerified, Subtasks: []goalSubtask{{ID: "write", Role: processRoleWriter, Status: subtaskComplete, ArtifactID: report.ID}}}
+	documentProcess, ok := processByID(documentReportProcessID)
+	if !ok {
+		t.Fatal("document report process is unavailable")
+	}
+	if err := bindGoalProcessIdentity(&plan, documentProcess); err != nil {
+		t.Fatal(err)
+	}
+	rawPlan, _ := json.Marshal(plan)
+	if _, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "Scout", map[string]string{"goalPlan": string(rawPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "complete", ArtifactID: goal.ID}}}}
+	owner := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if owner.Messages[0].Thread.ResultArtifactID != report.ID || !owner.Messages[0].Thread.ResultCanEdit {
+		t.Fatalf("owner lost authorized report: %+v", owner.Messages[0].Thread)
+	}
+	other := app.projectScoutChatThreadForViewer("tim@shareability.com", thread)
+	if ref := other.Messages[0].Thread; ref.ResultArtifactID != "" || ref.ResultTitle != "" || ref.ResultPreview != "" {
+		t.Fatalf("private result leaked to non-owner: %+v", ref)
+	}
+}
+
+func TestScoutChatViewerProjectionRejectsResultRevisionRace(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	report, _, err := app.createOSArtifactWithMetadata("research", "Race report", "# Race report\n\nOld authorized body.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "threadId": "race-report", "status": "complete", "threadStatus": "complete", "visibility": "organization",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := app.scoutChatResultIndex()
+	previousProbe := artifactAuthorizationAfterCheckProbe
+	mutated := false
+	artifactAuthorizationAfterCheckProbe = func() {
+		if mutated {
+			return
+		}
+		mutated = true
+		if _, _, updateErr := app.updateOSArtifact(report.ID, "Race report", "# Race report\n\nChanged after authorization.", "Scout"); updateErr != nil {
+			t.Fatalf("race update: %v", updateErr)
+		}
+	}
+	t.Cleanup(func() { artifactAuthorizationAfterCheckProbe = previousProbe })
+	message := scoutChatMessageRecord{Thread: &scoutChatThreadRef{ID: "race-report", Mode: "research", Status: "complete", ArtifactID: report.ID}}
+	app.projectScoutChatResultRef(context.Background(), accountStore().findUser("aj@shareability.com"), &message, index)
+	if ref := message.Thread; ref.ResultArtifactID != "" || ref.ResultPreview != "" {
+		t.Fatalf("stale result survived revision race: %+v", ref)
+	}
+}
+
+func TestScoutChatViewerProjectionUsesOnlyExactBlockedDeckSalvage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Blocked deck goal", "goal", "Scout", map[string]string{"mode": "goal", "status": "needs_attention", "threadStatus": "needs_attention"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	salvage, _, err := app.createOSArtifactWithMetadata("workflow", "Exact salvage", "<!doctype html><html><body><section class=\"pg\">salvage</section></body></html>", "Scout", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "goalParentId": goal.ID, "status": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, _, err := app.createOSArtifactWithMetadata("workflow", "Newer unrelated attempt", "<!doctype html><html><body><section class=\"pg\">newer</section></body></html>", "Scout", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "goalParentId": goal.ID, "status": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{ProcessID: packagingStudioProcessID, State: goalStateBlocked, Report: goalReport{DeliverableArtifactID: salvage.ID}}
+	rawPlan, _ := json.Marshal(plan)
+	if _, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "Scout", map[string]string{"goalPlan": string(rawPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "needs_attention", ArtifactID: goal.ID}}}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != salvage.ID || got == newer.ID {
+		t.Fatalf("blocked deck result=%q, want exact salvage %q and never newer %q", got, salvage.ID, newer.ID)
+	}
+}
+
+func TestScoutChatAcceptedDeckBindsExactRevisionAndLabelsLaterEdits(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Approved deck goal", "goal", "AJ", map[string]string{
+		"mode": "goal", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deck, _, err := app.createOSArtifactWithMetadata("workflow", "Approved deck", "<!doctype html><html><body><section class=\"pg\">approved v1</section></body></html>", "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "packaging_studio_ship", "goalId": goal.ID, "artifactContract": packagingStudioDeckContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{ProcessID: packagingStudioProcessID, State: goalStateVerified}
+	bindGoalAcceptedResult(&plan, deck)
+	rawPlan, _ := json.Marshal(plan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "AJ", map[string]string{"goalPlan": string(rawPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
+		ID: "approved-goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "complete", ArtifactID: goal.ID},
+	}}}
+	exact := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	exactRef := exact.Messages[0].Thread
+	if exactRef.ResultArtifactID != deck.ID || exactRef.ResultApprovalState != scoutChatResultApprovalExact || !exactRef.ResultCanEdit {
+		t.Fatalf("exact approved binding projection=%+v", exactRef)
+	}
+
+	edited, _, err := app.updateOSArtifact(deck.ID, "Approved deck", "<!doctype html><html><body><section class=\"pg\">edited after approval</section></body></html>", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifactVersion(edited) == plan.Report.AcceptedResultArtifactVersion || artifactCapabilityDigest(edited) == plan.Report.AcceptedResultArtifactDigest {
+		t.Fatalf("edit did not move the exact approved tuple: version=%d digest=%s", artifactVersion(edited), artifactCapabilityDigest(edited))
+	}
+	postEdit := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	postEditRef := postEdit.Messages[0].Thread
+	if postEditRef.ResultArtifactID != deck.ID || postEditRef.ResultApprovalState != scoutChatResultApprovalEdited {
+		t.Fatalf("post-approval edit was represented as exact approval: %+v", postEditRef)
+	}
+}
+
+func TestScoutChatVerifiedGoalHasNoLatestSiblingFallback(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Legacy verified goal", "goal", "AJ", map[string]string{
+		"mode": "goal", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.createOSArtifactWithMetadata("workflow", "Unbound later sibling", "<!doctype html><html><body><section class=\"pg\">later</section></body></html>", "AJ", map[string]string{
+		"type": artifactTypeHTMLDeck, "source": "scout_thread", "goalParentId": goal.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{ProcessID: packagingStudioProcessID, State: goalStateVerified}
+	rawPlan, _ := json.Marshal(plan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "AJ", map[string]string{"goalPlan": string(rawPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "complete", ArtifactID: goal.ID}}}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if ref := projected.Messages[0].Thread; ref.ResultArtifactID != "" || ref.ResultApprovalState != "" {
+		t.Fatalf("unbound latest sibling hijacked verified goal result: %+v", ref)
+	}
+}
+
+func TestScoutChatBlockedReportProjectsOnlyExactWriterSalvage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Blocked report goal", "goal", "AJ", map[string]string{
+		"mode": "goal", "status": "error", "threadStatus": "error",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	research, _, err := app.createOSArtifactWithMetadata("research", "Large evidence dossier", "# Evidence\n\n"+strings.Repeat("source row ", 500), "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": goal.ID, "goalSubtaskId": "external_research", "goalDeliverable": "true", "outputContract": packagingStudioExternalEvidenceContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{
+		ProcessID: documentReportProcessID, State: goalStateBlocked, ResultStageID: "write", ResultOutputContract: documentReportOutputContract,
+		Report: goalReport{DeliverableArtifactID: research.ID},
+	}
+	rawPlan, _ := json.Marshal(plan)
+	goal, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "AJ", map[string]string{"goalPlan": string(rawPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "needs_attention", ArtifactID: goal.ID}}}}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != "" {
+		t.Fatalf("internal research child became blocked report salvage: %q", got)
+	}
+
+	draft, _, err := app.createOSArtifactWithMetadata("workflow", "Report draft", "# Report\n\nSaved draft.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": goal.ID, "goalSubtaskId": "write", "goalDeliverable": "true", "outputContract": documentReportOutputContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Report.DeliverableArtifactID = draft.ID
+	rawPlan, _ = json.Marshal(plan)
+	if _, _, err = app.updateOSArtifactWithMetadata(goal.ID, "", goal.Text, "AJ", map[string]string{"goalPlan": string(rawPlan)}); err != nil {
+		t.Fatal(err)
+	}
+	projected = app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if got := projected.Messages[0].Thread.ResultArtifactID; got != draft.ID {
+		t.Fatalf("exact writer salvage=%q, want %q", got, draft.ID)
+	}
+}
+
 func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MEETING_MEMORY_PATH", dir+"/memory.jsonl")
@@ -218,6 +542,7 @@ func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(
 		"researchCitationCount":      "4",
 		"researchSourceDomainCount":  "3",
 		"researchQualityGate":        "passed",
+		"researchEvidenceBinding":    "provider_fetched_urls",
 		"researchSourceWindowDigest": strings.Repeat("e", 64),
 	})
 	app.updateScoutChatThreadRefs(agentThreadID, "complete", artifact.ID)
@@ -328,6 +653,7 @@ func TestScoutTerminalProjectionOmitsUnverifiedResearchCounts(t *testing.T) {
 		t.Fatalf("unverified counts entered terminal copy: %q %v", got, ok)
 	}
 	artifact.Metadata["researchQualityGate"] = "passed"
+	artifact.Metadata["researchEvidenceBinding"] = "provider_fetched_urls"
 	artifact.Metadata["researchSourceWindowDigest"] = "not-a-managed-receipt"
 	if got, ok := scoutChatTerminalWorkCopy(artifact, "thread-unverified", "complete"); !ok || got != "Research delivered" {
 		t.Fatalf("malformed receipt entered terminal copy: %q %v", got, ok)
@@ -343,6 +669,7 @@ func TestScoutTerminalProjectionReconcilesLegacyCompletedRefAfterRestart(t *test
 		"researchCitationCount":      "7",
 		"researchSourceDomainCount":  "6",
 		"researchQualityGate":        "passed",
+		"researchEvidenceBinding":    "provider_fetched_urls",
 		"researchSourceWindowDigest": strings.Repeat("c", 64),
 	})
 
@@ -393,6 +720,7 @@ func TestScoutTerminalProjectionRegisteredAdminReconciliationIsExactAndIdempoten
 		"researchCitationCount":      "9",
 		"researchSourceDomainCount":  "8",
 		"researchQualityGate":        "passed",
+		"researchEvidenceBinding":    "provider_fetched_urls",
 		"researchSourceWindowDigest": strings.Repeat("d", 64),
 	})
 	legacy, _, err := kanbanApp.scoutChatThreadByID(thread.OwnerEmail, thread.ID)

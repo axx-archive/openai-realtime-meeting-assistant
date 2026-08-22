@@ -37,6 +37,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1585,19 +1586,25 @@ func redactPrivateRiffPublicationMessage(message scoutChatMessageRecord) scoutCh
 // The returned thread is a copy. It is deliberately safe for HTTP responses,
 // websocket events, Files/deposits views, and model-history construction, but
 // must never be used for a durable write.
-func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
-	return app.projectScoutChatThreadForViewerEpisode(viewerEmail, thread, "")
+func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord, contexts ...context.Context) scoutChatThreadRecord {
+	return app.projectScoutChatThreadForViewerEpisode(viewerEmail, thread, "", contexts...)
 }
 
-func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail string, thread scoutChatThreadRecord, episodeID string) scoutChatThreadRecord {
-	return app.projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail, thread, episodeID, true)
+func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisode(viewerEmail string, thread scoutChatThreadRecord, episodeID string, contexts ...context.Context) scoutChatThreadRecord {
+	return app.projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail, thread, episodeID, true, contexts...)
 }
 
-func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail string, thread scoutChatThreadRecord, episodeID string, includeArtifactResults bool) scoutChatThreadRecord {
+func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail string, thread scoutChatThreadRecord, episodeID string, includeArtifactResults bool, contexts ...context.Context) scoutChatThreadRecord {
 	projected := thread
+	projectionContext := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		projectionContext = contexts[0]
+	}
 	var resultIndex scoutChatResultProjectionIndex
+	var resultViewer *userAccount
 	if includeArtifactResults {
 		resultIndex = app.scoutChatResultIndex()
+		resultViewer = accountStore().findUser(normalizeAccountEmail(viewerEmail))
 	}
 	if thread.Riff != nil {
 		projected.ConversationKind = "channel_riff"
@@ -1683,7 +1690,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 	for messageIndex := range projected.Messages {
 		original := projected.Messages[messageIndex]
 		if includeArtifactResults {
-			projectScoutChatResultRef(&projected.Messages[messageIndex], resultIndex)
+			app.projectScoutChatResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
 		}
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
@@ -1752,16 +1759,39 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 }
 
 type scoutChatResultProjectionIndex struct {
-	byID               map[string]meetingMemoryEntry
-	deckByGoal         map[string]meetingMemoryEntry
-	acceptedDeckByGoal map[string]meetingMemoryEntry
+	byID                      map[string]meetingMemoryEntry
+	deckByGoal                map[string]meetingMemoryEntry
+	acceptedDeckByGoal        map[string]meetingMemoryEntry
+	acceptedDeckBindingByGoal map[string]scoutChatAcceptedDeckBinding
+	documentByGoal            map[string]meetingMemoryEntry
+	goalPlanByID              map[string]goalPlan
 }
 
+type scoutChatAcceptedDeckBinding struct {
+	State   string
+	Version int
+	Digest  string
+}
+
+const (
+	scoutChatResultApprovalExact  = "approved_exact"
+	scoutChatResultApprovalEdited = "edited_after_approval"
+	scoutChatResultApprovalLegacy = "legacy_approval_binding"
+)
+
+var scoutChatResultIndexProbe func()
+
 func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex {
+	if scoutChatResultIndexProbe != nil {
+		scoutChatResultIndexProbe()
+	}
 	index := scoutChatResultProjectionIndex{
-		byID:               map[string]meetingMemoryEntry{},
-		deckByGoal:         map[string]meetingMemoryEntry{},
-		acceptedDeckByGoal: map[string]meetingMemoryEntry{},
+		byID:                      map[string]meetingMemoryEntry{},
+		deckByGoal:                map[string]meetingMemoryEntry{},
+		acceptedDeckByGoal:        map[string]meetingMemoryEntry{},
+		acceptedDeckBindingByGoal: map[string]scoutChatAcceptedDeckBinding{},
+		documentByGoal:            map[string]meetingMemoryEntry{},
+		goalPlanByID:              map[string]goalPlan{},
 	}
 	if app == nil {
 		return index
@@ -1770,24 +1800,27 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 	// rather than scanning every artifact once for every work message.
 	artifacts := app.osArtifactsSnapshot(0)
 	deckCandidates := map[string][]meetingMemoryEntry{}
+	documentCandidates := map[string][]meetingMemoryEntry{}
 	for _, artifact := range artifacts {
 		index.byID[artifact.ID] = artifact
-		if artifactType(artifact) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(artifact) {
-			continue
+		if artifactType(artifact) == artifactTypeHTMLDeck && artifactIsHTMLDocument(artifact) {
+			goalID := ""
+			if strings.TrimSpace(artifact.Metadata["source"]) == "packaging_studio_ship" &&
+				strings.TrimSpace(artifact.Metadata["artifactContract"]) == packagingStudioDeckContract {
+				goalID = strings.TrimSpace(artifact.Metadata["goalId"])
+			} else if strings.TrimSpace(artifact.Metadata["source"]) == "scout_thread" {
+				goalID = strings.TrimSpace(artifact.Metadata["goalParentId"])
+			}
+			if goalID != "" {
+				deckCandidates[goalID] = append(deckCandidates[goalID], artifact)
+			}
 		}
-		goalID := ""
-		if strings.TrimSpace(artifact.Metadata["source"]) == "packaging_studio_ship" &&
-			strings.TrimSpace(artifact.Metadata["artifactContract"]) == packagingStudioDeckContract {
-			goalID = strings.TrimSpace(artifact.Metadata["goalId"])
-		} else if strings.TrimSpace(artifact.Metadata["source"]) == "scout_thread" {
-			goalID = strings.TrimSpace(artifact.Metadata["goalParentId"])
-		}
-		if goalID != "" {
-			// Artifacts are oldest-first. A later native edit/regeneration inside
-			// the exact goal supersedes its compiled ship draft without rewriting
-			// history or guessing from titles.
-			index.deckByGoal[goalID] = artifact
-			deckCandidates[goalID] = append(deckCandidates[goalID], artifact)
+		if artifactType(artifact) == artifactTypeMarkdown &&
+			strings.TrimSpace(artifact.Metadata["source"]) == "scout_thread" &&
+			strings.EqualFold(strings.TrimSpace(artifact.Metadata["goalDeliverable"]), "true") {
+			if goalID := strings.TrimSpace(artifact.Metadata["goalParentId"]); goalID != "" {
+				documentCandidates[goalID] = append(documentCandidates[goalID], artifact)
+			}
 		}
 	}
 	for _, goal := range artifacts {
@@ -1795,34 +1828,104 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 			continue
 		}
 		acceptedID := strings.TrimSpace(goal.Metadata["acceptedResultArtifactId"])
+		acceptedVersion, _ := strconv.Atoi(strings.TrimSpace(goal.Metadata["acceptedResultArtifactVersion"]))
+		acceptedDigest := strings.TrimSpace(goal.Metadata["acceptedResultArtifactDigest"])
 		var plan goalPlan
 		if raw := strings.TrimSpace(goal.Metadata["goalPlan"]); raw != "" && json.Unmarshal([]byte(raw), &plan) == nil {
-			if acceptedID == "" {
+			index.goalPlanByID[goal.ID] = plan
+			if strings.TrimSpace(plan.Report.AcceptedResultArtifactID) != "" {
 				acceptedID = strings.TrimSpace(plan.Report.AcceptedResultArtifactID)
+				acceptedVersion = plan.Report.AcceptedResultArtifactVersion
+				acceptedDigest = strings.TrimSpace(plan.Report.AcceptedResultArtifactDigest)
 			}
 		}
 		if accepted, ok := index.byID[acceptedID]; ok && scoutChatDeckBelongsToGoal(accepted, goal.ID) {
 			index.acceptedDeckByGoal[goal.ID] = accepted
-			continue
-		}
-		// Compatibility for goals approved before acceptedResultArtifactId was
-		// introduced: freeze the latest eligible deck that existed when the ship
-		// checkpoint resolved. A later retry cannot move that historical cutoff.
-		checkpoint := plan.Checkpoint
-		if checkpoint == nil || checkpoint.StageID != "ship_approval" || checkpoint.LastAction != processCheckpointActionProceed || strings.TrimSpace(checkpoint.ResolvedAt) == "" {
-			continue
-		}
-		resolvedAt, err := time.Parse(time.RFC3339Nano, checkpoint.ResolvedAt)
-		if err != nil {
-			continue
-		}
-		for _, candidate := range deckCandidates[goal.ID] {
-			if !candidate.CreatedAt.After(resolvedAt) {
-				index.acceptedDeckByGoal[goal.ID] = candidate
+			binding := scoutChatAcceptedDeckBinding{State: scoutChatResultApprovalLegacy}
+			if acceptedVersion > 0 && acceptedDigest != "" {
+				binding.Version = acceptedVersion
+				binding.Digest = acceptedDigest
+				binding.State = scoutChatResultApprovalEdited
+				if acceptedVersion == artifactVersion(accepted) && strings.EqualFold(acceptedDigest, artifactCapabilityDigest(accepted)) {
+					binding.State = scoutChatResultApprovalExact
+				}
 			}
+			index.acceptedDeckBindingByGoal[goal.ID] = binding
+		} else {
+			// Compatibility for goals approved before acceptedResultArtifactId was
+			// introduced: freeze the latest eligible deck that existed when the ship
+			// checkpoint resolved. A later retry cannot move that historical cutoff.
+			checkpoint := plan.Checkpoint
+			if checkpoint != nil && checkpoint.StageID == "ship_approval" && checkpoint.LastAction == processCheckpointActionProceed && strings.TrimSpace(checkpoint.ResolvedAt) != "" {
+				if resolvedAt, err := time.Parse(time.RFC3339Nano, checkpoint.ResolvedAt); err == nil {
+					for _, candidate := range deckCandidates[goal.ID] {
+						prior, found := index.acceptedDeckByGoal[goal.ID]
+						if !candidate.CreatedAt.After(resolvedAt) && (!found || candidate.CreatedAt.After(prior.CreatedAt)) {
+							index.acceptedDeckByGoal[goal.ID] = candidate
+							index.acceptedDeckBindingByGoal[goal.ID] = scoutChatAcceptedDeckBinding{State: scoutChatResultApprovalLegacy}
+						}
+					}
+				}
+			}
+		}
+
+		// A candidate deck remains private to the process while render/jury/gate
+		// are running. The channel receives Edit/Present only after ship_compile
+		// has durably named the exact reviewed candidate (or after a legacy goal
+		// already reached verified terminal state).
+		if plan.State == goalStateBlocked {
+			salvageID := strings.TrimSpace(plan.Report.DeliverableArtifactID)
+			if salvage, ok := index.byID[salvageID]; ok && scoutChatDeckBelongsToGoal(salvage, goal.ID) {
+				index.deckByGoal[goal.ID] = salvage
+			}
+		} else if ready, ok := scoutChatReadyDeckForGoal(index.byID, goal.ID, plan); ok {
+			index.deckByGoal[goal.ID] = ready
+		}
+
+		// Successful document/report goals expose only the server-marked
+		// deliverable child. A blocked goal may expose only its exact salvaged
+		// draft id. Intermediate research/dossier children never become the
+		// editable result merely because they are newer or longer.
+		documentID := ""
+		if plan.State == goalStateBlocked {
+			documentID = strings.TrimSpace(plan.Report.DeliverableArtifactID)
+		} else if plan.State == goalStateVerified {
+			if deliverable := plan.subtaskByID(goalDeliverableSubtaskID(&plan)); deliverable != nil {
+				documentID = strings.TrimSpace(deliverable.ArtifactID)
+			}
+			if documentID == "" {
+				for _, candidate := range documentCandidates[goal.ID] {
+					if scoutChatDocumentBelongsToGoal(candidate, goal.ID, plan) {
+						documentID = candidate.ID
+					}
+				}
+			}
+		}
+		if document, ok := index.byID[documentID]; ok && scoutChatDocumentBelongsToGoal(document, goal.ID, plan) {
+			index.documentByGoal[goal.ID] = document
 		}
 	}
 	return index
+}
+
+func scoutChatReadyDeckForGoal(byID map[string]meetingMemoryEntry, goalID string, plan goalPlan) (meetingMemoryEntry, bool) {
+	if plan.ProcessID != packagingStudioProcessID {
+		return meetingMemoryEntry{}, false
+	}
+	ship := plan.subtaskByID("ship_compile")
+	if ship == nil || ship.Status != subtaskComplete || strings.TrimSpace(ship.ArtifactID) == "" {
+		return meetingMemoryEntry{}, false
+	}
+	record, ok := byID[strings.TrimSpace(ship.ArtifactID)]
+	if !ok || strings.TrimSpace(record.Metadata["processStage"]) != "ship_compile" || strings.TrimSpace(record.Metadata["goalParentId"]) != goalID {
+		return meetingMemoryEntry{}, false
+	}
+	deckID := strings.TrimSpace(record.Metadata["deckArtifactId"])
+	deck, ok := byID[deckID]
+	if !ok || !scoutChatDeckBelongsToGoal(deck, goalID) {
+		return meetingMemoryEntry{}, false
+	}
+	return deck, true
 }
 
 func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
@@ -1837,13 +1940,57 @@ func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
 	return shipForGoal || childForGoal
 }
 
+func scoutChatDocumentBelongsToGoal(document meetingMemoryEntry, goalID string, plan goalPlan) bool {
+	expectedStageID := goalDeliverableSubtaskID(&plan)
+	if expectedStageID == "" || strings.TrimSpace(document.Metadata["goalSubtaskId"]) != expectedStageID {
+		return false
+	}
+	if processID := strings.TrimSpace(plan.ProcessID); processID != "" {
+		expectedContract := strings.TrimSpace(plan.ResultOutputContract)
+		if expectedContract == "" {
+			// Backward-compatible migration only. New plans persist this binding
+			// at instantiation so a later registry change cannot move the result.
+			if definition, ok := processByID(processID); ok {
+				if stage, found := definition.stageByID(expectedStageID); found {
+					expectedContract = strings.TrimSpace(stage.OutputContract)
+				}
+			}
+		}
+		if expectedContract == "" || strings.TrimSpace(document.Metadata["outputContract"]) != expectedContract {
+			return false
+		}
+	}
+	return artifactType(document) == artifactTypeMarkdown &&
+		strings.TrimSpace(document.Metadata["source"]) == "scout_thread" &&
+		strings.TrimSpace(document.Metadata["goalParentId"]) == strings.TrimSpace(goalID) &&
+		strings.EqualFold(strings.TrimSpace(document.Metadata["goalDeliverable"]), "true")
+}
+
+// scoutChatIndexedArtifactCurrent revalidates the parent/run revision selected
+// by a reusable result index. Public terminal fanout shares that index across
+// viewers, so a goal edit between recipients must not let a later payload use
+// the earlier goal plan. The current header is body-free; version + content
+// digest cover the goal plan and authored body used for result selection.
+func (app *kanbanBoardApp) scoutChatIndexedArtifactCurrent(indexed meetingMemoryEntry) bool {
+	if app == nil || app.memory == nil || strings.TrimSpace(indexed.ID) == "" {
+		return false
+	}
+	current, found := app.memory.artifactAuthorizationHeaderByID(indexed.ID)
+	if !found {
+		return false
+	}
+	expected := artifactAuthorizationHeaderFromEntry(indexed)
+	return current.ContentRevision == expected.ContentRevision &&
+		strings.EqualFold(strings.TrimSpace(current.ContentDigest), strings.TrimSpace(expected.ContentDigest))
+}
+
 // projectScoutChatResultRef upgrades old and new work messages at the read
 // boundary with the concrete presentation they produced. The binding is
 // server-owned and conjunctive: a direct ref must itself be a deck, while a
 // goal ref may resolve only a declared HTML deck filed by Packaging Studio or
 // a later Scout artifact whose goalParentId is that exact goal. No title
 // sniffing and no cross-goal artifact search is allowed.
-func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
+func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer *userAccount, message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
 	if message == nil || message.Thread == nil {
 		return
 	}
@@ -1853,33 +2000,157 @@ func projectScoutChatResultRef(message *scoutChatMessageRecord, index scoutChatR
 	ref.ResultArtifactID = ""
 	ref.ResultArtifactType = ""
 	ref.ResultTitle = ""
+	ref.ResultPreview = ""
+	ref.ResultApprovalState = ""
+	ref.ResultCanEdit = false
 	artifact, found := index.byID[strings.TrimSpace(ref.ArtifactID)]
-	if !found {
+	if !found || !app.scoutChatIndexedArtifactCurrent(artifact) {
 		return
 	}
 	result := artifact
-	if strings.TrimSpace(artifact.Metadata["mode"]) == "goal" {
+	goalResult := strings.TrimSpace(artifact.Metadata["mode"]) == "goal"
+	acceptedBinding := scoutChatAcceptedDeckBinding{}
+	selectedAcceptedDeck := false
+	if goalResult {
 		deck, ok := index.acceptedDeckByGoal[artifact.ID]
+		if ok {
+			selectedAcceptedDeck = true
+			acceptedBinding = index.acceptedDeckBindingByGoal[artifact.ID]
+		}
 		if !ok {
 			deck, ok = index.deckByGoal[artifact.ID]
 		}
-		if !ok {
+		if ok {
+			if !scoutChatDeckBelongsToGoal(deck, artifact.ID) {
+				return
+			}
+			result = deck
+		} else if document, found := index.documentByGoal[artifact.ID]; found {
+			if !scoutChatDocumentBelongsToGoal(document, artifact.ID, index.goalPlanByID[artifact.ID]) {
+				return
+			}
+			result = document
+		} else {
 			return
 		}
-		if !scoutChatDeckBelongsToGoal(deck, artifact.ID) {
-			return
-		}
-		result = deck
 	}
-	if artifactType(result) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(result) {
+	currentResult, authorized := app.authorizedScoutChatResultArtifact(ctx, viewer, result.ID)
+	if !authorized {
+		return
+	}
+	result = currentResult
+	ref.ResultCanEdit = artifactAuthorized(ctx, viewer, ACLWrite, result)
+	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
+		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, artifactCapabilityDigest(result))) {
+		acceptedBinding.State = scoutChatResultApprovalEdited
+	}
+	if goalResult {
+		if artifactType(result) == artifactTypeHTMLDeck {
+			if !scoutChatDeckBelongsToGoal(result, artifact.ID) {
+				return
+			}
+		} else if !scoutChatDocumentBelongsToGoal(result, artifact.ID, index.goalPlanByID[artifact.ID]) {
+			return
+		}
+	}
+	if !goalResult && !scoutChatStandaloneTerminalResult(result, ref) {
+		return
+	}
+	resultType := artifactType(result)
+	if resultType == artifactTypeHTMLDeck && artifactIsHTMLDocument(result) {
+		ref.ResultArtifactID = result.ID
+		ref.ResultArtifactType = artifactTypeHTMLDeck
+		ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Presentation")
+		if selectedAcceptedDeck {
+			ref.ResultApprovalState = acceptedBinding.State
+		}
+		return
+	}
+	if resultType != artifactTypeMarkdown || (strings.TrimSpace(artifact.Metadata["mode"]) != "goal" && !oneOf(strings.ToLower(strings.TrimSpace(result.Metadata["threadStatus"])), codexJobStatusComplete, artifactStatusApproved, artifactStatusPublished)) {
 		return
 	}
 	ref.ResultArtifactID = result.ID
-	ref.ResultArtifactType = artifactTypeHTMLDeck
-	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Presentation")
+	ref.ResultArtifactType = artifactTypeMarkdown
+	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Document")
+	ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
 }
 
-func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) scoutChatMessageRecord {
+// authorizedScoutChatResultArtifact performs the authorization check against
+// a body-free current header, then returns only the exact body revision whose
+// header still matches under the store lock. This is the final serialization
+// seam, so an earlier channel-wide index can never authorize a stale body.
+func (app *kanbanBoardApp) authorizedScoutChatResultArtifact(ctx context.Context, viewer *userAccount, id string) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || viewer == nil || strings.TrimSpace(id) == "" {
+		return meetingMemoryEntry{}, false
+	}
+	header, found := app.memory.artifactAuthorizationHeaderByID(id)
+	if !found || !artifactHeaderAuthorized(ctx, viewer, ACLReadContent, header) {
+		return meetingMemoryEntry{}, false
+	}
+	if artifactAuthorizationAfterCheckProbe != nil {
+		artifactAuthorizationAfterCheckProbe()
+	}
+	return app.memory.artifactSnapshotIfHeaderMatches(id, header)
+}
+
+// scoutChatStandaloneTerminalResult distinguishes a user-facing, direct
+// deliverable from process receipts and goal children. Internal stages may be
+// complete Markdown too, but they belong only in the parent activity ledger.
+func scoutChatStandaloneTerminalResult(result meetingMemoryEntry, ref *scoutChatThreadRef) bool {
+	if ref == nil || strings.TrimSpace(result.Metadata["source"]) != "scout_thread" || strings.TrimSpace(result.Metadata["goalParentId"]) != "" {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(firstNonEmptyString(result.Metadata["threadStatus"], result.Metadata["status"])))
+	return strings.TrimSpace(result.ID) == strings.TrimSpace(ref.ArtifactID) &&
+		strings.TrimSpace(result.Metadata["threadId"]) == strings.TrimSpace(ref.ID) &&
+		oneOf(status, codexJobStatusComplete, artifactStatusApproved, artifactStatusPublished)
+}
+
+// scoutChatThreadRefMayExposeResult is the event hot-path gate. Active work
+// can never own a channel-facing result, so queued/running progress frames do
+// not scan the artifact store. Terminal/review states still build the exact
+// result index so completion appears immediately and a later ACL/revision
+// change authoritatively clears stale Result* fields.
+func scoutChatThreadRefMayExposeResult(ref *scoutChatThreadRef) bool {
+	if ref == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(ref.Status)) {
+	case codexJobStatusComplete, "completed", artifactStatusPublished, artifactStatusApproved, "verified",
+		codexJobStatusApprovalRequired, "error", codexJobStatusFailed, "needs_attention":
+		return true
+	default:
+		return false
+	}
+}
+
+func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
+	if message == nil || message.Thread == nil {
+		return
+	}
+	ref := *message.Thread
+	ref.ResultArtifactID = ""
+	ref.ResultArtifactType = ""
+	ref.ResultTitle = ""
+	ref.ResultPreview = ""
+	ref.ResultApprovalState = ""
+	ref.ResultCanEdit = false
+	message.Thread = &ref
+}
+
+func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, contexts ...context.Context) scoutChatMessageRecord {
+	var resultIndex *scoutChatResultProjectionIndex
+	if scoutChatThreadRefMayExposeResult(message.Thread) {
+		index := app.scoutChatResultIndex()
+		resultIndex = &index
+	}
+	return app.projectScoutChatMessageForViewerWithResultIndex(viewerEmail, thread, message, resultIndex, contexts...)
+}
+
+// projectScoutChatMessageForViewerWithResultIndex lets a terminal public
+// event build the O(artifacts) index once, then apply per-viewer ACL checks
+// without repeating that scan for every roster member.
+func (app *kanbanBoardApp) projectScoutChatMessageForViewerWithResultIndex(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, resultIndex *scoutChatResultProjectionIndex, contexts ...context.Context) scoutChatMessageRecord {
 	// Publication revocation is batch-wide, but ordinary message events retain
 	// the historical O(1-message) projection. Only a v2 publication scans its
 	// sibling provenance receipts, and it computes one authorized context map.
@@ -1895,26 +2166,36 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, 
 		publication.ContextSources = nil
 		message.Publication = &publication
 	}
-	// Live append broadcasts can run while the memory store is committing the
-	// artifact that caused them. Do not re-enter that store to backfill a result
-	// link here; the durable GET projection performs that lookup after commit.
-	// Newly persisted explicit Result* fields still pass through unchanged.
+	// Attachment/publication projection remains O(1-message). Result hydration
+	// is applied below from the optional prebuilt terminal index.
 	projected := app.projectScoutChatThreadForViewerEpisodeWithResults(viewerEmail, scoutChatThreadRecord{
 		ID: thread.ID, OwnerEmail: thread.OwnerEmail, Visibility: thread.Visibility, ConversationKind: thread.ConversationKind,
 		Riff: thread.Riff, Messages: []scoutChatMessageRecord{message},
-	}, message.RiffEpisodeID, false)
+	}, message.RiffEpisodeID, false, contexts...)
 	if len(projected.Messages) == 0 {
 		return scoutChatMessageRecord{ID: message.ID, Kind: message.Kind, Role: message.Role, CreatedAt: message.CreatedAt,
 			RiffEpisodeID: message.RiffEpisodeID, RiffCheckpointID: message.RiffCheckpointID}
 	}
-	return projected.Messages[0]
+	result := projected.Messages[0]
+	// A running retry must remove a previously enriched client result without
+	// paying for a store scan. Terminal events start from the same resultless
+	// baseline, then repopulate only an exact authorized current snapshot.
+	clearScoutChatMessageResultRef(&result)
+	if resultIndex != nil && result.Thread != nil {
+		projectionContext := context.Background()
+		if len(contexts) > 0 && contexts[0] != nil {
+			projectionContext = contexts[0]
+		}
+		app.projectScoutChatResultRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
+	}
+	return result
 }
 
 // projectScoutChatResponseForViewer applies the same attachment projection to
 // every chat HTTP response shape. Keeping this at the handler boundary avoids
 // relying on each mutator to remember that a source can be revoked between a
 // successful commit and serialization back to the requester.
-func (app *kanbanBoardApp) projectScoutChatResponseForViewer(viewerEmail string, threadID string, response map[string]any) map[string]any {
+func (app *kanbanBoardApp) projectScoutChatResponseForViewer(viewerEmail string, threadID string, response map[string]any, contexts ...context.Context) map[string]any {
 	if response == nil {
 		return nil
 	}
@@ -1930,10 +2211,10 @@ func (app *kanbanBoardApp) projectScoutChatResponseForViewer(viewerEmail string,
 	if !hasThread {
 		return projected
 	}
-	projected["thread"] = app.projectScoutChatThreadForViewer(viewerEmail, thread)
+	projected["thread"] = app.projectScoutChatThreadForViewer(viewerEmail, thread, contexts...)
 	for _, key := range []string{"message", "answer"} {
 		if message, ok := response[key].(scoutChatMessageRecord); ok {
-			projected[key] = app.projectScoutChatMessageForViewer(viewerEmail, thread, message)
+			projected[key] = app.projectScoutChatMessageForViewer(viewerEmail, thread, message, contexts...)
 		}
 	}
 	return projected

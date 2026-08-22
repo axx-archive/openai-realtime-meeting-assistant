@@ -910,7 +910,11 @@ func TestPrivateAgentWorkCarriesMeetingRangeIntoCurrentSourceProviderContext(t *
 		t.Fatal(err)
 	}
 	user := accountStore().findUser("aj@shareability.com")
-	response, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Analyze today's meetings and prepare a report", nil, "")
+	operation := conversationTurnOperation{
+		ID:         "conversation-meeting-report-0001",
+		BodyDigest: sha256Hex([]byte("Analyze today's meetings and prepare a report")),
+	}
+	response, err := app.appendScoutChatThreadMessage(withConversationTurnOperation(context.Background(), operation), user, thread.ID, "Analyze today's meetings and prepare a report", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -932,7 +936,11 @@ func TestPrivateAgentWorkCarriesMeetingRangeIntoCurrentSourceProviderContext(t *
 			found = strings.Contains(entry.Text, "Ship the customer launch") && strings.Contains(entry.Text, "verify the rollback receipt")
 		}
 	}
-	if !found || routerCalls != 1 {
+	// A substantial report request is deterministically carried by the native
+	// document process. The model router must not flatten it into a generic
+	// research workstream, while the exact meeting-range manifest still reaches
+	// the process provider context.
+	if !found || routerCalls != 0 {
 		t.Fatalf("provider context omitted meeting range or routerCalls=%d: %+v", routerCalls, providerContext.Memory)
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -47,20 +49,55 @@ func launchStudioShipChildAndCompileForScopeTest(t *testing.T, app *kanbanBoardA
 		t.Fatal("packaging process did not resolve")
 	}
 	stage := packagingStudioStage(t, definition, "ship_deck")
-	plan.Subtasks = []goalSubtask{{
-		ID: stage.ID, Title: stage.Title, Detail: stage.PromptBody, Mode: processStageThreadMode(stage),
-		Authority: normalizeCodexJobAuthority(plan.Authority), Runner: agentRunnerOpenAIText, Role: stage.Role,
-		Status: subtaskRunning, Attempts: 1,
-	}}
-	if err := engine.launchSubtask(&plan, &plan.Subtasks[0], work.Artifact.ID); err != nil {
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", `{"direct_ask":"Build the requested deck","audience":"decision makers","decision":"review the requested deck","desired_response":"make a grounded decision","slide_count":2,"context_used":[],"settled_decisions":[],"taste_signals":[],"brand_assets":[],"research_mode":"none","research_questions":[],"known_facts":[],"uncertain_claims":[],"reversible_inferences":[]}`, scoutParticipantName, map[string]string{
+		"goalParentId": work.Artifact.ID, "goalSubtaskId": "context_snapshot", "processId": plan.ProcessID,
+		"processStage": "context_snapshot", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("seed context snapshot: %v", err)
+	}
+	plan.Subtasks = []goalSubtask{
+		{ID: "context_snapshot", Status: subtaskComplete, ArtifactID: contextArtifact.ID},
+		{ID: "evidence", Status: subtaskPending},
+		{
+			ID: stage.ID, Title: stage.Title, Detail: stage.PromptBody, Mode: processStageThreadMode(stage),
+			Authority: normalizeCodexJobAuthority(plan.Authority), Runner: agentRunnerOpenAIText, Role: stage.Role,
+			Status: subtaskRunning, Attempts: 1,
+		},
+	}
+	evidenceBody, evidenceMetadata, err := compileProcessEvidenceDossier(app, &plan, work.Artifact.ID, ProcessStage{ID: "evidence"})
+	if err != nil {
+		t.Fatalf("compile empty evidence dossier: %v", err)
+	}
+	for key, value := range map[string]string{
+		"goalParentId": work.Artifact.ID, "goalSubtaskId": "evidence", "processId": plan.ProcessID,
+		"processStage": "evidence", "status": "complete", "threadStatus": "complete",
+	} {
+		evidenceMetadata[key] = value
+	}
+	evidenceArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Evidence admission dossier", evidenceBody, scoutParticipantName, evidenceMetadata)
+	if err != nil {
+		t.Fatalf("seed evidence dossier: %v", err)
+	}
+	if err := validateProcessEvidenceDossier(&plan, evidenceArtifact); err != nil {
+		matches := processEvidenceDossierReceiptPattern.FindAllStringSubmatch(evidenceArtifact.Text, -1)
+		index := processEvidenceDossierReceiptPattern.FindStringIndex(evidenceArtifact.Text)
+		actualDigest := ""
+		if len(index) == 2 {
+			actualDigest = sha256Hex([]byte(strings.TrimSpace(evidenceArtifact.Text[:index[0]])))
+		}
+		t.Fatalf("seeded evidence dossier is invalid before launch: %v receipt=%q metadata=%q actual=%q expected_process=%q", err, matches, evidenceArtifact.Metadata["evidenceAdmissionDigest"], actualDigest, plan.ProcessID)
+	}
+	plan.Subtasks[1].Status, plan.Subtasks[1].ArtifactID = subtaskComplete, evidenceArtifact.ID
+	if err := engine.launchSubtask(&plan, &plan.Subtasks[2], work.Artifact.ID); err != nil {
 		t.Fatalf("launch packaging child: %v", err)
 	}
-	child, ok := app.osArtifactByID(plan.Subtasks[0].ArtifactID)
+	child, ok := app.osArtifactByID(plan.Subtasks[2].ArtifactID)
 	if !ok {
 		t.Fatal("packaging child was not persisted")
 	}
 	deckHTML := studioTestDeckHTML()
-	child, _, err := app.updateOSArtifactWithMetadata(child.ID, "", deckHTML, scoutParticipantName, map[string]string{
+	child, _, err = app.updateOSArtifactWithMetadata(child.ID, "", deckHTML, scoutParticipantName, map[string]string{
 		"status": codexJobStatusComplete, "threadStatus": codexJobStatusComplete,
 	})
 	if err != nil {
@@ -238,6 +275,7 @@ func TestPackagingStudioDefinitionValidates(t *testing.T) {
 	// It instantiates into a plan the runtime accepts — the free-form cap (6)
 	// never applies; only the authored budget admits the full pipeline.
 	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan(packaging_studio): %v", err)
 	}
@@ -375,13 +413,13 @@ func TestLegacyPackagingStudioV2StageWiring(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioV3IsInvisibleConditionalAndFailClosed(t *testing.T) {
+func TestPackagingStudioV4IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	def := packagingStudioDefinition()
-	if def.Version != 3 {
-		t.Fatalf("version=%d, want 3", def.Version)
+	if def.Version != 4 || def.ImplementationRevision != "packaging_studio.runtime.v4" || def.Budgets.MaxSubtasks != 18 {
+		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v4 runtime v4 and 18 stages", def.Version, def.ImplementationRevision, def.Budgets)
 	}
 	if def.Stages[0].ID != "context_snapshot" || def.Stages[len(def.Stages)-1].ID != "ship_compile" {
-		t.Fatalf("unexpected v3 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
+		t.Fatalf("unexpected v4 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
 	}
 	for _, stage := range def.Stages {
 		if stage.Role == processRoleHumanCheckpoint {
@@ -395,11 +433,28 @@ func TestPackagingStudioV3IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	if research.RunIf == nil || research.RunIf.StageID != "context_snapshot" || research.RunIf.Field != "research_mode" || research.RunIf.Equals != "external" {
 		t.Fatalf("external research is not conditional on the brief: %+v", research.RunIf)
 	}
+	sourceSnapshot := packagingStudioStage(t, def, "source_snapshot")
+	if sourceSnapshot.Role != processRoleCompile || sourceSnapshot.Compile == nil || strings.Join(sourceSnapshot.InputFrom, "|") != "context_snapshot|external_research" ||
+		sourceSnapshot.RunIf == nil || sourceSnapshot.RunIf.StageID != "context_snapshot" || sourceSnapshot.RunIf.Equals != "external" {
+		t.Fatalf("source snapshot is not exact and conditional: %+v", sourceSnapshot)
+	}
+	entailment := packagingStudioStage(t, def, "evidence_entailment")
+	if entailment.Role != processRoleWriter || entailment.Mode != "artifacts" || entailment.OutputContract != packagingStudioEntailmentContract ||
+		strings.Join(entailment.InputFrom, "|") != "context_snapshot|external_research|source_snapshot" || entailment.RunIf == nil || entailment.RunIf.StageID != "context_snapshot" || entailment.RunIf.Equals != "external" ||
+		!strings.Contains(entailment.PromptBody, "Do not start a second search") || strings.Contains(entailment.PromptBody, "fresh provider retrieval") {
+		t.Fatalf("entailment stage is not exact and conditional: %+v", entailment)
+	}
+	evidence := packagingStudioStage(t, def, "evidence")
+	if evidence.Role != processRoleCompile || evidence.Compile == nil || strings.Join(evidence.InputFrom, "|") != "context_snapshot|evidence_entailment" ||
+		!strings.Contains(evidence.PromptBody, "entailment_checked") || !strings.Contains(evidence.PromptBody, "exactly one status") {
+		t.Fatalf("evidence stage can bypass entailment: %+v", evidence)
+	}
 	index := map[string]int{}
 	for i, stage := range def.Stages {
 		index[stage.ID] = i
 	}
 	for before, after := range map[string]string{
+		"external_research": "source_snapshot", "source_snapshot": "evidence_entailment", "evidence_entailment": "evidence",
 		"story_architects": "write", "write": "identity", "identity": "imagery_direction",
 		"ship_deck": "draft_compile", "draft_compile": "slide_jury", "slide_jury": "quality_gate", "quality_gate": "ship_compile",
 	} {
@@ -486,6 +541,7 @@ func TestPackagingStudioConditionalResearchSkipsCleanly(t *testing.T) {
 	}
 	def := packagingStudioDefinition()
 	plan := &goalPlan{PlanVersion: goalPlanVersion, GoalID: parent.ID, Objective: "Build the deck", ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -542,82 +598,31 @@ func TestPackagingStudioV3CompileFilesOnlyTheDeck(t *testing.T) {
 }
 
 func TestPackagingStudioQualityGateRepairsDeckAndRerunsRenderedReview(t *testing.T) {
-	setupAuthTestEnv(t)
-	app := newIsolatedKanbanBoardApp(t)
-	app.apiKey = "quality-repair-test"
-	t.Setenv("OPENAI_API_KEY", "quality-repair-test")
-	previousStart := startGoalThreadAsync
-	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
-	t.Cleanup(func() { startGoalThreadAsync = previousStart })
-	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
-		return `{"dimensions":[{"name":"Text fit","score":4,"gap":"shorten slide 2 and restore safe margins"}],"reasons":"the rendered deck needs repair"}`, nil
-	})
-	run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the actual 2-slide deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID})
-	if err != nil {
-		t.Fatal(err)
+	const exactFix = "Shorten slide 2 and restore the 96px safe margins."
+	fixture := newPackagingQualityGateFixture(t, "needs_changes", []slideJuryRepair{{Page: 2, Fixes: []string{exactFix}}})
+	var calls atomic.Int32
+	fixture.runQualityGate(t, `{"dimensions":[{"name":"Text fit","score":10,"gap":""}]}`, &calls)
+	quality := fixture.plan.subtaskByID("quality_gate")
+	if calls.Load() != 0 || quality.Status != subtaskPending || quality.Revisions != 1 {
+		t.Fatalf("deterministic jury repair did not re-arm without a scorer: calls=%d gate=%+v", calls.Load(), quality)
 	}
-	plan := mustGoalPlan(t, app, run.Artifact.ID)
-	engine := newGoalEngine(app)
-	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
-		t.Fatal(err)
-	}
-	def := packagingStudioDefinition()
-	if err := instantiateProcessPlan(def, &plan); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury"} {
-		body := "completed " + id
-		if id == "ship_deck" {
-			body = studioTestDeckHTML()
-		}
-		artifact, _, createErr := app.createOSArtifactWithMetadata("workflow", id, body, scoutParticipantName, map[string]string{})
-		if createErr != nil {
-			t.Fatal(createErr)
-		}
-		stage := plan.subtaskByID(id)
-		stage.Status, stage.ArtifactID = subtaskComplete, artifact.ID
-	}
-	quality := plan.subtaskByID("quality_gate")
-	quality.Status = subtaskRunning
-	stage := packagingStudioStage(t, def, "quality_gate")
-	engine.runProcessGateStage(context.Background(), &plan, run.Artifact.ID, quality, stage)
-
-	if quality.Status != subtaskPending || quality.Revisions != 1 {
-		t.Fatalf("quality gate did not re-arm for repair: %+v", quality)
-	}
-	if ship := plan.subtaskByID("ship_deck"); ship.Status != subtaskReady || ship.Review == nil || !strings.Contains(ship.Review.Reasons, "safe margins") {
-		t.Fatalf("repair notes did not reach ship_deck: %+v", ship)
+	if ship := fixture.plan.subtaskByID("ship_deck"); ship.Status != subtaskReady || ship.Review == nil || !strings.Contains(ship.Review.Reasons, exactFix) {
+		t.Fatalf("exact repair notes did not reach ship_deck: %+v", ship)
 	}
 	for _, id := range []string{"draft_compile", "slide_jury"} {
-		if got := plan.subtaskByID(id); got.Status != subtaskPending {
+		if got := fixture.plan.subtaskByID(id); got.Status != subtaskPending {
 			t.Fatalf("%s status=%q, want pending so the repaired deck is re-rendered and re-reviewed", id, got.Status)
 		}
 	}
 
-	holdRun, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{Objective: "Build the actual 2-slide deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	holdPlan := mustGoalPlan(t, app, holdRun.Artifact.ID)
-	if err := engine.prepareGoalRoute(&holdPlan, holdRun.Artifact.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := instantiateProcessPlan(def, &holdPlan); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"ship_deck", "slide_jury"} {
-		artifact, _, createErr := app.createOSArtifactWithMetadata("workflow", id+" hold", "blocking rendered review", scoutParticipantName, map[string]string{})
-		if createErr != nil {
-			t.Fatal(createErr)
-		}
-		subtask := holdPlan.subtaskByID(id)
-		subtask.Status, subtask.ArtifactID = subtaskComplete, artifact.ID
-	}
-	holdGate := holdPlan.subtaskByID("quality_gate")
-	holdGate.Status, holdGate.Revisions = subtaskRunning, 2
-	engine.runProcessGateStage(context.Background(), &holdPlan, holdRun.Artifact.ID, holdGate, stage)
-	if holdPlan.State != goalStateBlocked || holdPlan.Checkpoint != nil || holdGate.Status != subtaskFailed || !strings.Contains(holdPlan.Blocker, "held before delivery") {
-		t.Fatalf("spent quality gate did not hold fail-closed: state=%q checkpoint=%+v gate=%+v blocker=%q", holdPlan.State, holdPlan.Checkpoint, holdGate, holdPlan.Blocker)
+	hold := newPackagingQualityGateFixture(t, "needs_changes", []slideJuryRepair{{Page: 2, Fixes: []string{exactFix}}})
+	hold.plan.subtaskByID("quality_gate").Revisions = 2
+	var holdCalls atomic.Int32
+	hold.runQualityGate(t, `{"dimensions":[{"name":"Text fit","score":10,"gap":""}]}`, &holdCalls)
+	holdGate := hold.plan.subtaskByID("quality_gate")
+	draft := hold.plan.subtaskByID("draft_compile")
+	if holdCalls.Load() != 0 || hold.plan.State != goalStateBlocked || hold.plan.Checkpoint != nil || holdGate.Status != subtaskPending || draft == nil || draft.Status != subtaskBlocked || !strings.Contains(hold.plan.Blocker, "fresh rendered review before delivery") {
+		t.Fatalf("spent quality gate did not fail closed on a recoverable fresh-render seam: calls=%d state=%q checkpoint=%+v draft=%+v gate=%+v blocker=%q", holdCalls.Load(), hold.plan.State, hold.plan.Checkpoint, draft, holdGate, hold.plan.Blocker)
 	}
 }
 
@@ -638,13 +643,41 @@ func TestPackagingStudioShipDeckCarriesPrintChassis(t *testing.T) {
 func TestPackagingStudioShipDeckCarriesFirstClassDesignAndEditorContract(t *testing.T) {
 	shipDeck := packagingStudioStage(t, packagingStudioDefinition(), "ship_deck")
 	for _, need := range []string{
-		"12-column grid", "minimum 96px safe zone", "Mix at least four composition types",
+		"12-column grid", "minimum 96px safe zone", "COMPOSITION RHYTHM",
 		"no more than 45 client-facing words", "data-deck-element", "FULL-BLEED LAW",
 		"native presenter owns navigation", "Do not add custom JavaScript", "class=\"notes\" hidden",
 		`<figure class="image-plate fig-N"`, `add class "bleed"`, "left:0;top:0;width:1920px;height:1080px",
 	} {
 		if !strings.Contains(shipDeck.PromptBody, need) {
 			t.Errorf("ship_deck prompt missing first-class design contract %q:\n%s", need, shipDeck.PromptBody)
+		}
+	}
+}
+
+func TestPackagingStudioStoryIdentityAndCompositionAdaptToTheActualBrief(t *testing.T) {
+	def := packagingStudioDefinition()
+	story := packagingStudioStage(t, def, "story_architects")
+	if got := []string{story.Personas[0].Name, story.Personas[1].Name, story.Personas[2].Name}; !slices.Equal(got, []string{"decision_arc", "audience_reframe", "proof_to_action"}) {
+		t.Fatalf("story architects=%v, want artifact-neutral competing lenses", got)
+	}
+	for _, persona := range append(append([]ProcessPersona{}, story.Personas...), packagingStudioStage(t, def, "identity").Personas...) {
+		lower := strings.ToLower(persona.System)
+		for _, forbidden := range []string{"this venture", "founder conviction", "franchise playbook", "--heat", "duotone treatment"} {
+			if strings.Contains(lower, forbidden) {
+				t.Errorf("persona %q still prescribes the fixed venture identity %q: %s", persona.Name, forbidden, persona.System)
+			}
+		}
+	}
+
+	for _, stageID := range []string{"layout_plan", "ship_deck"} {
+		prompt := packagingStudioStage(t, def, stageID).PromptBody
+		for _, want := range []string{"For 1-3 slides", "For 4-7 slides", "For 8 or more slides", "Never force novelty"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s prompt lost proportional composition rule %q:\n%s", stageID, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "Mix at least four composition types") || strings.Contains(prompt, "Use at least four appropriate composition types") {
+			t.Errorf("%s still forces four composition types regardless of deck size:\n%s", stageID, prompt)
 		}
 	}
 }
@@ -943,6 +976,7 @@ func TestPackagingStudioModelWrittenStagesUseBoundedOpenAIWriter(t *testing.T) {
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
 	def := packagingStudioDefinition()
 	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}
@@ -959,7 +993,7 @@ func TestPackagingStudioModelWrittenStagesUseBoundedOpenAIWriter(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioCompanyContextCarriesAuthorizedSourceRefs(t *testing.T) {
+func TestPackagingStudioContextSnapshotCarriesAuthorizedSourceRefs(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	visible, _, err := app.createOSArtifactWithMetadata("artifacts", "Current company position", "The current operating thesis is evidence-first.", "AJ", map[string]string{
 		"type": artifactTypeMarkdown, "visibility": "organization", "ownerEmail": "aj@shareability.com",
@@ -982,13 +1016,13 @@ func TestPackagingStudioCompanyContextCarriesAuthorizedSourceRefs(t *testing.T) 
 	if strings.Contains(companyContext, privateSibling.ID) || strings.Contains(companyContext, "PRIVATE SIBLING") {
 		t.Fatalf("company context leaked an unauthorized sibling:\n%s", companyContext)
 	}
-	evidence := packagingStudioStage(t, packagingStudioDefinition(), "evidence")
-	task, err := engine.processStageTaskAuthorized(context.Background(), plan, &goalSubtask{ID: "evidence"}, evidence)
+	contextSnapshot := packagingStudioStage(t, packagingStudioDefinition(), "context_snapshot")
+	task, err := engine.processStageTaskAuthorized(context.Background(), plan, &goalSubtask{ID: "context_snapshot"}, contextSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(task, "Company Brain context") || !strings.Contains(task, "artifact_id="+visible.ID) {
-		t.Fatalf("evidence stage did not receive source-linked company context:\n%s", task)
+		t.Fatalf("context snapshot did not receive source-linked company context:\n%s", task)
 	}
 }
 
@@ -996,6 +1030,7 @@ func TestPackagingStudioRetryReassignmentPreservesBlockedPlan(t *testing.T) {
 	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
 	def := packagingStudioDefinition()
 	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateBlocked, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}
@@ -1084,6 +1119,7 @@ func TestPackagingStudioApprovedSourceLanguageReachesGate(t *testing.T) {
 		Authority:     codexJobAuthorityWorkspaceWrite,
 		State:         goalStateDecompose,
 	}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}

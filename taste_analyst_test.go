@@ -123,6 +123,9 @@ func TestTasteAnalystWritesEvidenceCitedProfileAndStampsSignals(t *testing.T) {
 		if request.ReasoningEffort != "high" {
 			t.Fatalf("effort=%q, want high", request.ReasoningEffort)
 		}
+		if request.MaxOutputTokens != tasteAnalystMaxOutputTokens || request.MaxOutputTokens < 8000 {
+			t.Fatalf("output budget=%d, want production truncation-safe %d", request.MaxOutputTokens, tasteAnalystMaxOutputTokens)
+		}
 		if !strings.Contains(request.Input, first.ID) || !strings.Contains(request.Input, second.ID) {
 			t.Fatalf("input missing the signal window: %s", request.Input)
 		}

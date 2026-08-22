@@ -40,6 +40,9 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"data-inspector-tab=\"design\"",
 		"data-inspector-tab=\"notes\"",
 		"data-inspector-tab=\"scout\"",
+		"data-slide-quick-tools",
+		"data-slide-background-value",
+		"data-action=\"open-scout\"",
 		"data-action=\"duplicate-element\"",
 		"data-action=\"align-center\"",
 		"data-slide-background",
@@ -146,6 +149,28 @@ const server=http.createServer((req,res)=>{
  assert.ok(geometry.canvas.left>=geometry.wrap.left&&geometry.canvas.right<=geometry.wrap.right,JSON.stringify(geometry));
  assert.ok(geometry.canvas.top>=geometry.wrap.top&&geometry.canvas.bottom<=geometry.wrap.bottom,JSON.stringify(geometry));
 
+ const slideQuick=page.locator('[data-slide-quick-tools]');
+ assert.equal(await slideQuick.isVisible(),true);
+ assert.match(await page.locator('[data-slide-quick-copy]').textContent(),/2 already on this slide/);
+ const quickGeometry=await slideQuick.evaluate(node=>({clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,buttons:Array.from(node.querySelectorAll('button')).map(button=>button.getBoundingClientRect().toJSON())}));
+ assert.ok(quickGeometry.scrollWidth<=quickGeometry.clientWidth,JSON.stringify(quickGeometry));
+ quickGeometry.buttons.forEach(rect=>assert.ok(rect.width>0&&rect.height>=40,JSON.stringify(quickGeometry)));
+ await page.getByRole('button',{name:'Create imagery with Scout',exact:true}).click();
+ assert.equal(await page.getByRole('tab',{name:'Scout'}).getAttribute('aria-selected'),'true');
+ assert.equal(await page.evaluate(()=>document.activeElement?.matches('[data-image-prompt]')),true);
+ await page.getByRole('tab',{name:'Design'}).click();
+
+ const zoomBaseline=geometry.canvas.width;
+ await page.locator('[data-zoom]').fill('140');
+ await page.locator('[data-zoom]').dispatchEvent('input');
+ await page.waitForTimeout(30);
+ const zoomed=await page.evaluate(()=>{const canvas=document.querySelector('.deck-editor__canvas').getBoundingClientRect();const wrap=document.querySelector('.deck-editor__canvas-wrap');return {width:canvas.width,label:document.querySelector('[data-zoom-output]').textContent,scrollWidth:wrap.scrollWidth,clientWidth:wrap.clientWidth};});
+ assert.ok(Math.abs(zoomed.width/zoomBaseline-1.4)<.02,JSON.stringify({zoomBaseline,zoomed}));
+ assert.equal(zoomed.label,'140%');
+ assert.ok(zoomed.scrollWidth>zoomed.clientWidth,JSON.stringify(zoomed));
+ await page.locator('[data-zoom]').fill('100');
+ await page.locator('[data-zoom]').dispatchEvent('input');
+
  const richMetrics=async()=>page.evaluate(()=>{const canvas=document.querySelector('.deck-editor__canvas').getBoundingClientRect();const span=document.querySelector('[data-scene] [data-element-id="rich-proof"] span');const style=getComputedStyle(span);return {canvasHeight:canvas.height,fontSize:parseFloat(style.fontSize),marginTop:parseFloat(style.marginTop)};});
  const richLarge=await richMetrics();
  assert.ok(Math.abs(richLarge.fontSize/richLarge.canvasHeight-75/1080)<0.002,JSON.stringify(richLarge));
@@ -181,6 +206,7 @@ const server=http.createServer((req,res)=>{
 	 const openInspector=await page.locator('.deck-editor__props').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),hidden:node.getAttribute('aria-hidden'),inert:node.inert}));
 	 assert.ok(openInspector.rect.left>=0&&openInspector.rect.right<=768&&openInspector.rect.bottom<=1024,JSON.stringify(openInspector));
 	 assert.equal(openInspector.hidden,null);assert.equal(openInspector.inert,false);
+	 if(process.env.DECK_STUDIO_TABLET_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_TABLET_SCREENSHOT,fullPage:true});}
 	 await page.getByRole('button',{name:'Close slide inspector'}).click();
 	 await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
 
@@ -205,6 +231,23 @@ const server=http.createServer((req,res)=>{
 	 await keyboardObject.focus();
 	 await page.keyboard.press('Alt+ArrowRight');
 	 assert.equal(Number(await page.locator('[data-prop="width"]').inputValue()),keyboardWidth+1);
+	 assert.equal(await page.locator('[data-save-state]').textContent(),'Unsaved');
+	 const setProp=async(prop,value)=>{const input=page.locator('[data-prop="'+prop+'"]');await input.fill(String(value));await input.dispatchEvent('change');};
+	 await setProp('x',-500);
+	 assert.equal(Number(await page.locator('[data-prop="x"]').inputValue()),0);
+	 await setProp('width',99999);
+	 assert.equal(Number(await page.locator('[data-prop="width"]').inputValue()),1920);
+	 await setProp('rotation',999);
+	 assert.equal(Number(await page.locator('[data-prop="rotation"]').inputValue()),360);
+	 await setProp('fontSize',2);
+	 assert.equal(Number(await page.locator('[data-prop="fontSize"]').inputValue()),8);
+	 await setProp('lineHeight',99);
+	 assert.equal(Number(await page.locator('[data-prop="lineHeight"]').inputValue()),4);
+	 await setProp('width',keyboardWidth+1);
+	 await setProp('x',keyboardX+1);
+	 await setProp('rotation',0);
+	 await setProp('fontSize',64);
+	 await setProp('lineHeight',1.08);
 	 await page.keyboard.press('Escape');
 	 const designTab=page.getByRole('tab',{name:'Design'});
 	 await designTab.focus();
@@ -221,9 +264,21 @@ const server=http.createServer((req,res)=>{
 
 	 await page.locator('[data-scene] [data-element-id="rich-proof"]').dispatchEvent('dblclick');
  await page.locator('.deck-editor__text-input').waitFor({state:'visible'});
- await page.getByRole('button',{name:'Rectangle'}).focus();
+	 await page.getByRole('button',{name:'Rectangle',exact:true}).focus();
 
- await page.locator('[data-scene] [data-element-id="headline"]').click();
+	 await page.locator('[data-scene] [data-element-id="headline"]').click();
+	 const designPanel=page.locator('[data-inspector-panel="design"]');
+	 await designPanel.evaluate(node=>{node.scrollTop=node.scrollHeight});
+	 assert.ok(await designPanel.evaluate(node=>node.scrollTop)>0,'fixture must exercise a deeply scrolled inspector');
+	 await page.locator('[data-scene] [data-element-id="rich-proof"]').click();
+	 assert.equal(await designPanel.evaluate(node=>node.scrollTop),0,'selecting another object must reveal its identity and Transform controls');
+	 await page.locator('[data-scene] [data-element-id="headline"]').click();
+	 assert.equal(await page.locator('[data-slide-controls]').isHidden(),true,'selected-object controls should start with Transform instead of burying it below slide settings');
+	 const transformCard=page.locator('[data-element-controls] .deck-editor__prop-section').first();
+	 const transformCardStyle=await transformCard.evaluate(node=>({radius:getComputedStyle(node).borderRadius,background:getComputedStyle(node).backgroundColor,shadow:getComputedStyle(node).boxShadow,top:node.getBoundingClientRect().top,panelTop:node.closest('[data-inspector-panel]')?.getBoundingClientRect().top}));
+	 assert.notEqual(transformCardStyle.radius,'0px',JSON.stringify(transformCardStyle));
+	 assert.notEqual(transformCardStyle.shadow,'none',JSON.stringify(transformCardStyle));
+	 assert.ok(transformCardStyle.top>=transformCardStyle.panelTop,JSON.stringify(transformCardStyle));
  if(process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_INSPECTOR_SCREENSHOT,fullPage:true});}
  await page.locator('[data-prop="fontFamily"]').fill('Georgia, Times New Roman, serif');
  await page.locator('[data-prop="fontFamily"]').dispatchEvent('change');
@@ -237,7 +292,7 @@ const server=http.createServer((req,res)=>{
  await page.locator('[data-slide-notes]').dispatchEvent('change');
 
  await page.getByRole('tab',{name:'Design'}).click();
- await page.getByRole('button',{name:'Rectangle'}).click();
+ await page.getByRole('button',{name:'Rectangle',exact:true}).click();
  await page.locator('[data-prop="fill"]').fill('#3366ff');
  await page.locator('[data-prop="opacity"]').fill('0.55');
  await page.locator('[data-prop="opacity"]').dispatchEvent('change');
@@ -254,6 +309,7 @@ const server=http.createServer((req,res)=>{
 	 await page.getByRole('button',{name:'Save',exact:true}).click();
 	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save"]');return button&&!button.disabled&&button.textContent==='Save';});
 	 assert.equal(await page.locator('.deck-editor').count(),1,'Save must keep Deck Studio open');
+	 assert.match(await page.locator('[data-save-state]').textContent(),/^Saved/);
 	 assert.equal(patches.length,1);
  assert.equal(patches[0].artifactId,artifactId);
  const savedShape=patches[0].deck.slides[0].elements.find(element=>element.type==='shape'&&element.shape==='rectangle');
@@ -288,8 +344,13 @@ const server=http.createServer((req,res)=>{
  await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
  await page.waitForSelector('.deck-editor');
  await page.getByRole('tab',{name:'Scout'}).click();
+ const scoutHint=await page.locator('[data-inspector-panel="scout"] .deck-editor__inspector-hint').evaluate(node=>({whiteSpace:getComputedStyle(node).whiteSpace,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight,text:node.textContent}));
+ assert.notEqual(scoutHint.whiteSpace,'nowrap',JSON.stringify(scoutHint));
+ assert.ok(scoutHint.clientHeight>=scoutHint.scrollHeight,JSON.stringify(scoutHint));
+ assert.match(scoutHint.text,/whole slide/i);
+ if(process.env.DECK_STUDIO_SCOUT_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_SCOUT_SCREENSHOT,fullPage:true});}
  await page.locator('[data-image-prompt]').fill('Documentary wide image of a working farm at first light');
- await page.getByRole('button',{name:'Generate'}).click();
+ await page.getByRole('button',{name:'Generate image'}).click();
  await page.waitForFunction(()=>document.querySelector('[data-image-status]')?.textContent.includes('added'));
  assert.equal(imageRequests.length,1);
  assert.equal(imageRequests[0].artifactId,artifactId);
@@ -349,9 +410,11 @@ const server=http.createServer((req,res)=>{
  await nativeNext.click();
  assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'2 / 2');
  assert.equal(await readonlyHost.locator('.chat-deck__native-element').filter({hasText:'The second slide'}).count(),1);
- const nativeChromeGeometry=await readonlyHost.evaluate(host=>{const shell=host.querySelector('.chat-deck').getBoundingClientRect();const nav=host.querySelector('.chat-deck__nav').getBoundingClientRect();const actions=host.querySelector('.chat-deck__actions').getBoundingClientRect();return {shell:shell.toJSON(),nav:nav.toJSON(),actions:actions.toJSON()};});
+ const nativeChromeGeometry=await readonlyHost.evaluate(host=>{const shell=host.querySelector('.chat-deck').getBoundingClientRect();const nav=host.querySelector('.chat-deck__nav').getBoundingClientRect();const actions=host.querySelector('.chat-deck__actions').getBoundingClientRect();const navButtons=Array.from(host.querySelectorAll('.chat-deck__nav button')).map(node=>node.getBoundingClientRect().toJSON());const actionButtons=Array.from(host.querySelectorAll('.chat-deck__actions .chat-deck__btn')).map(node=>node.getBoundingClientRect().toJSON());return {shell:shell.toJSON(),nav:nav.toJSON(),actions:actions.toJSON(),navButtons,actionButtons};});
  assert.ok(nativeChromeGeometry.nav.top<nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
  assert.ok(nativeChromeGeometry.actions.top>nativeChromeGeometry.shell.top+nativeChromeGeometry.shell.height/2,JSON.stringify(nativeChromeGeometry));
+ nativeChromeGeometry.navButtons.forEach(rect=>assert.ok(rect.width>=40&&rect.height>=40,JSON.stringify(nativeChromeGeometry)));
+ nativeChromeGeometry.actionButtons.forEach(rect=>assert.ok(rect.height>=40,JSON.stringify(nativeChromeGeometry)));
  await nativePrevious.click();
  assert.equal(await readonlyHost.locator('.chat-deck__nav-count').textContent(),'1 / 2');
  const cardDownload=page.waitForEvent('download');
@@ -469,6 +532,9 @@ const server=http.createServer((req,res)=>{
  const inspector=await page.locator('.deck-editor__props').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),inert:node.inert,hidden:node.getAttribute('aria-hidden')}));
  assert.ok(inspector.rect.left>=0&&inspector.rect.right<=390&&inspector.rect.bottom<=844,JSON.stringify(inspector));
  assert.equal(inspector.inert,false);assert.equal(inspector.hidden,null);
+ const inspectorTargets=await page.locator('.deck-editor__props').evaluate(node=>Array.from(node.querySelectorAll('button:not([hidden]),input:not([hidden]),select:not([hidden])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ inspectorTargets.forEach(target=>assert.ok(target.rect.height>=44,JSON.stringify(target)));
+ if(process.env.DECK_STUDIO_PHONE_SCREENSHOT){await page.screenshot({path:process.env.DECK_STUDIO_PHONE_SCREENSHOT,fullPage:true});}
  await page.getByRole('button',{name:'Close slide inspector'}).tap();
  await page.waitForFunction(()=>document.querySelector('.deck-editor__props')?.inert===true);
 

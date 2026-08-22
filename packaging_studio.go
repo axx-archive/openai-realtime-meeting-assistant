@@ -1,6 +1,6 @@
 package main
 
-// packaging_studio.go authors the opinionated deck-generation pipeline. V3 is
+// packaging_studio.go authors the opinionated deck-generation pipeline. V4 is
 // deliberately mostly invisible after the proposal boundary: it resolves the
 // brief, researches only when warranted, locks story and human-sounding copy,
 // derives art direction from that locked story, renders a candidate, repairs it
@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -103,6 +104,7 @@ const (
 	packagingStudioDeckContract               = "packaging_deck_v1"
 	packagingStudioExternalEvidenceContractV1 = "external_evidence_v1"
 	packagingStudioExternalEvidenceContract   = "external_evidence_v2"
+	packagingStudioEntailmentContract         = "external_evidence_entailment_v1"
 	packagingStudioImageryDirectionContract   = "imagery_direction_v1"
 	packagingStudioWallContract               = "packaging_wall_v1"
 	packagingStudioTalkContract               = "packaging_talk_v1"
@@ -113,6 +115,11 @@ const (
 // studioSourceLanguageLaw keeps quoted source language faithful downstream
 // without turning an internal production rule into customer-facing jargon.
 const studioSourceLanguageLaw = "Language explicitly quoted in the approved intake brief or goal objective is fixed source material: preserve its exact wording when used, never attribute a paraphrase as a quote, and do not contradict it."
+
+// studioCompositionRhythmLaw scales visual variety to the size of the deck.
+// A blanket four-layout minimum makes short decks feel like a sampler, while a
+// long deck with too little recurrence feels improvised instead of designed.
+const studioCompositionRhythmLaw = "COMPOSITION RHYTHM: match variety to the requested slide count. For 1-3 slides, use 1-2 coherent composition families. For 4-7 slides, use at least 3 families when the content warrants them. For 8 or more slides, use at least 4 families with deliberate recurrence. Never force novelty at the expense of hierarchy, story, or brand coherence."
 
 // packagingDeckChassisCSS is the INVARIANT deck chassis (stage geometry, the
 // .pg slide model, and — critically — the @page + @media print pagination).
@@ -173,9 +180,9 @@ func studioRedTeamPersonas() []ProcessPersona {
 // visual directions on the same sample slides (the design-identity gap).
 func studioIdentityJudges() []ProcessPersona {
 	return []ProcessPersona{
-		{Name: "art_director", System: "You are an art director judging rival visual directions applied to the same 2-3 sample slides. Score each on token set (color, the --heat dial), type pairing, and duotone treatment — whether the system is distinctive and coherent, not a recolored default. Pick a winner and say which tokens it hands to the deck chassis."},
-		{Name: "brand_strategist", System: "You are a brand strategist judging rival visual directions. Score each on whether the identity is BORN from this project's thesis and audience, not borrowed. Reward a direction that an outsider would recognize as this venture's own. Pick a winner."},
-		{Name: "audience_proxy", System: "You are the real audience this venture is selling to, judging rival visual directions on the same sample slides. Score each on whether it makes YOU lean in or bounce. You are not a designer; you react. Pick a winner."},
+		{Name: "art_director", System: "You are an art director judging rival visual directions applied to the same 2-3 sample slides. Score each on palette, contrast, typography, spacing, image treatment, and graphic language — whether the system is distinctive, coherent, and suited to the actual material rather than a decorated default. Pick a winner and name the reusable tokens and rules it hands to the deck chassis."},
+		{Name: "brand_strategist", System: "You are a brand strategist judging rival visual directions. Score each on whether the identity is born from this project's thesis, audience, source material, and any supplied brand assets rather than borrowed from a stock presentation style. Reward a direction an outsider would recognize as this project's own. Pick a winner."},
+		{Name: "audience_proxy", System: "You represent the intended audience, judging rival visual directions on the same sample slides. Score each on whether it creates trust, attention, and the right emotional response for the actual decision. You are not a designer; react as the reader or room would. Pick a winner."},
 	}
 }
 
@@ -183,9 +190,9 @@ func studioIdentityJudges() []ProcessPersona {
 // genuinely different spines, not three phrasings of one.
 func studioCompeteArchitects() []ProcessPersona {
 	return []ProcessPersona{
-		{Name: "cultural_moment", System: "You are a narrative architect building the spine around the CULTURAL MOMENT: why the world is ready for this now, what shift makes it inevitable. Write a complete, distinctive narrative spine (the slide-by-slide argument). Preserve approved source language exactly when quoted. Make it genuinely different from a franchise or leadership-conviction angle."},
-		{Name: "franchise_playbook", System: "You are a narrative architect building the spine around the FRANCHISE PLAYBOOK: the durable, expandable machine — the universe, the flywheel, the second and third act the first success unlocks. Write a complete, distinctive narrative spine. Preserve approved source language exactly when quoted."},
-		{Name: "founder_conviction", System: "You are a narrative architect building the spine around LEADERSHIP CONVICTION: the earned insight, the why-this-team, the thing the team sees that others do not. Write a complete, distinctive narrative spine. Preserve approved source language exactly when quoted."},
+		{Name: "decision_arc", System: "You are a narrative architect building the spine around the DECISION ARC: the current reality, the tension that makes the status quo untenable, the decisive turn, and the action this audience should take. Write a complete, distinctive slide-by-slide argument. Preserve approved source language exactly when quoted."},
+		{Name: "audience_reframe", System: "You are a narrative architect building the spine around an AUDIENCE REFRAME: begin with what this exact audience believes or needs now, reveal the overlooked truth, and earn a new way of seeing the decision. Write a complete, distinctive slide-by-slide argument. Preserve approved source language exactly when quoted."},
+		{Name: "proof_to_action", System: "You are a narrative architect building the spine from PROOF TO ACTION: lead with the strongest admitted evidence, show what it changes, confront the best counterargument, and end in a concrete choice, commitment, or test. Write a complete, distinctive slide-by-slide argument. Preserve approved source language exactly when quoted."},
 	}
 }
 
@@ -233,18 +240,19 @@ func studioHouseJudgeSeat() (ProcessPersona, bool) {
 func packagingStudioDefinition() ProcessDefinition {
 	internal := true
 	return ProcessDefinition{
-		ID: packagingStudioProcessID, Version: 3, Title: "Packaging Studio",
+		ID: packagingStudioProcessID, Version: 4, Title: "Packaging Studio",
 		Description: "Turn a direct request and authorized company context into a researched-when-needed, reviewed, editable presentation.",
 		Group:       toolGroupProcesses, Authority: toolAuthorityWorkspaceWrite,
-		Budgets: ProcessBudgets{MaxSubtasks: 16, MaxTokens: 64000, WallClock: 25 * time.Minute},
+		ImplementationRevision: "packaging_studio.runtime.v4",
+		Budgets:                ProcessBudgets{MaxSubtasks: 18, MaxTokens: 64000, WallClock: 25 * time.Minute},
 		Stages: []ProcessStage{
 			{
 				ID: "context_snapshot", Title: "Understand the brief", Role: processRoleSynthesizer, Internal: internal,
 				PromptBody: strings.Join([]string{
 					"Turn the direct approved request, exact reply-thread/source packet, and authorized Company Brain context into deck_context_snapshot_v2. The direct request is authoritative; older company context may support it but never override it.",
 					"Resolve audience, decision, desired response, slide_count, known brand assets, likes/dislikes, exact language worth preserving, and constraints. Use a safe reversible inference instead of asking a routine question; label it. If the request states a slide count, copy it exactly.",
-					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, or credibility-critical numbers could materially change the story. Never invent a citation.",
-					"Return one JSON object with keys direct_ask, audience, decision, desired_response, slide_count, context_used, settled_decisions, taste_signals, brand_assets, research_mode, research_questions, known_facts, uncertain_claims, and reversible_inferences.",
+					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, or credibility-critical numbers could materially change the story. Every external research question must name the concrete entity, audience, category, or market whose answer matters so a returned fact can be checked for direct relevance. Never invent a citation.",
+					"Return one JSON object with keys direct_ask, audience, decision, desired_response, slide_count, context_used, settled_decisions, taste_signals, brand_assets, research_mode, research_questions, known_facts, uncertain_claims, and reversible_inferences. known_facts must be an array of objects with claim, exact_quote, and source_ref. Copy claim and exact_quote verbatim from one authorized source and make them identical after whitespace normalization. Copy the complete bracketed reference exactly from the same SOURCE [...] block or source-linked Company Brain line into source_ref, including every id, revision, and digest field; never synthesize or combine a reference. If that same-source proof is unavailable, put the item in uncertain_claims instead.",
 				}, "\n"), OutputContract: "deck_context_snapshot_v2",
 			},
 			{
@@ -254,15 +262,28 @@ func packagingStudioDefinition() ProcessDefinition {
 				OutputContract: packagingStudioExternalEvidenceContract,
 			},
 			{
-				ID: "evidence", Title: "Lock the evidence", Role: processRoleSynthesizer, Internal: internal,
-				InputFrom:      []string{"context_snapshot", "external_research"},
-				PromptBody:     "Produce evidence_dossier_v3 from approved sources, authorized Company Brain facts, and external research only when that stage ran. Every claim carries claim, provenance, date when known, units, confidence, and status verified|internal|suggested. Only verified and attributable internal facts enter deck_ready_claims. Suggested facts go to excluded_claims and must never render as truth.",
+				ID: "source_snapshot", Title: "Capture exact source text", Role: processRoleCompile, Internal: internal,
+				InputFrom: []string{"context_snapshot", "external_research"}, RunIf: &ProcessStageCondition{StageID: "context_snapshot", Field: "research_mode", Equals: "external"},
+				PromptBody: "Fetch the exact provider-linked HTTPS sources server-side and preserve bounded, digest-bound text windows for each candidate claim. Fetch failures and pages with no relevant text remain explicit; URL membership alone never proves a claim.",
+				Compile:    compileExternalEvidenceSourceSnapshots,
+			},
+			{
+				ID: "evidence_entailment", Title: "Check what the sources actually prove", Role: processRoleWriter, Mode: "artifacts", Internal: internal,
+				InputFrom: []string{"context_snapshot", "external_research", "source_snapshot"}, RunIf: &ProcessStageCondition{StageID: "context_snapshot", Field: "research_mode", Equals: "external"},
+				PromptBody:     "Independently check every exact candidate fact + URL pair using only the exact authority-bound text windows the server fetched from that URL. Do not start a second search. Admit only claims those windows actually entail with matching population, date, units, and numeric fidelity. Reject unclear, contradicted, unfetched, or merely URL-associated claims; never repair a claim into a stronger one.",
+				OutputContract: packagingStudioEntailmentContract,
+			},
+			{
+				ID: "evidence", Title: "Lock the evidence", Role: processRoleCompile, Internal: internal,
+				InputFrom:      []string{"context_snapshot", "evidence_entailment"},
+				PromptBody:     "Produce evidence_dossier_v3 from authorized Company Brain/direct-source facts and the entailment-check record. Every deck_ready_claim carries claim, provenance, date when known, units, confidence, and exactly one status: entailment_checked for an external claim admitted by evidence_entailment, or internal for an attributable authorized company/direct-source fact. No verified, suggested, inferred, rejected, unclear, or merely provider-fetched claim may enter deck_ready_claims; keep all such material in excluded_claims or missing_proof.",
 				OutputContract: "evidence_dossier_v3",
+				Compile:        compileProcessEvidenceDossier,
 			},
 			{
 				ID: "story_architects", Title: "Find the strongest story", Role: processRolePanel, Internal: internal,
 				InputFrom: []string{"context_snapshot", "evidence"}, Personas: studioCompeteArchitects(),
-				PromptBody:     "Develop genuinely different slide-by-slide arguments for the actual audience and decision, then synthesize the strongest one. Use only deck-ready evidence. Preserve explicit source language exactly. Score excitement, coherence, credibility, audience fit, and distinctiveness; select one causal story spine and graft only compatible best beats. Name any claim still needing proof. This is a story, not an outline of topics.",
+				PromptBody:     "Develop genuinely different slide-by-slide arguments for the actual audience and decision, then synthesize the strongest one. Use only deck-ready evidence. Preserve explicit source language exactly. Score excitement, coherence, credibility, audience fit, and distinctiveness; select one causal story spine and graft only compatible best beats. Name any claim still needing proof. This is a story, not an outline of topics. For every JSON object that contains a material number, currency, percentage, date, external URL, or externally verifiable superlative, include sibling claim_ids and exact_claims arrays copied exactly from the admitted evidence row, and render the complete exact admitted claim verbatim in the fact-bearing string. If you write prose instead of JSON, append <!-- stride-claim:<claim id> | <exact admitted claim> --> in the same paragraph and render that exact claim verbatim in the factual sentence. " + processForwardStatementPromptLaw,
 				OutputContract: "story_spine_v2",
 			},
 			{
@@ -271,6 +292,8 @@ func packagingStudioDefinition() ProcessDefinition {
 				PromptBody: strings.Join([]string{
 					"Write the final deck_copy_v3 with exactly the slide_count in the brief; when the direct request omitted a count, choose the shortest count that tells the story completely and record the inference.",
 					"For each slide provide slide_id, purpose, headline, optional kicker, visible copy, evidence/source label, speaker intent, and transition. One claim per slide; use only deck_ready_claims.",
+					"Every slide object containing a material number, currency, percentage, date, external URL, or externally verifiable superlative must carry sibling claim_ids and exact_claims arrays copied exactly from the admitted evidence row. Render the complete exact admitted claim verbatim in the fact-bearing visible string; never place claim metadata itself in visible copy.",
+					processForwardStatementPromptLaw,
 					"Write in a specific human spoken register. Remove AI tells: throat-clearing, generic superlatives, slogan stacks, symmetrical filler, 'not just X but Y', empty abstraction, and invented quotes. No em dashes in client-facing copy. Keep normal slides under 45 visible words.",
 					studioSourceLanguageLaw,
 				}, "\n"), OutputContract: "deck_copy_v3",
@@ -279,12 +302,14 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID: "gate", Title: "Stress-test the story and copy", Role: processRoleGate, Internal: internal,
 				InputFrom:  []string{"write", "context_snapshot", "evidence", "story_architects"},
 				PromptBody: "Score Audience decision fit, Story causality, Evidence integrity, Human voice, Slide-count fidelity, and Source-language fidelity. Every weak score must name an executable repair. Do not accept unverified numbers, generic AI cadence, or a structurally correct outline that lacks a persuasive turn. " + studioSourceLanguageLaw,
-				GateSpec:   &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "write", HoldOnFailure: true},
+				GateSpec: &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "write", HoldOnFailure: true, Dimensions: []string{
+					"Audience decision fit", "Story causality", "Evidence integrity", "Human voice", "Slide-count fidelity", "Source-language fidelity",
+				}},
 			},
 			{
 				ID: "voice", Title: "Write presenter notes", Role: processRoleWriter, Mode: "artifacts", Internal: internal,
 				InputFrom:      []string{"write", "gate"},
-				PromptBody:     "For every slide, write a 25-45 second spoken note with exactly one [BEAT]. The voice owns parables and emotional turns; the slide owns numbers. Never speak a figure absent from its slide. Preserve exact approved source language where it strengthens the story.",
+				PromptBody:     "For every slide, write a 25-45 second spoken note with exactly one [BEAT]. The voice owns parables and emotional turns; the slide owns numbers. Never speak a figure absent from its slide. Preserve exact approved source language where it strengthens the story. Any material number, currency, percentage, date, external URL, or externally verifiable superlative must render the complete admitted claim verbatim in that sentence and carry <!-- stride-claim:<claim id> | <exact admitted claim> --> in the same slide note. " + processForwardStatementPromptLaw,
 				OutputContract: "presenter_script_v2",
 			},
 			{
@@ -307,8 +332,12 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID: "layout_plan", Title: "Compose every slide", Role: processRoleWriter, Mode: "artifacts", Internal: internal,
-				InputFrom:      []string{"identity", "write", "voice", "evidence", "imagery_direction", "imagery_generate"},
-				PromptBody:     "Create layout_plan_v3 after copy and identity are locked. For every slide specify a 1920x1080 scene with composition type, background, grid, and element ids/types/x/y/width/height/z/typography/alignment/opacity. Tie imagery to crop, focal point, and copy-safe space. Use at least four appropriate composition types, a radically simple cover, legible evidence furniture, and no overflow or accidental collision. Return structured JSON; do not rewrite copy.",
+				InputFrom: []string{"identity", "write", "voice", "evidence", "imagery_direction", "imagery_generate"},
+				PromptBody: strings.Join([]string{
+					"Create layout_plan_v3 after copy and identity are locked. For every slide specify a 1920x1080 scene with composition type, background, grid, and element ids/types/x/y/width/height/z/typography/alignment/opacity. Tie imagery to crop, focal point, and copy-safe space.",
+					studioCompositionRhythmLaw,
+					"Use a radically simple cover, legible evidence furniture, and no overflow or accidental collision. Return structured JSON; do not rewrite copy. Preserve each fact-bearing string, visible forward label, statement_type, claim_ids, and exact_claims exactly from deck copy on that same text-element object; geometry numbers are structural and need no evidence annotation. " + processForwardStatementPromptLaw,
+				}, "\n"),
 				OutputContract: "layout_plan_v3",
 			},
 			{
@@ -328,7 +357,9 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID: "quality_gate", Title: "Hold or repair the presentation", Role: processRoleGate, Internal: internal,
 				InputFrom:  []string{"ship_deck", "slide_jury"},
 				PromptBody: "Score Render completeness, Text fit, Hierarchy, Layout craft, Brand coherence, Image purpose, Copy fidelity, and Presentation-distance legibility. Use the jury's page-level findings. Pass only when the actual rendered deck is ready; otherwise return executable repairs for ship_deck.",
-				GateSpec:   &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "ship_deck", HoldOnFailure: true},
+				GateSpec: &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "ship_deck", HoldOnFailure: true, Dimensions: []string{
+					"Render completeness", "Text fit", "Hierarchy", "Layout craft", "Brand coherence", "Image purpose", "Copy fidelity", "Presentation-distance legibility",
+				}},
 			},
 			{
 				ID: "ship_compile", Title: "Presentation ready", Role: processRoleCompile,
@@ -345,23 +376,27 @@ func packagingStudioDeckWriterPrompt() string {
 		"Produce one complete self-contained HTML document beginning <!doctype html>, with all CSS inline and no external references except data: URIs used for embedded imagery. Use the locked copy and layout plan exactly; do not rewrite during rendering.",
 		"Include this exact chassis style in <head>: <style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>. Put every <section class=\"pg\"> inside one <div id=\"stage\"> and add class on to the first slide.",
 		"Every meaningful text, image, and shape needs a stable data-deck-element and data-deck-type plus inline absolute left/top/width/height/z-index/opacity/rotation in 1920x1080 coordinates. Text also needs inline family, size, weight, line-height, tracking, alignment, and color. Shapes need fill/stroke; images need object-fit. No overflow, clipping, off-canvas elements, or accidental intersections; mark only intentional overlap data-deck-overlap=\"allow\".",
-		"Use the identity tokens and a 12-column grid to create varied, presentation-distance compositions, not a document in the upper-left. Keep a minimum 96px safe zone. Mix at least four composition types. Keep one claim and no more than 45 client-facing words on a normal slide. Make metrics large, comparisons aligned, evidence sourced, and the cover radically simple.",
+		"Use the identity tokens and a 12-column grid to create varied, presentation-distance compositions, not a document in the upper-left. Keep a minimum 96px safe zone. " + studioCompositionRhythmLaw + " Keep one claim and no more than 45 client-facing words on a normal slide. Make metrics large, comparisons aligned, evidence sourced, and the cover radically simple.",
 		"FULL-BLEED LAW: for generated imagery, create only matching native-importable <figure class=\"image-plate fig-N\"> plates with a div.ph; never invent image URLs. For a directed full bleed, add class \"bleed\" and use left:0;top:0;width:1920px;height:1080px with a purposeful scrim behind copy. If imagery was skipped, produce a deliberately typographic deck.",
 		"Put each matching presenter note in <div class=\"notes\" hidden> with [BEAT]. Do not add custom JavaScript or presenter chrome; the native presenter owns navigation and presentation.",
+		"CLAIM-AUTHORITY LAW: do not add or paraphrase factual copy. For every slide carrying a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the complete exact admitted claim verbatim in its fact-bearing text element and place <!-- stride-claim:<claim id> | <exact admitted claim> --> inside that same <section class=\"pg\">. Preserve the marker in presenter notes too when they speak the fact. Page counters and scene geometry are structural, not claims.",
+		processForwardStatementPromptLaw,
+		"Do not generate visible slide copy with CSS content or pseudo-elements; every visible word must live in an inspectable data-deck-type=\"text\" element or presenter note.",
 		studioSourceLanguageLaw,
 	}, "\n")
 }
 
 // legacyPackagingStudioDefinition remains for migration archaeology only; the
-// registry uses the authored v3 definition above.
+// registry uses the authored v4 definition above.
 func legacyPackagingStudioDefinition() ProcessDefinition {
 	return ProcessDefinition{
-		ID:          packagingStudioProcessID,
-		Version:     2,
-		Title:       "Packaging Studio",
-		Description: "Turn source material into a reviewed, presenter-ready deck with a clear story, a coherent visual system, editable imagery, presenter notes, and customer checkpoints before delivery.",
-		Group:       toolGroupProcesses,
-		Authority:   toolAuthorityWorkspaceWrite,
+		ID:                     packagingStudioProcessID,
+		Version:                2,
+		Title:                  "Packaging Studio",
+		Description:            "Turn source material into a reviewed, presenter-ready deck with a clear story, a coherent visual system, editable imagery, presenter notes, and customer checkpoints before delivery.",
+		Group:                  toolGroupProcesses,
+		Authority:              toolAuthorityWorkspaceWrite,
+		ImplementationRevision: "packaging_studio.runtime.v2",
 		// V2 adds context, evidence, copy, and layout decisions while keeping the
 		// internal work out of the channel feed.
 		Budgets: ProcessBudgets{MaxSubtasks: 20, MaxTokens: 64000, WallClock: 25 * time.Minute},
@@ -491,7 +526,9 @@ func legacyPackagingStudioDefinition() ProcessDefinition {
 				// The SKILL semantics: 9.0 threshold, 7.0 floor, 2 rounds,
 				// force-accept below threshold ships with the gaps DISCLOSED (always
 				// a human's call downstream), never blocks silently.
-				GateSpec: &ProcessGateSpec{Threshold: 9.0, Floor: 7.0, MaxRounds: 2, ForceAccept: true},
+				GateSpec: &ProcessGateSpec{Threshold: 9.0, Floor: 7.0, MaxRounds: 2, ForceAccept: true, Dimensions: []string{
+					"Objections answered", "Strengths kept", "Spine integrity", "Copy law",
+				}},
 			},
 			{
 				ID:        "voice",
@@ -655,6 +692,27 @@ func compilePackagingStudioDraft(app *kanbanBoardApp, plan *goalPlan, parentID s
 }
 
 func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID string, _ ProcessStage) (string, map[string]string, error) {
+	// V3's final compile publishes the exact candidate revision that the jury
+	// saw and the quality gate accepted. Re-filing here would increment the
+	// artifact in place after review, making the delivered revision technically
+	// different even when its HTML happened to be byte-identical. Minimal and
+	// legacy unit plans without quality_gate retain the old compiler seam.
+	if plan != nil && plan.subtaskByID("quality_gate") != nil {
+		deck, review, err := packagingStudioReviewedDeckForShip(app, plan, parentID)
+		if err != nil {
+			return "", nil, err
+		}
+		lines := []string{
+			"Final deck filed",
+			"",
+			"- " + packagingStudioDeckContract + " → " + deck.ID,
+			fmt.Sprintf("- Exact reviewed candidate: version %d, digest %s", review.DeckVersion, review.DeckDigest),
+		}
+		return strings.Join(lines, "\n"), map[string]string{
+			"shipArtifactIds": deck.ID,
+			"deckArtifactId":  deck.ID,
+		}, nil
+	}
 	return compilePackagingStudioDeckOnly(app, plan, parentID, false)
 }
 
@@ -1083,6 +1141,221 @@ func applyDeckImagery(deckHTML string, images []deckImage, generated int, unread
 	return augmented, note
 }
 
+// packagingStudioQualityGateReview is the deterministic admission record in
+// front of the presentation quality scorer. It binds one jury scoreboard to
+// the exact candidate id, version, and digest the rendered page images came
+// from; needs_changes also carries only the structured verbatim seat fixes.
+type packagingStudioQualityGateReview struct {
+	Verdict        string
+	DeckID         string
+	DeckVersion    int
+	DeckDigest     string
+	JuryID         string
+	MinimumAverage float64
+	Repairs        []slideJuryRepair
+}
+
+func (review packagingStudioQualityGateReview) repairLines() []string {
+	lines := make([]string, 0, len(review.Repairs))
+	for _, repair := range review.Repairs {
+		for _, fix := range repair.Fixes {
+			lines = append(lines, fmt.Sprintf("slide %d: %s", repair.Page, fix))
+		}
+	}
+	return lines
+}
+
+func (review packagingStudioQualityGateReview) gateMetadata() map[string]string {
+	return map[string]string{
+		"reviewedDeckArtifactId":      review.DeckID,
+		"reviewedDeckArtifactVersion": strconv.Itoa(review.DeckVersion),
+		"reviewedDeckContentDigest":   review.DeckDigest,
+		"slideJuryArtifactId":         review.JuryID,
+	}
+}
+
+// resolvePackagingStudioQualityGateReview fails closed on every missing or
+// mismatched link. A needs_attention stage may legitimately have no scoreboard
+// (render/provider failure), but it still hard-holds before any scorer call.
+func resolvePackagingStudioQualityGateReview(app *kanbanBoardApp, plan *goalPlan, parentID string) (packagingStudioQualityGateReview, error) {
+	var review packagingStudioQualityGateReview
+	if app == nil || plan == nil {
+		return review, fmt.Errorf("artifact memory or plan is unavailable")
+	}
+	parentID = strings.TrimSpace(parentID)
+	draftStage := plan.subtaskByID("draft_compile")
+	if draftStage == nil || draftStage.Status != subtaskComplete || strings.TrimSpace(draftStage.ArtifactID) == "" {
+		return review, fmt.Errorf("draft_compile is missing or incomplete")
+	}
+	draftRecord, ok := app.osArtifactByID(draftStage.ArtifactID)
+	if !ok || draftRecord.Metadata["processStage"] != "draft_compile" || strings.TrimSpace(draftRecord.Metadata["goalParentId"]) != parentID {
+		return review, fmt.Errorf("draft compile record is missing or belongs to a different run")
+	}
+	deckID := strings.TrimSpace(draftRecord.Metadata["deckArtifactId"])
+	if deckID == "" || strings.TrimSpace(draftRecord.Metadata["shipArtifactIds"]) != deckID {
+		return review, fmt.Errorf("draft compile does not name exactly one candidate deck")
+	}
+	deck, ok := app.osArtifactByID(deckID)
+	if !ok || deck.Metadata["artifactContract"] != packagingStudioDeckContract || deck.Metadata["source"] != "packaging_studio_ship" || strings.TrimSpace(deck.Metadata["goalId"]) != parentID {
+		return review, fmt.Errorf("candidate deck is missing, mistyped, or belongs to a different run")
+	}
+
+	juryStage := plan.subtaskByID("slide_jury")
+	if juryStage == nil || juryStage.Status != subtaskComplete || strings.TrimSpace(juryStage.ArtifactID) == "" {
+		return review, fmt.Errorf("slide_jury is missing or incomplete")
+	}
+	juryRecord, ok := app.osArtifactByID(juryStage.ArtifactID)
+	if !ok || juryRecord.Metadata["processStage"] != "slide_jury" || strings.TrimSpace(juryRecord.Metadata["goalParentId"]) != parentID {
+		return review, fmt.Errorf("slide jury stage record is missing or belongs to a different run")
+	}
+	stageVerdict := strings.TrimSpace(juryRecord.Metadata["reviewVerdict"])
+	if stageVerdict == "needs_attention" {
+		return packagingStudioQualityGateReview{Verdict: stageVerdict, DeckID: deckID}, nil
+	}
+	if stageVerdict != "ready" && stageVerdict != "needs_changes" {
+		return review, fmt.Errorf("slide jury stage has no supported readiness verdict")
+	}
+
+	juryID := strings.TrimSpace(juryRecord.Metadata["slideJuryArtifactId"])
+	if juryID == "" {
+		return review, fmt.Errorf("slide jury stage does not link a scoreboard")
+	}
+	scoreboard, ok := app.osArtifactByID(juryID)
+	if !ok || scoreboard.Metadata["artifactContract"] != slideJuryContract || scoreboard.Metadata["source"] != slideJurySource || strings.TrimSpace(scoreboard.Metadata["goalId"]) != parentID {
+		return review, fmt.Errorf("linked slide jury scoreboard is missing, mistyped, or belongs to a different run")
+	}
+	if strings.TrimSpace(scoreboard.Metadata["deckArtifactId"]) != deckID {
+		return review, fmt.Errorf("slide jury scoreboard is bound to a different candidate deck")
+	}
+	if strings.TrimSpace(scoreboard.Metadata["reviewVerdict"]) != stageVerdict {
+		return review, fmt.Errorf("slide jury stage verdict does not match its linked scoreboard")
+	}
+	if strings.TrimSpace(juryRecord.Metadata["blockingPages"]) != strings.TrimSpace(scoreboard.Metadata["blockingPages"]) ||
+		strings.TrimSpace(juryRecord.Metadata["repairFixes"]) != strings.TrimSpace(scoreboard.Metadata["repairFixes"]) {
+		return review, fmt.Errorf("slide jury stage findings do not match its linked scoreboard")
+	}
+	version, versionErr := strconv.Atoi(strings.TrimSpace(scoreboard.Metadata["deckArtifactVersion"]))
+	digest := strings.TrimSpace(scoreboard.Metadata["deckContentDigest"])
+	if versionErr != nil || version < 1 || digest == "" {
+		return review, fmt.Errorf("slide jury scoreboard has no exact candidate revision binding")
+	}
+	if strings.TrimSpace(juryRecord.Metadata["deckArtifactVersion"]) != strconv.Itoa(version) || strings.TrimSpace(juryRecord.Metadata["deckContentDigest"]) != digest {
+		return review, fmt.Errorf("slide jury stage candidate binding does not match its scoreboard")
+	}
+	if artifactVersion(deck) != version || artifactCapabilityDigest(deck) != digest {
+		return review, fmt.Errorf("candidate deck changed after the rendered slide jury ran")
+	}
+	parsedSeats, seatsErr := strconv.Atoi(strings.TrimSpace(scoreboard.Metadata["parsedSeats"]))
+	if seatsErr != nil || parsedSeats < 2 {
+		return review, fmt.Errorf("slide jury scoreboard has fewer than two valid independent seats")
+	}
+	minimum, minimumErr := strconv.ParseFloat(strings.TrimSpace(scoreboard.Metadata["minimumAverage"]), 64)
+	if minimumErr != nil || minimum < 0 || minimum > 10 {
+		return review, fmt.Errorf("slide jury scoreboard has no valid minimum average")
+	}
+	review = packagingStudioQualityGateReview{
+		Verdict: stageVerdict, DeckID: deckID, DeckVersion: version,
+		DeckDigest: digest, JuryID: juryID, MinimumAverage: minimum,
+	}
+	blockingPages, pagesErr := slideJuryPageListFromMetadata(scoreboard.Metadata["blockingPages"])
+	if pagesErr != nil {
+		return packagingStudioQualityGateReview{}, pagesErr
+	}
+	if stageVerdict == "ready" {
+		if len(blockingPages) != 0 || strings.TrimSpace(scoreboard.Metadata["repairFixes"]) != "[]" {
+			return packagingStudioQualityGateReview{}, fmt.Errorf("ready scoreboard carries blocking pages or repair fixes")
+		}
+		return review, nil
+	}
+	repairs, repairsErr := decodeSlideJuryRepairs(scoreboard.Metadata["repairFixes"], blockingPages)
+	if repairsErr != nil {
+		return packagingStudioQualityGateReview{}, repairsErr
+	}
+	review.Repairs = repairs
+	return review, nil
+}
+
+func slideJuryPageListFromMetadata(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	pages := make([]int, 0, len(parts))
+	for _, part := range parts {
+		page, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || page < 1 || slices.Contains(pages, page) {
+			return nil, fmt.Errorf("slide jury scoreboard has invalid blocking pages")
+		}
+		pages = append(pages, page)
+	}
+	slices.Sort(pages)
+	return pages, nil
+}
+
+func decodeSlideJuryRepairs(raw string, blockingPages []int) ([]slideJuryRepair, error) {
+	var repairs []slideJuryRepair
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &repairs); err != nil || len(repairs) == 0 {
+		return nil, fmt.Errorf("needs_changes scoreboard has no structured repair fixes")
+	}
+	if len(repairs) != len(blockingPages) {
+		return nil, fmt.Errorf("slide jury repair pages do not match the blocking pages")
+	}
+	total := 0
+	seenPages := map[int]bool{}
+	for _, repair := range repairs {
+		if repair.Page < 1 || seenPages[repair.Page] || !slices.Contains(blockingPages, repair.Page) || len(repair.Fixes) == 0 {
+			return nil, fmt.Errorf("slide jury repair pages do not match the blocking pages")
+		}
+		seenPages[repair.Page] = true
+		seenFixes := map[string]bool{}
+		for _, fix := range repair.Fixes {
+			fix = strings.TrimSpace(fix)
+			if fix == "" || strings.EqualFold(fix, "KEEP") || len(fix) > slideJuryRepairFixMaxChars || seenFixes[fix] {
+				return nil, fmt.Errorf("slide jury repair fixes are empty, duplicated, oversized, or non-executable")
+			}
+			seenFixes[fix] = true
+			total++
+		}
+	}
+	if total == 0 || total > slideJuryRepairFixMaxCount {
+		return nil, fmt.Errorf("slide jury repair fixes exceed the bounded repair budget")
+	}
+	slices.SortFunc(repairs, func(a, b slideJuryRepair) int { return a.Page - b.Page })
+	return repairs, nil
+}
+
+func packagingStudioReviewedDeckForShip(app *kanbanBoardApp, plan *goalPlan, parentID string) (meetingMemoryEntry, packagingStudioQualityGateReview, error) {
+	var review packagingStudioQualityGateReview
+	if app == nil || plan == nil {
+		return meetingMemoryEntry{}, review, fmt.Errorf("the final presentation compile has no app/plan to read")
+	}
+	quality := plan.subtaskByID("quality_gate")
+	if quality == nil || quality.Status != subtaskComplete || strings.TrimSpace(quality.ArtifactID) == "" {
+		return meetingMemoryEntry{}, review, fmt.Errorf("the presentation quality gate is missing or incomplete")
+	}
+	record, ok := app.osArtifactByID(quality.ArtifactID)
+	if !ok || record.Metadata["processStage"] != "quality_gate" || strings.TrimSpace(record.Metadata["goalParentId"]) != strings.TrimSpace(parentID) {
+		return meetingMemoryEntry{}, review, fmt.Errorf("the presentation quality gate record is missing or belongs to a different run")
+	}
+	review.DeckID = strings.TrimSpace(record.Metadata["reviewedDeckArtifactId"])
+	review.DeckVersion, _ = strconv.Atoi(strings.TrimSpace(record.Metadata["reviewedDeckArtifactVersion"]))
+	review.DeckDigest = strings.TrimSpace(record.Metadata["reviewedDeckContentDigest"])
+	review.JuryID = strings.TrimSpace(record.Metadata["slideJuryArtifactId"])
+	if review.DeckID == "" || review.DeckVersion < 1 || review.DeckDigest == "" || review.JuryID == "" {
+		return meetingMemoryEntry{}, packagingStudioQualityGateReview{}, fmt.Errorf("the presentation quality gate has no exact reviewed candidate identity")
+	}
+	currentReview, err := resolvePackagingStudioQualityGateReview(app, plan, parentID)
+	if err != nil || currentReview.Verdict != "ready" || currentReview.DeckID != review.DeckID || currentReview.DeckVersion != review.DeckVersion || currentReview.DeckDigest != review.DeckDigest || currentReview.JuryID != review.JuryID {
+		return meetingMemoryEntry{}, packagingStudioQualityGateReview{}, fmt.Errorf("the rendered jury binding changed after quality approval; run rendered review again")
+	}
+	deck, ok := app.osArtifactByID(review.DeckID)
+	if !ok || deck.Metadata["artifactContract"] != packagingStudioDeckContract || strings.TrimSpace(deck.Metadata["goalId"]) != strings.TrimSpace(parentID) || artifactVersion(deck) != review.DeckVersion || artifactCapabilityDigest(deck) != review.DeckDigest {
+		return meetingMemoryEntry{}, packagingStudioQualityGateReview{}, fmt.Errorf("the candidate presentation changed after quality approval; run rendered review again")
+	}
+	return deck, review, nil
+}
+
 // --- The SLIDE JURY stage -----------------------------------------------------
 
 // compilePackagingStudioSlideJury is the slide_jury stage's ProcessCompileFunc
@@ -1159,6 +1432,10 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 		"reviewVerdict":       verdict,
 		"blockingPages":       blockingPages,
 		"minimumAverage":      strings.TrimSpace(jury.Metadata["minimumAverage"]),
+		"parsedSeats":         strings.TrimSpace(jury.Metadata["parsedSeats"]),
+		"repairFixes":         strings.TrimSpace(jury.Metadata["repairFixes"]),
+		"deckArtifactVersion": strings.TrimSpace(jury.Metadata["deckArtifactVersion"]),
+		"deckContentDigest":   strings.TrimSpace(jury.Metadata["deckContentDigest"]),
 	}, nil
 }
 
@@ -1608,8 +1885,12 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 			}
 			var err error
 			if spec.contract == packagingStudioDeckContract {
-				header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(existing))
-				artifact, _, err = app.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, existing.ID, existing.Metadata["title"], body, createdBy, metadata)
+				header, foundHeader := app.memory.artifactAuthorizationHeaderByID(existing.ID)
+				if !foundHeader {
+					err = fmt.Errorf("artifact not found")
+				} else {
+					artifact, _, err = app.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, existing.ID, existing.Metadata["title"], body, createdBy, metadata)
+				}
 			} else {
 				artifact, _, err = app.updateOSArtifactWithMetadata(existing.ID, "", body, createdBy, metadata)
 			}

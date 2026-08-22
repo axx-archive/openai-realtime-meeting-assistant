@@ -235,10 +235,14 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 
 	case conversationWorkRegistryTool:
 		if process, ok := processByID(work.ToolID); ok && !process.Hidden {
+			workLabel := ""
+			if process.ID == documentReportProcessID && scoutInsightsReportRequestDetected(userMessage.Text) {
+				workLabel = "Insights & Opportunities report"
+			}
 			launched, err = app.launchGoalThread(goalLaunchSpec{
 				Objective: work.Objective, CreatedBy: user.Name, Authority: process.Authority,
 				PackageID: work.PackageID, ToolTemplate: process.ID, ContextRefs: work.ContextRefs,
-				Origin: origin,
+				WorkLabel: workLabel, Origin: origin,
 			})
 			label = process.Title
 			break
@@ -283,6 +287,12 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		})
 	}
 	label = conversationWorkVisibleLabel(work, label)
+	// The launch objective may be source-expanded before this point. Preserve the
+	// named report's concise product label from the exact initiating message,
+	// while generic document runs keep the broader "Document" label.
+	if work.Kind == conversationWorkRegistryTool && work.ToolID == documentReportProcessID && scoutInsightsReportRequestDetected(userMessage.Text) {
+		label = "Insights & Opportunities report"
+	}
 
 	now := time.Now().UTC()
 	assistantMessage := scoutChatMessageRecord{
@@ -340,6 +350,12 @@ func conversationWorkVisibleLabel(work conversationWorkDecision, fallback string
 	switch strings.TrimSpace(work.ToolID) {
 	case packagingStudioProcessID:
 		return "Presentation"
+	case documentReportProcessID:
+		lower := strings.ToLower(work.Objective)
+		if strings.Contains(lower, "insights") && strings.Contains(lower, "opportunit") {
+			return "Insights & Opportunities report"
+		}
+		return "Document"
 	case "deck_outline":
 		return "Presentation outline"
 	case ventureWorkbookToolID:

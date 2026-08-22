@@ -69,8 +69,10 @@ type Props = {
   onSaveWorkArtifact: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact: (message: ScoutMessage) => void;
+  onRetryGoal: (message: ScoutMessage) => void;
   savingWorkID?: string | null;
   regeneratingWorkID?: string | null;
+  retryingGoalID?: string | null;
   savedWorkIDs: ReadonlySet<string>;
   workDriveSaveAvailability: 'checking' | 'available' | 'unavailable';
   actionOverlay?: React.ReactNode;
@@ -115,8 +117,10 @@ export function ThreadDetailSheet({
   onSaveWorkArtifact,
   onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
+  onRetryGoal,
   savingWorkID,
   regeneratingWorkID,
+  retryingGoalID,
   savedWorkIDs,
   workDriveSaveAvailability,
   actionOverlay,
@@ -343,8 +347,10 @@ export function ThreadDetailSheet({
                       onSaveWorkArtifact={onSaveWorkArtifact}
                       onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}
                       onRegenerateWorkArtifact={onRegenerateWorkArtifact}
+                      onRetryGoal={onRetryGoal}
                       savingWork={savingWorkID === String(message.id)}
                       regeneratingWork={regeneratingWorkID === String(message.id)}
+                      retryingGoal={retryingGoalID === String(message.id)}
                       workSaved={savedWorkIDs.has(String(message.id))}
                       workDriveSaveAvailability={workDriveSaveAvailability}
                     />

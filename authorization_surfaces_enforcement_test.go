@@ -388,9 +388,12 @@ func TestGoalFollowUpResponseUsesExactPersistedSnapshot(t *testing.T) {
 	previousStart := startGoalFeedbackResumeAsync
 	startGoalFeedbackResumeAsync = func(func()) {}
 	defer func() { startGoalFeedbackResumeAsync = previousStart }()
+	var exactPersisted meetingMemoryEntry
+	var exactPersistedFound bool
 	previousProbe := goalFeedbackAfterPersistProbe
 	goalFeedbackAfterPersistProbe = func() {
 		goalFeedbackAfterPersistProbe = nil
+		exactPersisted, exactPersistedFound = kanbanApp.osArtifactByID(parent.ID)
 		_, _, _ = kanbanApp.updateOSArtifactWithMetadata(parent.ID, "replacement title", "NEW PRIVATE BODY MUST NOT LEAK", "other", map[string]string{"visibility": "private", "ownerEmail": "tim@shareability.com"})
 	}
 	defer func() { goalFeedbackAfterPersistProbe = previousProbe }()
@@ -404,7 +407,9 @@ func TestGoalFollowUpResponseUsesExactPersistedSnapshot(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Artifact.Text != "authorized parent body" || payload.Artifact.Metadata["visibility"] != "organization" || strings.Contains(response.Body.String(), "NEW PRIVATE BODY MUST NOT LEAK") {
+	wantSnapshot, _ := json.Marshal(exactPersisted)
+	gotSnapshot, _ := json.Marshal(payload.Artifact)
+	if !exactPersistedFound || string(gotSnapshot) != string(wantSnapshot) || payload.Artifact.Metadata["visibility"] != "organization" || strings.Contains(response.Body.String(), "NEW PRIVATE BODY MUST NOT LEAK") {
 		t.Fatalf("response refetched concurrent private revision: %+v body=%s", payload.Artifact, response.Body.String())
 	}
 	current, _ := kanbanApp.osArtifactByID(parent.ID)

@@ -17,6 +17,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { api } from '../api/client';
+import {
+  artifactStudioIntent,
+  artifactStudioKind,
+  artifactStudioPath,
+} from '../artifacts/studioRoutes';
 import { useAuth } from '../auth/AuthContext';
 import { FilePreviewModal } from '../components/FilePreviewModal';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
@@ -584,10 +589,30 @@ export function FilesScreen({ navigation, route }: Props) {
           try {
             const response = await api.artifact(sessionToken, file.artifactId);
             const artifact = response.artifacts[0];
+            const title = String(artifact?.metadata?.title ?? file.name).trim() || file.name;
+            const studioKind = artifactStudioKind(
+              artifact?.metadata?.type ?? artifact?.metadata?.artifactType,
+            );
+            if (studioKind) {
+              const access = await api.artifactStudioAccess(
+                sessionToken,
+                file.artifactId,
+                studioKind,
+              );
+              navigation.navigate('OSWeb', {
+                path: artifactStudioPath(
+                  file.artifactId,
+                  studioKind,
+                  artifactStudioIntent(access.canWrite),
+                ),
+                title,
+              });
+              return;
+            }
             const text = String(artifact?.text ?? '').trim();
             if (!text) throw new Error('The completed deliverable is not available yet.');
             setArtifactPreview({
-              title: String(artifact?.metadata?.title ?? file.name).trim() || file.name,
+              title,
               text,
             });
           } catch (error) {
@@ -618,7 +643,7 @@ export function FilesScreen({ navigation, route }: Props) {
         }
       })();
     },
-    [busy, sessionToken],
+    [busy, navigation, sessionToken],
   );
 
   useEffect(() => {

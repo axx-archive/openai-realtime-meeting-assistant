@@ -78,6 +78,9 @@ func TestNarrativeMaintainerCreatesUpdatesAndExpiresDossiers(t *testing.T) {
 	var firstInput string
 	entry := runNarrativeMaintainerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		firstInput = request.Input
+		if request.MaxOutputTokens != narrativeMaintainerMaxOutputTokens || request.MaxOutputTokens < 12000 {
+			t.Fatalf("output budget=%d, want production truncation-safe %d", request.MaxOutputTokens, narrativeMaintainerMaxOutputTokens)
+		}
 		return fmt.Sprintf(`{"narratives":[{"slug":"Samsung TV Plus","title":"Samsung TV Plus","status":"Pitch delivered, awaiting response","body":%q}]}`, dossierV1), nil
 	})
 

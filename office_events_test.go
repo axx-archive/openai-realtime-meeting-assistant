@@ -399,6 +399,7 @@ func TestIndexUnifiedPushChannelConsumer(t *testing.T) {
 		"const osEventsRefetchDebounceMs = 500",
 		"osEventsPackagesTimer = setTimeout(",
 		"scheduleArtifactProgressRefresh(event.ref)",
+		"if (artifactProgressRefreshTimer) {\n          return\n        }",
 		// every kind is routed
 		"case 'artifact_completed':",
 		"case 'artifact_progress':",
@@ -411,5 +412,17 @@ func TestIndexUnifiedPushChannelConsumer(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing unified push channel consumer marker %q", want)
 		}
+	}
+	progressStart := strings.Index(html, "function scheduleArtifactProgressRefresh(ref)")
+	if progressStart < 0 {
+		t.Fatal("artifact progress refresh function missing")
+	}
+	progressEnd := strings.Index(html[progressStart:], "function osEventsDispatchHandlers(event)")
+	if progressEnd < 0 {
+		t.Fatal("artifact progress refresh function boundary missing")
+	}
+	progressBody := html[progressStart : progressStart+progressEnd]
+	if strings.Contains(progressBody, "clearTimeout(artifactProgressRefreshTimer)") {
+		t.Fatal("artifact progress refresh must be bounded from the first event; a trailing debounce can starve the parent card during continuous child work")
 	}
 }

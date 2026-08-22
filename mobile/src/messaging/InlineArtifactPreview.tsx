@@ -25,6 +25,7 @@ type Props = {
   text: string;
   agentName?: string;
   loading?: boolean;
+  needsAttention?: boolean;
   artifactId?: string;
   sessionToken?: string;
   /** Direct HTML content for live html_deck path (bypasses API fetch) */
@@ -65,6 +66,7 @@ export function InlineArtifactPreview({
   text,
   agentName = 'Scout',
   loading = false,
+  needsAttention = false,
   artifactId,
   sessionToken,
   htmlContent,
@@ -301,6 +303,12 @@ export function InlineArtifactPreview({
             <SymbolView name="chevron.right" size={15} tintColor={colors.onAccent} />
           </Pressable>
         </View>
+        {needsAttention ? (
+          <View accessibilityRole="summary" style={styles.deckDraftBanner}>
+            <SymbolView name="exclamationmark.triangle.fill" size={12} tintColor={colors.emberText} />
+            <Text style={styles.deckDraftText}>Draft · needs attention</Text>
+          </View>
+        ) : null}
         {/* Floating actions over the slide */}
         <View style={styles.deckOverlayActions}>
           {onEdit ? (
@@ -344,7 +352,7 @@ export function InlineArtifactPreview({
             <SymbolView name={kindIcon[kind] as any} size={12} tintColor={colors.emberText} />
             <Text style={styles.kindText}>{kindLabel[kind]}</Text>
           </View>
-          <Text style={styles.byline}>{agentName} · delivered</Text>
+          <Text style={styles.byline}>{agentName} · {needsAttention ? 'draft · needs attention' : 'delivered'}</Text>
         </View>
       </View>
 
@@ -387,7 +395,30 @@ export function InlineArtifactPreview({
         </Pressable>
       ) : null}
 
-      {onExpand ? (
+      {kind === 'document' && onEdit ? (
+        <View style={styles.documentActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Edit document"
+            onPress={onEdit}
+            style={({ pressed }) => [styles.documentEditButton, pressed && styles.actionPressed]}
+          >
+            <SymbolView name="pencil" size={12} tintColor={colors.onAccent} />
+            <Text style={styles.documentEditText}>Edit</Text>
+          </Pressable>
+          {onExpand ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open in full screen"
+              onPress={onExpand}
+              style={({ pressed }) => [styles.documentFullscreenButton, pressed && styles.actionPressed]}
+            >
+              <SymbolView name="arrow.up.left.and.arrow.down.right" size={12} tintColor={colors.text2} />
+              <Text style={styles.fullscreenText}>Full screen</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : onExpand ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open in full screen"
@@ -445,7 +476,7 @@ const styles = StyleSheet.create({
     color: colors.text3,
   },
   deckRetryButton: {
-    minHeight: 36,
+    minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: space[4],
     paddingVertical: space[2],
@@ -472,8 +503,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: space[2],
   },
-  deckActionButton: {
+  deckDraftBanner: {
+    position: 'absolute',
+    left: space[3],
+    top: space[3],
     minHeight: 36,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+    backgroundColor: colors.surface1,
+  },
+  deckDraftText: { ...type.captionMedium, color: colors.emberText },
+  deckActionButton: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -487,7 +531,7 @@ const styles = StyleSheet.create({
   },
   deckActionPressed: {
     opacity: 0.8,
-    transform: [{ scale: 0.98 }],
+    transform: [{ scale: 0.96 }],
   },
   deckActionText: {
     ...type.captionMedium,
@@ -537,6 +581,38 @@ const styles = StyleSheet.create({
     padding: space[4],
     gap: space[3],
   },
+  documentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
+  documentEditButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+    backgroundColor: colors.accent,
+  },
+  documentEditText: {
+    ...type.captionMedium,
+    color: colors.onAccent,
+  },
+  documentFullscreenButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface2,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -571,7 +647,7 @@ const styles = StyleSheet.create({
   },
   actionPressed: {
     opacity: 0.76,
-    transform: [{ scale: 0.98 }],
+    transform: [{ scale: 0.96 }],
   },
   title: {
     ...type.title2,
@@ -599,7 +675,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   expandButton: {
-    minHeight: 36,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -620,7 +696,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: space[3],
     right: space[3],
-    minHeight: 32,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,

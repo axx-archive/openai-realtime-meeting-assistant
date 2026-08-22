@@ -1073,7 +1073,7 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		if _, sourceErr := app.agentThreadProviderContext(ctx, thread); sourceErr != nil {
 			err = sourceErr
 		} else {
-			err = validateAgentThreadTerminalArtifact(thread, output)
+			err = validateAgentThreadTerminalArtifactWithApp(app, thread, output)
 		}
 	}
 
@@ -1098,7 +1098,9 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	// no runner/model metadata may self-assert this durable control class.
 	stampAgentThreadFailureClass(metadata, err)
 	if err == nil {
-		for key, value := range researchArtifactEvidenceMetadata(thread, output) {
+		// The terminal write replaces the running scaffold, so its accepted
+		// evidence body is the next immutable artifact revision.
+		for key, value := range researchArtifactEvidenceMetadataAtVersion(thread, output, artifactVersion(thread.Artifact)+1) {
 			metadata[key] = value
 		}
 	}
@@ -1238,6 +1240,13 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 // never delivers twice.
 func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, agentThreadID string) {
 	if app == nil || app.memory == nil || strings.TrimSpace(artifact.ID) == "" {
+		return
+	}
+	// Goal children are process evidence, never independent channel results.
+	// Their parent card owns progress and the exact terminal Result* handoff;
+	// posting each child here recreates the stage-card flood and can expose an
+	// internal writer artifact before the parent review/gate has accepted it.
+	if strings.TrimSpace(artifact.Metadata["goalParentId"]) != "" {
 		return
 	}
 	originKind := strings.TrimSpace(artifact.Metadata["originKind"])
@@ -1955,6 +1964,7 @@ type durableOpenAITextRequest struct {
 	ServiceTier     string               `json:"serviceTier,omitempty"`
 	JSONSchema      *openAIJSONSchema    `json:"jsonSchema,omitempty"`
 	EnableWebSearch bool                 `json:"enableWebSearch,omitempty"`
+	MaxToolCalls    int                  `json:"maxToolCalls,omitempty"`
 	LongRunning     bool                 `json:"longRunning,omitempty"`
 }
 
@@ -2042,19 +2052,19 @@ func durableOpenAIRequest(request openAITextRequest) durableOpenAITextRequest {
 		Model: request.Model, Instructions: request.Instructions, Input: request.Input, IdempotencyKey: request.IdempotencyKey,
 		Attachments: request.Attachments, ReasoningEffort: request.ReasoningEffort, Verbosity: request.Verbosity,
 		MaxOutputTokens: request.MaxOutputTokens, Seat: request.Seat, Workflow: request.Workflow,
-		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch, LongRunning: request.LongRunning,
+		ServiceTier: request.ServiceTier, JSONSchema: request.JSONSchema, EnableWebSearch: request.EnableWebSearch, MaxToolCalls: request.MaxToolCalls, LongRunning: request.LongRunning,
 	}
 }
 
-func (snapshot durableOpenAITextRequest) request(thread scoutAgentThread) openAITextRequest {
+func (snapshot durableOpenAITextRequest) request(app *kanbanBoardApp, thread scoutAgentThread) openAITextRequest {
 	request := openAITextRequest{
 		Model: snapshot.Model, Instructions: snapshot.Instructions, Input: snapshot.Input, IdempotencyKey: snapshot.IdempotencyKey,
 		Attachments: snapshot.Attachments, ReasoningEffort: snapshot.ReasoningEffort, Verbosity: snapshot.Verbosity,
 		MaxOutputTokens: snapshot.MaxOutputTokens, Seat: snapshot.Seat, Workflow: snapshot.Workflow,
-		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch, LongRunning: snapshot.LongRunning,
-		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
+		ServiceTier: snapshot.ServiceTier, JSONSchema: snapshot.JSONSchema, EnableWebSearch: snapshot.EnableWebSearch, MaxToolCalls: snapshot.MaxToolCalls, LongRunning: snapshot.LongRunning,
+		ValidateOutput: func(text string) error { return validateAgentThreadTerminalArtifactWithApp(app, thread, text) },
 	}
-	return configureExternalEvidenceV2Request(thread, request)
+	return configureExternalEvidenceV2Request(app, thread, request)
 }
 
 func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread, job AgentJob, now time.Time) openAITextRequest {
@@ -2075,20 +2085,36 @@ func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread
 		MaxOutputTokens: agentThreadMaxOutputTokensForThread(thread),
 		EnableWebSearch: liveWebSearch,
 		LongRunning:     agentThreadUsesGroundedDeliverableContract(thread),
-		ValidateOutput:  func(text string) error { return validateAgentThreadTerminalArtifact(thread, text) },
+		ValidateOutput:  func(text string) error { return validateAgentThreadTerminalArtifactWithApp(app, thread, text) },
 	}
-	return configureExternalEvidenceV2Request(thread, request)
+	return configureExternalEvidenceV2Request(app, thread, request)
 }
 
-func configureExternalEvidenceV2Request(thread scoutAgentThread, request openAITextRequest) openAITextRequest {
+func configureExternalEvidenceV2Request(app *kanbanBoardApp, thread scoutAgentThread, request openAITextRequest) openAITextRequest {
+	if agentThreadUsesExternalEvidenceEntailmentContract(thread) {
+		request.JSONSchema = externalEvidenceEntailmentJSONSchema()
+		request.NormalizeOutput = func(body string) (string, error) {
+			return normalizeExternalEvidenceEntailmentArtifact(app, thread, body)
+		}
+		request.EnableWebSearch = false
+		request.MaxToolCalls = 0
+		return request
+	}
 	if agentThreadUsesExternalEvidenceV2Contract(thread) {
 		request.JSONSchema = externalEvidenceJSONSchema()
-		request.NormalizeOutput = normalizeExternalEvidenceArtifact
+		request.NormalizeOutput = func(body string) (string, error) {
+			questions, err := authorizedExternalEvidenceResearchQuestionsForThread(app, thread)
+			if err != nil {
+				return "", err
+			}
+			return normalizeExternalEvidenceArtifactWithQuestions(body, questions)
+		}
+		request.MaxToolCalls = externalEvidenceMaxToolCalls
 	}
 	return request
 }
 
-func decodeDurablePublicConversationProviderRequest(thread scoutAgentThread, currentMemory []meetingMemoryEntry) (openAITextRequest, bool, error) {
+func (app *kanbanBoardApp) decodeDurablePublicConversationProviderRequest(thread scoutAgentThread, currentMemory []meetingMemoryEntry) (openAITextRequest, bool, error) {
 	ref := strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey])
 	if ref == "" {
 		return openAITextRequest{}, false, nil
@@ -2111,7 +2137,7 @@ func decodeDurablePublicConversationProviderRequest(thread scoutAgentThread, cur
 	if !samePublicConversationProviderAuthority(snapshot.Authority, currentAuthority) {
 		return openAITextRequest{}, false, fmt.Errorf("public conversation provider authority manifest changed")
 	}
-	return snapshot.Request.request(thread), true, nil
+	return snapshot.Request.request(app, thread), true, nil
 }
 
 // preparePublicConversationProviderRequest freezes every wire-relevant field
@@ -2133,7 +2159,7 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 	}
 	job := app.newAgentJob(refreshed)
 	job.Context = providerContext
-	if _, found, err := decodeDurablePublicConversationProviderRequest(refreshed, providerContext.Memory); err != nil {
+	if _, found, err := app.decodeDurablePublicConversationProviderRequest(refreshed, providerContext.Memory); err != nil {
 		return thread, err
 	} else if found {
 		return refreshed, nil
@@ -2198,7 +2224,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 
 	request := app.buildAgentThreadOpenAIRequest(thread, job, time.Now())
 	if request.IdempotencyKey != "" {
-		frozen, found, snapshotErr := decodeDurablePublicConversationProviderRequest(thread, job.Context.Memory)
+		frozen, found, snapshotErr := app.decodeDurablePublicConversationProviderRequest(thread, job.Context.Memory)
 		if snapshotErr != nil {
 			return "", snapshotErr
 		}
@@ -2290,6 +2316,11 @@ func agentThreadUsesExternalEvidenceContract(thread scoutAgentThread) bool {
 func agentThreadUsesExternalEvidenceV2Contract(thread scoutAgentThread) bool {
 	return agentThreadUsesGroundedDeliverableContract(thread) &&
 		strings.TrimSpace(thread.Artifact.Metadata["outputContract"]) == packagingStudioExternalEvidenceContract
+}
+
+func agentThreadUsesExternalEvidenceEntailmentContract(thread scoutAgentThread) bool {
+	return agentThreadUsesGroundedDeliverableContract(thread) &&
+		strings.TrimSpace(thread.Artifact.Metadata["outputContract"]) == packagingStudioEntailmentContract
 }
 
 const (
@@ -2412,6 +2443,9 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 	// Only a parent/subtask-bound server contract can select this override.
 	if agentThreadUsesExternalEvidenceV2Contract(thread) {
 		return strings.TrimSpace(externalEvidenceV2ContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
+	}
+	if agentThreadUsesExternalEvidenceEntailmentContract(thread) {
+		return strings.TrimSpace(externalEvidenceEntailmentContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
 	}
 	if agentThreadUsesExternalEvidenceContract(thread) {
 		return strings.TrimSpace(externalEvidenceContractInstructions() + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)

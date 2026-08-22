@@ -952,6 +952,35 @@ func TestDeliverArtifactToOriginRoomPostsCardOnce(t *testing.T) {
 	}
 }
 
+func TestDeliverArtifactToOriginSuppressesGoalChildrenFromChannel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "quiet goal channel", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	artifact, _, err := app.createOSArtifactWithMetadata("artifacts", "internal story stage", "# Internal story\n\nNot yet reviewed.", "Scout", map[string]string{
+		"source": "scout_thread", "status": "complete", "threadStatus": "complete",
+		"goalParentId": "goal-quiet-1", "goalSubtaskId": "story", "goalDeliverable": "true",
+		"originKind": agentThreadOriginChannel, "originId": channel.ID,
+	})
+	if err != nil {
+		t.Fatalf("create goal child: %v", err)
+	}
+
+	app.deliverArtifactToOrigin(artifact, "agent-thread-internal-story")
+	saved, _, err := app.scoutChatThreadByID(channel.OwnerEmail, channel.ID)
+	if err != nil {
+		t.Fatalf("read channel: %v", err)
+	}
+	if len(saved.Messages) != 0 {
+		t.Fatalf("internal goal child emitted %d channel messages, want zero", len(saved.Messages))
+	}
+	stored, _ := app.osArtifactByID(artifact.ID)
+	if stored.Metadata["deliveredAt"] != "" {
+		t.Fatalf("internal goal child stamped deliveredAt=%q", stored.Metadata["deliveredAt"])
+	}
+}
+
 func TestRoomAgentThreadStatusProjectsOneIdempotentRevisionPerState(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	meetingID := app.memory.ensureMeetingID(officeRoomID)

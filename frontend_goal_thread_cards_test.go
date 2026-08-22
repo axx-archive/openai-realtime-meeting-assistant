@@ -90,6 +90,53 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 	}
 }
 
+func TestIndexCompletedMarkdownResultOwnsOneBoundedEditableFeedCard(t *testing.T) {
+	html := readIndexForGoalThreadCards(t)
+	router := functionBody(html, "function scoutChatMessageRecordNode(message)")
+	documentResult := functionBody(html, "function scoutMarkdownDocumentRefRecordNode(message, artifact)")
+	stage := functionBody(html, "function scoutStageArtifactNode(message)")
+	if router == "" || documentResult == "" || stage == "" {
+		t.Fatal("could not extract concrete document feed functions")
+	}
+	for _, want := range []string{
+		"resultDocument",
+		"scoutMarkdownDocumentRefRecordNode(message, resultArtifact)",
+		"metadata?.processStage || run.artifact?.metadata?.goalSubtaskId",
+	} {
+		if !strings.Contains(router, want) {
+			t.Errorf("document result router missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"message?.thread?.resultArtifactId",
+		"artifactIsMarkdownDocument(artifact, declaredType)",
+		"scout-chat-document-result",
+		"renderArtifactRead(preview, artifact)",
+		"openArtifactStage(resultId, title, { canEdit: message?.thread?.resultCanEdit === true })",
+		"openDocumentStudio(resultId, title, { entry: artifact })",
+		"if (message?.thread?.resultCanEdit === true) actions.appendChild(edit)",
+		"preview.setAttribute('inert', '')",
+	} {
+		if !strings.Contains(documentResult, want) {
+			t.Errorf("rich document result function missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"internalProcessChild",
+		"return document.createDocumentFragment()",
+	} {
+		if !strings.Contains(stage, want) {
+			t.Errorf("process-child suppression missing %q", want)
+		}
+	}
+	if !strings.Contains(html, ".scout-chat-document-result__preview.artifact-read") || !strings.Contains(html, "max-height: 330px") {
+		t.Error("document result preview must stay visibly bounded in the channel")
+	}
+	if strings.Contains(html, "ready to crop, resize, and layer") {
+		t.Error("Scout still promises crop controls the editor does not provide")
+	}
+}
+
 // Generic workstreams also carry goalStatus for lifecycle reporting. That
 // field must not classify research/design work as a goal or desktop will hide
 // the report card behind the compact goal transcript path.

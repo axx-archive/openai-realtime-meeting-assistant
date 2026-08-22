@@ -19,25 +19,30 @@ const (
 // that selected it. routeVerified remains transient on goalPlan, so decoding a
 // receipt never makes it trusted without re-reading the source conversation.
 type goalRouteReceipt struct {
-	Contract              string `json:"contract"`
-	Requester             string `json:"requester"`
-	OriginKind            string `json:"originKind"`
-	OriginID              string `json:"originId"`
-	SourceMessageID       string `json:"sourceMessageId"`
-	SourceMessageDigest   string `json:"sourceMessageDigest"`
-	SourceWindowDigest    string `json:"sourceWindowDigest"`
-	OperationID           string `json:"operationId"`
-	OperationBodyDigest   string `json:"operationBodyDigest"`
-	ApprovedProposalID    string `json:"approvedProposalId,omitempty"`
-	ApprovedEffectClass   string `json:"approvedEffectClass,omitempty"`
-	ObjectiveDigest       string `json:"objectiveDigest"`
-	ToolTemplate          string `json:"toolTemplate,omitempty"`
-	ProcessID             string `json:"processId,omitempty"`
-	Authority             string `json:"authority"`
-	PackageID             string `json:"packageId,omitempty"`
-	ContextRefsDigest     string `json:"contextRefsDigest,omitempty"`
-	SourceSelectionDigest string `json:"sourceSelectionDigest,omitempty"`
-	Digest                string `json:"digest"`
+	Contract                      string `json:"contract"`
+	Requester                     string `json:"requester"`
+	OriginKind                    string `json:"originKind"`
+	OriginID                      string `json:"originId"`
+	SourceMessageID               string `json:"sourceMessageId"`
+	SourceMessageDigest           string `json:"sourceMessageDigest"`
+	SourceWindowDigest            string `json:"sourceWindowDigest"`
+	OperationID                   string `json:"operationId"`
+	OperationBodyDigest           string `json:"operationBodyDigest"`
+	ApprovedProposalID            string `json:"approvedProposalId,omitempty"`
+	ApprovedEffectClass           string `json:"approvedEffectClass,omitempty"`
+	ObjectiveDigest               string `json:"objectiveDigest"`
+	ToolTemplate                  string `json:"toolTemplate,omitempty"`
+	ProcessID                     string `json:"processId,omitempty"`
+	ProcessVersion                int    `json:"processVersion,omitempty"`
+	ProcessDigest                 string `json:"processDigest,omitempty"`
+	ProcessImplementationRevision string `json:"processImplementationRevision,omitempty"`
+	ResultStageID                 string `json:"resultStageId,omitempty"`
+	ResultOutputContract          string `json:"resultOutputContract,omitempty"`
+	Authority                     string `json:"authority"`
+	PackageID                     string `json:"packageId,omitempty"`
+	ContextRefsDigest             string `json:"contextRefsDigest,omitempty"`
+	SourceSelectionDigest         string `json:"sourceSelectionDigest,omitempty"`
+	Digest                        string `json:"digest"`
 }
 
 func (receipt goalRouteReceipt) contractDigest() (string, error) {
@@ -76,23 +81,28 @@ func (app *kanbanBoardApp) mintGoalRouteReceipt(plan *goalPlan, origin map[strin
 		return goalRouteReceipt{}, fmt.Errorf("server-owned goal route is unavailable")
 	}
 	receipt := goalRouteReceipt{
-		Contract:            goalRouteContractConversationV1,
-		Requester:           normalizeAccountEmail(firstNonEmptyString(origin["requestedBy"], plan.RequestedBy)),
-		OriginKind:          strings.TrimSpace(origin["originKind"]),
-		OriginID:            strings.TrimSpace(origin["originId"]),
-		SourceMessageID:     strings.TrimSpace(origin["sourceMessageId"]),
-		SourceMessageDigest: strings.TrimSpace(origin["sourceMessageDigest"]),
-		SourceWindowDigest:  strings.TrimSpace(origin["sourceWindowDigest"]),
-		OperationID:         strings.TrimSpace(origin["operationId"]),
-		OperationBodyDigest: strings.TrimSpace(origin["operationBodyDigest"]),
-		ApprovedProposalID:  strings.TrimSpace(origin["approvedProposalId"]),
-		ApprovedEffectClass: strings.TrimSpace(origin["approvedEffectClass"]),
-		ObjectiveDigest:     sha256Hex([]byte(canonicalizeBoardText(plan.Objective))),
-		ToolTemplate:        strings.TrimSpace(plan.ToolTemplate),
-		ProcessID:           strings.TrimSpace(plan.ProcessID),
-		Authority:           normalizeCodexJobAuthority(plan.Authority),
-		PackageID:           strings.TrimSpace(plan.PackageID),
-		ContextRefsDigest:   goalContextRefsDigest(plan.ContextRefs),
+		Contract:                      goalRouteContractConversationV1,
+		Requester:                     normalizeAccountEmail(firstNonEmptyString(origin["requestedBy"], plan.RequestedBy)),
+		OriginKind:                    strings.TrimSpace(origin["originKind"]),
+		OriginID:                      strings.TrimSpace(origin["originId"]),
+		SourceMessageID:               strings.TrimSpace(origin["sourceMessageId"]),
+		SourceMessageDigest:           strings.TrimSpace(origin["sourceMessageDigest"]),
+		SourceWindowDigest:            strings.TrimSpace(origin["sourceWindowDigest"]),
+		OperationID:                   strings.TrimSpace(origin["operationId"]),
+		OperationBodyDigest:           strings.TrimSpace(origin["operationBodyDigest"]),
+		ApprovedProposalID:            strings.TrimSpace(origin["approvedProposalId"]),
+		ApprovedEffectClass:           strings.TrimSpace(origin["approvedEffectClass"]),
+		ObjectiveDigest:               sha256Hex([]byte(canonicalizeBoardText(plan.Objective))),
+		ToolTemplate:                  strings.TrimSpace(plan.ToolTemplate),
+		ProcessID:                     strings.TrimSpace(plan.ProcessID),
+		ProcessVersion:                plan.ProcessVersion,
+		ProcessDigest:                 strings.TrimSpace(plan.ProcessDigest),
+		ProcessImplementationRevision: strings.TrimSpace(plan.ProcessImplementationRevision),
+		ResultStageID:                 strings.TrimSpace(plan.ResultStageID),
+		ResultOutputContract:          strings.TrimSpace(plan.ResultOutputContract),
+		Authority:                     normalizeCodexJobAuthority(plan.Authority),
+		PackageID:                     strings.TrimSpace(plan.PackageID),
+		ContextRefsDigest:             goalContextRefsDigest(plan.ContextRefs),
 	}
 	selection, selectionErr := app.goalRouteSourceSelection(receipt)
 	if selectionErr != nil {
@@ -129,6 +139,9 @@ func (e *goalEngine) prepareGoalRoute(plan *goalPlan, parentID string) error {
 		if oldDigestErr != nil || legacy.Digest != oldDigest ||
 			legacy.ObjectiveDigest != sha256Hex([]byte(canonicalizeBoardText(plan.Objective))) ||
 			legacy.ToolTemplate != strings.TrimSpace(plan.ToolTemplate) || legacy.ProcessID != strings.TrimSpace(plan.ProcessID) ||
+			legacy.ProcessVersion != plan.ProcessVersion || legacy.ProcessDigest != strings.TrimSpace(plan.ProcessDigest) ||
+			legacy.ProcessImplementationRevision != strings.TrimSpace(plan.ProcessImplementationRevision) ||
+			legacy.ResultStageID != strings.TrimSpace(plan.ResultStageID) || legacy.ResultOutputContract != strings.TrimSpace(plan.ResultOutputContract) ||
 			legacy.Authority != normalizeCodexJobAuthority(plan.Authority) || legacy.PackageID != strings.TrimSpace(plan.PackageID) ||
 			legacy.ContextRefsDigest != goalContextRefsDigest(plan.ContextRefs) || legacy.Requester != normalizeAccountEmail(goalPlanRequestedBy(*plan)) {
 			return fmt.Errorf("legacy goal route authentication failed")
@@ -206,8 +219,20 @@ func (e *goalEngine) prepareGoalRoute(plan *goalPlan, parentID string) error {
 			strings.TrimSpace(metadata["approvedEffectClass"]) != receipt.ApprovedEffectClass {
 			return fmt.Errorf("goal route parent metadata changed")
 		}
+		if strings.TrimSpace(plan.ProcessID) != "" && (strings.TrimSpace(metadata["processId"]) != strings.TrimSpace(plan.ProcessID) ||
+			strings.TrimSpace(metadata["processVersion"]) != strconv.Itoa(plan.ProcessVersion) || strings.TrimSpace(metadata["processDigest"]) != strings.TrimSpace(plan.ProcessDigest) ||
+			strings.TrimSpace(metadata["processImplementationRevision"]) != strings.TrimSpace(plan.ProcessImplementationRevision) ||
+			strings.TrimSpace(metadata["resultStageId"]) != strings.TrimSpace(plan.ResultStageID) || strings.TrimSpace(metadata["resultOutputContract"]) != strings.TrimSpace(plan.ResultOutputContract)) {
+			return fmt.Errorf("goal route parent process identity changed")
+		}
 	}
 	plan.routeVerified = true
+	if strings.TrimSpace(plan.ProcessID) != "" {
+		if _, err := resolvePinnedProcessDefinition(plan); err != nil {
+			plan.routeVerified = false
+			return err
+		}
+	}
 	return nil
 }
 
@@ -219,8 +244,17 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 		!isHexDigest(receipt.SourceMessageDigest) || !isHexDigest(receipt.SourceWindowDigest) || receipt.OperationID == "" || !isHexDigest(receipt.OperationBodyDigest) {
 		return fmt.Errorf("goal route receipt is incomplete")
 	}
+	if strings.TrimSpace(receipt.ProcessID) != "" && (receipt.ProcessVersion < 1 || !isHexDigest(receipt.ProcessDigest) || strings.TrimSpace(receipt.ProcessImplementationRevision) == "") {
+		return fmt.Errorf("goal route receipt process identity is incomplete; launch a new run")
+	}
+	if strings.TrimSpace(receipt.ProcessID) == "" && (receipt.ProcessVersion != 0 || receipt.ProcessDigest != "" || receipt.ProcessImplementationRevision != "" || receipt.ResultStageID != "" || receipt.ResultOutputContract != "") {
+		return fmt.Errorf("goal route receipt carries process identity without a process")
+	}
 	if receipt.ObjectiveDigest != sha256Hex([]byte(canonicalizeBoardText(plan.Objective))) ||
 		receipt.ToolTemplate != strings.TrimSpace(plan.ToolTemplate) || receipt.ProcessID != strings.TrimSpace(plan.ProcessID) ||
+		receipt.ProcessVersion != plan.ProcessVersion || receipt.ProcessDigest != strings.TrimSpace(plan.ProcessDigest) ||
+		receipt.ProcessImplementationRevision != strings.TrimSpace(plan.ProcessImplementationRevision) ||
+		receipt.ResultStageID != strings.TrimSpace(plan.ResultStageID) || receipt.ResultOutputContract != strings.TrimSpace(plan.ResultOutputContract) ||
 		receipt.Authority != normalizeCodexJobAuthority(plan.Authority) || receipt.PackageID != strings.TrimSpace(plan.PackageID) ||
 		receipt.ContextRefsDigest != goalContextRefsDigest(plan.ContextRefs) ||
 		receipt.Requester != normalizeAccountEmail(goalPlanRequestedBy(*plan)) {
@@ -299,10 +333,17 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 }
 
 type goalRouteSourceSelectionSnapshot struct {
-	Digest         string
-	Context        string
-	AttachmentRefs []string
-	FileProofs     []string
+	Digest                  string
+	Context                 string
+	AttachmentRefs          []string
+	FileProofs              []string
+	InternalEvidenceSources []goalRouteInternalEvidenceSource
+}
+
+type goalRouteInternalEvidenceSource struct {
+	Label string
+	Ref   string
+	Text  string
 }
 
 type goalRouteSourceSelectionMessage struct {
@@ -506,7 +547,37 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	if err != nil {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection is invalid")
 	}
-	return goalRouteSourceSelectionSnapshot{Digest: digest, Context: contextText, AttachmentRefs: canonicalAssistantContextRefs(attachmentRefs), FileProofs: fileProofs}, nil
+	internalSources := make([]goalRouteInternalEvidenceSource, 0, len(manifest)+len(attachmentRefs))
+	seenInternalSources := map[string]bool{}
+	appendInternalSource := func(label, ref, text string) {
+		ref, text = strings.Join(strings.Fields(strings.TrimSpace(ref)), " "), strings.TrimSpace(text)
+		if ref == "" || text == "" || seenInternalSources[ref] {
+			return
+		}
+		seenInternalSources[ref] = true
+		internalSources = append(internalSources, goalRouteInternalEvidenceSource{Label: compactAssistantLine(label), Ref: ref, Text: text})
+	}
+	appendFileSource := func(file goalRouteSourceSelectionFile) {
+		if strings.TrimSpace(file.SourceID) == "" || strings.TrimSpace(file.SourceRevision) == "" || strings.TrimSpace(file.Text) == "" {
+			return
+		}
+		appendInternalSource(firstNonEmptyString(strings.TrimSpace(file.Name), "Authorized file"), fmt.Sprintf("source_file_id=%s revision=%s digest=%s", strings.TrimSpace(file.SourceID), strings.TrimSpace(file.SourceRevision), sha256Hex([]byte(file.Text))), file.Text)
+	}
+	for _, item := range manifest {
+		if strings.TrimSpace(item.Text) != "" {
+			appendInternalSource(firstNonEmptyString(strings.TrimSpace(item.Author), "Coworker")+" ("+strings.TrimSpace(item.Role)+")", fmt.Sprintf("source_message_id=%s digest=%s", strings.TrimSpace(item.ID), sha256Hex([]byte(item.Text))), item.Text)
+		}
+		for _, file := range item.Files {
+			appendFileSource(file)
+		}
+	}
+	for _, bound := range boundFiles {
+		appendFileSource(bound.File)
+	}
+	return goalRouteSourceSelectionSnapshot{
+		Digest: digest, Context: contextText, AttachmentRefs: canonicalAssistantContextRefs(attachmentRefs), FileProofs: fileProofs,
+		InternalEvidenceSources: internalSources,
+	}, nil
 }
 
 func (app *kanbanBoardApp) legacyGoalRouteSelectionMatchesApprovedProposal(receipt goalRouteReceipt, selection goalRouteSourceSelectionSnapshot) bool {

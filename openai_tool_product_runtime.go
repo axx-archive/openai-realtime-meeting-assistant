@@ -1966,7 +1966,7 @@ func (finalizer *openAIToolProductFinalizer) FinalizeOpenAIToolRun(ctx context.C
 		return openAIToolFinalizationCommit{}, errors.New("OpenAI tool final artifact belongs to another run")
 	}
 	if existing := strings.TrimSpace(artifact.Metadata[openAIToolFinalRunDigestMetadataKey]); existing == "" {
-		if err := validateAgentThreadTerminalArtifact(finalizer.backend.job.thread, text); err != nil {
+		if err := validateAgentThreadTerminalArtifactWithApp(finalizer.backend.app, finalizer.backend.job.thread, text); err != nil {
 			return openAIToolFinalizationCommit{}, err
 		}
 		header := artifactAuthorizationHeaderFromEntry(artifact)

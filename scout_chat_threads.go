@@ -225,10 +225,13 @@ type scoutChatThreadRef struct {
 	// checkpoint state; clients must not infer the output from its title or
 	// mode. This explicit projection lets web and native render the same deck
 	// while the parent is still parked at final review.
-	ResultArtifactID   string                      `json:"resultArtifactId,omitempty"`
-	ResultArtifactType string                      `json:"resultArtifactType,omitempty"`
-	ResultTitle        string                      `json:"resultTitle,omitempty"`
-	Checkpoint         *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	ResultArtifactID    string                      `json:"resultArtifactId,omitempty"`
+	ResultArtifactType  string                      `json:"resultArtifactType,omitempty"`
+	ResultTitle         string                      `json:"resultTitle,omitempty"`
+	ResultPreview       string                      `json:"resultPreview,omitempty"`
+	ResultApprovalState string                      `json:"resultApprovalState,omitempty"`
+	ResultCanEdit       bool                        `json:"resultCanEdit,omitempty"`
+	Checkpoint          *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
 }
 
 // scoutChatWorkCheckpointRef is the bounded, display-safe checkpoint carried
@@ -1054,7 +1057,7 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		if !created {
 			status = http.StatusOK
 		}
-		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context())})
 	}
 }
 
@@ -1136,7 +1139,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		marker := lookupThreadReadMarker("", user.Email, threadID)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":                true,
-			"thread":            kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, episodeID),
+			"thread":            kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, episodeID, r.Context()),
 			"readAt":            marker.ReadAt,
 			"lastReadMessageId": marker.LastReadMessageID,
 			"muted":             threadMuted("", user.Email, threadID),
@@ -1201,7 +1204,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		if !created {
 			status = http.StatusOK
 		}
-		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, thread.Riff.ViewedEpisodeID)})
+		writeAuthJSON(w, status, map[string]any{"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, thread.Riff.ViewedEpisodeID, r.Context())})
 		return
 	}
 
@@ -1220,7 +1223,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "refreshed": refreshed, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "refreshed": refreshed, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context())})
 		return
 	}
 
@@ -1292,7 +1295,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response, r.Context()))
 		return
 	}
 
@@ -1307,7 +1310,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response, r.Context()))
 		return
 	}
 
@@ -1329,7 +1332,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusAccepted, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		writeAuthJSON(w, http.StatusAccepted, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response, r.Context()))
 		return
 	}
 
@@ -1461,7 +1464,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(payload.ToolTemplate) != "" {
 			response["clientToolTemplateIgnored"] = true
 		}
-		projected := kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response)
+		projected := kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response, r.Context())
 		if legacyNativeOperationIssued {
 			projected["legacyOperationIdIssued"] = true
 			projected["legacyOperationIdReused"] = legacyNativeOperationReused
@@ -1479,8 +1482,8 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeAuthJSON(w, http.StatusAccepted, map[string]any{
 			"ok":      true,
-			"thread":  kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
-			"message": kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message),
+			"thread":  kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context()),
+			"message": kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message, r.Context()),
 		})
 		return
 	}
@@ -1515,8 +1518,8 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":         true,
 			"reconciled": changed,
-			"thread":     kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
-			"message":    kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message),
+			"thread":     kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context()),
+			"message":    kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message, r.Context()),
 		})
 		return
 	}
@@ -1548,7 +1551,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthJSON(w, status, map[string]any{
 			"ok":       complete,
 			"accepted": true,
-			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context()),
 			"receipt":  projectScoutChatModerationReceipt(receipt),
 		})
 		return
@@ -1587,7 +1590,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthJSON(w, status, map[string]any{
 			"ok":       complete,
 			"accepted": true,
-			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context()),
 			"receipt":  projectScoutChatModerationReceipt(receipt),
 		})
 		return
@@ -1600,7 +1603,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread)})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context())})
 		return
 	}
 
@@ -1619,7 +1622,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
 		return
 	}
 
@@ -1648,7 +1651,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
 		return
 	}
 
@@ -5007,9 +5010,10 @@ func scoutChatTerminalWorkCopy(artifact meetingMemoryEntry, agentThreadID string
 		domains, domainErr := strconv.Atoi(strings.TrimSpace(metadata["researchSourceDomainCount"]))
 		receiptDigest := strings.ToLower(strings.TrimSpace(metadata["researchSourceWindowDigest"]))
 		_, receiptDigestErr := hex.DecodeString(receiptDigest)
-		verified := strings.EqualFold(strings.TrimSpace(metadata["researchQualityGate"]), "passed") &&
+		providerBound := strings.EqualFold(strings.TrimSpace(metadata["researchQualityGate"]), "passed") &&
+			strings.EqualFold(strings.TrimSpace(metadata["researchEvidenceBinding"]), "provider_fetched_urls") &&
 			len(receiptDigest) == 64 && receiptDigest != strings.Repeat("0", 64) && receiptDigestErr == nil
-		if verified && citationErr == nil && domainErr == nil && citations > 0 && citations <= 10000 && domains > 0 && domains <= 10000 {
+		if providerBound && citationErr == nil && domainErr == nil && citations > 0 && citations <= 10000 && domains > 0 && domains <= 10000 {
 			citationNoun := "cited source link"
 			if citations != 1 {
 				citationNoun += "s"
@@ -6893,9 +6897,18 @@ func deliverScoutChatThreadMetadata(thread scoutChatThreadRecord) {
 
 // scoutChatThreadUpdatePayload is the chat_thread event body shared by the
 // public broadcast and the private owner-targeted delivery.
-func (app *kanbanBoardApp) scoutChatThreadUpdatePayload(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) map[string]any {
+func (app *kanbanBoardApp) scoutChatThreadUpdatePayload(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, contexts ...context.Context) map[string]any {
+	var resultIndex *scoutChatResultProjectionIndex
+	if scoutChatThreadRefMayExposeResult(message.Thread) {
+		index := app.scoutChatResultIndex()
+		resultIndex = &index
+	}
+	return app.scoutChatThreadUpdatePayloadWithResultIndex(viewerEmail, thread, message, resultIndex, contexts...)
+}
+
+func (app *kanbanBoardApp) scoutChatThreadUpdatePayloadWithResultIndex(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, resultIndex *scoutChatResultProjectionIndex, contexts ...context.Context) map[string]any {
 	payload := scoutChatThreadEventPayload(thread)
-	payload["message"] = app.projectScoutChatMessageForViewer(viewerEmail, thread, message)
+	payload["message"] = app.projectScoutChatMessageForViewerWithResultIndex(viewerEmail, thread, message, resultIndex, contexts...)
 	return payload
 }
 
@@ -6908,13 +6921,32 @@ func (app *kanbanBoardApp) scoutChatThreadUpdatePayload(viewerEmail string, thre
 // re-render.
 func (app *kanbanBoardApp) broadcastScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
 	if scoutChatThreadIsOrganizationPublic(thread) {
+		// Result refs are viewer-authorized and a document result contains a
+		// bounded body preview. A single owner-projected payload cannot safely
+		// fan out to the organization: a private result readable by the channel
+		// owner could leak to every socket. Work-card updates therefore reuse the
+		// targeted union once per roster account so each event receives its own
+		// exact ACL/read/write projection. Ordinary channel messages keep the
+		// single organization broadcast fast path.
+		if scoutChatThreadRefMayExposeResult(message.Thread) {
+			resultIndex := app.scoutChatResultIndex()
+			for _, viewerEmail := range accountStore().accountEmails() {
+				sendKanbanEventToUser(viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayloadWithResultIndex(viewerEmail, thread, message, &resultIndex))
+			}
+			return
+		}
 		// Projecting with the owner performs the source-store/revision health
 		// check while avoiding a per-socket body fan-out for organization chat.
 		broadcastSignedInKanbanEvent("chat_thread", app.scoutChatThreadUpdatePayload(thread.OwnerEmail, thread, message))
 		return
 	}
+	var resultIndex *scoutChatResultProjectionIndex
+	if scoutChatThreadRefMayExposeResult(message.Thread) {
+		index := app.scoutChatResultIndex()
+		resultIndex = &index
+	}
 	for _, member := range scoutChatThreadMemberEmails(thread) {
-		sendKanbanEventToUser(member, "chat_thread", app.scoutChatThreadUpdatePayload(member, thread, message))
+		sendKanbanEventToUser(member, "chat_thread", app.scoutChatThreadUpdatePayloadWithResultIndex(member, thread, message, resultIndex))
 	}
 }
 
@@ -6942,7 +6974,7 @@ func (app *kanbanBoardApp) sendScoutChatThreadUpdateToViewer(viewerEmail string,
 }
 
 func (app *kanbanBoardApp) sendScoutChatThreadUpdateToViewerWithContext(ctx context.Context, viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord) {
-	sendKanbanEventToUserWithContext(ctx, viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayload(viewerEmail, thread, message))
+	sendKanbanEventToUserWithContext(ctx, viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayload(viewerEmail, thread, message, ctx))
 }
 
 // deliverScoutChatThreadDeletion routes a message removal the same way

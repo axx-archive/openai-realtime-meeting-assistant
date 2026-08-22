@@ -9,13 +9,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
-const documentStudioMaxBytes = 1 << 20
+const (
+	documentStudioMaxBytes      = 1 << 20
+	documentStudioImageMaxBytes = 16 << 20
+)
 
 const (
 	documentStudioEmptyMetadataKey = "documentEmpty"
@@ -281,6 +286,108 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
 			"branchedFromArtifactVersion": payload.ExpectedVersion,
 			"sourceCurrentVersion":        currentSourceVersion, "staleBranch": staleBranch,
+		},
+	})
+}
+
+// documentEditorImageUploadHandler attaches one safe, content-addressed image
+// to the exact writable document revision. The Markdown body remains dirty in
+// the browser until its image token is saved, while the asset is already bound
+// to this artifact so native preview and the non-fetching PDF renderer can use
+// the same verified bytes.
+func documentEditorImageUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, documentStudioImageMaxBytes+(1<<20))
+	if err := r.ParseMultipartForm(documentStudioImageMaxBytes); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read image upload")
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	artifactID := strings.TrimSpace(r.FormValue("artifactId"))
+	expectedVersion, err := strconv.Atoi(strings.TrimSpace(r.FormValue("expectedVersion")))
+	if artifactID == "" || err != nil || expectedVersion < 1 {
+		writeAuthError(w, http.StatusBadRequest, "artifactId and expectedVersion are required")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, "image file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, documentStudioImageMaxBytes+1))
+	if err != nil || len(data) == 0 || len(data) > documentStudioImageMaxBytes {
+		writeAuthError(w, http.StatusBadRequest, "image file exceeds the 16MB limit")
+		return
+	}
+	mime := http.DetectContentType(data)
+	if !oneOf(mime, "image/png", "image/jpeg", "image/webp", "image/gif") {
+		writeAuthError(w, http.StatusBadRequest, "image must be PNG, JPEG, WebP, or GIF")
+		return
+	}
+	prior, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLWrite)
+	if !ok || !artifactIsDocumentStudioDocument(prior) {
+		writeAuthError(w, http.StatusNotFound, "document artifact not found")
+		return
+	}
+	if artifactVersion(prior) != expectedVersion {
+		writeDocumentVersionConflict(w, prior)
+		return
+	}
+	ref, err := putBlob(data, mime)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "image could not be stored")
+		return
+	}
+	name := strings.TrimSpace(filepath.Base(header.Filename))
+	if name == "" || name == "." || len([]rune(name)) > 200 {
+		name = "document-image." + deckImageExtension(mime)
+	}
+	assetsRaw, err := deckAssetsMetadataWith(prior, artifactAsset{Ref: ref, Mime: mime, Name: name, Kind: "image"})
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "image could not be attached")
+		return
+	}
+	headerOwner := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior))
+	var updated meetingMemoryEntry
+	err = kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
+		var updateErr error
+		updated, _, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(
+			headerOwner, prior.ID, prior.Metadata["title"], prior.Text, user.Name,
+			map[string]string{artifactAssetsMetadataKey: assetsRaw},
+		)
+		return updateErr
+	})
+	if err != nil {
+		current, _ := kanbanApp.osArtifactByID(prior.ID)
+		writeDocumentVersionConflict(w, current)
+		return
+	}
+	writeAuthJSON(w, http.StatusCreated, map[string]any{
+		"ok": true, "artifact": documentStudioView(updated),
+		"image": map[string]any{
+			"ref": ref, "mime": mime, "name": name,
+			"url": fileBlobDownloadURL(ref, name),
 		},
 	})
 }

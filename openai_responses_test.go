@@ -417,7 +417,7 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 	routeOpenAIResponsesToTestServer(t, server.URL)
 
 	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
-		Model: "gpt-5.5", Input: "verify the current release", EnableWebSearch: true,
+		Model: "gpt-5.5", Input: "verify the current release", EnableWebSearch: true, MaxToolCalls: 99,
 	})
 	if err != nil {
 		t.Fatalf("create response: %v", err)
@@ -436,6 +436,9 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 	include, _ := payload["include"].([]any)
 	if len(include) != 1 || include[0] != "web_search_call.action.sources" {
 		t.Fatalf("include=%#v, want provider-owned hosted-search sources", payload["include"])
+	}
+	if _, found := payload["max_tool_calls"]; found {
+		t.Fatalf("ordinary hosted search unexpectedly received external-evidence tool budget: %#v", payload["max_tool_calls"])
 	}
 	if !strings.Contains(text, "Official 2026 release — https://docs.example.com/releases/2026") {
 		t.Fatalf("text=%q, want durable exact citation URL", text)
@@ -465,6 +468,7 @@ func TestCreateOpenAITextResponseRetainsWebReceiptForStructuredEvidence(t *testi
 			"output":[{"type":"web_search_call","action":{"sources":[
 				{"type":"url","url":"https://example.org/creator_(program).","title":"Official creator program"},
 				{"type":"url","url":"https://example.org/creator_(program).","title":"duplicate"},
+				{"type":"url","url":"https://example.org/engagement-methodology","title":"Official engagement methodology"},
 				{"type":"url","url":" https://example.org/padded ","title":"padded"},
 				{"type":"url","url":"http://example.org/insecure","title":"insecure"},
 				{"type":"url","url":"javascript:alert(1)","title":"unsafe"}
@@ -476,7 +480,8 @@ func TestCreateOpenAITextResponseRetainsWebReceiptForStructuredEvidence(t *testi
 
 	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
 		Model: "gpt-5.5", Input: "verify the proof points", EnableWebSearch: true,
-		JSONSchema: externalEvidenceJSONSchema(), NormalizeOutput: normalizeExternalEvidenceArtifact,
+		MaxToolCalls: 99,
+		JSONSchema:   externalEvidenceJSONSchema(), NormalizeOutput: normalizeExternalEvidenceArtifact,
 		ValidateOutput: func(text string) error { return validateExternalEvidenceArtifact(text) },
 	})
 	if err != nil {
@@ -494,7 +499,10 @@ func TestCreateOpenAITextResponseRetainsWebReceiptForStructuredEvidence(t *testi
 	if len(include) != 1 || include[0] != "web_search_call.action.sources" {
 		t.Fatalf("include=%#v, want hosted-search action sources", payload["include"])
 	}
-	if !strings.Contains(text, "## Verified evidence ledger") || !strings.Contains(text, "stride-web-citation-receipt:v1") || strings.HasPrefix(strings.TrimSpace(text), "{") {
+	if payload["max_tool_calls"] != float64(6) {
+		t.Fatalf("max_tool_calls=%#v, want server-owned external evidence budget", payload["max_tool_calls"])
+	}
+	if !strings.Contains(text, "## Provider-fetched evidence ledger") || !strings.Contains(text, "stride-web-citation-receipt:v1") || strings.HasPrefix(strings.TrimSpace(text), "{") {
 		t.Fatalf("structured evidence was not normalized with its provider receipt:\n%s", text)
 	}
 	if strings.Contains(text, "javascript:") {
@@ -509,8 +517,41 @@ func TestCreateOpenAITextResponseRetainsWebReceiptForStructuredEvidence(t *testi
 	if got := strings.Count(text, exactURL); got != 2 {
 		t.Fatalf("exact provider URL occurrences=%d, want one ledger row and one receipt row:\n%s", got, text)
 	}
-	if rows, rowErr := externalEvidenceLedgerRows(stripOpenAIWebCitationReceipt(text)); rowErr != nil || len(rows) != 1 || len(rows[0]) != 8 {
+	if rows, rowErr := externalEvidenceLedgerRows(stripOpenAIWebCitationReceipt(text)); rowErr != nil || len(rows) != 2 || len(rows[0]) != 8 {
 		t.Fatalf("canonical rows=%#v err=%v", rows, rowErr)
+	}
+}
+
+func TestExtractOpenAIResponseWebEvidenceRetainsLargeCompleteProviderSet(t *testing.T) {
+	_, _, providerURLs := largeExternalEvidenceFixtureForTest(t)
+	outputs := make([]map[string]any, 13)
+	for index := range outputs {
+		outputs[index] = map[string]any{
+			"type":   "web_search_call",
+			"action": map[string]any{"sources": []map[string]any{}},
+		}
+	}
+	for index, sourceURL := range providerURLs {
+		call := outputs[0]
+		action := call["action"].(map[string]any)
+		sources := action["sources"].([]map[string]any)
+		action["sources"] = append(sources, map[string]any{"type": "url", "title": fmt.Sprintf("Primary source %03d", index), "url": sourceURL})
+	}
+	raw, err := json.Marshal(map[string]any{"id": "resp_large_extract", "output": outputs})
+	if err != nil {
+		t.Fatalf("marshal large provider response: %v", err)
+	}
+	var body openAIResponsesBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal large provider response: %v", err)
+	}
+	evidence := extractOpenAIResponseWebEvidence(body)
+	last := openAIResponseWebCitation{}
+	if len(evidence.Citations) > 0 {
+		last = evidence.Citations[len(evidence.Citations)-1]
+	}
+	if evidence.SearchCalls != 13 || len(evidence.Citations) != 166 || last.URL != providerURLs[165] {
+		t.Fatalf("extracted evidence calls=%d sources=%d last=%#v, want 13/166/%s", evidence.SearchCalls, len(evidence.Citations), last, providerURLs[165])
 	}
 }
 

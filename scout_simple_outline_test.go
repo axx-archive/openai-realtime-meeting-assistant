@@ -325,6 +325,9 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 		{"presentation for this pitch", true},
 		{"deck for the investor meeting", true},
 		{"slides for the quarterly review", true},
+		{"I need a presentation made", true},
+		{"Can you make a deck?", true},
+		{"Could you please build a presentation?", true},
 
 		// Negative cases: outline-only requests
 		{"just the outline", false},
@@ -337,6 +340,16 @@ func TestScoutChatDeckRequestDetected(t *testing.T) {
 		{"research the market", false},
 		{"design a logo", false},
 		{"create a business plan", false},
+		{"Should we make a deck?", false},
+		{"Do we need a presentation?", false},
+		{"Would a slide deck help?", false},
+		{"How do I create a deck?", false},
+		{"I need to know if we should make a presentation", false},
+		{"Don't create a deck; just explain what one should include.", false},
+		{"I never asked you to make a presentation.", false},
+		{"Can you explain how to create a deck?", false},
+		{"I need the deck edited, not rebuilt.", false},
+		{"I want the presentation updated in place.", false},
 
 		// Edge cases
 		{"", false},

@@ -39,7 +39,7 @@ function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | n
   if (/^(table|data_table|spreadsheet)$/u.test(resultType)) return 'table';
   if (/^(ideation|ideas|brainstorm)$/u.test(resultType)) return 'ideation';
   if (/^(research|deep_research|report|analysis)$/u.test(resultType)) return 'research';
-  if (/^(document|doc|memo|brief)$/u.test(resultType)) return 'document';
+  if (/^(markdown|document|doc|memo|brief)$/u.test(resultType)) return 'document';
 
   // Live path: kind=thread uses message.thread.mode
   const threadMode = String(message.thread?.mode ?? '').toLowerCase();
@@ -48,7 +48,7 @@ function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | n
     if (/^(table|data_table|spreadsheet)$/u.test(threadMode)) return 'table';
     if (/^(ideation|ideas|brainstorm)$/u.test(threadMode)) return 'ideation';
     if (/^(research|deep_research|report|analysis)$/u.test(threadMode)) return 'research';
-    if (/^(document|doc|memo|brief)$/u.test(threadMode)) return 'document';
+    if (/^(markdown|document|doc|memo|brief)$/u.test(threadMode)) return 'document';
   }
 
   // Governed work path: check explicit artifact kind fields
@@ -65,7 +65,7 @@ function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | n
     if (/^(table|data_table|spreadsheet)$/u.test(kind)) return 'table';
     if (/^(ideation|ideas|brainstorm)$/u.test(kind)) return 'ideation';
     if (/^(research|deep_research|report|analysis)$/u.test(kind)) return 'research';
-    if (/^(document|doc|memo|brief)$/u.test(kind)) return 'document';
+    if (/^(markdown|document|doc|memo|brief)$/u.test(kind)) return 'document';
   }
 
   // Do NOT infer from title/summary keywords — mode must be explicit
@@ -131,6 +131,7 @@ export type MessageBubbleProps = {
   onSaveWorkArtifact?: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact?: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact?: (message: ScoutMessage) => void;
+  onRetryGoal?: (message: ScoutMessage) => void;
   onViewArtifactFullscreen?: (message: ScoutMessage) => void;
   onSaveImage?: (message: ScoutMessage) => void;
   onRegenerateImage?: (message: ScoutMessage) => void;
@@ -141,6 +142,7 @@ export type MessageBubbleProps = {
   imageSaved?: boolean;
   savingWork?: boolean;
   regeneratingWork?: boolean;
+  retryingGoal?: boolean;
   workSaved?: boolean;
   workDriveSaveAvailability?: 'checking' | 'available' | 'unavailable';
 };
@@ -194,7 +196,7 @@ function workThreadPresentation(message: ScoutMessage) {
   const complete = status === 'complete' || status === 'completed' || status === 'published';
 	const followUpStatus = String(ref.followUpStatus ?? '').toLowerCase();
   const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(ref.progressNote ?? ''))));
-  const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
+  const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected' || status === 'blocked';
   const progress = workProgressPresentation(ref);
   const needsInput = progress.needsInput;
   const decisionStatus = status === 'approval_required' || status === 'needs_input' || status === 'parked';
@@ -299,6 +301,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onSaveWorkArtifact,
   onOpenSavedWorkArtifact,
   onRegenerateWorkArtifact,
+  onRetryGoal,
   onViewArtifactFullscreen,
   onSaveImage,
   onRegenerateImage,
@@ -309,6 +312,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   imageSaved = false,
   savingWork = false,
   regeneratingWork = false,
+  retryingGoal = false,
   workSaved = false,
   workDriveSaveAvailability = 'checking',
 }: MessageBubbleProps) {
@@ -317,6 +321,27 @@ export const MessageBubble = React.memo(function MessageBubble({
   const projectTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
+  const failedGoal = Boolean(
+    workThread?.failed
+    && !workThread.governedRecord
+    && String(workThread.ref.mode ?? '').trim().toLowerCase() === 'goal'
+    && String(workThread.ref.artifactId ?? '').trim(),
+  );
+  const retryingFailedWork = failedGoal ? retryingGoal : regeneratingWork;
+  const retryFailedWork = () => failedGoal ? onRetryGoal?.(message) : onRegenerateWorkArtifact?.(message);
+  const inlineArtifactKind = workThread ? detectInlineArtifactKind(message) : null;
+  const explicitResultArtifactId = String(workThread?.ref.resultArtifactId ?? '').trim();
+  const directArtifactMode = /^(html_deck|deck|presentation|slides?)$/u.test(String(workThread?.ref.mode ?? '').toLowerCase());
+  // A goal/process artifact id owns lifecycle, not media. Only an explicit
+  // ResultArtifactID may drive its preview/actions. Legacy standalone deck
+  // runs may use ArtifactID after terminal completion because that id is the
+  // deliverable itself, not a goal root.
+  const richArtifactId = explicitResultArtifactId || (
+    workThread?.complete && directArtifactMode
+      ? String(workThread.ref.artifactId ?? '').trim()
+      : ''
+  );
+  const showRichWorkResult = Boolean(richArtifactId) || Boolean(workThread?.active && workThread.family === 'Presentation');
   const proposal = message.proposal;
   const proposalKind = String(proposal?.kind ?? '').toLowerCase();
   const proposalStatus = String(proposal?.status ?? '').toLowerCase();
@@ -547,20 +572,42 @@ export const MessageBubble = React.memo(function MessageBubble({
             </View>
           ) : workThread
             && !(String(workThread.ref.projectTitle ?? '').trim() && workThread.family === 'Research')
-            && (detectInlineArtifactKind(message) || workThread.family === 'Presentation') ? (
+            && showRichWorkResult ? (
             <View style={styles.richWorkResult}>
               <InlineArtifactPreview
-                kind={detectInlineArtifactKind(message) ?? 'html_deck'}
+                kind={inlineArtifactKind ?? 'html_deck'}
                 title={String(workThread.ref.resultTitle ?? '').trim() || 'Presentation'}
                 text={String(workThread.ref.resultPreview ?? '')}
                 agentName={workThread.agentName}
-                loading={workThread.active && !String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim()}
-                artifactId={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() || undefined}
+                loading={workThread.active && !richArtifactId}
+                needsAttention={workThread.failed}
+                artifactId={richArtifactId || undefined}
                 sessionToken={sessionToken}
-                onEdit={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onOpenWorkArtifact?.(message) : undefined}
-                onPresent={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onViewArtifactFullscreen?.(message) : undefined}
-                onExpand={String(workThread.ref.resultArtifactId ?? workThread.ref.artifactId ?? '').trim() ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onEdit={richArtifactId && workThread.ref.resultCanEdit === true ? () => onOpenWorkArtifact?.(message) : undefined}
+                onPresent={richArtifactId ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onExpand={richArtifactId ? () => onViewArtifactFullscreen?.(message) : undefined}
               />
+              {workThread.ref.resultApprovalState === 'edited_after_approval' ? (
+                <Text accessibilityRole="alert" style={styles.workAttentionCopy}>Edited after approval · review this version before presenting</Text>
+              ) : null}
+              {workThread.failed && richArtifactId ? (
+                <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
+                  <View style={styles.checkpointStatusRow}>
+                    <SymbolView name="exclamationmark.triangle.fill" tintColor={colors.emberText} size={14} />
+                    <Text style={styles.checkpointKicker}>Draft · needs attention</Text>
+                  </View>
+                  <Text style={styles.checkpointQuestion}>{workThread.attentionCopy || 'Scout saved the best current draft, but it has not passed the final quality gate.'}</Text>
+                  <View style={styles.workResultActions}>
+                    <Pressable accessibilityRole="button" accessibilityLabel="Inspect draft details" onPress={() => onViewArtifactFullscreen?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed]}>
+                      <Text style={styles.workResultActionText}>Inspect</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" accessibilityLabel="Retry draft from here" accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
+                      {retryingFailedWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
+                      <Text style={styles.workResultActionText}>{retryingFailedWork ? 'Starting…' : 'Retry'}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
               {workThread.needsInput && workThread.ref.checkpoint?.question ? (
                 <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
                   <View style={styles.checkpointStatusRow}>
@@ -685,9 +732,9 @@ export const MessageBubble = React.memo(function MessageBubble({
                     <SymbolView name="info.circle.fill" tintColor={colors.onAccent} size={14} />
                     <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultPrimaryText}>View details</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={`Retry ${workThread.family.toLowerCase()}`} accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
-                    {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
-                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Retry'}</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Retry ${workThread.family.toLowerCase()}`} accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
+                    {retryingFailedWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
+                    <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>{retryingFailedWork ? 'Starting…' : 'Retry'}</Text>
                   </Pressable>
                 </View>
               ) : (

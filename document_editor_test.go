@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +31,78 @@ func setupDocumentEditorHTTPTest(t *testing.T) ([]*http.Cookie, meetingMemoryEnt
 		t.Fatalf("create document artifact: %v", err)
 	}
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!"), artifact
+}
+
+func postDocumentImageUpload(t *testing.T, cookies []*http.Cookie, artifactID string, version int, name, mime string, data []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	formBody, formType := multipartDocumentImageBody(t, artifactID, version, name, mime, data)
+	request := httptest.NewRequest(http.MethodPost, "/artifacts/document/images", formBody)
+	request.Header.Set("Content-Type", formType)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	documentEditorImageUploadHandler(recorder, request)
+	return recorder
+}
+
+func multipartDocumentImageBody(t *testing.T, artifactID string, version int, name, mime string, data []byte) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("artifactId", artifactID)
+	_ = writer.WriteField("expectedVersion", strconv.Itoa(version))
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, name))
+	header.Set("Content-Type", mime)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body, writer.FormDataContentType()
+}
+
+func TestDocumentStudioImageUploadBindsExactRevisionAndPDFAsset(t *testing.T) {
+	cookies, artifact := setupDocumentEditorHTTPTest(t)
+	response := postDocumentImageUpload(t, cookies, artifact.ID, artifactVersion(artifact), "field-notes.png", "image/png", tinyPNG(t))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("image upload status=%d body=%s", response.Code, response.Body.String())
+	}
+	var uploaded struct {
+		Artifact documentStudioArtifactView `json:"artifact"`
+		Image    struct {
+			Ref  string `json:"ref"`
+			Mime string `json:"mime"`
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"image"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &uploaded); err != nil || uploaded.Artifact.Version <= artifactVersion(artifact) || !validBlobRef(uploaded.Image.Ref) || uploaded.Image.Mime != "image/png" || !strings.HasPrefix(uploaded.Image.URL, "/artifacts/blob?") {
+		t.Fatalf("image upload response=%s", response.Body.String())
+	}
+	stored, ok := kanbanApp.osArtifactByID(artifact.ID)
+	assets := artifactAssets(stored)
+	if !ok || len(assets) != 1 || assets[0].Ref != uploaded.Image.Ref || assets[0].Kind != "image" || stored.Text != artifact.Text {
+		t.Fatalf("image upload did not preserve body and bind one asset: %+v assets=%+v", stored, assets)
+	}
+	if html := newReportPrintRenderer(stored).imageHTML("Field notes", uploaded.Image.URL); !strings.Contains(html, "data:image/png;base64,") {
+		t.Fatalf("attached document image did not become a local PDF image: %s", html)
+	}
+	stale := postDocumentImageUpload(t, cookies, artifact.ID, artifactVersion(artifact), "stale.png", "image/png", tinyPNG(t))
+	afterStale, _ := kanbanApp.osArtifactByID(artifact.ID)
+	if stale.Code != http.StatusConflict || len(artifactAssets(afterStale)) != 1 {
+		t.Fatalf("stale image upload status=%d body=%s", stale.Code, stale.Body.String())
+	}
+	invalid := postDocumentImageUpload(t, cookies, artifact.ID, uploaded.Artifact.Version, "script.svg", "image/svg+xml", []byte(`<svg><script>alert(1)</script></svg>`))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe image upload status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
 }
 
 func TestDocumentStudioGETPatchAndConflict(t *testing.T) {

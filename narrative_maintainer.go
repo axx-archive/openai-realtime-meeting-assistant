@@ -34,7 +34,13 @@ const (
 	narrativeMaintainerAgentName       = "narrative maintainer"
 	defaultNarrativeMaintainerModel    = "gpt-5.6-sol"
 	defaultNarrativeMaintainerInterval = 10 * time.Minute
-	narrativeMaintainerRequestTimeout  = 90 * time.Second
+	narrativeMaintainerRequestTimeout  = 3 * time.Minute
+	// One pass may materially update several bounded 6,000-character dossiers,
+	// and Responses counts hidden reasoning against this same ceiling. Four
+	// thousand tokens repeatedly truncated the production JSON before it could
+	// be parsed. Keep the per-dossier and input-window bounds, but provision the
+	// actual worst-case envelope so the durable cursor can advance.
+	narrativeMaintainerMaxOutputTokens = 12000
 	// narrativeBodyMaxChars caps one dossier body (runes): enough for the
 	// eight sections without letting one storyline crowd recall context.
 	narrativeBodyMaxChars = 6000
@@ -300,7 +306,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		Input:           input,
 		ReasoningEffort: effort,
 		Verbosity:       "low",
-		MaxOutputTokens: 4000,
+		MaxOutputTokens: narrativeMaintainerMaxOutputTokens,
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, err

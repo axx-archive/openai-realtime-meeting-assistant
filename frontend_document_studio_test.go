@@ -19,11 +19,15 @@ func TestDocumentStudioFrontendContract(t *testing.T) {
 		"/artifacts/document?id=${encodeURIComponent(artifactId)}",
 		"fetch('/artifacts/document'",
 		"fetch('/artifacts/document/copies'",
+		"fetch('/artifacts/document/images'",
 		"document-editor__outline",
 		"document-editor__paper",
 		"document-editor__rich",
 		"contenteditable=\"true\"",
 		"data-doc-action=\"image\"",
+		"data-doc-action=\"image-url\"",
+		"data-doc-image-width",
+		"data-doc-image-align",
 		"data-doc-action=\"indent\"",
 		"data-doc-action=\"outdent\"",
 		"data-doc-action=\"status\"",
@@ -87,6 +91,13 @@ const server=http.createServer((req,res)=>{
  assert.ok(geometry.editor.width>=1439&&geometry.editor.height>=899,JSON.stringify(geometry));
  assert.ok(geometry.paper.width>600&&geometry.paper.left>160,JSON.stringify(geometry));
  assert.equal(await editor.locator('.document-editor__outline-item').count(),2);
+ const chrome=await page.evaluate(()=>{const toolbar=document.querySelector('.document-editor [role="toolbar"]');const bold=document.querySelector('[data-doc-action="bold"]');const statusCard=document.querySelector('.document-editor__meta p');const paper=document.querySelector('.document-editor__paper');return {toolbar:{background:getComputedStyle(toolbar).backgroundColor,radius:getComputedStyle(toolbar).borderRadius,shadow:getComputedStyle(toolbar).boxShadow},bold:{border:getComputedStyle(bold).borderTopWidth,background:getComputedStyle(bold).backgroundColor},status:{radius:getComputedStyle(statusCard).borderRadius,shadow:getComputedStyle(statusCard).boxShadow},paper:{shadow:getComputedStyle(paper).boxShadow}};});
+ assert.notEqual(chrome.toolbar.background,'rgba(0, 0, 0, 0)',JSON.stringify(chrome));
+ assert.notEqual(chrome.toolbar.radius,'0px',JSON.stringify(chrome));
+ assert.notEqual(chrome.toolbar.shadow,'none',JSON.stringify(chrome));
+ assert.equal(chrome.bold.border,'0px',JSON.stringify(chrome));
+ assert.notEqual(chrome.status.radius,'0px',JSON.stringify(chrome));
+ assert.notEqual(chrome.status.shadow,'none',JSON.stringify(chrome));
  if(process.env.DOCUMENT_STUDIO_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_SCREENSHOT,fullPage:true});}
 
  // Formatting uses a keyboard toolbar pattern, and modal focus cannot escape
@@ -104,12 +115,13 @@ const server=http.createServer((req,res)=>{
  const ipad=await page.evaluate(()=>{const rect=node=>node.getBoundingClientRect().toJSON();const formatting=document.querySelector('.document-editor [role="toolbar"]');const inspector=document.querySelector('.document-editor__inspector');return {paper:rect(document.querySelector('.document-editor__paper')),outline:rect(document.querySelector('.document-editor__outline')),inspector:{display:getComputedStyle(inspector).display,hidden:inspector.getAttribute('aria-hidden'),inert:inspector.inert},format:{clientWidth:formatting.clientWidth,scrollWidth:formatting.scrollWidth,rect:rect(formatting)},scrollWidth:document.documentElement.scrollWidth};});
  assert.equal(ipad.inspector.display,'block');assert.equal(ipad.inspector.hidden,'true');assert.equal(ipad.inspector.inert,true);assert.ok(ipad.outline.width>=159,JSON.stringify(ipad));
  assert.ok(ipad.paper.width>600&&ipad.paper.right<=1024,JSON.stringify(ipad));
- assert.ok(ipad.format.rect.left>=0&&ipad.format.rect.right<=1024&&ipad.format.scrollWidth<=ipad.format.clientWidth,JSON.stringify(ipad));
+ assert.ok(ipad.format.rect.left>=0&&ipad.format.rect.right<=1024&&ipad.format.clientWidth>0&&ipad.format.scrollWidth>=ipad.format.clientWidth,JSON.stringify(ipad));
  assert.ok(ipad.scrollWidth<=1024,JSON.stringify(ipad));
  await editor.locator('[data-doc-mobile-status]').click();
  await page.waitForFunction(()=>document.querySelector('.document-editor__inspector')?.getBoundingClientRect().right<=innerWidth-11);
  const ipadInspector=await editor.locator('.document-editor__inspector').evaluate(node=>({rect:node.getBoundingClientRect().toJSON(),hidden:node.getAttribute('aria-hidden'),inert:node.inert,visibility:getComputedStyle(node).visibility}));
  assert.ok(ipadInspector.rect.left>=0&&ipadInspector.rect.right<=1024&&ipadInspector.rect.top>=0&&ipadInspector.rect.bottom<=768,JSON.stringify(ipadInspector));assert.equal(ipadInspector.hidden,null);assert.equal(ipadInspector.inert,false);assert.equal(ipadInspector.visibility,'visible');
+ if(process.env.DOCUMENT_STUDIO_TABLET_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_TABLET_SCREENSHOT,fullPage:true});}
  await editor.getByRole('button',{name:'Close document status'}).click();
 
  // Portrait tablet collapses the outline so the editable page remains the
@@ -167,6 +179,8 @@ const server=http.createServer((req,res)=>{
  assert.ok(focusedFormat.active.left>=focusedFormat.toolbar.left&&focusedFormat.active.right<=focusedFormat.toolbar.right,JSON.stringify(focusedFormat));
  const mobileCopy=await editor.getByRole('button',{name:'Save a copy…',exact:true}).evaluate(node=>{const rect=node.getBoundingClientRect();const style=getComputedStyle(node);return {rect:rect.toJSON(),display:style.display,visibility:style.visibility,opacity:style.opacity,hidden:node.hidden,connected:node.isConnected,viewport:{width:innerWidth,height:innerHeight}};});
  assert.ok(mobileCopy.display!=='none'&&mobileCopy.visibility!=='hidden'&&mobileCopy.rect.width>0&&mobileCopy.rect.height>0&&mobileCopy.rect.right>0&&mobileCopy.rect.left<mobileCopy.viewport.width&&mobileCopy.rect.bottom>0&&mobileCopy.rect.top<mobileCopy.viewport.height,JSON.stringify(mobileCopy));
+ const mobileTargets=await editor.evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ mobileTargets.forEach(target=>assert.ok(target.rect.height>=40,JSON.stringify(target)));
 
  // A revision conflict opens the full actionable status sheet on phone; the
  // person can read the real error and reload without hunting for hidden UI.
@@ -182,6 +196,17 @@ const server=http.createServer((req,res)=>{
  await page.waitForFunction(()=>document.querySelector('[data-doc-status]')?.textContent==='Current version loaded');
  await editor.getByRole('button',{name:'Close Document Studio'}).click();
  await editor.waitFor({state:'detached'});
+ const touchContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});
+ const touchPage=await touchContext.newPage();
+ await touchPage.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await touchPage.waitForSelector('#appShell.is-authed');
+ await touchPage.evaluate(id=>openDocumentStudio(id,'Field Notes',{}),artifactId);
+ await touchPage.locator('[data-doc-mobile-status]').click();
+ await touchPage.waitForFunction(()=>document.querySelector('.document-editor__inspector')?.getBoundingClientRect().bottom<=innerHeight);
+ const touchTargets=await touchPage.locator('.document-editor').evaluate(node=>Array.from(node.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled])')).filter(control=>control.getClientRects().length).map(control=>({name:control.getAttribute('aria-label')||control.textContent.trim(),rect:control.getBoundingClientRect().toJSON()})));
+ touchTargets.forEach(target=>assert.ok(target.rect.height>=44,JSON.stringify(target)));
+ if(process.env.DOCUMENT_STUDIO_PHONE_SCREENSHOT){await touchPage.screenshot({path:process.env.DOCUMENT_STUDIO_PHONE_SCREENSHOT,fullPage:true});}
+ await touchContext.close();
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
@@ -208,7 +233,7 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DOCUMENT_STUDIO_INDEX,'utf8');
 const artifactId='document-list-image-artifact';
 let version=2;
-let markdown='# Activation plan\n\n1. Recruit\n  - Rodeo creators\n    1. Verify audience\n    2. Brief the cohort\n  - Music creators\n2. Activate\n  1. Launch the first batch\n  2. Measure participation\n\n![Field correspondents](https://images.example.test/field.jpg)\n\n![Unsafe](javascript:alert(1))';
+let markdown='# Activation plan\n\n1. Recruit\n  - Rodeo creators\n    1. Verify audience\n    2. Brief the cohort\n  - Music creators\n2. Activate\n  1. Launch the first batch\n  2. Measure participation\n\n![Field correspondents](https://images.example.test/field.jpg#stride-doc-image?width=50&align=right&caption=Field+correspondents+at+work)\n\n![Unsafe](javascript:alert(1))';
 const patches=[];
 const artifact=()=>({id:artifactId,title:'Activation plan',version,savedToFiles:true,metadata:{type:'markdown',artifactVersion:String(version),savedToFiles:'true'}});
 const server=http.createServer((req,res)=>{
@@ -236,14 +261,49 @@ const server=http.createServer((req,res)=>{
  assert.equal(await rich.locator(':scope > ol > li').first().locator(':scope > ul > li').count(),2);
  assert.equal(await rich.locator(':scope > ol > li').first().locator(':scope > ul > li').first().locator(':scope > ol > li').count(),2);
  assert.equal(await rich.locator('img').count(),1,'unsafe Markdown image must not become an image node');
- assert.equal(await rich.locator('img').first().getAttribute('alt'),'Field correspondents');
- assert.equal(await rich.locator('img').first().getAttribute('src'),'https://images.example.test/field.jpg');
+ const failedImage=rich.locator('img').first();
+ assert.equal(await failedImage.getAttribute('alt'),'Field correspondents');
+ assert.equal(await failedImage.getAttribute('src'),'https://images.example.test/field.jpg#stride-doc-image?width=50&align=right&caption=Field+correspondents+at+work');
+ const imageOutline=await failedImage.evaluate(node=>getComputedStyle(node).outlineColor);
+ assert.equal(imageOutline,'rgba(0, 0, 0, 0.1)');
+ const unsafeTreatment=rich.locator('[data-doc-unsafe-image]');
+ assert.equal(await unsafeTreatment.count(),1);
+ assert.match(await unsafeTreatment.textContent(),/Image omitted — unsafe URL/);
+ assert.match(await unsafeTreatment.textContent(),/Unsafe/,'the safe visual treatment should retain useful alt context');
+ assert.doesNotMatch(await rich.textContent(),/javascript:alert/,'the unsafe address must remain out of the Visual surface');
+ assert.doesNotMatch(await unsafeTreatment.evaluate(node=>node.outerHTML),/javascript:/i,'Visual mode must not expose an executable-looking unsafe address');
+ assert.equal(await unsafeTreatment.locator('a,img,button').count(),0,'the omitted treatment must be inert');
+
+ // A failed safe URL never falls through to the browser's native broken-image
+ // glyph. Its authored width, alignment, alt text, and caption remain stable,
+ // while the same Replace/Remove recovery controls remain reachable.
+ await failedImage.evaluate(node=>node.dispatchEvent(new Event('error')));
+ const failedBlock=failedImage.locator('xpath=..');
+ const failedPlaceholder=failedBlock.locator('[data-doc-image-placeholder]');
+ assert.equal(await failedBlock.getAttribute('data-image-state'),'error');
+ assert.equal(await failedBlock.getAttribute('data-align'),'right');
+ assert.equal(await failedBlock.evaluate(node=>node.style.width),'50%');
+ const failedVisual=await failedImage.evaluate(node=>({visibility:getComputedStyle(node).visibility,opacity:getComputedStyle(node).opacity,width:getComputedStyle(node).width,height:getComputedStyle(node).height}));
+ assert.equal(failedVisual.visibility,'hidden',JSON.stringify(failedVisual));
+ assert.equal(failedVisual.opacity,'0',JSON.stringify(failedVisual));
+ assert.equal(await failedPlaceholder.isVisible(),true);
+ assert.match(await failedPlaceholder.textContent(),/Image unavailable/);
+ assert.match(await failedPlaceholder.textContent(),/Field correspondents/);
+ assert.match(await failedBlock.textContent(),/Field correspondents at work/,'the authored caption remains visible with the placeholder');
+ await failedPlaceholder.click();
+ const imageTools=editor.locator('[data-doc-image-tools]');
+ assert.equal(await imageTools.isVisible(),true);
+ for(const name of ['Replace','Remove']){
+   const recovery=imageTools.getByRole('button',{name,exact:true});
+   assert.equal(await recovery.isVisible(),true,name+' must remain visible after image failure');
+   assert.equal(await recovery.isEnabled(),true,name+' must remain enabled after image failure');
+ }
 
  await editor.getByRole('button',{name:'Source',exact:true}).click();
  const source=editor.getByRole('textbox',{name:'Markdown source'});
  const normalized=await source.inputValue();
  assert.match(normalized,/1\. Recruit\n  - Rodeo creators\n    1\. Verify audience\n    2\. Brief the cohort\n  - Music creators\n2\. Activate/);
- assert.match(normalized,/!\[Field correspondents\]\(https:\/\/images\.example\.test\/field\.jpg\)/);
+ assert.ok(normalized.includes('![Field correspondents](https://images.example.test/field.jpg#stride-doc-image?width=50&align=right&caption=Field+correspondents+at+work)'));
  assert.match(normalized,/!\[Unsafe\]\(javascript:alert\(1\)\)/,'an untouched source view should preserve the exact durable Markdown while the visual renderer keeps it inert');
  await editor.getByRole('button',{name:'Visual',exact:true}).click();
 
@@ -263,26 +323,43 @@ const server=http.createServer((req,res)=>{
  await editor.getByRole('button',{name:'Decrease list indent'}).click();
  assert.equal(await rich.locator(':scope > ol > li').count(),2,'Outdent control should work without a keyboard');
 
- const answerDialogs=async answers=>{
+ const answerDialogs=async (button,answers)=>{
    let index=0;
    const handler=dialog=>dialog.accept(answers[index++] || '');
    page.on('dialog',handler);
-   try { await editor.getByRole('button',{name:'Insert image'}).click(); }
+   try { await editor.getByRole('button',{name:button,exact:true}).click(); }
    finally { page.off('dialog',handler); }
  };
  await rich.focus();
- await answerDialogs(['https://images.example.test/creator.jpg','Creator at a western event']);
+ await answerDialogs('Image URL',['https://images.example.test/creator.jpg','Creator at a western event']);
  assert.equal(await rich.locator('img').count(),2);
  const inserted=rich.locator('img[alt="Creator at a western event"]');
  assert.equal(await inserted.count(),1);
  assert.equal(await inserted.getAttribute('alt'),'Creator at a western event');
 
- await inserted.evaluate(image=>{const range=document.createRange();range.selectNodeContents(image);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);});
- await answerDialogs(['https://images.example.test/creator-edited.jpg','Creator briefing a cohort']);
+ await inserted.locator('xpath=..').click();
+ await answerDialogs('Use image URL',['https://images.example.test/creator-edited.jpg','Creator briefing a cohort']);
  assert.equal(await rich.locator('img').count(),2);
- assert.equal(await rich.locator('img[alt="Creator briefing a cohort"]').getAttribute('src'),'https://images.example.test/creator-edited.jpg');
+ const edited=rich.locator('img[alt="Creator briefing a cohort"]');
+ assert.equal(await edited.getAttribute('src'),'https://images.example.test/creator-edited.jpg#stride-doc-image?width=100&align=center');
 
- await answerDialogs(['javascript:alert(1)','Unsafe source']);
+ await editor.getByRole('combobox',{name:'Image width'}).selectOption('50');
+ await editor.getByRole('button',{name:'Right',exact:true}).click();
+ await editor.getByRole('textbox',{name:'Image caption'}).fill('A coordinated creator cohort in the field.');
+ await editor.getByRole('textbox',{name:'Image caption'}).press('Tab');
+ const imageBlock=edited.locator('xpath=..');
+ assert.equal(await imageBlock.getAttribute('data-align'),'right');
+ assert.equal(await imageBlock.evaluate(node=>node.style.width),'50%');
+ assert.match(await imageBlock.textContent(),/coordinated creator cohort/);
+ const imageToolsStyle=await editor.locator('[data-doc-image-tools]').evaluate(node=>({radius:getComputedStyle(node).borderRadius,background:getComputedStyle(node).backgroundColor,shadow:getComputedStyle(node).boxShadow,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth}));
+ assert.notEqual(imageToolsStyle.radius,'0px',JSON.stringify(imageToolsStyle));
+ assert.notEqual(imageToolsStyle.background,'rgba(0, 0, 0, 0)',JSON.stringify(imageToolsStyle));
+ assert.notEqual(imageToolsStyle.shadow,'none',JSON.stringify(imageToolsStyle));
+ assert.ok(imageToolsStyle.scrollWidth<=imageToolsStyle.clientWidth,JSON.stringify(imageToolsStyle));
+ if(process.env.DOCUMENT_STUDIO_IMAGE_SCREENSHOT){await page.screenshot({path:process.env.DOCUMENT_STUDIO_IMAGE_SCREENSHOT,fullPage:true});}
+
+ await rich.click({position:{x:8,y:8}});
+ await answerDialogs('Image URL',['javascript:alert(1)','Unsafe source']);
  assert.equal(await rich.locator('img').count(),2,'unsafe Image action must not insert a node');
  const sanitizedPaste=await page.evaluate(()=>sanitizedDocumentPasteHTML('<img src="javascript:alert(1)" onerror="window.__unsafe=true" alt="bad"><img src="https://images.example.test/safe.jpg" onerror="window.__unsafe=true" alt="Safe \n description">'));
  assert.doesNotMatch(sanitizedPaste,/(?:javascript:|onerror)/i);
@@ -294,8 +371,8 @@ const server=http.createServer((req,res)=>{
  assert.equal(patches.length,1);
  const saved=patches[0].document.markdown;
  assert.match(saved,/1\. Recruit\n  - Rodeo creators\n    1\. Verify audience\n    2\. Brief the cohort/);
- assert.match(saved,/!\[Field correspondents\]\(https:\/\/images\.example\.test\/field\.jpg\)/);
- assert.match(saved,/!\[Creator briefing a cohort\]\(https:\/\/images\.example\.test\/creator-edited\.jpg\)/);
+ assert.ok(saved.includes('![Field correspondents](https://images.example.test/field.jpg#stride-doc-image?width=50&align=right&caption=Field+correspondents+at+work)'));
+ assert.match(saved,/!\[Creator briefing a cohort\]\(https:\/\/images\.example\.test\/creator-edited\.jpg#stride-doc-image\?width=50&align=right&caption=A\+coordinated\+creator\+cohort\+in\+the\+field\.\)/);
  assert.match(saved,/\\!\[Unsafe\]\(javascript:alert\(1\)\)/);
  assert.doesNotMatch(saved,/(?:^|\n)!\[Unsafe\]\(javascript:|onerror/i);
  await browser.close();server.close();

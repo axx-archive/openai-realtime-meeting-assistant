@@ -11,6 +11,10 @@ test('adds a PDF extension to an extensionless Drive display title', () => {
 
 test('preserves an existing type-bearing extension without changing its case', () => {
   assert.equal(localFileName('Quarterly Review.PDF', 'application/pdf'), 'Quarterly Review.PDF');
+  assert.equal(
+    localFileName('Board Review', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+    'Board Review.pptx',
+  );
   assert.equal(localFileName('Campaign.jpeg', 'image/jpeg'), 'Campaign.jpeg');
 });
 

@@ -474,6 +474,7 @@ func scoutRouterSystemPrompt() string {
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
+		"- substantial report/document creation ('write the market report', 'prepare a strategy document', 'draft the decision memo', 'Insights & Opportunities report') -> propose_tool_run document_report. A lightweight answer, brainstorm, requested list, explanation, summary, or question stays Tier 0; editing an existing document is an app/editor action, not a new report run.",
 		"- presentation/deck asks ('create a deck', 'make a 5-slide deck', 'presentation for this pitch', 'build the pitch deck') -> propose_tool_run packaging_studio. The packaging_studio workflow produces an html_deck artifact with the sandboxed viewer, Present button, and cover hero.",
 		"- outline-only asks ('make an outline', 'outline the pitch', 'give me the slide outline', 'just the deck structure') -> propose_tool_run deck_outline. This produces a structured text outline, not a presentable deck.",
 		"- full packaging studio run ('run the full packaging process', 'complete package with deck') -> propose_tool_run packaging_studio.",
@@ -790,9 +791,75 @@ var scoutRouterSimpleOutlinePhrases = []string{
 // scoutChatDeckRequestDetected returns true when the message is asking for a
 // real presentation/deck (not just an outline). This is used to trigger HTML
 // deck generation when the agent worker is unavailable.
+func scoutArtifactCreationDeliberationDetected(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+	normalized = strings.NewReplacer("’", "'", "‘", "'").Replace(normalized)
+	if normalized == "" {
+		return false
+	}
+	for _, prefix := range []string{"@scout ", "scout, ", "scout "} {
+		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, prefix))
+	}
+
+	// Creation verbs inside negation, how-to discussion, passive requests to an
+	// unspecified person, or an edit-in-place instruction are not authority to
+	// launch a new artifact. These speech acts must be classified before the
+	// affirmative request frames below.
+	for _, phrase := range []string{
+		"don't make ", "don't create ", "don't build ", "don't write ", "don't draft ", "don't prepare ", "don't produce ", "don't generate ", "don't put together ",
+		"do not make ", "do not create ", "do not build ", "do not write ", "do not draft ", "do not prepare ", "do not produce ", "do not generate ", "do not put together ",
+		"never asked", "didn't ask", "did not ask", "not asking",
+		"explain how to make ", "explain how to create ", "explain how to build ", "explain how to write ", "explain how to draft ", "explain how to prepare ",
+		"need the deck edited", "need a deck edited", "need the presentation edited", "need a presentation edited", "need the report edited", "need a report edited", "need the document edited", "need a document edited", "need the memo edited", "need a memo edited",
+		"updated in place", "edited in place", "revised in place", "not rebuilt", "not recreated",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"could someone ", "can someone ", "would someone ", "should someone "} {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+
+	// These question-shaped forms are direct requests to Scout, not product or
+	// format deliberation. Keep them eligible for deterministic creation.
+	for _, phrase := range []string{
+		"can you make ", "can you create ", "can you build ", "can you write ", "can you draft ", "can you prepare ", "can you produce ", "can you generate ", "can you put together ",
+		"could you make ", "could you create ", "could you build ", "could you write ", "could you draft ", "could you prepare ", "could you produce ", "could you generate ", "could you put together ",
+		"would you make ", "would you create ", "would you build ", "would you write ", "would you draft ", "would you prepare ", "would you produce ", "would you generate ", "would you put together ",
+		"will you make ", "will you create ", "will you build ", "will you write ", "will you draft ", "will you prepare ", "will you produce ", "will you generate ", "will you put together ",
+		"can you please make ", "can you please create ", "can you please build ", "can you please write ", "can you please draft ", "can you please prepare ",
+		"could you please make ", "could you please create ", "could you please build ", "could you please write ", "could you please draft ", "could you please prepare ",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return false
+		}
+	}
+
+	// Deliberation about whether, why, or how to create an artifact is a Tier 0
+	// conversation. It must not become durable work merely because the sentence
+	// also contains a creation verb and an artifact noun.
+	for _, prefix := range []string{
+		"should ", "do we need ", "do i need ", "do you think ", "would a ", "would an ", "would it ", "would we ",
+		"is a ", "is an ", "is it ", "are we better ", "what ", "why ", "how ", "when ", "where ", "who ", "which ",
+		"can a ", "can an ", "could a ", "could an ", "i want to know ", "we want to know ", "i need to know ", "we need to know ",
+		"i'm wondering ", "i am wondering ", "we're wondering ", "we are wondering ",
+	} {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return hasAssistantPhrase(normalized, "whether we should ", "whether i should ", "decide whether to ", "decide if we should ", "decide if i should ")
+}
+
 func scoutChatDeckRequestDetected(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
+		return false
+	}
+	if scoutArtifactCreationDeliberationDetected(lower) {
 		return false
 	}
 	// Must mention deck or presentation or slides
@@ -815,6 +882,8 @@ func scoutChatDeckRequestDetected(text string) bool {
 		"make a deck", "create a deck", "build a deck", "make me a deck",
 		"make a presentation", "create a presentation", "build a presentation",
 		"make me a presentation", "create me a presentation", "build me a presentation",
+		"need a deck", "need the deck", "need a presentation", "need the presentation", "need slides",
+		"want a deck", "want the deck", "want a presentation", "want the presentation", "want slides",
 		"presentation for", "deck for", "slides for",
 		"slide deck", "pitch deck", "5-slide", "5 slide", "five-slide", "five slide",
 		"10-slide", "10 slide", "ten-slide", "ten slide",
@@ -828,36 +897,74 @@ func scoutChatDeckRequestDetected(text string) bool {
 	return false
 }
 
-// scoutInsightsReportRequestDetected recognizes an action-shaped request for
-// the durable Insights & Opportunities artifact. Questions about the format
-// remain ordinary conversation; public threads keep their separate Suggested
-// Work contract before the shared router is invoked.
+// scoutInsightsReportRequestDetected recognizes the named STRIDE report. It is
+// kept as a narrow compatibility seam for Product suggestions; typed Scout
+// routes it through the broader native-document decision below.
 func scoutInsightsReportRequestDetected(text string) bool {
 	return isSTRIDEInsightsOutcomeRequest(text)
 }
 
-func scoutInsightsReportObjective(text string) string {
+// scoutDocumentReportRequestDetected selects only explicit creation requests
+// for a durable report-like artifact. Ordinary questions, source analysis, and
+// lightweight list/idea asks stay on Scout's immediate answer path; edits to an
+// existing document stay with the native app-action/editor route.
+func scoutDocumentReportRequestDetected(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+	if normalized == "" {
+		return false
+	}
+	if scoutArtifactCreationDeliberationDetected(normalized) {
+		return false
+	}
+	for _, prefix := range []string{"what is ", "what's ", "why is ", "how does ", "explain ", "describe ", "tell me about "} {
+		if strings.HasPrefix(normalized, prefix) {
+			return false
+		}
+	}
+	for _, informational := range []string{"what an insights & opportunities report is", "what an insights and opportunities report is", "how an insights & opportunities report works", "how an insights and opportunities report works"} {
+		if strings.Contains(normalized, informational) {
+			return false
+		}
+	}
+	if scoutInsightsReportRequestDetected(text) {
+		return true
+	}
+	hasArtifact := scoutTextHasWord(normalized, "report", "document", "memo") || hasAssistantPhrase(normalized, "white paper", "position paper")
+	if !hasArtifact {
+		return false
+	}
+	if hasAssistantPhrase(normalized, "edit the report", "edit the document", "edit the memo", "revise the report", "revise the document", "revise the memo", "update the report", "update the document", "update the memo", "rewrite the report", "rewrite the document", "rewrite the memo") {
+		return false
+	}
+	return scoutTextHasWord(normalized, "create", "write", "draft", "prepare", "build", "produce", "generate", "develop", "need", "want") ||
+		hasAssistantPhrase(normalized, "put together", "make me", "give me")
+}
+
+func scoutDocumentReportObjective(text string) string {
 	directAsk := polishedWorkstreamObjective(text)
-	return strings.Join([]string{
-		"Create a private, editable Markdown Insights & Opportunities report from this direct request: " + directAsk,
-		"Use authorized conversation and Company Brain context, with the direct request taking precedence. Decide whether current external research could materially change the market or credibility analysis; when it can, prefer primary and current sources and include clickable citations. Never invent a source or turn an inference into a fact.",
-		"Build a decision-worthy human narrative, not an AI-shaped list. Include an executive thesis, market evidence and counterevidence, audience or participant segments, the operating and activation loops, business-model opportunities, risks and opt-in guardrails, 30/60/90-day tests with owners and success metrics, confidence by major conclusion, and explicit open questions. Separate sourced facts, company-grounded observations, inferences, and recommendations.",
-		"If the request uses the phrase engagement army, treat it as an opt-in ambassador and creator community, never coercive mobilization. Give the document a specific title and make the final artifact polished enough to circulate internally without rewriting.",
-	}, "\n\n")
+	parts := []string{
+		"Create one private, editable native Markdown document that fulfills this direct request: " + directAsk,
+		"Use the direct request as authority and authorized conversation, attached sources, and Company Brain context as supporting evidence. Let the process decide whether current external research would materially improve the answer; do not research by default and never invent a source, fact, quote, or degree of certainty.",
+		"Deliver the polished document itself with a coherent human argument and only the sections this reader and decision need. It must be ready to open and edit in Document Studio, not an outline, a workflow receipt, or an AI-shaped list.",
+	}
+	if scoutInsightsReportRequestDetected(text) {
+		parts = append(parts, "This is an Insights & Opportunities report: identify the most material evidence, counterevidence, opportunities, risks, and executable tests without imposing a generic market-report template. If the request uses the phrase engagement army, interpret it as an opt-in ambassador and creator community, never coercive mobilization.")
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func scoutDocumentReportDecision(text string) (conversationIntentDecision, bool) {
+	if !scoutDocumentReportRequestDetected(text) {
+		return conversationIntentDecision{}, false
+	}
+	return deterministicScoutRegistryWorkDecision(documentReportProcessID, scoutDocumentReportObjective(text), text)
 }
 
 func scoutInsightsReportDecision(text string) (conversationIntentDecision, bool) {
 	if !scoutInsightsReportRequestDetected(text) {
 		return conversationIntentDecision{}, false
 	}
-	work := conversationWorkDecision{
-		Kind: conversationWorkWorkstream, Mode: "research",
-		Objective: scoutInsightsReportObjective(text), Authority: toolAuthorityReadOnly,
-	}
-	if err := work.validatePrivate(); err != nil {
-		return conversationIntentDecision{}, false
-	}
-	return conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: proposalSourceDeterministicGuard}, true
+	return scoutDocumentReportDecision(text)
 }
 
 // scoutChatDeckConfirmationDetected returns true when the message is a short
@@ -1043,7 +1150,7 @@ func scoutRegistryWorkAvailableWithoutAgentWorker(work *conversationWorkDecision
 		return false
 	}
 	switch strings.TrimSpace(strings.ToLower(work.ToolID)) {
-	case packagingStudioProcessID, "deck_outline":
+	case packagingStudioProcessID, documentReportProcessID, "deck_outline":
 		return true
 	default:
 		return false
@@ -1232,16 +1339,13 @@ func (app *kanbanBoardApp) routeConversationIntentWithInput(ctx context.Context,
 		recordConversationIntentOutcome(decision, map[string]any{"reason": "source_analysis"})
 		return decision
 	}
-	// An explicit I&O report is one durable document, not a multi-artifact goal
-	// loop and not the public synthetic Insights product. Route the private
-	// reversible ask to one source-bound research writer; the public caller
-	// intercepts the same language at its Suggested Work boundary.
+	// An explicit substantial report/document request is one durable native
+	// document. Route it through the server-authored, researched-when-needed
+	// report process before the model can flatten it into a generic research
+	// workstream. Public callers still hold work at their audience boundary.
 	if !imageRequest && turn.Modality != conversationModalityDirectAgentChat {
-		if decision, ok := scoutInsightsReportDecision(intentText); ok {
-			if !scoutAgentWorkerAvailable() {
-				decision = unavailableConversationDecision("agent_worker_unavailable", "The private report writer is unavailable right now, so nothing started.", proposalSourceDeterministicGuard)
-			}
-			recordConversationIntentOutcome(decision, map[string]any{"guard": "insights_report_output"})
+		if decision, ok := scoutDocumentReportDecision(intentText); ok {
+			recordConversationIntentOutcome(decision, map[string]any{"guard": "document_report_output"})
 			return decision
 		}
 	}
@@ -1468,6 +1572,8 @@ func scoutRouterProposalForToolID(toolID string, objective string, query string)
 	groupLabel := toolGroupLabels[tool.Group]
 	if tool.ID == packagingStudioProcessID {
 		groupLabel = "Presentation"
+	} else if tool.ID == documentReportProcessID {
+		groupLabel = "Document"
 	}
 	return &scoutRouterProposal{
 		Kind:        scoutRouterProposalKindToolRun,

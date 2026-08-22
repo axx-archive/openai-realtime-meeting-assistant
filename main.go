@@ -1211,6 +1211,7 @@ func main() {
 	http.HandleFunc("/artifacts/deck/copies", deckEditorCopyHandler)
 	http.HandleFunc("/artifacts/document", documentEditorHandler)
 	http.HandleFunc("/artifacts/document/copies", documentEditorCopyHandler)
+	http.HandleFunc("/artifacts/document/images", documentEditorImageUploadHandler)
 	http.HandleFunc("/artifacts/deck/image-generations", deckEditorImageGenerationHandler)
 	http.HandleFunc("/artifacts/deck/assets", deckEditorAssetUploadHandler)
 	http.HandleFunc("/artifacts/workstream", artifactWorkstreamCorrectionHandler)

@@ -1371,7 +1371,7 @@ func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
 					deliverScoutChatThreadMetadata(thread)
 				}
 				writeAuthJSON(w, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], map[string]any{
-					"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+					"ok": true, "created": created, "thread": kanbanApp.projectScoutChatThreadForViewer(user.Email, thread, r.Context()),
 				})
 				return
 			}

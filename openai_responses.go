@@ -62,6 +62,11 @@ type openAITextRequest struct {
 	// meeting, routing, and structured-output calls retain their existing
 	// authority and wire contract.
 	EnableWebSearch bool
+	// MaxToolCalls is a server-owned hosted-tool budget. It is set only by the
+	// external_evidence_v2 configurator and frozen in the durable provider
+	// request; ordinary web-search calls leave it zero and preserve their wire
+	// shape.
+	MaxToolCalls int
 	// LongRunning is a server-owned transport hint for durable, contract-bearing
 	// artifact generation. It changes only the HTTP deadline; it is never sent
 	// to the provider and ordinary chat/routing calls leave it false.
@@ -107,6 +112,7 @@ type openAIResponsesPayload struct {
 	Tools           []openAIResponsesTool `json:"tools,omitempty"`
 	ToolChoice      string                `json:"tool_choice,omitempty"`
 	Include         []string              `json:"include,omitempty"`
+	MaxToolCalls    int                   `json:"max_tool_calls,omitempty"`
 }
 
 type openAIResponsesTool struct {
@@ -368,6 +374,12 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		// bind those URLs server-side instead of trusting model-authored receipts.
 		payload.Include = []string{"web_search_call.action.sources"}
 	}
+	if request.EnableWebSearch && request.JSONSchema != nil && request.JSONSchema.Name == packagingStudioExternalEvidenceContract {
+		// This is intentionally not caller-tunable: the bounded evidence lane
+		// owns its hosted-search budget at the final wire seam as well as in the
+		// durable request snapshot.
+		payload.MaxToolCalls = externalEvidenceMaxToolCalls
+	}
 
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -598,9 +610,7 @@ func extractOpenAIResponseWebEvidence(body openAIResponsesBody) openAIResponseWe
 		}
 		seen[rawURL] = true
 		title := strings.Join(strings.Fields(rawTitle), " ")
-		if len(title) > 180 {
-			title = title[:180]
-		}
+		title = truncateAgentThreadText(title, 180)
 		citations = append(citations, openAIResponseWebCitation{Title: title, URL: rawURL})
 	}
 	searchCalls := 0
@@ -649,9 +659,7 @@ func appendOpenAIResponseWebSources(text string, evidence openAIResponseWebEvide
 		}
 		seen[rawURL] = true
 		title := strings.Join(strings.Fields(citation.Title), " ")
-		if len(title) > 180 {
-			title = title[:180]
-		}
+		title = truncateAgentThreadText(title, 180)
 		line := "- " + rawURL
 		if title != "" {
 			line = "- " + title + " — " + rawURL

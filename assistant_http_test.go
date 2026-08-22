@@ -887,6 +887,11 @@ func TestShouldServeIndexHTMLGatesAPIishPaths(t *testing.T) {
 		{method: http.MethodGet, path: "/", accept: "", want: true},
 		{method: http.MethodGet, path: "/index.html", accept: "", want: true},
 		{method: http.MethodGet, path: "/some-page", accept: "text/html,application/xhtml+xml", want: true},
+		// Native Studio routes are browser-navigation entrypoints. The client
+		// validates the artifact id and mode after the authenticated shell boots.
+		{method: http.MethodGet, path: "/studio/deck/deck-proof", accept: "text/html,application/xhtml+xml", want: true},
+		{method: http.MethodGet, path: "/studio/deck/deck-proof?mode=present", accept: "text/html", want: true},
+		{method: http.MethodGet, path: "/studio/document/report-proof?mode=edit", accept: "text/html", want: true},
 		// API-ish paths must 404 instead of serving the SPA, even to browsers.
 		{method: http.MethodGet, path: "/assistant/unknown", accept: "text/html", want: false},
 		{method: http.MethodGet, path: "/brain/state", accept: "*/*", want: false},

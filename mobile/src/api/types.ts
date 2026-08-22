@@ -411,6 +411,8 @@ export type ScoutWorkThreadRef = {
   resultArtifactType?: string;
   resultTitle?: string;
   resultPreview?: string;
+  resultApprovalState?: 'approved_exact' | 'edited_after_approval' | 'legacy_approval_binding' | string;
+  resultCanEdit?: boolean;
   provenance?: string;
   checkpoint?: {
     id: string;

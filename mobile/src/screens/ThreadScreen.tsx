@@ -38,6 +38,10 @@ import * as Linking from "expo-linking";
 import * as Clipboard from "expo-clipboard";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { api, BonfireApiError } from "../api/client";
+import {
+  artifactStudioKind,
+  artifactStudioPath,
+} from "../artifacts/studioRoutes";
 import type {
   ChatMentionCandidate,
   DriveFileRecord,
@@ -234,6 +238,7 @@ type ThreadMessageRowProps = {
   proposalObjective?: string;
   savingWork: boolean;
   regeneratingWork: boolean;
+  retryingGoal: boolean;
   workSaved: boolean;
   workDriveSaveAvailability: "checking" | "available" | "unavailable";
   onOpenSource: (source: ScoutAnswerSource) => void;
@@ -258,6 +263,7 @@ type ThreadMessageRowProps = {
   onSaveWorkArtifact: (message: ScoutMessage) => void;
   onOpenSavedWorkArtifact: (message: ScoutMessage) => void;
   onRegenerateWorkArtifact: (message: ScoutMessage) => void;
+  onRetryGoal: (message: ScoutMessage) => void;
   onViewArtifactFullscreen: (message: ScoutMessage) => void;
   onSaveImage: (message: ScoutMessage) => void;
   onRegenerateImage: (message: ScoutMessage) => void;
@@ -283,6 +289,7 @@ const ThreadMessageRow = React.memo(
     proposalObjective,
     savingWork,
     regeneratingWork,
+    retryingGoal,
     workSaved,
     workDriveSaveAvailability,
     onOpenSource,
@@ -295,6 +302,7 @@ const ThreadMessageRow = React.memo(
     onSaveWorkArtifact,
     onOpenSavedWorkArtifact,
     onRegenerateWorkArtifact,
+    onRetryGoal,
     onViewArtifactFullscreen,
     onSaveImage,
     onRegenerateImage,
@@ -364,6 +372,7 @@ const ThreadMessageRow = React.memo(
           onSaveWorkArtifact={onSaveWorkArtifact}
           onOpenSavedWorkArtifact={onOpenSavedWorkArtifact}
           onRegenerateWorkArtifact={onRegenerateWorkArtifact}
+          onRetryGoal={onRetryGoal}
           onViewArtifactFullscreen={onViewArtifactFullscreen}
           onSaveImage={onSaveImage}
           onRegenerateImage={onRegenerateImage}
@@ -378,6 +387,7 @@ const ThreadMessageRow = React.memo(
           imageSaved={imageSaved}
           savingWork={savingWork}
           regeneratingWork={regeneratingWork}
+          retryingGoal={retryingGoal}
           workSaved={workSaved}
           workDriveSaveAvailability={workDriveSaveAvailability}
         />
@@ -397,6 +407,7 @@ const ThreadMessageRow = React.memo(
     previous.proposalObjective === next.proposalObjective &&
     previous.savingWork === next.savingWork &&
     previous.regeneratingWork === next.regeneratingWork &&
+    previous.retryingGoal === next.retryingGoal &&
     previous.workSaved === next.workSaved &&
     previous.workDriveSaveAvailability === next.workDriveSaveAvailability &&
     previous.onOpenSource === next.onOpenSource &&
@@ -409,6 +420,7 @@ const ThreadMessageRow = React.memo(
     previous.onSaveWorkArtifact === next.onSaveWorkArtifact &&
     previous.onOpenSavedWorkArtifact === next.onOpenSavedWorkArtifact &&
     previous.onRegenerateWorkArtifact === next.onRegenerateWorkArtifact &&
+    previous.onRetryGoal === next.onRetryGoal &&
     previous.onViewArtifactFullscreen === next.onViewArtifactFullscreen &&
     previous.onSaveImage === next.onSaveImage &&
     previous.onRegenerateImage === next.onRegenerateImage &&
@@ -574,6 +586,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [regeneratingWorkID, setRegeneratingWorkID] = useState<string | null>(
     null,
   );
+  const [retryingGoalID, setRetryingGoalID] = useState<string | null>(null);
   const [regenerateWorkError, setRegenerateWorkError] = useState("");
   const [typingParticipants, setTypingParticipants] = useState<
     TypingParticipant[]
@@ -2695,12 +2708,18 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openWorkArtifact = useCallback(
     async (message: ScoutMessage, returnFocusHandle?: number) => {
       expandedMessageReturnFocusHandleRef.current = returnFocusHandle ?? null;
-      const resultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+      const resultArtifactId = String(message.thread?.resultArtifactId ?? '').trim()
+        || String(message.thread?.artifactId ?? '').trim();
       const resultArtifactType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
-      if (resultArtifactId && /^(html_deck|deck|presentation|slides?)$/u.test(resultArtifactType)) {
+      const resultStudioKind = artifactStudioKind(resultArtifactType)
+        ?? artifactStudioKind(message.thread?.mode);
+      if (resultArtifactId && resultStudioKind) {
         navigation.navigate('OSWeb', {
-          path: `/artifacts/deck?id=${encodeURIComponent(resultArtifactId)}`,
-          title: String(message.thread?.resultTitle ?? 'Presentation').trim() || 'Presentation',
+          path: artifactStudioPath(resultArtifactId, resultStudioKind, message.thread?.resultCanEdit === true ? 'edit' : 'present'),
+          title: String(
+            message.thread?.resultTitle
+              ?? (resultStudioKind === 'deck' ? 'Presentation' : 'Document'),
+          ).trim() || (resultStudioKind === 'deck' ? 'Presentation' : 'Document'),
         });
         return;
       }
@@ -2883,7 +2902,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const viewArtifactFullscreen = useCallback(
     (message: ScoutMessage) => {
-      const artifactId = String(message.thread?.resultArtifactId ?? message.thread?.artifactId ?? "").trim();
+      const artifactId = String(message.thread?.resultArtifactId ?? "").trim()
+        || String(message.thread?.artifactId ?? "").trim();
       const mode = String(message.thread?.resultArtifactType ?? message.thread?.mode ?? "").toLowerCase();
       const title = String(message.thread?.resultTitle ?? "Deliverable").trim();
       
@@ -2892,16 +2912,18 @@ export function ThreadScreen({ route, navigation }: Props) {
         return;
       }
       
-      // Open in web viewer via OSWeb - proper fullscreen deck/artifact view
-      // This does NOT dump to LongMessageSheet
-      const isDeck = /^(html_deck|deck|presentation|slides?)$/u.test(mode);
-      const path = isDeck
-        ? `/artifact/${artifactId}?present=true`
-        : `/artifact/${artifactId}`;
-      
-      navigation.navigate("OSWeb", { path, title });
+      const studioKind = artifactStudioKind(mode);
+      if (!studioKind) {
+        void openWorkArtifact(message);
+        return;
+      }
+
+      navigation.navigate("OSWeb", {
+        path: artifactStudioPath(artifactId, studioKind, 'present'),
+        title,
+      });
     },
-    [navigation],
+    [navigation, openWorkArtifact],
   );
 
   const beginSaveChatAttachment = useCallback(() => {
@@ -3028,6 +3050,35 @@ export function ThreadScreen({ route, navigation }: Props) {
     [savingWorkID, sessionToken, workSaveTarget],
   );
 
+  const retryGoal = useCallback(
+    async (message: ScoutMessage) => {
+      const messageID = String(message.id ?? "").trim();
+      const goalID = String(message.thread?.artifactId ?? "").trim();
+      const mode = String(message.thread?.mode ?? "").trim().toLowerCase();
+      const status = String(message.thread?.status ?? "").trim().toLowerCase();
+      const retryable = ["failed", "error", "needs_attention", "rejected", "blocked"].includes(status);
+      if (!sessionToken || !messageID || !goalID || mode !== "goal" || !retryable || retryingGoalID) return;
+      setRetryingGoalID(messageID);
+      setError(null);
+      try {
+        await api.resumeGoal(sessionToken, goalID);
+        await load();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (caught) {
+        setError(
+          caught instanceof BonfireApiError
+            ? caught.message
+            : caught instanceof Error
+              ? caught.message
+              : "Scout could not resume that goal.",
+        );
+      } finally {
+        setRetryingGoalID(null);
+      }
+    },
+    [load, retryingGoalID, sessionToken],
+  );
+
   const beginRegenerateWorkArtifact = useCallback((message: ScoutMessage) => {
     if (!String(message.thread?.artifactId ?? "").trim()) {
       setError("This deliverable is not available to regenerate yet.");
@@ -3095,6 +3146,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         proposalObjective={proposalObjectives[String(item.message.id)]}
         savingWork={savingWorkID === String(item.message.id)}
         regeneratingWork={regeneratingWorkID === String(item.message.id)}
+        retryingGoal={retryingGoalID === String(item.message.id)}
         workSaved={savedWorkIDs.has(String(item.message.id))}
         workDriveSaveAvailability={workDriveSaveAvailability}
 		onOpenSource={openAnswerSource}
@@ -3107,6 +3159,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onSaveWorkArtifact={beginSaveWorkArtifact}
         onOpenSavedWorkArtifact={openSavedWorkArtifact}
         onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
+        onRetryGoal={retryGoal}
         onViewArtifactFullscreen={viewArtifactFullscreen}
         onSaveImage={saveGeneratedImage}
         onRegenerateImage={regenerateGeneratedImage}
@@ -3137,6 +3190,8 @@ export function ThreadScreen({ route, navigation }: Props) {
       regenerateGeneratedImage,
       regeneratingImageID,
       regeneratingWorkID,
+      retryGoal,
+      retryingGoalID,
       retryScoutReply,
       retryingReplyID,
       resolveProposal,
@@ -3606,8 +3661,10 @@ export function ThreadScreen({ route, navigation }: Props) {
         onSaveWorkArtifact={beginSaveWorkArtifact}
         onOpenSavedWorkArtifact={openSavedWorkArtifact}
         onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
+        onRetryGoal={retryGoal}
         savingWorkID={savingWorkID}
         regeneratingWorkID={regeneratingWorkID}
+        retryingGoalID={retryingGoalID}
         savedWorkIDs={savedWorkIDs}
         workDriveSaveAvailability={workDriveSaveAvailability}
         actionOverlay={

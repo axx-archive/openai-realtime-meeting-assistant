@@ -2,6 +2,7 @@ const maxLocalFileNameLength = 140;
 
 const extensionsByMime: Record<string, readonly string[]> = {
   'application/pdf': ['.pdf'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'image/gif': ['.gif'],
   'image/jpeg': ['.jpg', '.jpeg'],
   'image/png': ['.png'],

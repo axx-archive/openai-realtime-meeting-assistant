@@ -19,6 +19,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,13 @@ const (
 	processRoleRender          = "render"
 	processRoleCompile         = "compile"
 	processRoleHumanCheckpoint = "human_checkpoint"
+
+	// documentReportProcessID is Scout's proportionate native-document lane.
+	// It is intentionally a process rather than the generic research workstream:
+	// the brief decides whether outside research is warranted, while story,
+	// writing, and the final quality gate remain present for every real report.
+	documentReportProcessID      = "document_report"
+	documentReportOutputContract = "native_markdown_report_v1"
 )
 
 var processStageRoles = map[string]bool{
@@ -79,6 +88,10 @@ type ProcessGateSpec struct {
 	Floor       float64 `json:"floor,omitempty"`
 	MaxRounds   int     `json:"maxRounds,omitempty"`
 	ForceAccept bool    `json:"forceAccept,omitempty"`
+	// Dimensions are the exact server-authored rubric rows the scorer must
+	// return once each. Runtime validation rejects missing, duplicate, extra,
+	// non-finite, or out-of-range rows before any average can pass.
+	Dimensions []string `json:"dimensions,omitempty"`
 	// RepairTarget names the authored stage a failed round should revise. When
 	// empty, the historical behavior revises the gate's first input. This lets a
 	// rendered review consume both the draft and its review record while still
@@ -193,11 +206,111 @@ type ProcessDefinition struct {
 	Description string `json:"description"`
 	Group       string `json:"group,omitempty"`
 	Authority   string `json:"authority,omitempty"`
+	// ImplementationRevision is the authored code revision for behavior that
+	// JSON cannot carry, most importantly Compile functions. It MUST change
+	// whenever a process's runtime implementation changes without a data-shape
+	// change. The exact value is pinned into every plan and route receipt.
+	ImplementationRevision string `json:"implementationRevision"`
 	// Hidden keeps a process launchable by id (tests, internal proofs) while
 	// leaving it OFF the public /assistant/tools payload and the router enum.
 	Hidden  bool           `json:"hidden,omitempty"`
 	Budgets ProcessBudgets `json:"budgets,omitempty"`
 	Stages  []ProcessStage `json:"stages"`
+}
+
+const processDefinitionDigestSchema = "stride.process-definition.identity.v1"
+
+type processCompileBinding struct {
+	StageID string `json:"stageId"`
+	Symbol  string `json:"symbol"`
+}
+
+type processDefinitionDigestMaterial struct {
+	Schema          string                  `json:"schema"`
+	Definition      ProcessDefinition       `json:"definition"`
+	CompileBindings []processCompileBinding `json:"compileBindings,omitempty"`
+}
+
+type processDefinitionIdentity struct {
+	ID                     string
+	Version                int
+	Digest                 string
+	ImplementationRevision string
+	ResultStageID          string
+	ResultOutputContract   string
+}
+
+// processDefinitionIdentityFor computes the complete executable identity of a
+// process. ProcessDefinition's JSON covers prompts, order, contracts,
+// conditions, checkpoints, budgets and gates. Compile is deliberately omitted
+// from that JSON, so its stable runtime symbol is included alongside the
+// explicit implementation revision. Pointer addresses are never hashed (ASLR
+// would make a persisted identity fail after restart).
+func processDefinitionIdentityFor(def ProcessDefinition) (processDefinitionIdentity, error) {
+	if err := validateProcessDefinition(def); err != nil {
+		return processDefinitionIdentity{}, err
+	}
+	bindings := make([]processCompileBinding, 0)
+	resultStageID := ""
+	resultOutputContract := ""
+	for _, stage := range def.Stages {
+		if stage.Role == processRoleWriter {
+			resultStageID = strings.TrimSpace(stage.ID)
+			resultOutputContract = strings.TrimSpace(stage.OutputContract)
+		}
+		if stage.Compile == nil {
+			continue
+		}
+		fn := runtime.FuncForPC(reflect.ValueOf(stage.Compile).Pointer())
+		if fn == nil || strings.TrimSpace(fn.Name()) == "" {
+			return processDefinitionIdentity{}, fmt.Errorf("process %q stage %q compile implementation has no stable symbol", def.ID, stage.ID)
+		}
+		bindings = append(bindings, processCompileBinding{StageID: strings.TrimSpace(stage.ID), Symbol: fn.Name()})
+	}
+	digest, err := digestAny(processDefinitionDigestMaterial{
+		Schema:          processDefinitionDigestSchema,
+		Definition:      def,
+		CompileBindings: bindings,
+	})
+	if err != nil || !isHexDigest(digest) {
+		return processDefinitionIdentity{}, fmt.Errorf("process %q identity could not be encoded", def.ID)
+	}
+	return processDefinitionIdentity{
+		ID:                     strings.TrimSpace(def.ID),
+		Version:                def.Version,
+		Digest:                 digest,
+		ImplementationRevision: strings.TrimSpace(def.ImplementationRevision),
+		ResultStageID:          resultStageID,
+		ResultOutputContract:   resultOutputContract,
+	}, nil
+}
+
+// cloneProcessDefinition makes registry entries immutable to callers while
+// retaining Go function values that cannot be JSON-cloned.
+func cloneProcessDefinition(def ProcessDefinition) ProcessDefinition {
+	cloned := def
+	cloned.Stages = make([]ProcessStage, len(def.Stages))
+	for index, stage := range def.Stages {
+		clonedStage := stage
+		clonedStage.Personas = append([]ProcessPersona(nil), stage.Personas...)
+		clonedStage.InputFrom = append([]string(nil), stage.InputFrom...)
+		if stage.GateSpec != nil {
+			gate := *stage.GateSpec
+			gate.Dimensions = append([]string(nil), stage.GateSpec.Dimensions...)
+			clonedStage.GateSpec = &gate
+		}
+		if stage.CheckpointSpec != nil {
+			checkpoint := *stage.CheckpointSpec
+			checkpoint.Options = append([]ProcessCheckpointOption(nil), stage.CheckpointSpec.Options...)
+			clonedStage.CheckpointSpec = &checkpoint
+		}
+		if stage.RunIf != nil {
+			condition := *stage.RunIf
+			clonedStage.RunIf = &condition
+		}
+		cloned.Stages[index] = clonedStage
+	}
+	return cloned
 }
 
 func (def ProcessDefinition) stageByID(id string) (ProcessStage, bool) {
@@ -242,6 +355,14 @@ func processStageLawSweep(stage ProcessStage, body string) (string, bool) {
 		if err := validateDeckDocument(deck, artifactAssetRefSet(candidate)); err != nil {
 			return "LAW SWEEP (packaging_deck_v1): the editable scene is invalid: " + compactAssistantLine(err.Error()), true
 		}
+	case documentReportOutputContract:
+		if !strings.HasPrefix(trimmed, "# ") {
+			return "LAW SWEEP (native_markdown_report_v1): emit the editable Markdown document itself, beginning with one specific H1 title. Do not return a plan, workflow log, JSON object, or fenced code block.", true
+		}
+		lowered := strings.ToLower(trimmed)
+		if strings.HasPrefix(lowered, "# scout work thread") || strings.Contains(lowered, "\n## work decomposition") || strings.Contains(lowered, "\n## agent assignment") {
+			return "LAW SWEEP (native_markdown_report_v1): the deliverable is a reader-ready report, not an execution log. Remove workflow scaffolding and emit only the finished Markdown document.", true
+		}
 	}
 	return "", false
 }
@@ -263,6 +384,17 @@ func rawDocumentContractInstructions(contract string) (string, bool) {
 			"A plan, outline, or description of the deck is a FAILED deliverable — the law sweep rejects anything that is not the document itself.",
 			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, inert per-slide .notes from the VOICE script, and a .fig-N slot for each generated image. Do not add custom JavaScript or presenter chrome; the native app owns presentation behavior.",
 			"The file must round-trip through Deck Studio faithfully: stable data-deck ids/types plus explicit inline position, size, z-index, opacity, rotation, typography, fills, and image-fit for every editable element. A visually plausible but non-editable HTML page fails the deterministic law sweep.",
+		}, "\n"), true
+	case documentReportOutputContract:
+		return strings.Join([]string{
+			"You are Scout's senior report writer for Stride.",
+			"Your ENTIRE response is the finished, editable Markdown document itself. Begin with one specific H1 title and include no preamble, code fence, JSON envelope, Vision line, workflow log, process commentary, or text after the document.",
+			"Follow the approved brief and prior-stage evidence supplied in the user request. Choose only the sections the actual decision needs; do not impose a generic research-report template or a fixed word count.",
+			"Build a coherent human argument: lead with the useful thesis, earn it with attributable evidence and counterevidence, make inferences explicit, and end with concrete decisions, tests, or next moves appropriate to the ask.",
+			"Use clickable Markdown links beside externally sourced claims. Keep company-grounded observations, external facts, inferences, and recommendations distinct. Never invent a quote, source, number, or degree of certainty.",
+			"For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the complete exact admitted claim verbatim and append the exact hidden authority marker required by the stage prompt. This marker is source metadata and must stay in the Markdown document.",
+			processForwardStatementPromptLaw,
+			"Write publication-quality prose with varied, natural cadence. Remove AI tells, filler headings, slogan stacks, throat-clearing, and meta-language about producing the report.",
 		}, "\n"), true
 	}
 	return "", false
@@ -311,6 +443,9 @@ func validateProcessDefinition(def ProcessDefinition) error {
 	}
 	if def.Version < 1 {
 		return fmt.Errorf("process %q version must be >= 1", id)
+	}
+	if strings.TrimSpace(def.ImplementationRevision) == "" {
+		return fmt.Errorf("process %q has no implementation revision", id)
 	}
 	if strings.TrimSpace(def.Title) == "" {
 		return fmt.Errorf("process %q has no title", id)
@@ -491,7 +626,7 @@ func registerProcessDefinition(def ProcessDefinition) error {
 			return fmt.Errorf("process id %q is already registered", def.ID)
 		}
 	}
-	registeredProcessDefinitions = append(registeredProcessDefinitions, def)
+	registeredProcessDefinitions = append(registeredProcessDefinitions, cloneProcessDefinition(def))
 	return nil
 }
 
@@ -505,6 +640,7 @@ func registerProcessDefinition(def ProcessDefinition) error {
 func builtinProcessDefinitions() []ProcessDefinition {
 	return []ProcessDefinition{
 		processProbeDefinition(),
+		documentReportDefinition(),
 		packagingStudioDefinition(),
 	}
 }
@@ -515,7 +651,14 @@ func processDefinitions() []ProcessDefinition {
 	processRegistryMu.Lock()
 	defer processRegistryMu.Unlock()
 	defs := builtinProcessDefinitions()
-	return append(defs, registeredProcessDefinitions...)
+	result := make([]ProcessDefinition, 0, len(defs)+len(registeredProcessDefinitions))
+	for _, def := range defs {
+		result = append(result, cloneProcessDefinition(def))
+	}
+	for _, def := range registeredProcessDefinitions {
+		result = append(result, cloneProcessDefinition(def))
+	}
+	return result
 }
 
 // processByID resolves a process id, hidden included (hidden means "not
@@ -533,6 +676,64 @@ func processByID(id string) (ProcessDefinition, bool) {
 		}
 	}
 	return ProcessDefinition{}, false
+}
+
+func bindGoalProcessIdentity(plan *goalPlan, def ProcessDefinition) error {
+	if plan == nil {
+		return fmt.Errorf("process plan is unavailable")
+	}
+	identity, err := processDefinitionIdentityFor(def)
+	if err != nil {
+		return err
+	}
+	plan.ProcessID = identity.ID
+	plan.ProcessVersion = identity.Version
+	plan.ProcessDigest = identity.Digest
+	plan.ProcessImplementationRevision = identity.ImplementationRevision
+	plan.ResultStageID = identity.ResultStageID
+	plan.ResultOutputContract = identity.ResultOutputContract
+	return nil
+}
+
+func verifyGoalProcessIdentity(plan *goalPlan, identity processDefinitionIdentity) error {
+	if plan == nil || strings.TrimSpace(plan.ProcessID) == "" {
+		return fmt.Errorf("saved process identity is unavailable; launch a new run")
+	}
+	if plan.ProcessVersion < 1 || !isHexDigest(plan.ProcessDigest) || strings.TrimSpace(plan.ProcessImplementationRevision) == "" {
+		return fmt.Errorf("saved process identity is incomplete; launch a new run")
+	}
+	if strings.TrimSpace(plan.ProcessID) != identity.ID || plan.ProcessVersion != identity.Version ||
+		plan.ProcessDigest != identity.Digest || strings.TrimSpace(plan.ProcessImplementationRevision) != identity.ImplementationRevision ||
+		strings.TrimSpace(plan.ResultStageID) != identity.ResultStageID || strings.TrimSpace(plan.ResultOutputContract) != identity.ResultOutputContract {
+		return fmt.Errorf("saved process %s identity no longer matches an available immutable definition; relaunch or explicitly migrate the run", strings.TrimSpace(plan.ProcessID))
+	}
+	return nil
+}
+
+// resolvePinnedProcessDefinition is the only runtime process lookup. An old
+// ProcessID-only plan, a removed definition, or any drift in prompts, stage
+// order, contracts, conditions, checkpoints, budgets, gates, compile binding,
+// version, or implementation revision fails closed. It never degrades a
+// process goal into a generic goal or unavailable-stub execution lane.
+func resolvePinnedProcessDefinition(plan *goalPlan) (ProcessDefinition, error) {
+	if plan == nil || strings.TrimSpace(plan.ProcessID) == "" {
+		return ProcessDefinition{}, fmt.Errorf("saved process identity is unavailable; launch a new run")
+	}
+	if !plan.routeVerified {
+		return ProcessDefinition{}, fmt.Errorf("saved process route is not verified")
+	}
+	def, ok := processByID(plan.ProcessID)
+	if !ok {
+		return ProcessDefinition{}, fmt.Errorf("saved process %s is no longer available; relaunch or explicitly migrate the run", strings.TrimSpace(plan.ProcessID))
+	}
+	identity, err := processDefinitionIdentityFor(def)
+	if err != nil {
+		return ProcessDefinition{}, fmt.Errorf("saved process %s cannot be resolved safely: %w", strings.TrimSpace(plan.ProcessID), err)
+	}
+	if err := verifyGoalProcessIdentity(plan, identity); err != nil {
+		return ProcessDefinition{}, err
+	}
+	return def, nil
 }
 
 // processDeliverableContract is the contract the process's LAST writer stage
@@ -556,6 +757,16 @@ func processDeliverableContract(def ProcessDefinition) string {
 // must pass — against the process's own subtask budget, not the free-form cap.
 // Deterministic and model-free, so a restart re-instantiates identically.
 func instantiateProcessPlan(def ProcessDefinition, plan *goalPlan) error {
+	if plan == nil {
+		return fmt.Errorf("process plan is unavailable")
+	}
+	identity, err := processDefinitionIdentityFor(def)
+	if err != nil {
+		return err
+	}
+	if err := verifyGoalProcessIdentity(plan, identity); err != nil {
+		return err
+	}
 	subtasks := make([]goalSubtask, 0, len(def.Stages))
 	for _, stage := range def.Stages {
 		dependsOn := make([]string, 0, len(stage.InputFrom))
@@ -673,14 +884,15 @@ func processPaletteEntry(def ProcessDefinition) packagingTool {
 // never appears on the public payload or the router enum.
 func processProbeDefinition() ProcessDefinition {
 	return ProcessDefinition{
-		ID:          "process_probe",
-		Version:     1,
-		Title:       "Process Probe",
-		Description: "Three-stage proof pipeline for the process runtime: draft, gate, human checkpoint.",
-		Group:       toolGroupProcesses,
-		Authority:   toolAuthorityWorkspaceWrite,
-		Hidden:      true,
-		Budgets:     ProcessBudgets{MaxSubtasks: 3},
+		ID:                     "process_probe",
+		Version:                1,
+		Title:                  "Process Probe",
+		Description:            "Three-stage proof pipeline for the process runtime: draft, gate, human checkpoint.",
+		Group:                  toolGroupProcesses,
+		Authority:              toolAuthorityWorkspaceWrite,
+		ImplementationRevision: "process_probe.runtime.v1",
+		Hidden:                 true,
+		Budgets:                ProcessBudgets{MaxSubtasks: 3},
 		Stages: []ProcessStage{
 			{
 				ID:             "draft",
@@ -696,7 +908,7 @@ func processProbeDefinition() ProcessDefinition {
 				Role:       processRoleGate,
 				PromptBody: "Rubric dimensions: Directness (answers the objective, not around it), Brevity (short enough to read in one breath).",
 				InputFrom:  []string{"draft"},
-				GateSpec:   &ProcessGateSpec{Threshold: 8, Floor: 6, MaxRounds: 2},
+				GateSpec:   &ProcessGateSpec{Threshold: 8, Floor: 6, MaxRounds: 2, Dimensions: []string{"Directness", "Brevity"}},
 			},
 			{
 				ID:        "ship_choice",
@@ -710,6 +922,123 @@ func processProbeDefinition() ProcessDefinition {
 					Options: []ProcessCheckpointOption{
 						{Label: "ship"},
 						{Label: "hold", Action: processCheckpointActionHold},
+					},
+				},
+			},
+		},
+	}
+}
+
+// documentReportDefinition is the native-document counterpart to Packaging
+// Studio. It deliberately leaves the requested report shape open: Scout first
+// resolves the audience and decision, spends hosted research only when current
+// external facts could materially change the answer, finds an argument, writes
+// the actual Markdown file, and holds anything that misses the exact quality
+// bar. There is no routine human checkpoint; a well-formed ask runs through.
+func documentReportDefinition() ProcessDefinition {
+	internal := true
+	return ProcessDefinition{
+		ID:                     documentReportProcessID,
+		Version:                2,
+		Title:                  "Document Studio",
+		Description:            "Turn a substantial document or report request and authorized company context into a researched-when-needed, reviewed, editable native document.",
+		Group:                  toolGroupProcesses,
+		Authority:              toolAuthorityWorkspaceWrite,
+		ImplementationRevision: "document_report.runtime.v2",
+		Budgets:                ProcessBudgets{MaxSubtasks: 8, MaxTokens: 48000, WallClock: 20 * time.Minute},
+		Stages: []ProcessStage{
+			{
+				ID:       "context_snapshot",
+				Title:    "Understand the decision",
+				Role:     processRoleSynthesizer,
+				Internal: internal,
+				PromptBody: strings.Join([]string{
+					"Turn the direct approved request, exact reply-thread/source packet, and authorized Company Brain context into report_context_snapshot_v1. The current request is authoritative; older company context may support it but never override it.",
+					"Resolve the reader, decision or job to be done, intended use, scope, voice, useful document shape, known constraints, exact language worth preserving, settled internal facts, and genuinely open claims. Prefer a safe reversible inference over a routine clarification and label it.",
+					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, comparative claims, or credibility-critical numbers could materially change the report. Every external research question must name the concrete entity, audience, category, or market whose answer matters so a returned fact can be checked for direct relevance. A synthesis, internal memo, narrative draft, or answer fully supported by authorized sources does not need web research.",
+					"Return one JSON object with keys direct_ask, reader, decision, intended_use, document_shape, scope, voice, constraints, context_used, settled_facts, open_claims, research_mode, research_questions, reversible_inferences, and success_criteria. settled_facts must be an array of objects with claim, exact_quote, and source_ref. Copy claim and exact_quote verbatim from one authorized source and make them identical after whitespace normalization. Copy the complete bracketed reference exactly from the same SOURCE [...] block or source-linked Company Brain line into source_ref, including every id, revision, and digest field; never synthesize or combine a reference. If that same-source proof is unavailable, put the item in open_claims instead.",
+				}, "\n"),
+				OutputContract: "report_context_snapshot_v1",
+			},
+			{
+				ID:        "external_research",
+				Title:     "Verify what could change the answer",
+				Role:      processRoleWriter,
+				Mode:      "research",
+				Internal:  internal,
+				InputFrom: []string{"context_snapshot"},
+				RunIf:     &ProcessStageCondition{StageID: "context_snapshot", Field: "research_mode", Equals: "external"},
+				PromptBody: strings.Join([]string{
+					"Research only the credibility-critical questions authorized by the context snapshot; one decisive question is enough when that is all the report needs.",
+					"Prefer current primary or official sources where available. For every used finding provide the precise claim, provider-fetched URL, publication date when known, units, confidence, and its implication for the report. Separate sourced fact from inference and exclude anything not verified in this run.",
+				}, "\n"),
+				OutputContract: packagingStudioExternalEvidenceContract,
+			},
+			{
+				ID:         "source_snapshot",
+				Title:      "Capture exact source text",
+				Role:       processRoleCompile,
+				Internal:   internal,
+				InputFrom:  []string{"context_snapshot", "external_research"},
+				RunIf:      &ProcessStageCondition{StageID: "context_snapshot", Field: "research_mode", Equals: "external"},
+				PromptBody: "Fetch the exact provider-linked HTTPS sources server-side and preserve bounded, digest-bound text windows for each candidate claim. Fetch failures and pages with no relevant text remain explicit; URL membership alone never proves a claim.",
+				Compile:    compileExternalEvidenceSourceSnapshots,
+			},
+			{
+				ID:             "evidence_entailment",
+				Title:          "Check what the sources actually prove",
+				Role:           processRoleWriter,
+				Mode:           "artifacts",
+				Internal:       internal,
+				InputFrom:      []string{"context_snapshot", "external_research", "source_snapshot"},
+				RunIf:          &ProcessStageCondition{StageID: "context_snapshot", Field: "research_mode", Equals: "external"},
+				PromptBody:     "Independently check every exact candidate fact + URL pair using only the exact authority-bound text windows the server fetched from that URL. Do not start a second search. Admit only claims those windows actually entail with matching population, date, units, and numeric fidelity. Reject unclear, contradicted, unfetched, or merely URL-associated claims; never repair a claim into a stronger one.",
+				OutputContract: packagingStudioEntailmentContract,
+			},
+			{
+				ID:             "evidence",
+				Title:          "Lock the evidence",
+				Role:           processRoleCompile,
+				Internal:       internal,
+				InputFrom:      []string{"context_snapshot", "evidence_entailment"},
+				PromptBody:     "Produce report_evidence_dossier_v1 from authorized Company Brain/direct-source facts and the entailment-check record. Every report_ready_claim carries claim, provenance, URL when external, date and units when relevant, confidence, and exactly one status: entailment_checked for an external claim admitted by evidence_entailment, or internal for an attributable authorized company/direct-source fact. State counterevidence and missing proof. No verified, inferred, suggested, rejected, unclear, or merely provider-fetched claim may enter report_ready_claims.",
+				OutputContract: "report_evidence_dossier_v1",
+				Compile:        compileProcessEvidenceDossier,
+			},
+			{
+				ID:        "story",
+				Title:     "Find the strongest argument",
+				Role:      processRolePanel,
+				Internal:  internal,
+				InputFrom: []string{"context_snapshot", "evidence"},
+				Personas: []ProcessPersona{
+					{Name: "decision editor", System: "You are a rigorous executive editor. Build the shortest causal argument that helps this exact reader make the intended decision. Refuse topic dumps, generic section templates, repeated points, and recommendations the evidence has not earned."},
+					{Name: "skeptical operator", System: "You are the operator who must act on this report. Pressure-test proof, counterevidence, incentives, feasibility, risks, guardrails, success measures, and what would change the recommendation. Keep only material objections and executable implications."},
+				},
+				PromptBody:     "Develop distinct narrative approaches for the actual reader and decision, then synthesize one report_story_spine_v1. Name the opening thesis, causal turns, evidence assigned to each turn, counterargument, implications, and ending decision or test. Use only report-ready claims, preserve explicit source language exactly, and choose a story rather than an outline of topics. For every JSON object that contains a material number, currency, percentage, date, external URL, or externally verifiable superlative, include sibling claim_ids and exact_claims arrays copied exactly from the admitted evidence row and render the complete exact admitted claim verbatim in the fact-bearing string. If you write prose instead of JSON, append <!-- stride-claim:<claim id> | <exact admitted claim> --> in the same paragraph and render that exact claim verbatim in the factual sentence. " + processForwardStatementPromptLaw,
+				OutputContract: "report_story_spine_v1",
+			},
+			{
+				ID:             "write",
+				Title:          "Write the editable document",
+				Role:           processRoleWriter,
+				Mode:           "artifacts",
+				Internal:       internal,
+				InputFrom:      []string{"context_snapshot", "evidence", "story"},
+				PromptBody:     "Write the finished native Markdown document now. Honor the requested report type and choose only useful sections. Open with a specific title and a decision-worthy thesis; build one coherent narrative supported by attributed facts and clearly labeled inference; include counterevidence, risks, guardrails, and concrete opportunities, tests, owners, measures, or next decisions only where relevant. Use natural human prose and clickable citations. For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the complete exact admitted claim verbatim and append one hidden authority marker in that same heading, paragraph, or row using exactly <!-- stride-claim:<claim id> | <exact admitted claim> -->. The id and claim text must be copied from the dossier; the external URL must equal that row's requested or final URL. Do not include process artifacts, a research receipt, a generic workflow template, or a fixed minimum length. " + processForwardStatementPromptLaw,
+				OutputContract: documentReportOutputContract,
+			},
+			{
+				ID:         "quality_gate",
+				Title:      "Hold or perfect the document",
+				Role:       processRoleGate,
+				Internal:   internal,
+				InputFrom:  []string{"write", "context_snapshot", "evidence", "story"},
+				PromptBody: "Score Direct-request fidelity, Decision usefulness, Narrative coherence, Evidence integrity, Human voice, Specificity and actionability, and Document completeness. The report must be a polished document a trusted colleague could circulate without rewriting, not an AI-shaped list or process log. Every weak score must name an executable repair; unsupported certainty, invented facts, generic prose, or a structurally correct but unhelpful report cannot pass.",
+				GateSpec: &ProcessGateSpec{
+					Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "write", HoldOnFailure: true,
+					Dimensions: []string{
+						"Direct-request fidelity", "Decision usefulness", "Narrative coherence", "Evidence integrity", "Human voice", "Specificity and actionability", "Document completeness",
 					},
 				},
 			},

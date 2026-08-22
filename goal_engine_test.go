@@ -56,7 +56,7 @@ func (routes goalResponderRoutes) responder(t *testing.T) anthropicMessagesRespo
 		case strings.Contains(system, "final verifier"):
 			text = firstNonEmptyString(routes.verify, `{"verdict":"pass","reasons":"goal met"}`)
 		case strings.Contains(system, "process gate scorer"):
-			text = firstNonEmptyString(routes.processGate, `{"dimensions":[{"name":"Quality","score":9.5,"gap":""},{"name":"Completeness","score":9.0,"gap":""}],"reasons":"clears the bar"}`)
+			text = firstNonEmptyString(routes.processGate, `{"dimensions":[{"name":"Directness","score":9.5,"gap":""},{"name":"Brevity","score":9.0,"gap":""}],"reasons":"clears the bar"}`)
 		case strings.Contains(system, "panel synthesizer"):
 			text = firstNonEmptyString(routes.synthesis, "Synthesis: the panel agrees.")
 		case strings.Contains(system, "process stage synthesizer"):
@@ -847,7 +847,7 @@ func TestProcessGateBlockerProjectsActionableCheckpoint(t *testing.T) {
 	})
 
 	run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
-		Objective: "Prepare the decision deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+		Objective: "Prepare the decision note", CreatedBy: "aj@shareability.com", ToolTemplate: "process_probe",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -857,11 +857,11 @@ func TestProcessGateBlockerProjectsActionableCheckpoint(t *testing.T) {
 	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+	if err := instantiateProcessPlan(processProbeDefinition(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	stage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
-	stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: false}
+	stage := packagingStudioStage(t, processProbeDefinition(), "note_gate")
+	stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: false, Dimensions: []string{"Grounding"}}
 	st := plan.subtaskByID(stage.ID)
 	st.Status = subtaskRunning
 	st.Revisions = 1
@@ -907,7 +907,7 @@ func TestProcessGateScorerFailuresTerminalCannotBeOverridden(t *testing.T) {
 			})
 
 			run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
-				Objective: "Prepare the decision deck", CreatedBy: "aj@shareability.com", ToolTemplate: packagingStudioProcessID,
+				Objective: "Prepare the decision note", CreatedBy: "aj@shareability.com", ToolTemplate: "process_probe",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -917,10 +917,10 @@ func TestProcessGateScorerFailuresTerminalCannotBeOverridden(t *testing.T) {
 			if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
+			if err := instantiateProcessPlan(processProbeDefinition(), &plan); err != nil {
 				t.Fatal(err)
 			}
-			stage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
+			stage := packagingStudioStage(t, processProbeDefinition(), "note_gate")
 			stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: true}
 			st := plan.subtaskByID(stage.ID)
 			st.Status = subtaskRunning
@@ -3594,7 +3594,7 @@ func TestProcessRenderStageSkipsDisclosedWhenSidecarAbsent(t *testing.T) {
 func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	installFakeResponder(t, goalResponderRoutes{
-		processGate: `{"dimensions":[{"name":"Directness","score":4,"gap":"does not answer the objective"}],"reasons":"misses the point"}`,
+		processGate: `{"dimensions":[{"name":"Directness","score":4,"gap":"does not answer the objective"},{"name":"Brevity","score":9,"gap":""}],"reasons":"misses the point"}`,
 	})
 	launched := installFakeChildRunner(t)
 
@@ -3963,18 +3963,20 @@ func TestProcessBudgetsOverrideEngineDefaults(t *testing.T) {
 		})
 	}
 	def := ProcessDefinition{
-		ID:          "process_budget_probe",
-		Version:     1,
-		Title:       "Budget Probe",
-		Description: "Test-only: more stages than the free-form cap.",
-		Authority:   toolAuthorityWorkspaceWrite,
-		Hidden:      true,
-		Budgets:     ProcessBudgets{MaxSubtasks: goalMaxSubtasks + 2, MaxTokens: 48000, WallClock: 25 * time.Minute},
-		Stages:      stages,
+		ID:                     "process_budget_probe",
+		Version:                1,
+		Title:                  "Budget Probe",
+		Description:            "Test-only: more stages than the free-form cap.",
+		Authority:              toolAuthorityWorkspaceWrite,
+		ImplementationRevision: "test.process_budget_probe.runtime.v1",
+		Hidden:                 true,
+		Budgets:                ProcessBudgets{MaxSubtasks: goalMaxSubtasks + 2, MaxTokens: 48000, WallClock: 25 * time.Minute},
+		Stages:                 stages,
 	}
 	registerProcessDefinitionForTest(t, def)
 
 	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan under the budget: %v", err)
 	}
@@ -4246,7 +4248,7 @@ func TestResumeLegacyStudioGoalFreezesApprovedDeckBeforeFreshRetryPark(t *testin
 		t.Fatalf("projection index latest/accepted=%q/%q, want retry/approved %q/%q", index.deckByGoal[parent.ID].ID, index.acceptedDeckByGoal[parent.ID].ID, retry.ID, approved.ID)
 	}
 	message := scoutChatMessageRecord{Thread: &scoutChatThreadRef{ArtifactID: parent.ID}}
-	projectScoutChatResultRef(&message, index)
+	app.projectScoutChatResultRef(context.Background(), accountStore().findUser("aj@shareability.com"), &message, index)
 	if message.Thread.ResultArtifactID != approved.ID {
 		t.Fatalf("fresh retry park projected %q, want still-approved deck %q", message.Thread.ResultArtifactID, approved.ID)
 	}

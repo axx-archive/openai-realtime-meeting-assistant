@@ -16,6 +16,9 @@ import (
 // removes it again at cleanup so the registry never leaks across tests.
 func registerProcessDefinitionForTest(t *testing.T, def ProcessDefinition) {
 	t.Helper()
+	if strings.TrimSpace(def.ImplementationRevision) == "" {
+		def.ImplementationRevision = "test." + strings.TrimSpace(def.ID) + ".runtime.v1"
+	}
 	if err := registerProcessDefinition(def); err != nil {
 		t.Fatalf("registerProcessDefinition(%s): %v", def.ID, err)
 	}
@@ -32,6 +35,14 @@ func registerProcessDefinitionForTest(t *testing.T, def ProcessDefinition) {
 	})
 }
 
+func pinProcessPlanForTest(t *testing.T, plan *goalPlan, def ProcessDefinition) {
+	t.Helper()
+	if err := bindGoalProcessIdentity(plan, def); err != nil {
+		t.Fatalf("bindGoalProcessIdentity(%s): %v", def.ID, err)
+	}
+	plan.routeVerified = true
+}
+
 // testProcessCompileFunc is a no-op compiler for validation-shape tests.
 func testProcessCompileFunc(_ *kanbanBoardApp, _ *goalPlan, _ string, _ ProcessStage) (string, map[string]string, error) {
 	return "compiled", nil, nil
@@ -40,12 +51,13 @@ func testProcessCompileFunc(_ *kanbanBoardApp, _ *goalPlan, _ string, _ ProcessS
 // validProcessProbeLikeDefinition is a minimal valid definition tests mutate.
 func validProcessProbeLikeDefinition(id string) ProcessDefinition {
 	return ProcessDefinition{
-		ID:          id,
-		Version:     1,
-		Title:       "Test Process",
-		Description: "Test-only process definition.",
-		Authority:   toolAuthorityWorkspaceWrite,
-		Hidden:      true,
+		ID:                     id,
+		Version:                1,
+		Title:                  "Test Process",
+		Description:            "Test-only process definition.",
+		Authority:              toolAuthorityWorkspaceWrite,
+		ImplementationRevision: "test." + id + ".runtime.v1",
+		Hidden:                 true,
 		Stages: []ProcessStage{
 			{ID: "w1", Title: "Write", Role: processRoleWriter},
 			{ID: "g1", Title: "Gate", Role: processRoleGate, InputFrom: []string{"w1"}},
@@ -95,6 +107,158 @@ func TestBuiltinProcessDefinitionsValidate(t *testing.T) {
 	}
 }
 
+func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
+	def, ok := processByID(documentReportProcessID)
+	if !ok || def.Hidden {
+		t.Fatalf("document report process=%+v ok=%t", def, ok)
+	}
+	if err := validateProcessDefinition(def); err != nil {
+		t.Fatalf("document report process does not validate: %v", err)
+	}
+	wantStages := []string{"context_snapshot", "external_research", "source_snapshot", "evidence_entailment", "evidence", "story", "write", "quality_gate"}
+	if len(def.Stages) != len(wantStages) {
+		t.Fatalf("stages=%d, want %d", len(def.Stages), len(wantStages))
+	}
+	for index, want := range wantStages {
+		if def.Stages[index].ID != want {
+			t.Fatalf("stage %d=%q, want %q", index, def.Stages[index].ID, want)
+		}
+		if def.Stages[index].Role == processRoleHumanCheckpoint {
+			t.Fatalf("routine human checkpoint leaked into document process: %+v", def.Stages[index])
+		}
+	}
+	research := def.Stages[1]
+	if research.Mode != "research" || research.OutputContract != packagingStudioExternalEvidenceContract || research.RunIf == nil ||
+		research.RunIf.StageID != "context_snapshot" || research.RunIf.Field != "research_mode" || research.RunIf.Equals != "external" {
+		t.Fatalf("conditional research stage=%+v", research)
+	}
+	sourceSnapshot := def.Stages[2]
+	if sourceSnapshot.Role != processRoleCompile || sourceSnapshot.Compile == nil || strings.Join(sourceSnapshot.InputFrom, "|") != "context_snapshot|external_research" ||
+		sourceSnapshot.RunIf == nil || sourceSnapshot.RunIf.StageID != "context_snapshot" || sourceSnapshot.RunIf.Equals != "external" {
+		t.Fatalf("source snapshot stage=%+v", sourceSnapshot)
+	}
+	entailment := def.Stages[3]
+	if entailment.Role != processRoleWriter || entailment.Mode != "artifacts" || entailment.OutputContract != packagingStudioEntailmentContract ||
+		strings.Join(entailment.InputFrom, "|") != "context_snapshot|external_research|source_snapshot" || entailment.RunIf == nil || entailment.RunIf.StageID != "context_snapshot" || entailment.RunIf.Equals != "external" ||
+		!strings.Contains(entailment.PromptBody, "Do not start a second search") || strings.Contains(entailment.PromptBody, "fresh provider retrieval") {
+		t.Fatalf("entailment stage=%+v", entailment)
+	}
+	evidence := def.Stages[4]
+	if evidence.Role != processRoleCompile || evidence.Compile == nil || strings.Join(evidence.InputFrom, "|") != "context_snapshot|evidence_entailment" ||
+		!strings.Contains(evidence.PromptBody, "entailment_checked") || !strings.Contains(evidence.PromptBody, "exactly one status") {
+		t.Fatalf("evidence admission stage=%+v", evidence)
+	}
+	write := def.Stages[6]
+	if write.OutputContract != documentReportOutputContract || processDeliverableContract(def) != documentReportOutputContract {
+		t.Fatalf("write contract=%q process contract=%q", write.OutputContract, processDeliverableContract(def))
+	}
+	gate := def.Stages[7]
+	wantDimensions := []string{"Direct-request fidelity", "Decision usefulness", "Narrative coherence", "Evidence integrity", "Human voice", "Specificity and actionability", "Document completeness"}
+	if gate.GateSpec == nil || !gate.GateSpec.HoldOnFailure || gate.GateSpec.RepairTarget != "write" || gate.GateSpec.Threshold != 9 || gate.GateSpec.Floor != 7 ||
+		strings.Join(gate.GateSpec.Dimensions, "|") != strings.Join(wantDimensions, "|") {
+		t.Fatalf("quality gate=%+v", gate.GateSpec)
+	}
+	if def.Version != 2 || def.ImplementationRevision != "document_report.runtime.v2" || def.Budgets.MaxSubtasks != 8 {
+		t.Fatalf("document process identity/budget=%d/%q/%+v", def.Version, def.ImplementationRevision, def.Budgets)
+	}
+}
+
+func TestStudioProcessSourceEntailmentGraphsAreIdentityPinned(t *testing.T) {
+	for _, fixture := range []struct {
+		name           string
+		def            ProcessDefinition
+		version        int
+		implementation string
+		maxSubtasks    int
+		resultStage    string
+		resultContract string
+	}{
+		{name: "presentation", def: packagingStudioDefinition(), version: 4, implementation: "packaging_studio.runtime.v4", maxSubtasks: 18, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
+		{name: "document", def: documentReportDefinition(), version: 2, implementation: "document_report.runtime.v2", maxSubtasks: 8, resultStage: "write", resultContract: documentReportOutputContract},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			identity, err := processDefinitionIdentityFor(fixture.def)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity.Version != fixture.version || identity.ImplementationRevision != fixture.implementation || !isHexDigest(identity.Digest) ||
+				identity.ResultStageID != fixture.resultStage || identity.ResultOutputContract != fixture.resultContract || fixture.def.Budgets.MaxSubtasks != fixture.maxSubtasks {
+				t.Fatalf("identity=%+v budget=%+v", identity, fixture.def.Budgets)
+			}
+			plan := &goalPlan{PlanVersion: goalPlanVersion, Authority: codexJobAuthorityWorkspaceWrite}
+			pinProcessPlanForTest(t, plan, fixture.def)
+			if err := instantiateProcessPlan(fixture.def, plan); err != nil {
+				t.Fatal(err)
+			}
+			for _, stageID := range []string{"source_snapshot", "evidence_entailment"} {
+				if plan.subtaskByID(stageID) == nil {
+					t.Fatalf("pinned plan omitted %s", stageID)
+				}
+			}
+			changed := cloneProcessDefinition(fixture.def)
+			stage, ok := changed.stageByID("evidence_entailment")
+			if !ok {
+				t.Fatal("entailment stage missing")
+			}
+			for index := range changed.Stages {
+				if changed.Stages[index].ID == stage.ID {
+					changed.Stages[index].PromptBody += " changed"
+				}
+			}
+			changedIdentity, err := processDefinitionIdentityFor(changed)
+			if err != nil || changedIdentity.Digest == identity.Digest {
+				t.Fatalf("entailment behavior was not identity-bound: changed=%+v err=%v", changedIdentity, err)
+			}
+			compileChanged := cloneProcessDefinition(fixture.def)
+			for index := range compileChanged.Stages {
+				if compileChanged.Stages[index].ID == "evidence" {
+					if compileChanged.Stages[index].Role != processRoleCompile || compileChanged.Stages[index].Compile == nil {
+						t.Fatalf("evidence compile binding missing: %+v", compileChanged.Stages[index])
+					}
+					compileChanged.Stages[index].Compile = testProcessCompileFunc
+				}
+			}
+			compileIdentity, err := processDefinitionIdentityFor(compileChanged)
+			if err != nil || compileIdentity.Digest == identity.Digest {
+				t.Fatalf("evidence Compile symbol was not identity-bound: changed=%+v err=%v", compileIdentity, err)
+			}
+		})
+	}
+}
+
+func TestNativeMarkdownReportContractRejectsWorkflowScaffolding(t *testing.T) {
+	stage := ProcessStage{OutputContract: documentReportOutputContract}
+	if reason, failed := processStageLawSweep(stage, "Vision: prepare report\n\n## Work decomposition\n- research"); !failed || !strings.Contains(reason, "editable Markdown document") {
+		t.Fatalf("non-document passed law sweep: failed=%t reason=%q", failed, reason)
+	}
+	if reason, failed := processStageLawSweep(stage, "# Western Creator Opportunity\n\nA grounded thesis with [evidence](https://example.com)."); failed {
+		t.Fatalf("valid Markdown failed law sweep: %q", reason)
+	}
+	instructions, ok := rawDocumentContractInstructions(documentReportOutputContract)
+	if !ok || !strings.Contains(instructions, "ENTIRE response is the finished, editable Markdown document") || strings.Contains(instructions, "Work decomposition") {
+		t.Fatalf("raw document instructions=%q ok=%t", instructions, ok)
+	}
+}
+
+func TestDocumentReportWriterBypassesGenericWorkflowTemplate(t *testing.T) {
+	app := &kanbanBoardApp{}
+	thread := scoutAgentThread{Mode: "artifacts", Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"goalDeliverable": "true",
+		"goalParentId":    "goal-report",
+		"goalSubtaskId":   "write",
+		"outputContract":  documentReportOutputContract,
+	}}}
+	instructions := app.agentThreadInstructionsForThread(thread)
+	if !strings.Contains(instructions, "ENTIRE response is the finished, editable Markdown document") {
+		t.Fatalf("report writer lost raw-document instructions: %q", instructions)
+	}
+	for _, forbidden := range []string{"Start with a one-line Vision", "Work decomposition", "Comparable Companies", "at least five actually used sources"} {
+		if strings.Contains(instructions, forbidden) {
+			t.Fatalf("generic workstream contract %q leaked into report writer instructions: %q", forbidden, instructions)
+		}
+	}
+}
+
 func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 	mutate := func(change func(*ProcessDefinition)) ProcessDefinition {
 		def := validProcessProbeLikeDefinition("process_case")
@@ -110,6 +274,7 @@ func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 		{"empty id", mutate(func(d *ProcessDefinition) { d.ID = "" }), "no id"},
 		{"uppercase id", mutate(func(d *ProcessDefinition) { d.ID = "Process_Case" }), "lowercase"},
 		{"version zero", mutate(func(d *ProcessDefinition) { d.Version = 0 }), "version"},
+		{"no implementation revision", mutate(func(d *ProcessDefinition) { d.ImplementationRevision = "" }), "implementation revision"},
 		{"no title", mutate(func(d *ProcessDefinition) { d.Title = " " }), "no title"},
 		{"no stages", mutate(func(d *ProcessDefinition) { d.Stages = nil }), "no stages"},
 		{"duplicate stage ids", mutate(func(d *ProcessDefinition) {
@@ -302,6 +467,7 @@ func TestInstantiateProcessPlanMapsStagesInOrder(t *testing.T) {
 		t.Fatal("process_probe missing")
 	}
 	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	pinProcessPlanForTest(t, plan, def)
 	if err := instantiateProcessPlan(def, plan); err != nil {
 		t.Fatalf("instantiateProcessPlan: %v", err)
 	}
@@ -326,6 +492,37 @@ func TestInstantiateProcessPlanMapsStagesInOrder(t *testing.T) {
 	// The gate depends on the draft; the checkpoint on the gate.
 	if plan.Subtasks[1].DependsOn[0] != "draft" || plan.Subtasks[2].DependsOn[0] != "note_gate" {
 		t.Fatalf("dependency mapping broken: %+v", plan.Subtasks)
+	}
+	if plan.ProcessVersion != def.Version || len(plan.ProcessDigest) != 64 || plan.ResultStageID != "draft" || plan.ResultOutputContract != "probe_note_v1" {
+		t.Fatalf("instantiation did not persist immutable process/result bindings: version=%d digest=%q stage=%q contract=%q", plan.ProcessVersion, plan.ProcessDigest, plan.ResultStageID, plan.ResultOutputContract)
+	}
+}
+
+func TestPersistedProcessResultBindingSurvivesRegistryRemoval(t *testing.T) {
+	def := validProcessProbeLikeDefinition("process_removed_after_instantiation")
+	def.Version = 7
+	def.Stages[0].OutputContract = "removed_process_report_v1"
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose, routeVerified: true}
+	if _, registered := processByID(def.ID); registered {
+		t.Fatal("fixture process must never enter the live registry")
+	}
+	pinProcessPlanForTest(t, plan, def)
+	if err := instantiateProcessPlan(def, plan); err != nil {
+		t.Fatalf("instantiate unregistered process: %v", err)
+	}
+	if got := goalDeliverableSubtaskID(plan); got != "w1" {
+		t.Fatalf("persisted result stage=%q, want w1 without a registry lookup", got)
+	}
+	document := meetingMemoryEntry{ID: "report-v1", Metadata: map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "goalParentId": "goal-v1", "goalSubtaskId": "w1",
+		"goalDeliverable": "true", "outputContract": "removed_process_report_v1",
+	}}
+	if !scoutChatDocumentBelongsToGoal(document, "goal-v1", *plan) {
+		t.Fatal("persisted result contract stopped resolving after registry removal")
+	}
+	document.Metadata["outputContract"] = "registry_drifted_contract_v2"
+	if scoutChatDocumentBelongsToGoal(document, "goal-v1", *plan) {
+		t.Fatal("a later contract drift replaced the instantiated result binding")
 	}
 }
 

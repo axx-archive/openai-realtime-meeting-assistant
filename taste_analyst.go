@@ -54,7 +54,12 @@ const (
 	defaultTasteAnalystMinBatch = 15
 	defaultTasteAnalystMaxBatch = 60
 	tasteAnalystEffort          = "high"
-	tasteAnalystMaxOutputTokens = 2500
+	// Responses output budgets include hidden reasoning. The prior 2,500-token
+	// ceiling repeatedly exhausted on a real 60-signal distillation before the
+	// strict JSON profile was emitted, leaving the compounding taste cursor held.
+	// Eight thousand keeps the same bounded input and body contract while giving
+	// the approved high-reasoning lane enough room to finish its visible output.
+	tasteAnalystMaxOutputTokens = 8000
 	tasteAnalystMaxProposals    = 5
 	tasteAnalystProposalTextCap = 300
 	tasteAnalystDecisionContext = 20

@@ -447,14 +447,14 @@ const server = http.createServer((req, res) => {
   });
   assert.equal(card.shrink, '0'); assert.ok(card.height > 20); assert.ok(card.actionHeight > 0); assert.ok(card.height >= card.actionHeight);
   const qualityDigest = 'a'.repeat(64);
-  const summary = await page.evaluate(digest => researchArtifactCurrentSourceSummary({text:'v2 https://one.test\nprevious v1 https://two.test',metadata:{researchQualityGate:'passed',researchSourceWindowDigest:digest,researchCitationCount:12,researchSourceDomainCount:10,researchWebSearchCallCount:15}}), qualityDigest);
-  assert.deepEqual(summary, {count:12,label:'12 cited source links · 10 domains',preview:'12 cited source links · 10 domains',authority:'verified_current_metadata'});
+  const summary = await page.evaluate(digest => researchArtifactCurrentSourceSummary({text:'v2 https://one.test\nprevious v1 https://two.test',metadata:{researchQualityGate:'passed',researchEvidenceBinding:'provider_fetched_urls',researchSourceWindowDigest:digest,researchCitationCount:12,researchSourceDomainCount:10,researchWebSearchCallCount:15}}), qualityDigest);
+  assert.deepEqual(summary, {count:12,label:'12 cited source links · 10 domains',preview:'12 cited source links · 10 domains',authority:'provider_fetched_current_metadata'});
   const unverified = await page.evaluate(() => researchArtifactCurrentSourceSummary({text:'v2 https://one.test\nprevious v1 https://two.test',metadata:{researchCitationCount:35,researchSourceDomainCount:20}}));
   assert.deepEqual(unverified, {count:0,label:'',preview:'',authority:'unverified'});
   assert.equal(await page.evaluate(() => scoutResearchTerminalPreview('error', {metadata:{threadStatus:'error'}})), 'Needs attention');
   assert.equal(await page.evaluate(() => scoutResearchTerminalPreview('running', {})), '');
   const terminal = await page.evaluate(() => {
-    const artifact={id:'artifact-current',status:'complete',updatedAt:'2026-08-09T23:59:00Z',text:'v2 and prior history',metadata:{threadStatus:'complete',status:'complete',threadId:'run-alpha',originKind:'channel',originId:'channel-alpha',researchQualityGate:'passed',researchSourceWindowDigest:'a'.repeat(64),researchCitationCount:12,researchSourceDomainCount:10}};
+    const artifact={id:'artifact-current',status:'complete',updatedAt:'2026-08-09T23:59:00Z',text:'v2 and prior history',metadata:{threadStatus:'complete',status:'complete',threadId:'run-alpha',originKind:'channel',originId:'channel-alpha',researchQualityGate:'passed',researchEvidenceBinding:'provider_fetched_urls',researchSourceWindowDigest:'a'.repeat(64),researchCitationCount:12,researchSourceDomainCount:10}};
     artifactEntries=[artifact];
     scoutChatThreads=[{id:'channel-alpha',title:'Bonfire Chat',visibility:'public',preview:'research workstream confirmed — running now',updatedAt:'2026-08-09T23:00:00Z',messages:[{id:'work-message',kind:'thread',thread:{id:'run-alpha',artifactId:'artifact-current',status:'running'}}]}];
     const marker=document.createElement('article'); marker.dataset.threadArtifactId='artifact-current'; marker.dataset.threadRunId='run-alpha';
