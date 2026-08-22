@@ -58,6 +58,10 @@
     },
     {
       "kind": "exact",
+      "path": "packaging_studio_v4_definition.json"
+    },
+    {
+      "kind": "exact",
       "path": "deploy/digitalocean/docker-compose.yml"
     },
     {
@@ -98,6 +102,7 @@
     "main.go",
     "index.html",
     "packaging_deck_chassis.css",
+    "packaging_studio_v4_definition.json",
     "internal/dr/authority.go",
     "internal/e10evidence/types.go",
     "deploy/digitalocean/docker-compose.yml",

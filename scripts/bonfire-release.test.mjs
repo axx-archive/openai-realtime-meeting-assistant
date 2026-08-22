@@ -421,6 +421,7 @@ async function fixtureFiles() {
     '.dockerignore': '.git\ndata/\n', Dockerfile: 'FROM scratch\n', 'Dockerfile.render': 'FROM scratch\n',
     'go.mod': 'module example.test/release\n\ngo 1.26\n', 'go.sum': '', 'main.go': 'package main\nfunc main() {}\n',
     'index.html': '<!doctype html>\n', 'packaging_deck_chassis.css': 'body{}\n',
+    'packaging_studio_v4_definition.json': '{}\n',
     'internal/dr/authority.go': 'package dr\n', 'internal/e10evidence/types.go': 'package e10evidence\n',
     'deploy/digitalocean/docker-compose.yml': 'services: {}\n',
     'deploy/digitalocean/Caddyfile': ':80\n',
@@ -529,6 +530,35 @@ test('scope owns every internal package imported by production root files', asyn
     for (const name of sources) {
       const path = `${packagePath}/${name}`
       assert.equal(releasePathOwned(path, policy), true, `release scope omits runtime source ${path}`)
+    }
+  }
+})
+
+test('scope owns every asset embedded by production Go', async () => {
+  const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
+  const { stdout } = await execFileAsync('git', ['ls-files', '*.go'], { cwd: repoRoot })
+  const productionSources = stdout.trim().split('\n').filter(path => path && releasePathOwned(path, policy))
+  assert.ok(productionSources.length > 0)
+  for (const sourcePath of productionSources) {
+    const body = await readFile(join(repoRoot, sourcePath), 'utf8')
+    for (const match of body.matchAll(/^\s*\/\/go:embed\s+(.+)$/gm)) {
+      const patterns = match[1].match(/`[^`]+`|"(?:\\.|[^"\\])*"|\S+/g) || []
+      assert.ok(patterns.length > 0, `${sourcePath} has an empty go:embed directive`)
+      for (const encodedPattern of patterns) {
+        const pattern = encodedPattern.startsWith('`')
+          ? encodedPattern.slice(1, -1)
+          : encodedPattern.startsWith('"')
+            ? JSON.parse(encodedPattern)
+            : encodedPattern
+        const sourceDirectory = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : ''
+        const repoPattern = sourceDirectory ? `${sourceDirectory}/${pattern}` : pattern
+        const { stdout: matchedRaw } = await execFileAsync('git', ['ls-files', repoPattern], { cwd: repoRoot })
+        const matchedPaths = matchedRaw.trim().split('\n').filter(Boolean)
+        assert.ok(matchedPaths.length > 0, `${sourcePath} embeds missing release asset ${repoPattern}`)
+        for (const embeddedPath of matchedPaths) {
+          assert.equal(releasePathOwned(embeddedPath, policy), true, `release scope omits embedded runtime asset ${embeddedPath}`)
+        }
+      }
     }
   }
 })
