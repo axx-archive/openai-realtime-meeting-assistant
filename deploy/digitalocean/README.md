@@ -73,28 +73,47 @@ false server values all fail closed. Source or EAS configuration is not proof
 that the server key is live, that OpenAI accepted a call, or that iPhone/iPad
 audio works.
 
-Activate the server key only inside the same exact-release transaction that
-replaces the app container. Preserve a mode-`0600` copy of the prior base env,
-atomically replace the single key, and write a root-private activation receipt
-under `/opt/meetingassist-backups` containing the before/after env-file SHA-256
-(never its contents), exact target commit, release generation, activation time,
-and retained rollback commit. After activation, require the exact-release
-verifier, active ledger, running image IDs, public `/healthz` and `/readyz`, and
-an authenticated `/client-config` read to agree. Only a fresh private call may
-add provider acceptance; only physical phone and iPad runs may add device/audio
-acceptance.
+Activate the server key only through the transactional exact-release arguments
+documented below. The tool binds the exact prior env-file digest, changes only
+one canonical `PRIVATE_REALTIME_VOICE_QUALIFIED=false` assignment to `true`, or
+appends one canonical `true` assignment when the key is entirely absent. It does
+not normalize any other byte. It preserves a mode-`0600` backup and writes a
+root-private digest-only receipt under the mode-`0700`, root-owned
+`/opt/meetingassist-backups` directory. The receipt contains no env values or
+secret bytes; it binds the before/after SHA-256, exact target commit, retained
+rollback commit, ledger generation, prior absent-or-false state, and transaction
+state.
 
-`false` is a fail-closed deployment switch, not a hot-reloaded process flag.
-Apply it atomically and replace the container through the retained exact-release
-tool. A false process refuses every new offer and tool effect; an exact active
-lease that reaches Renew is durably marked `qualification_revoked`. The native
-client renews every 10 seconds. Each request has a dynamic deadline of at most
-five seconds and strictly before its exact-generation local watchdog at
-`leaseExpiresAt - 3s`. If Renew never settles, the watchdog still enters visible
-teardown and synchronously closes the peer and microphone tracks before native
-audio deactivation; the 30-second server TTL remains the final authority bound.
-Stop remains admitted so cleanup is never blocked. Do not describe the env
-change as instantaneous without the container replacement receipt.
+The currently serving retained release tool must already implement that
+transaction. If it does not, use two distinct exact releases: first activate and
+verify a no-flag bootstrap release with the old retained tool while the base env
+remains byte-identical and fail closed (the current generation-170 production
+baseline has the key absent); then use that newly retained bootstrap tool to
+activate a distinct successor with the qualification arguments. Never run the
+candidate tool, hot-edit a retained bundle, normalize the absent key to `false`,
+or mutate the base env outside the release transaction to collapse those two
+releases.
+
+After activation, require the committed env-patch receipt, exact-release
+verifier, active ledger, running image IDs, public `/healthz` and `/readyz`, and
+an authenticated `/client-config` read to agree. Those are server activation
+evidence only. A fresh accepted private provider call is the separate provider
+receipt; signed-in physical phone and iPad microphone/playback runs are the
+separate device acceptance. Do not claim either from source, EAS configuration,
+or the server receipt.
+
+An absent or literal `false` value is fail closed, not a hot-reloaded process
+flag. Apply a qualification transition atomically and replace the container
+through the retained exact-release tool. An unqualified process refuses every
+new offer and tool effect; an exact active lease that reaches Renew is durably
+marked `qualification_revoked`. The native client renews every 10 seconds. Each
+request has a dynamic deadline of at most five seconds and strictly before its
+exact-generation local watchdog at `leaseExpiresAt - 3s`. If Renew never
+settles, the watchdog still enters visible teardown and synchronously closes the
+peer and microphone tracks before native audio deactivation; the 30-second
+server TTL remains the final authority bound. Stop remains admitted so cleanup
+is never blocked. Do not describe the env change as instantaneous without the
+container replacement receipt.
 
 Codex-style server-side execution is disabled in the production-style Compose
 candidate. The former reusable `codex-runner` image/profile was not a qualified
@@ -217,6 +236,15 @@ node "$prior_dir/sealed-candidate/scripts/bonfire-release.mjs" activate \
   --ready-url https://thebonfire.xyz/readyz
 ```
 
+That command is the ordinary/no-flag activation path. It is also the only safe
+way to install the bootstrap release when the currently serving retained tool
+predates transactional base-env patching. The bootstrap activation must leave
+the canonical base env byte-for-byte unchanged. The actual generation-170
+production baseline has `PRIVATE_REALTIME_VOICE_QUALIFIED` absent; do not add or
+normalize it during bootstrap. Verify the fail-closed bootstrap and retain its
+exact release directory and images before preparing the distinct qualification
+successor.
+
 Activation must be orchestrated by the private, read-only release tool from the
 **currently serving rollback bundle** (`$prior_dir/sealed-candidate/...`), not
 the candidate's newly built tool. It uses the target's sealed-candidate Compose
@@ -235,6 +263,111 @@ automatically executes the retained rollback bundle's own verified tool,
 restores its exact ledger, and verifies both before returning failure. An
 ambiguous recovery leaves the operation lock in place and requires an explicit
 operator inspection; never delete that lock merely because it is old.
+
+### Transactional private Realtime qualification
+
+Use this only for the distinct qualification successor, and only after its
+currently serving retained bootstrap tool has itself been activated and
+verified. The base env must be a root-owned mode-`0600` regular file whose exact
+bytes either contain no mention or assignment of
+`PRIVATE_REALTIME_VOICE_QUALIFIED` at all, or contain exactly one unquoted
+canonical `PRIVATE_REALTIME_VOICE_QUALIFIED=false` line. The current production
+baseline is the absent-key case. Comments mentioning the key, `export`, quotes,
+whitespace variants, malformed values, and duplicates fail closed. The backup
+root must be a root-owned, non-symlink mode-`0700` directory:
+
+```bash
+release_sha=<distinct-qualification-successor-full-commit>
+release_dir="/opt/meetingassist-releases/$release_sha"
+prior_sha=<verified-bootstrap-full-commit>
+prior_dir="/opt/meetingassist-releases/$prior_sha"
+base_env=/opt/meetingassist/deploy/digitalocean/.env
+backup_dir=/opt/meetingassist-backups
+
+install -d -o root -g root -m 0700 "$backup_dir"
+test "$(stat -c '%U:%G:%a:%F' "$backup_dir")" = 'root:root:700:directory'
+test "$(stat -c '%U:%G:%a:%F' "$base_env")" = 'root:root:600:regular file'
+prior_env_sha256="$(sha256sum "$base_env" | awk '{print $1}')"
+
+node "$prior_dir/sealed-candidate/scripts/bonfire-release.mjs" activate \
+  --release-dir "$release_dir" \
+  --rollback-release-dir "$prior_dir" \
+  --base-env "$base_env" \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz \
+  --target-base-env-expected-sha256 "$prior_env_sha256" \
+  --target-base-env-patch-key PRIVATE_REALTIME_VOICE_QUALIFIED \
+  --target-base-env-patch-value true \
+  --target-base-env-backup-dir "$backup_dir"
+```
+
+The successful command emits one JSON line containing
+`"qualificationState":"target"` and the exact root-private
+`qualificationReceipt` path. Record that path as part of the release handoff;
+do not print or copy the receipt or backup contents. The operation lock and
+journal are removed after success, so this explicit receipt handoff is required
+for the safe rollback command below.
+
+The four `--target-base-env-*` arguments are an all-or-none, `activate`-only
+contract. They are invalid for ordinary activation, rollback, resume, recover,
+or verification; resume/recover uses only the redacted plan already bound into
+the root-private transaction journal. Duplicate arguments, any other key or
+value, any other backup path, digest drift, symlinks, non-root ownership, or
+wrong modes fail closed before a target start.
+
+Under the existing release lock, the retained baseline and prior env digest are
+verified before mutation. The host qualification state must also exactly match
+the currently serving application container; an out-of-band host/container
+mismatch fails closed. The journal records patch intent; the tool writes and
+fsyncs the mode-`0600` backup, atomically installs the target env, preflights and
+starts the target privately, and requires the actual application container to
+report `PRIVATE_REALTIME_VOICE_QUALIFIED=true`. It commits the receipt only after
+private verification, ledger compare-and-swap, ingress opening, and the
+ledger-bound external verifier all pass.
+
+The secret-bearing atomic-write temporary is not random or untracked: its exact
+mode-`0600` path is derived from the journaled transaction token beside the base
+env. Resume/recover removes only that exact owner-private, single-link file
+before replaying the write. This closes the SIGKILL window after temp fsync and
+before rename without globbing for, logging, or retaining extra credential
+copies.
+
+If interruption occurs during the first exclusive backup write itself, the
+canonical env is still prior and no receipt exists. No-op recovery inventories
+and removes only that exact owner-private, single-link transaction backup before
+releasing the lock; a wrong owner, mode, link count, or any receipt ambiguity
+keeps the lock fail closed.
+
+On failure, target-owned transition cleanup runs while the target env is still
+installed. The tool then journals restore intent and atomically restores the
+exact prior env before any retained-release preflight container, maintenance
+container, or private application start. The retained application must inspect
+with the exact receipted prior state: the key absent for an absent prior, or the
+literal value `false` for a canonical-false prior. Only then may the prior ledger
+and ingress be restored and externally verified. A third env digest or ambiguous
+ledger retains the lock and starts nothing further.
+
+After an abrupt process death, run the verified retained bootstrap tool against
+the locked target. Supply neither target-patch nor rollback-receipt arguments;
+the private journal already binds the exact transition:
+
+```bash
+node "$prior_dir/sealed-candidate/scripts/bonfire-release.mjs" resume \
+  --release-dir "$release_dir" \
+  --base-env "$base_env" \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+
+# Choose recovery instead of forward resume only after inspecting the journal.
+node "$prior_dir/sealed-candidate/scripts/bonfire-release.mjs" recover \
+  --release-dir "$release_dir" \
+  --base-env "$base_env" \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+```
+
+Do not delete the operation lock, edit the journal, repeat the target-only
+arguments, or run either command from the candidate bundle.
 
 After the container is healthy, verification is mandatory and fail-closed:
 
@@ -255,21 +388,42 @@ record.
 
 Keep every versioned release directory and its Docker image until its rollback
 window closes; do not prune them. Before activation, record the currently active
-release SHA and confirm its directory and image still exist. Exact rollback uses
-that retained receipt and image ID, waits for Compose health, and repeats both
-external probes:
+release SHA and confirm its directory and image still exist. Exact rollback from
+a qualified release additionally requires the exact `qualificationReceipt` path
+emitted by that activation. It waits for Compose health and repeats both external
+probes:
 
 ```bash
 prior_sha=<previous-full-reviewed-commit>
 prior_dir="/opt/meetingassist-releases/$prior_sha"
+qualification_receipt=<exact-qualificationReceipt-path-emitted-by-activation>
 test -r "$prior_dir/release-receipt.json"
+test -r "$qualification_receipt"
 node "$release_dir/sealed-candidate/scripts/bonfire-release.mjs" rollback \
   --release-dir "$prior_dir" \
   --rollback-release-dir "$release_dir" \
   --base-env /opt/meetingassist/deploy/digitalocean/.env \
   --health-url https://thebonfire.xyz/healthz \
-  --ready-url https://thebonfire.xyz/readyz
+  --ready-url https://thebonfire.xyz/readyz \
+  --qualification-rollback-receipt "$qualification_receipt"
 ```
+
+That receipt is accepted only when it is `target_committed` and binds the exact
+currently active qualified commit, rollback target commit, active ledger
+generation, base-env path, backup, and before/after digests. The tool restores
+the exact absent-or-false prior bytes before any rollback-target preflight or
+container start and requires the actual target container to match that prior
+state. If rollback fails, recovery atomically reinstalls the exact qualified
+`true` env before restarting the still-current qualified release, verifies the
+actual container as literal `true`, and returns the receipt to
+`target_committed`. A legacy rollback may omit the argument only while the host
+env is absent or canonical false.
+
+Until qualification lineage is carried through the active-release ledger, an
+ordinary activation while the current base env is `true` is deliberately
+blocked. Do not strand rollback by advancing to another generation. First use
+the receipt-bound rollback above, then activate a newly reviewed successor from
+the unqualified retained release with a fresh target patch transaction.
 
 If the prior directory or immutable image ID is absent, rollback is blocked; do
 not rebuild an old tag and call it the prior image. The active-release ledger

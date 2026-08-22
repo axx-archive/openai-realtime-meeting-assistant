@@ -3,13 +3,16 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import test from 'node:test'
 
 import {
-  acquireReleaseOperationLock, composeActivationArgs, composeIngressArgs, composePrivateActivationArgs,
+  acquireReleaseOperationLock, assertPrivateRealtimeVoiceQualificationHostRuntimeMatch,
+  assertPriorBaseEnvRestored, assertTargetBaseEnvPatchInstalled,
+  commitPriorBaseEnvRestore, commitTargetBaseEnvPatch,
+  composeActivationArgs, composeIngressArgs, composePrivateActivationArgs,
   computeBundleSha256, computeEnvironmentMarker, environmentValues,
   executeReleaseTransaction, inspectExtractedArchive, releaseActivationProgress, releaseComposeEnvironment, releaseEnvironmentValues, releasePathOwned,
   loadRetainedRollbackTool, restoreReleaseBundleAfterFailedActivation,
@@ -21,8 +24,18 @@ import {
   verifyArchiveIdentity, verifyCandidateConfig, verifyLabels, verifyProbeRelease,
   verifyExecutingReleaseTool, verifyReleaseEnvironmentFile, verifyRenderRunnerHeartbeat,
   verifyRetainedReleaseActivator, verifyRuntimeEnvironment,
-  executeDurableReleasePhaseMachine, strideE10W4MaintenanceArgs, strideE10W4RecoveryPlan, strideE10W4ReleaseTransitionPlan,
-  validateReleaseTransactionJournal,
+  assertQualificationTransitionBound, baseEnvPatchDigestState, baseEnvPatchPlanFromReceipt,
+  baseEnvPatchTemporaryPath,
+  executeDurableReleasePhaseMachine, executeDurableReleaseRecoveryPhaseMachine,
+  installTargetBaseEnvPatch, prepareTargetBaseEnvPatch,
+  privateRealtimeVoiceQualificationEnvPatch, privateRealtimeVoiceQualificationEnvState,
+  privateRealtimeVoiceQualificationRuntimeState,
+  priorBaseEnvCommitDisposition, releaseTransactionCompletionEvidence,
+  reinstallCommittedTargetBaseEnvPatch, requestedQualificationRollbackReceipt, requestedTargetBaseEnvPatch,
+  restorePriorBaseEnv,
+  strideE10W4MaintenanceArgs, strideE10W4RecoveryPlan, strideE10W4ReleaseTransitionPlan,
+  validateBaseEnvPatchPlan, validateBaseEnvPatchReceipt, validatePrivateReleasePathInfo,
+  validateReleaseTransactionJournal, verifyBaseEnvPatchRuntimeEnvironment,
   validateStrideE10W4ComposeSource, validateStrideE10W4DeploymentPolicy
 } from './bonfire-release.mjs'
 
@@ -73,9 +86,75 @@ const source = {
   sourceDateEpoch: 1_700_000_000
 }
 
+function makeBaseEnvPatchPlan(overrides = {}) {
+  const value = {
+    schema: 'bonfire.base-env-patch.v1', transactionToken: 'transaction-token',
+    targetReleaseCommit: 'a'.repeat(40), rollbackReleaseCommit: 'b'.repeat(40), targetLedgerGeneration: 2,
+    baseEnvPath: '/opt/meetingassist/deploy/digitalocean/.env',
+    backupDir: '/opt/meetingassist-backups',
+    backupPath: '', receiptPath: '',
+    patchKey: 'PRIVATE_REALTIME_VOICE_QUALIFIED', priorQualificationState: 'false',
+    beforeSha256: digest('1'), afterSha256: digest('2'),
+    ...overrides
+  }
+  const stem = `base-env-${value.targetReleaseCommit}-${value.transactionToken}`
+  if (!overrides.backupPath) value.backupPath = `${value.backupDir}/${stem}.before.env`
+  if (!overrides.receiptPath) value.receiptPath = `${value.backupDir}/${stem}.receipt.json`
+  return value
+}
+
+function makeBaseEnvPatchReceipt(plan = makeBaseEnvPatchPlan(), overrides = {}) {
+  return {
+    schema: 'bonfire.base-env-patch-receipt.v1', transactionToken: plan.transactionToken,
+    targetReleaseCommit: plan.targetReleaseCommit, rollbackReleaseCommit: plan.rollbackReleaseCommit,
+    targetLedgerGeneration: plan.targetLedgerGeneration, baseEnvPath: plan.baseEnvPath, backupPath: plan.backupPath,
+    patchKey: plan.patchKey, priorQualificationState: plan.priorQualificationState,
+    beforeSha256: plan.beforeSha256, afterSha256: plan.afterSha256,
+    state: 'target_committed', targetObservedAt: '2026-08-22T12:00:00.000Z',
+    committedAt: '2026-08-22T12:01:00.000Z', priorRestoredAt: null,
+    ...overrides
+  }
+}
+
 function sha256(value) { return createHash('sha256').update(value).digest('hex') }
 function jsonLine(value) { return Buffer.from(`${JSON.stringify(value)}\n`) }
 function configDigest(files) { return sha256(jsonLine({ schema: 'bonfire.release-config.v2', files })) }
+async function makeBaseEnvFilesystemFixture(t, priorBody) {
+  const ownerUid = typeof process.getuid === 'function' ? process.getuid() : 0
+  const root = await mkdtemp(join(tmpdir(), 'bonfire-base-env-'))
+  await chmod(root, 0o700)
+  const configDir = join(root, 'config')
+  const backupRoot = join(root, 'meetingassist-backups')
+  await mkdir(configDir, { mode: 0o700 })
+  await mkdir(backupRoot, { mode: 0o700 })
+  const baseEnv = join(configDir, '.env')
+  const prior = Buffer.from(priorBody)
+  await writeFile(baseEnv, prior, { mode: 0o600 })
+  await chmod(baseEnv, 0o600)
+  const targetDir = join(root, 'target-release')
+  const rollbackDir = join(root, 'rollback-release')
+  const operationLock = await acquireReleaseOperationLock(targetDir, rollbackDir)
+  t.after(async () => {
+    await operationLock.release().catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  })
+  const plan = await prepareTargetBaseEnvPatch({
+    baseEnv,
+    request: {
+      expectedBeforeSha256: sha256(prior),
+      patchKey: 'PRIVATE_REALTIME_VOICE_QUALIFIED',
+      patchValue: 'true',
+      backupDir: backupRoot
+    },
+    operationLock,
+    targetReleaseCommit: 'a'.repeat(40),
+    rollbackReleaseCommit: 'b'.repeat(40),
+    targetLedgerGeneration: 2,
+    ownerUid,
+    backupRoot
+  })
+  return { ownerUid, root, baseEnv, backupRoot, operationLock, plan, prior }
+}
 async function makeTreeWritable(path) {
   const info = await lstat(path).catch(() => null)
   if (!info || info.isSymbolicLink() || !info.isDirectory()) return
@@ -1597,29 +1676,356 @@ test('receipt-bound private journal rejects drift and permits every resumable ph
   const ledger = generation => ({ schema: 'bonfire.active-release-ledger.v1', generation,
     updatedAt: '2026-08-09T12:00:00.000Z', active: entry('a'), previous: entry('b') })
   const lock = { token: 'transaction-token' }
-  const base = { schema: 'bonfire.release-transaction.v1', token: lock.token, action: 'activated', phase: 'prepared',
+  const baseEnvPatch = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ transactionToken: lock.token }))
+  const priorLedger = { ...ledger(1), active: entry('b'), previous: entry('a') }
+  const base = { schema: 'bonfire.release-transaction.v2', token: lock.token, action: 'activated', phase: 'prepared',
     targetBundleSha256: digest('c'), rollbackBundleSha256: digest('d'), targetRenderedComposeSha256: digest('e'),
-    rollbackRenderedComposeSha256: digest('f'), priorLedger: ledger(1), nextLedger: ledger(2),
+    rollbackRenderedComposeSha256: digest('f'), priorLedger, nextLedger: ledger(2),
+    baseEnvPatch, baseEnvPatchMode: 'activate', recoveryFromPhase: null,
     baselineProjectContainers: [], baselineProjectResources: { networks: [], volumes: [] },
     createdAt: '2026-08-09T12:00:00.000Z', updatedAt: '2026-08-09T12:00:00.000Z' }
-  for (const phase of ['prepared', 'ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+  for (const phase of ['prepared', 'ingress_stopped', 'base_env_patch_started', 'base_env_patched', 'target_preflighted', 'data_transition_started', 'data_ready', 'private_started',
     'private_verified', 'ledger_written', 'ingress_opened', 'external_verified']) {
     assert.equal(validateReleaseTransactionJournal({ ...base, phase }, lock).phase, phase)
   }
+  for (const phase of ['recovery_started', 'recovery_data_restored', 'recovery_env_restore_started', 'recovery_env_restored',
+    'recovery_runtime_verified', 'recovery_private_started', 'recovery_private_verified', 'recovery_ledger_restored',
+    'recovery_ingress_opened', 'recovery_external_verified']) {
+    assert.equal(validateReleaseTransactionJournal({ ...base, phase, recoveryFromPhase: 'private_started' }, lock).phase, phase)
+  }
+  const rollbackPriorLedger = ledger(2)
+  const rollbackNextLedger = { ...ledger(3), active: entry('b'), previous: entry('a') }
+  const rollbackJournal = {
+    ...base, action: 'rolledBack', priorLedger: rollbackPriorLedger, nextLedger: rollbackNextLedger,
+    baseEnvPatch: makeBaseEnvPatchPlan({ targetLedgerGeneration: 2 }), baseEnvPatchMode: 'rollback'
+  }
+  assert.equal(validateReleaseTransactionJournal(rollbackJournal, lock).baseEnvPatchMode, 'rollback')
+  assert.equal(validateReleaseTransactionJournal({ ...rollbackJournal, phase: 'base_env_patched',
+    targetRenderedComposeSha256: null }, lock).targetRenderedComposeSha256, null)
+  assert.throws(() => validateReleaseTransactionJournal({ ...rollbackJournal, phase: 'target_preflighted',
+    targetRenderedComposeSha256: null }, lock), /preflight digest/)
+  assert.throws(() => validateReleaseTransactionJournal({ ...rollbackJournal,
+    baseEnvPatch: makeBaseEnvPatchPlan({ rollbackReleaseCommit: 'c'.repeat(40), targetLedgerGeneration: 2 }) }, lock), /binding/)
+  assert.equal(validateReleaseTransactionJournal({ ...base, baseEnvPatch: null, baseEnvPatchMode: null }, lock).baseEnvPatch, null)
   assert.throws(() => validateReleaseTransactionJournal({ ...base, targetBundleSha256: digest('9') }, { token: 'other' }), /invalid/)
   assert.throws(() => validateReleaseTransactionJournal({ ...base, attacker: true }, lock), /invalid/)
+  assert.throws(() => validateReleaseTransactionJournal({ ...base, phase: 'recovery_started' }, lock), /recovery origin/)
+})
+
+test('target-only qualification arguments are exact, complete, and confined to one private backup directory', async () => {
+  const options = {
+    targetBaseEnvExpectedSha256: digest('1'),
+    targetBaseEnvPatchKey: 'PRIVATE_REALTIME_VOICE_QUALIFIED',
+    targetBaseEnvPatchValue: 'true',
+    targetBaseEnvBackupDir: '/opt/meetingassist-backups'
+  }
+  assert.deepEqual(requestedTargetBaseEnvPatch(options, 'activated'), {
+    expectedBeforeSha256: digest('1'), patchKey: 'PRIVATE_REALTIME_VOICE_QUALIFIED', patchValue: 'true',
+    backupDir: '/opt/meetingassist-backups'
+  })
+  assert.equal(requestedTargetBaseEnvPatch({}, 'activated'), null)
+  assert.throws(() => requestedTargetBaseEnvPatch({ ...options, targetBaseEnvPatchValue: '' }, 'activated'), /every explicit target-only/)
+  assert.throws(() => requestedTargetBaseEnvPatch({ ...options, targetBaseEnvPatchKey: 'OTHER' }, 'activated'), /approved private Realtime/)
+  assert.throws(() => requestedTargetBaseEnvPatch(options, 'rolledBack'), /only for activate/)
+  assert.throws(() => requestedTargetBaseEnvPatch({ ...options,
+    targetBaseEnvBackupDir: '/opt/meetingassist-backups/parent/child' }, 'activated'), /exactly \/opt\/meetingassist-backups/)
+  assert.throws(() => requestedTargetBaseEnvPatch({ ...options,
+    targetBaseEnvBackupDir: '/tmp/attacker' }, 'activated'), /exactly \/opt\/meetingassist-backups/)
+  await assert.rejects(execFileAsync(process.execPath, [releaseToolPath, 'scope', '--repo', repoRoot, '--repo', repoRoot]), /duplicate argument --repo/)
+})
+
+test('qualification rollback accepts only one exact committed receipt path on rollback', async () => {
+  const plan = makeBaseEnvPatchPlan()
+  assert.equal(requestedQualificationRollbackReceipt({ qualificationRollbackReceipt: plan.receiptPath }, 'rolledBack'), plan.receiptPath)
+  assert.equal(requestedQualificationRollbackReceipt({}, 'rolledBack'), null)
+  assert.throws(() => requestedQualificationRollbackReceipt({ qualificationRollbackReceipt: plan.receiptPath }, 'activated'), /only for rollback/)
+  assert.throws(() => requestedQualificationRollbackReceipt({ qualificationRollbackReceipt: '/tmp/receipt.json' }, 'rolledBack'), /exact receipt/)
+  assert.throws(() => requestedQualificationRollbackReceipt({ qualificationRollbackReceipt: `${plan.receiptPath}/../x` }, 'rolledBack'), /exact receipt/)
+  const receipt = makeBaseEnvPatchReceipt(plan)
+  assert.deepEqual(baseEnvPatchPlanFromReceipt(plan.receiptPath, receipt), plan)
+  assert.throws(() => baseEnvPatchPlanFromReceipt('/opt/meetingassist-backups/wrong.receipt.json', receipt), /invalid/)
+  assert.equal(validateBaseEnvPatchReceipt(makeBaseEnvPatchReceipt(plan, {
+    state: 'prior_committed', priorRestoredAt: '2026-08-22T12:02:00.000Z'
+  }), plan).state, 'prior_committed')
+  await assert.rejects(execFileAsync(process.execPath, [releaseToolPath, 'verify',
+    '--qualification-rollback-receipt', plan.receiptPath]), /permitted only for rollback/)
+})
+
+test('qualified release transitions fail closed without exact generation-bound lineage', () => {
+  assert.deepEqual(assertQualificationTransitionBound('activated', 'absent', null),
+    { action: 'activated', currentState: 'absent', baseEnvPatchMode: null })
+  assert.doesNotThrow(() => assertQualificationTransitionBound('activated', 'false', null))
+  assert.doesNotThrow(() => assertQualificationTransitionBound('activated', 'absent', 'activate'))
+  assert.throws(() => assertQualificationTransitionBound('activated', 'true', null), /durable qualification lineage/)
+  assert.throws(() => assertQualificationTransitionBound('activated', 'true', 'activate'), /durable qualification lineage/)
+  assert.throws(() => assertQualificationTransitionBound('rolledBack', 'true', null), /qualification-rollback-receipt/)
+  assert.doesNotThrow(() => assertQualificationTransitionBound('rolledBack', 'true', 'rollback'))
+  assert.doesNotThrow(() => assertQualificationTransitionBound('rolledBack', 'absent', null))
+  assert.doesNotThrow(() => assertQualificationTransitionBound('rolledBack', 'false', null))
+  assert.throws(() => assertQualificationTransitionBound('other', 'true', null), /proof is invalid/)
+})
+
+test('successful qualification output hands off the exact redacted rollback receipt', () => {
+  const plan = makeBaseEnvPatchPlan()
+  const activation = releaseTransactionCompletionEvidence({
+    action: 'activated', nextLedger: { generation: 2 }, baseEnvPatchMode: 'activate', baseEnvPatch: plan
+  }, 'prepared')
+  assert.deepEqual(activation, {
+    action: 'activated', ledgerGeneration: 2, resumed: false,
+    qualificationReceipt: plan.receiptPath, qualificationState: 'target'
+  })
+  assert.equal(JSON.stringify(activation).includes('do-not-disclose'), false)
+  assert.deepEqual(releaseTransactionCompletionEvidence({
+    action: 'rolledBack', nextLedger: { generation: 3 }, baseEnvPatchMode: 'rollback', baseEnvPatch: plan
+  }, 'private_started'), {
+    action: 'rolledBack', ledgerGeneration: 3, resumed: true,
+    qualificationReceipt: plan.receiptPath, qualificationState: 'prior'
+  })
+  assert.deepEqual(releaseTransactionCompletionEvidence({
+    action: 'activated', nextLedger: { generation: 1 }, baseEnvPatchMode: null, baseEnvPatch: null
+  }, 'prepared'), {
+    action: 'activated', ledgerGeneration: 1, resumed: false,
+    qualificationReceipt: null, qualificationState: null
+  })
+  assert.throws(() => releaseTransactionCompletionEvidence({
+    action: 'activated', nextLedger: { generation: 2 }, baseEnvPatchMode: null, baseEnvPatch: plan
+  }, 'prepared'), /completion evidence is invalid/)
+})
+
+test('qualification env patch preserves an exact absent or false prior and rejects ambiguous bytes', () => {
+  const before = Buffer.from('OPENAI_API_KEY=do-not-disclose\r\nPRIVATE_REALTIME_VOICE_QUALIFIED=false\r\nOTHER=value\n')
+  const patch = privateRealtimeVoiceQualificationEnvPatch(before)
+  assert.equal(patch.priorQualificationState, 'false')
+  assert.equal(patch.beforeSha256, sha256(before))
+  assert.equal(patch.after.toString(), 'OPENAI_API_KEY=do-not-disclose\r\nPRIVATE_REALTIME_VOICE_QUALIFIED=true\r\nOTHER=value\n')
+  assert.equal(patch.afterSha256, sha256(patch.after))
+  assert.equal(patch.after.toString().replace('PRIVATE_REALTIME_VOICE_QUALIFIED=true', 'PRIVATE_REALTIME_VOICE_QUALIFIED=false'), before.toString())
+  for (const [prior, expected] of [
+    ['OPENAI_API_KEY=do-not-disclose\n', 'OPENAI_API_KEY=do-not-disclose\nPRIVATE_REALTIME_VOICE_QUALIFIED=true\n'],
+    ['OPENAI_API_KEY=do-not-disclose', 'OPENAI_API_KEY=do-not-disclose\nPRIVATE_REALTIME_VOICE_QUALIFIED=true\n'],
+    ['', 'PRIVATE_REALTIME_VOICE_QUALIFIED=true\n']
+  ]) {
+    const absent = privateRealtimeVoiceQualificationEnvPatch(Buffer.from(prior))
+    assert.equal(absent.priorQualificationState, 'absent')
+    assert.equal(absent.after.toString(), expected)
+    assert.deepEqual(absent.after.subarray(0, absent.before.length), absent.before)
+  }
+  assert.equal(privateRealtimeVoiceQualificationEnvState('OTHER=value\n').state, 'absent')
+  assert.equal(privateRealtimeVoiceQualificationEnvState('PRIVATE_REALTIME_VOICE_QUALIFIED=false\n').state, 'false')
+  assert.equal(privateRealtimeVoiceQualificationEnvState('PRIVATE_REALTIME_VOICE_QUALIFIED=true\n').state, 'true')
+  assert.throws(() => privateRealtimeVoiceQualificationEnvPatch('PRIVATE_REALTIME_VOICE_QUALIFIED=true\n'), /canonical.*false/)
+  assert.throws(() => privateRealtimeVoiceQualificationEnvPatch(
+    'PRIVATE_REALTIME_VOICE_QUALIFIED=false\n export PRIVATE_REALTIME_VOICE_QUALIFIED=false\n'), /absent or one canonical/)
+  for (const invalid of [
+    '# PRIVATE_REALTIME_VOICE_QUALIFIED=false\n',
+    'export PRIVATE_REALTIME_VOICE_QUALIFIED=false\n',
+    'PRIVATE_REALTIME_VOICE_QUALIFIED="false"\n',
+    'PRIVATE_REALTIME_VOICE_QUALIFIED =false\n'
+  ]) assert.throws(() => privateRealtimeVoiceQualificationEnvPatch(invalid), /absent or one canonical/)
+  assert.throws(() => privateRealtimeVoiceQualificationEnvPatch(Buffer.from([0xff, 0xfe])), /valid UTF-8/)
+})
+
+test('qualification env transaction is byte-exact and idempotent on a real private filesystem', async t => {
+  for (const [name, prior] of [
+    ['absent prior', 'OPENAI_API_KEY=do-not-disclose\nOTHER=value\n'],
+    ['canonical false prior', 'OPENAI_API_KEY=do-not-disclose\nPRIVATE_REALTIME_VOICE_QUALIFIED=false\nOTHER=value\n']
+  ]) {
+    await t.test(name, async t => {
+      const fixture = await makeBaseEnvFilesystemFixture(t, prior)
+      const policy = { backupRoot: fixture.backupRoot }
+      const installed = await installTargetBaseEnvPatch(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+      assert.equal(installed.state, 'target_installed')
+      assert.deepEqual(await readFile(fixture.plan.backupPath), fixture.prior)
+      assert.equal(sha256(await readFile(fixture.baseEnv)), fixture.plan.afterSha256)
+      assert.equal((await lstat(fixture.plan.backupPath)).mode & 0o777, 0o600)
+      assert.equal((await lstat(fixture.plan.receiptPath)).mode & 0o777, 0o600)
+      await assertTargetBaseEnvPatchInstalled(fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+
+      // A crash after install but before the durable phase update may repeat
+      // this exact effect. It must preserve one backup and one receipt.
+      const repeatedInstall = await installTargetBaseEnvPatch(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+      assert.equal(repeatedInstall.state, 'target_installed')
+      assert.deepEqual(await readFile(fixture.plan.backupPath), fixture.prior)
+
+      const targetCommitted = await commitTargetBaseEnvPatch(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+      assert.equal(targetCommitted.state, 'target_committed')
+      const redactedReceipt = await readFile(fixture.plan.receiptPath, 'utf8')
+      assert.equal(redactedReceipt.includes('do-not-disclose'), false)
+      assert.equal(redactedReceipt.includes('OPENAI_API_KEY'), false)
+
+      const priorInstalled = await restorePriorBaseEnv(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true })
+      assert.equal(priorInstalled.state, 'prior_installed')
+      assert.deepEqual(await readFile(fixture.baseEnv), fixture.prior)
+      await assertPriorBaseEnvRestored(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true })
+      const priorCommitted = await commitPriorBaseEnvRestore(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true })
+      assert.equal(priorCommitted.state, 'prior_committed')
+
+      // Failed explicit rollback recovery must be able to put the exact true
+      // bytes back before restarting the qualified current release.
+      const reinstalled = await reinstallCommittedTargetBaseEnvPatch(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+      assert.equal(reinstalled.state, 'target_installed')
+      assert.equal(sha256(await readFile(fixture.baseEnv)), fixture.plan.afterSha256)
+      assert.equal((await commitTargetBaseEnvPatch(
+        fixture.operationLock, fixture.plan, fixture.ownerUid, policy)).state, 'target_committed')
+    })
+  }
+})
+
+test('transaction-bound base env temp is cleaned across pre- and post-rename crash states', async t => {
+  const fixture = await makeBaseEnvFilesystemFixture(t, 'OPENAI_API_KEY=do-not-disclose\n')
+  const policy = { backupRoot: fixture.backupRoot }
+  const temporary = baseEnvPatchTemporaryPath(fixture.plan, fixture.backupRoot)
+  assert.equal(temporary, join(dirname(fixture.baseEnv),
+    `.${fixture.baseEnv.split('/').at(-1)}.bonfire-${fixture.operationLock.token}.tmp`))
+
+  // SIGKILL after the bound temp is fsynced but before rename: the canonical
+  // file is still prior, the exact backup exists, and the secret temp remains.
+  await writeFile(fixture.plan.backupPath, fixture.prior, { mode: 0o600 })
+  await chmod(fixture.plan.backupPath, 0o600)
+  const targetBody = privateRealtimeVoiceQualificationEnvPatch(fixture.prior).after
+  await writeFile(temporary, targetBody, { mode: 0o600 })
+  await chmod(temporary, 0o600)
+  await installTargetBaseEnvPatch(fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+  assert.equal(sha256(await readFile(fixture.baseEnv)), fixture.plan.afterSha256)
+  await assert.rejects(lstat(temporary), error => error?.code === 'ENOENT')
+
+  // SIGKILL after rename but before receipt: canonical target and backup are
+  // sufficient to recreate the exact receipt without another secret copy.
+  await rm(fixture.plan.receiptPath)
+  const resumed = await installTargetBaseEnvPatch(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+  assert.equal(resumed.state, 'target_installed')
+  await assert.rejects(lstat(temporary), error => error?.code === 'ENOENT')
+  await commitTargetBaseEnvPatch(fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+
+  // The reverse write uses the same bound path and cleans its pre-rename crash
+  // copy before restoring the exact prior bytes.
+  await writeFile(temporary, fixture.prior, { mode: 0o600 })
+  await chmod(temporary, 0o600)
+  await restorePriorBaseEnv(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true })
+  assert.deepEqual(await readFile(fixture.baseEnv), fixture.prior)
+  await assert.rejects(lstat(temporary), error => error?.code === 'ENOENT')
+})
+
+test('receiptless prior recovery removes an interrupted real backup before releasing the no-op boundary', async t => {
+  const fixture = await makeBaseEnvFilesystemFixture(t, 'OTHER=value\n')
+  const policy = { backupRoot: fixture.backupRoot }
+  // SIGKILL after exclusive backup creation but before the full write/fsync
+  // leaves the exact transaction-bound final path partial and receiptless.
+  await writeFile(fixture.plan.backupPath, 'OTHER=partial-secret', { mode: 0o600 })
+  await chmod(fixture.plan.backupPath, 0o600)
+  await assert.rejects(installTargetBaseEnvPatch(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, policy), /backup differs/)
+  assert.equal(await restorePriorBaseEnv(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, policy), null)
+  assert.equal(await commitPriorBaseEnvRestore(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, policy), null)
+  assert.deepEqual(await readdir(fixture.backupRoot), [])
+  await assert.rejects(assertPriorBaseEnvRestored(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true }), /bound receipt/)
+  await assert.rejects(commitPriorBaseEnvRestore(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true }), /bound receipt/)
+})
+
+test('explicit rollback cannot commit after its real receipt and backup are deleted', async t => {
+  const fixture = await makeBaseEnvFilesystemFixture(t, 'OTHER=value\n')
+  const policy = { backupRoot: fixture.backupRoot }
+  await installTargetBaseEnvPatch(fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+  await commitTargetBaseEnvPatch(fixture.operationLock, fixture.plan, fixture.ownerUid, policy)
+  await restorePriorBaseEnv(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true })
+  await rm(fixture.plan.receiptPath)
+  await rm(fixture.plan.backupPath)
+  assert.deepEqual(await readFile(fixture.baseEnv), fixture.prior)
+  await assert.rejects(assertPriorBaseEnvRestored(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true }), /bound receipt/)
+  await assert.rejects(commitPriorBaseEnvRestore(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, { ...policy, requireReceipt: true }), /bound receipt/)
+})
+
+test('real filesystem env drift cannot create a backup, receipt, or target install', async t => {
+  const fixture = await makeBaseEnvFilesystemFixture(t, 'OTHER=value\n')
+  const policy = { backupRoot: fixture.backupRoot }
+  await writeFile(fixture.baseEnv, 'OTHER=drifted\n', { mode: 0o600 })
+  await assert.rejects(installTargetBaseEnvPatch(
+    fixture.operationLock, fixture.plan, fixture.ownerUid, policy), /drifted outside/)
+  assert.deepEqual(await readdir(fixture.backupRoot), [])
+  assert.equal((await readFile(fixture.baseEnv, 'utf8')), 'OTHER=drifted\n')
+})
+
+test('qualification plan and redacted receipt bind both releases, generation, and only digests', () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan())
+  const receipt = validateBaseEnvPatchReceipt(makeBaseEnvPatchReceipt(plan), plan)
+  assert.equal(receipt.rollbackReleaseCommit, 'b'.repeat(40))
+  assert.equal(receipt.targetLedgerGeneration, 2)
+  assert.deepEqual(baseEnvPatchPlanFromReceipt(plan.receiptPath, receipt), plan)
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    'afterSha256', 'backupPath', 'baseEnvPath', 'beforeSha256', 'committedAt', 'patchKey', 'priorQualificationState', 'priorRestoredAt',
+    'rollbackReleaseCommit', 'schema', 'state', 'targetLedgerGeneration', 'targetObservedAt', 'targetReleaseCommit', 'transactionToken'
+  ].sort())
+  assert.equal(JSON.stringify(receipt).includes('do-not-disclose'), false)
+  assert.throws(() => validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ backupDir: '/tmp/attacker',
+    backupPath: '/tmp/attacker/base-env.before.env', receiptPath: '/tmp/attacker/base-env.receipt.json' })), /invalid/)
+  assert.throws(() => validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ backupDir: '/opt/meetingassist-backups/a/b',
+    backupPath: '/opt/meetingassist-backups/a/b/base-env.before.env',
+    receiptPath: '/opt/meetingassist-backups/a/b/base-env.receipt.json' })), /invalid/)
+})
+
+test('qualification patch fails closed on digest drift and private path ownership or modes', () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan())
+  assert.equal(baseEnvPatchDigestState(plan.beforeSha256, plan), 'prior')
+  assert.equal(baseEnvPatchDigestState(plan.afterSha256, plan), 'target')
+  assert.throws(() => baseEnvPatchDigestState(digest('9'), plan), /drifted outside/)
+  const stat = ({ file = false, directory = false, symlink = false, mode = 0, uid = 0 }) => ({
+    isFile: () => file, isDirectory: () => directory, isSymbolicLink: () => symlink, mode, uid
+  })
+  assert.doesNotThrow(() => validatePrivateReleasePathInfo(stat({ file: true, mode: 0o600 }), 'base env'))
+  assert.doesNotThrow(() => validatePrivateReleasePathInfo(stat({ directory: true, mode: 0o700 }), 'base env backup directory'))
+  assert.throws(() => validatePrivateReleasePathInfo(stat({ file: true, mode: 0o640 }), 'base env backup'), /owner-private/)
+  assert.throws(() => validatePrivateReleasePathInfo(stat({ directory: true, mode: 0o755 }), 'base env backup directory'), /owner-private/)
+  assert.throws(() => validatePrivateReleasePathInfo(stat({ directory: true, symlink: true, mode: 0o700 }), 'base env backup directory'), /owner-private/)
+  assert.throws(() => validatePrivateReleasePathInfo(stat({ file: true, mode: 0o600, uid: 501 }), 'base env'), /owner-private/)
+})
+
+test('actual container qualification value is required for target and retained rollback verification', () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan())
+  const absentPlan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ priorQualificationState: 'absent' }))
+  assert.equal(privateRealtimeVoiceQualificationRuntimeState({}), 'absent')
+  assert.equal(privateRealtimeVoiceQualificationRuntimeState({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }), 'false')
+  assert.equal(privateRealtimeVoiceQualificationRuntimeState({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }), 'true')
+  assert.throws(() => privateRealtimeVoiceQualificationRuntimeState({ PRIVATE_REALTIME_VOICE_QUALIFIED: ' TRUE ' }), /malformed/)
+  assert.equal(assertPrivateRealtimeVoiceQualificationHostRuntimeMatch('absent', 'absent'), 'absent')
+  assert.equal(assertPrivateRealtimeVoiceQualificationHostRuntimeMatch('true', 'true'), 'true')
+  assert.throws(() => assertPrivateRealtimeVoiceQualificationHostRuntimeMatch('absent', 'true'), /currently serving/)
+  assert.doesNotThrow(() => verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }, plan, 'target'))
+  assert.doesNotThrow(() => verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }, plan, 'prior'))
+  assert.doesNotThrow(() => verifyBaseEnvPatchRuntimeEnvironment({}, absentPlan, 'prior'))
+  assert.throws(() => verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }, plan, 'target'), /target base env/)
+  assert.throws(() => verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }, plan, 'prior'), /prior base env/)
+  assert.throws(() => verifyBaseEnvPatchRuntimeEnvironment({}, plan, 'target'), /target base env/)
+  assert.throws(() => verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }, absentPlan, 'prior'), /prior base env/)
 })
 
 test('abrupt death resumes every fenced phase without opening ingress before durable ledger', async () => {
   const transition = { activateTargetBeforeStart: true, verifyTargetRuntimeBeforeStart: false }
-  const terminalOrder = ['stop-ingress', 'activate', 'start-private', 'verify-private', 'write-ledger', 'open-ingress', 'verify-external']
-  for (const crashPhase of ['ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+  const terminalOrder = ['stop-ingress', 'install-target-env', 'preflight-target', 'activate', 'start-private', 'verify-private', 'write-ledger', 'open-ingress', 'verify-external']
+  for (const crashPhase of ['ingress_stopped', 'base_env_patch_started', 'base_env_patched', 'target_preflighted', 'data_transition_started', 'data_ready', 'private_started',
     'private_verified', 'ledger_written', 'ingress_opened']) {
     let durablePhase = 'prepared'
     const calls = []
     let crashed = false
     const effects = {
-      stopIngress: async () => calls.push('stop-ingress'), activateTarget: async () => calls.push('activate'),
+      stopIngress: async () => calls.push('stop-ingress'), installTargetBaseEnv: async () => calls.push('install-target-env'),
+      assertTargetBaseEnv: async () => {}, preflightTarget: async () => calls.push('preflight-target'),
+      activateTarget: async () => calls.push('activate'),
       verifyTargetRuntime: async () => calls.push('verify-runtime'), startTargetPrivate: async () => calls.push('start-private'),
       verifyTargetPrivate: async () => calls.push('verify-private'), writeTargetLedger: async () => calls.push('write-ledger'),
       openTargetIngress: async () => calls.push('open-ingress'), verifyTargetExternal: async () => calls.push('verify-external')
@@ -1631,9 +2037,277 @@ test('abrupt death resumes every fenced phase without opening ingress before dur
     await executeDurableReleasePhaseMachine({ phase: durablePhase, transition, effects, advance: async phase => { durablePhase = phase } })
     assert.equal(durablePhase, 'external_verified')
     assert.ok(calls.indexOf('stop-ingress') < calls.indexOf('activate'))
+    assert.ok(calls.indexOf('install-target-env') < calls.indexOf('preflight-target'))
+    assert.ok(calls.indexOf('preflight-target') < calls.indexOf('activate'))
     assert.ok(calls.indexOf('write-ledger') < calls.indexOf('open-ingress'))
     assert.deepEqual([...new Set(calls)], terminalOrder)
   }
+})
+
+test('transactional qualification succeeds only after target preflight, container proof, ledger CAS, and external proof', async () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan())
+  const events = []
+  let environmentState = 'prior'
+  let ledgerState = 'prior'
+  let phase = 'prepared'
+  await executeDurableReleasePhaseMachine({ phase,
+    transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false },
+    advance: async next => { phase = next }, effects: {
+      stopIngress: async () => events.push('stop-ingress'),
+      installTargetBaseEnv: async () => { environmentState = 'target'; events.push('install-target-env') },
+      assertTargetBaseEnv: async () => assert.equal(environmentState, 'target'),
+      preflightTarget: async () => { assert.equal(environmentState, 'target'); events.push('preflight-target') },
+      activateTarget: async () => assert.fail('activation transition is not required'),
+      verifyTargetRuntime: async () => assert.fail('runtime lineage is not required'),
+      startTargetPrivate: async () => { assert.equal(environmentState, 'target'); events.push('start-target') },
+      verifyTargetPrivate: async () => {
+        verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }, plan, 'target')
+        events.push('verify-target-private')
+      },
+      writeTargetLedger: async () => { ledgerState = 'target'; events.push('ledger-cas') },
+      openTargetIngress: async () => { assert.equal(ledgerState, 'target'); events.push('open-target-ingress') },
+      verifyTargetExternal: async () => {
+        assert.equal(ledgerState, 'target')
+        verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }, plan, 'target')
+        events.push('verify-target-external')
+      }
+    } })
+  assert.equal(phase, 'external_verified')
+  events.push('commit-redacted-receipt')
+  assert.deepEqual(events, ['stop-ingress', 'install-target-env', 'preflight-target', 'start-target', 'verify-target-private',
+    'ledger-cas', 'open-target-ingress', 'verify-target-external', 'commit-redacted-receipt'])
+})
+
+test('explicit qualification rollback restores exact prior state before target preflight and commits only after external proof', async () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ priorQualificationState: 'absent' }))
+  let environmentState = 'target'
+  let receiptState = 'target_committed'
+  let ledgerState = 'qualified-current'
+  let phase = 'prepared'
+  const events = []
+  await executeDurableReleasePhaseMachine({ phase,
+    transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false },
+    advance: async next => { phase = next }, effects: {
+      stopIngress: async () => { assert.equal(environmentState, 'target'); events.push('stop-qualified-ingress') },
+      installTargetBaseEnv: async () => { environmentState = 'prior'; receiptState = 'prior_installed'; events.push('restore-exact-prior-env') },
+      assertTargetBaseEnv: async () => assert.equal(environmentState, 'prior'),
+      preflightTarget: async () => { assert.equal(environmentState, 'prior'); events.push('preflight-bootstrap') },
+      activateTarget: async () => assert.fail('unexpected data activation'),
+      verifyTargetRuntime: async () => assert.fail('unexpected runtime verification'),
+      startTargetPrivate: async () => { assert.equal(environmentState, 'prior'); events.push('start-bootstrap') },
+      verifyTargetPrivate: async () => {
+        verifyBaseEnvPatchRuntimeEnvironment({}, plan, 'prior')
+        events.push('verify-bootstrap-private')
+      },
+      writeTargetLedger: async () => { ledgerState = 'bootstrap-target'; events.push('rollback-ledger-cas') },
+      openTargetIngress: async () => { assert.equal(ledgerState, 'bootstrap-target'); events.push('open-bootstrap-ingress') },
+      verifyTargetExternal: async () => { assert.equal(environmentState, 'prior'); events.push('verify-bootstrap-external') }
+    } })
+  assert.equal(phase, 'external_verified')
+  assert.equal(receiptState, 'prior_installed')
+  receiptState = 'prior_committed'
+  events.push('commit-prior-receipt')
+  assert.deepEqual(events, ['stop-qualified-ingress', 'restore-exact-prior-env', 'preflight-bootstrap', 'start-bootstrap',
+    'verify-bootstrap-private', 'rollback-ledger-cas', 'open-bootstrap-ingress', 'verify-bootstrap-external', 'commit-prior-receipt'])
+})
+
+test('failed qualification rollback reinstalls true before restarting the qualified current release', async () => {
+  const plan = validateBaseEnvPatchPlan(makeBaseEnvPatchPlan({ priorQualificationState: 'absent' }))
+  let environmentState = 'prior'
+  let receiptState = 'prior_installed'
+  let phase = 'recovery_started'
+  const events = []
+  await executeDurableReleaseRecoveryPhaseMachine({ phase, advance: async next => { phase = next }, effects: {
+    restoreTargetData: async () => { assert.equal(environmentState, 'prior'); events.push('undo-bootstrap-transition') },
+    restoreRecoveryBaseEnv: async () => { environmentState = 'target'; receiptState = 'target_installed'; events.push('reinstall-exact-true-env') },
+    verifyRollbackRuntime: async () => { assert.equal(environmentState, 'target'); events.push('preflight-qualified-current') },
+    startRollbackPrivate: async () => { assert.equal(environmentState, 'target'); events.push('restart-qualified-current') },
+    verifyRollbackPrivate: async () => {
+      verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'true' }, plan, 'target')
+      events.push('verify-qualified-private')
+    },
+    restoreLedger: async () => events.push('restore-qualified-ledger'),
+    openRollbackIngress: async () => { assert.equal(environmentState, 'target'); events.push('open-qualified-ingress') },
+    verifyRollbackExternal: async () => { assert.equal(environmentState, 'target'); events.push('verify-qualified-external') }
+  } })
+  assert.equal(phase, 'recovery_external_verified')
+  receiptState = 'target_committed'
+  events.push('recommit-target-receipt')
+  assert.deepEqual(events.slice(0, 4), ['undo-bootstrap-transition', 'reinstall-exact-true-env', 'preflight-qualified-current', 'restart-qualified-current'])
+  assert.equal(receiptState, 'target_committed')
+})
+
+test('explicit qualification rollback resumes every forward env-transition crash window', async () => {
+  const crashPhases = ['ingress_stopped', 'base_env_patch_started', 'base_env_patched', 'target_preflighted', 'data_ready', 'private_started',
+    'private_verified', 'ledger_written', 'ingress_opened']
+  for (const crashPhase of crashPhases) {
+    let phase = 'prepared'
+    let environmentState = 'target'
+    let crashed = false
+    const calls = []
+    const effects = {
+      stopIngress: async () => { assert.equal(environmentState, 'target'); calls.push('stop') },
+      installTargetBaseEnv: async () => { environmentState = 'prior'; calls.push('restore-prior') },
+      assertTargetBaseEnv: async () => assert.equal(environmentState, 'prior'),
+      preflightTarget: async () => { assert.equal(environmentState, 'prior'); calls.push('preflight') },
+      activateTarget: async () => assert.fail('unexpected'), verifyTargetRuntime: async () => assert.fail('unexpected'),
+      startTargetPrivate: async () => { assert.equal(environmentState, 'prior'); calls.push('start') },
+      verifyTargetPrivate: async () => calls.push('verify-private'), writeTargetLedger: async () => calls.push('ledger'),
+      openTargetIngress: async () => calls.push('open'), verifyTargetExternal: async () => calls.push('verify-external')
+    }
+    await assert.rejects(executeDurableReleasePhaseMachine({ phase,
+      transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false }, effects, advance: async next => {
+        phase = next
+        if (!crashed && next === crashPhase) { crashed = true; throw new Error('abrupt rollback death') }
+      } }), /abrupt rollback death/)
+    await executeDurableReleasePhaseMachine({ phase,
+      transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false }, effects,
+      advance: async next => { phase = next } })
+    assert.equal(phase, 'external_verified')
+    assert.ok(calls.indexOf('restore-prior') < calls.indexOf('preflight'))
+    assert.ok(calls.indexOf('preflight') < calls.indexOf('start'))
+  }
+})
+
+test('failed qualification rollback recovery resumes every true-env reinstall crash window', async () => {
+  const crashPhases = ['recovery_data_restored', 'recovery_env_restore_started', 'recovery_env_restored',
+    'recovery_runtime_verified', 'recovery_private_started', 'recovery_private_verified', 'recovery_ledger_restored', 'recovery_ingress_opened']
+  for (const crashPhase of crashPhases) {
+    let phase = 'recovery_started'
+    let environmentState = 'prior'
+    let crashed = false
+    const calls = []
+    const effects = {
+      restoreTargetData: async () => { assert.equal(environmentState, 'prior'); calls.push('undo-target') },
+      restoreRecoveryBaseEnv: async () => { environmentState = 'target'; calls.push('reinstall-true') },
+      verifyRollbackRuntime: async () => { assert.equal(environmentState, 'target'); calls.push('preflight-current') },
+      startRollbackPrivate: async () => { assert.equal(environmentState, 'target'); calls.push('start-current') },
+      verifyRollbackPrivate: async () => calls.push('verify-current'), restoreLedger: async () => calls.push('ledger'),
+      openRollbackIngress: async () => calls.push('open'), verifyRollbackExternal: async () => calls.push('external')
+    }
+    await assert.rejects(executeDurableReleaseRecoveryPhaseMachine({ phase, effects, advance: async next => {
+      phase = next
+      if (!crashed && next === crashPhase) { crashed = true; throw new Error('abrupt rollback recovery death') }
+    } }), /abrupt rollback recovery death/)
+    await executeDurableReleaseRecoveryPhaseMachine({ phase, effects, advance: async next => { phase = next } })
+    assert.equal(phase, 'recovery_external_verified')
+    assert.ok(calls.indexOf('reinstall-true') < calls.indexOf('preflight-current'))
+    assert.ok(calls.indexOf('preflight-current') < calls.indexOf('start-current'))
+  }
+})
+
+test('pre-target patch failure starts neither target nor retained release until prior env restore is durable', async () => {
+  assert.equal(priorBaseEnvCommitDisposition(null), 'skip')
+  assert.equal(priorBaseEnvCommitDisposition(makeBaseEnvPatchReceipt(makeBaseEnvPatchPlan(), {
+    state: 'prior_installed', priorRestoredAt: '2026-08-22T12:02:00.000Z'
+  })), 'commit')
+  assert.throws(() => priorBaseEnvCommitDisposition(makeBaseEnvPatchReceipt()), /not commit-ready/)
+  const forwardCalls = []
+  let phase = 'prepared'
+  await assert.rejects(executeDurableReleasePhaseMachine({ phase,
+    transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false },
+    advance: async next => { phase = next }, effects: {
+      stopIngress: async () => forwardCalls.push('stop-ingress'),
+      installTargetBaseEnv: async () => { forwardCalls.push('install-target-env'); throw new Error('base env digest drift') },
+      assertTargetBaseEnv: async () => forwardCalls.push('unexpected-assert'),
+      preflightTarget: async () => forwardCalls.push('unexpected-preflight'),
+      activateTarget: async () => forwardCalls.push('unexpected-activate'),
+      verifyTargetRuntime: async () => forwardCalls.push('unexpected-runtime'),
+      startTargetPrivate: async () => forwardCalls.push('unexpected-target-start'),
+      verifyTargetPrivate: async () => forwardCalls.push('unexpected-target-verify'),
+      writeTargetLedger: async () => forwardCalls.push('unexpected-ledger'),
+      openTargetIngress: async () => forwardCalls.push('unexpected-open'),
+      verifyTargetExternal: async () => forwardCalls.push('unexpected-external')
+    } }), /base env digest drift/)
+  assert.equal(phase, 'base_env_patch_started')
+  assert.deepEqual(forwardCalls, ['stop-ingress', 'install-target-env'])
+
+  const recoveryCalls = []
+  let recoveryPhase = 'recovery_started'
+  let priorRestored = false
+  await executeDurableReleaseRecoveryPhaseMachine({ phase: recoveryPhase, advance: async next => { recoveryPhase = next }, effects: {
+    restoreTargetData: async () => recoveryCalls.push('cleanup-target'),
+    restoreRecoveryBaseEnv: async () => { priorRestored = true; recoveryCalls.push('restore-prior-env') },
+    verifyRollbackRuntime: async () => { assert.equal(priorRestored, true); recoveryCalls.push('preflight-retained') },
+    startRollbackPrivate: async () => { assert.equal(priorRestored, true); recoveryCalls.push('start-retained') },
+    verifyRollbackPrivate: async () => recoveryCalls.push('verify-retained-private'),
+    restoreLedger: async () => recoveryCalls.push('restore-ledger'),
+    openRollbackIngress: async () => recoveryCalls.push('open-retained-ingress'),
+    verifyRollbackExternal: async () => recoveryCalls.push('verify-retained-external')
+  } })
+  assert.ok(recoveryCalls.indexOf('restore-prior-env') < recoveryCalls.indexOf('preflight-retained'))
+  assert.ok(recoveryCalls.indexOf('restore-prior-env') < recoveryCalls.indexOf('start-retained'))
+})
+
+test('post-target failure restores target data first, then prior env before every retained verifier or start', async () => {
+  let environmentState = 'target'
+  const calls = []
+  let recoveryPhase = 'recovery_started'
+  await executeDurableReleaseRecoveryPhaseMachine({ phase: recoveryPhase, advance: async next => { recoveryPhase = next }, effects: {
+    restoreTargetData: async () => { assert.equal(environmentState, 'target'); calls.push('undo-target-data') },
+    restoreRecoveryBaseEnv: async () => { environmentState = 'prior'; calls.push('restore-prior-env') },
+    verifyRollbackRuntime: async () => { assert.equal(environmentState, 'prior'); calls.push('preflight-retained') },
+    startRollbackPrivate: async () => { assert.equal(environmentState, 'prior'); calls.push('start-retained') },
+    verifyRollbackPrivate: async () => {
+      verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }, makeBaseEnvPatchPlan(), 'prior')
+      calls.push('verify-retained-private')
+    },
+    restoreLedger: async () => calls.push('restore-ledger'),
+    openRollbackIngress: async () => { assert.equal(environmentState, 'prior'); calls.push('open-retained-ingress') },
+    verifyRollbackExternal: async () => {
+      verifyBaseEnvPatchRuntimeEnvironment({ PRIVATE_REALTIME_VOICE_QUALIFIED: 'false' }, makeBaseEnvPatchPlan(), 'prior')
+      calls.push('verify-retained-external')
+    }
+  } })
+  assert.equal(recoveryPhase, 'recovery_external_verified')
+  assert.deepEqual(calls.slice(0, 4), ['undo-target-data', 'restore-prior-env', 'preflight-retained', 'start-retained'])
+})
+
+test('abrupt death resumes every recovery phase without starting retained services before prior env restoration', async () => {
+  const crashPhases = ['recovery_data_restored', 'recovery_env_restore_started', 'recovery_env_restored', 'recovery_runtime_verified',
+    'recovery_private_started', 'recovery_private_verified', 'recovery_ledger_restored', 'recovery_ingress_opened']
+  for (const crashPhase of crashPhases) {
+    let phase = 'recovery_started'
+    let crashed = false
+    let priorRestored = false
+    const calls = []
+    const effects = {
+      restoreTargetData: async () => calls.push('undo-target-data'),
+      restoreRecoveryBaseEnv: async () => { priorRestored = true; calls.push('restore-prior-env') },
+      verifyRollbackRuntime: async () => { assert.equal(priorRestored, true); calls.push('preflight-retained') },
+      startRollbackPrivate: async () => { assert.equal(priorRestored, true); calls.push('start-retained') },
+      verifyRollbackPrivate: async () => { assert.equal(priorRestored, true); calls.push('verify-retained-private') },
+      restoreLedger: async () => calls.push('restore-ledger'),
+      openRollbackIngress: async () => { assert.equal(priorRestored, true); calls.push('open-retained-ingress') },
+      verifyRollbackExternal: async () => { assert.equal(priorRestored, true); calls.push('verify-retained-external') }
+    }
+    await assert.rejects(executeDurableReleaseRecoveryPhaseMachine({ phase, effects, advance: async next => {
+      phase = next
+      if (!crashed && next === crashPhase) { crashed = true; throw new Error('abrupt death') }
+    } }), /abrupt death/)
+    if (phase === 'recovery_env_restored' || crashPhases.indexOf(phase) > crashPhases.indexOf('recovery_env_restored')) priorRestored = true
+    await executeDurableReleaseRecoveryPhaseMachine({ phase, effects, advance: async next => { phase = next } })
+    assert.equal(phase, 'recovery_external_verified')
+    assert.ok(calls.indexOf('restore-prior-env') < calls.indexOf('start-retained') ||
+      (crashPhase === 'recovery_env_restored' && calls.indexOf('start-retained') >= 0))
+  }
+})
+
+test('legacy no-patch activation and rollback remain resumable with absent or false qualification', async () => {
+  const calls = []
+  let phase = 'prepared'
+  await executeDurableReleasePhaseMachine({ phase,
+    transition: { activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: false },
+    advance: async next => { phase = next }, effects: {
+      stopIngress: async () => calls.push('stop'), installTargetBaseEnv: async () => calls.push('no-patch'),
+      assertTargetBaseEnv: async () => {}, preflightTarget: async () => calls.push('preflight'),
+      activateTarget: async () => assert.fail('unexpected'), verifyTargetRuntime: async () => assert.fail('unexpected'),
+      startTargetPrivate: async () => calls.push('start'), verifyTargetPrivate: async () => calls.push('verify-private'),
+      writeTargetLedger: async () => calls.push('ledger'), openTargetIngress: async () => calls.push('open'),
+      verifyTargetExternal: async () => calls.push('verify-external')
+    } })
+  assert.equal(phase, 'external_verified')
+  assert.deepEqual(calls, ['stop', 'no-patch', 'preflight', 'start', 'verify-private', 'ledger', 'open', 'verify-external'])
 })
 
 test('explicit live to canary phase machine preserves evolved bytes and uses lineage only', async () => {
@@ -1643,14 +2317,16 @@ test('explicit live to canary phase machine preserves evolved bytes and uses lin
   await executeDurableReleasePhaseMachine({ phase: 'prepared',
     transition: strideE10W4ReleaseTransitionPlan('rolledBack', makeReceipt(), makeReceipt(w4LivePolicy)),
     advance: async () => {}, effects: {
-      stopIngress: async () => calls.push('stop-ingress'), activateTarget: async () => { evolved.fill(0); calls.push('MUTATED') },
+      stopIngress: async () => calls.push('stop-ingress'), installTargetBaseEnv: async () => {},
+      assertTargetBaseEnv: async () => {}, preflightTarget: async () => calls.push('preflight-canary'),
+      activateTarget: async () => { evolved.fill(0); calls.push('MUTATED') },
       verifyTargetRuntime: async () => calls.push('verify-runtime-read-only'), startTargetPrivate: async () => calls.push('start-canary-private'),
       verifyTargetPrivate: async () => calls.push('verify-canary-private'), writeTargetLedger: async () => calls.push('write-ledger'),
       openTargetIngress: async () => calls.push('open-canary-ingress'), verifyTargetExternal: async () => calls.push('verify-canary-external')
     } })
   assert.deepEqual(evolved, before)
   assert.equal(calls.includes('MUTATED'), false)
-  assert.deepEqual(calls.slice(0, 3), ['stop-ingress', 'verify-runtime-read-only', 'start-canary-private'])
+  assert.deepEqual(calls.slice(0, 4), ['stop-ingress', 'preflight-canary', 'verify-runtime-read-only', 'start-canary-private'])
 })
 
 test('post-ingress initial activation failure preserves public evolved bytes and restores canary read-only', () => {

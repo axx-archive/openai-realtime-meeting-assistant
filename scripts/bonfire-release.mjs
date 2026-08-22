@@ -8,7 +8,7 @@ import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -23,7 +23,12 @@ const receiptSchemaW4 = 'bonfire.release-receipt.v4'
 const candidateBundleSchema = 'bonfire.candidate-deployment-bundle.v1'
 const activeReleaseLedgerSchema = 'bonfire.active-release-ledger.v1'
 const releaseOperationLockSchema = 'bonfire.release-operation-lock.v1'
-const releaseTransactionSchema = 'bonfire.release-transaction.v1'
+const releaseTransactionSchema = 'bonfire.release-transaction.v2'
+const baseEnvPatchSchema = 'bonfire.base-env-patch.v1'
+const baseEnvPatchReceiptSchema = 'bonfire.base-env-patch-receipt.v1'
+const privateRealtimeVoiceQualificationKey = 'PRIVATE_REALTIME_VOICE_QUALIFIED'
+const privateRealtimeVoiceQualificationValue = 'true'
+const baseEnvPatchBackupRoot = '/opt/meetingassist-backups'
 const shaPattern = /^[0-9a-f]{64}$/
 const commitPattern = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 const imageRefPattern = /^.+@sha256:[0-9a-f]{64}$/
@@ -1695,7 +1700,9 @@ export function verifyRenderRunnerHeartbeat(rawHeartbeat, now = Date.now()) {
 async function verifyRunning(options, printResult = true, {
   verifyTool = true,
   verifyLedger = true,
-  expectedRenderedComposeSha256 = ''
+  expectedRenderedComposeSha256 = '',
+  baseEnvPatch = null,
+  baseEnvPatchState = ''
 } = {}) {
   for (const [name, value] of [['--release-dir', options.releaseDir], ['--base-env', options.baseEnv],
     ['--health-url', options.healthUrl], ['--ready-url', options.readyUrl]]) required(name, value)
@@ -1752,6 +1759,7 @@ async function verifyRunning(options, printResult = true, {
   await verifyRunningOwnedImage(containers['render-runner'], receipt.images.renderRunner)
   const appEnvironment = environmentFromInspect(inspected.meetingassist)
   verifyRuntimeEnvironment(appEnvironment, receipt)
+  verifyBaseEnvPatchRuntimeEnvironment(appEnvironment, baseEnvPatch, baseEnvPatchState)
   if (appEnvironment.BONFIRE_RELEASE_BUNDLE_SHA256 !== receipt.bundleSha256) throw new Error('running app bundle identity differs from release receipt')
   const caddyCopy = join(await mkdtemp(`${tmpdir()}/bonfire-caddy-verify-`), 'Caddyfile')
   try {
@@ -1782,6 +1790,9 @@ async function verifyRunning(options, printResult = true, {
   // including secret-derived values. Keep it non-enumerable so logs do not
   // become an offline oracle for low-entropy operator secrets.
   Object.defineProperty(result, 'renderedComposeSha256', { value: composePreflight.sha256, enumerable: false })
+  Object.defineProperty(result, 'qualificationState', {
+    value: privateRealtimeVoiceQualificationRuntimeState(appEnvironment), enumerable: false
+  })
   if (printResult) process.stdout.write(`${JSON.stringify(result)}\n`)
   return result
 }
@@ -1826,6 +1837,31 @@ export function verifyLabels(labels, source, buildInputManifestSha256) {
 export function verifyRuntimeEnvironment(environment, receipt) {
   const expected = environmentValues(receipt)
   for (const [name, value] of Object.entries(expected)) if (String(environment[name] || '') !== value) throw new Error(`running environment ${name} differs from release receipt`)
+}
+
+export function verifyBaseEnvPatchRuntimeEnvironment(environment, plan, state) {
+  if (!plan) return
+  validateBaseEnvPatchPlan(plan)
+  if (!['target', 'prior'].includes(state)) throw new Error('base env runtime verification state is invalid')
+  const expected = state === 'target' ? privateRealtimeVoiceQualificationValue : plan.priorQualificationState
+  if (privateRealtimeVoiceQualificationRuntimeState(environment) !== expected) {
+    throw new Error(`running environment ${privateRealtimeVoiceQualificationKey} differs from the ${state} base env`)
+  }
+}
+
+export function privateRealtimeVoiceQualificationRuntimeState(environment) {
+  if (!Object.hasOwn(environment || {}, privateRealtimeVoiceQualificationKey)) return 'absent'
+  const value = String(environment[privateRealtimeVoiceQualificationKey])
+  if (!['false', 'true'].includes(value)) throw new Error('running qualification environment is malformed')
+  return value
+}
+
+export function assertPrivateRealtimeVoiceQualificationHostRuntimeMatch(hostState, runtimeState) {
+  if (!['absent', 'false', 'true'].includes(hostState) || !['absent', 'false', 'true'].includes(runtimeState) ||
+      hostState !== runtimeState) {
+    throw new Error('base env qualification state differs from the currently serving application container')
+  }
+  return hostState
 }
 
 export function verifyReleaseEnvironmentFile(body, receipt) {
@@ -1931,6 +1967,479 @@ function releaseOperationLockPath(releaseDir) {
   return join(dirname(resolve(releaseDir)), '.bonfire-release-operation.lock')
 }
 
+const targetBaseEnvPatchOptionNames = [
+  'targetBaseEnvExpectedSha256', 'targetBaseEnvPatchKey', 'targetBaseEnvPatchValue', 'targetBaseEnvBackupDir'
+]
+
+export function requestedTargetBaseEnvPatch(options, action) {
+  const supplied = targetBaseEnvPatchOptionNames.filter(name => String(options?.[name] || '').trim())
+  if (!supplied.length) return null
+  if (action !== 'activated') throw new Error('target base-env patch arguments are permitted only for activate')
+  if (supplied.length !== targetBaseEnvPatchOptionNames.length) {
+    throw new Error('target base-env patch requires every explicit target-only argument')
+  }
+  const rawExpectedBeforeSha256 = String(options.targetBaseEnvExpectedSha256)
+  const expectedBeforeSha256 = rawExpectedBeforeSha256.trim()
+  if (expectedBeforeSha256 !== rawExpectedBeforeSha256 || !shaPattern.test(expectedBeforeSha256)) {
+    throw new Error('--target-base-env-expected-sha256 must be exactly 64 lowercase hexadecimal characters')
+  }
+  if (options.targetBaseEnvPatchKey !== privateRealtimeVoiceQualificationKey ||
+      options.targetBaseEnvPatchValue !== privateRealtimeVoiceQualificationValue) {
+    throw new Error('target base-env patch is not the approved private Realtime qualification transition')
+  }
+  if (!isAbsolute(options.targetBaseEnvBackupDir)) throw new Error('--target-base-env-backup-dir must be absolute')
+  const backupDir = resolve(options.targetBaseEnvBackupDir)
+  if (options.targetBaseEnvBackupDir !== baseEnvPatchBackupRoot || backupDir !== baseEnvPatchBackupRoot) {
+    throw new Error('--target-base-env-backup-dir must be exactly /opt/meetingassist-backups')
+  }
+  return {
+    expectedBeforeSha256,
+    patchKey: privateRealtimeVoiceQualificationKey,
+    patchValue: privateRealtimeVoiceQualificationValue,
+    backupDir
+  }
+}
+
+export function requestedQualificationRollbackReceipt(options, action) {
+  const raw = String(options?.qualificationRollbackReceipt || '')
+  if (!raw) return null
+  if (action !== 'rolledBack') throw new Error('--qualification-rollback-receipt is permitted only for rollback')
+  if (!isAbsolute(raw) || resolve(raw) !== raw || dirname(raw) !== baseEnvPatchBackupRoot) {
+    throw new Error('--qualification-rollback-receipt must be one exact receipt under /opt/meetingassist-backups')
+  }
+  return raw
+}
+
+export function privateRealtimeVoiceQualificationEnvState(body) {
+  const before = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const text = before.toString('utf8')
+  if (!Buffer.from(text).equals(before)) throw new Error('base env is not valid UTF-8')
+  const mentionedLines = text.split(/\n/).filter(line => line.includes(privateRealtimeVoiceQualificationKey))
+  if (mentionedLines.length === 0) return { body: before, text, state: 'absent', match: null }
+  const pattern = /^PRIVATE_REALTIME_VOICE_QUALIFIED=(false|true)(\r?)$/gm
+  const matches = [...text.matchAll(pattern)]
+  if (mentionedLines.length !== 1 || matches.length !== 1 || matches[0].index === undefined) {
+    throw new Error('base env qualification key must be absent or one canonical false/true assignment')
+  }
+  return { body: before, text, state: matches[0][1], match: matches[0] }
+}
+
+export function privateRealtimeVoiceQualificationEnvPatch(body) {
+  const current = privateRealtimeVoiceQualificationEnvState(body)
+  const { body: before, text } = current
+  if (current.state === 'absent') {
+    const separator = before.length > 0 && !text.endsWith('\n') ? Buffer.from('\n') : Buffer.alloc(0)
+    const after = Buffer.concat([before, separator, Buffer.from(`${privateRealtimeVoiceQualificationKey}=${privateRealtimeVoiceQualificationValue}\n`)])
+    return { before, after, beforeSha256: sha256(before), afterSha256: sha256(after), priorQualificationState: 'absent' }
+  }
+  if (current.state !== 'false') {
+    throw new Error('base env qualification key must be absent or one canonical PRIVATE_REALTIME_VOICE_QUALIFIED=false assignment')
+  }
+  const match = current.match
+  const replacement = `${privateRealtimeVoiceQualificationKey}=${privateRealtimeVoiceQualificationValue}${match[2]}`
+  const afterText = `${text.slice(0, match.index)}${replacement}${text.slice(match.index + match[0].length)}`
+  const after = Buffer.from(afterText)
+  if (after.equals(before)) throw new Error('base env qualification patch produced no change')
+  return { before, after, beforeSha256: sha256(before), afterSha256: sha256(after), priorQualificationState: 'false' }
+}
+
+export function assertQualificationTransitionBound(action, currentState, baseEnvPatchMode) {
+  if (!['activated', 'rolledBack'].includes(action) || !['absent', 'false', 'true'].includes(currentState) ||
+      !['activate', 'rollback', null].includes(baseEnvPatchMode)) {
+    throw new Error('qualification transition proof is invalid')
+  }
+  if (action === 'activated' && currentState === 'true') {
+    // The active-release ledger does not yet carry qualification lineage across
+    // arbitrary successors. Refuse to create a generation whose only safe
+    // rollback receipt is bound to an older active generation.
+    throw new Error('qualified current release cannot perform an ordinary activation without durable qualification lineage')
+  }
+  if (action === 'rolledBack' && currentState === 'true' && baseEnvPatchMode !== 'rollback') {
+    throw new Error('qualified explicit rollback requires --qualification-rollback-receipt')
+  }
+  return { action, currentState, baseEnvPatchMode }
+}
+
+export function validatePrivateReleasePathInfo(info, kind, ownerUid = 0) {
+  if (!info || !Number.isSafeInteger(ownerUid) || ownerUid < 0) throw new Error(`${kind} ownership proof is invalid`)
+  if (kind === 'base env' || kind === 'base env backup' || kind === 'base env patch receipt') {
+    if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600 || info.uid !== ownerUid) {
+      throw new Error(`${kind} must be an owner-private regular file`)
+    }
+  } else if (kind === 'base env parent') {
+    if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o022) !== 0 || info.uid !== ownerUid) {
+      throw new Error('base env parent must be an owner-controlled non-writable directory')
+    }
+  } else if (kind === 'base env backup directory') {
+    if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 || info.uid !== ownerUid) {
+      throw new Error('base env backup directory must be owner-private')
+    }
+  } else throw new Error('private release path kind is invalid')
+  return info
+}
+
+export function validateBaseEnvPatchPlan(value, backupRoot = baseEnvPatchBackupRoot) {
+  const expected = ['afterSha256', 'backupDir', 'backupPath', 'baseEnvPath', 'beforeSha256', 'patchKey', 'receiptPath',
+    'priorQualificationState', 'rollbackReleaseCommit', 'schema', 'targetLedgerGeneration', 'targetReleaseCommit', 'transactionToken'].sort()
+  const planStem = value && `base-env-${value.targetReleaseCommit}-${value.transactionToken}`
+  if (!isAbsolute(String(backupRoot || '')) || resolve(backupRoot) !== backupRoot || !value ||
+      Object.keys(value).sort().join('\n') !== expected.join('\n') || value.schema !== baseEnvPatchSchema ||
+      !shaPattern.test(String(value.beforeSha256 || '')) || !shaPattern.test(String(value.afterSha256 || '')) ||
+      value.beforeSha256 === value.afterSha256 || value.patchKey !== privateRealtimeVoiceQualificationKey ||
+      !['absent', 'false'].includes(value.priorQualificationState) ||
+      !commitPattern.test(String(value.targetReleaseCommit || '')) || !commitPattern.test(String(value.rollbackReleaseCommit || '')) ||
+      !Number.isSafeInteger(value.targetLedgerGeneration) || value.targetLedgerGeneration < 1 ||
+      !/^[A-Za-z0-9-]{1,100}$/.test(String(value.transactionToken || '')) ||
+      ![value.baseEnvPath, value.backupDir, value.backupPath, value.receiptPath].every(path => isAbsolute(String(path || ''))) ||
+      value.backupDir !== backupRoot || value.backupPath !== join(value.backupDir, `${planStem}.before.env`) ||
+      value.receiptPath !== join(value.backupDir, `${planStem}.receipt.json`) ||
+      value.backupPath === value.receiptPath) throw new Error('base env patch plan is invalid')
+  return value
+}
+
+export function validateBaseEnvPatchReceipt(value, plan, backupRoot = baseEnvPatchBackupRoot) {
+  validateBaseEnvPatchPlan(plan, backupRoot)
+  const expected = ['afterSha256', 'backupPath', 'baseEnvPath', 'beforeSha256', 'committedAt', 'patchKey', 'priorQualificationState', 'priorRestoredAt',
+    'rollbackReleaseCommit', 'schema', 'state', 'targetLedgerGeneration', 'targetObservedAt', 'targetReleaseCommit', 'transactionToken'].sort()
+  if (!value || Object.keys(value).sort().join('\n') !== expected.join('\n') || value.schema !== baseEnvPatchReceiptSchema ||
+      value.transactionToken !== plan.transactionToken || value.targetReleaseCommit !== plan.targetReleaseCommit ||
+      value.rollbackReleaseCommit !== plan.rollbackReleaseCommit ||
+      value.targetLedgerGeneration !== plan.targetLedgerGeneration || value.baseEnvPath !== plan.baseEnvPath ||
+      value.backupPath !== plan.backupPath || value.patchKey !== plan.patchKey ||
+      value.priorQualificationState !== plan.priorQualificationState ||
+      value.beforeSha256 !== plan.beforeSha256 || value.afterSha256 !== plan.afterSha256 ||
+      !['target_installed', 'target_committed', 'prior_installed', 'prior_committed'].includes(value.state) ||
+      typeof value.targetObservedAt !== 'string' || Number.isNaN(Date.parse(value.targetObservedAt)) ||
+      (value.state === 'target_installed' && (value.committedAt !== null || value.priorRestoredAt !== null)) ||
+      (value.state === 'target_committed' && (typeof value.committedAt !== 'string' || Number.isNaN(Date.parse(value.committedAt)) || value.priorRestoredAt !== null)) ||
+      (['prior_installed', 'prior_committed'].includes(value.state) && (typeof value.priorRestoredAt !== 'string' || Number.isNaN(Date.parse(value.priorRestoredAt)) ||
+        (value.committedAt !== null && (typeof value.committedAt !== 'string' || Number.isNaN(Date.parse(value.committedAt))))))) {
+    throw new Error('base env patch receipt is invalid')
+  }
+  return value
+}
+
+export function baseEnvPatchPlanFromReceipt(receiptPath, receipt, backupRoot = baseEnvPatchBackupRoot) {
+  const plan = validateBaseEnvPatchPlan({
+    schema: baseEnvPatchSchema,
+    transactionToken: receipt?.transactionToken,
+    targetReleaseCommit: receipt?.targetReleaseCommit,
+    rollbackReleaseCommit: receipt?.rollbackReleaseCommit,
+    targetLedgerGeneration: receipt?.targetLedgerGeneration,
+    baseEnvPath: receipt?.baseEnvPath,
+    backupDir: dirname(receiptPath),
+    backupPath: receipt?.backupPath,
+    receiptPath,
+    patchKey: receipt?.patchKey,
+    priorQualificationState: receipt?.priorQualificationState,
+    beforeSha256: receipt?.beforeSha256,
+    afterSha256: receipt?.afterSha256
+  }, backupRoot)
+  validateBaseEnvPatchReceipt(receipt, plan, backupRoot)
+  return plan
+}
+
+export function baseEnvPatchDigestState(currentSha256, plan, backupRoot = baseEnvPatchBackupRoot) {
+  validateBaseEnvPatchPlan(plan, backupRoot)
+  if (currentSha256 === plan.beforeSha256) return 'prior'
+  if (currentSha256 === plan.afterSha256) return 'target'
+  throw new Error('base env drifted outside the durable patch transaction')
+}
+
+export function baseEnvPatchTemporaryPath(plan, backupRoot = baseEnvPatchBackupRoot) {
+  validateBaseEnvPatchPlan(plan, backupRoot)
+  return join(dirname(plan.baseEnvPath), `.${basename(plan.baseEnvPath)}.bonfire-${plan.transactionToken}.tmp`)
+}
+
+async function readPrivateReleaseFile(path, kind, ownerUid) {
+  validatePrivateReleasePathInfo(await lstat(path), kind, ownerUid)
+  return readFile(path)
+}
+
+async function assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot = baseEnvPatchBackupRoot) {
+  validateBaseEnvPatchPlan(plan, backupRoot)
+  validatePrivateReleasePathInfo(await lstat(dirname(plan.baseEnvPath)), 'base env parent', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(plan.baseEnvPath), 'base env', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(backupRoot), 'base env backup directory', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(plan.backupDir), 'base env backup directory', ownerUid)
+}
+
+export async function prepareTargetBaseEnvPatch({
+  baseEnv, request, operationLock, targetReleaseCommit, rollbackReleaseCommit, targetLedgerGeneration,
+  ownerUid = 0, backupRoot = baseEnvPatchBackupRoot
+}) {
+  if (!request) return null
+  await assertReleaseOperationLock(operationLock)
+  const baseEnvPath = resolve(baseEnv)
+  const planStem = `base-env-${targetReleaseCommit}-${operationLock.token}`
+  const draft = {
+    schema: baseEnvPatchSchema,
+    transactionToken: operationLock.token,
+    targetReleaseCommit,
+    rollbackReleaseCommit,
+    targetLedgerGeneration,
+    baseEnvPath,
+    backupDir: request.backupDir,
+    backupPath: join(request.backupDir, `${planStem}.before.env`),
+    receiptPath: join(request.backupDir, `${planStem}.receipt.json`),
+    patchKey: request.patchKey,
+    priorQualificationState: 'absent',
+    beforeSha256: request.expectedBeforeSha256,
+    afterSha256: request.expectedBeforeSha256
+  }
+  validatePrivateReleasePathInfo(await lstat(dirname(baseEnvPath)), 'base env parent', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(baseEnvPath), 'base env', ownerUid)
+  if (request.backupDir !== backupRoot) throw new Error('base env patch request backup root differs from policy')
+  validatePrivateReleasePathInfo(await lstat(backupRoot), 'base env backup directory', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(request.backupDir), 'base env backup directory', ownerUid)
+  const patch = privateRealtimeVoiceQualificationEnvPatch(await readFile(baseEnvPath))
+  if (patch.beforeSha256 !== request.expectedBeforeSha256) {
+    throw new Error('base env digest differs from the explicitly approved prior digest')
+  }
+  return validateBaseEnvPatchPlan({
+    ...draft, afterSha256: patch.afterSha256, priorQualificationState: patch.priorQualificationState
+  }, backupRoot)
+}
+
+async function readOptionalPatchReceipt(plan, ownerUid, backupRoot = baseEnvPatchBackupRoot) {
+  try {
+    const body = await readPrivateReleaseFile(plan.receiptPath, 'base env patch receipt', ownerUid)
+    return validateBaseEnvPatchReceipt(parseJSON(body, 'base env patch receipt'), plan, backupRoot)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+export async function prepareQualificationRollbackBaseEnvPatch({
+  baseEnv, receiptPath, operationLock, targetReleaseCommit, rollbackReleaseCommit, activeLedgerGeneration,
+  ownerUid = 0, backupRoot = baseEnvPatchBackupRoot
+}) {
+  if (!receiptPath) return null
+  await assertReleaseOperationLock(operationLock)
+  validatePrivateReleasePathInfo(await lstat(backupRoot), 'base env backup directory', ownerUid)
+  validatePrivateReleasePathInfo(await lstat(receiptPath), 'base env patch receipt', ownerUid)
+  const receipt = parseJSON(await readFile(receiptPath), 'qualification rollback receipt')
+  const plan = baseEnvPatchPlanFromReceipt(receiptPath, receipt, backupRoot)
+  if (receipt.state !== 'target_committed' || plan.baseEnvPath !== resolve(baseEnv) ||
+      plan.targetReleaseCommit !== rollbackReleaseCommit || plan.rollbackReleaseCommit !== targetReleaseCommit ||
+      plan.targetLedgerGeneration !== activeLedgerGeneration) {
+    throw new Error('qualification rollback receipt does not bind the exact active and target releases')
+  }
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+  if (sha256(backup) !== plan.beforeSha256) throw new Error('qualification rollback backup differs from its committed receipt')
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.afterSha256) {
+    throw new Error('qualification rollback requires the exact committed target env digest')
+  }
+  return plan
+}
+
+async function ensureBaseEnvBackup(plan, priorBody, ownerUid) {
+  try {
+    await writeExclusive(plan.backupPath, priorBody, 0o600)
+    await syncDirectory(plan.backupDir)
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+  }
+  const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+  if (sha256(backup) !== plan.beforeSha256) throw new Error('base env backup differs from the approved prior digest')
+  return backup
+}
+
+async function removeReceiptlessBaseEnvBackup(plan, ownerUid, backupRoot = baseEnvPatchBackupRoot) {
+  validateBaseEnvPatchPlan(plan, backupRoot)
+  try {
+    const info = await lstat(plan.backupPath)
+    validatePrivateReleasePathInfo(info, 'base env backup', ownerUid)
+    if (info.nlink !== 1) throw new Error('receiptless base env backup has an unexpected link count')
+    await unlink(plan.backupPath)
+    await syncDirectory(plan.backupDir)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+}
+
+async function writeBaseEnvPatchReceipt(plan, state, targetObservedAt, ownerUid, backupRoot = baseEnvPatchBackupRoot) {
+  const previous = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  const now = new Date().toISOString()
+  const receipt = validateBaseEnvPatchReceipt({
+    schema: baseEnvPatchReceiptSchema,
+    transactionToken: plan.transactionToken,
+    targetReleaseCommit: plan.targetReleaseCommit,
+    rollbackReleaseCommit: plan.rollbackReleaseCommit,
+    targetLedgerGeneration: plan.targetLedgerGeneration,
+    baseEnvPath: plan.baseEnvPath,
+    backupPath: plan.backupPath,
+    patchKey: plan.patchKey,
+    priorQualificationState: plan.priorQualificationState,
+    beforeSha256: plan.beforeSha256,
+    afterSha256: plan.afterSha256,
+    state,
+    targetObservedAt: previous?.targetObservedAt || targetObservedAt || now,
+    committedAt: state === 'target_committed' ? now : (state.startsWith('prior_') ? previous?.committedAt || null : null),
+    priorRestoredAt: state.startsWith('prior_') ? (previous?.priorRestoredAt || now) : null
+  }, plan, backupRoot)
+  await writeAtomicReplace(plan.receiptPath, jsonLine(receipt), 0o600)
+  validatePrivateReleasePathInfo(await lstat(plan.receiptPath), 'base env patch receipt', ownerUid)
+  return receipt
+}
+
+async function installTargetBaseEnvPatchWithPolicy(
+  operationLock, plan, ownerUid, allowPriorReinstall, backupRoot = baseEnvPatchBackupRoot
+) {
+  if (!plan) return null
+  await assertReleaseOperationLock(operationLock)
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  const current = await readFile(plan.baseEnvPath)
+  const currentSha256 = sha256(current)
+  const currentState = baseEnvPatchDigestState(currentSha256, plan, backupRoot)
+  let targetObservedAt = ''
+  if (currentState === 'prior') {
+    const patch = privateRealtimeVoiceQualificationEnvPatch(current)
+    if (patch.afterSha256 !== plan.afterSha256 || patch.priorQualificationState !== plan.priorQualificationState) {
+      throw new Error('base env patch bytes or prior qualification state differ from the durable plan')
+    }
+    await ensureBaseEnvBackup(plan, current, ownerUid)
+    await writeAtomicReplaceBound(plan.baseEnvPath, patch.after, 0o600,
+      baseEnvPatchTemporaryPath(plan, backupRoot), ownerUid)
+    targetObservedAt = new Date().toISOString()
+  } else if (currentState === 'target') {
+    await ensureBaseEnvBackup(plan, await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid), ownerUid)
+    targetObservedAt = (await readOptionalPatchReceipt(plan, ownerUid, backupRoot))?.targetObservedAt || new Date().toISOString()
+  }
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.afterSha256) throw new Error('target base env patch was not installed')
+  const existingReceipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (existingReceipt?.state === 'target_committed') return existingReceipt
+  if (existingReceipt && existingReceipt.state.startsWith('prior_') && !allowPriorReinstall) {
+    throw new Error('restored base env patch cannot be reinstalled by forward resume')
+  }
+  return writeBaseEnvPatchReceipt(plan, 'target_installed', targetObservedAt, ownerUid, backupRoot)
+}
+
+export async function installTargetBaseEnvPatch(
+  operationLock, plan, ownerUid = 0, { backupRoot = baseEnvPatchBackupRoot } = {}
+) {
+  return installTargetBaseEnvPatchWithPolicy(operationLock, plan, ownerUid, false, backupRoot)
+}
+
+export async function reinstallCommittedTargetBaseEnvPatch(
+  operationLock, plan, ownerUid = 0, { backupRoot = baseEnvPatchBackupRoot } = {}
+) {
+  return installTargetBaseEnvPatchWithPolicy(operationLock, plan, ownerUid, true, backupRoot)
+}
+
+export async function assertTargetBaseEnvPatchReady(
+  operationLock, plan, ownerUid = 0, { backupRoot = baseEnvPatchBackupRoot } = {}
+) {
+  if (!plan) return
+  await assertReleaseOperationLock(operationLock)
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.beforeSha256) {
+    throw new Error('base env differs from the approved prior digest before patch intent')
+  }
+}
+
+export async function assertTargetBaseEnvPatchInstalled(
+  operationLock, plan, ownerUid = 0, { backupRoot = baseEnvPatchBackupRoot } = {}
+) {
+  if (!plan) return
+  await assertReleaseOperationLock(operationLock)
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.afterSha256) throw new Error('target base env patch is not installed')
+  const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+  if (sha256(backup) !== plan.beforeSha256) throw new Error('base env backup differs from the approved prior digest')
+  const receipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (!receipt || !['target_installed', 'target_committed'].includes(receipt.state)) throw new Error('target base env patch receipt is not installed')
+}
+
+export async function assertPriorBaseEnvRestored(
+  operationLock, plan, ownerUid = 0,
+  { backupRoot = baseEnvPatchBackupRoot, requireReceipt = false } = {}
+) {
+  if (!plan) return
+  await assertReleaseOperationLock(operationLock)
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.beforeSha256) throw new Error('prior base env is not installed')
+  const receipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (requireReceipt && !receipt) throw new Error('prior base env restore requires its bound receipt')
+  if (receipt && !['prior_installed', 'prior_committed'].includes(receipt.state)) throw new Error('prior base env restore receipt is not installed')
+  if (receipt) {
+    const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+    if (sha256(backup) !== plan.beforeSha256) throw new Error('base env backup differs from the approved prior digest')
+  }
+}
+
+export async function commitTargetBaseEnvPatch(
+  operationLock, plan, ownerUid = 0, { backupRoot = baseEnvPatchBackupRoot } = {}
+) {
+  if (!plan) return null
+  await assertTargetBaseEnvPatchInstalled(operationLock, plan, ownerUid, { backupRoot })
+  const receipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (receipt?.state === 'target_committed') return receipt
+  return writeBaseEnvPatchReceipt(plan, 'target_committed', receipt?.targetObservedAt || '', ownerUid, backupRoot)
+}
+
+export function priorBaseEnvCommitDisposition(receipt) {
+  if (receipt === null) return 'skip'
+  if (receipt?.state === 'prior_committed') return 'already_committed'
+  if (receipt?.state === 'prior_installed') return 'commit'
+  throw new Error('prior base env receipt is not commit-ready')
+}
+
+export async function commitPriorBaseEnvRestore(
+  operationLock, plan, ownerUid = 0,
+  { backupRoot = baseEnvPatchBackupRoot, requireReceipt = false } = {}
+) {
+  if (!plan) return null
+  const receipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  await assertPriorBaseEnvRestored(operationLock, plan, ownerUid, { backupRoot, requireReceipt })
+  // A failure after durable patch intent but before backup/install is a true
+  // no-op recovery. Keep it receiptless; inventing a prior receipt would make
+  // later assertions require a backup that was never created.
+  const disposition = priorBaseEnvCommitDisposition(receipt)
+  if (disposition === 'skip') {
+    await removeReceiptlessBaseEnvBackup(plan, ownerUid, backupRoot)
+    return null
+  }
+  if (disposition === 'already_committed') return receipt
+  return writeBaseEnvPatchReceipt(plan, 'prior_committed', receipt?.targetObservedAt || '', ownerUid, backupRoot)
+}
+
+export async function restorePriorBaseEnv(
+  operationLock, plan, ownerUid = 0,
+  { backupRoot = baseEnvPatchBackupRoot, requireReceipt = false } = {}
+) {
+  if (!plan) return null
+  await assertReleaseOperationLock(operationLock)
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  const startingReceipt = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (requireReceipt && !startingReceipt) throw new Error('prior base env restore requires its bound receipt')
+  const current = await readFile(plan.baseEnvPath)
+  const currentSha256 = sha256(current)
+  const currentState = baseEnvPatchDigestState(currentSha256, plan, backupRoot)
+  let targetObservedAt = ''
+  if (currentState === 'target') {
+    targetObservedAt = startingReceipt?.targetObservedAt || new Date().toISOString()
+    const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+    if (sha256(backup) !== plan.beforeSha256) throw new Error('base env backup differs from the approved prior digest')
+    await writeAtomicReplaceBound(plan.baseEnvPath, backup, 0o600,
+      baseEnvPatchTemporaryPath(plan, backupRoot), ownerUid)
+  } else if (currentState === 'prior') {
+    if (!startingReceipt) {
+      await removeReceiptlessBaseEnvBackup(plan, ownerUid, backupRoot)
+      return null
+    }
+    targetObservedAt = startingReceipt.targetObservedAt
+    const backup = await readPrivateReleaseFile(plan.backupPath, 'base env backup', ownerUid)
+    if (sha256(backup) !== plan.beforeSha256) throw new Error('base env backup differs from the approved prior digest')
+  }
+  await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  if (sha256(await readFile(plan.baseEnvPath)) !== plan.beforeSha256) throw new Error('prior base env was not restored')
+  return writeBaseEnvPatchReceipt(plan, 'prior_installed', targetObservedAt, ownerUid, backupRoot)
+}
+
 async function assertReleaseOperationLock(lock) {
   if (!lock || typeof lock.path !== 'string' || typeof lock.token !== 'string' || !lock.token) {
     throw new Error('release operation lock proof is missing')
@@ -1969,9 +2478,10 @@ async function assertReleaseOperationLock(lock) {
 }
 
 const releaseTransactionPhases = [
-  'prepared', 'ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+  'prepared', 'ingress_stopped', 'base_env_patch_started', 'base_env_patched',
+  'target_preflighted', 'data_transition_started', 'data_ready', 'private_started',
   'private_verified', 'ledger_written', 'ingress_opened', 'external_verified',
-  'recovery_started', 'recovery_data_restored', 'recovery_private_started',
+  'recovery_started', 'recovery_data_restored', 'recovery_env_restore_started', 'recovery_env_restored', 'recovery_runtime_verified', 'recovery_private_started',
   'recovery_private_verified', 'recovery_ledger_restored', 'recovery_ingress_opened', 'recovery_external_verified'
 ]
 
@@ -1979,19 +2489,43 @@ function releaseTransactionPath(lock) { return join(resolve(lock.path), 'transac
 
 export function validateReleaseTransactionJournal(value, lock) {
   const keys = Object.keys(value || {}).sort()
-  const expected = ['action', 'baselineProjectContainers', 'baselineProjectResources', 'createdAt', 'nextLedger', 'phase',
-    'priorLedger', 'rollbackBundleSha256', 'rollbackRenderedComposeSha256', 'schema', 'targetBundleSha256',
+  const expected = ['action', 'baseEnvPatch', 'baseEnvPatchMode', 'baselineProjectContainers', 'baselineProjectResources', 'createdAt', 'nextLedger', 'phase',
+    'priorLedger', 'recoveryFromPhase', 'rollbackBundleSha256', 'rollbackRenderedComposeSha256', 'schema', 'targetBundleSha256',
     'targetRenderedComposeSha256', 'token', 'updatedAt'].sort()
   if (value?.schema !== releaseTransactionSchema || JSON.stringify(keys) !== JSON.stringify(expected) ||
       value.token !== lock.token || !['activated', 'rolledBack'].includes(value.action) ||
       !releaseTransactionPhases.includes(value.phase) || !shaPattern.test(String(value.targetBundleSha256 || '')) ||
-      !shaPattern.test(String(value.rollbackBundleSha256 || '')) || !shaPattern.test(String(value.targetRenderedComposeSha256 || '')) ||
+      !shaPattern.test(String(value.rollbackBundleSha256 || '')) ||
+      !(value.targetRenderedComposeSha256 === null || shaPattern.test(String(value.targetRenderedComposeSha256 || ''))) ||
       !shaPattern.test(String(value.rollbackRenderedComposeSha256 || '')) || Number.isNaN(Date.parse(value.createdAt)) ||
       Number.isNaN(Date.parse(value.updatedAt)) || !Array.isArray(value.baselineProjectContainers) ||
       !value.baselineProjectResources || !Array.isArray(value.baselineProjectResources.networks) ||
       !Array.isArray(value.baselineProjectResources.volumes)) throw new Error('release transaction journal is invalid')
   validateActiveReleaseLedger(value.nextLedger)
   if (value.priorLedger !== null) validateActiveReleaseLedger(value.priorLedger)
+  if (!['activate', 'rollback', null].includes(value.baseEnvPatchMode) || (value.baseEnvPatch === null) !== (value.baseEnvPatchMode === null)) {
+    throw new Error('release transaction journal base env patch mode is invalid')
+  }
+  if (value.baseEnvPatch !== null) {
+    const plan = validateBaseEnvPatchPlan(value.baseEnvPatch)
+    const activationBinding = value.baseEnvPatchMode === 'activate' && value.action === 'activated' &&
+      plan.transactionToken === value.token && plan.targetReleaseCommit === value.nextLedger.active.releaseCommit &&
+      plan.rollbackReleaseCommit === value.priorLedger?.active.releaseCommit && plan.targetLedgerGeneration === value.nextLedger.generation
+    const rollbackBinding = value.baseEnvPatchMode === 'rollback' && value.action === 'rolledBack' &&
+      plan.targetReleaseCommit === value.priorLedger?.active.releaseCommit &&
+      plan.rollbackReleaseCommit === value.nextLedger.active.releaseCommit && plan.targetLedgerGeneration === value.priorLedger?.generation
+    if (value.priorLedger === null || (!activationBinding && !rollbackBinding)) {
+      throw new Error('release transaction journal base env patch binding is invalid')
+    }
+  }
+  const recovery = String(value.phase).startsWith('recovery_')
+  if ((recovery && !forwardReleasePhases.includes(value.recoveryFromPhase)) || (!recovery && value.recoveryFromPhase !== null)) {
+    throw new Error('release transaction journal recovery origin is invalid')
+  }
+  const preflightOrigin = recovery ? value.recoveryFromPhase : value.phase
+  if (releasePhaseAtLeast(preflightOrigin, 'target_preflighted') && !shaPattern.test(String(value.targetRenderedComposeSha256 || ''))) {
+    throw new Error('release transaction journal lacks its durable target preflight digest')
+  }
   return value
 }
 
@@ -2343,7 +2877,7 @@ async function startReleaseApplicationPrivately(options, bundle) {
   })
 }
 
-async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha256 = '') {
+async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha256 = '', baseEnvPatch = null, baseEnvPatchState = '') {
   const preflight = await preflightComposeBundle(options, bundle, expectedRenderedComposeSha256)
   const containers = await inspectProjectServiceInventory(true)
   const { stdout: caddyRaw } = await execFileAsync('docker', ['container', 'inspect', containers.caddy], { maxBuffer: 16 << 20 })
@@ -2367,7 +2901,9 @@ async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha2
       if (inspected?.State?.Status !== 'exited' || inspected?.State?.ExitCode !== 0) throw new Error('private render-queue-init did not complete')
     } else if (inspected?.State?.Status !== 'running') throw new Error(`private candidate ${service} is not running`)
     if (service === 'meetingassist') {
-      verifyRuntimeEnvironment(environmentFromInspect(inspected), bundle.receipt)
+      const environment = environmentFromInspect(inspected)
+      verifyRuntimeEnvironment(environment, bundle.receipt)
+      verifyBaseEnvPatchRuntimeEnvironment(environment, baseEnvPatch, baseEnvPatchState)
       appContainer = container
     }
   }
@@ -2579,7 +3115,7 @@ export async function restoreReleaseBundleAfterFailedActivation(options) {
   return verified
 }
 
-const forwardReleasePhases = ['prepared', 'ingress_stopped', 'data_transition_started', 'data_ready',
+const forwardReleasePhases = ['prepared', 'ingress_stopped', 'base_env_patch_started', 'base_env_patched', 'target_preflighted', 'data_transition_started', 'data_ready',
   'private_started', 'private_verified', 'ledger_written', 'ingress_opened', 'external_verified']
 
 function releasePhaseAtLeast(phase, expected) {
@@ -2606,15 +3142,22 @@ export async function executeDurableReleasePhaseMachine({ phase, transition, eff
   if (!forwardReleasePhases.includes(phase) || !transition || typeof effects !== 'object' || typeof advance !== 'function') {
     throw new Error('durable release phase machine input is invalid')
   }
-  for (const name of ['stopIngress', 'activateTarget', 'verifyTargetRuntime', 'startTargetPrivate', 'verifyTargetPrivate',
+  for (const name of ['stopIngress', 'installTargetBaseEnv', 'assertTargetBaseEnv', 'preflightTarget', 'activateTarget', 'verifyTargetRuntime', 'startTargetPrivate', 'verifyTargetPrivate',
     'writeTargetLedger', 'openTargetIngress', 'verifyTargetExternal']) {
     if (typeof effects[name] !== 'function') throw new Error(`durable release phase effect ${name} is invalid`)
   }
   let current = phase
-  const move = async next => { await advance(next); current = next }
+  const move = async (next, evidence) => { await advance(next, evidence); current = next }
   if (!releasePhaseAtLeast(current, 'ingress_stopped')) {
     await effects.stopIngress(); await move('ingress_stopped')
   }
+  if (!releasePhaseAtLeast(current, 'base_env_patched')) {
+    if (!releasePhaseAtLeast(current, 'base_env_patch_started')) await move('base_env_patch_started')
+    await effects.installTargetBaseEnv(); await move('base_env_patched')
+  }
+  await effects.assertTargetBaseEnv()
+  const preflight = await effects.preflightTarget()
+  if (!releasePhaseAtLeast(current, 'target_preflighted')) await move('target_preflighted', preflight)
   if (!releasePhaseAtLeast(current, 'data_ready')) {
     if (transition.activateTargetBeforeStart) {
       if (!releasePhaseAtLeast(current, 'data_transition_started')) await move('data_transition_started')
@@ -2624,15 +3167,69 @@ export async function executeDurableReleasePhaseMachine({ phase, transition, eff
   }
   if (!releasePhaseAtLeast(current, 'private_started')) { await effects.startTargetPrivate(); await move('private_started') }
   if (!releasePhaseAtLeast(current, 'private_verified')) { await effects.verifyTargetPrivate(); await move('private_verified') }
-  if (!releasePhaseAtLeast(current, 'ledger_written')) { await effects.writeTargetLedger(); await move('ledger_written') }
-  if (!releasePhaseAtLeast(current, 'ingress_opened')) { await effects.openTargetIngress(); await move('ingress_opened') }
+  if (!releasePhaseAtLeast(current, 'ledger_written')) { await effects.assertTargetBaseEnv(); await effects.writeTargetLedger(); await move('ledger_written') }
+  if (!releasePhaseAtLeast(current, 'ingress_opened')) { await effects.assertTargetBaseEnv(); await effects.openTargetIngress(); await move('ingress_opened') }
   if (!releasePhaseAtLeast(current, 'external_verified')) { await effects.verifyTargetExternal(); await move('external_verified') }
+  await effects.assertTargetBaseEnv()
+  return current
+}
+
+const recoveryReleasePhases = ['recovery_started', 'recovery_data_restored', 'recovery_env_restore_started', 'recovery_env_restored',
+  'recovery_runtime_verified', 'recovery_private_started', 'recovery_private_verified', 'recovery_ledger_restored',
+  'recovery_ingress_opened', 'recovery_external_verified']
+
+function recoveryPhaseAtLeast(phase, expected) {
+  const actualIndex = recoveryReleasePhases.indexOf(phase)
+  const expectedIndex = recoveryReleasePhases.indexOf(expected)
+  if (actualIndex < 0 || expectedIndex < 0) throw new Error('release transaction phase is not recovery-resumable')
+  return actualIndex >= expectedIndex
+}
+
+export async function executeDurableReleaseRecoveryPhaseMachine({ phase, effects, advance }) {
+  if (!recoveryReleasePhases.includes(phase) || typeof effects !== 'object' || typeof advance !== 'function') {
+    throw new Error('durable release recovery phase machine input is invalid')
+  }
+  for (const name of ['restoreTargetData', 'restoreRecoveryBaseEnv', 'verifyRollbackRuntime', 'startRollbackPrivate', 'verifyRollbackPrivate',
+    'restoreLedger', 'openRollbackIngress', 'verifyRollbackExternal']) {
+    if (typeof effects[name] !== 'function') throw new Error(`durable release recovery phase effect ${name} is invalid`)
+  }
+  let current = phase
+  const move = async next => { await advance(next); current = next }
+  if (!recoveryPhaseAtLeast(current, 'recovery_data_restored')) {
+    await effects.restoreTargetData(); await move('recovery_data_restored')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_env_restored')) {
+    if (!recoveryPhaseAtLeast(current, 'recovery_env_restore_started')) await move('recovery_env_restore_started')
+    await effects.restoreRecoveryBaseEnv()
+    await move('recovery_env_restored')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_runtime_verified')) {
+    await effects.verifyRollbackRuntime(); await move('recovery_runtime_verified')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_private_started')) {
+    await effects.startRollbackPrivate(); await move('recovery_private_started')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_private_verified')) {
+    await effects.verifyRollbackPrivate(); await move('recovery_private_verified')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_ledger_restored')) {
+    await effects.restoreLedger(); await move('recovery_ledger_restored')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_ingress_opened')) {
+    await effects.openRollbackIngress(); await move('recovery_ingress_opened')
+  }
+  if (!recoveryPhaseAtLeast(current, 'recovery_external_verified')) {
+    await effects.verifyRollbackExternal(); await move('recovery_external_verified')
+  }
   return current
 }
 
 async function loadDurableReleaseContext(options, operationLock, journal) {
   const targetDir = resolve(operationLock.targetDir)
   const rollbackDir = resolve(operationLock.rollbackDir)
+  if (journal.baseEnvPatch && resolve(options.baseEnv) !== journal.baseEnvPatch.baseEnvPath) {
+    throw new Error('resume base env path differs from the durable patch plan')
+  }
   const targetOptions = { ...options, releaseDir: targetDir, rollbackReleaseDir: rollbackDir }
   const rollbackOptions = { ...options, releaseDir: rollbackDir, rollbackReleaseDir: targetDir }
   const target = await loadReleaseBundle(targetOptions, { verifyTool: false })
@@ -2646,23 +3243,71 @@ async function loadDurableReleaseContext(options, operationLock, journal) {
   verifyReleaseEnvironmentFile(await readFile(rollback.paths.runtimeEnv, 'utf8'), rollback.receipt)
   await verifyReleaseImages(target.receipt)
   await verifyReleaseImages(rollback.receipt)
-  await preflightComposeBundle(targetOptions, target, journal.targetRenderedComposeSha256)
-  await preflightComposeBundle(rollbackOptions, rollback, journal.rollbackRenderedComposeSha256)
   return { targetDir, rollbackDir, targetOptions, rollbackOptions, target, rollback,
     transition: strideE10W4ReleaseTransitionPlan(journal.action, target.receipt, rollback.receipt) }
+}
+
+export function releaseTransactionCompletionEvidence(journal, initialPhase) {
+  if (!journal || !['activated', 'rolledBack'].includes(journal.action) ||
+      !Number.isSafeInteger(journal.nextLedger?.generation) || journal.nextLedger.generation < 1 ||
+      !['activate', 'rollback', null].includes(journal.baseEnvPatchMode) ||
+      (journal.baseEnvPatchMode === null) !== (journal.baseEnvPatch === null) ||
+      typeof initialPhase !== 'string') {
+    throw new Error('release completion evidence is invalid')
+  }
+  return {
+    action: journal.action,
+    ledgerGeneration: journal.nextLedger.generation,
+    resumed: initialPhase !== 'prepared',
+    qualificationReceipt: journal.baseEnvPatch?.receiptPath || null,
+    qualificationState: journal.baseEnvPatchMode === 'rollback'
+      ? 'prior'
+      : (journal.baseEnvPatchMode === 'activate' ? 'target' : null)
+  }
 }
 
 async function resumeDurableReleaseTransaction(options, operationLock, journal) {
   const context = await loadDurableReleaseContext(options, operationLock, journal)
   let current = journal
-  const advance = async phase => { current = await writeReleaseTransactionJournal(operationLock, current, phase) }
+  const advance = async (phase, evidence) => {
+    if (phase === 'target_preflighted') {
+      if (!shaPattern.test(String(evidence?.sha256 || ''))) throw new Error('target preflight did not return a durable rendered Compose digest')
+      current = { ...current, targetRenderedComposeSha256: evidence.sha256 }
+    }
+    current = await writeReleaseTransactionJournal(operationLock, current, phase)
+  }
+  const assertForwardBaseEnv = () => current.baseEnvPatchMode === 'rollback'
+    ? assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+    : assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+  const assertOriginBaseEnv = () => current.baseEnvPatchMode === 'rollback'
+    ? assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    : assertTargetBaseEnvPatchReady(operationLock, current.baseEnvPatch)
+  const withForwardBaseEnv = async effect => {
+    await assertForwardBaseEnv()
+    const result = await effect()
+    await assertForwardBaseEnv()
+    return result
+  }
+  const withOriginBaseEnv = async effect => {
+    await assertOriginBaseEnv()
+    const result = await effect()
+    await assertOriginBaseEnv()
+    return result
+  }
+  const forwardRuntimeState = current.baseEnvPatchMode === 'rollback' ? 'prior' : 'target'
   await executeDurableReleasePhaseMachine({ phase: current.phase, transition: context.transition, advance, effects: {
-    stopIngress: () => setReleaseIngress(context.rollbackOptions, context.rollback, 'stop'),
-    activateTarget: () => activateStrideE10W4Network(context.targetOptions, context.target),
-    verifyTargetRuntime: () => runStrideE10W4Maintenance(context.targetOptions, context.target, 'verifyRuntime'),
-    startTargetPrivate: () => startReleaseApplicationPrivately(context.targetOptions, context.target),
-    verifyTargetPrivate: () => verifyPrivateRelease(context.targetOptions, context.target, current.targetRenderedComposeSha256),
-    writeTargetLedger: async () => {
+    stopIngress: () => withOriginBaseEnv(() => setReleaseIngress(context.rollbackOptions, context.rollback, 'stop')),
+    installTargetBaseEnv: () => current.baseEnvPatchMode === 'rollback'
+      ? restorePriorBaseEnv(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+      : installTargetBaseEnvPatch(operationLock, current.baseEnvPatch),
+    assertTargetBaseEnv: assertForwardBaseEnv,
+    preflightTarget: () => withForwardBaseEnv(() => preflightComposeBundle(context.targetOptions, context.target, current.targetRenderedComposeSha256)),
+    activateTarget: () => withForwardBaseEnv(() => activateStrideE10W4Network(context.targetOptions, context.target)),
+    verifyTargetRuntime: () => withForwardBaseEnv(() => runStrideE10W4Maintenance(context.targetOptions, context.target, 'verifyRuntime')),
+    startTargetPrivate: () => withForwardBaseEnv(() => startReleaseApplicationPrivately(context.targetOptions, context.target)),
+    verifyTargetPrivate: () => withForwardBaseEnv(() => verifyPrivateRelease(context.targetOptions, context.target,
+      current.targetRenderedComposeSha256, current.baseEnvPatch, forwardRuntimeState)),
+    writeTargetLedger: () => withForwardBaseEnv(async () => {
     // Reassert the ingress fence at the ledger linearization point. This is
     // idempotent and prevents a privately verified candidate from becoming
     // ledger-active after an out-of-band Caddy restart.
@@ -2673,54 +3318,144 @@ async function resumeDurableReleaseTransaction(options, operationLock, journal) 
     } else if (sha256(canonical(ledger)) !== sha256(canonical(current.nextLedger))) {
       throw new Error('release ledger is neither durable prior nor target state during resume')
     }
-    },
-    openTargetIngress: () => setReleaseIngress(context.targetOptions, context.target, 'start'),
-    verifyTargetExternal: () => verifyRunning(context.targetOptions, false, { verifyTool: false, verifyLedger: true,
-      expectedRenderedComposeSha256: current.targetRenderedComposeSha256 })
+    }),
+    openTargetIngress: () => withForwardBaseEnv(() => setReleaseIngress(context.targetOptions, context.target, 'start')),
+    verifyTargetExternal: () => withForwardBaseEnv(() => verifyRunning(context.targetOptions, false, { verifyTool: false, verifyLedger: true,
+      expectedRenderedComposeSha256: current.targetRenderedComposeSha256,
+      baseEnvPatch: current.baseEnvPatch, baseEnvPatchState: forwardRuntimeState }))
   } })
+  // The receipt becomes committed only after private verification, ledger CAS,
+  // ingress opening, and the ledger-bound external verifier all succeeded.
+  const targetLedger = await readActiveReleaseLedger(context.targetDir)
+  if (sha256(canonical(targetLedger)) !== sha256(canonical(current.nextLedger))) {
+    throw new Error('target ledger drifted before the base env patch could be committed')
+  }
+  await assertForwardBaseEnv()
+  const patchReceipt = current.baseEnvPatchMode === 'rollback'
+    ? await commitPriorBaseEnvRestore(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+    : await commitTargetBaseEnvPatch(operationLock, current.baseEnvPatch)
+  const expectedReceiptState = current.baseEnvPatchMode === 'rollback' ? 'prior_committed' : 'target_committed'
+  if (current.baseEnvPatch && !patchReceipt) throw new Error('base env transition receipt is missing at commit')
+  if (patchReceipt && patchReceipt.state !== expectedReceiptState) throw new Error('base env transition receipt is not committed')
+  await assertForwardBaseEnv()
+  const committedLedger = await readActiveReleaseLedger(context.targetDir)
+  if (sha256(canonical(committedLedger)) !== sha256(canonical(current.nextLedger))) {
+    throw new Error('target ledger drifted after the base env patch was committed')
+  }
   await operationLock.release()
-  return { action: current.action, ledgerGeneration: current.nextLedger.generation, resumed: journal.phase !== 'prepared' }
+  return releaseTransactionCompletionEvidence(current, journal.phase)
 }
 
 async function recoverDurableReleaseTransaction(options, operationLock, journal) {
   const context = await loadDurableReleaseContext(options, operationLock, journal)
-  const recoveryPlan = strideE10W4RecoveryPlan(journal.phase, context.transition)
+  let current = journal
+  if (forwardReleasePhases.includes(current.phase)) {
+    current = await writeReleaseTransactionJournal(operationLock, {
+      ...current,
+      recoveryFromPhase: current.phase
+    }, 'recovery_started')
+  }
+  if (!recoveryReleasePhases.includes(current.phase) || !forwardReleasePhases.includes(current.recoveryFromPhase)) {
+    throw new Error('release recovery journal has no exact forward failure phase')
+  }
+  const recoveryPlan = strideE10W4RecoveryPlan(current.recoveryFromPhase, context.transition)
+  const recoveryPriorReceiptRequired = current.baseEnvPatchMode === 'rollback' ||
+    releasePhaseAtLeast(current.recoveryFromPhase, 'base_env_patched')
+  const advance = async phase => { current = await writeReleaseTransactionJournal(operationLock, current, phase) }
+  const assertRecoveryBaseEnv = () => current.baseEnvPatchMode === 'rollback'
+    ? assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    : assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: recoveryPriorReceiptRequired })
+  const assertForwardBaseEnv = () => current.baseEnvPatchMode === 'rollback'
+    ? assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+    : assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+  const withRecoveryBaseEnv = async effect => {
+    await assertRecoveryBaseEnv()
+    const result = await effect()
+    await assertRecoveryBaseEnv()
+    return result
+  }
+  const withForwardBaseEnv = async effect => {
+    await assertForwardBaseEnv()
+    const result = await effect()
+    await assertForwardBaseEnv()
+    return result
+  }
+  const recoveryRuntimeState = current.baseEnvPatchMode === 'rollback' ? 'target' : 'prior'
+  // Every recovery entry reasserts the public fence. The first durable recovery
+  // phase precedes this call, so an abrupt death can safely repeat it.
   await setReleaseIngress(context.rollbackOptions, context.rollback, 'stop')
-  if (recoveryPlan.rollbackUnexposedInitialActivation) {
-    // A crash can occur after the durable intent but before activation writes
-    // its terminal phase. Resume activation to a committed state, then use the
-    // authenticated rollback CLI; both are idempotent behind the ingress fence.
-    await activateStrideE10W4Network(context.targetOptions, context.target)
-    await rollbackStrideE10W4Network(context.targetOptions, context.target)
+  await executeDurableReleaseRecoveryPhaseMachine({ phase: current.phase, advance, effects: {
+    // Restore the exact prior env before any retained application or read-only
+    // maintenance container is started. Drift retains the lock and starts
+    // nothing from the rollback release.
+    restoreTargetData: async () => {
+      if (recoveryPlan.rollbackUnexposedInitialActivation) {
+        // A crash can occur after the durable intent but before activation
+        // writes its terminal phase. Complete and reverse only that exact data
+        // transition behind the ingress fence; both operations are idempotent.
+        await withForwardBaseEnv(() => activateStrideE10W4Network(context.targetOptions, context.target))
+        await withForwardBaseEnv(() => rollbackStrideE10W4Network(context.targetOptions, context.target))
+      }
+      const resourceClaims = await removeFailedTargetProjectContainers(operationLock, current.baselineProjectContainers,
+        context.target.paths.candidateCompose)
+      await removeFailedTargetProjectResources(operationLock, current.baselineProjectResources, resourceClaims)
+    },
+    restoreRecoveryBaseEnv: () => current.baseEnvPatchMode === 'rollback'
+      ? reinstallCommittedTargetBaseEnvPatch(operationLock, current.baseEnvPatch)
+      : restorePriorBaseEnv(operationLock, current.baseEnvPatch, 0, { requireReceipt: recoveryPriorReceiptRequired }),
+    verifyRollbackRuntime: () => withRecoveryBaseEnv(async () => {
+      await preflightComposeBundle(context.rollbackOptions, context.rollback, current.rollbackRenderedComposeSha256)
+      if (recoveryPlan.verifyRetainedRuntimeWithoutMutation) {
+        await runStrideE10W4Maintenance(context.rollbackOptions, context.rollback, 'verifyRuntime')
+      }
+    }),
+    startRollbackPrivate: () => withRecoveryBaseEnv(() => startReleaseApplicationPrivately(context.rollbackOptions, context.rollback)),
+    verifyRollbackPrivate: () => withRecoveryBaseEnv(() => verifyPrivateRelease(context.rollbackOptions, context.rollback,
+      current.rollbackRenderedComposeSha256, current.baseEnvPatch, recoveryRuntimeState)),
+    restoreLedger: async () => {
+      const ledger = await readActiveReleaseLedger(context.targetDir)
+      if (sha256(canonical(ledger)) === sha256(canonical(current.nextLedger))) {
+        await writeActiveReleaseLedger(context.targetDir, current.priorLedger)
+      } else if (sha256(canonical(ledger)) !== sha256(canonical(current.priorLedger))) {
+        throw new Error('release ledger is neither durable prior nor target state during recovery')
+      }
+    },
+    openRollbackIngress: () => withRecoveryBaseEnv(() => setReleaseIngress(context.rollbackOptions, context.rollback, 'start')),
+    verifyRollbackExternal: () => withRecoveryBaseEnv(async () => {
+      await verifyRunning(context.rollbackOptions, false, { verifyTool: false, verifyLedger: true,
+        expectedRenderedComposeSha256: current.rollbackRenderedComposeSha256,
+        baseEnvPatch: current.baseEnvPatch, baseEnvPatchState: recoveryRuntimeState })
+      if (projectResourceSnapshotSha256(await inspectProjectResources()) !== projectResourceSnapshotSha256(current.baselineProjectResources)) {
+        throw new Error('release recovery did not restore exact pre-transaction project resources')
+      }
+    })
+  } })
+  await assertRecoveryBaseEnv()
+  const recoveryReceipt = current.baseEnvPatchMode === 'rollback'
+    ? await commitTargetBaseEnvPatch(operationLock, current.baseEnvPatch)
+    : await commitPriorBaseEnvRestore(operationLock, current.baseEnvPatch, 0, { requireReceipt: recoveryPriorReceiptRequired })
+  const expectedRecoveryReceiptState = current.baseEnvPatchMode === 'rollback' ? 'target_committed' : 'prior_committed'
+  if (current.baseEnvPatch && recoveryPriorReceiptRequired && !recoveryReceipt) {
+    throw new Error('recovery base env transition receipt is missing at commit')
   }
-  const resourceClaims = await removeFailedTargetProjectContainers(operationLock, journal.baselineProjectContainers,
-    context.target.paths.candidateCompose)
-  await removeFailedTargetProjectResources(operationLock, journal.baselineProjectResources, resourceClaims)
-  if (recoveryPlan.verifyRetainedRuntimeWithoutMutation) {
-    await runStrideE10W4Maintenance(context.rollbackOptions, context.rollback, 'verifyRuntime')
+  if (recoveryReceipt && recoveryReceipt.state !== expectedRecoveryReceiptState) {
+    throw new Error('recovery base env transition receipt is not committed')
   }
-  await startReleaseApplicationPrivately(context.rollbackOptions, context.rollback)
-  await verifyPrivateRelease(context.rollbackOptions, context.rollback, journal.rollbackRenderedComposeSha256)
-  const ledger = await readActiveReleaseLedger(context.targetDir)
-  if (sha256(canonical(ledger)) === sha256(canonical(journal.nextLedger))) {
-    await writeActiveReleaseLedger(context.targetDir, journal.priorLedger)
-  } else if (sha256(canonical(ledger)) !== sha256(canonical(journal.priorLedger))) {
-    throw new Error('release ledger is neither durable prior nor target state during recovery')
-  }
-  await setReleaseIngress(context.rollbackOptions, context.rollback, 'start')
-  await verifyRunning(context.rollbackOptions, false, { verifyTool: false, verifyLedger: true,
-    expectedRenderedComposeSha256: journal.rollbackRenderedComposeSha256 })
-  if (projectResourceSnapshotSha256(await inspectProjectResources()) !== projectResourceSnapshotSha256(journal.baselineProjectResources)) {
-    throw new Error('release recovery did not restore exact pre-transaction project resources')
+  await assertRecoveryBaseEnv()
+  const restoredLedger = await readActiveReleaseLedger(context.targetDir)
+  if (sha256(canonical(restoredLedger)) !== sha256(canonical(current.priorLedger))) {
+    throw new Error('prior release ledger was not restored at recovery completion')
   }
   await operationLock.release()
-  return { recovered: true, action: journal.action, ledgerGeneration: journal.priorLedger.generation }
+  return { recovered: true, action: current.action, ledgerGeneration: current.priorLedger.generation }
 }
 
 async function activateRelease(options, action) {
   for (const [name, value] of [['--release-dir', options.releaseDir], ['--base-env', options.baseEnv],
     ['--health-url', options.healthUrl], ['--ready-url', options.readyUrl],
     ['--rollback-release-dir', options.rollbackReleaseDir]]) required(name, value)
+  const baseEnvPatchRequest = requestedTargetBaseEnvPatch(options, action)
+  const qualificationRollbackReceipt = requestedQualificationRollbackReceipt(options, action)
   const targetDir = resolve(options.releaseDir)
   const rollbackDir = resolve(options.rollbackReleaseDir)
   if (targetDir === rollbackDir || dirname(targetDir) !== dirname(rollbackDir)) {
@@ -2746,6 +3481,8 @@ async function activateRelease(options, action) {
     const baselineProjectResources = await inspectProjectResources()
     const baselineProjectResourceSha256 = projectResourceSnapshotSha256(baselineProjectResources)
     const rollbackVerified = await verifyRunning(rollbackOptions, false, { verifyTool: false, verifyLedger: false })
+    const currentQualification = privateRealtimeVoiceQualificationEnvState(await readFile(resolve(options.baseEnv)))
+    assertPrivateRealtimeVoiceQualificationHostRuntimeMatch(currentQualification.state, rollbackVerified.qualificationState)
     const baselineAfterVerification = await inspectProjectContainers()
     if (projectContainerSnapshotSha256(baselineAfterVerification) !== baselineProjectSha256) {
       throw new Error('currently serving Compose project changed during baseline verification')
@@ -2757,14 +3494,66 @@ async function activateRelease(options, action) {
     validateReleaseTransition(action, ledger, targetDir, target.receipt, rollbackDir, rollback.receipt)
     await assertActiveReleaseLedgerUnchanged(targetDir, ledger)
     const nextLedger = nextActiveReleaseLedger(targetDir, target.receipt, rollbackDir, rollback.receipt, ledger)
-    const targetPreflight = await preflightComposeBundle(options, target)
+    // Planning reads and hashes only. The first base-env write occurs later in
+    // the durable phase machine, still under this lock and only after the exact
+    // retained baseline above has been verified.
+    let baseEnvPatch = null
+    let baseEnvPatchMode = null
+    if (baseEnvPatchRequest) {
+      baseEnvPatch = await prepareTargetBaseEnvPatch({
+        baseEnv: options.baseEnv,
+        request: baseEnvPatchRequest,
+        operationLock,
+        targetReleaseCommit: target.receipt.source.releaseCommit,
+        rollbackReleaseCommit: rollback.receipt.source.releaseCommit,
+        targetLedgerGeneration: nextLedger.generation
+      })
+      baseEnvPatchMode = 'activate'
+    } else if (qualificationRollbackReceipt) {
+      baseEnvPatch = await prepareQualificationRollbackBaseEnvPatch({
+        baseEnv: options.baseEnv,
+        receiptPath: qualificationRollbackReceipt,
+        operationLock,
+        targetReleaseCommit: target.receipt.source.releaseCommit,
+        rollbackReleaseCommit: rollback.receipt.source.releaseCommit,
+        activeLedgerGeneration: ledger.generation
+      })
+      baseEnvPatchMode = 'rollback'
+    }
+    const qualificationBeforeMutation = privateRealtimeVoiceQualificationEnvState(await readFile(resolve(options.baseEnv)))
+    if (qualificationBeforeMutation.state !== currentQualification.state) {
+      throw new Error('base env qualification state changed during release planning')
+    }
+    assertQualificationTransitionBound(action, qualificationBeforeMutation.state, baseEnvPatchMode)
+    if (baseEnvPatch) {
+      const qualifiedRollbackVerified = await verifyRunning(rollbackOptions, false, {
+        verifyTool: false,
+        verifyLedger: false,
+        expectedRenderedComposeSha256: rollbackVerified.renderedComposeSha256,
+        baseEnvPatch,
+        baseEnvPatchState: baseEnvPatchMode === 'rollback' ? 'target' : 'prior'
+      })
+      if (qualifiedRollbackVerified.renderedComposeSha256 !== rollbackVerified.renderedComposeSha256) {
+        throw new Error('retained rollback preflight changed while proving the prior qualification environment')
+      }
+      if (projectContainerSnapshotSha256(await inspectProjectContainers()) !== baselineProjectSha256 ||
+          projectResourceSnapshotSha256(await inspectProjectResources()) !== baselineProjectResourceSha256) {
+        throw new Error('currently serving Compose project changed while proving the prior qualification environment')
+      }
+      await assertActiveReleaseLedgerUnchanged(targetDir, ledger)
+    }
+    // A qualified transition must render/preflight only after its phase-specific
+    // env bytes are installed. Legacy/no-patch releases retain the earlier
+    // pre-mutation preflight behavior.
+    const targetPreflight = baseEnvPatch ? null : await preflightComposeBundle(options, target)
     transactionStarted = true
     const now = new Date().toISOString()
     const journal = await writeReleaseTransactionJournal(operationLock, {
       schema: releaseTransactionSchema, token: operationLock.token, action, phase: 'prepared',
       targetBundleSha256: target.receipt.bundleSha256, rollbackBundleSha256: rollback.receipt.bundleSha256,
-      targetRenderedComposeSha256: targetPreflight.sha256, rollbackRenderedComposeSha256: rollbackVerified.renderedComposeSha256,
-      priorLedger: ledger, nextLedger, baselineProjectContainers, baselineProjectResources, createdAt: now, updatedAt: now
+      targetRenderedComposeSha256: targetPreflight?.sha256 || null, rollbackRenderedComposeSha256: rollbackVerified.renderedComposeSha256,
+      priorLedger: ledger, nextLedger, baseEnvPatch, baseEnvPatchMode, recoveryFromPhase: null,
+      baselineProjectContainers, baselineProjectResources, createdAt: now, updatedAt: now
     })
     try {
       const completed = await resumeDurableReleaseTransaction(options, operationLock, journal)
@@ -2888,7 +3677,9 @@ function parseArgs(args) {
     const name = args[index]
     const value = args[++index]
     if (!value || !name.startsWith('--')) throw new Error(`invalid argument ${name}`)
-    options[name.slice(2).replace(/-([a-z])/g, (_, char) => char.toUpperCase())] = value
+    const key = name.slice(2).replace(/-([a-z])/g, (_, char) => char.toUpperCase())
+    if (Object.hasOwn(options, key)) throw new Error(`duplicate argument ${name}`)
+    options[key] = value
   }
   return options
 }
@@ -2935,6 +3726,44 @@ async function writeAtomicReplace(path, body, mode) {
   }
 }
 
+async function removeBoundAtomicTemporary(temporary, ownerUid) {
+  try {
+    const info = await lstat(temporary)
+    validatePrivateReleasePathInfo(info, 'base env', ownerUid)
+    if (info.nlink !== 1) throw new Error('bound base env temporary file has an unexpected link count')
+    await unlink(temporary)
+    await syncDirectory(dirname(temporary))
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+}
+
+async function writeAtomicReplaceBound(path, body, mode, temporary, ownerUid) {
+  const directory = dirname(path)
+  if (dirname(temporary) !== directory || temporary === path) {
+    throw new Error('bound atomic replacement path is invalid')
+  }
+  // A SIGKILL after file fsync but before rename cannot run `finally`. The
+  // transaction-token-derived path makes that exact private copy discoverable
+  // on resume/recover without globbing or touching unrelated secret files.
+  await removeBoundAtomicTemporary(temporary, ownerUid)
+  let renamed = false
+  try {
+    const file = await open(temporary, 'wx', mode)
+    try {
+      await file.writeFile(body)
+      await file.sync()
+    } finally {
+      await file.close()
+    }
+    await rename(temporary, path)
+    renamed = true
+    await syncDirectory(directory)
+  } finally {
+    if (!renamed) await removeBoundAtomicTemporary(temporary, ownerUid)
+  }
+}
+
 async function syncDirectory(directory) {
   const parent = await open(directory, 'r')
   try { await parent.sync() } finally { await parent.close() }
@@ -2956,6 +3785,12 @@ async function spawnWithInput(command, args, input) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
+  if (options.command !== 'activate' && targetBaseEnvPatchOptionNames.some(name => String(options[name] || '').trim())) {
+    throw new Error('target base-env patch arguments are permitted only for activate')
+  }
+  if (options.command !== 'rollback' && String(options.qualificationRollbackReceipt || '').trim()) {
+    throw new Error('--qualification-rollback-receipt is permitted only for rollback')
+  }
   if (options.command === 'scope') await scope(options)
   else if (options.command === 'prepare') await prepare(options)
   else if (options.command === 'build') await build(options)
