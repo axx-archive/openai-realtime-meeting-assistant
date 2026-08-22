@@ -3346,9 +3346,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// taking product actions would require carrying the public checkpoint through
 	// every downstream WorkRun and terminal effect. Refuse that widening until
 	// the complete launch spine has the same reauthorization contract.
+	//
+	// Image generation is explicitly allowed: constrainPrivateRiffDecision passes
+	// image work through unchanged. Recompute the verdict after constraining so
+	// the image proposal (and only the image proposal) can execute inline.
 	if thread.Riff != nil {
 		routedIntent = constrainPrivateRiffDecision(routedIntent)
-		routedVerdict = nil
+		routedVerdict, _ = scoutRouterVerdictFromConversationIntent(routedIntent, intentQuery)
 	}
 	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {
 		result, _, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)

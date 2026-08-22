@@ -1047,9 +1047,19 @@ func (app *kanbanBoardApp) privateRiffModelQuery(viewerEmail string, thread scou
 // but it may not answer (or decline to answer) a checkpoint-content question.
 // The exact-source answer stage below is the only stage that receives the
 // frozen channel bodies, so every non-work turn must reach it.
+//
+// Image generation is explicitly allowed: a concept render is a single direct
+// API call that produces an inline chat asset, not a durable work run that
+// requires checkpoint authority tracking. The image and its artifact stay
+// scoped to the Riff owner's private thread.
 func constrainPrivateRiffDecision(decision conversationIntentDecision) conversationIntentDecision {
 	switch decision.Outcome {
-	case conversationIntentStartPrivateWork, conversationIntentApprovalRequired:
+	case conversationIntentStartPrivateWork:
+		if decision.Work != nil && decision.Work.Kind == conversationWorkImage {
+			return decision
+		}
+		return unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
+	case conversationIntentApprovalRequired:
 		return unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
 	default:
 		return conversationalReplyDecision(proposalSourceDeterministicGuard)
@@ -1178,10 +1188,12 @@ func privateRiffPublicationMessageDigest(message scoutChatMessageRecord) (string
 }
 
 func (app *kanbanBoardApp) privateRiffConversationMessageForPublication(ctx context.Context, viewerEmail, destinationThreadID string, thread scoutChatThreadRecord, message scoutChatMessageRecord) error {
-	if message.Kind != "message" || strings.TrimSpace(message.Text) == "" || message.Via == privateRiffPublicationControlVia ||
+	isImageMessage := message.Kind == scoutChatMessageKindImage && message.Image != nil && strings.TrimSpace(message.Image.Ref) != ""
+	isTextMessage := message.Kind == "message" && strings.TrimSpace(message.Text) != ""
+	if (!isTextMessage && !isImageMessage) || message.Via == privateRiffPublicationControlVia ||
 		message.Thread != nil || message.Work != nil || message.Proposal != nil || message.Choices != nil || message.Manifest != nil ||
-		message.Image != nil || message.ImageGeneration != nil || message.Reply != nil || message.Publication != nil || len(message.Files) > 0 {
-		return fmt.Errorf("Only an ordinary completed Riff reply can be shared")
+		message.ImageGeneration != nil || message.Reply != nil || message.Publication != nil || len(message.Files) > 0 {
+		return fmt.Errorf("Only an ordinary completed Riff reply or image can be shared")
 	}
 	role := strings.ToLower(strings.TrimSpace(message.Role))
 	switch role {
@@ -1702,8 +1714,12 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThroughEpisode(user *us
 	for index, privateMessage := range eligible {
 		publicID := requestItems[index].PublicMessageID
 		result.MessageIDs = append(result.MessageIDs, publicID)
+		messageKind := "message"
+		if privateMessage.Kind == scoutChatMessageKindImage {
+			messageKind = scoutChatMessageKindImage
+		}
 		posted := scoutChatMessageRecord{
-			ID: publicID, Kind: "message", Role: privateMessage.Role,
+			ID: publicID, Kind: messageKind, Role: privateMessage.Role,
 			AuthorName: privateMessage.AuthorName, AuthorEmail: privateMessage.AuthorEmail,
 			Text: privateMessage.Text, CreatedAt: preparedAt.Add(time.Duration(index) * time.Nanosecond).Format(time.RFC3339Nano), Via: "private_riff",
 			Publication: &scoutChatPublicationProvenance{
@@ -1712,6 +1728,13 @@ func (app *kanbanBoardApp) publishPrivateRiffConversationThroughEpisode(user *us
 				PublishedAt: preparedAt.Format(time.RFC3339Nano), OperationID: operationID, RiffThreadID: thread.ID,
 				SourceMessageID: privateMessage.ID, SelectionDigest: requestItems[index].SourceDigest, Scope: string(scope), RootMessageID: rootID,
 			},
+		}
+		if privateMessage.Image != nil {
+			posted.Image = &scoutChatImageRef{
+				Ref:  privateMessage.Image.Ref,
+				Mime: privateMessage.Image.Mime,
+				Name: privateMessage.Image.Name,
+			}
 		}
 		if privateMessage.RiffAuthority != nil {
 			posted.Publication.ContextManifestDigest = privateMessage.RiffAuthority.ContextManifestDigest

@@ -73,12 +73,14 @@ export function privateRiffReplyShareable(
   if (!riff || !riff.sourceAvailable || !message?.id) return false;
   const role = String(message.role ?? '').toLowerCase();
   const text = String(message.text ?? message.content ?? '').trim();
-  if (!['user', 'assistant', 'scout'].includes(role) || !text) return false;
+  const isImageMessage = Boolean(message.image?.ref);
+  if (!['user', 'assistant', 'scout'].includes(role)) return false;
+  if (!text && !isImageMessage) return false;
   if (String(message.via ?? '') === 'private_riff_publication_control') return false;
   if (message.thread || message.work || message.proposal || message.choices || message.manifest
-    || message.image || message.imageGeneration || message.publication || (message.files?.length ?? 0) > 0) return false;
+    || message.imageGeneration || message.publication || (message.files?.length ?? 0) > 0) return false;
   if (message.reply?.state === 'queued' || message.reply?.state === 'running') return false;
-  if (role !== 'user' && (message.activity?.version !== 'stride-private-riff/v1'
+  if (!isImageMessage && role !== 'user' && (message.activity?.version !== 'stride-private-riff/v1'
     || message.activity?.status !== 'completed'
     || Number(message.activity?.contextRevision ?? 0) <= 0
     || !String(message.activity?.throughMessageId ?? '').trim())) return false;
@@ -103,22 +105,22 @@ export function privateRiffShareAllCount(
   return privateRiffCurrentEpisodeMessages(riff, messages).filter((message) => {
     const role = String(message.role ?? '').toLowerCase();
     const text = String(message.text ?? message.content ?? '').trim();
+    const isImageMessage = Boolean(message.image?.ref);
     return ['user', 'assistant', 'scout'].includes(role)
       && Boolean(message.id)
-      && Boolean(text)
+      && (Boolean(text) || isImageMessage)
       && String(message.via ?? '') !== 'private_riff_publication_control'
       && !message.thread
       && !message.work
       && !message.proposal
       && !message.choices
       && !message.manifest
-      && !message.image
       && !message.imageGeneration
       && !message.publication
       && (message.files?.length ?? 0) === 0
       && message.reply?.state !== 'queued'
       && message.reply?.state !== 'running'
-      && (role === 'user' || (message.activity?.version === 'stride-private-riff/v1'
+      && (isImageMessage || role === 'user' || (message.activity?.version === 'stride-private-riff/v1'
         && message.activity?.status === 'completed'
         && Number(message.activity?.contextRevision ?? 0) > 0
         && Boolean(String(message.activity?.throughMessageId ?? '').trim())));
