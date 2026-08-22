@@ -73335,6 +73335,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function authoredResultQualityState(message) {
 	        const state = String(message?.thread?.resultQualityState || '').trim().toLowerCase()
+	        if (!state) return ''
 	        return ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(state)
 	          ? state
 	          : 'draft_needs_attention'
@@ -73371,7 +73372,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function authoredResultQualityNote(message, kind) {
 	        const qualityState = authoredResultQualityState(message)
-	        if (qualityState === 'admitted') return null
+	        if (!qualityState || qualityState === 'admitted') return null
 	        const note = bfEl('div', 'scout-authored-result__quality')
 	        note.dataset.qualityState = qualityState
 	        const copy = bfEl('div', 'scout-authored-result__quality-copy')
@@ -73512,7 +73513,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const head = bfEl('header', 'scout-chat-document-result__head')
 	        const identity = bfEl('div', 'scout-chat-document-result__identity')
 	        identity.append(
-	          bfEl('span', 'scout-chat-document-result__kicker', admitted ? 'document · ready' : qualityState === 'edited_after_admission' ? 'document · edited draft' : 'document · draft'),
+	          bfEl('span', 'scout-chat-document-result__kicker', !qualityState ? 'document' : admitted ? 'document · ready' : qualityState === 'edited_after_admission' ? 'document · edited draft' : 'document · draft'),
 	          bfEl('h3', 'scout-chat-document-result__title', title)
 	        )
 	        const actions = bfEl('div', 'scout-chat-document-result__actions')

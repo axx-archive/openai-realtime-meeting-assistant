@@ -23,6 +23,8 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.AUTHORED_RESULT_INDEX,'utf8');
 const deckId='blocked-deck';
 const documentId='blocked-document';
+const standaloneDeckId='standalone-deck';
+const standaloneDocumentId='standalone-document';
 const deck={schemaVersion:1,width:1920,height:1080,slides:[{id:'cover',background:'#15191f',elements:[{id:'title',type:'text',x:160,y:160,width:1200,height:220,z:1,opacity:1,rotation:0,text:'Working deck',fontSize:84,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.05,letterSpacing:'normal'}]}]};
 const actions=[];
 const server=http.createServer((req,res)=>{
@@ -31,7 +33,10 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/artifacts/deck?id='+deckId&&req.method==='GET'){
     res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:deckId,title:'Working deck',version:2},deck,canWrite:true,qualityState:'draft_needs_attention',canPresent:false,canExport:false}));
   }
-  if(req.url==='/artifacts/document?id='+documentId&&req.method==='GET'){
+  if(req.url==='/artifacts/deck?id='+standaloneDeckId&&req.method==='GET'){
+    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:standaloneDeckId,title:'Standalone deck',version:1},deck,canWrite:true,qualityState:'',canPresent:true,canExport:true}));
+  }
+  if((req.url==='/artifacts/document?id='+documentId||req.url==='/artifacts/document?id='+standaloneDocumentId)&&req.method==='GET'){
     res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:documentId,title:'Working report',version:3},document:{schemaVersion:1,markdown:'# Working report\n\nA useful draft that still needs review.'},canWrite:true,qualityState:'draft_needs_attention',canExport:false}));
   }
   if(req.url==='/artifacts/action'&&req.method==='POST'){
@@ -46,21 +51,26 @@ const server=http.createServer((req,res)=>{
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
   await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
-  await page.evaluate(({deckId,documentId})=>{
+  await page.evaluate(({deckId,documentId,standaloneDeckId,standaloneDocumentId})=>{
     const deckArtifact={id:deckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Working deck',type:'html_deck',status:'complete',artifactVersion:'2'}};
     const documentArtifact={id:documentId,text:'# Working report\n\nA useful draft that still needs review.',metadata:{title:'Working report',type:'markdown',status:'complete',artifactVersion:'3',assets:JSON.stringify([{ref:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',kind:'pdf',mime:'application/pdf',name:'working-report.pdf'}])}};
+    const standaloneDeckArtifact={id:standaloneDeckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Standalone deck',type:'html_deck',status:'complete',artifactVersion:'1'}};
+    const standaloneDocumentArtifact={id:standaloneDocumentId,text:'# Standalone report\n\nA complete ordinary document.',metadata:{title:'Standalone report',type:'markdown',status:'complete',artifactVersion:'1'}};
     const deckMessage={id:'deck-result',kind:'thread',thread:{artifactId:'deck-goal',mode:'goal',goalStatus:'needs_attention',resultArtifactId:deckId,resultArtifactType:'html_deck',resultTitle:'Working deck',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
     const documentMessage={id:'document-result',kind:'thread',thread:{artifactId:'document-goal',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultTitle:'Working report',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
-    artifactEntries=[deckArtifact,documentArtifact];
-    scoutChatThreads=[{id:'quality-thread',messages:[deckMessage,documentMessage]}];
+    const standaloneDeckMessage={id:'standalone-deck-result',kind:'thread',thread:{artifactId:standaloneDeckId,mode:'presentation',goalStatus:'complete',resultArtifactId:standaloneDeckId,resultArtifactType:'html_deck',resultTitle:'Standalone deck',resultCanEdit:true,resultCanContinue:false,resultCanPresent:true,resultCanExport:true}};
+    const standaloneDocumentMessage={id:'standalone-document-result',kind:'thread',thread:{artifactId:standaloneDocumentId,mode:'research',goalStatus:'complete',resultArtifactId:standaloneDocumentId,resultArtifactType:'markdown',resultTitle:'Standalone report',resultCanEdit:true,resultCanContinue:false,resultCanPresent:false,resultCanExport:true}};
+    artifactEntries=[deckArtifact,documentArtifact,standaloneDeckArtifact,standaloneDocumentArtifact];
+    scoutChatThreads=[{id:'quality-thread',messages:[deckMessage,documentMessage,standaloneDeckMessage,standaloneDocumentMessage]}];
     activeScoutThreadId='quality-thread';
     document.body.append(scoutHTMLDeckRefRecordNode(deckMessage,deckArtifact),scoutMarkdownDocumentRefRecordNode(documentMessage,documentArtifact));
+    document.body.append(scoutHTMLDeckRefRecordNode(standaloneDeckMessage,standaloneDeckArtifact),scoutMarkdownDocumentRefRecordNode(standaloneDocumentMessage,standaloneDocumentArtifact));
     const editedNote=authoredResultQualityNote({thread:{artifactId:'edited-goal',resultArtifactId:'edited-deck',resultQualityState:'edited_after_admission',resultCanContinue:true}},'presentation');
     editedNote.id='edited-result-quality';
     document.body.append(editedNote);
-  },{deckId,documentId});
+  },{deckId,documentId,standaloneDeckId,standaloneDocumentId});
 
-  const deckResult=page.locator('.scout-chat-deck-result');
+  const deckResult=page.locator('[data-result-artifact-id="'+deckId+'"]');
   await deckResult.waitFor({state:'visible'});
   await deckResult.getByRole('button',{name:'Edit'}).waitFor({state:'visible'});
   assert.match(await deckResult.innerText(),/Draft · needs attention/);
@@ -78,13 +88,25 @@ const server=http.createServer((req,res)=>{
   await deckEditor.getByRole('button',{name:'Close Deck Studio'}).click();
   await deckEditor.waitFor({state:'detached'});
 
-  const documentResult=page.locator('.scout-chat-document-result');
+  const documentResult=page.locator('[data-result-artifact-id="'+documentId+'"]');
   await documentResult.waitFor({state:'visible'});
   assert.match(await documentResult.locator('.scout-chat-document-result__kicker').innerText(),/document · draft/i);
   assert.doesNotMatch(await documentResult.innerText(),/document · ready/i);
   assert.match(await documentResult.innerText(),/Draft · needs attention/);
   assert.equal(await documentResult.getByRole('button',{name:'Continue',exact:true}).count(),1);
   assert.equal(await documentResult.locator('a[download$=".pdf"],object[type="application/pdf"]').count(),0);
+
+  const standaloneDeckResult=page.locator('[data-result-artifact-id="'+standaloneDeckId+'"]');
+  await standaloneDeckResult.getByRole('button',{name:'Present',exact:true}).waitFor({state:'visible'});
+  assert.doesNotMatch(await standaloneDeckResult.innerText(),/Draft · needs attention|final quality review/i);
+  assert.equal(await standaloneDeckResult.locator('.scout-authored-result__quality').count(),0);
+  assert.equal(await standaloneDeckResult.locator('.chat-deck__download:visible').count(),1);
+
+  const standaloneDocumentResult=page.locator('[data-result-artifact-id="'+standaloneDocumentId+'"]');
+  await standaloneDocumentResult.waitFor({state:'visible'});
+  assert.equal((await standaloneDocumentResult.locator('.scout-chat-document-result__kicker').innerText()).trim().toLowerCase(),'document');
+  assert.doesNotMatch(await standaloneDocumentResult.innerText(),/Draft · needs attention|final quality review/i);
+  assert.equal(await standaloneDocumentResult.locator('.scout-authored-result__quality').count(),0);
 
   await documentResult.getByRole('button',{name:'Open Working report'}).click();
   const reader=page.locator('.artifact-stage');
