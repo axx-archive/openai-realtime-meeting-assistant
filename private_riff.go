@@ -326,6 +326,23 @@ func privateRiffMessageAuthorityForThread(thread scoutChatThreadRecord, message 
 		SourceMessageDigest: thread.Riff.SourceMessageDigest, SourceWindowDigest: thread.Riff.SourceWindowDigest,
 		SourceAudienceDigest: thread.Riff.SourceAudienceDigest,
 	}
+	if privateRiffIsSpace(thread) {
+		episodeIndex := privateRiffEpisodeIndex(thread.Riff, message.RiffEpisodeID)
+		checkpointIndex := -1
+		if episodeIndex >= 0 {
+			checkpointIndex = privateRiffCheckpointIndex(&thread.Riff.EpisodeRecords[episodeIndex], message.RiffCheckpointID)
+		}
+		if episodeIndex < 0 || checkpointIndex < 0 {
+			return nil, fmt.Errorf("Private Riff message checkpoint does not match its episode")
+		}
+		checkpoint := thread.Riff.EpisodeRecords[episodeIndex].Checkpoints[checkpointIndex]
+		authority.ContextRevision = checkpoint.Revision
+		authority.SourceThreadID = thread.Riff.SourceThreadID
+		authority.ThroughMessageID = checkpoint.ThroughMessageID
+		authority.SourceMessageDigest = checkpoint.SourceMessageDigest
+		authority.SourceWindowDigest = checkpoint.SourceWindowDigest
+		authority.SourceAudienceDigest = checkpoint.SourceAudienceDigest
+	}
 	if message.Activity != nil {
 		if privateRiffIsSpace(thread) {
 			episodeIndex := privateRiffEpisodeIndex(thread.Riff, message.RiffEpisodeID)
@@ -1042,18 +1059,82 @@ func (app *kanbanBoardApp) privateRiffModelQuery(viewerEmail string, thread scou
 		"\n\nCurrent private request (the only new instruction):\n" + strings.TrimSpace(request), len(window), nil
 }
 
+// privateRiffInternalWorkAllowed admits work whose only effect is an owner-only
+// artifact or image in the Riff itself. A Riff is not publication authority:
+// native actions, external writes, audience expansion, and every other held
+// effect remain behind their ordinary governed surface.
+func privateRiffInternalWorkAllowed(work *conversationWorkDecision) bool {
+	if work == nil || conversationWorkRequiredEffectClass(*work, "") != "" {
+		return false
+	}
+	switch work.Kind {
+	case conversationWorkRegistryTool, conversationWorkWorkstream, conversationWorkGoal, conversationWorkImage:
+		return true
+	default:
+		return false
+	}
+}
+
 // constrainPrivateRiffDecision keeps the shared router in its proper role for
-// a Private Riff: it may identify and refuse an attempted authority expansion,
-// but it may not answer (or decline to answer) a checkpoint-content question.
-// The exact-source answer stage below is the only stage that receives the
-// frozen channel bodies, so every non-work turn must reach it.
+// a Private Riff. Source-bound conversation still reaches the exact checkpoint
+// answer stage, while internal work may execute only when its destination stays
+// this owner-only Riff. Publication or any other consequential effect remains
+// unavailable here and must cross its explicit governed boundary elsewhere.
 func constrainPrivateRiffDecision(decision conversationIntentDecision) conversationIntentDecision {
 	switch decision.Outcome {
-	case conversationIntentStartPrivateWork, conversationIntentApprovalRequired:
-		return unavailableConversationDecision("private_riff_work_unavailable", "Keep this Riff conversational. Start durable work from the source channel or a regular private thread so its authority stays explicit.", proposalSourceDeterministicGuard)
+	case conversationIntentStartPrivateWork:
+		if privateRiffInternalWorkAllowed(decision.Work) {
+			return decision
+		}
+		return unavailableConversationDecision("private_riff_effect_unavailable", "That action cannot run from a private Riff. Keep the work private here, or use an explicit governed publish or action control.", proposalSourceDeterministicGuard)
+	case conversationIntentApprovalRequired:
+		return unavailableConversationDecision("private_riff_effect_unavailable", "That action cannot run from a private Riff. Keep the work private here, or use an explicit governed publish or action control.", proposalSourceDeterministicGuard)
 	default:
 		return conversationalReplyDecision(proposalSourceDeterministicGuard)
 	}
+}
+
+// privateRiffWorkSourceWindow reauthorizes the exact public checkpoint stamped
+// on a persisted Riff message. It is the downstream work/image boundary: a
+// copied Riff id, a later active episode, or a source edit/audience change can
+// never substitute different channel material after the user starts work.
+func (app *kanbanBoardApp) privateRiffWorkSourceWindow(viewerEmail string, riffThread scoutChatThreadRecord, message scoutChatMessageRecord) (scoutChatThreadRecord, []scoutChatMessageRecord, error) {
+	if app == nil || riffThread.Riff == nil || normalizeAccountEmail(riffThread.OwnerEmail) != normalizeAccountEmail(viewerEmail) ||
+		scoutChatThreadVisibility(riffThread) != scoutChatVisibilityPrivate {
+		return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source is unavailable")
+	}
+	authority := message.RiffAuthority
+	contentDigest, digestErr := privateRiffMessageContentDigest(message)
+	if digestErr != nil || authority == nil || authority.Version != privateRiffConversationPublicationVersion ||
+		authority.MessageID != message.ID || authority.ContentDigest != contentDigest || authority.SourceThreadID != riffThread.Riff.SourceThreadID ||
+		strings.TrimSpace(authority.ThroughMessageID) == "" || !isHexDigest(authority.SourceMessageDigest) ||
+		!isHexDigest(authority.SourceWindowDigest) || !isHexDigest(authority.SourceAudienceDigest) {
+		return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source receipt is unavailable")
+	}
+	if privateRiffIsSpace(riffThread) {
+		if message.RiffEpisodeID == "" || message.RiffCheckpointID == "" || authority.EpisodeID != message.RiffEpisodeID || authority.CheckpointID != message.RiffCheckpointID {
+			return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source episode is unavailable")
+		}
+		episodeIndex := privateRiffEpisodeIndex(riffThread.Riff, message.RiffEpisodeID)
+		if episodeIndex < 0 || privateRiffCheckpointIndex(&riffThread.Riff.EpisodeRecords[episodeIndex], message.RiffCheckpointID) < 0 {
+			return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source checkpoint is unavailable")
+		}
+	}
+	source, _, err := app.scoutChatThreadByID(viewerEmail, authority.SourceThreadID)
+	if err != nil || source.ArchivedAt != "" || scoutChatThreadVisibility(source) != scoutChatVisibilityPublic {
+		return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source is no longer available")
+	}
+	_, current, _, err := privateRiffSourceBinding(source, authority.ThroughMessageID)
+	if err != nil || current.MessageDigest != authority.SourceMessageDigest || current.WindowDigest != authority.SourceWindowDigest ||
+		conversationContinuityAudienceDigest(source) != authority.SourceAudienceDigest {
+		return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source changed; launch the work again from current context")
+	}
+	projected := app.projectScoutChatThreadForViewer(viewerEmail, source)
+	window, projectedBinding, _, err := privateRiffSourceBinding(projected, authority.ThroughMessageID)
+	if err != nil || projectedBinding.MessageDigest != authority.SourceMessageDigest || projectedBinding.WindowDigest != authority.SourceWindowDigest {
+		return scoutChatThreadRecord{}, nil, fmt.Errorf("Private Riff work source is no longer authorized")
+	}
+	return projected, window, nil
 }
 
 func privateRiffParagraphs(message scoutChatMessageRecord) ([]privateRiffParagraph, string, error) {

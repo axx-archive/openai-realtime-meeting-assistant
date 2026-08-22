@@ -14,7 +14,7 @@ const source = (relative: string) => readFileSync(
   'utf8',
 );
 
-test('phone and iPad use the same encoded authenticated Studio destinations', () => {
+test('shared web-route helper encodes authenticated Studio destinations', () => {
   const artifactId = 'artifact /?#+ field deck';
   for (const device of [
     { name: 'phone', width: 390, height: 844 },
@@ -40,7 +40,7 @@ test('phone and iPad use the same encoded authenticated Studio destinations', ()
   }
 });
 
-test('phone and iPad route writable and shared read-only Files artifacts by exact capability', () => {
+test('web-route helper preserves exact artifact capability independent of screen size', () => {
   for (const device of [
     { name: 'phone', width: 390, height: 844 },
     { name: 'iPad', width: 1024, height: 1366 },
@@ -49,12 +49,12 @@ test('phone and iPad route writable and shared read-only Files artifacts by exac
     assert.equal(
       artifactStudioPath('owner-deck', 'deck', artifactStudioIntent(true)),
       '/studio/deck/owner-deck?mode=edit',
-      `${device.name} writer should edit a deck`,
+      `${device.name} web-route helper should retain deck write authority`,
     );
     assert.equal(
       artifactStudioPath('shared-deck', 'deck', artifactStudioIntent(false)),
       '/studio/deck/shared-deck?mode=present',
-      `${device.name} reader should present a deck`,
+      `${device.name} web-route helper should retain deck read authority`,
     );
     assert.equal(
       artifactStudioPath('owner-document', 'document', artifactStudioIntent(true)),
@@ -85,21 +85,26 @@ test('only editable artifact families receive Studio routes', () => {
   assert.equal(artifactStudioPath('   ', 'deck', 'edit'), '');
 });
 
-test('thread and Files actions route editors through OSWeb and retire nonexistent paths', () => {
+test('iOS decks use the native read-only viewer while documents retain the authenticated Studio route', () => {
   const thread = source('screens/ThreadScreen.tsx');
   const files = source('screens/FilesScreen.tsx');
   const web = source('screens/OSWebScreen.tsx');
   const navigator = source('navigation/RootNavigator.tsx');
 
-  assert.match(thread, /artifactStudioPath\(resultArtifactId, resultStudioKind, message\.thread\?\.resultCanEdit === true \? 'edit' : 'present'\)/u);
-  assert.match(thread, /artifactStudioPath\(artifactId, studioKind, 'present'\)/u);
+  assert.match(thread, /resultStudioKind === 'deck'[\s\S]*navigation\.navigate\('DeckViewer'/u);
+  assert.match(thread, /studioKind === 'deck'[\s\S]*navigation\.navigate\('DeckViewer'/u);
+  assert.equal((thread.match(/desktopEditable: message\.thread\?\.resultCanEdit === true/g) ?? []).length, 3);
+  assert.match(thread, /navigation\.navigate\('OSWeb', \{[\s\S]*artifactStudioPath\(resultArtifactId, resultStudioKind/u);
   assert.doesNotMatch(thread, /\/artifacts\/deck\?id=/u);
   assert.doesNotMatch(thread, /`\/artifact\/\$\{artifactId\}/u);
+  assert.match(files, /studioKind === 'deck'[\s\S]*navigation\.navigate\('DeckViewer'/u);
+  assert.match(files, /artifactStudioAccess\([\s\S]*?studioKind[\s\S]*?studioKind === 'deck'[\s\S]*?desktopEditable: access\.canWrite === true/u);
   assert.match(files, /await api\.artifactStudioAccess\([\s\S]*?sessionToken,[\s\S]*?file\.artifactId,[\s\S]*?studioKind,[\s\S]*?\)/u);
   assert.match(files, /artifactStudioPath\([\s\S]*?file\.artifactId,[\s\S]*?studioKind,[\s\S]*?artifactStudioIntent\(access\.canWrite\),[\s\S]*?\)/u);
   assert.match(files, /artifact\?\.metadata\?\.type \?\? artifact\?\.metadata\?\.artifactType/u);
 
   assert.match(navigator, /name="OSWeb"[\s\S]*?presentation: 'modal'/u);
+  assert.match(navigator, /name="DeckViewer"[\s\S]*?presentation: 'fullScreenModal'/u);
   assert.match(web, /<SafeAreaView[\s\S]*?edges=\{\['top', 'left', 'right'\]\}/u);
   assert.match(web, /auth\/native-web-session\?path=\$\{encodeURIComponent\(safePath\)\}/u);
   assert.match(web, /candidate\.type !== 'stride\.studio\.close' \|\| candidate\.version !== 1/u);

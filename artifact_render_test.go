@@ -234,6 +234,31 @@ func TestArtifactRenderMintRequiresReadContentAndExport(t *testing.T) {
 	}
 }
 
+func TestArtifactRenderTokenIsRevokedByACLGenerationChange(t *testing.T) {
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	deck, _, err := kanbanApp.createOSArtifactWithMetadata("research", "deck", testDeckBody, "AJ", map[string]string{"type": "html_deck", "aclVersion": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := mintArtifactRenderTokenForArtifact(deck, time.Now().Add(artifactRenderTokenTTL))
+	target := "/artifacts/render?id=" + deck.ID + "&t=" + token
+	before := httptest.NewRecorder()
+	artifactRenderHandler(before, httptest.NewRequest(http.MethodGet, target, nil))
+	if before.Code != http.StatusOK {
+		t.Fatalf("pre-bump render status=%d body=%s", before.Code, before.Body.String())
+	}
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(deck.ID, map[string]string{"aclVersion": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	after := httptest.NewRecorder()
+	artifactRenderHandler(after, httptest.NewRequest(http.MethodGet, target, nil))
+	if after.Code != http.StatusNotFound || strings.Contains(after.Body.String(), "Bonfire") {
+		t.Fatalf("old render token survived ACL bump: status=%d body=%s", after.Code, after.Body.String())
+	}
+}
+
 func TestNativeDeckViewerHidesStageUntilFirstFit(t *testing.T) {
 	document := injectArtifactDeckNavigation(`<!doctype html><html><body><div id="stage"><section class="pg on"></section></div></body></html>`)
 	for _, want := range []string{

@@ -230,12 +230,16 @@ func (store *meetingMemoryStore) backfillArtifactAuthorizationProjectionsLocked(
 }
 
 func resolveArtifactHeaderOwner(header ArtifactAuthorizationHeader) ArtifactAuthorizationHeader {
-	if kanbanApp == nil || kanbanApp.memory == nil {
+	return kanbanApp.resolveArtifactHeaderOwner(header)
+}
+
+func (app *kanbanBoardApp) resolveArtifactHeaderOwner(header ArtifactAuthorizationHeader) ArtifactAuthorizationHeader {
+	if app == nil || app.memory == nil {
 		return header
 	}
-	kanbanApp.memory.mu.Lock()
-	header = kanbanApp.memory.resolveArtifactHeaderSecurityLocked(header)
-	kanbanApp.memory.mu.Unlock()
+	app.memory.mu.Lock()
+	header = app.memory.resolveArtifactHeaderSecurityLocked(header)
+	app.memory.mu.Unlock()
 	return header
 }
 
@@ -243,6 +247,10 @@ var artifactObjectAuthorizer ObjectAuthorizer = LegacyCompatibleObjectAuthorizer
 
 func artifactAuthorized(ctx context.Context, user *userAccount, action ACLAction, artifact meetingMemoryEntry) bool {
 	return artifactHeaderAuthorized(ctx, user, action, resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)))
+}
+
+func (app *kanbanBoardApp) artifactAuthorized(ctx context.Context, user *userAccount, action ACLAction, artifact meetingMemoryEntry) bool {
+	return artifactHeaderAuthorized(ctx, user, action, app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)))
 }
 
 func artifactHeaderAuthorized(ctx context.Context, user *userAccount, action ACLAction, header ArtifactAuthorizationHeader) bool {
@@ -450,10 +458,14 @@ func authorizedArtifactByID(ctx context.Context, user *userAccount, action ACLAc
 // body-free header, then returns only the exact body snapshot whose header
 // still matches under the store lock.
 func authorizedArtifactForActions(ctx context.Context, user *userAccount, id string, actions ...ACLAction) (meetingMemoryEntry, bool) {
-	if kanbanApp == nil || kanbanApp.memory == nil {
+	return kanbanApp.authorizedArtifactForActions(ctx, user, id, actions...)
+}
+
+func (app *kanbanBoardApp) authorizedArtifactForActions(ctx context.Context, user *userAccount, id string, actions ...ACLAction) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false
 	}
-	header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(id)
+	header, found := app.memory.artifactAuthorizationHeaderByID(id)
 	if !found || len(actions) == 0 {
 		return meetingMemoryEntry{}, false
 	}
@@ -465,11 +477,11 @@ func authorizedArtifactForActions(ctx context.Context, user *userAccount, id str
 	if artifactAuthorizationAfterCheckProbe != nil {
 		artifactAuthorizationAfterCheckProbe()
 	}
-	artifact, found := kanbanApp.memory.artifactSnapshotIfHeaderMatches(id, header)
+	artifact, found := app.memory.artifactSnapshotIfHeaderMatches(id, header)
 	if !found {
 		return meetingMemoryEntry{}, false
 	}
-	if !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
+	if !app.projectBoundArtifactCurrent(ctx, artifact) {
 		return meetingMemoryEntry{}, false
 	}
 	if artifactBodyReadProbe != nil {
@@ -508,11 +520,77 @@ func artifactOwnersForBlob(ref string) []ArtifactAuthorizationHeader {
 	return owners
 }
 
+func artifactAssetRequiresFinalExportAdmission(asset artifactAsset) bool {
+	mime := strings.ToLower(strings.TrimSpace(asset.Mime))
+	return strings.EqualFold(strings.TrimSpace(asset.Kind), "pdf") || mime == "application/pdf" ||
+		mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+		mime == "application/vnd.ms-powerpoint"
+}
+
+func artifactAssetRefRequiresFinalExportAdmission(asset artifactAsset) bool {
+	if artifactAssetRequiresFinalExportAdmission(asset) {
+		return true
+	}
+	meta, err := blobStatForRef(asset.Ref)
+	if err != nil {
+		// Missing or corrupt immutable sidecar metadata must never downgrade a
+		// declared asset into the read-only lane. The blob serve will still 404.
+		return true
+	}
+	mime := strings.ToLower(strings.TrimSpace(meta.Mime))
+	return mime == "application/pdf" ||
+		mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+		mime == "application/vnd.ms-powerpoint"
+}
+
+func artifactOwnsFinalExportAssetRef(entry meetingMemoryEntry, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if !validBlobRef(ref) {
+		return false
+	}
+	for _, asset := range artifactAssets(entry) {
+		if asset.Ref != ref {
+			continue
+		}
+		if artifactAssetRefRequiresFinalExportAdmission(asset) {
+			return true
+		}
+	}
+	return false
+}
+
 func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 	if user == nil || !validBlobRef(ref) || kanbanApp == nil {
 		return false
 	}
 	for _, header := range artifactOwnersForBlob(ref) {
+		if _, isAsset := header.AssetRefs[ref]; isAsset {
+			// Asset authority is always current-revision authority. Re-resolve the
+			// live header rather than using a header collected just before an
+			// asset removal or ACL change. Historical body revisions take the
+			// separate path below and intentionally retain their revision header.
+			currentHeader, found := kanbanApp.memory.artifactAuthorizationHeaderByID(header.ObjectID)
+			if !found {
+				continue
+			}
+			if _, stillOwned := currentHeader.AssetRefs[ref]; !stillOwned || !artifactHeaderAuthorized(ctx, user, ACLReadContent, currentHeader) {
+				continue
+			}
+			artifact, found := kanbanApp.memory.artifactSnapshotIfHeaderMatches(header.ObjectID, currentHeader)
+			if !found || !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
+				continue
+			}
+			if artifactOwnsFinalExportAssetRef(artifact, ref) {
+				if !artifactHeaderAuthorized(ctx, user, ACLExport, currentHeader) {
+					continue
+				}
+				_, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
+				if !stable || !canExport {
+					continue
+				}
+			}
+			return true
+		}
 		// The owner header identifies the exact historical revision that created
 		// this immutable blob. Requiring it to match the artifact's current
 		// revision would make every valid history entry unreadable after an edit.
@@ -523,13 +601,21 @@ func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 			return true
 		}
 	}
-	// Files uploads are explicitly organization-visible under the current
-	// product contract. Resolve their stored blob reference without touching
-	// the blob itself; possession of an otherwise-known hash is never enough.
+	// True Files uploads are explicitly organization-visible under the current
+	// product contract. A chat-promoted Files row is only another durable handle
+	// to its exact source, so reauthorize that committed source on every blob
+	// request instead of laundering the ref into independent Files authority.
 	if kanbanApp.memory != nil {
 		for _, file := range kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-			if strings.TrimSpace(file.Metadata["blobRef"]) == ref {
+			if strings.TrimSpace(file.Metadata["blobRef"]) != ref {
+				continue
+			}
+			if _, promoted, valid := promotedChatFileBindingFromEntry(file); !promoted {
 				return true
+			} else if valid {
+				if _, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, file); authorized {
+					return true
+				}
 			}
 		}
 	}
@@ -573,8 +659,15 @@ func blobOrganizationVisible(ctx context.Context, user *userAccount, ref string)
 	}
 	if kanbanApp.memory != nil {
 		for _, file := range kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-			if strings.TrimSpace(file.Metadata["blobRef"]) == ref {
+			if strings.TrimSpace(file.Metadata["blobRef"]) != ref {
+				continue
+			}
+			if _, promoted, valid := promotedChatFileBindingFromEntry(file); !promoted {
 				return true
+			} else if valid {
+				if sourceThread, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, file); authorized && scoutChatThreadIsOrganizationPublic(sourceThread) {
+					return true
+				}
 			}
 		}
 	}

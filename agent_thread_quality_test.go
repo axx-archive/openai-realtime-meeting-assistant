@@ -139,7 +139,7 @@ func externalEvidenceResearchAuthorityObjectForTest(t *testing.T, plan goalPlan,
 		t.Fatal("test objective authority is unavailable")
 	}
 	return map[string]any{
-		"question": question, "research_kind": "direct_evidence", "source_ref": objective.Ref,
+		"question": question, "research_kind": "direct_evidence", "importance": "load_bearing", "source_ref": objective.Ref,
 		"authority_quote": canonicalEvidenceText(objective.Text), "scope_anchor": "official program",
 		"decision_effect": "recommendation", "decision_relevance": "The official program count determines whether to recommend proceeding.",
 	}
@@ -753,7 +753,7 @@ func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
 			value := cloneResearchAuthorityObjectForTest(base)
 			value["source_ref"], value["authority_quote"] = selfRef, contextArtifact.Text
 			return []any{value}
-		}, want: "exact authorized source"},
+		}, want: "missing a bounded source_ref or authority_quote"},
 		{name: "inner-clause authority quote", questions: func() []any {
 			value := cloneResearchAuthorityObjectForTest(base)
 			value["authority_quote"] = "the official program's 2026 opted-in creator count"
@@ -783,6 +783,17 @@ func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
 			value["decision_relevance"] = "The official program fact might be useful later."
 			return []any{value}
 		}, want: "generic or unbound"},
+		{name: "invalid importance", questions: func() []any {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["importance"] = "nice_to_have"
+			return []any{value}
+		}, want: "invalid importance"},
+		{name: "two load bearing questions", questions: func() []any {
+			first := cloneResearchAuthorityObjectForTest(base)
+			second := cloneResearchAuthorityObjectForTest(base)
+			second["question"] = "What is the official program's opted-in creator count in 2026?"
+			return []any{first, second}
+		}, want: "at most one load-bearing"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -802,12 +813,12 @@ func TestFreshResearchAuthorityAllowsBoundedComparatorAndCurrentRuleLanes(t *tes
 	}
 	tests := []externalEvidenceResearchQuestionAuthority{
 		{
-			Question: "How does the official program's 2026 opted-in creator count compare with peer programs?", ResearchKind: "comparative_evidence",
+			Question: "How does the official program's 2026 opted-in creator count compare with peer programs?", ResearchKind: "comparative_evidence", Importance: "optional",
 			SourceRef: objective.Ref, AuthorityQuote: canonicalEvidenceText(objective.Text), ScopeAnchor: "official program", DecisionEffect: "recommendation",
 			DecisionRelevance: "The official program creator count benchmark determines whether to recommend proceeding.",
 		},
 		{
-			Question: "What current rules govern the official program?", ResearchKind: "current_constraint",
+			Question: "What current rules govern the official program?", ResearchKind: "current_constraint", Importance: "optional",
 			SourceRef: objective.Ref, AuthorityQuote: canonicalEvidenceText(objective.Text), ScopeAnchor: "official program", DecisionEffect: "guardrail",
 			DecisionRelevance: "The official program rules determine the launch guardrail.",
 		},
@@ -822,6 +833,177 @@ func TestFreshResearchAuthorityAllowsBoundedComparatorAndCurrentRuleLanes(t *tes
 		authorized, mode, err := authorizeExternalEvidenceResearchText(app, &plan, body)
 		if err != nil || mode != "external" || len(authorized.Questions) != 1 || authorized.Questions[0] != authority.Question {
 			t.Fatalf("bounded %s lane was rejected: authority=%+v mode=%q err=%v", authority.ResearchKind, authorized, mode, err)
+		}
+	}
+}
+
+func TestExternalEvidenceApprovedDisplayClaimIsExtractiveAndScopePreserving(t *testing.T) {
+	const candidate = "In 2026, the official program has 4,200 opted-in creators in the United States."
+	const question = "What is the official program's 2026 opted-in creator count in the United States?"
+	for _, display := range []string{candidate} {
+		if !externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("safe extractive rendering was rejected: %q", display)
+		}
+	}
+	for _, display := range []string{
+		"2026 official program: 4,200 opted-in creators in the United States.",
+		"Official program: 8,400 opted-in creators in the United States, 2026.",
+		"Official program: 4,200 creators worldwide, 2026.",
+		"Reportedly 4,200 opted-in creators in the United States, 2026.",
+		"Official program: 4,200 opted-in creators in the United States.",
+		"Official program: 4,200 opted-in creators in the United States, 2026.",
+	} {
+		if externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("unsafe display rendering was admitted: %q", display)
+		}
+	}
+}
+
+func TestExternalEvidenceDisplayClaimCannotReverseSemanticRolesByReordering(t *testing.T) {
+	const candidate = "Acme purchased Beacon in 2026 for $4.2 billion."
+	const question = "Did Acme purchase Beacon in 2026 for $4.2 billion?"
+	for _, display := range []string{"Acme purchased Beacon in 2026 for $4.2 billion."} {
+		if !externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("order-preserving extract was rejected: %q", display)
+		}
+	}
+	for _, display := range []string{
+		"Acme purchased Beacon: 2026, $4.2 billion.",
+		"Beacon purchased Acme in 2026 for $4.2 billion.",
+		"2026: Acme purchased Beacon for $4.2 billion.",
+		"$4.2 billion: Acme purchased Beacon in 2026.",
+	} {
+		if externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("semantic-role or modifier reorder was admitted: %q", display)
+		}
+	}
+}
+
+func TestExternalEvidenceDisplayClaimPreservesEveryNamedRoleAndBindingRelation(t *testing.T) {
+	const candidate = "Acme purchased Beacon from Zenith."
+	const question = "Did Acme purchase Beacon from Zenith?"
+	for _, display := range []string{
+		candidate,
+		"Acme purchased Beacon from Zenith",
+	} {
+		if !externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("faithful named-role extract was rejected: %q", display)
+		}
+	}
+	for _, display := range []string{
+		// The original re-critic exploit: the subject and verb survive in order,
+		// but deleting the real object promotes the seller into its role.
+		"Acme purchased Zenith.",
+		"Acme purchased Beacon Zenith.",
+		"Beacon purchased Acme from Zenith.",
+		"Acme purchased Beacon to Zenith.",
+		"Acme purchased Beacon from Acme.",
+	} {
+		if externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("named-role deletion, substitution, or relation drift was admitted: %q", display)
+		}
+	}
+	const styledCandidate = "Acme purchased Beacon from eBay."
+	if externalEvidenceDisplayClaimAllowed(styledCandidate, "Did Acme purchase Beacon from eBay?", "Acme purchased Beacon eBay.") {
+		t.Fatal("lowercase-leading brand lost its binding relation")
+	}
+	const lowercaseCandidate = "Acme purchased Beacon from adidas."
+	const lowercaseQuestion = "Did Acme purchase Beacon from adidas?"
+	if !externalEvidenceDisplayClaimAllowed(lowercaseCandidate, lowercaseQuestion, "Acme purchased Beacon from adidas") {
+		t.Fatal("faithful extract with an all-lowercase brand was rejected")
+	}
+	if externalEvidenceDisplayClaimAllowed(lowercaseCandidate, lowercaseQuestion, "Acme purchased Beacon adidas.") {
+		t.Fatal("all-lowercase brand lost its binding relation")
+	}
+}
+
+func TestExternalEvidenceDisplayClaimPreservesMaterialObjectModifiers(t *testing.T) {
+	const candidate = "Acme acquired a minority stake in Beacon from Zenith."
+	const question = "Did Acme acquire a minority stake in Beacon from Zenith?"
+	if display := "Acme acquired minority stake in Beacon from Zenith."; !externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+		t.Fatalf("safe determiner-only shortening was rejected: %q", display)
+	}
+	for _, display := range []string{
+		"Acme acquired Beacon from Zenith.",
+		"Acme acquired a stake in Beacon from Zenith.",
+		"Acme acquired a majority stake in Beacon from Zenith.",
+		"Acme acquired a minority stake in Beacon.",
+	} {
+		if externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("material object modifier or counterparty drift was admitted: %q", display)
+		}
+	}
+}
+
+func TestExternalEvidenceDisplayClaimPreservesGenericAndHyphenatedQualifiers(t *testing.T) {
+	const candidate = "Acme signed a non-binding preliminary agreement to acquire Beacon from Zenith."
+	const question = "Did Acme sign a non-binding preliminary agreement to acquire Beacon from Zenith?"
+	if display := "Acme signed non-binding preliminary agreement to acquire Beacon from Zenith."; !externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+		t.Fatalf("grammar-only shortening was rejected: %q", display)
+	}
+	for _, display := range []string{
+		"Acme signed a preliminary agreement to acquire Beacon from Zenith.",
+		"Acme signed a non-binding agreement to acquire Beacon from Zenith.",
+		"Acme signed an agreement to acquire Beacon from Zenith.",
+	} {
+		if externalEvidenceDisplayClaimAllowed(candidate, question, display) {
+			t.Fatalf("legal or previously unseen material qualifier was dropped: %q", display)
+		}
+	}
+}
+
+func TestExternalEvidenceDisplayClaimPreservesConjunctionsAndDirectionalRelations(t *testing.T) {
+	for _, test := range []struct {
+		candidate string
+		question  string
+		display   string
+	}{
+		{
+			candidate: "Revenue increased from 10% to 20%.",
+			question:  "Did revenue increase from 10% to 20%?",
+			display:   "Revenue increased to 10% from 20%.",
+		},
+		{
+			candidate: "Acme acquired Beacon and Zenith.",
+			question:  "Did Acme acquire Beacon and Zenith?",
+			display:   "Acme acquired Beacon or Zenith.",
+		},
+		{
+			candidate: "The official program has 4,200 creators.",
+			question:  "How many creators does the official program have?",
+			display:   "An official program has 4,200 creators.",
+		},
+		{
+			candidate: "In 2026, Acme reported $10 million for Product A.",
+			question:  "What did Acme report for Product A in 2026?",
+			display:   "For 2026, Acme reported $10 million in Product A.",
+		},
+	} {
+		if externalEvidenceDisplayClaimAllowed(test.candidate, test.question, test.display) {
+			t.Fatalf("directional relation or conjunction drift was admitted: %q -> %q", test.candidate, test.display)
+		}
+	}
+}
+
+func TestExternalEvidenceDisplayClaimPreservesGrammaticalPatients(t *testing.T) {
+	for _, test := range []struct {
+		candidate string
+		question  string
+		display   string
+	}{
+		{
+			candidate: "The permit for Acme was denied by Beacon.",
+			question:  "Was the permit for Acme denied by Beacon?",
+			display:   "Permit: Acme denied by Beacon.",
+		},
+		{
+			candidate: "The growth in Acme was caused by Beacon.",
+			question:  "Was the growth in Acme caused by Beacon?",
+			display:   "Growth: Acme caused by Beacon.",
+		},
+	} {
+		if externalEvidenceDisplayClaimAllowed(test.candidate, test.question, test.display) {
+			t.Fatalf("grammatical patient drift was admitted: %q -> %q", test.candidate, test.display)
 		}
 	}
 }
@@ -867,7 +1049,7 @@ func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *test
 		t.Fatalf("production-shaped research authority=%#v", rawQuestions[0])
 	}
 	question, _ := authority["question"].(string)
-	if question == "" || len(authority) != 7 {
+	if question == "" || len(authority) != 8 || authority["research_kind"] != "direct_evidence" {
 		t.Fatalf("production-shaped research authority=%#v", authority)
 	}
 

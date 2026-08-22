@@ -162,7 +162,7 @@ func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithConversationOpe
 		if err := app.verifyGoalChildRoute(artifact); err != nil {
 			return scoutAgentThread{}, err
 		}
-		parent, parentOK := authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
+		parent, parentOK := app.authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
 		if !parentOK {
 			return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
 		}
@@ -201,7 +201,7 @@ func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithConversationOpe
 	if parentID == "" {
 		return scoutAgentThread{}, fmt.Errorf("that deliverable is not linked to a workstream that can take feedback yet")
 	}
-	parent, ok := authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
+	parent, ok := app.authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
 	}
@@ -219,7 +219,7 @@ func (app *kanbanBoardApp) revalidateArtifactSnapshot(expected meetingMemoryEntr
 	if app == nil || app.memory == nil || strings.TrimSpace(expected.ID) == "" {
 		return meetingMemoryEntry{}, false
 	}
-	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(expected))
+	header := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(expected))
 	return app.memory.artifactSnapshotIfHeaderMatches(expected.ID, header)
 }
 
@@ -380,7 +380,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	// Mark running WITHOUT touching text or title: a failed follow-up must be
 	// able to restore the prior good state untouched.
-	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	expectedHeader := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
 	runningMetadata := map[string]string{
 		"status":            "running",
 		"threadStatus":      "running",

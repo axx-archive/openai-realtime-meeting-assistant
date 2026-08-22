@@ -141,6 +141,10 @@ type roomLiveState struct {
 	// it so provider callbacks from audio buffered before the transition cannot
 	// persist into the next recording interval.
 	recordingEpoch uint64
+	// recordingStatusRevision orders every user-visible transcription status
+	// edge, including provider connect/disconnect refinements that do not change
+	// the hard capture epoch. It is guarded by app.mu and never reused.
+	recordingStatusRevision uint64
 
 	// speaker attribution + active speaker, fed by THIS room's mixer activity
 	// listener (roomAudioActivityListener).
@@ -297,6 +301,7 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		recordingEnabled:           true,
 		recordingUpdatedAt:         now,
 		recordingEpoch:             1,
+		recordingStatusRevision:    1,
 		chatBuckets:                map[string]*guestChatBucket{},
 		mediaStateBuckets:          map[string]*guestChatBucket{},
 		telemetryBuckets:           map[string]*guestChatBucket{},

@@ -53,7 +53,8 @@ test("iPad keeps destination, conversation, and selected thread context together
   assert.match(rootNavigator, /activeRoute === 'ChannelRiff'/);
   assert.match(rootNavigator, /isWorkstationWidth && \(activeRoute === 'NewConversation' \|\| activeRoute === 'CreateRoom'\)/);
   assert.match(rootNavigator, /presentation: 'card'/);
-  assert.doesNotMatch(rootNavigator, /presentation: 'fullScreenModal'/);
+  assert.match(rootNavigator, /name="DeckViewer"[\s\S]*?presentation: 'fullScreenModal'/);
+  assert.equal((rootNavigator.match(/presentation: 'fullScreenModal'/g) ?? []).length, 1);
 });
 
 test("Chat thread opening stacks on Chat, same pattern Meet uses for Room", () => {

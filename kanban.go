@@ -116,9 +116,13 @@ type participantMediaState struct {
 }
 
 type roomRecordingState struct {
-	Enabled   bool   `json:"enabled"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
-	UpdatedBy string `json:"updatedBy,omitempty"`
+	Enabled        bool   `json:"enabled"`
+	Available      bool   `json:"available"`
+	Connected      bool   `json:"connected"`
+	Revision       uint64 `json:"revision"`
+	StatusRevision uint64 `json:"statusRevision"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
+	UpdatedBy      string `json:"updatedBy,omitempty"`
 }
 
 type meetingArchive struct {
@@ -1640,11 +1644,18 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
-	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
-	// on the first response with no route HTTP. The client flips to auto via
-	// session.update only when the user's transcription indicates an action
-	// request (work/approval/unavailable), then resets to none after the tool call.
-	session["tool_choice"] = "none"
+	// One completed utterance owns exactly one router/no-effect decision. The
+	// reasoning Realtime schema otherwise permits parallel tool calls, which can
+	// mint distinct call ids for the same spoken turn. Clients still validate the
+	// terminal batch defensively before executing anything.
+	session["parallel_tool_calls"] = false
+	// Every accepted user turn enters the same server-owned conversation route
+	// as typed Scout before the model may speak. The only alternative is the
+	// no-effect do_nothing escape hatch for silence/noise/abandoned fragments.
+	// A post-tool response may override this to none solely to speak the exact
+	// durable server result; the session itself remains required for the next
+	// completed user utterance.
+	session["tool_choice"] = "required"
 	// Private Scout is a direct one-to-one conversation, so provider-side VAD
 	// can create responses immediately. Shared rooms deliberately wait for the
 	// server's deterministic Scout-invocation gate before response.create.
@@ -1677,11 +1688,11 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfigForThread(model, use
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime conversation outside the video room.",
-		"# Conversational voice contract\nFor casual chat, greetings, and simple questions you can answer from general knowledge, speak your answer directly. For anything that needs platform data — channels, messages, activity, work status, memory, artifacts, meetings, team context, or what happened — call route_conversation_turn with the user's exact words. The server retrieves authorized context and returns the answer. Also call route_conversation_turn for explicit action requests (starting work, launching something, sending, approving). Use do_nothing only for silence, noise, or an abandoned fragment.",
+		"# Conversational voice contract\nFor every completed natural-language user utterance, call route_conversation_turn exactly once with the user's exact words before speaking. This includes greetings, ordinary conversation, Brain or company-memory questions, channels and messages, meetings, navigation, approvals, and every work request supported by typed Scout — presentations, documents and reports, images, research, design, and general work. Speak the durable server result exactly; do not add an earlier answer, paraphrase it, or call the route a second time. Use do_nothing only for silence, noise, or an abandoned fragment that is not an accepted natural-language turn.",
 		"# Authority boundary\nYou never choose a tool, deliverable template, model, provider, reasoning effort, budget, authority, channel, audience, or effect. route_conversation_turn accepts natural language only. The server may start safe private work, hold a governed effect for approval, ask one clarification, or report a capability unavailable. Never claim work started, changed, sent, published, deleted, or saved unless the returned server result says so.",
 		"# Surface boundary\nYou are NOT the room's shared voice. Do not say the room can hear you and do not treat the user as a meeting participant. The Kanban Board is retired. Direct artifact, channel, file, memory, notification, package, grill, posting, publication, deletion, and goal tools are unavailable on this model-controlled surface until each is individually admitted behind the server conversation contract.",
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly. You do not have direct access to platform data; route questions about channels, activity, work, or memory through route_conversation_turn so the server can retrieve authorized context.",
+		"# Behavior\nKeep the spoken delivery brief and natural, but never answer from model memory. You do not have direct access to platform or company data; route_conversation_turn is the only authority for accepted user turns. Current Work and Project context is server-resolved through that route. If that context is unavailable or ambiguous, say so instead of guessing.",
 	}, "\n\n")
 }
 
@@ -4618,6 +4629,11 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceSessionModelTool(ctx context
 	}
 	result := privateRealtimeConversationResult(response, thread.ID)
 	result["voice_session_id"] = voiceSessionID
+	// Client navigation actions never rebind or publish this owner-private
+	// transcript. The stable context receipt makes that continuity explicit
+	// without changing the shared typed Scout action/copy contract.
+	result["voice_context_thread_id"] = thread.ID
+	result["voice_context_policy"] = "private_scout_thread"
 	return result, false, nil
 }
 
@@ -4769,6 +4785,13 @@ func privateRealtimeConversationResult(response map[string]any, fallbackThreadID
 	result["message"] = messageText
 	result["thread_id"] = threadID
 	result["approval_required"] = outcome == string(conversationIntentApprovalRequired)
+	// Typed Scout may return server-minted UI actions (for example, opening an
+	// admitted destination). Voice uses the exact same route, so preserve that
+	// envelope for web/native clients rather than silently dropping it. This
+	// does not admit any direct Realtime tools or let the model construct actions.
+	if actions, ok := response["actions"]; ok {
+		result["actions"] = actions
+	}
 	return result
 }
 
@@ -8201,6 +8224,10 @@ func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled b
 		if state.recordingEpoch == 0 {
 			state.recordingEpoch = 1
 		}
+		state.recordingStatusRevision++
+		if state.recordingStatusRevision == 0 {
+			state.recordingStatusRevision = 1
+		}
 		epoch = state.recordingEpoch
 		if state.id == officeRoomID {
 			lane = app.transcriptLane
@@ -8256,15 +8283,49 @@ func roomRecordingAnnouncementText(recording roomRecordingState) string {
 }
 
 func (app *kanbanBoardApp) roomRecordingStateLocked(room *roomLiveState) roomRecordingState {
+	available := false
+	connected := false
+	if room != nil && transcriptionLaneEnabled() {
+		var lane *meetingTranscriptionLane
+		if room.id == officeRoomID {
+			lane = app.transcriptLane
+		} else {
+			lane = room.lane
+		}
+		available = lane != nil
+		connected = lane != nil && lane.isConnected()
+	}
 	state := roomRecordingState{
-		Enabled:   room.recordingEnabled,
-		UpdatedBy: room.recordingUpdatedBy,
+		Enabled:        room.recordingEnabled,
+		Available:      available,
+		Connected:      connected,
+		Revision:       room.recordingEpoch,
+		StatusRevision: room.recordingStatusRevision,
+		UpdatedBy:      room.recordingUpdatedBy,
 	}
 	if !room.recordingUpdatedAt.IsZero() {
 		state.UpdatedAt = room.recordingUpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 
 	return state
+}
+
+// roomSnapshotForTranscriptionConnectionEdge mints one monotonic authority
+// revision for a provider connection refinement and snapshots it under the
+// same room lock. WebSocket delivery may reorder, but no older connected or
+// disconnected frame can then overwrite a newer one on the client.
+func (app *kanbanBoardApp) roomSnapshotForTranscriptionConnectionEdge(roomID string) map[string]any {
+	if app == nil {
+		return nil
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	room := app.roomLiveLocked(roomID)
+	room.recordingStatusRevision++
+	if room.recordingStatusRevision == 0 {
+		room.recordingStatusRevision = 1
+	}
+	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity())
 }
 
 func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {

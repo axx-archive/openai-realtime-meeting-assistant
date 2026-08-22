@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 type denyArtifactActionAuthorizer struct{ denied ACLAction }
@@ -32,6 +32,89 @@ func dealRoomTestEnv(t *testing.T) (adminCookies, memberCookies []*http.Cookie) 
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!"), loginAs(t, "tim@shareability.com", "B0NFIRE!")
 }
 
+func TestDealRoomBoundArtifactUsesReceiverAppWhenGlobalAppIsPoisoned(t *testing.T) {
+	receiver := newIsolatedKanbanBoardApp(t)
+	source, created, err := receiver.ensureScoutChatThread("deal-room-receiver-source", "aj@shareability.com", "AJ", "Receiver source", scoutChatVisibilityPublic, []string{"e@shareability.com"})
+	if err != nil || !created {
+		t.Fatalf("create receiver source: created=%t err=%v", created, err)
+	}
+	artifact, _, err := receiver.createOSArtifactWithMetadata("research", "Receiver binder", "# Receiver binder", "AJ", map[string]string{
+		"artifactContract": "package_binder_v1",
+		"originKind":       agentThreadOriginChannel,
+		"originId":         source.ID,
+		"originSurface":    "chat:" + source.ID,
+		"requestedBy":      "aj@shareability.com",
+		"status":           artifactStatusApproved,
+		"title":            "Receiver assembled binder",
+		"toolTemplate":     "package_assembly",
+	})
+	if err != nil {
+		t.Fatalf("create receiver artifact: %v", err)
+	}
+	pkg, err := receiver.createVenturePackage("Receiver package", "receiver-scoped authority", "AJ")
+	if err != nil {
+		t.Fatalf("create receiver package: %v", err)
+	}
+	if _, err := receiver.attachToPackage(pkg.ID, packageRefTypeArtifact, artifact.ID, "AJ"); err != nil {
+		t.Fatalf("attach receiver artifact: %v", err)
+	}
+	artifact, found := receiver.osArtifactByID(artifact.ID)
+	if !found {
+		t.Fatal("receiver artifact disappeared after package attachment")
+	}
+	receiverHeader := receiver.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	record := dealRoomRecord{
+		PackageID:  pkg.ID,
+		ArtifactID: artifact.ID,
+		TenantID:   receiverHeader.TenantID,
+		BoundArtifacts: map[string]dealRoomArtifactBinding{
+			artifact.ID: {
+				Revision:      artifactVersion(artifact),
+				ACLGeneration: receiverHeader.ACLVersion,
+				ContentDigest: artifactCapabilityDigest(artifact),
+			},
+		},
+	}
+
+	poison := newIsolatedKanbanBoardApp(t)
+	if _, created, err := poison.ensureScoutChatThread(source.ID, "e@shareability.com", "E", "Unrelated private source", scoutChatVisibilityPrivate, nil); err != nil || !created {
+		t.Fatalf("create poisoned global source: created=%t err=%v", created, err)
+	}
+	poisonHeader := poison.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	if receiverHeader.Visibility != scoutChatVisibilityPublic || poisonHeader.Visibility != scoutChatVisibilityPrivate || poisonHeader.OwnerEmail != "e@shareability.com" {
+		t.Fatalf("fixture did not create conflicting receiver/global authority: receiver=%+v poison=%+v", receiverHeader, poisonHeader)
+	}
+
+	previousApp := kanbanApp
+	kanbanApp = poison
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	type boundArtifactResult struct {
+		artifact meetingMemoryEntry
+		binding  dealRoomArtifactBinding
+		found    bool
+	}
+	completed := make(chan boundArtifactResult, 1)
+	poison.memory.mu.Lock()
+	go func() {
+		boundArtifact, binding, ok := receiver.dealRoomBoundArtifact(record, artifact.ID)
+		completed <- boundArtifactResult{artifact: boundArtifact, binding: binding, found: ok}
+	}()
+
+	var result boundArtifactResult
+	select {
+	case result = <-completed:
+		poison.memory.mu.Unlock()
+	case <-time.After(2 * time.Second):
+		poison.memory.mu.Unlock()
+		<-completed
+		t.Fatal("dealRoomBoundArtifact consulted the locked process-global app instead of the receiver app")
+	}
+	if !result.found || result.artifact.ID != artifact.ID || result.binding != record.BoundArtifacts[artifact.ID] {
+		t.Fatalf("receiver-bound artifact result=%+v, want exact receiver snapshot", result)
+	}
+}
+
 func TestDealRoomCapabilityStoresOnlyHashAndRejectsEditedBoundGalleryArtifact(t *testing.T) {
 	admin, member := dealRoomTestEnv(t)
 	packageID, _ := seedPackageWithBinder(t, "# Bound cover\n\nImmutable at approval")
@@ -49,7 +132,10 @@ func TestDealRoomCapabilityStoresOnlyHashAndRejectsEditedBoundGalleryArtifact(t 
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Bound gallery deck") {
 		t.Fatalf("pre-edit page status=%d", page.Code)
 	}
-	renderHref := html.UnescapeString(regexp.MustCompile(`/artifacts/render\?id=[^"]+`).FindString(page.Body.String()))
+	renderHref := url + "?artifact=" + deck.ID + "&view=deck"
+	if !strings.Contains(page.Body.String(), html.EscapeString(renderHref)) {
+		t.Fatalf("page did not contain room-scoped deck URL: %s", page.Body.String())
+	}
 	if _, _, err := kanbanApp.memory.updateOSArtifact(deck.ID, "", "<!doctype html><html><body>unapproved gallery v2</body></html>", "AJ"); err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +143,108 @@ func TestDealRoomCapabilityStoresOnlyHashAndRejectsEditedBoundGalleryArtifact(t 
 	if after.Code != http.StatusOK || strings.Contains(after.Body.String(), "Bound gallery deck") || strings.Contains(after.Body.String(), "unapproved gallery v2") {
 		t.Fatalf("edited gallery leaked under old capability: status=%d", after.Code)
 	}
-	render := httptest.NewRecorder()
-	artifactRenderHandler(render, httptest.NewRequest(http.MethodGet, renderHref, nil))
+	render := dealRoomRequest(t, http.MethodGet, renderHref, "", nil)
 	if render.Code != http.StatusNotFound || strings.Contains(render.Body.String(), "unapproved gallery v2") {
 		t.Fatalf("old render capability served edit: status=%d body=%s", render.Code, render.Body.String())
 	}
+}
+
+func TestDealRoomManagementReportsEffectiveRevocationWhilePreservingStoredStatus(t *testing.T) {
+	t.Run("parent admission", func(t *testing.T) {
+		setupAuthTestEnv(t)
+		fixture := seedDocumentReportQualityFixture(t, 2)
+		if _, changed, err := fixture.app.memory.updateOSArtifactMetadata(fixture.report.ID, map[string]string{"status": artifactStatusApproved}); err != nil || !changed {
+			t.Fatalf("approve report before review: changed=%t err=%v", changed, err)
+		}
+		pkg, err := fixture.app.createVenturePackage("Western opportunity", "market opportunity", "AJ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.app.attachToPackage(pkg.ID, packageRefTypeArtifact, fixture.report.ID, "AJ"); err != nil {
+			t.Fatal(err)
+		}
+		attachFreshDocumentRender(t, &fixture)
+		if _, changed, err := fixture.app.memory.updateOSArtifactMetadata(fixture.report.ID, map[string]string{"status": artifactStatusApproved}); err != nil || !changed {
+			t.Fatalf("approve exact rendered report: changed=%t err=%v", changed, err)
+		}
+		fixture.fileJury(t, 9.4, 2, "KEEP")
+		fileAdmittedPublishedDocument(t, &fixture)
+
+		previousApp := kanbanApp
+		kanbanApp = fixture.app
+		t.Cleanup(func() { kanbanApp = previousApp })
+		admin := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+		member := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+		publicURL := approveDealRoomForTest(t, admin, member, pkg.ID)
+		before := dealRoomRequest(t, http.MethodGet, "/assistant/deal-room/list", "", member)
+		rooms, _ := decodeJSON(t, before)["rooms"].([]any)
+		room, _ := rooms[0].(map[string]any)
+		if room["status"] != dealRoomStatusActive || room["storedStatus"] != dealRoomStatusActive ||
+			room["effectiveStatus"] != dealRoomStatusActive || room["available"] != true {
+			t.Fatalf("fresh room payload=%v, want stored/effective active", room)
+		}
+
+		parent := mustArtifact(t, fixture.app, fixture.parentID)
+		blockedPlan := *fixture.plan
+		blockedPlan.State = goalStateBlocked
+		blockedRaw, err := json.Marshal(blockedPlan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		childVersion := artifactVersion(mustArtifact(t, fixture.app, fixture.report.ID))
+		if _, changed, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "AJ", map[string]string{"goalPlan": string(blockedRaw)}); err != nil || !changed {
+			t.Fatalf("block parent only: changed=%t err=%v", changed, err)
+		}
+		if got := artifactVersion(mustArtifact(t, fixture.app, fixture.report.ID)); got != childVersion {
+			t.Fatalf("parent-only revocation changed child version: before=%d after=%d", childVersion, got)
+		}
+		after := dealRoomRequest(t, http.MethodGet, "/assistant/deal-room/list", "", member)
+		rooms, _ = decodeJSON(t, after)["rooms"].([]any)
+		room, _ = rooms[0].(map[string]any)
+		if room["status"] != dealRoomStatusActive || room["storedStatus"] != dealRoomStatusActive ||
+			room["effectiveStatus"] != dealRoomEffectiveStatusUnavailable || room["available"] != false || room["url"] != nil {
+			t.Fatalf("parent-revoked room payload=%v, want stored active/effective unavailable", room)
+		}
+		if opened := dealRoomRequest(t, http.MethodGet, publicURL, "", nil); opened.Code != http.StatusNotFound {
+			t.Fatalf("parent-revoked room status=%d body=%s, want 404", opened.Code, opened.Body.String())
+		}
+	})
+
+	t.Run("package membership", func(t *testing.T) {
+		admin, member := dealRoomTestEnv(t)
+		packageID, artifactID := seedPackageWithBinder(t, "# Bound package")
+		publicURL := approveDealRoomForTest(t, admin, member, packageID)
+		if _, err := kanbanApp.detachFromPackage(packageID, packageRefTypeArtifact, artifactID, "AJ"); err != nil {
+			t.Fatal(err)
+		}
+		listed := dealRoomRequest(t, http.MethodGet, "/assistant/deal-room/list", "", member)
+		rooms, _ := decodeJSON(t, listed)["rooms"].([]any)
+		room, _ := rooms[0].(map[string]any)
+		if room["storedStatus"] != dealRoomStatusActive || room["effectiveStatus"] != dealRoomEffectiveStatusUnavailable || room["available"] != false {
+			t.Fatalf("package-revoked room payload=%v, want stored active/effective unavailable", room)
+		}
+		if opened := dealRoomRequest(t, http.MethodGet, publicURL, "", nil); opened.Code != http.StatusNotFound {
+			t.Fatalf("package-revoked room status=%d, want 404", opened.Code)
+		}
+	})
+
+	t.Run("ACL generation", func(t *testing.T) {
+		admin, member := dealRoomTestEnv(t)
+		packageID, artifactID := seedPackageWithBinder(t, "# ACL-bound package")
+		publicURL := approveDealRoomForTest(t, admin, member, packageID)
+		if _, changed, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, map[string]string{"aclVersion": "2"}); err != nil || !changed {
+			t.Fatalf("bump ACL generation: changed=%t err=%v", changed, err)
+		}
+		listed := dealRoomRequest(t, http.MethodGet, "/assistant/deal-room/list", "", member)
+		rooms, _ := decodeJSON(t, listed)["rooms"].([]any)
+		room, _ := rooms[0].(map[string]any)
+		if room["storedStatus"] != dealRoomStatusActive || room["effectiveStatus"] != dealRoomEffectiveStatusUnavailable || room["available"] != false {
+			t.Fatalf("ACL-revoked room payload=%v, want stored active/effective unavailable", room)
+		}
+		if opened := dealRoomRequest(t, http.MethodGet, publicURL, "", nil); opened.Code != http.StatusNotFound {
+			t.Fatalf("ACL-revoked room status=%d, want 404", opened.Code)
+		}
+	})
 }
 
 func TestLegacyPlaintextDealRoomCapabilityFailsClosed(t *testing.T) {
@@ -510,8 +693,7 @@ func dealRoomOpenSignalCount(t *testing.T, artifactID string) int {
 
 // The gallery renders ONLY final/approved artifacts below the (still escaped,
 // unchanged) binder cover: title + type badge + version + gateOutcome/rubric
-// score, an html_deck linking to the sandboxed render route with a page-build
-// render token that actually authorizes the render, and a pdf linking to the
+// score, an html_deck linking to the room-scoped deck renderer, and a pdf linking to the
 // deal-room-scoped serve — never the session-gated blob route. Draft work
 // never appears.
 func TestDealRoomGalleryRendersOnlyApprovedArtifacts(t *testing.T) {
@@ -558,15 +740,13 @@ func TestDealRoomGalleryRendersOnlyApprovedArtifacts(t *testing.T) {
 		t.Fatal("a draft artifact must never appear in the gallery")
 	}
 
-	// The deck href is the sandboxed render route with a token minted at page
-	// build — and that token authorizes the render for real.
-	renderHref := regexp.MustCompile(`/artifacts/render\?id=[^"]+`).FindString(page)
-	if renderHref == "" || !strings.Contains(renderHref, deck.ID) {
+	// The deck href remains scoped to this Deal Room capability and authorizes
+	// the exact bound deck for real.
+	renderHref := url + "?artifact=" + deck.ID + "&view=deck"
+	if !strings.Contains(page, html.EscapeString(renderHref)) {
 		t.Fatalf("no render link for the deck in page: %s", page)
 	}
-	renderReq := httptest.NewRequest(http.MethodGet, html.UnescapeString(renderHref), nil)
-	renderRec := httptest.NewRecorder()
-	artifactRenderHandler(renderRec, renderReq)
+	renderRec := dealRoomRequest(t, http.MethodGet, renderHref, "", nil)
 	if renderRec.Code != http.StatusOK || renderRec.Body.String() != deckBody {
 		t.Fatalf("page-build render token did not authorize the deck: status=%d", renderRec.Code)
 	}

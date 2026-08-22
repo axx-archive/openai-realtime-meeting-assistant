@@ -172,6 +172,96 @@ func TestArtifactExportPDFLateFirstCallbackStillAttachesAfterRetry(t *testing.T)
 	}
 }
 
+func TestArtifactExportPDFReusesExactCompletedAssetWithoutQueueOrVersionMutation(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	queueDir := setupRenderSidecarEnv(t)
+	t.Setenv("BONFIRE_RUNNER_TOKEN", "render-secret")
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "completed-idempotency-runner"); err != nil {
+		t.Fatal(err)
+	}
+	artifact := seedShareArtifact(t, "draft", "<!doctype html><html><body>completed exact deck</body></html>", map[string]string{"type": artifactTypeHTMLDeck})
+	firstBody := fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, artifact.ID, artifactVersion(artifact))
+	first := postPDFExportForIdempotencyTest(firstBody, member)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first export status=%d body=%s", first.Code, first.Body.String())
+	}
+	jobID := strings.TrimSpace(fmt.Sprint(decodeJSON(t, first)["jobId"]))
+	callback := renderRunnerCallbackPayload{
+		JobID: jobID, ArtifactID: artifact.ID, Kind: renderJobKindDeck, Status: renderJobStatusComplete,
+		PDFBase64: base64.StdEncoding.EncodeToString([]byte("%PDF-1.7 exact completed deck")), Flattened: true, PageCount: 5,
+	}
+	landed := renderCallbackRequest(t, "render-secret", callback)
+	if landed.Code != http.StatusOK || !strings.Contains(landed.Body.String(), `"attached":true`) {
+		t.Fatalf("callback status=%d body=%s", landed.Code, landed.Body.String())
+	}
+	current, found := kanbanApp.osArtifactByID(artifact.ID)
+	if !found {
+		t.Fatal("completed artifact disappeared")
+	}
+	asset, hasPDF := firstArtifactAssetOfKind(current, "pdf")
+	if !hasPDF {
+		t.Fatalf("completed artifact assets=%v, want PDF", artifactAssets(current))
+	}
+	beforeArtifact, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueFiles := renderQueueJSONFiles(t, queueDir)
+	if len(queueFiles) != 1 {
+		t.Fatalf("queue files=%v, want original job only", queueFiles)
+	}
+	beforeJob, err := os.ReadFile(filepath.Join(queueDir, queueFiles[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A completed exact export must be retrievable even when no renderer is
+	// healthy: no new work is necessary and the existing artifact is the result.
+	if err := os.Remove(renderRunnerHeartbeatPath()); err != nil {
+		t.Fatal(err)
+	}
+	retryBody := fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, current.ID, artifactVersion(current))
+	retry := postPDFExportForIdempotencyTest(retryBody, member)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("completed retry status=%d body=%s, want 200", retry.Code, retry.Body.String())
+	}
+	payload := decodeJSON(t, retry)
+	returnedAsset, _ := payload["asset"].(map[string]any)
+	if payload["reused"] != true || payload["renderStatus"] != renderJobStatusComplete ||
+		fmt.Sprint(returnedAsset["ref"]) != asset.Ref || int(payload["artifactVersion"].(float64)) != artifactVersion(current) {
+		t.Fatalf("completed retry payload=%v, want exact asset %s at v%d", payload, asset.Ref, artifactVersion(current))
+	}
+	after, _ := kanbanApp.osArtifactByID(artifact.ID)
+	afterArtifact, err := json.Marshal(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterArtifact) != string(beforeArtifact) {
+		t.Fatalf("completed retry mutated artifact\nbefore=%s\nafter=%s", beforeArtifact, afterArtifact)
+	}
+	if files := renderQueueJSONFiles(t, queueDir); len(files) != 1 || files[0] != queueFiles[0] {
+		t.Fatalf("completed retry queued work: before=%v after=%v", queueFiles, files)
+	}
+	afterJob, err := os.ReadFile(filepath.Join(queueDir, queueFiles[0]))
+	if err != nil || string(afterJob) != string(beforeJob) {
+		t.Fatalf("completed retry mutated original job: err=%v", err)
+	}
+
+	if _, changed, err := kanbanApp.memory.updateOSArtifactWithMetadata(artifact.ID, "", "<!doctype html><html><body>edited after completed PDF</body></html>", "AJ", nil); err != nil || !changed {
+		t.Fatalf("edit after completed PDF: changed=%t err=%v", changed, err)
+	}
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "completed-idempotency-runner"); err != nil {
+		t.Fatal(err)
+	}
+	edited, _ := kanbanApp.osArtifactByID(artifact.ID)
+	editedRetry := postPDFExportForIdempotencyTest(fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, edited.ID, artifactVersion(edited)), member)
+	if editedRetry.Code != http.StatusAccepted || decodeJSON(t, editedRetry)["reused"] != false {
+		t.Fatalf("edited retry status=%d body=%s, want a new queued render", editedRetry.Code, editedRetry.Body.String())
+	}
+	if files := renderQueueJSONFiles(t, queueDir); len(files) != 2 {
+		t.Fatalf("edited revision reused completed PDF: queue files=%v, want old receipt plus new job", files)
+	}
+}
+
 func TestArtifactExportPDFStaleRevisionCannotReuseOrAttach(t *testing.T) {
 	_, member := shareLinkTestEnv(t)
 	queueDir := setupRenderSidecarEnv(t)

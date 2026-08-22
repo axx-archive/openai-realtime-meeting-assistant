@@ -2256,7 +2256,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return nil, fmt.Errorf("chat thread is archived")
 	}
 	if thread.Riff != nil && (strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != "" || projectLinkBinding.Token.Kind != "") {
-		return nil, fmt.Errorf("Private Riff accepts conversation only; start or revise durable work from the source channel or a regular private thread")
+		return nil, fmt.Errorf("Private Riff work starts from a natural-language request; direct artifact, tool, and project-link overrides are not accepted")
 	}
 	if turnOperation.ID != "" {
 		if replay, found, replayErr := app.replayConversationTurnInThread(ctx, user.Email, thread, turnOperation); found || replayErr != nil {
@@ -2637,6 +2637,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			app.notifyScoutChatTargets(thread, userMessage)
 		}
 	}
+	companySourceLocksHeld := false
 	commitUserMessage := func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
 		// A response caused by a threaded human reply belongs to that same side
 		// conversation. Persist the immutable ancestry on every immediate Scout
@@ -2672,7 +2673,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				return thread, nil
 			}
 		}
-		saved, err := app.commitScoutChatThreadMessagesWithContext(ctx, user.Email, threadID, messages...)
+		var saved scoutChatThreadRecord
+		var err error
+		if companySourceLocksHeld {
+			saved, err = app.commitScoutChatThreadMessagesLockedWithContext(ctx, user.Email, threadID, messages...)
+		} else {
+			saved, err = app.commitScoutChatThreadMessagesWithContext(ctx, user.Email, threadID, messages...)
+		}
 		if err == nil {
 			attachmentCommitted = true
 		}
@@ -2859,7 +2866,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// counts as summoning Scout, so this branch runs regardless of channel
 	// visibility and never needs @scout.
 	if followUpArtifactID = strings.TrimSpace(followUpArtifactID); followUpArtifactID != "" {
-		artifact, ok := authorizedArtifactForActions(ctx, user, followUpArtifactID, ACLReadContent, ACLExecute, ACLWrite)
+		artifact, ok := app.authorizedArtifactForActions(ctx, user, followUpArtifactID, ACLReadContent, ACLExecute, ACLWrite)
 		if !ok {
 			return nil, fmt.Errorf("that report is unavailable")
 		}
@@ -3346,7 +3353,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// Work requested from a public/channel surface is never silently converted
 	// into a private launch. Preserve channel mention policy and hold the exact
 	// server-minted work at an audience-expansion confirmation boundary.
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil {
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && routedIntent.Outcome == conversationIntentStartPrivateWork && routedIntent.Work != nil &&
+		!(routedIntent.Work.Kind == conversationWorkNativeAction && scoutNativeActionAdmittedReadOnly(routedIntent.Work.ToolID)) {
 		work := *routedIntent.Work
 		routedIntent = conversationIntentDecision{Outcome: conversationIntentApprovalRequired, Approval: &conversationApprovalDecision{
 			EffectClass: "expanded_audience",
@@ -3360,13 +3368,15 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		workQuery, _ = appendScoutReplyContextObjective(workQuery, turnContext.WorkContext, turnContext.SourceComplete)
 	}
 	routedVerdict, _ := scoutRouterVerdictFromConversationIntent(routedIntent, workQuery)
-	// Private Riff v1 is a source-bound analysis conversation. Starting work or
-	// taking product actions would require carrying the public checkpoint through
-	// every downstream WorkRun and terminal effect. Refuse that widening until
-	// the complete launch spine has the same reauthorization contract.
+	// A Private Riff may now start owner-only internal work because the launch
+	// receipt carries its exact public checkpoint and the resulting artifact
+	// inherits the Riff's private origin surface. Native actions, publication,
+	// external effects, and client-selected tool overrides remain fenced.
 	if thread.Riff != nil {
 		routedIntent = constrainPrivateRiffDecision(routedIntent)
-		routedVerdict = nil
+		if routedIntent.Outcome != conversationIntentStartPrivateWork {
+			routedVerdict = nil
+		}
 	}
 	if routedIntent.Outcome == conversationIntentStartPrivateWork && routedVerdict != nil && routedVerdict.action != nil {
 		result, _, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
@@ -3384,7 +3394,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			Kind:              "message",
 			Role:              "scout",
 			AuthorName:        scoutParticipantName,
-			IntentOutcome:     string(conversationIntentApprovalRequired),
+			IntentOutcome:     string(conversationIntentStartPrivateWork),
 			CausedByMessageID: userMessage.ID,
 			Text:              answerText,
 			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -3737,6 +3747,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// of fuzzy memory hits. Legacy ask-bar callers may still use that fallback;
 	// a conversational Scout turn requires an actual model answer.
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, responseStyle))
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		answerContext = withAssistantConversationContinuityRecall(answerContext)
+	}
 	if meetingConversation != nil || thread.Riff != nil {
 		answerContext = withAssistantExactSourceContext(answerContext)
 	}
@@ -3782,6 +3795,46 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		response["unavailable"] = map[string]any{"code": "answer_unavailable", "message": unavailableMessage.Text}
 		return response, nil
 	}
+	var currentCompanySources []currentCompanyConversationSource
+	hasConversationSourceContext := false
+	for _, entry := range result.contextEntries {
+		if entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindTranscript && oneOf(strings.TrimSpace(entry.Metadata["source"]), transcriptSourceChannel, transcriptSourceRiff) {
+			hasConversationSourceContext = true
+			break
+		}
+	}
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && hasConversationSourceContext {
+		// Retrieval authorization is not publication authority. The provider can
+		// take seconds to answer while a source message or channel audience changes.
+		// Re-read every company-channel row now and retain its authority lock until
+		// this private answer is committed. A change lands before this point and the
+		// stale answer is discarded; otherwise the source mutation waits for commit.
+		var releaseCompanySources func()
+		var sourceErr error
+		currentCompanySources, releaseCompanySources, sourceErr = app.lockCurrentCompanyConversationSources(recallPrincipalForUser(user), thread.ID, result.contextEntries)
+		if sourceErr != nil {
+			unavailableMessage := scoutChatMessageRecord{
+				ID:            fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:          "message",
+				Role:          "scout",
+				AuthorName:    visibleWorkerName,
+				IntentOutcome: string(conversationIntentUnavailable),
+				Text:          "I couldn't answer safely because a company source changed while I was working. Your message is saved; ask again for a current answer.",
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, commitErr := commitUserMessage(userMessage, unavailableMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = unavailableMessage
+			response["thread"] = saved
+			response["intentOutcome"] = string(conversationIntentUnavailable)
+			response["unavailable"] = map[string]any{"code": "source_changed", "message": unavailableMessage.Text}
+			return response, nil
+		}
+		companySourceLocksHeld = true
+		defer releaseCompanySources()
+	}
 	answer := strings.TrimSpace(result.answer)
 	if scoutConversationalAnswerPromisesFutureWork(answer) {
 		answer = "Nothing was scheduled from that answer. Send the exact deliverable request again; real work appears as a visible channel card when it is queued."
@@ -3808,6 +3861,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			sources[index].ThreadTitle = thread.Riff.SourceTitle
 		}
 	}
+	// A private Scout answer may be grounded in a different authorized company
+	// channel. Only post-provider, lock-held current source bodies can mint these
+	// cross-channel chips; stored transcripts and synthetic prompt headers cannot.
+	sources = appendUniqueAnswerSources(sources, groundAnswerInCurrentCompanyConversationSources(answer, currentCompanySources, 4), 4)
 	if meetingConversation != nil {
 		sources = meetingConversation.groundAnswer(answer, 4)
 		if len(sources) == 0 {
@@ -5514,7 +5571,17 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessagesWithContext(ctx context.
 	lock := app.scoutChatThreadLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
+	return app.commitScoutChatThreadMessagesLockedWithContext(ctx, viewerEmail, threadID, messages...)
+}
 
+// commitScoutChatThreadMessagesLockedWithContext is the exact commit effect for
+// callers that already hold threadID's authority lock as part of a sorted
+// multi-thread lock set. The ordinary public wrappers above remain the only
+// unlocked entrypoints.
+func (app *kanbanBoardApp) commitScoutChatThreadMessagesLockedWithContext(ctx context.Context, viewerEmail string, threadID string, messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	if len(messages) == 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat thread commit requires a message")
+	}
 	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, err

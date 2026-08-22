@@ -30,6 +30,7 @@ type Props = {
   sessionToken?: string;
   /** Direct HTML content for live html_deck path (bypasses API fetch) */
   htmlContent?: string;
+  desktopEditingOnly?: boolean;
   onEdit?: () => void;
   onPresent?: () => void;
   onExpand?: () => void;
@@ -70,6 +71,7 @@ export function InlineArtifactPreview({
   artifactId,
   sessionToken,
   htmlContent,
+  desktopEditingOnly = false,
   onEdit,
   onPresent,
   onExpand,
@@ -228,7 +230,10 @@ export function InlineArtifactPreview({
           <WebView
             ref={deckWebViewRef}
             source={deckUrl ? { uri: deckUrl } : { html: deckHtml ?? '' }}
-            style={styles.deckWebViewFill}
+            style={[
+              styles.deckWebViewFill,
+              deckNavigation.status !== 'ready' && styles.deckWebViewHidden,
+            ]}
             scrollEnabled={false}
             originWhitelist={['*']}
             javaScriptEnabled
@@ -257,6 +262,15 @@ export function InlineArtifactPreview({
               setDeckError(true);
             }}
           />
+          {deckNavigation.status !== 'ready' ? (
+            <View
+              accessibilityLabel="Fitting presentation preview"
+              accessibilityRole="progressbar"
+              style={styles.deckFitLoading}
+            >
+              <ActivityIndicator color={colors.emberText} size="small" />
+            </View>
+          ) : null}
         </View>
         <View style={styles.deckNavigation} accessibilityLabel="Presentation slide navigation">
           <Pressable
@@ -309,20 +323,14 @@ export function InlineArtifactPreview({
             <Text style={styles.deckDraftText}>Draft · needs attention</Text>
           </View>
         ) : null}
-        {/* Floating actions over the slide */}
+        {desktopEditingOnly ? (
+          <View accessibilityLabel="Editing is available on desktop" style={styles.deckDesktopBadge}>
+            <SymbolView name="desktopcomputer" size={12} tintColor={colors.onAccent} />
+            <Text maxFontSizeMultiplier={1.4} style={styles.deckDesktopText}>Edit on desktop</Text>
+          </View>
+        ) : null}
+        {/* Mobile is deliberately read-only; Present is the only deck action. */}
         <View style={styles.deckOverlayActions}>
-          {onEdit ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Edit presentation"
-              hitSlop={4}
-              onPress={onEdit}
-              style={({ pressed }) => [styles.deckActionButton, pressed && styles.deckActionPressed]}
-            >
-              <SymbolView name="pencil" size={14} tintColor={colors.onAccent} />
-              <Text style={styles.deckActionText}>Edit</Text>
-            </Pressable>
-          ) : null}
           {onPresent ? (
             <Pressable
               accessibilityRole="button"
@@ -461,6 +469,14 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: 'transparent',
   },
+  deckWebViewHidden: { opacity: 0 },
+  deckFitLoading: {
+    position: 'absolute',
+    inset: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgApp,
+  },
   deckLoadingCenter: {
     flex: 1,
     alignItems: 'center',
@@ -503,6 +519,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: space[2],
   },
+  deckDesktopBadge: {
+    position: 'absolute',
+    left: space[3],
+    bottom: space[3],
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space[3],
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(0,0,0,0.66)',
+  },
+  deckDesktopText: { ...type.label, color: colors.onAccent },
   deckDraftBanner: {
     position: 'absolute',
     left: space[3],

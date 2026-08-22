@@ -159,19 +159,21 @@ func TestPrivateArtifactIsFilteredFromFilesAndDeniedSaveAndFollowUp(t *testing.T
 
 func TestEnforcedArtifactSurfaceRegistryMatchesHandlerContracts(t *testing.T) {
 	want := map[string][]ACLAction{
-		"http.assistant.agent_followup":    {ACLReadContent, ACLExecute, ACLWrite},
-		"http.assistant.files":             {ACLReadContent, ACLWrite, ACLDelete},
-		"http.assistant.file_save":         {ACLReadContent, ACLWrite},
-		"http.assistant.deal_room_request": {ACLReadContent, ACLShare},
-		"http.artifacts":                   {ACLReadContent, ACLWrite},
-		"http.artifacts.action":            {ACLReadMetadata, ACLReadContent, ACLApprove, ACLExecute, ACLWrite},
-		"http.artifacts.open":              {ACLReadContent},
-		"http.artifacts.render_token":      {ACLReadContent, ACLExport},
-		"http.artifacts.blob":              {ACLReadContent},
-		"http.artifacts.share":             {ACLReadMetadata, ACLReadContent, ACLShare},
-		"http.artifacts.export_pdf":        {ACLExport},
-		"http.artifacts.export_pptx":       {ACLExport},
-		"http.signals.survey":              {ACLReadContent, ACLWrite},
+		"http.assistant.agent_followup":          {ACLReadContent, ACLExecute, ACLWrite},
+		"http.assistant.files":                   {ACLReadContent, ACLWrite, ACLDelete},
+		"http.assistant.file_save":               {ACLReadContent, ACLWrite},
+		"http.assistant.deal_room_request":       {ACLReadContent, ACLShare, ACLExport},
+		"http.assistant.deal_room_resolve":       {ACLReadContent, ACLShare, ACLApprove, ACLExport},
+		"http.artifacts":                         {ACLReadContent, ACLWrite},
+		"http.artifacts.final_export_capability": {ACLReadContent, ACLExport},
+		"http.artifacts.action":                  {ACLReadMetadata, ACLReadContent, ACLApprove, ACLExecute, ACLWrite},
+		"http.artifacts.open":                    {ACLReadContent},
+		"http.artifacts.render_token":            {ACLReadContent, ACLExport},
+		"http.artifacts.blob":                    {ACLReadContent},
+		"http.artifacts.share":                   {ACLReadMetadata, ACLReadContent, ACLShare, ACLExport},
+		"http.artifacts.export_pdf":              {ACLExport},
+		"http.artifacts.export_pptx":             {ACLExport},
+		"http.signals.survey":                    {ACLReadContent, ACLWrite},
 	}
 	registered := map[string]AuthorizationSurface{}
 	for _, surface := range AuthorizationSurfaces() {

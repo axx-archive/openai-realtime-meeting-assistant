@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	xhtml "golang.org/x/net/html"
 )
@@ -18,51 +19,113 @@ import (
 type processAdmittedClaim struct {
 	ID           string
 	ExactClaim   string
+	DisplayClaim string
 	RequestedURL string
 	FinalURL     string
 	Internal     bool
 }
 
+func processClaimApprovedRenderings(claim processAdmittedClaim) []string {
+	display := canonicalEvidenceText(claim.DisplayClaim)
+	exact := canonicalEvidenceText(claim.ExactClaim)
+	renderings := make([]string, 0, 2)
+	if display != "" {
+		renderings = append(renderings, display)
+	}
+	if exact != "" && exact != display {
+		renderings = append(renderings, exact)
+	}
+	return renderings
+}
+
+func processScopeContainsApprovedClaim(text string, claim processAdmittedClaim) bool {
+	visible := canonicalEvidenceText(processHTMLCommentPattern.ReplaceAllString(text, " "))
+	for _, rendering := range processClaimApprovedRenderings(claim) {
+		if strings.Contains(visible, rendering) {
+			return true
+		}
+	}
+	return false
+}
+
 type processAdmittedClaimManifest map[string]processAdmittedClaim
 
-const processForwardStatementPromptLaw = "FORWARD-STATEMENT LAW: a genuinely forward-looking recommendation or proposal may carry planned numbers only under an explicit contract. In JSON, put statement_type recommendation or proposal on that exact object and begin its visible string with the matching Recommendation:, Proposal: or Target: label; Phase N is also a proposal. Begin with one imperative action such as run, test, launch, set, or build, and keep it to that forward-looking clause. A qualitative inference may instead use statement_type inference plus a visible Inference: label, but it cannot introduce a number or URL. In Markdown, presenter notes, and slide text, begin the scope with the same visible label. A label never licenses a present or past factual assertion, external URL, or altered admitted claim. Never wrap an admitted claim with False, allegedly, reportedly, may, might, could, no longer, or any other polarity or modality. Every external URL must appear with its own exact admitted claim, never a different admitted row."
+const processForwardStatementPromptLaw = "FORWARD-STATEMENT LAW: a genuinely forward-looking recommendation or proposal may carry planned numbers only under an explicit contract. In JSON, put statement_type recommendation or proposal on that exact object and begin its visible string with the matching Recommendation:, Proposal: or Target: label; Phase N is also a proposal. Begin with one imperative action such as run, test, launch, set, or build, and keep it to that forward-looking clause. A qualitative inference may instead use statement_type inference plus a visible Inference: label, but it cannot introduce a number or URL. In Markdown, presenter notes, and slide text, begin the scope with the same visible label. A label never licenses a present or past factual assertion, external URL, or altered admitted claim. Never wrap an admitted claim with False, allegedly, reportedly, may, might, could, no longer, or any other polarity or modality. Every external URL must appear with its own approved admitted rendering, never a different admitted row."
+
+const (
+	processScopedEvidenceDisclosure = "Working hypothesis — external proof remains unresolved"
+	processScopedEvidencePromptLaw  = "SCOPED-EVIDENCE LAW: inspect the evidence dossier's Automatic scope adjustment. When it says a decision-critical external lane remains unresolved, the output is a conditional working hypothesis, never a proved answer. Copy the 64-character digest from the dossier's stride-process-evidence-dossier receipt exactly. For JSON, add these exact root fields: evidence_scope=\"scoped\", evidence_scope_receipt=<that digest>, decision_posture=\"conditional\", and evidence_scope_disclosure=\"Working hypothesis — external proof remains unresolved\". For Markdown or final deck HTML, include exactly one <!-- stride-evidence-scope:scoped digest=<that digest> --> marker and visibly render exactly \"Working hypothesis — external proof remains unresolved\". Keep decisions visibly labeled Recommendation:, Proposal:, Target:, or Inference:. Every high-consequence action such as launching, scaling, investing, committing, hiring, funding, deploying, shipping, or publishing must also be explicitly contingent on a named condition or framed as a bounded test; the label alone does not make an unconditional directive safe. Do not say the answer is proven, certain, best, the only path, a clear choice, or guaranteed. When no automatic scope adjustment was required, do not add this scoped receipt."
+)
+
+type processEvidenceGateAuthority struct {
+	Claims        processAdmittedClaimManifest
+	Adequacy      string
+	DossierDigest string
+}
 
 var (
-	processClaimMarkerPattern               = regexp.MustCompile(`(?i)(?:<!--\s*stride-claim:|\[\[claim:)([a-f0-9]{64})`)
-	processMaterialURLPattern               = regexp.MustCompile(`(?i)https://[^\s<>\[\]"']+`)
-	processMaterialCurrencyPattern          = regexp.MustCompile(`(?i)(?:[$€£¥]\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|bn|k|m|b))?|\b(?:USD|EUR|GBP|JPY|CAD|AUD)\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|bn|k|m|b))?)`)
-	processMaterialPercentPattern           = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:%|\bpercent(?:age\s+points?)?\b)`)
-	processMaterialDatePattern              = regexp.MustCompile(`(?i)\b(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))?\b`)
-	processMaterialScaledNumberPattern      = regexp.MustCompile(`(?i)\b(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+(?:\.\d+)?\s*(?:trillion|billion|million|thousand|bn|k|m|b|creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?|dollars?|euros?|pounds?|per\s+(?:day|week|month|year)))\b`)
-	processMaterialWordScalePattern         = regexp.MustCompile(`(?i)\b(?:hundreds|thousands|millions|billions|trillions)(?:\s+of)?(?:\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|dollars?|euros?|pounds?))?\b`)
-	processMaterialSpelledScalePattern      = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?\s+(?:hundred|thousand|million|billion|trillion)\b`)
-	processMaterialSpelledNominalPattern    = regexp.MustCompile(`(?i)\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
-	processMaterialCollectiveNominalPattern = regexp.MustCompile(`(?i)\b(?:(?:a|one)\s+dozen|dozens(?:\s+of)?|(?:a|one)\s+score(?:\s+of)?)\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
-	processMaterialRomanNominalPattern      = regexp.MustCompile(`\b[IVXLCDM]{2,}\s+(?i:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
-	processMaterialIntegerPattern           = regexp.MustCompile(`\b\d+\b`)
-	processMaterialQualitativePattern       = regexp.MustCompile(`(?i)\b(?:market\s+leader|category\s+leader|industry\s+leader|largest|fastest[- ]growing|most\s+popular|most\s+widely\s+used|dominant|unprecedented|first[- ]of[- ]its[- ]kind|only\s+(?:company|platform|product|brand|network))\b`)
-	processMarkdownParagraphPattern         = regexp.MustCompile(`\n\s*\n+`)
-	processHTMLCommentPattern               = regexp.MustCompile(`(?s)<!--.*?-->`)
-	processStructuralSlideRefPattern        = regexp.MustCompile(`(?i)\b(?:slide|page)\s+#?\s*\d+\b`)
-	processUnsupportedPredicatePattern      = regexp.MustCompile(`(?i)\b(?:powers|powered|drives|drove|driven|delivers|delivered|enables|enabled|reaches|reached|grew|grows|grown|increased|decreased|declined|generates|generated|converts|converted|leads|led|outperforms|outperformed|dominates|dominated|represents|represented|shows|showed|demonstrates|demonstrated|proves|proved|serves|served|sells|sold|buys|bought|uses|used|creates|created|operates|operated|spans|spanned|includes|included|contains|contained|accounts|accounted|employs|employed|supports|supported|engages|engaged|connects|connected|builds|built|owns|owned|controls|controlled|purchased|surveyed)\b`)
-	processUnsupportedCopulaPattern         = regexp.MustCompile(`(?i)\b(?:they|it|these|those|we|our\s+(?:company|platform|product|brand|network)|the\s+(?:company|market|platform|product|brand|network|audience|category|industry))\s+(?:all\s+)?(?:is|are|was|were|has|have|had|does|do|can|will|may|might|could)\b`)
-	processDeclarativeAuxiliaryPattern      = regexp.MustCompile(`(?i)\b(?:is|are|was|were|has|have|had|remains?|became|becomes?|continues?|continued|will|does|did)\b`)
-	processClaimMutationPattern             = regexp.MustCompile(`(?i)\b(?:false|untrue|allegedly|reportedly|purportedly|supposedly|apparently|possibly|perhaps|maybe|may|might|could|no\s+longer|used\s+to|does\s+not\s+apply|do\s+not\s+apply|did\s+not\s+apply)\b`)
-	processVisibleStatementPattern          = regexp.MustCompile(`(?i)^(?:#{1,6}\s*)?(?:[-*]\s*)?(recommendation|proposal|target|inference)\s*:`)
-	processVisiblePhasePattern              = regexp.MustCompile(`(?i)^(?:#{1,6}\s*)?(?:[-*]\s*)?phase\s+\d+\b`)
-	processDeckFractionCounterPattern       = regexp.MustCompile(`^0*\d{1,3}\s*/\s*0*\d{1,3}$`)
-	processDeckNamedCounterPattern          = regexp.MustCompile(`(?i)^(?:slide|page)\s+#?\s*0*\d{1,3}$`)
-	processDeckAccessibleCounterPattern     = regexp.MustCompile(`(?i)^(?:slide|page)\s+#?\s*0*\d{1,3}\s+(?:of|/)\s+0*\d{1,3}$`)
-	processDeckBareCounterPattern           = regexp.MustCompile(`^0*\d{1,3}$`)
-	processForwardActionPattern             = regexp.MustCompile(`(?i)^(?:run|test|launch|pilot|start|set|target|reach|build|create|make|design|develop|ship|publish|measure|track|compare|invite|recruit|activate|engage|ask|offer|price|fund|hire|train|deploy|expand|reduce|increase|improve|validate|prove|explore|sequence|schedule|review|audit|choose|use|add|remove|move|keep|stop|protect|reserve|name|define|map|interview|survey|try|commit|plan|open|close|transition|imagine|consider|picture|notice|remember|meet|follow|watch|listen)\b`)
-	processForwardClausePattern             = regexp.MustCompile(`(?i)\b(?:because|since|given\s+that|based\s+on|according\s+to|although|despite|whereas|while|but\s+(?:the|acme|it|they|we)|last\s+(?:year|month|week)|yesterday|previously|historically)\b`)
-	processAllowedSourceFurniture           = regexp.MustCompile(`(?i)\b(?:source|citation|official\s+source|read\s+source)\b`)
-	processJSONFieldNamePattern             = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
-	processJSONSlidePathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\]$`)
-	processJSONElementPathPattern           = regexp.MustCompile(`^\$\.slides\[\d+\]\.elements\[\d+\]$`)
-	processJSONRootWrapperPathPattern       = regexp.MustCompile(`^\$\.(canvas|grid|palette|typography)$`)
-	processJSONSceneWrapperPathPattern      = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution)$`)
-	processJSONStyleWrapperPathPattern      = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.style\.(palette|typography|position|dimensions)$`)
+	processClaimMarkerPattern                      = regexp.MustCompile(`(?i)(?:<!--\s*stride-claim:|\[\[claim:)([a-f0-9]{64})`)
+	processMaterialURLPattern                      = regexp.MustCompile(`(?i)https://[^\s<>\[\]"']+`)
+	processMaterialCurrencyPattern                 = regexp.MustCompile(`(?i)(?:[$€£¥]\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|bn|k|m|b))?|\b(?:USD|EUR|GBP|JPY|CAD|AUD)\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|bn|k|m|b))?)`)
+	processMaterialPercentPattern                  = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:%|\bpercent(?:age\s+points?)?\b)`)
+	processMaterialDatePattern                     = regexp.MustCompile(`(?i)\b(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))?\b`)
+	processMaterialScaledNumberPattern             = regexp.MustCompile(`(?i)\b(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+(?:\.\d+)?\s*(?:trillion|billion|million|thousand|bn|k|m|b|creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?|dollars?|euros?|pounds?|per\s+(?:day|week|month|year)))\b`)
+	processMaterialWordScalePattern                = regexp.MustCompile(`(?i)\b(?:hundreds|thousands|millions|billions|trillions)(?:\s+of)?(?:\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|dollars?|euros?|pounds?))?\b`)
+	processMaterialSpelledScalePattern             = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?\s+(?:hundred|thousand|million|billion|trillion)\b`)
+	processMaterialSpelledNominalPattern           = regexp.MustCompile(`(?i)\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
+	processMaterialCollectiveNominalPattern        = regexp.MustCompile(`(?i)\b(?:(?:a|one)\s+dozen|dozens(?:\s+of)?|(?:a|one)\s+score(?:\s+of)?)\s+(?:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
+	processMaterialRomanNominalPattern             = regexp.MustCompile(`\b[IVXLCDM]{2,}\s+(?i:creators?|people|users?|customers?|accounts?|companies|brands?|products?|locations?|jobs?|posts?|views?|impressions?|countries|markets?|regions?|states?|cities|years?|months?|days?)\b`)
+	processMaterialIntegerPattern                  = regexp.MustCompile(`\b\d+\b`)
+	processMaterialQualitativePattern              = regexp.MustCompile(`(?i)\b(?:market\s+leader|category\s+leader|industry\s+leader|largest|fastest[- ]growing|most\s+popular|most\s+widely\s+used|dominant|unprecedented|first[- ]of[- ]its[- ]kind|only\s+(?:company|platform|product|brand|network))\b`)
+	processMarkdownParagraphPattern                = regexp.MustCompile(`\n\s*\n+`)
+	processHTMLCommentPattern                      = regexp.MustCompile(`(?s)<!--.*?-->`)
+	processStructuralSlideRefPattern               = regexp.MustCompile(`(?i)\b(?:slide|page)\s+#?\s*\d+\b`)
+	processUnsupportedPredicatePattern             = regexp.MustCompile(`(?i)\b(?:powers|powered|drives|drove|driven|delivers|delivered|enables|enabled|reaches|reached|grew|grows|grown|increased|decreased|declined|generates|generated|converts|converted|leads|led|outperforms|outperformed|dominates|dominated|represents|represented|shows|showed|demonstrates|demonstrated|proves|proved|serves|served|sells|sold|buys|bought|uses|used|creates|created|operates|operated|spans|spanned|includes|included|contains|contained|accounts|accounted|employs|employed|supports|supported|engages|engaged|connects|connected|builds|built|owns|owned|controls|controlled|purchased|surveyed)\b`)
+	processUnsupportedCopulaPattern                = regexp.MustCompile(`(?i)\b(?:they|it|these|those|we|our\s+(?:company|platform|product|brand|network)|the\s+(?:company|market|platform|product|brand|network|audience|category|industry))\s+(?:all\s+)?(?:is|are|was|were|has|have|had|does|do|can|will|may|might|could)\b`)
+	processDeclarativeAuxiliaryPattern             = regexp.MustCompile(`(?i)\b(?:is|are|was|were|has|have|had|remains?|became|becomes?|continues?|continued|will|does|did)\b`)
+	processClaimMutationPattern                    = regexp.MustCompile(`(?i)\b(?:false|untrue|allegedly|reportedly|purportedly|supposedly|apparently|possibly|perhaps|maybe|may|might|could|no\s+longer|used\s+to|does\s+not\s+apply|do\s+not\s+apply|did\s+not\s+apply)\b`)
+	processVisibleStatementPattern                 = regexp.MustCompile(`(?i)^(?:#{1,6}\s*)?(?:[-*]\s*)?(recommendation|proposal|target|inference)\s*:`)
+	processVisiblePhasePattern                     = regexp.MustCompile(`(?i)^(?:#{1,6}\s*)?(?:[-*]\s*)?phase\s+\d+\b`)
+	processDeckFractionCounterPattern              = regexp.MustCompile(`^0*\d{1,3}\s*/\s*0*\d{1,3}$`)
+	processDeckNamedCounterPattern                 = regexp.MustCompile(`(?i)^(?:slide|page)\s+#?\s*0*\d{1,3}$`)
+	processDeckAccessibleCounterPattern            = regexp.MustCompile(`(?i)^(?:slide|page)\s+#?\s*0*\d{1,3}\s+(?:of|/)\s+0*\d{1,3}$`)
+	processDeckBareCounterPattern                  = regexp.MustCompile(`^0*\d{1,3}$`)
+	processForwardActionPattern                    = regexp.MustCompile(`(?i)^(?:run|test|launch|pilot|start|set|target|reach|build|create|make|design|develop|ship|publish|measure|track|compare|invite|recruit|activate|engage|ask|offer|price|fund|hire|train|deploy|expand|reduce|increase|improve|validate|prove|explore|sequence|schedule|review|audit|choose|use|add|remove|move|keep|stop|protect|reserve|name|define|map|interview|survey|try|commit|plan|open|close|transition|imagine|consider|picture|notice|remember|meet|follow|watch|listen)\b`)
+	processForwardClausePattern                    = regexp.MustCompile(`(?i)\b(?:because|since|given\s+that|based\s+on|according\s+to|although|despite|whereas|while|but\s+(?:the|acme|it|they|we)|last\s+(?:year|month|week)|yesterday|previously|historically)\b`)
+	processScopedEvidenceReceiptPattern            = regexp.MustCompile(`<!--\s*stride-evidence-scope:scoped\s+digest=([a-f0-9]{64})\s*-->`)
+	processScopedDefinitivePattern                 = regexp.MustCompile(`(?i)\b(?:definitive(?:ly)?|certain(?:ly)?|guaranteed|guarantees|proven|proves|must|will|no[- ]brainer|case\s+closed|clear(?:ly)?\s+(?:answer|choice|winner)|right\s+(?:answer|choice|move)|best\s+(?:answer|choice|move|option|path|strategy)|only\s+(?:answer|choice|move|option|path|strategy)|winning\s+(?:answer|choice|move|strategy))\b`)
+	processScopedDecisionActionPattern             = regexp.MustCompile(`(?i)(?:^(?:(?:then|next|now|finally)\s*[:,]?\s*)?|[.!?;:,\r\n]\s*|[—–]\s*|\b(?:to|for|can|could|may|might|should|must|will|ought\s+to|need(?:s|ed)?\s+to|plan(?:s|ned)?\s+(?:is\s+)?(?:to\s+)?|intend(?:s|ed)?\s+to|purpose\s+(?:is\s+)?(?:to\s+)?|intent\s+(?:is\s+)?(?:to\s+)?|recommend(?:s|ed)?\s+to|propose(?:s|d)?\s+to)\s+)(?:activat(?:e|ed|es|ing)|enabl(?:e|ed|es|ing)|releas(?:e|ed|es|ing)|roll(?:ed|ing|s)?\s+out|go(?:es|ing)?\s+live|went\s+live|launch(?:ed|es|ing)?|scal(?:e|ed|es|ing)|invest(?:ed|ing|s)?|commit(?:s|ted|ting)?|choos(?:e|es|ing)|chose|adopt(?:ed|ing|s)?|build(?:s|ing)?|built|expand(?:ed|ing|s)?|hir(?:e|ed|es|ing)|fund(?:ed|ing|s)?|deploy(?:ed|ing|s)?|ship(?:ped|ping|s)?|publish(?:ed|es|ing)?|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|approv(?:e|ed|es|ing)|authoriz(?:e|ed|es|ing)|acquir(?:e|ed|es|ing)|purchas(?:e|ed|es|ing)|delet(?:e|ed|es|ing))\b`)
+	processScopedSubjectActionPattern              = regexp.MustCompile(`(?i)\b(?:we|they|you|leadership|management|the\s+(?:team|company|board|client))\s+(?:(?:can|could|may|might|should|must|will|ought\s+to|need(?:s)?\s+to|plan(?:s)?\s+to|intend(?:s)?\s+to)\s+)?(?:activat(?:e|ed|es|ing)|enabl(?:e|ed|es|ing)|releas(?:e|ed|es|ing)|roll(?:ed|ing|s)?\s+out|go(?:es|ing)?\s+live|went\s+live|launch(?:ed|es|ing)?|scal(?:e|ed|es|ing)|invest(?:ed|ing|s)?|commit(?:s|ted|ting)?|choos(?:e|es|ing)|chose|adopt(?:ed|ing|s)?|build(?:s|ing)?|built|expand(?:ed|ing|s)?|hir(?:e|ed|es|ing)|fund(?:ed|ing|s)?|deploy(?:ed|ing|s)?|ship(?:ped|ping|s)?|publish(?:ed|es|ing)?|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|approv(?:e|ed|es|ing)|authoriz(?:e|ed|es|ing)|acquir(?:e|ed|es|ing)|purchas(?:e|ed|es|ing)|delet(?:e|ed|es|ing))\b`)
+	processScopedInflectedActionPattern            = regexp.MustCompile(`(?i)\b(?:activated|activates|activating|enabled|enables|enabling|released|releases|releasing|rolled\s+out|rolls\s+out|rolling\s+out|went\s+live|goes\s+live|going\s+live|launched|launches|launching|scaled|scales|scaling|invested|invests|investing|commits|committed|committing|chooses|chose|choosing|adopted|adopts|adopting|built|builds|building|expanded|expands|expanding|hired|hires|hiring|funded|funds|funding|deployed|deploys|deploying|shipped|ships|shipping|published|publishes|publishing|migrated|migrates|migrating|switched|switches|switching|approved|approves|approving|authorized|authorizes|authorizing|acquired|acquires|acquiring|purchased|purchases|purchasing|deleted|deletes|deleting)\b`)
+	processScopedActionWordPattern                 = regexp.MustCompile(`(?i)\b(?:activat(?:e|ed|es|ing)|enabl(?:e|ed|es|ing)|releas(?:e|ed|es|ing)|roll(?:ed|ing|s)?\s+out|go(?:es|ing)?\s+live|went\s+live|launch(?:ed|es|ing)?|scal(?:e|ed|es|ing)|invest(?:ed|ing|s)?|commit(?:s|ted|ting)?|choos(?:e|es|ing)|chose|adopt(?:ed|ing|s)?|build(?:s|ing)?|built|expand(?:ed|ing|s)?|hir(?:e|ed|es|ing)|fund(?:ed|ing|s)?|deploy(?:ed|ing|s)?|ship(?:ped|ping|s)?|publish(?:ed|es|ing)?|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|approv(?:e|ed|es|ing)|authoriz(?:e|ed|es|ing)|acquir(?:e|ed|es|ing)|purchas(?:e|ed|es|ing)|delet(?:e|ed|es|ing))\b`)
+	processScopedBindingConditionPattern           = regexp.MustCompile(`(?i)\b(?:if|unless|once|when|subject\s+to|pending|provided\s+that|depending\s+on|only\s+after|after\s+(?:(?:a|the)\s+)?(?:test|pilot|experiment|validation))\b`)
+	processScopedBindingConditionLeadPattern       = regexp.MustCompile(`(?i)^\s*(?:if|unless|once|when|subject\s+to|pending|provided\s+that|depending\s+on|only\s+after|after\s+(?:(?:a|the)\s+)?(?:test|pilot|experiment|validation))\b`)
+	processScopedMaterialConditionPattern          = regexp.MustCompile(`(?i)\b(?:approval|authori[sz]ation|benchmark|budget|capacity|churn|consent|conversion|data|demand|evidence|experiment|guardrail|legal|measure|metric|outcome|pilot|proof|quality|regulatory|result|retention|revenue|safety|sample|signal|test|threshold|validation|validat(?:e|ed|es|ing)|clear(?:ed|s|ing)?|confirm(?:ed|s|ing)?|hold(?:s|ing)?|meet(?:s|ing)?|pass(?:ed|es|ing)?|support(?:ed|s|ing)?)\b`)
+	processScopedNegativeConditionPattern          = regexp.MustCompile(`(?i)\b(?:below|den(?:ied|ies|y|ying)|fail(?:ed|s|ing|ure)?|insufficient|irrespective|lack(?:ed|s|ing)?|miss(?:ed|es|ing)?|negative|never|not|reject(?:ed|s|ing|ion)?|unmet|weak|without|doesn['’]t|isn['’]t|wasn['’]t|weren['’]t|won['’]t)\b`)
+	processScopedConditionBreakPattern             = regexp.MustCompile(`(?i)\b(?:but|despite|however|irrespective|regardless|anyway|nevertheless|nonetheless|yet)\b`)
+	processScopedBoundedActionPattern              = regexp.MustCompile(`(?i)\b(?:(?:launch(?:ed|es|ing)?)\s+(?:(?:a|an|the)\s+)?(?:test|pilot|experiment)|(?:build(?:s|ing)?|built)\s+(?:(?:a|an|the)\s+)?(?:test|pilot|experiment|prototype|draft|mockup))\b`)
+	processScopedUnboundedRolloutPattern           = regexp.MustCompile(`(?i)\b(?:production|publicly|company[- ]wide|organization[- ]wide|nationwide|globally|at\s+scale|full\s+rollout|every(?:one|body|thing|where|\s+[\pL\pN][\pL\pN&.'-]*)|each\s+[\pL\pN][\pL\pN&.'-]*|all(?:\s+of)?\s+(?:the\s+)?[\pL\pN][\pL\pN&.'-]*|(?:entire|whole)\s+[\pL\pN][\pL\pN&.'-]*)\b`)
+	processScopedGenericUniversalImperativePattern = regexp.MustCompile(`(?i)(?:^|[.!?;:,\r\n]\s*|[—–]\s*)(?:(?:please|then|next|now|finally|immediately|promptly|directly|quickly|simply|just)\s*[:,]?\s*)*(?:(?:begin|start|continue|proceed)\s+(?:to\s+)?(?:(?:immediately|promptly|directly|quickly|simply|just)\s+)*)?([\pL][\pL'-]{2,})\s+(?:every(?:one|body|thing|where|\s+[\pL\pN][\pL\pN&.'-]*)|each\s+[\pL\pN][\pL\pN&.'-]*|all(?:\s+of)?\s+(?:the\s+)?[\pL\pN][\pL\pN&.'-]*|(?:the\s+)?(?:entire|whole)\s+[\pL\pN][\pL\pN&.'-]*)\b`)
+	processScopedGenericUniversalSubjectPattern    = regexp.MustCompile(`(?i)\b(?:we|they|you|leadership|management|the\s+(?:team|company|board|client))\s+(?:can|could|may|might|should|must|will|ought\s+to|need(?:s)?\s+to|plan(?:s)?\s+to|intend(?:s)?\s+to)\s+([\pL][\pL'-]{2,})(?:\s+[\pL\pN&.'-]+){0,5}\s+(?:every(?:one|body|thing|where|\s+[\pL\pN][\pL\pN&.'-]*)|each\s+[\pL\pN][\pL\pN&.'-]*|all(?:\s+of)?\s+(?:the\s+)?[\pL\pN][\pL\pN&.'-]*|(?:the\s+)?(?:entire|whole)\s+[\pL\pN][\pL\pN&.'-]*)\b`)
+	processScopedUniversalTargetPattern            = regexp.MustCompile(`(?i)\b(?:production|publicly|company[- ]wide|organization[- ]wide|nationwide|globally|at\s+scale|full\s+rollout|every(?:one|body|thing|where|\s+[\pL\pN][\pL\pN&.'-]*)|each\s+[\pL\pN][\pL\pN&.'-]*|all(?:\s+of)?\s+(?:the\s+)?[\pL\pN][\pL\pN&.'-]*|(?:the\s+)?(?:entire|whole)\s+[\pL\pN][\pL\pN&.'-]*)\b`)
+	processScopedDirectiveLeadActionPattern        = regexp.MustCompile(`(?i)^\s*(?:(?:recommendation|proposal|target|inference|hypothesis)\s*:\s*)?(?:(?:please|kindly|then|next|now|finally|immediately|promptly|directly|quickly|simply|just)\s*[:,]?\s*)*(?:(?:go\s+ahead\s+and|begin|start|continue|proceed(?:\s+to)?)\s+)?(?:(?:please|kindly|immediately|promptly|directly|quickly|simply|just)\s+)*([\pL][\pL'-]{2,})\b`)
+	processScopedRecommendationActionPattern       = regexp.MustCompile(`(?i)^\s*(?:i|we)\s+(?:(?:strongly|explicitly|directly)\s+)?recommend(?:s|ed)?\s+(?:that\s+)?(?:(?:we|they|you)\s+)?(?:(?:can|could|may|might|should|must|will|ought\s+to|need(?:s)?\s+to)\s+)?(?:(?:go\s+ahead\s+and|begin|start|continue|proceed(?:\s+to)?)\s+)?([\pL][\pL'-]{2,})\b`)
+	processScopedDirectiveSubjectActionPattern     = regexp.MustCompile(`(?i)^\s*(?:we|they|you|leadership|management|the\s+(?:team|company|board|client))\s+(?:can|could|may|might|should|must|will|ought\s+to|need(?:s)?\s+to|plan(?:s)?\s+to|intend(?:s)?\s+to)\s+(?:(?:please|kindly|immediately|promptly|directly|quickly|simply|just)\s+)*(?:(?:go\s+ahead\s+and|begin|start|continue|proceed(?:\s+to)?)\s+)?([\pL][\pL'-]{2,})\b`)
+	processScopedUniversalSubjectActionPattern     = regexp.MustCompile(`(?i)^\s*(?:every(?:one|body|thing|where|\s+[\pL\pN][\pL\pN&.'-]*)|each\s+[\pL\pN][\pL\pN&.'-]*|all(?:\s+of)?\s+(?:the\s+)?[\pL\pN][\pL\pN&.'-]*|(?:the\s+)?(?:entire|whole)\s+[\pL\pN][\pL\pN&.'-]*)\s+(?:can|could|may|might|should|must|will|ought\s+to|need(?:s)?\s+to)\s+(?:be\s+)?([\pL][\pL'-]{2,})\b`)
+	processScopedNegatedCoveragePattern            = regexp.MustCompile(`(?i)(?:\b(?:do|does|did|is|are|was|were|has|have|had|should|must|will|can|could|may|might)\s+(?:not|never)\b|\b(?:no|without|lack(?:ed|s|ing)?)\s+(?:coverage|data|evidence|proof|support)\b)`)
+	processScopedCoordinationBoundaryPattern       = regexp.MustCompile(`(?i)\b(?:and|also|or|plus|then|before|after|while|but|yet)\b`)
+	processScopedSubjectSubordinateBoundaryPattern = regexp.MustCompile(`(?i:\b(?:as|so)\b(?:\s+that)?\s+)((?:(?i:we|they|you|it|leadership|management)|(?i:the)\s+(?i:team|company|board|client)|[A-Z][\pL'-]{1,31}))\b`)
+	processScopedBareSubjectActionPattern          = regexp.MustCompile(`^\s*(?:(?i:we|they|you|it|leadership|management)|(?i:the)\s+(?i:team|company|board|client)|[A-Z][\pL'-]{1,31})\s+(?:(?i:can|could|may|might|should|must|will|would|ought\s+to|need(?:s)?\s+to|plan(?:s)?\s+to|intend(?:s)?\s+to|am|are|is|was|were|be|been|being|do|does|did|have|has|had)\s+)*(?:(?i:not|never)\s+)?([\pL][\pL'-]{2,})\b`)
+	processScopedDirectiveLeadMarkerPattern        = regexp.MustCompile(`(?i)^\s*(?:(?:recommendation|proposal|target|inference|hypothesis)\s*:|(?:please|kindly|then|next|now|finally|immediately|promptly|directly|quickly|simply|just|go\s+ahead\s+and|begin|start|continue|proceed\s+to)\b)`)
+	processScopedInterrogativeLeadPattern          = regexp.MustCompile(`(?i)^\s*(?:who|what|when|where|why|how|which|am|are|is|was|were|do|does|did|has|have|had|can|could|will|would|shall|should|may|might|must)\b`)
+	processScopedWordPattern                       = regexp.MustCompile(`[\pL\pN][\pL\pN&.'-]*`)
+	processAllowedSourceFurniture                  = regexp.MustCompile(`(?i)\b(?:source|citation|official\s+source|read\s+source)\b`)
+	processJSONFieldNamePattern                    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+	processJSONSlidePathPattern                    = regexp.MustCompile(`^\$\.slides\[\d+\]$`)
+	processJSONElementPathPattern                  = regexp.MustCompile(`^\$\.slides\[\d+\]\.elements\[\d+\]$`)
+	processJSONRootWrapperPathPattern              = regexp.MustCompile(`^\$\.(canvas|grid|palette|typography)$`)
+	processJSONSceneWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution)$`)
+	processJSONStyleWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.style\.(palette|typography|position|dimensions)$`)
 )
 
 type processMaterialToken struct {
@@ -147,13 +210,13 @@ func processClaimGateStage(plan *goalPlan, stage ProcessStage) bool {
 	}
 }
 
-func loadProcessAdmittedClaimManifest(app *kanbanBoardApp, plan *goalPlan, parentID string) (processAdmittedClaimManifest, error) {
+func loadProcessEvidenceGateAuthority(app *kanbanBoardApp, plan *goalPlan, parentID string) (processEvidenceGateAuthority, error) {
 	if app == nil || plan == nil {
-		return nil, fmt.Errorf("process evidence authority is unavailable")
+		return processEvidenceGateAuthority{}, fmt.Errorf("process evidence authority is unavailable")
 	}
 	evidence := plan.subtaskByID("evidence")
 	if evidence == nil || evidence.Status != subtaskComplete || strings.TrimSpace(evidence.ArtifactID) == "" {
-		return nil, fmt.Errorf("completed evidence admission dossier is required")
+		return processEvidenceGateAuthority{}, fmt.Errorf("completed evidence admission dossier is required")
 	}
 	artifact, ok := app.osArtifactByID(evidence.ArtifactID)
 	if !ok || strings.TrimSpace(parentID) == "" || strings.TrimSpace(artifact.Metadata["goalParentId"]) != strings.TrimSpace(parentID) ||
@@ -161,36 +224,41 @@ func loadProcessAdmittedClaimManifest(app *kanbanBoardApp, plan *goalPlan, paren
 		strings.TrimSpace(artifact.Metadata["processId"]) != strings.TrimSpace(plan.ProcessID) ||
 		strings.TrimSpace(artifact.Metadata["processStage"]) != "evidence" ||
 		strings.TrimSpace(artifact.Metadata["status"]) != "complete" {
-		return nil, fmt.Errorf("evidence dossier is not the exact completed process artifact")
+		return processEvidenceGateAuthority{}, fmt.Errorf("evidence dossier is not the exact completed process artifact")
 	}
 	if err := validateProcessEvidenceDossier(plan, artifact); err != nil {
-		return nil, err
+		return processEvidenceGateAuthority{}, err
 	}
 	external, err := processExternalManifestRows(artifact.Text)
 	if err != nil {
-		return nil, err
+		return processEvidenceGateAuthority{}, err
 	}
 	internal, err := processInternalManifestRows(artifact.Text)
 	if err != nil {
-		return nil, err
+		return processEvidenceGateAuthority{}, err
 	}
 	manifest := make(processAdmittedClaimManifest, len(external)+len(internal))
 	for _, claim := range external {
 		if _, duplicate := manifest[claim.ID]; duplicate {
-			return nil, fmt.Errorf("evidence dossier repeats claim id %s", claim.ID)
+			return processEvidenceGateAuthority{}, fmt.Errorf("evidence dossier repeats claim id %s", claim.ID)
 		}
 		manifest[claim.ID] = processAdmittedClaim{
-			ID: claim.ID, ExactClaim: canonicalEvidenceText(claim.Claim),
+			ID: claim.ID, ExactClaim: canonicalEvidenceText(claim.Claim), DisplayClaim: canonicalEvidenceText(claim.DisplayClaim),
 			RequestedURL: claim.RequestedURL, FinalURL: claim.FinalURL,
 		}
 	}
 	for _, claim := range internal {
 		if _, duplicate := manifest[claim.ID]; duplicate {
-			return nil, fmt.Errorf("evidence dossier repeats claim id %s", claim.ID)
+			return processEvidenceGateAuthority{}, fmt.Errorf("evidence dossier repeats claim id %s", claim.ID)
 		}
-		manifest[claim.ID] = processAdmittedClaim{ID: claim.ID, ExactClaim: canonicalEvidenceText(claim.Claim), Internal: true}
+		manifest[claim.ID] = processAdmittedClaim{ID: claim.ID, ExactClaim: canonicalEvidenceText(claim.Claim), DisplayClaim: canonicalEvidenceText(claim.DisplayClaim), Internal: true}
 	}
-	return manifest, nil
+	adequacy := strings.TrimSpace(artifact.Metadata["evidenceAdequacy"])
+	dossierDigest := strings.TrimSpace(artifact.Metadata["evidenceAdmissionDigest"])
+	if !oneOf(adequacy, processEvidenceAdequacyNotRequired, processEvidenceAdequacySufficient, processEvidenceAdequacyScoped, processEvidenceAdequacyInsufficient) || !isHexDigest(dossierDigest) {
+		return processEvidenceGateAuthority{}, fmt.Errorf("evidence dossier has invalid gate metadata")
+	}
+	return processEvidenceGateAuthority{Claims: manifest, Adequacy: adequacy, DossierDigest: dossierDigest}, nil
 }
 
 func processMaterialTokens(text string) []processMaterialToken {
@@ -334,9 +402,8 @@ func processDeclaredStatementType(object map[string]any) (processStatementType, 
 }
 
 func processScopeContainsExactClaim(text string, anchors []processAdmittedClaim) bool {
-	visible := canonicalEvidenceText(processHTMLCommentPattern.ReplaceAllString(text, " "))
 	for _, claim := range anchors {
-		if claim.ExactClaim != "" && strings.Contains(visible, claim.ExactClaim) {
+		if processScopeContainsApprovedClaim(text, claim) {
 			return true
 		}
 	}
@@ -382,7 +449,7 @@ func validateProcessClaimURLBindings(text, path string, anchors []processAdmitte
 		url := strings.TrimRight(strings.TrimSpace(rawURL), ").,;:!?]}")
 		bound := false
 		for _, claim := range anchors {
-			if processClaimOwnsURL(claim, url) && strings.Contains(visible, claim.ExactClaim) {
+			if processClaimOwnsURL(claim, url) && processScopeContainsApprovedClaim(visible, claim) {
 				bound = true
 				break
 			}
@@ -458,7 +525,7 @@ func validateProcessSentenceLocalClaimURLBindings(text, path string, anchors []p
 			url := strings.TrimRight(strings.TrimSpace(rawURL), ").,;:!?]}")
 			bound := false
 			for _, claim := range anchors {
-				if processClaimOwnsURL(claim, url) && strings.Contains(visible, claim.ExactClaim) {
+				if processClaimOwnsURL(claim, url) && processScopeContainsApprovedClaim(visible, claim) {
 					bound = true
 					break
 				}
@@ -557,11 +624,14 @@ func validateProcessExactClaimUnit(text, path string, anchors []processAdmittedC
 	remaining := visible
 	matched := false
 	for _, claim := range anchors {
-		if claim.ExactClaim == "" || !strings.Contains(remaining, claim.ExactClaim) {
-			continue
+		for _, rendering := range processClaimApprovedRenderings(claim) {
+			if rendering == "" || !strings.Contains(remaining, rendering) {
+				continue
+			}
+			matched = true
+			remaining = strings.ReplaceAll(remaining, rendering, " ")
+			break
 		}
-		matched = true
-		remaining = strings.ReplaceAll(remaining, claim.ExactClaim, " ")
 	}
 	if !matched {
 		return false, nil
@@ -589,12 +659,18 @@ func validateProcessExactClaimUnit(text, path string, anchors []processAdmittedC
 
 func validateProcessFactText(text, path string, anchors []processAdmittedClaim, forceNumber bool) error {
 	visible := canonicalEvidenceText(processHTMLCommentPattern.ReplaceAllString(text, " "))
+	// This exact server-validated disclosure is posture metadata, not market
+	// evidence. Remove only the canonical phrase; any surrounding or substituted
+	// assertion remains subject to the ordinary positive claim contract.
+	visible = canonicalEvidenceText(strings.ReplaceAll(visible, processScopedEvidenceDisclosure, " "))
 	if matched, err := validateProcessExactClaimUnit(visible, path, anchors); matched {
 		return err
 	}
 	remaining := visible
 	for _, claim := range anchors {
-		remaining = strings.ReplaceAll(remaining, claim.ExactClaim, " ")
+		for _, rendering := range processClaimApprovedRenderings(claim) {
+			remaining = strings.ReplaceAll(remaining, rendering, " ")
+		}
 		if claim.RequestedURL != "" {
 			remaining = strings.ReplaceAll(remaining, claim.RequestedURL, " ")
 		}
@@ -630,8 +706,13 @@ func processClaimPairs(ids, exactClaims []string, manifest processAdmittedClaimM
 		normalized := canonicalEvidenceText(exact)
 		matched := false
 		for _, claim := range selected {
-			if normalized == claim.ExactClaim {
-				matched = true
+			for _, rendering := range processClaimApprovedRenderings(claim) {
+				if normalized == rendering {
+					matched = true
+					break
+				}
+			}
+			if matched {
 				break
 			}
 		}
@@ -642,13 +723,18 @@ func processClaimPairs(ids, exactClaims []string, manifest processAdmittedClaimM
 	for _, claim := range selected {
 		matched := false
 		for _, exact := range exactClaims {
-			if canonicalEvidenceText(exact) == claim.ExactClaim {
-				matched = true
+			for _, rendering := range processClaimApprovedRenderings(claim) {
+				if canonicalEvidenceText(exact) == rendering {
+					matched = true
+					break
+				}
+			}
+			if matched {
 				break
 			}
 		}
 		if !matched {
-			return nil, fmt.Errorf("claim id %s is missing its exact admitted text", claim.ID)
+			return nil, fmt.Errorf("claim id %s is missing an approved admitted rendering", claim.ID)
 		}
 	}
 	claims := make([]processAdmittedClaim, 0, len(selected))
@@ -668,8 +754,31 @@ func processJSONAnchorField(key string) (ids bool, exact bool) {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "claim_id", "claim_ids":
 		return true, false
-	case "exact_claim", "exact_claims":
+	case "exact_claim", "exact_claims", "claim_rendering", "claim_renderings":
 		return false, true
+	default:
+		return false, false
+	}
+}
+
+func processJSONScopedEvidenceMetadataField(path, key string, value any) (bool, bool) {
+	if path != "$" {
+		return false, false
+	}
+	text, ok := value.(string)
+	if !ok {
+		return false, false
+	}
+	text = strings.TrimSpace(text)
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "evidence_scope":
+		return true, text == processEvidenceAdequacyScoped
+	case "evidence_scope_receipt":
+		return true, isHexDigest(text)
+	case "decision_posture":
+		return true, text == "conditional"
+	case "evidence_scope_disclosure":
+		return true, text == processScopedEvidenceDisclosure
 	default:
 		return false, false
 	}
@@ -855,7 +964,11 @@ func validateProcessJSONClaimObject(object map[string]any, path string, manifest
 	directVisible := make([]string, 0)
 	for key, value := range object {
 		isID, isExact := processJSONAnchorField(key)
-		if isID || isExact || strings.EqualFold(strings.TrimSpace(key), "statement_type") {
+		isScope, scopeSafe := processJSONScopedEvidenceMetadataField(path, key, value)
+		if isScope && !scopeSafe {
+			return fmt.Errorf("%s: scoped-evidence field %s has an invalid value", path, key)
+		}
+		if isID || isExact || isScope || strings.EqualFold(strings.TrimSpace(key), "statement_type") {
 			continue
 		}
 		for _, leaf := range processJSONScalarLeaves(value, path+"."+key) {
@@ -866,7 +979,11 @@ func validateProcessJSONClaimObject(object map[string]any, path string, manifest
 	}
 	for key, value := range object {
 		isID, isExact := processJSONAnchorField(key)
-		if isID || isExact || strings.EqualFold(strings.TrimSpace(key), "statement_type") {
+		isScope, scopeSafe := processJSONScopedEvidenceMetadataField(path, key, value)
+		if isScope && !scopeSafe {
+			return fmt.Errorf("%s: scoped-evidence field %s has an invalid value", path, key)
+		}
+		if isID || isExact || isScope || strings.EqualFold(strings.TrimSpace(key), "statement_type") {
 			continue
 		}
 		for _, leaf := range processJSONScalarLeaves(value, path+"."+key) {
@@ -926,8 +1043,11 @@ func processClaimAnchorsFromScope(scope string, manifest processAdmittedClaimMan
 			return nil, fmt.Errorf("claim id %s was not admitted by the evidence dossier", id)
 		}
 		ids = append(ids, id)
-		if strings.Contains(canonicalScope, claim.ExactClaim) {
-			exactClaims = append(exactClaims, claim.ExactClaim)
+		for _, rendering := range processClaimApprovedRenderings(claim) {
+			if strings.Contains(canonicalScope, rendering) {
+				exactClaims = append(exactClaims, rendering)
+				break
+			}
 		}
 	}
 	return processClaimPairs(ids, exactClaims, manifest)
@@ -1351,6 +1471,474 @@ func validateProcessDeckFactualClaims(body string, manifest processAdmittedClaim
 	return nil
 }
 
+func processScopedEvidenceUnitRemainder(text string, manifest processAdmittedClaimManifest) string {
+	visible := canonicalEvidenceText(processHTMLCommentPattern.ReplaceAllString(text, " "))
+	visible = strings.ReplaceAll(visible, processScopedEvidenceDisclosure, " ")
+	for _, claim := range manifest {
+		for _, rendering := range processClaimApprovedRenderings(claim) {
+			visible = strings.ReplaceAll(visible, rendering, " ")
+		}
+	}
+	for _, rawURL := range processMaterialURLPattern.FindAllString(visible, -1) {
+		visible = strings.ReplaceAll(visible, rawURL, " ")
+	}
+	return strings.TrimSpace(visible)
+}
+
+func processScopedActionClause(text string, actionStart int) string {
+	if actionStart < 0 || actionStart > len(text) {
+		return text
+	}
+	start := 0
+	if boundary := strings.LastIndexAny(text[:actionStart], ".!?;"); boundary >= 0 {
+		start = boundary + 1
+	}
+	end := len(text)
+	if boundary := strings.IndexAny(text[actionStart:], ".!?;"); boundary >= 0 {
+		end = actionStart + boundary
+	}
+	return strings.TrimSpace(text[start:end])
+}
+
+func processScopedActionTail(text string, actionStart int) string {
+	if actionStart < 0 || actionStart > len(text) {
+		return ""
+	}
+	end := len(text)
+	if boundary := strings.IndexAny(text[actionStart:], ".!?;"); boundary >= 0 {
+		end = actionStart + boundary
+	}
+	return strings.TrimSpace(text[actionStart:end])
+}
+
+// A caveat elsewhere in a sentence is not a condition on the action. In
+// particular, "Demand is a hypothesis, launch everywhere" must not inherit the
+// word hypothesis as permission to execute. Accept a condition only when it is
+// stated after the action or in the immediately preceding comma/colon/dash
+// clause, with no adversative bridge such as "but" or "regardless".
+func processScopedActionConditionallyBound(text string, actionStart int) bool {
+	if actionStart < 0 || actionStart > len(text) {
+		return false
+	}
+	start := 0
+	if boundary := strings.LastIndexAny(text[:actionStart], ".!?;"); boundary >= 0 {
+		start = boundary + 1
+	}
+	end := len(text)
+	if boundary := strings.IndexAny(text[actionStart:], ".!?;"); boundary >= 0 {
+		end = actionStart + boundary
+	}
+	sentence := text[start:end]
+	relativeAction := actionStart - start
+	if relativeAction < 0 || relativeAction > len(sentence) {
+		return false
+	}
+	afterAction := sentence[relativeAction:]
+	if indexes := processScopedBindingConditionPattern.FindStringIndex(afterAction); len(indexes) == 2 {
+		bridge := afterAction[:indexes[0]]
+		condition := afterAction[indexes[0]:]
+		if !processScopedConditionBreakPattern.MatchString(afterAction) &&
+			!processScopedConditionBreakPattern.MatchString(bridge) &&
+			!processScopedNegativeConditionPattern.MatchString(condition) &&
+			processScopedMaterialConditionPattern.MatchString(condition) {
+			return true
+		}
+	}
+
+	beforeAction := sentence[:relativeAction]
+	lastBoundary := strings.LastIndexAny(beforeAction, ",;:—–")
+	if lastBoundary < 0 {
+		candidate := strings.TrimSpace(beforeAction)
+		return !processScopedConditionBreakPattern.MatchString(sentence) &&
+			processScopedBindingConditionLeadPattern.MatchString(candidate) &&
+			!processScopedNegativeConditionPattern.MatchString(candidate) &&
+			processScopedMaterialConditionPattern.MatchString(candidate)
+	}
+	bridge := beforeAction[lastBoundary+1:]
+	if processScopedConditionBreakPattern.MatchString(bridge) {
+		return false
+	}
+	preceding := beforeAction[:lastBoundary]
+	previousBoundary := strings.LastIndexAny(preceding, ",;:—–")
+	if previousBoundary >= 0 {
+		preceding = preceding[previousBoundary+1:]
+	}
+	preceding = strings.TrimSpace(preceding)
+	return !processScopedConditionBreakPattern.MatchString(sentence) &&
+		processScopedBindingConditionLeadPattern.MatchString(preceding) &&
+		!processScopedNegativeConditionPattern.MatchString(preceding) &&
+		processScopedMaterialConditionPattern.MatchString(preceding)
+}
+
+func processScopedGenericUniversalAction(text string) string {
+	for _, universal := range processScopedUniversalTargetPattern.FindAllStringIndex(text, -1) {
+		if len(universal) != 2 {
+			continue
+		}
+		segmentStart := 0
+		if boundary := strings.LastIndexAny(text[:universal[0]], ".!?;,:—–\r\n"); boundary >= 0 {
+			_, width := utf8.DecodeRuneInString(text[boundary:])
+			segmentStart = boundary + width
+		}
+		// Coordinated directives are independent decisions. A safe first verb or
+		// a negated evidence statement must not exempt a later action merely
+		// because both appear in the same punctuation-delimited clause.
+		boundaryStart := -1
+		if coordinated := processScopedCoordinationBoundaryPattern.FindAllStringIndex(text[segmentStart:universal[0]], -1); len(coordinated) > 0 {
+			last := coordinated[len(coordinated)-1]
+			boundaryStart = segmentStart + last[0]
+			segmentStart += last[1]
+		}
+		if subordinated := processScopedSubjectSubordinateBoundaryPattern.FindAllStringSubmatchIndex(text[:universal[0]], -1); len(subordinated) > 0 {
+			last := subordinated[len(subordinated)-1]
+			if len(last) >= 4 && last[2] >= 0 && last[3] > last[2] && last[0] > boundaryStart && last[2] >= segmentStart {
+				segmentStart = last[2]
+			}
+		}
+		segmentEnd := len(text)
+		if boundary := strings.IndexAny(text[universal[1]:], ".!?;,:—–\r\n"); boundary >= 0 {
+			segmentEnd = universal[1] + boundary
+		}
+		if coordinated := processScopedCoordinationBoundaryPattern.FindStringIndex(text[universal[1]:segmentEnd]); len(coordinated) == 2 {
+			segmentEnd = universal[1] + coordinated[0]
+		}
+		if subordinated := processScopedSubjectSubordinateBoundaryPattern.FindStringSubmatchIndex(text[universal[1]:segmentEnd]); len(subordinated) >= 2 {
+			candidateEnd := universal[1] + subordinated[0]
+			if candidateEnd < segmentEnd {
+				segmentEnd = candidateEnd
+			}
+		}
+		segment := text[segmentStart:segmentEnd]
+		if processScopedNegatedCoveragePattern.MatchString(segment) {
+			continue
+		}
+
+		var actionStart, actionEnd int
+		found := false
+		patterns := []*regexp.Regexp{
+			processScopedUniversalSubjectActionPattern,
+			processScopedRecommendationActionPattern,
+			processScopedDirectiveSubjectActionPattern,
+			processScopedBareSubjectActionPattern,
+			processScopedDirectiveLeadActionPattern,
+		}
+		for _, pattern := range patterns {
+			indexes := pattern.FindStringSubmatchIndex(segment)
+			if len(indexes) < 4 || indexes[2] < 0 || indexes[3] <= indexes[2] {
+				continue
+			}
+			actionStart, actionEnd = segmentStart+indexes[2], segmentStart+indexes[3]
+			// Except for universal-subject/passive grammar, the universal target
+			// must be the action's object or rollout scope, not the sentence's
+			// subject. This keeps factual coverage statements out of the lane.
+			if pattern != processScopedUniversalSubjectActionPattern && universal[0] < actionEnd {
+				continue
+			}
+			// An unlabeled, unmarked clause-leading noun phrase such as "Growth
+			// for every customer remains uncertain" is not an imperative. A real
+			// recommendation/subject-modal/polite/aspect form was already matched
+			// by the earlier structural patterns.
+			if pattern == processScopedDirectiveLeadActionPattern &&
+				!processScopedDirectiveLeadMarkerPattern.MatchString(segment) &&
+				processDeclarativeAuxiliaryPattern.MatchString(segment) {
+				continue
+			}
+			found = true
+			break
+		}
+		if !found {
+			continue
+		}
+		action := strings.ToLower(text[actionStart:actionEnd])
+		// Reading and evaluating the evidence are safe epistemic acts; the
+		// generic lane exists for irreversible or audience-wide imperatives,
+		// not to block review of the very proof the gate asks for.
+		if oneOf(action, "analyze", "analyzing", "check", "checking", "compare", "comparing", "consider", "considering", "discuss", "discussing", "evaluate", "evaluating", "examine", "examining", "inspect", "inspecting", "question", "questioning", "read", "reading", "review", "reviewing", "study", "studying") {
+			continue
+		}
+		if processScopedActionConditionallyBound(text, actionStart) {
+			continue
+		}
+		return text[actionStart:actionEnd]
+	}
+	return ""
+}
+
+func processScopedAdjacentWord(text string, start, direction int) string {
+	if direction < 0 {
+		if start <= 0 || start > len(text) {
+			return ""
+		}
+		words := processScopedWordPattern.FindAllString(text[:start], -1)
+		if len(words) == 0 {
+			return ""
+		}
+		return strings.ToLower(words[len(words)-1])
+	}
+	if start < 0 || start >= len(text) {
+		return ""
+	}
+	return strings.ToLower(processScopedWordPattern.FindString(text[start:]))
+}
+
+func processScopedInflectedActionLooksVerbal(text string, start, end int) bool {
+	action := strings.ToLower(text[start:end])
+	previous := processScopedAdjacentWord(text, start, -1)
+	next := processScopedAdjacentWord(text, end, 1)
+	if strings.HasSuffix(action, "ing") {
+		if oneOf(previous, "am", "are", "be", "been", "being", "is", "was", "were") || oneOf(next, "a", "an", "immediately", "now", "our", "the", "this", "that", "their", "your") {
+			return true
+		}
+		// "Funding options" and "launching imagery" are noun/adjective
+		// phrases, not directives. A gerund with no auxiliary or direct object
+		// remains outside this fallback; clause-leading imperatives are already
+		// caught by processScopedDecisionActionPattern.
+		return false
+	}
+	if oneOf(previous, "a", "an", "our", "the", "this", "that", "their", "your") {
+		return false
+	}
+	if oneOf(action, "builds", "funds", "launches", "scales", "ships") && oneOf(next, "are", "can", "continue", "have", "include", "may", "remain", "were", "will") {
+		return false
+	}
+	return previous != "" || next != ""
+}
+
+func processScopedUnconditionalAction(text string) string {
+	type actionMatch struct {
+		start, end int
+		fallback   bool
+	}
+	matches := make([]actionMatch, 0)
+	for _, pattern := range []*regexp.Regexp{processScopedDecisionActionPattern, processScopedSubjectActionPattern} {
+		for _, indexes := range pattern.FindAllStringIndex(text, -1) {
+			matches = append(matches, actionMatch{start: indexes[0], end: indexes[1]})
+		}
+	}
+	for _, indexes := range processScopedInflectedActionPattern.FindAllStringIndex(text, -1) {
+		matches = append(matches, actionMatch{start: indexes[0], end: indexes[1], fallback: true})
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].start != matches[j].start {
+			return matches[i].start < matches[j].start
+		}
+		if matches[i].fallback != matches[j].fallback {
+			return !matches[i].fallback
+		}
+		return matches[i].end < matches[j].end
+	})
+	seenActionStarts := map[int]bool{}
+	for _, match := range matches {
+		word := processScopedActionWordPattern.FindStringIndex(text[match.start:match.end])
+		if len(word) != 2 {
+			continue
+		}
+		actionStart := match.start + word[0]
+		actionEnd := match.start + word[1]
+		actionWord := strings.ToLower(text[actionStart:actionEnd])
+		if (match.fallback || strings.HasSuffix(actionWord, "ing")) && !processScopedInflectedActionLooksVerbal(text, actionStart, actionEnd) {
+			continue
+		}
+		if seenActionStarts[actionStart] {
+			continue
+		}
+		seenActionStarts[actionStart] = true
+		clause := processScopedActionClause(text, actionStart)
+		actionTail := processScopedActionTail(text, actionStart)
+		boundedMatch := processScopedBoundedActionPattern.FindStringIndex(actionTail)
+		boundedAction := len(boundedMatch) == 2 && boundedMatch[0] == 0 && !processScopedUnboundedRolloutPattern.MatchString(clause)
+		if processScopedActionConditionallyBound(text, actionStart) || boundedAction {
+			continue
+		}
+		return text[actionStart:actionEnd]
+	}
+	if action := processScopedGenericUniversalAction(text); action != "" {
+		return action
+	}
+	return ""
+}
+
+func processScopedUnsupportedDefinitive(text string) string {
+	for _, indexes := range processScopedDefinitivePattern.FindAllStringIndex(text, -1) {
+		match := text[indexes[0]:indexes[1]]
+		// "If the pilot clears the threshold, we will launch" remains a
+		// conditional recommendation. Only the two modal tokens can inherit an
+		// explicit same-clause condition; words such as proven, guaranteed, best,
+		// or only remain disallowed even inside a conditional wrapper.
+		if oneOf(strings.ToLower(match), "will", "must") && processScopedActionConditionallyBound(text, indexes[0]) {
+			continue
+		}
+		return match
+	}
+	return ""
+}
+
+func validateProcessScopedDecisionUnit(text, path string, manifest processAdmittedClaimManifest) error {
+	remainder := processScopedEvidenceUnitRemainder(text, manifest)
+	if remainder == "" {
+		return nil
+	}
+	if strings.HasSuffix(strings.TrimSpace(remainder), "?") && processScopedInterrogativeLeadPattern.MatchString(remainder) {
+		return nil
+	}
+	if match := processScopedUnsupportedDefinitive(remainder); match != "" {
+		return fmt.Errorf("%s uses unsupported definitive language %q while decision-critical external proof is unresolved", path, compactAssistantLine(match))
+	}
+	visible := strings.TrimSpace(strings.TrimLeft(remainder, "#*-• "))
+	if action := processScopedUnconditionalAction(visible); action != "" {
+		return fmt.Errorf("%s presents an unconditional high-consequence action %q while decision-critical external proof is unresolved; bind it to an explicit condition or frame a bounded test", path, compactAssistantLine(action))
+	}
+	return nil
+}
+
+func validateProcessScopedJSONObject(value any, path, key string, manifest processAdmittedClaimManifest) error {
+	switch typed := value.(type) {
+	case map[string]any:
+		for childKey, child := range typed {
+			if isID, isExact := processJSONAnchorField(childKey); isID || isExact || strings.EqualFold(strings.TrimSpace(childKey), "statement_type") {
+				continue
+			}
+			if isScope, _ := processJSONScopedEvidenceMetadataField(path, childKey, child); isScope {
+				continue
+			}
+			if err := validateProcessScopedJSONObject(child, path+"."+childKey, childKey, manifest); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for index, item := range typed {
+			if err := validateProcessScopedJSONObject(item, fmt.Sprintf("%s[%d]", path, index), key, manifest); err != nil {
+				return err
+			}
+		}
+	case string:
+		// Every free-text leaf is potentially user-visible narrative. A key
+		// allowlist is not an authority boundary: real contracts use purpose,
+		// speaker_intent, transition, and nested custom fields, any of which can
+		// otherwise launder the same unconditional directive.
+		return validateProcessScopedDecisionUnit(typed, path, manifest)
+	}
+	return nil
+}
+
+func validateProcessScopedJSONOutput(object map[string]any, authority processEvidenceGateAuthority) error {
+	want := map[string]string{
+		"evidence_scope":            processEvidenceAdequacyScoped,
+		"evidence_scope_receipt":    authority.DossierDigest,
+		"decision_posture":          "conditional",
+		"evidence_scope_disclosure": processScopedEvidenceDisclosure,
+	}
+	for key, expected := range want {
+		actual, ok := object[key].(string)
+		if !ok || strings.TrimSpace(actual) != expected {
+			return fmt.Errorf("JSON root must bind %s to the exact scoped-evidence contract", key)
+		}
+	}
+	return validateProcessScopedJSONObject(object, "$", "", authority.Claims)
+}
+
+func validateProcessScopedTextReceipt(body string, authority processEvidenceGateAuthority) error {
+	matches := processScopedEvidenceReceiptPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) != 1 || matches[0][1] != authority.DossierDigest {
+		return fmt.Errorf("output must carry exactly one scoped-evidence marker bound to the current dossier digest")
+	}
+	visible := canonicalEvidenceText(processHTMLCommentPattern.ReplaceAllString(body, " "))
+	if !strings.Contains(visible, processScopedEvidenceDisclosure) {
+		return fmt.Errorf("output must visibly disclose the unresolved external-proof posture")
+	}
+	return nil
+}
+
+func validateProcessScopedMarkdownOutput(body string, authority processEvidenceGateAuthority) error {
+	if err := validateProcessScopedTextReceipt(body, authority); err != nil {
+		return err
+	}
+	paragraphs := processMarkdownParagraphPattern.Split(strings.ReplaceAll(body, "\r\n", "\n"), -1)
+	for index, paragraph := range paragraphs {
+		if err := validateProcessScopedDecisionUnit(paragraph, fmt.Sprintf("paragraph %d", index+1), authority.Claims); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProcessScopedDeckOutput(body string, authority processEvidenceGateAuthority) error {
+	if err := validateProcessScopedTextReceipt(body, authority); err != nil {
+		return err
+	}
+	artifact := meetingMemoryEntry{Text: body, Metadata: map[string]string{"type": artifactTypeHTMLDeck}}
+	deck, quality := importLegacyDeckDocument(artifact)
+	if quality != "faithful" {
+		return fmt.Errorf("scoped final deck could not be inspected as a faithful native scene")
+	}
+	surfacedAttributes, err := processDeckSlideSurfacedAttributes(body)
+	if err != nil || len(surfacedAttributes) != len(deck.Slides) {
+		return fmt.Errorf("scoped final deck surfaced accessibility copy could not be matched to every slide")
+	}
+	disclosureVisible := false
+	for slideIndex, slide := range deck.Slides {
+		for attributeIndex, attribute := range surfacedAttributes[slideIndex] {
+			if err := validateProcessScopedDecisionUnit(attribute.Value, fmt.Sprintf("slide %d %s attribute %d", slideIndex+1, attribute.Name, attributeIndex+1), authority.Claims); err != nil {
+				return err
+			}
+		}
+		for _, element := range slide.Elements {
+			if element.Type != "text" || strings.TrimSpace(element.Text) == "" || processDeckStructuralText(element) {
+				continue
+			}
+			if strings.Contains(canonicalEvidenceText(element.Text), processScopedEvidenceDisclosure) {
+				disclosureVisible = true
+			}
+			if err := validateProcessScopedDecisionUnit(element.Text, fmt.Sprintf("slide %d element %s", slideIndex+1, element.ID), authority.Claims); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(slide.Notes) != "" {
+			if err := validateProcessScopedDecisionUnit(slide.Notes, fmt.Sprintf("slide %d presenter notes", slideIndex+1), authority.Claims); err != nil {
+				return err
+			}
+		}
+	}
+	if !disclosureVisible {
+		return fmt.Errorf("final deck must render the scoped-evidence disclosure in an inspectable text element")
+	}
+	return nil
+}
+
+// validateProcessScopedEvidenceOutput turns evidenceAdequacy=scoped into an
+// executable downstream contract. The immutable dossier digest must be copied
+// into every story/copy/layout/final artifact, the unresolved posture must be
+// visible, and certainty or unconditional high-consequence action cannot be
+// laundered through otherwise claim-free prose.
+func validateProcessScopedEvidenceOutput(body string, stage ProcessStage, authority processEvidenceGateAuthority) error {
+	if authority.Adequacy == processEvidenceAdequacyInsufficient {
+		return fmt.Errorf("external research has no authorized question coverage; downstream synthesis is not permitted")
+	}
+	if authority.Adequacy != processEvidenceAdequacyScoped {
+		if processScopedEvidenceReceiptPattern.MatchString(body) || strings.Contains(body, processScopedEvidenceDisclosure) {
+			return fmt.Errorf("output claims a scoped-evidence posture that the current dossier does not authorize")
+		}
+		if object, ok := decodeProcessClaimJSON(body); ok {
+			for _, key := range []string{"evidence_scope", "evidence_scope_receipt", "decision_posture", "evidence_scope_disclosure"} {
+				if _, exists := object[key]; exists {
+					return fmt.Errorf("JSON output claims scoped-evidence field %s without a scoped dossier", key)
+				}
+			}
+		}
+		return nil
+	}
+	if !isHexDigest(authority.DossierDigest) {
+		return fmt.Errorf("current evidence dossier has no valid immutable receipt")
+	}
+	if stage.ID == "ship_deck" {
+		return validateProcessScopedDeckOutput(body, authority)
+	}
+	if object, ok := decodeProcessClaimJSON(body); ok {
+		return validateProcessScopedJSONOutput(object, authority)
+	}
+	return validateProcessScopedMarkdownOutput(body, authority)
+}
+
 func validateProcessFactualClaims(body string, manifest processAdmittedClaimManifest) error {
 	body = strings.TrimSpace(body)
 	if object, ok := decodeProcessClaimJSON(body); ok {
@@ -1394,14 +1982,17 @@ func validateProcessStageFactualClaims(app *kanbanBoardApp, plan *goalPlan, pare
 	if !processClaimGateStage(plan, stage) {
 		return nil
 	}
-	manifest, err := loadProcessAdmittedClaimManifest(app, plan, parentID)
+	authority, err := loadProcessEvidenceGateAuthority(app, plan, parentID)
 	if err != nil {
 		return fmt.Errorf("factual claim gate could not load authority: %w", err)
 	}
+	if err := validateProcessScopedEvidenceOutput(body, stage, authority); err != nil {
+		return fmt.Errorf("scoped evidence gate rejected %s: %w", stage.ID, err)
+	}
 	if stage.ID == "ship_deck" {
-		err = validateProcessDeckFactualClaims(body, manifest)
+		err = validateProcessDeckFactualClaims(body, authority.Claims)
 	} else {
-		err = validateProcessFactualClaims(body, manifest)
+		err = validateProcessFactualClaims(body, authority.Claims)
 	}
 	if err != nil {
 		return fmt.Errorf("factual claim gate rejected %s: %w", stage.ID, err)
@@ -1433,6 +2024,9 @@ func validateGroundedProcessWriterFactualClaims(app *kanbanBoardApp, thread scou
 	engine := newGoalEngine(app)
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
 		return fmt.Errorf("process factual claim gate found invalid route authority: %w", err)
+	}
+	if err := packagingStudioHistoricalRunError(&plan); err != nil {
+		return fmt.Errorf("process factual claim gate requires a current process relaunch: %w", err)
 	}
 	definition, err := resolvePinnedProcessDefinition(&plan)
 	if err != nil {

@@ -43,6 +43,29 @@ func (a *strideE10TenantProductionLegacyIDs) WithMappedLegacyPerson(_ context.Co
 	return use(personID)
 }
 
+func (a *strideE10TenantProductionLegacyIDs) WithMappedLegacyOrganizationPrincipal(_ context.Context, digest string, requestPrincipal StrideE10TenantPrincipal, use func(StrideE10TenantPrincipal) error) error {
+	if a == nil || a.organizations == nil || !isHexDigest(digest) || !strideIdentifier(requestPrincipal.TenantID) || use == nil {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	a.organizations.mu.RLock()
+	defer a.organizations.mu.RUnlock()
+	personID := a.organizations.accountPersons[digest]
+	person, personOK := a.organizations.persons[personID]
+	organization, organizationOK := a.organizations.organizations[requestPrincipal.TenantID]
+	membership := a.organizations.activeMembershipForPersonOrganizationLocked(personID, requestPrincipal.TenantID)
+	if !personOK || person.Validate() != nil || person.Status != "active" || person.AccountSubjectDigest != digest ||
+		!organizationOK || organization.Validate() != nil || organization.Status != "active" || organization.Header.ID != requestPrincipal.TenantID ||
+		membership == nil || membership.Validate() != nil || membership.Status != "active" || membership.EndedAt != nil ||
+		membership.PersonID != personID || membership.OrganizationID != requestPrincipal.TenantID || membership.Header.TenantID != requestPrincipal.TenantID {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	return use(StrideE10TenantPrincipal{
+		TenantID: requestPrincipal.TenantID, PersonID: personID,
+		ActiveOrganizationID: requestPrincipal.TenantID, OrganizationMembershipID: membership.Header.ID,
+		OrganizationMembershipRev: membership.Header.Revision, AuthorityGeneration: requestPrincipal.AuthorityGeneration,
+	})
+}
+
 type strideE10TenantFileReceiptSink struct {
 	mu       sync.Mutex
 	path     string
@@ -224,4 +247,5 @@ func installStrideE10TenantProductionRuntimeFromEnvironment() (func(), error) {
 
 var _ StrideE10TenantReceiptSink = (*strideE10TenantFileReceiptSink)(nil)
 var _ StrideE10LegacyIdentityAuthority = (*strideE10TenantProductionLegacyIDs)(nil)
+var _ StrideE10LegacyOrganizationPrincipalAuthority = (*strideE10TenantProductionLegacyIDs)(nil)
 var _ StrideE10TenantAuthorityEnvelopeKeyring = (*strideE10TenantManagedEnvelopeKeyring)(nil)

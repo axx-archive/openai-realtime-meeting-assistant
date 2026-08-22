@@ -111,18 +111,22 @@ func (app *kanbanBoardApp) conversationContinuityForViewer(viewerEmail string, t
 		return conversationContinuityCheckpoint{}, false
 	}
 	checkpoint := app.latestConversationContinuity(thread.ID)
-	if checkpoint.ID == "" || checkpoint.Status != conversationContinuityStatusActive {
-		return conversationContinuityCheckpoint{}, false
-	}
-	currentAudienceDigest := conversationContinuityAudienceDigest(thread)
-	if checkpoint.AudienceDigest != currentAudienceDigest {
-		return conversationContinuityCheckpoint{}, false
-	}
-	currentSourceDigest, _, _ := conversationContinuitySourceDigest(thread, currentAudienceDigest)
-	if currentSourceDigest == "" || checkpoint.SourceDigest != currentSourceDigest {
+	if !conversationContinuityCheckpointCurrentForViewer(viewerEmail, thread, checkpoint) {
 		return conversationContinuityCheckpoint{}, false
 	}
 	return checkpoint, true
+}
+
+func conversationContinuityCheckpointCurrentForViewer(viewerEmail string, thread scoutChatThreadRecord, checkpoint conversationContinuityCheckpoint) bool {
+	if !scoutChatThreadAllowsViewer(thread, viewerEmail) || thread.ArchivedAt != "" || checkpoint.ID == "" || checkpoint.Status != conversationContinuityStatusActive || checkpoint.ThreadID != thread.ID {
+		return false
+	}
+	currentAudienceDigest := conversationContinuityAudienceDigest(thread)
+	if checkpoint.AudienceDigest != currentAudienceDigest {
+		return false
+	}
+	currentSourceDigest, _, _ := conversationContinuitySourceDigest(thread, currentAudienceDigest)
+	return currentSourceDigest != "" && checkpoint.SourceDigest == currentSourceDigest
 }
 
 func conversationContinuityAudienceDigest(thread scoutChatThreadRecord) string {

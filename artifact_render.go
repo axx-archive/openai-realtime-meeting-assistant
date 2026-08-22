@@ -80,14 +80,15 @@ func artifactIsHTMLDocument(artifact meetingMemoryEntry) bool {
 // invalidates the token. Reuses the archive token secret with a distinct
 // domain prefix (participants.go precedent): one lazily-created server
 // secret, no cross-protocol token replay.
-func artifactRenderTokenMAC(artifactID string, revision string, digest string, action string, expiresUnix string) string {
+func artifactRenderTokenMAC(artifactID string, revision string, digest string, aclGeneration string, action string, expiresUnix string) string {
 	mac := hmac.New(sha256.New, archiveTokenSecret())
-	mac.Write([]byte(strings.Join([]string{artifactRenderTokenPrefix + canonicalArtifactTenantID(), strings.TrimSpace(artifactID), revision, digest, action, expiresUnix}, ":")))
+	mac.Write([]byte(strings.Join([]string{artifactRenderTokenPrefix + canonicalArtifactTenantID(), strings.TrimSpace(artifactID), revision, digest, aclGeneration, action, expiresUnix}, ":")))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// mintArtifactRenderToken issues a render token valid until expires, encoded
-// as "<unix-expiry>.<hex-mac>" so validation needs no server-side state.
+// mintArtifactRenderToken issues a render token valid until expires, binding
+// the exact body revision, capability digest, ACL generation, and action so
+// validation needs no server-side token record and an ACL bump revokes it.
 func mintArtifactRenderToken(artifactID string, expires time.Time) string {
 	if kanbanApp != nil {
 		if artifact, ok := kanbanApp.osArtifactByID(artifactID); ok {
@@ -101,8 +102,9 @@ func mintArtifactRenderTokenForArtifact(artifact meetingMemoryEntry, expires tim
 	expiresUnix := strconv.FormatInt(expires.Unix(), 10)
 	revision := strconv.Itoa(artifactVersion(artifact))
 	digest := artifactCapabilityDigest(artifact)
+	aclGeneration := strconv.FormatInt(artifactAuthorizationHeaderFromEntry(artifact).ACLVersion, 10)
 	action := string(ACLReadContent)
-	return strings.Join([]string{expiresUnix, revision, digest, action, artifactRenderTokenMAC(artifact.ID, revision, digest, action, expiresUnix)}, ".")
+	return strings.Join([]string{expiresUnix, revision, digest, aclGeneration, action, artifactRenderTokenMAC(artifact.ID, revision, digest, aclGeneration, action, expiresUnix)}, ".")
 }
 
 // validArtifactRenderToken accepts only an unexpired token whose MAC matches
@@ -110,10 +112,10 @@ func mintArtifactRenderTokenForArtifact(artifact meetingMemoryEntry, expires tim
 // validArchiveKey pattern, so attacker-controlled lengths leak nothing).
 func validArtifactRenderToken(artifactID string, token string, now time.Time) bool {
 	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 5 {
+	if len(parts) != 6 {
 		return false
 	}
-	expiresUnix, revision, digest, action, macHex := parts[0], parts[1], parts[2], parts[3], parts[4]
+	expiresUnix, revision, digest, aclGeneration, action, macHex := parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
 	expires, err := strconv.ParseInt(expiresUnix, 10, 64)
 	if err != nil || now.Unix() > expires || action != string(ACLReadContent) || !isHexDigest(digest) {
 		return false
@@ -121,20 +123,25 @@ func validArtifactRenderToken(artifactID string, token string, now time.Time) bo
 	if parsed, err := strconv.Atoi(revision); err != nil || parsed < 0 {
 		return false
 	}
+	if parsed, err := strconv.ParseInt(aclGeneration, 10, 64); err != nil || parsed < 1 {
+		return false
+	}
 
 	providedHash := sha256.Sum256([]byte(macHex))
-	expectedHash := sha256.Sum256([]byte(artifactRenderTokenMAC(artifactID, revision, digest, action, expiresUnix)))
+	expectedHash := sha256.Sum256([]byte(artifactRenderTokenMAC(artifactID, revision, digest, aclGeneration, action, expiresUnix)))
 
 	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
 }
 
 func artifactRenderTokenMatchesArtifact(token string, artifact meetingMemoryEntry) bool {
 	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 5 {
+	if len(parts) != 6 {
 		return false
 	}
 	revision, err := strconv.Atoi(parts[1])
-	return err == nil && revision == artifactVersion(artifact) && parts[2] == artifactCapabilityDigest(artifact) && parts[3] == string(ACLReadContent)
+	aclGeneration, aclErr := strconv.ParseInt(parts[3], 10, 64)
+	return err == nil && aclErr == nil && revision == artifactVersion(artifact) && parts[2] == artifactCapabilityDigest(artifact) &&
+		aclGeneration == artifactAuthorizationHeaderFromEntry(artifact).ACLVersion && parts[4] == string(ACLReadContent)
 }
 
 // artifactRenderTokenHandler serves GET /artifacts/render-token?id=... —
@@ -169,6 +176,10 @@ func artifactRenderTokenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !artifactIsHTMLDocument(artifact) {
 		writeAuthError(w, http.StatusNotFound, "artifact is not an html document")
+		return
+	}
+	if err := kanbanApp.requireFinalExportAdmission(artifact); err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -212,12 +223,18 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artifact, found := kanbanApp.osArtifactByID(artifactID)
-	if !found || !artifactIsHTMLDocument(artifact) || !artifactRenderTokenMatchesArtifact(token, artifact) || !kanbanApp.projectBoundArtifactCurrent(r.Context(), artifact) {
+	if !found || !artifactIsHTMLDocument(artifact) || !artifactRenderTokenMatchesArtifact(token, artifact) || !kanbanApp.projectBoundArtifactCurrent(r.Context(), artifact) || !kanbanApp.authoredResultPublicationReady(artifact) {
 		http.NotFound(w, r)
 		return
 	}
 	body, err := artifactRenderBody(artifact)
 	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	current, currentFound := kanbanApp.osArtifactByID(artifactID)
+	if !currentFound || !artifactRenderTokenMatchesArtifact(token, current) || !kanbanApp.projectBoundArtifactCurrent(r.Context(), current) ||
+		!kanbanApp.authoredResultPublicationReady(current) || artifactVersion(current) != artifactVersion(artifact) || artifactCapabilityDigest(current) != artifactCapabilityDigest(artifact) {
 		http.NotFound(w, r)
 		return
 	}

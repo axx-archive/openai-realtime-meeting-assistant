@@ -392,7 +392,7 @@ func rawDocumentContractInstructions(contract string) (string, bool) {
 			"Follow the approved brief and prior-stage evidence supplied in the user request. Choose only the sections the actual decision needs; do not impose a generic research-report template or a fixed word count.",
 			"Build a coherent human argument: lead with the useful thesis, earn it with attributable evidence and counterevidence, make inferences explicit, and end with concrete decisions, tests, or next moves appropriate to the ask.",
 			"Use clickable Markdown links beside externally sourced claims. Keep company-grounded observations, external facts, inferences, and recommendations distinct. Never invent a quote, source, number, or degree of certainty.",
-			"For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the complete exact admitted claim verbatim and append the exact hidden authority marker required by the stage prompt. This marker is source metadata and must stay in the Markdown document.",
+			"For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the approved display claim verbatim and append the hidden claim-id marker required by the stage prompt. The full exact source sentence stays immutable in the evidence dossier and source metadata. This marker is source metadata and must stay in the Markdown document.",
 			processForwardStatementPromptLaw,
 			"Write publication-quality prose with varied, natural cadence. Remove AI tells, filler headings, slogan stacks, throat-clearing, and meta-language about producing the report.",
 		}, "\n"), true
@@ -678,6 +678,23 @@ func processByID(id string) (ProcessDefinition, bool) {
 	return ProcessDefinition{}, false
 }
 
+// pinnedProcessDefinitions returns every immutable executable definition that
+// may legitimately be named by a persisted plan. processByID intentionally
+// remains current-only so every new launch receives the latest definition;
+// this compatibility set exists only at resume/replay time.
+func pinnedProcessDefinitions(id string) []ProcessDefinition {
+	id = strings.TrimSpace(strings.ToLower(id))
+	definitions := make([]ProcessDefinition, 0, 2)
+	if current, ok := processByID(id); ok {
+		definitions = append(definitions, current)
+	}
+	if id == packagingStudioProcessID {
+		definitions = append(definitions, packagingStudioDefinitionV5())
+		definitions = append(definitions, packagingStudioDefinitionV4())
+	}
+	return definitions
+}
+
 func bindGoalProcessIdentity(plan *goalPlan, def ProcessDefinition) error {
 	if plan == nil {
 		return fmt.Errorf("process plan is unavailable")
@@ -722,18 +739,20 @@ func resolvePinnedProcessDefinition(plan *goalPlan) (ProcessDefinition, error) {
 	if !plan.routeVerified {
 		return ProcessDefinition{}, fmt.Errorf("saved process route is not verified")
 	}
-	def, ok := processByID(plan.ProcessID)
-	if !ok {
+	definitions := pinnedProcessDefinitions(plan.ProcessID)
+	if len(definitions) == 0 {
 		return ProcessDefinition{}, fmt.Errorf("saved process %s is no longer available; relaunch or explicitly migrate the run", strings.TrimSpace(plan.ProcessID))
 	}
-	identity, err := processDefinitionIdentityFor(def)
-	if err != nil {
-		return ProcessDefinition{}, fmt.Errorf("saved process %s cannot be resolved safely: %w", strings.TrimSpace(plan.ProcessID), err)
+	for _, def := range definitions {
+		identity, err := processDefinitionIdentityFor(def)
+		if err != nil {
+			return ProcessDefinition{}, fmt.Errorf("saved process %s cannot be resolved safely: %w", strings.TrimSpace(plan.ProcessID), err)
+		}
+		if verifyGoalProcessIdentity(plan, identity) == nil {
+			return def, nil
+		}
 	}
-	if err := verifyGoalProcessIdentity(plan, identity); err != nil {
-		return ProcessDefinition{}, err
-	}
-	return def, nil
+	return ProcessDefinition{}, fmt.Errorf("saved process %s identity no longer matches an available immutable definition; relaunch or explicitly migrate the run", strings.TrimSpace(plan.ProcessID))
 }
 
 // processDeliverableContract is the contract the process's LAST writer stage
@@ -939,12 +958,12 @@ func documentReportDefinition() ProcessDefinition {
 	internal := true
 	return ProcessDefinition{
 		ID:                     documentReportProcessID,
-		Version:                3,
+		Version:                4,
 		Title:                  "Document Studio",
 		Description:            "Turn a substantial document or report request and authorized company context into a researched-when-needed, reviewed, editable native document.",
 		Group:                  toolGroupProcesses,
 		Authority:              toolAuthorityWorkspaceWrite,
-		ImplementationRevision: "document_report.runtime.v3.rendered-admission.v1",
+		ImplementationRevision: "document_report.runtime.v4.scoped-evidence.v1",
 		Budgets:                ProcessBudgets{MaxSubtasks: 12, MaxTokens: 64000, WallClock: 25 * time.Minute},
 		Stages: []ProcessStage{
 			{
@@ -956,8 +975,8 @@ func documentReportDefinition() ProcessDefinition {
 					"Turn the direct approved request, exact reply-thread/source packet, and authorized Company Brain context into report_context_snapshot_v2. The current request is authoritative; older company context may support it but never override it.",
 					"Resolve the reader, decision or job to be done, intended use, scope, voice, useful document shape, known constraints, exact language worth preserving, settled internal facts, and genuinely open claims. Prefer a safe reversible inference over a routine clarification and label it.",
 					"Choose research_mode as none, internal, or external. Use external only when current market facts, benchmarks, regulations, comparative claims, or credibility-critical numbers could materially change the report. Use the fewest decision-driving questions: one decisive lane is better than a broad scan. Do not ask hosted web research to reconstruct private account analytics or perform a broad multi-platform audit; record that as an internal data need instead. A synthesis, internal memo, narrative draft, or answer fully supported by authorized sources does not need web research.",
-					"When research_mode is external, research_questions must contain 1 to 3 atomic single-line objects and no other shape. Each object has exactly question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance. research_kind is direct_evidence, comparative_evidence, or current_constraint. decision_effect is recommendation, scope, sequence, guardrail, or measurement. The question has exactly one question mark. Copy source_ref exactly as the full text inside one SOURCE [...] header, excluding only the literal brackets. Copy authority_quote exactly from that same source. scope_anchor is an exact 2 to 12 material-word phrase present in the direct ask, the authority_quote, the question, and decision_relevance; a company name or generic word such as market is insufficient. decision_relevance repeats that anchor and states concretely how the answer could change a recommendation, decision, pilot, sequence, scope, guardrail, or measurement in this report. direct_evidence must preserve the authorized entity, population, measure, predicate, geography, and time window. comparative_evidence may introduce named comparators only when the question explicitly asks for a comparison or benchmark and stays within one measure lane. current_constraint may introduce a regulator or platform only to ask for current rules, policy, regulation, or requirements; it must not bundle market, spend, reach, or performance claims. When research_mode is none or internal, research_questions is an empty array.",
-					"Return one JSON object with keys direct_ask, reader, decision, intended_use, document_shape, scope, voice, constraints, context_used, settled_facts, open_claims, research_mode, research_questions, reversible_inferences, and success_criteria. settled_facts must be an array of objects with claim, exact_quote, and source_ref. Copy claim and exact_quote verbatim from one authorized source and make them identical after whitespace normalization. Copy the complete bracketed reference exactly from the same SOURCE [...] block or source-linked Company Brain line into source_ref, including every id, revision, and digest field; never synthesize or combine a reference. If that same-source proof is unavailable, put the item in open_claims instead.",
+					"When research_mode is external, research_questions must contain 1 to 3 atomic single-line objects and no other shape. Each object has exactly question, research_kind, importance, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance. research_kind is direct_evidence, comparative_evidence, or current_constraint. importance is load_bearing or optional; use load_bearing only when an unsupported answer would materially change the core decision, authorize at most one load_bearing question, and mark useful corroboration optional. decision_effect is recommendation, scope, sequence, guardrail, or measurement. The question has exactly one question mark. Copy source_ref exactly as the full text inside one SOURCE [...] header, excluding only the literal brackets. Copy authority_quote exactly from that same source. scope_anchor is an exact 2 to 12 material-word phrase present in the direct ask, the authority_quote, the question, and decision_relevance; a company name or generic word such as market is insufficient. decision_relevance repeats that anchor and states concretely how the answer could change a recommendation, decision, pilot, sequence, scope, guardrail, or measurement in this report. direct_evidence must preserve the authorized entity, population, measure, predicate, geography, and time window. comparative_evidence may introduce named comparators only when the question explicitly asks for a comparison or benchmark and stays within one measure lane. current_constraint may introduce a regulator or platform only to ask for current rules, policy, regulation, or requirements; it must not bundle market, spend, reach, or performance claims. When research_mode is none or internal, research_questions is an empty array.",
+					"Return one JSON object with keys direct_ask, reader, decision, intended_use, document_shape, scope, voice, constraints, context_used, settled_facts, open_claims, research_mode, research_questions, reversible_inferences, and success_criteria. settled_facts must be an array of objects with claim, display_claim, exact_quote, and source_ref. Copy claim and exact_quote verbatim from one authorized source and make them identical after whitespace normalization. display_claim is a concise human rendering made only by removing non-material words from claim while retaining every content token in source order; it must keep every number, date, measure, entity, population, geography, and time scope and add no new word, qualifier, or semantic-role swap. Copy the complete bracketed reference exactly from the same SOURCE [...] block or source-linked Company Brain line into source_ref, including every id, revision, and digest field; never synthesize or combine a reference. If that same-source proof is unavailable, put the item in open_claims instead.",
 				}, "\n"),
 				OutputContract: "report_context_snapshot_v2",
 			},
@@ -1016,7 +1035,7 @@ func documentReportDefinition() ProcessDefinition {
 					{Name: "decision editor", System: "You are a rigorous executive editor. Build the shortest causal argument that helps this exact reader make the intended decision. Refuse topic dumps, generic section templates, repeated points, and recommendations the evidence has not earned."},
 					{Name: "skeptical operator", System: "You are the operator who must act on this report. Pressure-test proof, counterevidence, incentives, feasibility, risks, guardrails, success measures, and what would change the recommendation. Keep only material objections and executable implications."},
 				},
-				PromptBody:     "Develop distinct narrative approaches for the actual reader and decision, then synthesize one report_story_spine_v1. Name the opening thesis, causal turns, evidence assigned to each turn, counterargument, implications, and ending decision or test. Use only report-ready claims, preserve explicit source language exactly, and choose a story rather than an outline of topics. For every JSON object that contains a material number, currency, percentage, date, external URL, or externally verifiable superlative, include sibling claim_ids and exact_claims arrays copied exactly from the admitted evidence row and render the complete exact admitted claim verbatim in the fact-bearing string. If you write prose instead of JSON, append <!-- stride-claim:<claim id> | <exact admitted claim> --> in the same paragraph and render that exact claim verbatim in the factual sentence. " + processForwardStatementPromptLaw,
+				PromptBody:     "Develop distinct narrative approaches for the actual reader and decision, then synthesize one report_story_spine_v1. Name the opening thesis, causal turns, evidence assigned to each turn, counterargument, implications, and ending decision or test. Use only report-ready claims and choose a story rather than an outline of topics. For every JSON object that contains a material number, currency, percentage, date, external URL, or externally verifiable superlative, include sibling claim_ids and claim_renderings arrays copied exactly from the admitted evidence row and render the approved display claim verbatim in the fact-bearing string. The full exact source sentence remains immutable in the dossier and source notes. If you write prose instead of JSON, append <!-- stride-claim:<claim id> --> in the same paragraph and render the approved display claim verbatim in the factual sentence. " + processForwardStatementPromptLaw,
 				OutputContract: "report_story_spine_v1",
 			},
 			{
@@ -1026,7 +1045,7 @@ func documentReportDefinition() ProcessDefinition {
 				Mode:           "artifacts",
 				Internal:       internal,
 				InputFrom:      []string{"context_snapshot", "evidence", "story"},
-				PromptBody:     "Write the finished native Markdown document now. Honor the requested report type and choose only useful sections. Open with a specific title and a decision-worthy thesis; build one coherent narrative supported by attributed facts and clearly labeled inference; include counterevidence, risks, guardrails, and concrete opportunities, tests, owners, measures, or next decisions only where relevant. Use natural human prose and clickable citations. For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the complete exact admitted claim verbatim and append one hidden authority marker in that same heading, paragraph, or row using exactly <!-- stride-claim:<claim id> | <exact admitted claim> -->. The id and claim text must be copied from the dossier; the external URL must equal that row's requested or final URL. Do not include process artifacts, a research receipt, a generic workflow template, or a fixed minimum length. " + processForwardStatementPromptLaw,
+				PromptBody:     "Write the finished native Markdown document now. Honor the requested report type and choose only useful sections. Open with a specific title and a decision-worthy thesis; build one coherent narrative supported by attributed facts and clearly labeled inference; include counterevidence, risks, guardrails, and concrete opportunities, tests, owners, measures, or next decisions only where relevant. Use natural human prose and clickable citations. For every heading, paragraph, or table row containing a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the approved display claim verbatim and append one hidden authority marker in that same heading, paragraph, or row using exactly <!-- stride-claim:<claim id> -->. The id and approved rendering must come from the dossier; the external URL must equal that row's requested or final URL. Keep the full exact source sentence in source metadata. Do not include process artifacts, a research receipt, a generic workflow template, or a fixed minimum length. " + processForwardStatementPromptLaw,
 				OutputContract: documentReportOutputContract,
 			},
 			{

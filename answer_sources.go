@@ -182,3 +182,88 @@ func groundAnswerInMessages(
 	}
 	return sources
 }
+
+// groundAnswerInCurrentCompanyConversationSources is the cross-channel
+// counterpart to groundAnswerInMessages. Callers may pass only sources returned
+// by lockCurrentCompanyConversationSources: each source is an exact message body
+// re-read from its current channel after the provider returned, while the
+// channel's authority lock remains held through final answer persistence.
+//
+// Matching the live message body (not the synthetic Channel/Author/Posted
+// prompt wrapper) prevents provenance headers from fabricating support.
+func groundAnswerInCurrentCompanyConversationSources(answer string, entries []currentCompanyConversationSource, limit int) []answerSource {
+	answerWords := normalizeForGrounding(answer)
+	if len(answerWords) == 0 || len(entries) == 0 {
+		return nil
+	}
+	type scored struct {
+		source   answerSource
+		strength int
+	}
+	bySource := map[string]scored{}
+	for _, entry := range entries {
+		threadID := strings.TrimSpace(entry.ThreadID)
+		messageID := strings.TrimSpace(entry.MessageID)
+		if threadID == "" || messageID == "" || strings.TrimSpace(entry.Text) == "" {
+			continue
+		}
+		key := threadID + "\x00" + messageID
+		run, content := longestSharedRun(answerWords, normalizeForGrounding(entry.Text))
+		if content < 3 {
+			continue
+		}
+		candidate := scored{source: answerSource{
+			Kind:        "company_conversation",
+			MessageID:   messageID,
+			ThreadID:    threadID,
+			ThreadTitle: strings.TrimSpace(entry.ThreadTitle),
+			At:          strings.TrimSpace(entry.OccurredAt),
+			Author:      firstNonEmptyString(strings.TrimSpace(entry.Author), "channel"),
+			Quote:       strings.Join(run, " "),
+		}, strength: content}
+		prior, exists := bySource[key]
+		if !exists || candidate.strength > prior.strength {
+			bySource[key] = candidate
+		}
+	}
+	candidates := make([]scored, 0, len(bySource))
+	for _, candidate := range bySource {
+		candidates = append(candidates, candidate)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].strength != candidates[j].strength {
+			return candidates[i].strength > candidates[j].strength
+		}
+		left := candidates[i].source.ThreadID + "\x00" + candidates[i].source.MessageID
+		right := candidates[j].source.ThreadID + "\x00" + candidates[j].source.MessageID
+		return left < right
+	})
+	sources := make([]answerSource, 0, len(candidates))
+	for _, candidate := range candidates {
+		if limit > 0 && len(sources) >= limit {
+			break
+		}
+		sources = append(sources, candidate.source)
+	}
+	return sources
+}
+
+func appendUniqueAnswerSources(current []answerSource, additions []answerSource, limit int) []answerSource {
+	seen := make(map[string]bool, len(current)+len(additions))
+	result := make([]answerSource, 0, len(current)+len(additions))
+	appendSource := func(source answerSource) {
+		key := strings.TrimSpace(source.Kind) + "\x00" + strings.TrimSpace(source.ThreadID) + "\x00" + strings.TrimSpace(source.MessageID) + "\x00" + strings.TrimSpace(source.MeetingID) + "\x00" + strings.TrimSpace(source.SegmentID)
+		if key == "\x00\x00\x00\x00" || seen[key] || limit > 0 && len(result) >= limit {
+			return
+		}
+		seen[key] = true
+		result = append(result, source)
+	}
+	for _, source := range current {
+		appendSource(source)
+	}
+	for _, source := range additions {
+		appendSource(source)
+	}
+	return result
+}

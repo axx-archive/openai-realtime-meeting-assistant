@@ -1518,6 +1518,17 @@ func (store *meetingMemoryStore) eligibleEmbeddingEntriesSnapshotForPrincipal(pr
 	defer store.mu.Unlock()
 	out := make([]meetingMemoryEntry, 0, 256)
 	for _, entry := range store.entries {
+		// A chat-promoted Files row has no standalone company-brain authority:
+		// its copied text is projected only through a request-time source check in
+		// recallStoreForPrincipal. The background embedding service has no human
+		// principal with which to reauthorize that source, so exclude it and let a
+		// later reconcile drop any pre-hardening vector. True direct Files uploads
+		// have no provenance binding and retain their existing corpus behavior.
+		if entry.Kind == meetingMemoryKindFile {
+			if _, promoted, _ := promotedChatFileBindingFromEntry(entry); promoted {
+				continue
+			}
+		}
 		if embeddingEligible(entry) && (principal.Audience == "" || recallEntryScopeAllowed(entry.Metadata, principal)) {
 			out = append(out, cloneMemoryEntry(entry))
 		}

@@ -14,6 +14,34 @@ export type RealtimeFunctionCall = {
   argumentsText: string;
 };
 
+export const ROUTED_MESSAGE_SPEECH_INSTRUCTIONS =
+  'Speak only the message string from the most recent route_conversation_turn function result, exactly as written. Do not add, omit, paraphrase, explain, or answer anything else.';
+
+export const ROUTE_BATCH_FAILURE_MESSAGE =
+  "I couldn't safely route that voice turn. Please try again.";
+
+export const ROUTE_BATCH_FAILURE_SPEECH_INSTRUCTIONS =
+  `Say exactly: "${ROUTE_BATCH_FAILURE_MESSAGE}" Do not say anything else.`;
+
+export function realtimeToolContinuationPolicy(calls: RealtimeFunctionCall[]): {
+  valid: boolean;
+  shouldRespond: boolean;
+  instructions: string;
+  failureMessage: string;
+} {
+  const valid = calls.length === 1
+    && ['route_conversation_turn', 'do_nothing'].includes(calls[0].name);
+  const shouldRespond = calls.some((call) => call.name === 'route_conversation_turn');
+  return {
+    valid,
+    shouldRespond,
+    instructions: shouldRespond
+      ? (valid ? ROUTED_MESSAGE_SPEECH_INSTRUCTIONS : ROUTE_BATCH_FAILURE_SPEECH_INSTRUCTIONS)
+      : '',
+    failureMessage: valid ? '' : ROUTE_BATCH_FAILURE_MESSAGE,
+  };
+}
+
 export function normalizeRealtimeSDP(value: unknown): string {
   const normalized = String(value ?? '').trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   if (!normalized) return '';
@@ -26,8 +54,9 @@ export function realtimeStatusForEvent(
 ): PersonalRealtimeStatus {
   if (type === 'error') return 'error';
   if (type.includes('speech_started')) return 'hearing';
-  // Conversational voice: do NOT flip to thinking on speech_stopped. Stay in
-  // listening/hearing until first_audio so there's no visible "thinking" beat.
+  // Every completed private turn enters the server-owned Scout route before
+  // speech, so expose that short grounded lookup instead of appearing stuck.
+  if (type.includes('speech_stopped')) return 'thinking';
   if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) return 'talking';
   if (type.includes('response.done') || type.includes('output_audio_buffer.stopped')) return 'listening';
   return current;

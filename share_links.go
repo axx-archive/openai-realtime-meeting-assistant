@@ -50,8 +50,10 @@ import (
 )
 
 const (
-	shareLinkStatusActive  = "active"
-	shareLinkStatusRevoked = "revoked"
+	shareLinkStatusActive               = "active"
+	shareLinkStatusRevoked              = "revoked"
+	shareLinkEffectiveStatusExpired     = "expired"
+	shareLinkEffectiveStatusUnavailable = "unavailable"
 
 	// shareLinkDefaultExpiryDays / shareLinkMaxExpiryDays bound the mint
 	// request's expiresDays: a share link is a courtesy window, not a
@@ -257,7 +259,7 @@ func validShareLinkBinding(record shareLinkRecord) bool {
 
 func validShareLinkBindingForTenant(record shareLinkRecord, tenantID string) bool {
 	return record.TokenHash != "" && isHexDigest(record.TokenHash) && record.TenantID == strings.TrimSpace(tenantID) && record.ObjectType == "artifact" &&
-		record.ArtifactID != "" && record.Revision >= 1 && isHexDigest(record.ContentDigest) && record.Action == "read_content"
+		record.ArtifactID != "" && record.Revision >= 1 && record.ACLGeneration >= 1 && isHexDigest(record.ContentDigest) && record.Action == "read_content"
 }
 
 // shareLinkByToken resolves a public token via hash-then-constant-time
@@ -294,20 +296,38 @@ func shareLinkPayload(record shareLinkRecord, now time.Time) map[string]any {
 }
 
 func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID string) map[string]any {
+	effectiveStatus := record.Status
+	available := false
+	if record.Status == shareLinkStatusActive {
+		switch {
+		case shareLinkExpired(record, now):
+			effectiveStatus = shareLinkEffectiveStatusExpired
+		case !shareLinkLiveForTenant(record, now, tenantID):
+			effectiveStatus = shareLinkEffectiveStatusUnavailable
+		default:
+			_, available = shareLinkBoundArtifact(record)
+			if !available {
+				effectiveStatus = shareLinkEffectiveStatusUnavailable
+			}
+		}
+	}
 	payload := map[string]any{
-		"id":           record.ID,
-		"artifactId":   record.ArtifactID,
-		"status":       record.Status,
-		"createdAt":    record.CreatedAt,
-		"expiresAt":    record.ExpiresAt,
-		"openCount":    record.OpenCount,
-		"lastOpenedAt": record.LastOpenedAt,
-		"expired":      record.Status == shareLinkStatusActive && shareLinkExpired(record, now),
+		"id":              record.ID,
+		"artifactId":      record.ArtifactID,
+		"status":          record.Status,
+		"storedStatus":    record.Status,
+		"effectiveStatus": effectiveStatus,
+		"available":       available,
+		"createdAt":       record.CreatedAt,
+		"expiresAt":       record.ExpiresAt,
+		"openCount":       record.OpenCount,
+		"lastOpenedAt":    record.LastOpenedAt,
+		"expired":         effectiveStatus == shareLinkEffectiveStatusExpired,
 	}
 	if record.KeyID == "" && record.CreatedBy != "" {
 		payload["createdBy"] = record.CreatedBy
 	}
-	if shareLinkLiveForTenant(record, now, tenantID) && record.RawToken != "" {
+	if available && record.RawToken != "" {
 		payload["url"] = "/a/" + record.RawToken
 	}
 	return payload
@@ -369,7 +389,7 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 		return
 	}
 
-	artifact, found := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadMetadata, ACLShare, ACLReadContent)
+	artifact, found := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadMetadata, ACLShare, ACLReadContent, ACLExport)
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -379,6 +399,10 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 	// enforcement point.
 	if !artifactShareEligible(artifact) {
 		writeAuthError(w, http.StatusBadRequest, "share links need an approved artifact — current status is "+artifactStatus(artifact))
+		return
+	}
+	if !kanbanApp.authoredResultPublicationReady(artifact) {
+		writeAuthError(w, http.StatusConflict, "this authored draft must pass review before it can be shared")
 		return
 	}
 
@@ -722,39 +746,50 @@ func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
 	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
 	if !found || !kanbanApp.projectBoundArtifactCurrent(r.Context(), artifact) || header.TenantID != claims.TenantID || header.ObjectID != claims.ArtifactID || int(header.ContentRevision) != claims.Revision ||
-		header.ACLVersion != claims.ACLGeneration || !artifactShareEligible(artifact) || artifactCapabilityDigest(artifact) != claims.ContentDigest {
+		header.ACLVersion != claims.ACLGeneration || !kanbanApp.authoredArtifactShareEligible(artifact) || artifactCapabilityDigest(artifact) != claims.ContentDigest {
 		writeShareLinkNotFound(w)
 		return
 	}
 	serveShareLinkRecord(w, record)
 }
 
-func serveShareLinkRecord(w http.ResponseWriter, record shareLinkRecord) {
+func shareLinkBoundArtifact(record shareLinkRecord) (meetingMemoryEntry, bool) {
+	if kanbanApp == nil {
+		return meetingMemoryEntry{}, false
+	}
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
-	// Re-check the status gate on EVERY open: pulling an artifact's approval
-	// revokes its live links without touching the records.
-	if !found || !kanbanApp.projectBoundArtifactCurrent(context.Background(), artifact) || !artifactShareEligible(artifact) || artifactVersion(artifact) != record.Revision || artifactCapabilityDigest(artifact) != record.ContentDigest {
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	if !found || header.TenantID != record.TenantID || header.ACLVersion != record.ACLGeneration ||
+		!kanbanApp.projectBoundArtifactCurrent(context.Background(), artifact) || !kanbanApp.authoredArtifactShareEligible(artifact) ||
+		artifactVersion(artifact) != record.Revision || artifactCapabilityDigest(artifact) != record.ContentDigest {
+		return meetingMemoryEntry{}, false
+	}
+	return artifact, true
+}
+
+func serveShareLinkRecord(w http.ResponseWriter, record shareLinkRecord) {
+	artifact, found := shareLinkBoundArtifact(record)
+	// Re-check the status gate on EVERY open: pulling an artifact's approval,
+	// changing its ACL, or reopening authored review revokes live links without
+	// mutating the capability record.
+	if !found {
 		writeShareLinkNotFound(w)
 		return
 	}
 
 	boundArtifact := cloneMemoryEntry(artifact)
-	recordShareLinkOpen(record, boundArtifact)
-
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
+	var body []byte
+	contentType := "text/html; charset=utf-8"
+	disposition := ""
 	switch artifactType(boundArtifact) {
 	case artifactTypeHTMLDeck:
 		// The sandboxed render path's pinned policy, verbatim: full deck
 		// fidelity, zero network reach, opaque origin even opened top-level.
-		w.Header().Set("Content-Security-Policy", artifactRenderCSP)
-		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write([]byte(boundArtifact.Text)); err != nil {
-			log.Errorf("Failed to serve shared deck %s: %v", artifact.ID, err)
+		var err error
+		body, err = artifactRenderBody(boundArtifact)
+		if err != nil {
+			writeShareLinkNotFound(w)
+			return
 		}
 	case artifactTypePDF:
 		asset, hasPDF := firstArtifactAssetOfKind(boundArtifact, "pdf")
@@ -762,24 +797,40 @@ func serveShareLinkRecord(w http.ResponseWriter, record shareLinkRecord) {
 			writeShareLinkNotFound(w)
 			return
 		}
-		data, _, err := getBlob(asset.Ref)
-		if err != nil {
+		data, meta, err := getBlob(asset.Ref)
+		if err != nil || !strings.EqualFold(strings.TrimSpace(meta.Mime), "application/pdf") {
 			log.Errorf("Failed to read shared pdf blob %s: %v", asset.Ref, err)
 			writeShareLinkNotFound(w)
 			return
 		}
-		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", blobDownloadFilename(asset.Name, asset.Ref)))
-		if _, err := w.Write(data); err != nil {
-			log.Errorf("Failed to serve shared pdf %s: %v", artifact.ID, err)
-		}
+		body = data
+		contentType = "application/pdf"
+		disposition = fmt.Sprintf("inline; filename=%q", blobDownloadFilename(asset.Name, asset.Ref))
 	default:
 		// markdown/image/bundle: the injection-safe server renderer — every
 		// artifact-derived span is escaped before it gets structure.
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write([]byte(renderSharedArtifactPage(boundArtifact))); err != nil {
-			log.Errorf("Failed to serve shared artifact %s: %v", artifact.ID, err)
-		}
+		body = []byte(renderSharedArtifactPage(boundArtifact))
+	}
+	current, currentOK := shareLinkBoundArtifact(record)
+	if !currentOK || artifactVersion(current) != artifactVersion(boundArtifact) || artifactCapabilityDigest(current) != artifactCapabilityDigest(boundArtifact) {
+		writeShareLinkNotFound(w)
+		return
+	}
+	recordShareLinkOpen(record, boundArtifact)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", contentType)
+	if disposition != "" {
+		w.Header().Set("Content-Disposition", disposition)
+	}
+	if artifactType(boundArtifact) == artifactTypeHTMLDeck {
+		w.Header().Set("Content-Security-Policy", artifactRenderCSP)
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	}
+	if _, err := w.Write(body); err != nil {
+		log.Errorf("Failed to serve shared artifact %s: %v", artifact.ID, err)
 	}
 }
 

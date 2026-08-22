@@ -130,7 +130,7 @@ func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
 	if def.Stages[0].OutputContract != "report_context_snapshot_v2" {
 		t.Fatalf("document context snapshot contract=%q, want strict v2", def.Stages[0].OutputContract)
 	}
-	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform audit"} {
+	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, importance, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "load_bearing", "at most one load_bearing", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform audit"} {
 		if !strings.Contains(def.Stages[0].PromptBody, contract) {
 			t.Errorf("document context snapshot does not keep research proportional: missing %q", contract)
 		}
@@ -182,7 +182,7 @@ func TestDocumentReportProcessIsConditionalGatedNativeMarkdown(t *testing.T) {
 	if publish.Role != processRoleCompile || publish.Compile == nil || strings.Join(publish.InputFrom, "|") != documentReportRenderedAdmissionID {
 		t.Fatalf("publish stage=%+v", publish)
 	}
-	if def.Version != 3 || def.ImplementationRevision != "document_report.runtime.v3.rendered-admission.v1" || def.Budgets.MaxSubtasks != 12 {
+	if def.Version != 4 || def.ImplementationRevision != "document_report.runtime.v4.scoped-evidence.v1" || def.Budgets.MaxSubtasks != 12 {
 		t.Fatalf("document process identity/budget=%d/%q/%+v", def.Version, def.ImplementationRevision, def.Budgets)
 	}
 }
@@ -197,8 +197,8 @@ func TestStudioProcessSourceEntailmentGraphsAreIdentityPinned(t *testing.T) {
 		resultStage    string
 		resultContract string
 	}{
-		{name: "presentation", def: packagingStudioDefinition(), version: 5, implementation: "packaging_studio.runtime.v5", maxSubtasks: 16, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
-		{name: "document", def: documentReportDefinition(), version: 3, implementation: "document_report.runtime.v3.rendered-admission.v1", maxSubtasks: 12, resultStage: "write", resultContract: documentReportOutputContract},
+		{name: "presentation", def: packagingStudioDefinition(), version: 7, implementation: "packaging_studio.runtime.v7.scoped-evidence-image-authority.v2", maxSubtasks: 20, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
+		{name: "document", def: documentReportDefinition(), version: 4, implementation: "document_report.runtime.v4.scoped-evidence.v1", maxSubtasks: 12, resultStage: "write", resultContract: documentReportOutputContract},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			identity, err := processDefinitionIdentityFor(fixture.def)

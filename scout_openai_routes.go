@@ -269,15 +269,20 @@ func scoutConversationIntentFromOpenAI(output openAIScoutRouterOutput, query str
 		if err != nil {
 			return conversationIntentDecision{}, err
 		}
-		// The first secure-tool manifest deliberately admits no legacy native
-		// action. A structured router result cannot bypass that admission boundary
-		// by reaching the old direct executor under either start or approval.
-		if work.Kind == conversationWorkNativeAction {
+		// The first secure-tool manifest admits one reversible, read-only native
+		// action: exact authenticated chat navigation. A structured router result
+		// still cannot reach any legacy mutation executor under either start or
+		// approval.
+		if work.Kind == conversationWorkNativeAction && !scoutNativeActionAdmittedReadOnly(work.ToolID) {
 			decision := unavailableConversationDecision(
 				"tool_unadmitted",
 				"That Stride action is unavailable until its governed tool contract is individually admitted.",
 				source,
 			)
+			return decision, decision.validate()
+		}
+		if work.Kind == conversationWorkNativeAction && scoutNativeActionAdmittedReadOnly(work.ToolID) {
+			decision := conversationIntentDecision{Outcome: conversationIntentStartPrivateWork, Work: &work, Source: source}
 			return decision, decision.validate()
 		}
 		requiredEffect := conversationWorkRequiredEffectClass(work, output.EffectClass)
@@ -390,6 +395,9 @@ func conversationWorkApprovalClass(work conversationWorkDecision) string {
 
 func conversationWorkRequiredEffectClass(work conversationWorkDecision, classifiedEffect string) string {
 	if work.Kind == conversationWorkNativeAction {
+		if scoutNativeActionAdmittedReadOnly(work.ToolID) {
+			return ""
+		}
 		return firstNonEmptyString(scoutNativeActionApprovalClass(work.ToolID, work.Fields), "governed_effect")
 	}
 	objective := strings.ToLower(strings.Join(strings.Fields(work.Objective), " "))
@@ -454,7 +462,10 @@ func scoutRouterVerdictFromConversationIntent(decision conversationIntentDecisio
 func scoutRouterVerdictFromConversationWork(work conversationWorkDecision, query string, source string) (*scoutRouterVerdict, error) {
 	switch work.Kind {
 	case conversationWorkNativeAction:
-		return nil, fmt.Errorf("native action %q is not admitted by the secure tool manifest", work.ToolID)
+		if !scoutNativeActionAdmittedReadOnly(work.ToolID) {
+			return nil, fmt.Errorf("native action %q is not admitted by the secure tool manifest", work.ToolID)
+		}
+		return &scoutRouterVerdict{action: &scoutNativeAction{ToolID: work.ToolID, Fields: work.Fields}, source: source}, nil
 	case conversationWorkRegistryTool:
 		proposal := scoutRouterProposalForToolID(work.ToolID, work.Objective, query)
 		if proposal == nil {

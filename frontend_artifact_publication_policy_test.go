@@ -92,9 +92,13 @@ const artifactReadPane = element();
 let artifactEditMode = false;
 let artifactSharePanelFor = null;
 let renderSidecarReady = false;
+let artifactFinalExportCapabilityRefreshTimer = 0;
+let artifactFinalExportCapabilityTTLMS = 5000;
 let currentArtifact = null;
 let fetches = [];
 let renderCount = 0;
+globalThis.setTimeout = () => 0;
+globalThis.clearTimeout = () => {};
 function selectedArtifact() { return currentArtifact }
 function artifactPublished(entry) { return String(entry?.metadata?.published || '').trim().toLowerCase() === 'true' }
 function artifactStatusValue(entry) { return artifactPublished(entry) ? 'published' : String(entry?.metadata?.status || 'complete') }
@@ -104,6 +108,8 @@ function artifactShareable() { return false }
 function artifactModeLabel() { return 'workbook' }
 function artifactStatusLabel(entry) { return artifactStatusValue(entry) }
 function artifactTimeLabel() { return 'now' }
+function artifactFinalExportCapability() { return { ready: true, canExport: true } }
+function artifactPublicationManagedHint(entry, projected = {}) { return projected?.managed === true || Boolean(String(entry?.metadata?.goalId || entry?.metadata?.goalParentId || '').trim()) }
 function renderArtifactRead() { renderCount++ }
 function ensureArtifactBody() { return Promise.resolve() }
 function setArtifactDetailStatus() {}

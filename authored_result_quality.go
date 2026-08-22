@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -155,11 +158,340 @@ func (app *kanbanBoardApp) authoredResultQualityForArtifact(result meetingMemory
 }
 
 func (app *kanbanBoardApp) requireFinalExportAdmission(result meetingMemoryEntry) error {
-	qualityState := app.authoredResultQualityForArtifact(result)
-	if qualityState != "" && qualityState != authoredResultQualityAdmitted {
+	_, canExport, stable := app.authoredResultFinalExportState(result)
+	if !stable {
+		return fmt.Errorf("the artifact review changed; retry from the current revision")
+	}
+	if !canExport {
 		return fmt.Errorf("this authored draft must pass review before final export")
 	}
 	return nil
+}
+
+// authoredResultFinalExportState evaluates publication against one exact
+// artifact revision. Goal-managed results share the goal engine's mutation
+// fence so a concurrent drive cannot move the review plan while the admission
+// tuple is being resolved. Callers fail closed when the fence is busy or the
+// artifact header changes; no read path is allowed to wait behind a long run.
+func (app *kanbanBoardApp) authoredResultFinalExportState(result meetingMemoryEntry) (qualityState string, canExport bool, stable bool) {
+	if app == nil || app.memory == nil || strings.TrimSpace(result.ID) == "" {
+		return "", false, false
+	}
+	parentID := strings.TrimSpace(firstNonEmptyString(result.Metadata["goalId"], result.Metadata["goalParentId"]))
+	// A goal-owned result is managed even while its goal mutation fence is
+	// busy. Return the conservative managed state on every unstable exit so a
+	// caller can never mistake contention for a legacy standalone artifact.
+	if parentID != "" {
+		qualityState = authoredResultQualityDraftNeedsAttention
+	}
+	if parentID != "" {
+		lock := goalEngineLock(parentID)
+		if !lock.TryLock() {
+			return qualityState, false, false
+		}
+		defer lock.Unlock()
+	}
+	return app.authoredResultFinalExportStateUnderGoalFence(result)
+}
+
+var authoredAdmissionAfterQualityProbe func()
+var authoredCopyAfterAdmissionProbe func()
+
+var authoredAdmissionReferenceMetadataKeys = []string{
+	"deckArtifactId",
+	"reviewedDeckArtifactId",
+	"slideJuryArtifactId",
+	"documentArtifactId",
+	"reviewedDocumentArtifactId",
+	"documentJuryArtifactId",
+	"imageryBoardArtifactId",
+}
+
+func authoredAdmissionReferencedArtifactIDs(entry meetingMemoryEntry) []string {
+	ids := make([]string, 0, len(authoredAdmissionReferenceMetadataKeys)+2)
+	for _, key := range authoredAdmissionReferenceMetadataKeys {
+		if id := strings.TrimSpace(entry.Metadata[key]); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range strings.Split(entry.Metadata["shipArtifactIds"], ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return uniqueSortedStrings(ids)
+}
+
+// authoredAdmissionWitness captures every artifact record that can influence
+// the rendered admission decision. The plan's stage records are the roots;
+// their server-owned artifact references add the jury/scoreboard and exact
+// deliverable records. A final recheck of this witness turns independent
+// store reads inside the quality resolver into one optimistic snapshot.
+type authoredAdmissionWitnessRecord struct {
+	Header       ArtifactAuthorizationHeader
+	RecordDigest string
+}
+
+// authoredAdmissionRecordDigest deliberately binds the complete persisted
+// record, not only the authorization header. Quality resolvers read
+// server-owned metadata (jury verdicts, thresholds, artifact references, and
+// render receipts) that is not capability-bearing on its own. Hashing the
+// full snapshot makes a metadata-only edit during evaluation invalidate the
+// optimistic admission decision just as a body or ACL edit would.
+func authoredAdmissionRecordDigest(entry meetingMemoryEntry) string {
+	raw, err := json.Marshal(struct {
+		ID       string            `json:"id"`
+		Kind     string            `json:"kind"`
+		Text     string            `json:"text"`
+		Metadata map[string]string `json:"metadata"`
+	}{
+		ID:       strings.TrimSpace(entry.ID),
+		Kind:     entry.Kind,
+		Text:     entry.Text,
+		Metadata: entry.Metadata,
+	})
+	if err != nil {
+		return ""
+	}
+	return sha256Hex(raw)
+}
+
+func (app *kanbanBoardApp) authoredAdmissionWitness(plan goalPlan, parentID string, result meetingMemoryEntry) (map[string]authoredAdmissionWitnessRecord, bool) {
+	if app == nil || app.memory == nil {
+		return nil, false
+	}
+	queued := []string{strings.TrimSpace(parentID), strings.TrimSpace(result.ID)}
+	for _, subtask := range plan.Subtasks {
+		if id := strings.TrimSpace(subtask.ArtifactID); id != "" {
+			queued = append(queued, id)
+		}
+	}
+	witness := map[string]authoredAdmissionWitnessRecord{}
+	for len(queued) > 0 {
+		id := strings.TrimSpace(queued[0])
+		queued = queued[1:]
+		if id == "" {
+			continue
+		}
+		if _, seen := witness[id]; seen {
+			continue
+		}
+		if len(witness) >= 256 {
+			return nil, false
+		}
+		header, found := app.memory.artifactAuthorizationHeaderByID(id)
+		if !found {
+			// A missing stage/evidence record cannot contribute to admission.
+			// Leave it out; the deterministic resolver will return draft.
+			continue
+		}
+		entry, exact := app.memory.artifactSnapshotIfHeaderMatches(id, header)
+		if !exact {
+			return nil, false
+		}
+		recordDigest := authoredAdmissionRecordDigest(entry)
+		if recordDigest == "" {
+			return nil, false
+		}
+		witness[id] = authoredAdmissionWitnessRecord{Header: header, RecordDigest: recordDigest}
+		queued = append(queued, authoredAdmissionReferencedArtifactIDs(entry)...)
+	}
+	if _, parentFound := witness[strings.TrimSpace(parentID)]; !parentFound {
+		return nil, false
+	}
+	if _, resultFound := witness[strings.TrimSpace(result.ID)]; !resultFound {
+		return nil, false
+	}
+	return witness, true
+}
+
+func (app *kanbanBoardApp) authoredAdmissionWitnessCurrent(witness map[string]authoredAdmissionWitnessRecord) bool {
+	if app == nil || app.memory == nil || len(witness) == 0 {
+		return false
+	}
+	ids := make([]string, 0, len(witness))
+	for id := range witness {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		expected := witness[id]
+		current, found := app.memory.artifactAuthorizationHeaderByID(id)
+		if !found || !artifactAuthorizationHeaderEqual(expected.Header, current) {
+			return false
+		}
+		entry, exact := app.memory.artifactSnapshotIfHeaderMatches(id, expected.Header)
+		if !exact || expected.RecordDigest == "" || !strings.EqualFold(expected.RecordDigest, authoredAdmissionRecordDigest(entry)) {
+			return false
+		}
+	}
+	return true
+}
+
+// authoredResultFinalExportStateUnderGoalFence evaluates one result while the
+// caller owns goalEngineLock(parentID) for managed artifacts. It also binds
+// every independent evidence record read by the quality resolver, so a jury
+// or publication-record edit cannot race through as an admitted snapshot.
+func (app *kanbanBoardApp) authoredResultFinalExportStateUnderGoalFence(result meetingMemoryEntry) (qualityState string, canExport bool, stable bool) {
+	if app == nil || app.memory == nil || strings.TrimSpace(result.ID) == "" {
+		return "", false, false
+	}
+	expectedHeader := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(result))
+	parentID := strings.TrimSpace(firstNonEmptyString(result.Metadata["goalId"], result.Metadata["goalParentId"]))
+	if parentID != "" {
+		qualityState = authoredResultQualityDraftNeedsAttention
+	}
+
+	current, ok := app.memory.artifactSnapshotIfHeaderMatches(result.ID, expectedHeader)
+	if !ok || strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != parentID {
+		return qualityState, false, false
+	}
+	if parentID == "" {
+		if _, exact := app.memory.artifactSnapshotIfHeaderMatches(result.ID, expectedHeader); !exact {
+			return "", false, false
+		}
+		return "", true, true
+	}
+	parentHeader, found := app.memory.artifactAuthorizationHeaderByID(parentID)
+	if !found {
+		return qualityState, false, true
+	}
+	parent, exact := app.memory.artifactSnapshotIfHeaderMatches(parentID, parentHeader)
+	if !exact {
+		return qualityState, false, false
+	}
+	plan, decoded := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !decoded {
+		return qualityState, false, true
+	}
+	witness, witnessed := app.authoredAdmissionWitness(plan, parentID, current)
+	if !witnessed {
+		return qualityState, false, false
+	}
+	qualityState = app.authoredGoalResultQuality(plan, parentID, current)
+	if authoredAdmissionAfterQualityProbe != nil {
+		authoredAdmissionAfterQualityProbe()
+	}
+	if !app.authoredAdmissionWitnessCurrent(witness) {
+		return authoredResultQualityDraftNeedsAttention, false, false
+	}
+	return qualityState, qualityState == "" || qualityState == authoredResultQualityAdmitted, true
+}
+
+func (app *kanbanBoardApp) authoredResultPublicationReady(result meetingMemoryEntry) bool {
+	_, canExport, stable := app.authoredResultFinalExportState(result)
+	return stable && canExport
+}
+
+// withFinalExportAdmissionOperation keeps the authored goal fence across an
+// operation that would create an independent publication capability (for
+// example Save a Copy). It evaluates admission immediately before and after
+// the operation. Callers that create durable state must roll it back when the
+// post-check fails; ordinary authored mutations use the same goal fence.
+func (app *kanbanBoardApp) withFinalExportAdmissionOperation(result meetingMemoryEntry, operation func(meetingMemoryEntry) error) error {
+	if app == nil || app.memory == nil || operation == nil {
+		return fmt.Errorf("artifacts are unavailable")
+	}
+	parentID := strings.TrimSpace(firstNonEmptyString(result.Metadata["goalId"], result.Metadata["goalParentId"]))
+	var unlock func()
+	if parentID != "" {
+		lock := goalEngineLock(parentID)
+		if !lock.TryLock() {
+			return fmt.Errorf("the artifact review is busy; try again from the current revision")
+		}
+		unlock = lock.Unlock
+		defer unlock()
+	}
+	header := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(result))
+	current, exact := app.memory.artifactSnapshotIfHeaderMatches(result.ID, header)
+	if !exact {
+		return fmt.Errorf("the artifact changed; reopen the current revision")
+	}
+	quality, allowed, stable := app.authoredResultFinalExportStateUnderGoalFence(current)
+	if !stable || !allowed || (parentID != "" && quality != authoredResultQualityAdmitted) {
+		return fmt.Errorf("review the current authored deliverable before creating an independent copy")
+	}
+	if authoredCopyAfterAdmissionProbe != nil {
+		authoredCopyAfterAdmissionProbe()
+	}
+	if err := operation(current); err != nil {
+		return err
+	}
+	current, exact = app.memory.artifactSnapshotIfHeaderMatches(result.ID, header)
+	if !exact {
+		return fmt.Errorf("the artifact changed while the copy was being created")
+	}
+	quality, allowed, stable = app.authoredResultFinalExportStateUnderGoalFence(current)
+	if !stable || !allowed || (parentID != "" && quality != authoredResultQualityAdmitted) {
+		return fmt.Errorf("the artifact review changed while the copy was being created")
+	}
+	return nil
+}
+
+func rollbackAuthoredIndependentCopy(app *kanbanBoardApp, artifactID string) {
+	artifactID = strings.TrimSpace(artifactID)
+	if app == nil || app.memory == nil || artifactID == "" {
+		return
+	}
+	if err := moveFileToFolder(artifactID, ""); err != nil {
+		log.Errorf("Rollback copy folder assignment %s failed: %v", artifactID, err)
+	}
+	_, projection, deleted, err := app.memory.deleteOSArtifactWithProjection(artifactID)
+	if projection.token != nil {
+		revokeArtifactDeletionProjection(projection)
+	}
+	if err != nil || !deleted {
+		log.Errorf("Rollback independent copy %s failed: deleted=%t err=%v", artifactID, deleted, err)
+	}
+}
+
+func (app *kanbanBoardApp) authoredArtifactShareEligible(result meetingMemoryEntry) bool {
+	return artifactShareEligible(result) && app.authoredResultPublicationReady(result)
+}
+
+// authoredResultFinalExportCapabilityHandler is the small, revision-bound
+// read seam used by generic Intelligence views. Those views can expose assets
+// without opening a Studio, so they must not infer publication rights from
+// persisted artifact metadata or from a stale channel message. Unmanaged
+// artifacts retain their historical behavior; authored goal results require
+// the exact current rendered admission.
+func authoredResultFinalExportCapabilityHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+	artifactID := strings.TrimSpace(r.URL.Query().Get("id"))
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLExport)
+	if !ok {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
+	if !stable {
+		writeAuthError(w, http.StatusConflict, "artifact revision changed")
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"artifactId":      artifact.ID,
+		"artifactVersion": artifactVersion(artifact),
+		"qualityState":    qualityState,
+		"managed":         qualityState != "",
+		"canExport":       canExport,
+	})
 }
 
 // reviewEditedAuthoredResult reopens only the deterministic render/admission
@@ -182,14 +514,14 @@ func (app *kanbanBoardApp) reviewEditedAuthoredResult(parentSnapshot, resultSnap
 	}
 	defer lock.Unlock()
 
-	expectedParentHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(parentSnapshot))
+	expectedParentHeader := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(parentSnapshot))
 	parent, ok := app.memory.artifactSnapshotIfHeaderMatches(parentID, expectedParentHeader)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
 	}
 	result, ok := app.osArtifactByID(resultID)
 	if !ok || artifactVersion(result) != artifactVersion(resultSnapshot) || !strings.EqualFold(artifactCapabilityDigest(result), artifactCapabilityDigest(resultSnapshot)) ||
-		!artifactAuthorizationHeaderEqual(resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(resultSnapshot)), resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(result))) {
+		!artifactAuthorizationHeaderEqual(app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(resultSnapshot)), app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(result))) {
 		return scoutAgentThread{}, fmt.Errorf("the edited result changed — reopen it before starting review")
 	}
 	if strings.TrimSpace(firstNonEmptyString(result.Metadata["goalId"], result.Metadata["goalParentId"])) != parentID {
@@ -207,6 +539,9 @@ func (app *kanbanBoardApp) reviewEditedAuthoredResult(parentSnapshot, resultSnap
 	engine.expectedPersistBody = parent.Text
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
 		return scoutAgentThread{}, fmt.Errorf("saved goal route is unavailable: %w", err)
+	}
+	if err := packagingStudioHistoricalRunError(&plan); err != nil {
+		return scoutAgentThread{}, err
 	}
 
 	reviewReason := "Studio changes by " + firstNonEmptyString(strings.TrimSpace(reviewedBy), "an authorized editor") + " require fresh rendered admission"

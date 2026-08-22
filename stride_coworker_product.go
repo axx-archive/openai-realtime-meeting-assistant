@@ -770,15 +770,36 @@ func (app *kanbanBoardApp) resolveSTRIDECoworkerFileSource(ctx context.Context, 
 			if entry.ID != id {
 				continue
 			}
+			var sourceThread scoutChatThreadRecord
+			var sourceFile scoutChatFileAttachment
+			var binding promotedChatFileBinding
+			if candidate, promoted, valid := promotedChatFileBindingFromEntry(entry); promoted {
+				if !valid {
+					return strideCoworkerFileSource{}, ErrSTRIDEFileHandleDenied
+				}
+				var authorized bool
+				sourceThread, sourceFile, binding, authorized = app.promotedChatFileSource(ctx, user, entry)
+				if !authorized || candidate != binding {
+					return strideCoworkerFileSource{}, ErrSTRIDEFileHandleDenied
+				}
+			}
 			ref := strings.TrimSpace(entry.Metadata["blobRef"])
 			meta, err := blobStatForRef(ref)
 			if err != nil || !validBlobRef(ref) {
 				return strideCoworkerFileSource{}, ErrSTRIDEFileHandleDenied
 			}
-			digest, _ := STRIDEContractDigest(struct {
-				ID, Ref, Mime string
-				Size          int64
-			}{entry.ID, ref, meta.Mime, meta.Size})
+			var digest string
+			if binding.SourceFileID != "" {
+				digest, _ = STRIDEContractDigest(struct {
+					ID, Ref, Mime, SourceFileID, SourceID, SourceRevision, DestinationRevision string
+					Size                                                                       int64
+				}{entry.ID, ref, meta.Mime, binding.SourceFileID, sourceFile.SourceID, binding.SourceRevision, scoutChatAttachmentDestinationRevision(sourceThread), meta.Size})
+			} else {
+				digest, _ = STRIDEContractDigest(struct {
+					ID, Ref, Mime string
+					Size          int64
+				}{entry.ID, ref, meta.Mime, meta.Size})
+			}
 			return strideCoworkerFileSource{Row: *visible, Object: object, Revision: ACLRevisionRef{ContentRevision: 1, ContentDigest: digest}, BlobRef: ref, BlobMeta: meta}, nil
 		}
 	}

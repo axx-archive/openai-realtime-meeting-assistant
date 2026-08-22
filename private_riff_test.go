@@ -112,7 +112,7 @@ func TestPrivateRiffCannotEnterLegacyArtifactFollowUpPath(t *testing.T) {
 	}
 
 	result, err := app.appendScoutChatThreadMessage(context.Background(), user, riff.ID, "Revise that deliverable", nil, "known-artifact-id")
-	if err == nil || !strings.Contains(err.Error(), "conversation only") || result != nil {
+	if err == nil || !strings.Contains(err.Error(), "natural-language request") || result != nil {
 		t.Fatalf("follow-up result=%v err=%v, want early Riff work fence", result, err)
 	}
 	unchanged, _, readErr := app.scoutChatThreadByID(user.Email, riff.ID)
@@ -138,8 +138,18 @@ func TestPrivateRiffRouterCannotPreemptCheckpointAnswer(t *testing.T) {
 		Source:  proposalSourceChatRouter,
 	}
 	constrained := constrainPrivateRiffDecision(work)
-	if constrained.Outcome != conversationIntentUnavailable || constrained.Unavailable == nil || constrained.Unavailable.Code != "private_riff_work_unavailable" {
-		t.Fatalf("work decision=%+v, want Riff authority fence", constrained)
+	if constrained.Outcome != conversationIntentStartPrivateWork || constrained.Work == nil || constrained.Work.Kind != conversationWorkWorkstream {
+		t.Fatalf("internal work decision=%+v, want owner-only Riff execution", constrained)
+	}
+
+	unsafe := conversationIntentDecision{
+		Outcome: conversationIntentStartPrivateWork,
+		Work:    &conversationWorkDecision{Kind: conversationWorkNativeAction, ToolID: "publish", Objective: "Publish this publicly"},
+		Source:  proposalSourceChatRouter,
+	}
+	constrained = constrainPrivateRiffDecision(unsafe)
+	if constrained.Outcome != conversationIntentUnavailable || constrained.Unavailable == nil || constrained.Unavailable.Code != "private_riff_effect_unavailable" {
+		t.Fatalf("unsafe decision=%+v, want explicit publication/action fence", constrained)
 	}
 }
 

@@ -15,6 +15,7 @@ import { DeckScreen } from '../screens/DeckScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { MeetScreen } from '../screens/MeetScreen';
 import { OSWebScreen } from '../screens/OSWebScreen';
+import { DeckViewerScreen } from '../screens/DeckViewerScreen';
 import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
 import { ChannelRiffScreen, ThreadScreen } from '../screens/ThreadScreen';
@@ -204,6 +205,18 @@ export function RootNavigator() {
     if (!navigationRef.isReady()) return;
     for (const action of actions) {
       const actionType = String(action.type ?? '').trim();
+      if (actionType === 'open_chat_thread') {
+        const threadId = String(action.threadId ?? '').trim();
+        const title = String(action.title ?? '').trim();
+        const visibility = String(action.visibility ?? '').trim();
+        if (threadId) {
+          navigationRef.navigate('Thread', {
+            threadId,
+            title: visibility === 'public' ? `#${title.replace(/^#/, '')}` : title || 'Private chat',
+          });
+        }
+        continue;
+      }
       const tool = String(action.tool ?? action.mode ?? '').trim();
       if (!['open_tool', 'assistant_mode'].includes(actionType)) continue;
       if (tool === 'chat') navigationRef.navigate('Chat');
@@ -322,6 +335,15 @@ export function RootNavigator() {
               name="OSWeb"
               component={OSWebScreen}
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="DeckViewer"
+              component={DeckViewerScreen}
+              options={{
+                presentation: 'fullScreenModal',
+                animation: 'fade',
+                gestureEnabled: true,
+              }}
             />
             {/* Legacy Board deep links land in Work. The old filing-system UI
                 is no longer mounted, while its persisted history remains. */}

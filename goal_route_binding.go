@@ -279,7 +279,7 @@ func (app *kanbanBoardApp) verifyGoalRouteReceipt(plan *goalPlan, receipt goalRo
 		lock.Unlock()
 		return fmt.Errorf("originating conversation is unavailable")
 	}
-	_, binding, bindingErr := scoutChatSourceWindow(thread, receipt.SourceMessageID)
+	_, binding, bindingErr := goalRouteConversationSourceWindow(thread, receipt.SourceMessageID)
 	var source scoutChatMessageRecord
 	var approved scoutChatMessageRecord
 	if bindingErr == nil {
@@ -375,6 +375,41 @@ type goalRouteBoundSourceFile struct {
 	File      goalRouteSourceSelectionFile `json:"file"`
 }
 
+// goalRouteConversationThread scopes a canonical Riff Space to the episode
+// that owns the initiating message. Ordinary private threads and public
+// channels retain their existing bounded-window behavior. Without this filter,
+// an older Riff episode can either leak into a later work receipt or make a
+// valid launch fail when the viewer projection correctly hides that episode.
+func goalRouteConversationThread(thread scoutChatThreadRecord, sourceMessageID string) (scoutChatThreadRecord, error) {
+	if !privateRiffIsSpace(thread) {
+		return thread, nil
+	}
+	index := scoutChatMessageIndex(thread, sourceMessageID)
+	if index < 0 || strings.TrimSpace(thread.Messages[index].RiffEpisodeID) == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff work episode is unavailable")
+	}
+	episodeID := thread.Messages[index].RiffEpisodeID
+	messages := make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	for _, message := range thread.Messages {
+		if message.RiffEpisodeID == episodeID {
+			messages = append(messages, message)
+		}
+	}
+	thread.Messages = messages
+	if scoutChatMessageIndex(thread, sourceMessageID) < 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("Private Riff work episode is unavailable")
+	}
+	return thread, nil
+}
+
+func goalRouteConversationSourceWindow(thread scoutChatThreadRecord, sourceMessageID string) ([]scoutChatMessageRecord, scoutChatSourceBinding, error) {
+	scoped, err := goalRouteConversationThread(thread, sourceMessageID)
+	if err != nil {
+		return nil, scoutChatSourceBinding{}, err
+	}
+	return scoutChatSourceWindow(scoped, sourceMessageID)
+}
+
 func goalRouteSelectionFile(file scoutChatFileAttachment) goalRouteSourceSelectionFile {
 	return goalRouteSourceSelectionFile{
 		Name: file.Name, Ref: file.Ref, Mime: file.Mime, Kind: file.Kind, Size: file.Size,
@@ -392,12 +427,19 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	if approvedIndex := scoutChatMessageIndex(fullThread, receipt.ApprovedProposalID); approvedIndex >= 0 && fullThread.Messages[approvedIndex].Proposal != nil {
 		approvedContextRefs = decodeAssistantContextRefs(fullThread.Messages[approvedIndex].Proposal.ContextRefs)
 	}
+	thread, err = goalRouteConversationThread(thread, receipt.SourceMessageID)
+	if err != nil {
+		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("originating conversation is unavailable")
+	}
 	sourceIndex := scoutChatMessageIndex(thread, receipt.SourceMessageID)
 	if sourceIndex < 0 {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("originating conversation is unavailable")
 	}
 	thread.Messages = append([]scoutChatMessageRecord(nil), thread.Messages[:sourceIndex+1]...)
 	projected := app.projectScoutChatThreadForViewer(receipt.Requester, thread)
+	if privateRiffIsSpace(thread) {
+		projected = app.projectScoutChatThreadForViewerEpisode(receipt.Requester, thread, thread.Messages[sourceIndex].RiffEpisodeID)
+	}
 	projectedSourceIndex := scoutChatMessageIndex(projected, receipt.SourceMessageID)
 	if projectedSourceIndex < 0 {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source is no longer readable")
@@ -410,7 +452,7 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 		}
 		selected = scoutChatReplyContextMessages(thread, scoutChatReplyRootID(thread, source.ReplyTo.MessageID)).Messages
 	} else {
-		selected, _, err = scoutChatSourceWindow(thread, receipt.SourceMessageID)
+		selected, _, err = goalRouteConversationSourceWindow(thread, receipt.SourceMessageID)
 		if err != nil {
 			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source is unavailable")
 		}
@@ -455,6 +497,38 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 		}
 		manifest = append(manifest, item)
 		projectedSelected = append(projectedSelected, visible)
+	}
+	// A Riff request carries two independently authorized source sets: the
+	// private episode that asked for work and the immutable public checkpoint the
+	// Riff was opened from. Reauthorize and bind the latter into the exact source
+	// manifest so Deck/Document stages receive the useful channel material
+	// without ever changing their private destination.
+	riffSourceThreadID := ""
+	riffSourceTitle := ""
+	riffManifest := []goalRouteSourceSelectionMessage{}
+	if thread.Riff != nil {
+		riffSource, riffWindow, riffErr := app.privateRiffWorkSourceWindow(receipt.Requester, fullThread, source)
+		if riffErr != nil {
+			return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved Private Riff checkpoint is unavailable: %w", riffErr)
+		}
+		riffSourceThreadID, riffSourceTitle = riffSource.ID, riffSource.Title
+		for _, visible := range riffWindow {
+			item := goalRouteSourceSelectionMessage{
+				ID: visible.ID, Role: visible.Role, Author: firstNonEmptyString(visible.AuthorName, "Coworker"), CreatedAt: visible.CreatedAt,
+				CausedBy: visible.CausedByMessageID, Text: visible.Text, Sources: append([]answerSource(nil), visible.Sources...),
+			}
+			if visible.ReplyTo != nil {
+				item.ReplyTo = visible.ReplyTo.MessageID
+			}
+			for fileIndex, file := range visible.Files {
+				item.Files = append(item.Files, goalRouteSelectionFile(file))
+				appendFileProof(file)
+				ref := scoutChatFileContextRef(riffSource.ID, visible.ID, fileIndex)
+				attachmentRefs = append(attachmentRefs, ref)
+				selectedAttachmentRefs[ref] = true
+			}
+			riffManifest = append(riffManifest, item)
+		}
 	}
 	// Explicit proposal ContextRefs may name a unique authorized attachment in
 	// the same public channel but outside the reply branch. Bind that exact file
@@ -540,10 +614,12 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	// topology and every visible file identity/revision, preventing two distinct
 	// branches that happen to render the same prose from becoming interchangeable.
 	digest, err := STRIDEContractDigest(struct {
-		Context    string                            `json:"context"`
-		Messages   []goalRouteSourceSelectionMessage `json:"messages"`
-		BoundFiles []goalRouteBoundSourceFile        `json:"boundFiles,omitempty"`
-	}{Context: contextText, Messages: manifest, BoundFiles: boundFiles})
+		Context            string                            `json:"context"`
+		Messages           []goalRouteSourceSelectionMessage `json:"messages"`
+		BoundFiles         []goalRouteBoundSourceFile        `json:"boundFiles,omitempty"`
+		RiffSourceThreadID string                            `json:"riffSourceThreadId,omitempty"`
+		RiffMessages       []goalRouteSourceSelectionMessage `json:"riffMessages,omitempty"`
+	}{Context: contextText, Messages: manifest, BoundFiles: boundFiles, RiffSourceThreadID: riffSourceThreadID, RiffMessages: riffManifest})
 	if err != nil {
 		return goalRouteSourceSelectionSnapshot{}, fmt.Errorf("approved source selection is invalid")
 	}
@@ -573,6 +649,15 @@ func (app *kanbanBoardApp) goalRouteSourceSelection(receipt goalRouteReceipt) (g
 	}
 	for _, bound := range boundFiles {
 		appendFileSource(bound.File)
+	}
+	for _, item := range riffManifest {
+		if strings.TrimSpace(item.Text) != "" {
+			label := firstNonEmptyString(strings.TrimSpace(item.Author), "Coworker") + " in #" + firstNonEmptyString(strings.TrimSpace(riffSourceTitle), "source channel")
+			appendInternalSource(label, fmt.Sprintf("source_message_id=%s digest=%s", strings.TrimSpace(item.ID), sha256Hex([]byte(item.Text))), item.Text)
+		}
+		for _, file := range item.Files {
+			appendFileSource(file)
+		}
 	}
 	return goalRouteSourceSelectionSnapshot{
 		Digest: digest, Context: contextText, AttachmentRefs: canonicalAssistantContextRefs(attachmentRefs), FileProofs: fileProofs,
@@ -652,6 +737,9 @@ func (app *kanbanBoardApp) verifyGoalChildRouteState(child meetingMemoryEntry, a
 	engine := newGoalEngine(app)
 	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
 		return fmt.Errorf("goal child parent route is unavailable: %w", err)
+	}
+	if err := packagingStudioHistoricalRunError(&plan); err != nil {
+		return fmt.Errorf("goal child requires a current process relaunch: %w", err)
 	}
 	if plan.RouteReceipt == nil || metadata["goalRouteDigest"] != plan.RouteReceipt.Digest {
 		return fmt.Errorf("goal child route receipt changed")

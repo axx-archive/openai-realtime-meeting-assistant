@@ -5,6 +5,7 @@ import {
   normalizeRealtimeSDP,
   realtimeFunctionCalls,
   realtimeStatusForEvent,
+  realtimeToolContinuationPolicy,
   transcriptFromRealtimeEvent,
 } from '../realtime/personalRealtimeProtocol';
 
@@ -57,12 +58,35 @@ test('provider events preserve text-primary turns and honest voice state', () =>
   assert.equal(realtimeStatusForEvent('response.done', 'talking'), 'listening');
 });
 
-test('speech_stopped does not force thinking state for conversational latency', () => {
-  // Conversational voice: speech_stopped must NOT flip to thinking. The island
-  // stays in listening/hearing until first_audio arrives so there's no visible
-  // "thinking" beat before every response. This keeps voice tight back-and-forth.
-  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'hearing'), 'hearing');
-  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'listening'), 'listening');
+test('speech_stopped truthfully shows the grounded Scout route before audio', () => {
+  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'hearing'), 'thinking');
+  assert.equal(realtimeStatusForEvent('input_audio_buffer.speech_stopped', 'listening'), 'thinking');
+});
+
+test('silence stays silent and routed turns speak only the durable message', () => {
+  const noEffect = realtimeToolContinuationPolicy([
+    { callId: 'noise', name: 'do_nothing', argumentsText: '{"reason":"background noise"}' },
+  ]);
+  assert.deepEqual(noEffect, { valid: true, shouldRespond: false, instructions: '', failureMessage: '' });
+
+  const routed = realtimeToolContinuationPolicy([
+    { callId: 'route', name: 'route_conversation_turn', argumentsText: '{"utterance":"what changed?"}' },
+  ]);
+  assert.equal(routed.valid, true);
+  assert.equal(routed.shouldRespond, true);
+  assert.match(routed.instructions, /Speak only the message string/);
+  assert.match(routed.instructions, /exactly as written/);
+  assert.doesNotMatch(routed.instructions, /answer from model memory/i);
+
+  const duplicateRoute = realtimeToolContinuationPolicy([
+    { callId: 'route-1', name: 'route_conversation_turn', argumentsText: '{"utterance":"make a deck"}' },
+    { callId: 'route-2', name: 'route_conversation_turn', argumentsText: '{"utterance":"make a deck"}' },
+  ]);
+  assert.equal(duplicateRoute.valid, false);
+  assert.equal(duplicateRoute.shouldRespond, true);
+  assert.match(duplicateRoute.failureMessage, /couldn't safely route/i);
+  assert.match(duplicateRoute.instructions, /Say exactly/);
+  assert.doesNotMatch(duplicateRoute.instructions, /most recent route_conversation_turn/);
 });
 
 test('metering reads bounded live audio levels without decorative motion', () => {

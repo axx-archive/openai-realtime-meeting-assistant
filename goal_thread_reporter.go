@@ -89,6 +89,14 @@ func (app *kanbanBoardApp) postGoalOriginMessageOnce(parentID, messageID string,
 	}
 	message.ID = messageID
 	message.Role = firstNonEmptyString(message.Role, "scout")
+	if strings.EqualFold(strings.TrimSpace(message.Role), "scout") || strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+		// Private Riff commits authenticate Scout's durable identity instead of
+		// trusting a display name supplied by a caller. Goal reporters historically
+		// omitted the name because ordinary private threads did not need it; stamp
+		// the same server-owned identity used by work cards so a completed stage can
+		// land back in its Riff without weakening that receipt check.
+		message.AuthorName = scoutParticipantName
+	}
 	message.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
 		return err

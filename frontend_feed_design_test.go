@@ -73,7 +73,9 @@ func TestIndexArtifactStageContract(t *testing.T) {
 		// renderer, newest-pdf embed for text-less pdf payloads
 		"artifactIsHTMLDeck(entry)",
 		"renderArtifactDeck(body, entry",
-		"renderArtifactRead(read, entry)",
+		"renderArtifactRead(read, entry, { allowFinalExport: stageCanExport })",
+		"ensureArtifactFinalExportCapability(entry, { force: true })",
+		"watchArtifactPublicationCapability(",
 		"embed.type = 'application/pdf'",
 		"artifactBlobUrl(newest)",
 		// the escape hatch to the data room

@@ -113,12 +113,11 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, canWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
-		qualityState := kanbanApp.authoredResultQualityForArtifact(artifact)
-		managedAuthoredResult := qualityState != ""
+		qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "artifact": documentStudioView(artifact),
 			"document": documentStudioDocumentFromEntry(artifact), "canWrite": canWrite,
-			"qualityState": qualityState, "canExport": !managedAuthoredResult || qualityState == authoredResultQualityAdmitted,
+			"qualityState": qualityState, "canExport": stable && canExport,
 		})
 		return
 	}
@@ -170,11 +169,11 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "document could not be saved")
 		return
 	}
-	qualityState := kanbanApp.authoredResultQualityForArtifact(updated)
+	qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(updated)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": documentStudioView(updated),
 		"document":     documentStudioDocumentFromEntry(updated),
-		"qualityState": qualityState, "canExport": qualityState == "" || qualityState == authoredResultQualityAdmitted,
+		"qualityState": qualityState, "canExport": stable && canExport,
 		"receipt": map[string]any{
 			"outcome": "document_saved", "artifactId": updated.ID,
 			"artifactVersion": artifactVersion(updated), "contentSaved": true,
@@ -228,7 +227,7 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "a valid document name and Files destination are required")
 		return
 	}
-	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite, ACLCreateChild)
 	if !ok || !artifactIsDocumentStudioDocument(prior) {
 		writeAuthError(w, http.StatusNotFound, "document artifact not found")
 		return
@@ -241,32 +240,79 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, errFileFolderNotFound.Error())
 		return
 	}
-	storedBody, emptyMarker := documentStudioStoredBody(payload.Document.Markdown)
-	currentSourceVersion := artifactVersion(prior)
-	staleBranch := payload.ExpectedVersion != currentSourceVersion
-	metadata := map[string]string{
-		"title": payload.Title, "type": artifactTypeMarkdown, "source": "scout_thread",
-		"status": artifactStatusComplete, "threadStatus": artifactStatusComplete,
-		"copiedFromArtifactId": prior.ID, "copiedFromArtifactVersion": strconv.Itoa(payload.ExpectedVersion),
-		"copiedFromCurrentArtifactVersion": strconv.Itoa(currentSourceVersion),
-		"documentSchemaVersion":            "1", "tenantId": strings.TrimSpace(prior.Metadata["tenantId"]),
-		documentStudioEmptyMetadataKey: emptyMarker,
-		"visibility":                   firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
-		"ownerEmail":                   normalizeAccountEmail(user.Email),
-	}
-	if staleBranch {
-		metadata["copiedFromStaleRevision"] = "true"
-	}
-	copyEntry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", payload.Title, storedBody, firstNonEmptyString(user.Name, user.Email), metadata)
-	if err != nil || !appended {
-		writeAuthError(w, http.StatusInternalServerError, "document copy could not be created")
+	actor := firstNonEmptyString(user.Name, user.Email)
+	var copyEntry meetingMemoryEntry
+	var file assistantFileRecord
+	var fileErr error
+	var internalCopyErr bool
+	sourceEntry := prior
+	staleBranch := false
+	guardErr := kanbanApp.withFinalExportAdmissionOperation(prior, func(current meetingMemoryEntry) error {
+		sourceEntry = current
+		currentSourceVersion := artifactVersion(current)
+		staleBranch = payload.ExpectedVersion != currentSourceVersion
+		managed := strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != ""
+		if managed && (staleBranch || payload.Document.Markdown != documentStudioDocumentFromEntry(current).Markdown) {
+			return fmt.Errorf("review the current authored document before saving an independent copy")
+		}
+
+		storedBody, emptyMarker := documentStudioStoredBody(payload.Document.Markdown)
+		metadata := map[string]string{
+			"title": payload.Title, "type": artifactTypeMarkdown, "source": "scout_thread",
+			"status": artifactStatusComplete, "threadStatus": artifactStatusComplete,
+			"copiedFromArtifactId": current.ID, "copiedFromArtifactVersion": strconv.Itoa(payload.ExpectedVersion),
+			"copiedFromCurrentArtifactVersion": strconv.Itoa(currentSourceVersion),
+			"documentSchemaVersion":            "1", "tenantId": strings.TrimSpace(current.Metadata["tenantId"]),
+			documentStudioEmptyMetadataKey: emptyMarker,
+			"visibility":                   firstNonEmptyString(strings.TrimSpace(current.Metadata["visibility"]), "organization"),
+			"ownerEmail":                   normalizeAccountEmail(user.Email),
+		}
+		copyAssets := make([]artifactAsset, 0)
+		for _, asset := range artifactAssets(current) {
+			if artifactAssetIsEditableImage(asset) {
+				copyAssets = append(copyAssets, asset)
+			}
+		}
+		if len(copyAssets) > 0 {
+			rawAssets, marshalErr := json.Marshal(copyAssets)
+			if marshalErr != nil {
+				internalCopyErr = true
+				return marshalErr
+			}
+			metadata[artifactAssetsMetadataKey] = string(rawAssets)
+		}
+		if staleBranch {
+			metadata["copiedFromStaleRevision"] = "true"
+		}
+		var appended bool
+		var createErr error
+		copyEntry, appended, createErr = kanbanApp.createOSArtifactWithMetadata("artifacts", payload.Title, storedBody, actor, metadata)
+		if createErr != nil || !appended {
+			internalCopyErr = true
+			if createErr != nil {
+				return createErr
+			}
+			return fmt.Errorf("document copy was not appended")
+		}
+		file, fileErr = kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, fileName, actor)
+		return nil
+	})
+	if guardErr != nil {
+		if copyEntry.ID != "" {
+			rollbackAuthoredIndependentCopy(kanbanApp, copyEntry.ID)
+		}
+		if internalCopyErr {
+			log.Errorf("Document copy create failed: %v", guardErr)
+			writeAuthError(w, http.StatusInternalServerError, "document copy could not be created")
+		} else {
+			writeAuthError(w, http.StatusConflict, guardErr.Error())
+		}
 		return
 	}
-	file, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, fileName, firstNonEmptyString(user.Name, user.Email))
-	if err != nil {
+	if fileErr != nil {
 		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 		storedView := documentStudioView(stored)
-		writeAuthJSON(w, fileSaveErrorStatus(err), map[string]any{
+		writeAuthJSON(w, fileSaveErrorStatus(fileErr), map[string]any{
 			"ok": false, "partialSuccess": true,
 			"error":    "document copy was created, but Files filing failed",
 			"artifact": storedView, "document": documentStudioDocumentFromEntry(stored),
@@ -275,7 +321,7 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 				"artifactVersion": artifactVersion(stored), "contentSaved": true,
 				"filingCompleted": false, "savedToFiles": storedView.SavedToFiles,
 				"branchedFromArtifactVersion": payload.ExpectedVersion,
-				"sourceCurrentVersion":        currentSourceVersion, "staleBranch": staleBranch,
+				"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": staleBranch,
 				"retryable": true, "retryUrl": "/assistant/files/save", "retryMethod": http.MethodPost,
 				"fileName": fileName, "folderId": payload.FolderID,
 			},
@@ -290,7 +336,7 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
 			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
 			"branchedFromArtifactVersion": payload.ExpectedVersion,
-			"sourceCurrentVersion":        currentSourceVersion, "staleBranch": staleBranch,
+			"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": staleBranch,
 		},
 	})
 }

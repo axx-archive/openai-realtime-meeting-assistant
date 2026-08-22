@@ -16,6 +16,7 @@ func TestProcessContextDownstreamBriefStripsResearchAuthorityEnvelope(t *testing
 		"research_questions":[{
 			"question":"`+question+`",
 			"research_kind":"current_constraint",
+			"importance":"optional",
 			"source_ref":"goal_objective_id=secret digest=secret",
 			"authority_quote":"DO NOT FORWARD THIS SOURCE BODY",
 			"scope_anchor":"official program",
@@ -24,7 +25,7 @@ func TestProcessContextDownstreamBriefStripsResearchAuthorityEnvelope(t *testing
 		}],
 		"reversible_inferences":[]
 	}`, packagingStudioProcessID)
-	for _, forbidden := range []string{"goal_objective_id", "DO NOT FORWARD", "scope_anchor", "decision_effect", "decision_relevance", "current_constraint"} {
+	for _, forbidden := range []string{"goal_objective_id", "DO NOT FORWARD", "scope_anchor", "decision_effect", "decision_relevance", "current_constraint", "optional"} {
 		if strings.Contains(brief, forbidden) {
 			t.Fatalf("downstream creative brief leaked research authority metadata %q:\n%s", forbidden, brief)
 		}
@@ -288,7 +289,7 @@ func cloneEvidenceMetadataForTest(source map[string]string) map[string]string {
 	return clone
 }
 
-func TestProcessEvidenceDossierRequiresStrongCoverageForEveryExternalQuestion(t *testing.T) {
+func TestProcessEvidenceDossierScopesWeakLoadBearingResearchWithoutInventingAnAnswer(t *testing.T) {
 	t.Run("high confidence admitted support passes", func(t *testing.T) {
 		_, plan, evidence := compileFocusedEvidenceDossierForTest(t, "entailed", "High")
 		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacySufficient || evidence.Metadata["researchQuestionsAuthorized"] != "1" || evidence.Metadata["researchQuestionsStrong"] != "1" {
@@ -299,39 +300,39 @@ func TestProcessEvidenceDossierRequiresStrongCoverageForEveryExternalQuestion(t 
 		}
 	})
 
-	t.Run("weak admitted support holds before story", func(t *testing.T) {
+	t.Run("weak admitted support narrows the story automatically", func(t *testing.T) {
 		app, plan, evidence := compileFocusedEvidenceDossierForTest(t, "entailed", "Medium")
-		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacyInsufficient || !strings.Contains(evidence.Text, "| weak |") {
+		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacyScoped || !strings.Contains(evidence.Text, "| load_bearing |") || !strings.Contains(evidence.Text, "| weak |") || !strings.Contains(evidence.Text, "Automatically narrow the recommendation") {
 			t.Fatalf("weak coverage was not recorded honestly: metadata=%v\n%s", evidence.Metadata, evidence.Text)
 		}
-		if err := validateProcessEvidenceDossier(&plan, evidence); err == nil || !strings.Contains(err.Error(), "load-bearing external research coverage is insufficient") || !strings.Contains(err.Error(), "(weak)") {
-			t.Fatalf("weak coverage reached story authority: %v", err)
+		if err := validateProcessEvidenceDossier(&plan, evidence); err != nil {
+			t.Fatalf("scoped weak coverage did not remain valid authority: %v", err)
 		}
 		story, ok := packagingStudioDefinition().stageByID("story_architects")
 		if !ok {
 			t.Fatal("story stage is unavailable")
 		}
-		if err := newGoalEngine(app).validateProcessStageInputAuthority(&plan, story); err == nil || !strings.Contains(err.Error(), "(weak)") {
-			t.Fatalf("weak coverage crossed the exact pre-story authority boundary: %v", err)
+		if err := newGoalEngine(app).validateProcessStageInputAuthority(&plan, story); err != nil {
+			t.Fatalf("scoped dossier could not reach the story stage: %v", err)
 		}
 	})
 
-	t.Run("unadmitted candidate support holds as partial", func(t *testing.T) {
+	t.Run("unadmitted candidate support is an explicit scoped gap", func(t *testing.T) {
 		_, plan, evidence := compileFocusedEvidenceDossierForTest(t, "unclear", "High")
-		if !strings.Contains(evidence.Text, "| partial |") {
+		if evidence.Metadata["evidenceAdequacy"] != processEvidenceAdequacyScoped || !strings.Contains(evidence.Text, "| partial |") {
 			t.Fatalf("partial coverage was not recorded honestly:\n%s", evidence.Text)
 		}
-		if err := validateProcessEvidenceDossier(&plan, evidence); err == nil || !strings.Contains(err.Error(), "(partial)") {
-			t.Fatalf("partial coverage reached story authority: %v", err)
+		if err := validateProcessEvidenceDossier(&plan, evidence); err != nil {
+			t.Fatalf("partial coverage did not preserve an uncertainty-first path: %v", err)
 		}
 	})
 }
 
 func TestProcessExternalResearchCoverageTracksMissingPartialAndStrongPerExactQuestion(t *testing.T) {
 	authorities := []externalEvidenceResearchQuestionAuthority{
-		{Question: "What is the official creator count?"},
-		{Question: "What is the current participation rule?"},
-		{Question: "What comparator changes the decision?"},
+		{Question: "What is the official creator count?", Importance: "load_bearing"},
+		{Question: "What is the current participation rule?", Importance: "optional"},
+		{Question: "What comparator changes the decision?", Importance: "optional"},
 	}
 	first := externalEvidenceEnvelopeRow{ResearchQuestion: authorities[0].Question, SourceFact: "The program has 4,200 creators.", SourceTitle: "Official count", URL: "https://example.org/count", PublishedOrUpdated: "Accessed 2026-08-21", Units: "creators", Confidence: "High", DeckImplication: "Use as the ceiling."}
 	second := externalEvidenceEnvelopeRow{ResearchQuestion: authorities[1].Question, SourceFact: "The current rule requires opt in.", SourceTitle: "Official rule", URL: "https://example.org/rule", PublishedOrUpdated: "Accessed 2026-08-21", Units: "rule", Confidence: "High", DeckImplication: "Use as a guardrail."}
@@ -343,7 +344,7 @@ func TestProcessExternalResearchCoverageTracksMissingPartialAndStrongPerExactQue
 			{CandidateID: secondID, ResearchQuestion: second.ResearchQuestion, CandidateFact: second.SourceFact, URL: second.URL},
 		}},
 	}
-	admitted := [][]string{{firstID, first.SourceFact, first.SourceTitle, first.URL, "exact window", strings.Repeat("a", 64), "Count", "relevant", "decision_grade", "entailed", "High", "Exact support."}}
+	admitted := [][]string{{firstID, first.SourceFact, first.SourceFact, first.SourceTitle, first.URL, "exact window", strings.Repeat("a", 64), "Count", "relevant", "decision_grade", "entailed", "High", "Exact support."}}
 	coverage, err := processExternalResearchQuestionCoverage(authorities, authority, admitted)
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +356,7 @@ func TestProcessExternalResearchCoverageTracksMissingPartialAndStrongPerExactQue
 		}
 	}
 	manifest, adequacy, strong, digest, err := canonicalProcessResearchQuestionCoverageManifest("external", coverage)
-	if err != nil || adequacy != processEvidenceAdequacyInsufficient || strong != 1 || digest == "" || !strings.Contains(manifest, authorities[2].Question) {
+	if err != nil || adequacy != processEvidenceAdequacySufficient || strong != 1 || digest == "" || !strings.Contains(manifest, authorities[2].Question) {
 		t.Fatalf("coverage manifest adequacy=%q strong=%d digest=%q err=%v\n%s", adequacy, strong, digest, err, manifest)
 	}
 }
@@ -368,7 +369,7 @@ func TestProcessResearchCoverageNoneAndInternalRemainValid(t *testing.T) {
 				t.Fatalf("%s coverage manifest adequacy=%q strong=%d digest=%q err=%v", mode, adequacy, strong, digest, err)
 			}
 			rows, err := processResearchQuestionCoverageRows(manifest, mode)
-			if err != nil || len(rows) != 0 || !strings.Contains(manifest, "| None required | 0 | 0 | 0 | not_required |") {
+			if err != nil || len(rows) != 0 || !strings.Contains(manifest, "| None required | not_required | 0 | 0 | 0 | not_required |") {
 				t.Fatalf("%s coverage was not a canonical no-research sentinel: rows=%+v err=%v\n%s", mode, rows, err, manifest)
 			}
 		})

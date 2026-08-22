@@ -481,6 +481,7 @@ func TestScoutChatHumanAcceptedDeckNeverBypassesRenderedAdmission(t *testing.T) 
 }
 
 func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T) {
+	unrelatedApp := newIsolatedKanbanBoardApp(t)
 	fixture := newPackagingQualityGateFixture(t, "ready", []slideJuryRepair{})
 	var scorerCalls atomic.Int32
 	fixture.runQualityGate(t, packagingQualityScoreJSON(9.4, "ready"), &scorerCalls)
@@ -505,10 +506,104 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
 		ID: "published-goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: parent.ID, Mode: "goal", Status: "complete", ArtifactID: parent.ID},
 	}}}
+	// Projection must resolve chat-origin security against the receiver app,
+	// never whichever app instance happens to occupy the process-global HTTP
+	// singleton. The broad package suite intentionally leaves a different test
+	// app here to catch that cross-store header mismatch.
+	previousApp := kanbanApp
+	kanbanApp = unrelatedApp
+	t.Cleanup(func() { kanbanApp = previousApp })
 	projected := fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	ref := projected.Messages[0].Thread
 	if ref.ResultArtifactID != fixture.deck.ID || ref.ResultQualityState != authoredResultQualityAdmitted || !ref.ResultCanPresent || !ref.ResultCanExport {
-		t.Fatalf("exact rendered publication was not admitted: %+v", ref)
+		review, qualityErr := resolvePublishedPackagingStudioQuality(fixture.app, &fixture.plan, fixture.parentID)
+		t.Fatalf("exact rendered publication was not admitted: %+v; resolver review=%+v err=%v", ref, review, qualityErr)
+	}
+	handlerPreviousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = handlerPreviousApp })
+	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	admittedDeckDocument, _, _, loadErr := loadDeckDocument(fixture.deck)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	copyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": fixture.deck.ID, "expectedVersion": artifactVersion(fixture.deck),
+		"title": "Reviewed deck copy", "fileName": "Reviewed deck copy", "folderId": "", "deck": admittedDeckDocument,
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(copyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusCreated {
+		t.Fatalf("exact admitted deck copy status=%d body=%s", copied.Code, copied.Body.String())
+	}
+	modifiedCopy := admittedDeckDocument
+	modifiedCopy.Slides = append([]deckSlide(nil), admittedDeckDocument.Slides...)
+	modifiedCopy.Slides[0].Elements = append([]deckElement(nil), admittedDeckDocument.Slides[0].Elements...)
+	modifiedCopy.Slides[0].Elements[0].Text += " changed in copy request"
+	modifiedCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": fixture.deck.ID, "expectedVersion": artifactVersion(fixture.deck),
+		"title": "Unreviewed deck copy", "fileName": "Unreviewed deck copy", "folderId": "", "deck": modifiedCopy,
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(modifiedCopyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusConflict {
+		t.Fatalf("modified managed deck copy status=%d body=%s", copied.Code, copied.Body.String())
+	}
+
+	// The channel index is an optimization, not publication authority. Move
+	// only the parent plan after the result child has been authorized: the
+	// projected controls must re-evaluate the current goal instead of streaming
+	// the admitted state captured in the earlier channel-wide index.
+	admittedPlanJSON := string(rawPlan)
+	blockedPlan := fixture.plan
+	blockedPlan.State = goalStateBlocked
+	blockedPlanJSON, _ := json.Marshal(blockedPlan)
+	beforeCopyRaceArtifacts := len(fixture.app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0))
+	beforeCopyRaceFiles := len(fixture.app.assistantFilesForUser("aj@shareability.com"))
+	previousCopyProbe := authoredCopyAfterAdmissionProbe
+	t.Cleanup(func() { authoredCopyAfterAdmissionProbe = previousCopyProbe })
+	copyParentMoved := false
+	authoredCopyAfterAdmissionProbe = func() {
+		if copyParentMoved {
+			return
+		}
+		copyParentMoved = true
+		parentSnapshot := mustArtifact(t, fixture.app, fixture.parentID)
+		if _, _, updateErr := fixture.app.updateOSArtifactWithMetadata(parentSnapshot.ID, "", parentSnapshot.Text, "Scout", map[string]string{"goalPlan": string(blockedPlanJSON)}); updateErr != nil {
+			t.Fatalf("move parent review during deck copy: %v", updateErr)
+		}
+	}
+	copyRace := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(copyPayload), adminCookies, deckEditorCopyHandler)
+	authoredCopyAfterAdmissionProbe = previousCopyProbe
+	if !copyParentMoved || copyRace.Code != http.StatusConflict {
+		t.Fatalf("parent-raced deck copy status=%d body=%s moved=%t", copyRace.Code, copyRace.Body.String(), copyParentMoved)
+	}
+	if got := len(fixture.app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)); got != beforeCopyRaceArtifacts {
+		t.Fatalf("parent-raced deck copy left artifact rows: got=%d want=%d", got, beforeCopyRaceArtifacts)
+	}
+	if got := len(fixture.app.assistantFilesForUser("aj@shareability.com")); got != beforeCopyRaceFiles {
+		t.Fatalf("parent-raced deck copy left Files rows: got=%d want=%d", got, beforeCopyRaceFiles)
+	}
+	parent = mustArtifact(t, fixture.app, fixture.parentID)
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "Scout", map[string]string{"goalPlan": admittedPlanJSON}); err != nil {
+		t.Fatal(err)
+	}
+	previousAuthorizationProbe := artifactAuthorizationAfterCheckProbe
+	parentMoved := false
+	artifactAuthorizationAfterCheckProbe = func() {
+		if parentMoved {
+			return
+		}
+		parentMoved = true
+		parentSnapshot := mustArtifact(t, fixture.app, fixture.parentID)
+		if _, _, updateErr := fixture.app.updateOSArtifactWithMetadata(parentSnapshot.ID, "", parentSnapshot.Text, "Scout", map[string]string{"goalPlan": string(blockedPlanJSON)}); updateErr != nil {
+			t.Fatalf("move parent review after result auth: %v", updateErr)
+		}
+	}
+	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	artifactAuthorizationAfterCheckProbe = previousAuthorizationProbe
+	if raced := projected.Messages[0].Thread; raced.ResultQualityState != authoredResultQualityDraftNeedsAttention || raced.ResultCanPresent || raced.ResultCanExport {
+		t.Fatalf("parent-only review race streamed stale final controls: %+v", raced)
+	}
+	parent = mustArtifact(t, fixture.app, fixture.parentID)
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "Scout", map[string]string{"goalPlan": admittedPlanJSON}); err != nil {
+		t.Fatal(err)
 	}
 
 	edited, _, err := fixture.app.updateOSArtifact(fixture.deck.ID, "", fixture.deck.Text+"\n<!-- edited -->", "AJ")
@@ -517,6 +612,17 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 	}
 	if artifactVersion(edited) == artifactVersion(fixture.deck) {
 		t.Fatal("fixture edit did not advance the admitted deck revision")
+	}
+	editedDeckDocument, _, _, loadErr := loadDeckDocument(edited)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	editedCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": edited.ID, "expectedVersion": artifactVersion(edited),
+		"title": "Edited draft copy", "fileName": "Edited draft copy", "folderId": "", "deck": editedDeckDocument,
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(editedCopyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusConflict {
+		t.Fatalf("edited authored draft copy status=%d body=%s", copied.Code, copied.Body.String())
 	}
 	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	ref = projected.Messages[0].Thread
@@ -544,10 +650,6 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 		t.Fatalf("restored exact jury tuple did not recover edited-review state: %+v", restored)
 	}
 
-	previousApp := kanbanApp
-	kanbanApp = fixture.app
-	t.Cleanup(func() { kanbanApp = previousApp })
-	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 	assertExportHeld := func(handler http.HandlerFunc, path, body string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -639,6 +741,60 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 	if quality := fixture.app.authoredResultQualityForArtifact(current); quality != authoredResultQualityAdmitted {
 		t.Fatalf("exact published document quality=%q, want admitted", quality)
 	}
+	previousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	exactDocument := documentStudioDocumentFromEntry(current)
+	documentCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": current.ID, "expectedVersion": artifactVersion(current),
+		"title": "Reviewed report copy", "fileName": "Reviewed report copy", "folderId": "", "document": exactDocument,
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(documentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusCreated {
+		t.Fatalf("exact admitted document copy status=%d body=%s", copied.Code, copied.Body.String())
+	}
+	modifiedDocument := exactDocument
+	modifiedDocument.Markdown += "\n\nUnreviewed copy change."
+	modifiedDocumentCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": current.ID, "expectedVersion": artifactVersion(current),
+		"title": "Unreviewed report copy", "fileName": "Unreviewed report copy", "folderId": "", "document": modifiedDocument,
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(modifiedDocumentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusConflict {
+		t.Fatalf("modified managed document copy status=%d body=%s", copied.Code, copied.Body.String())
+	}
+	blockedPlan := plan
+	blockedPlan.State = goalStateBlocked
+	blockedPlanJSON, _ := json.Marshal(blockedPlan)
+	beforeCopyRaceArtifacts := len(fixture.app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0))
+	beforeCopyRaceFiles := len(fixture.app.assistantFilesForUser("aj@shareability.com"))
+	previousCopyProbe := authoredCopyAfterAdmissionProbe
+	t.Cleanup(func() { authoredCopyAfterAdmissionProbe = previousCopyProbe })
+	copyParentMoved := false
+	authoredCopyAfterAdmissionProbe = func() {
+		if copyParentMoved {
+			return
+		}
+		copyParentMoved = true
+		parentSnapshot := mustArtifact(t, fixture.app, work.Artifact.ID)
+		if _, _, updateErr := fixture.app.updateOSArtifactWithMetadata(parentSnapshot.ID, "", parentSnapshot.Text, "Scout", map[string]string{"goalPlan": string(blockedPlanJSON)}); updateErr != nil {
+			t.Fatalf("move parent review during document copy: %v", updateErr)
+		}
+	}
+	copyRace := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(documentCopyPayload), adminCookies, documentEditorCopyHandler)
+	authoredCopyAfterAdmissionProbe = previousCopyProbe
+	if !copyParentMoved || copyRace.Code != http.StatusConflict {
+		t.Fatalf("parent-raced document copy status=%d body=%s moved=%t", copyRace.Code, copyRace.Body.String(), copyParentMoved)
+	}
+	if got := len(fixture.app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)); got != beforeCopyRaceArtifacts {
+		t.Fatalf("parent-raced document copy left artifact rows: got=%d want=%d", got, beforeCopyRaceArtifacts)
+	}
+	if got := len(fixture.app.assistantFilesForUser("aj@shareability.com")); got != beforeCopyRaceFiles {
+		t.Fatalf("parent-raced document copy left Files rows: got=%d want=%d", got, beforeCopyRaceFiles)
+	}
+	parent = mustArtifact(t, fixture.app, work.Artifact.ID)
+	if _, _, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "Scout", map[string]string{"goalPlan": string(rawPlan)}); err != nil {
+		t.Fatal(err)
+	}
 
 	edited, _, err := fixture.app.updateOSArtifact(current.ID, "", current.Text+"\n\n## Edited conclusion\n\nRun the bounded pilot.", "AJ")
 	if err != nil {
@@ -647,11 +803,13 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 	if quality := fixture.app.authoredResultQualityForArtifact(edited); quality != authoredResultQualityEditedAfterAdmission {
 		t.Fatalf("edited published document quality=%q, want edited_after_admission", quality)
 	}
-
-	previousApp := kanbanApp
-	kanbanApp = fixture.app
-	t.Cleanup(func() { kanbanApp = previousApp })
-	adminCookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	editedDocumentCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": edited.ID, "expectedVersion": artifactVersion(edited),
+		"title": "Edited draft report copy", "fileName": "Edited draft report copy", "folderId": "", "document": documentStudioDocumentFromEntry(edited),
+	})
+	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(editedDocumentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusConflict {
+		t.Fatalf("edited authored document copy status=%d body=%s", copied.Code, copied.Body.String())
+	}
 	request := httptest.NewRequest(http.MethodPost, "/artifacts/export-pdf", strings.NewReader(fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, edited.ID, artifactVersion(edited))))
 	request.Header.Set("Content-Type", "application/json")
 	for _, cookie := range adminCookies {

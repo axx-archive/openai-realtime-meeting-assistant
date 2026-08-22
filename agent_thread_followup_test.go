@@ -59,6 +59,67 @@ func TestStrideE10ScoutFollowUpCutoverFailsBeforePrivateSourcesAndWrite(t *testi
 	}
 }
 
+func TestScoutFollowUpUsesReceiverAppWhenGlobalAppIsPoisoned(t *testing.T) {
+	receiver := newIsolatedKanbanBoardApp(t)
+	receiver.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	source, created, err := receiver.ensureScoutChatThread("followup-receiver-scoped-source", "aj@shareability.com", "AJ", "Receiver source", scoutChatVisibilityPublic, []string{"e@shareability.com"})
+	if err != nil || !created {
+		t.Fatalf("create receiver source: created=%t err=%v", created, err)
+	}
+	artifact, _, err := receiver.createOSArtifactWithMetadata("grill", "grill: receiver authority", "# Receiver authority proof", "AJ", map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-receiver-authority", "threadQuery": "grill: receiver authority",
+		"originKind": agentThreadOriginChannel, "originId": source.ID, "originSurface": "chat:" + source.ID,
+		"requestedBy": "aj@shareability.com", "status": "complete", "threadStatus": "complete", "threadVersion": "1",
+	})
+	if err != nil {
+		t.Fatalf("create receiver artifact: %v", err)
+	}
+
+	poison := newIsolatedKanbanBoardApp(t)
+	if _, created, err := poison.ensureScoutChatThread(source.ID, "e@shareability.com", "E", "Unrelated private source", scoutChatVisibilityPrivate, nil); err != nil || !created {
+		t.Fatalf("create poisoned global source: created=%t err=%v", created, err)
+	}
+	receiverHeader := receiver.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	poisonHeader := poison.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	if receiverHeader.Visibility != scoutChatVisibilityPublic || poisonHeader.Visibility != scoutChatVisibilityPrivate || poisonHeader.OwnerEmail != "e@shareability.com" {
+		t.Fatalf("fixture did not create conflicting receiver/global authority: receiver=%+v poison=%+v", receiverHeader, poisonHeader)
+	}
+
+	previousApp, previousAuthorizer := kanbanApp, artifactObjectAuthorizer
+	kanbanApp = poison
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{TenantID: canonicalArtifactTenantID()}
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		artifactObjectAuthorizer = previousAuthorizer
+	})
+	user := accountStore().findUser("aj@shareability.com")
+	authorized, ok := receiver.authorizedArtifactForActions(context.Background(), user, artifact.ID, ACLReadContent, ACLExecute, ACLWrite)
+	if !ok {
+		t.Fatal("Scout follow-up admission consulted the poisoned process-global app instead of the receiver app")
+	}
+	asyncCalls := 0
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, _ agentThreadFollowUpRun) {
+		if runApp != receiver {
+			t.Fatalf("follow-up launched on app %p, want receiver %p", runApp, receiver)
+		}
+		asyncCalls++
+	}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+	thread, err := receiver.dispatchAuthorizedArtifactFollowUpWithAttachments(context.Background(), user, authorized, "tighten the receiver proof", user.Name, nil, source, nil, "")
+	if err != nil {
+		t.Fatalf("dispatch receiver-scoped follow-up: %v", err)
+	}
+	if asyncCalls != 1 || thread.Artifact.ID != artifact.ID || thread.Artifact.Metadata["threadVersion"] != "2" {
+		t.Fatalf("receiver follow-up async=%d thread=%+v", asyncCalls, thread)
+	}
+	stored, ok := receiver.osArtifactByID(artifact.ID)
+	if !ok || stored.Metadata["threadStatus"] != "running" || stored.Metadata["threadVersion"] != "2" {
+		t.Fatalf("receiver follow-up did not persist running v2: %+v", stored)
+	}
+}
+
 // A follow-up run versions the SAME artifact in place: stable id, threadVersion
 // bump, archived prior body, readiness delta, run log, chat ref flip, and dual
 // notifications (creator + distinct requester).

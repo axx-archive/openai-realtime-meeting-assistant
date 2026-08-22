@@ -434,13 +434,13 @@ func TestLegacyPackagingStudioV2StageWiring(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioV5IsInvisibleConditionalAndFailClosed(t *testing.T) {
+func TestPackagingStudioV6IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	def := packagingStudioDefinition()
-	if def.Version != 5 || def.ImplementationRevision != "packaging_studio.runtime.v5" || def.Budgets.MaxSubtasks != 16 {
-		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v5 runtime v5 and 16 stages", def.Version, def.ImplementationRevision, def.Budgets)
+	if def.Version != 7 || def.ImplementationRevision != "packaging_studio.runtime.v7.scoped-evidence-image-authority.v2" || def.Budgets.MaxSubtasks != 20 {
+		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v6 authority-bound identity runtime and 20-subtask budget", def.Version, def.ImplementationRevision, def.Budgets)
 	}
-	if len(def.Stages) != 16 {
-		t.Fatalf("v5 stage count=%d, want exactly 16", len(def.Stages))
+	if len(def.Stages) != 19 {
+		t.Fatalf("v6 stage count=%d, want exactly 19", len(def.Stages))
 	}
 	if def.Stages[0].ID != "context_snapshot" || def.Stages[len(def.Stages)-1].ID != "ship_compile" {
 		t.Fatalf("unexpected v5 boundaries: first=%s last=%s", def.Stages[0].ID, def.Stages[len(def.Stages)-1].ID)
@@ -457,7 +457,7 @@ func TestPackagingStudioV5IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	if contextSnapshot.OutputContract != "deck_context_snapshot_v3" {
 		t.Fatalf("context snapshot contract=%q, want strict v3", contextSnapshot.OutputContract)
 	}
-	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform performance audit"} {
+	for _, contract := range []string{"1 to 3 atomic single-line objects", "question, research_kind, importance, source_ref, authority_quote, scope_anchor, decision_effect, and decision_relevance", "load_bearing", "at most one load_bearing", "exact 2 to 12 material-word phrase", "direct_evidence", "comparative_evidence", "current_constraint", "fewest decision-driving questions", "private account analytics", "multi-platform performance audit"} {
 		if !strings.Contains(contextSnapshot.PromptBody, contract) {
 			t.Errorf("context snapshot prompt does not keep research proportional: missing %q", contract)
 		}
@@ -491,7 +491,7 @@ func TestPackagingStudioV5IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	}
 	for before, after := range map[string]string{
 		"external_research": "source_snapshot", "source_snapshot": "evidence_entailment", "evidence_entailment": "evidence",
-		"story_architects": "write", "write": "identity", "identity": "imagery_generate",
+		"story_architects": "write", "write": "identity_candidates", "identity_candidates": "identity", "identity": "imagery_generate",
 		"ship_deck": "draft_compile", "draft_compile": "slide_jury", "slide_jury": "quality_gate", "quality_gate": "ship_compile",
 	} {
 		if index[before] >= index[after] {
@@ -504,12 +504,12 @@ func TestPackagingStudioV5IsInvisibleConditionalAndFailClosed(t *testing.T) {
 			t.Errorf("%s must repair then hold, never force-accept: %+v", id, stage.GateSpec)
 		}
 	}
-	identity := packagingStudioStage(t, def, "identity")
-	if !containsString(identity.InputFrom, "gate") {
-		t.Fatalf("identity inputFrom=%v, must wait for the story/copy gate before designing against locked copy", identity.InputFrom)
+	identityCandidates := packagingStudioStage(t, def, "identity_candidates")
+	if !containsString(identityCandidates.InputFrom, "gate") {
+		t.Fatalf("identity_candidates inputFrom=%v, must wait for the story/copy gate before designing against locked copy", identityCandidates.InputFrom)
 	}
 	write := packagingStudioStage(t, def, "write")
-	for _, cue := range []string{"presenter_note", "proportional", "10-45 second", "[BEAT] only when", "Never add filler", "complete admitted claim verbatim"} {
+	for _, cue := range []string{"presenter_note", "proportional", "10-45 second", "[BEAT] only when", "Never add filler", "approved display claim verbatim"} {
 		if !strings.Contains(write.PromptBody, cue) {
 			t.Errorf("write stage does not own integrated presenter notes: missing %q", cue)
 		}
@@ -761,7 +761,7 @@ func TestPackagingStudioStoryIdentityAndCompositionAdaptToTheActualBrief(t *test
 	if got := []string{story.Personas[0].Name, story.Personas[1].Name, story.Personas[2].Name}; !slices.Equal(got, []string{"decision_arc", "audience_reframe", "proof_to_action"}) {
 		t.Fatalf("story architects=%v, want artifact-neutral competing lenses", got)
 	}
-	for _, persona := range append(append([]ProcessPersona{}, story.Personas...), packagingStudioStage(t, def, "identity").Personas...) {
+	for _, persona := range append(append([]ProcessPersona{}, story.Personas...), packagingStudioStage(t, def, "identity_judges").Personas...) {
 		lower := strings.ToLower(persona.System)
 		for _, forbidden := range []string{"this venture", "founder conviction", "franchise playbook", "--heat", "duotone treatment"} {
 			if strings.Contains(lower, forbidden) {
@@ -808,8 +808,16 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 	def := packagingStudioDefinition()
 
 	identity := packagingStudioStage(t, def, "identity")
-	if identity.Role != processRoleJudges || identity.OutputContract != "identity_direction_v3" {
-		t.Fatalf("identity role/contract=%q/%q, want judges/identity_direction_v3", identity.Role, identity.OutputContract)
+	if identity.Role != processRoleSynthesizer || identity.OutputContract != packagingStudioIdentityDirectionContract {
+		t.Fatalf("identity role/contract=%q/%q, want decision editor/%s", identity.Role, identity.OutputContract, packagingStudioIdentityDirectionContract)
+	}
+	candidates := packagingStudioStage(t, def, "identity_candidates")
+	judges := packagingStudioStage(t, def, "identity_judges")
+	critic := packagingStudioStage(t, def, "identity_critic")
+	if candidates.Role != processRoleSynthesizer || judges.Role != processRoleJudges || len(judges.Personas) != 3 || critic.Role != processRoleSynthesizer ||
+		judges.RunIf == nil || judges.RunIf.StageID != "identity_candidates" || judges.RunIf.Equals != "develop" ||
+		critic.RunIf == nil || critic.RunIf.StageID != "identity_candidates" || critic.RunIf.Equals != "extend" {
+		t.Fatalf("identity candidate/review branches are not one art director + conditional jury/critic: candidates=%+v judges=%+v critic=%+v", candidates, judges, critic)
 	}
 	gen := packagingStudioStage(t, def, "imagery_generate")
 	if gen.Role != processRoleCompile || gen.Compile == nil {
@@ -830,7 +838,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 	for i, s := range def.Stages {
 		idx[s.ID] = i
 	}
-	order := []string{"write", "identity", "imagery_generate", "ship_deck"}
+	order := []string{"write", "identity_candidates", "identity", "imagery_generate", "ship_deck"}
 	for i := 1; i < len(order); i++ {
 		if idx[order[i-1]] >= idx[order[i]] {
 			t.Fatalf("stage order broken: %s(%d) must precede %s(%d)", order[i-1], idx[order[i-1]], order[i], idx[order[i]])
@@ -847,7 +855,7 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 		t.Fatalf("last writer stage=%q, want ship_deck (the deck must stay the deliverable)", lastWriter)
 	}
 
-	for _, need := range []string{"emotional", "full-bleed", "crescendo", "typographic", "JSON", "one to three", "zero to four", "exactly strategy, visual_system, identity, and shots"} {
+	for _, need := range []string{"named depiction", "full-bleed", "crescendo", "typographic", "fenced JSON", "one to three", "zero to four", "selected_candidate_id"} {
 		if !strings.Contains(identity.PromptBody, need) {
 			t.Errorf("identity prompt missing the integrated art-direction cue %q", need)
 		}
@@ -862,8 +870,10 @@ func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
 
 func packagingIdentityDirectionValueForTest() map[string]any {
 	return map[string]any{
-		"strategy":      "Use type for proof and imagery only for emotional turns.",
-		"visual_system": "warm paper, ink black, one clay accent, natural photography",
+		"selected_candidate_id": "direction_a",
+		"selection_rationale":   "Direction A has the strongest hierarchy and audience fit.",
+		"strategy":              "Use type for proof and imagery only for emotional turns.",
+		"visual_system":         "warm paper, ink black, one clay accent, natural photography",
 		"identity": map[string]any{
 			"palette": "paper, ink, clay", "type": "grotesk plus editorial serif", "spacing": "8px base rhythm",
 			"grid": "12 columns", "graphic_motif": "thin evidence rules", "image_treatment": "natural color with quiet grain",
@@ -871,16 +881,18 @@ func packagingIdentityDirectionValueForTest() map[string]any {
 		},
 		"shots": []any{
 			map[string]any{
-				"fig": 1, "slide_id": "cover", "slot": "bleed", "subject": "a rooftop crowd mid-laugh",
+				"fig": 1, "slide_id": "cover", "slot": "bleed", "subject": "non-identifying rooftop crowd mid-laugh",
 				"composition": "wide eyeline with negative space on the left", "temperature": "joy",
 				"treatment": "natural 35mm grain; the single crescendo", "aspect": "landscape",
 				"caption": "FIG. 1 — the room", "place": "", "why": "opens on shared belief",
+				"depiction_kind": "generic", "depiction_entity": "", "depiction_ref": "",
 			},
 			map[string]any{
 				"fig": 2, "slide_id": "proof", "slot": "plate", "subject": "hands arranging evidence cards",
 				"composition": "top-down crop with clear center detail", "temperature": "focus",
 				"treatment": "natural color, restrained grain", "aspect": "square",
 				"caption": "FIG. 2 — proof in hand", "place": "Nashville", "why": "makes the operating proof tangible",
+				"depiction_kind": "claim", "depiction_entity": "Nashville", "depiction_ref": strings.Repeat("a", 64),
 			},
 		},
 	}
@@ -908,7 +920,7 @@ func cloneIdentityShotForTest(t *testing.T, shot map[string]any) map[string]any 
 	return clone
 }
 
-// Only a complete, exact identity_direction_v3 with an explicit shots array is
+// Only a complete, exact identity_direction_v4 with an explicit shots array is
 // accepted. Every validated placement and art-direction field reaches the image
 // generator prompt; a valid empty array remains an intentional typographic deck.
 func TestParseImageryDirection(t *testing.T) {
@@ -920,14 +932,23 @@ func TestParseImageryDirection(t *testing.T) {
 	if doc.VisualSystem == "" || len(doc.Shots) != 2 {
 		t.Fatalf("parsed direction=%+v", doc)
 	}
-	shots := doc.imageryShots()
-	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || shots[1].Place != "Nashville" {
+	shots, err := doc.imageryShots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || shots[1].Place != "" || !strings.Contains(shots[1].Description, "Nashville") {
 		t.Fatalf("generator shots=%+v", shots)
 	}
-	for _, propagated := range []string{"slide cover", "bleed slot", "natural 35mm grain", "landscape", "opens on shared belief"} {
+	for _, propagated := range []string{"generic, non-identifying", "bleed slot", "natural full-color editorial photography", "landscape"} {
 		if !strings.Contains(shots[0].Description, propagated) {
 			t.Errorf("generator prompt lost validated field %q:\n%s", propagated, shots[0].Description)
 		}
+	}
+	if strings.Contains(shots[0].Description, "slide cover") {
+		t.Fatalf("server-side slide placement key entered the image-generator prompt:\n%s", shots[0].Description)
+	}
+	if strings.Contains(shots[0].Description, "rooftop crowd") || strings.Contains(shots[0].Description, "opens on shared belief") {
+		t.Fatalf("generic generation prompt retained untrusted identifying prose:\n%s", shots[0].Description)
 	}
 
 	typographic := packagingIdentityDirectionValueForTest()
@@ -941,7 +962,7 @@ func TestParseImageryDirection(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioIdentityDirectionV3AdversarialMatrix(t *testing.T) {
+func TestPackagingStudioIdentityDirectionV4AdversarialMatrix(t *testing.T) {
 	allowed := map[string]struct{}{"cover": {}, "proof": {}}
 	tests := []struct {
 		name   string
@@ -1003,10 +1024,9 @@ func TestPackagingStudioIdentityDirectionV3AdversarialMatrix(t *testing.T) {
 	}
 }
 
-func TestPackagingStudioV5ImageryCompileReadsIntegratedIdentityDirection(t *testing.T) {
+func TestPackagingStudioV5ImageryCompileRequiresCurrentRelaunch(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	value := packagingIdentityDirectionValueForTest()
-	value["shots"] = []any{}
+	value := packagingStudioV5IdentityDirectionValueForTest(t, false)
 	identity, _, err := app.createOSArtifactWithMetadata("workflow", "Integrated identity", fencedIdentityDirectionForTest(t, value), scoutParticipantName, map[string]string{})
 	if err != nil {
 		t.Fatal(err)
@@ -1020,11 +1040,8 @@ func TestPackagingStudioV5ImageryCompileReadsIntegratedIdentityDirection(t *test
 		{ID: "identity", Status: subtaskComplete, ArtifactID: identity.ID},
 	}}
 	body, metadata, err := compilePackagingStudioImagery(app, plan, "goal-v5-identity", ProcessStage{ID: "imagery_generate"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if metadata["imageryShots"] != "0" || !strings.Contains(body, "typographic") {
-		t.Fatalf("integrated identity zero-shot direction was not honored: metadata=%v body=%q", metadata, body)
+	if err == nil || !strings.Contains(err.Error(), "Relaunch it with the current process") || body != "" || metadata != nil {
+		t.Fatalf("historical v5 zero-shot direction resumed instead of requiring a current relaunch: metadata=%v body=%q err=%v", metadata, body, err)
 	}
 }
 
@@ -1065,14 +1082,13 @@ func TestPackagingStudioGeneratedPlacementsPreserveValidatedDirection(t *testing
 	}
 }
 
-func TestPackagingStudioV5ImageryPromptUsesBoundSynthesisNotRejectedPanelVoices(t *testing.T) {
+func TestPackagingStudioV5ImageryNeverSpendsAgainstHistoricalPanelSynthesis(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("OPENAI_API_KEY", "test-image-key")
 
-	selected := packagingIdentityDirectionValueForTest()
-	selected["shots"] = selected["shots"].([]any)[:1]
+	selected := packagingStudioV5IdentityDirectionValueForTest(t, true)
 	synthesis := fencedIdentityDirectionForTest(t, selected)
-	rejected := packagingIdentityDirectionValueForTest()
+	rejected := packagingStudioV5IdentityDirectionValueForTest(t, true)
 	rejectedShot := rejected["shots"].([]any)[0].(map[string]any)
 	rejectedShot["subject"] = "RAW-VOICE-REJECTED-SENTINEL"
 	rejectedVoice := fencedIdentityDirectionForTest(t, rejected)
@@ -1119,14 +1135,11 @@ func TestPackagingStudioV5ImageryPromptUsesBoundSynthesisNotRejectedPanelVoices(
 		})
 	})
 	body, metadata, err := compilePackagingStudioImagery(app, plan, "goal-v5-panel-boundary", ProcessStage{ID: "imagery_generate"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "Relaunch it with the current process") || body != "" || metadata != nil {
+		t.Fatalf("historical v5 imagery was not quarantined: body=%q metadata=%v err=%v", body, metadata, err)
 	}
-	if capturedPrompt == "" || !strings.Contains(capturedPrompt, "rooftop crowd mid-laugh") || strings.Contains(capturedPrompt, "RAW-VOICE-REJECTED-SENTINEL") {
-		t.Fatalf("image prompt crossed the synthesis boundary:\n%s", capturedPrompt)
-	}
-	if metadata["imageryShots"] != "1" || strings.Contains(metadata["imageryFigs"], "RAW-VOICE-REJECTED-SENTINEL") || !strings.Contains(body, "1 of 1") {
-		t.Fatalf("imagery result crossed the synthesis boundary: metadata=%v body=%q", metadata, body)
+	if capturedPrompt != "" {
+		t.Fatalf("historical panel synthesis reached the image provider:\n%s", capturedPrompt)
 	}
 }
 

@@ -300,8 +300,10 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 				Changed bool  `json:"changed"`
 				Actions []any `json:"actions"`
 				Result  struct {
-					OK    bool   `json:"ok"`
-					Error string `json:"error"`
+					OK      bool   `json:"ok"`
+					Outcome string `json:"outcome"`
+					Message string `json:"message"`
+					Error   string `json:"error"`
 				} `json:"result"`
 			}
 			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -319,6 +321,9 @@ func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 			want := fmt.Sprintf("private Realtime voice capability %q is unavailable", name)
 			if !strings.Contains(payload.Result.Error, want) {
 				t.Fatalf("error=%q, want %q", payload.Result.Error, want)
+			}
+			if payload.Result.Outcome != string(conversationIntentUnavailable) || payload.Result.Message != "I couldn't safely complete that voice turn. Nothing else was launched." {
+				t.Fatalf("rejected voice route lacks one truthful durable receipt: %+v", payload.Result)
 			}
 		})
 	}

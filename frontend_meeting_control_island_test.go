@@ -34,10 +34,18 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 			t.Fatalf("secondary action %s is not removed from the primary island", secondary)
 		}
 	}
-	for _, menuItem := range []string{`id="roomMoreChat"`, `id="roomMoreRecap"`, `id="roomMoreTranscript"`, `id="roomMoreRecord"`, `id="roomMorePeople"`, `id="roomMoreSpecialists"`, `id="roomMoreInvite"`, `id="roomMoreConsent"`, `id="roomMoreWorkspace"`, `id="roomMoreArchive"`} {
+	for _, menuItem := range []string{`id="roomMoreChat"`, `id="roomMorePeople"`, `id="roomMoreSettings"`} {
 		if !strings.Contains(controls, menuItem) {
 			t.Fatalf("More menu does not own %s", menuItem)
 		}
+	}
+	for _, removed := range []string{`id="roomMoreRecap"`, `id="roomMoreTranscript"`, `id="roomMoreRecord"`, `id="roomMoreWorkspace"`, `id="roomMoreSpecialists"`, `id="roomMoreInvite"`, `id="roomMoreConsent"`, `id="roomMoreArchive"`, `Open advanced workspace`} {
+		if strings.Contains(controls, removed) {
+			t.Fatalf("redundant or product-language More action remains: %s", removed)
+		}
+	}
+	if strings.Count(controls, `class="room-more__action"`) != 3 {
+		t.Fatal("the live More hierarchy must stay bounded to three immediate actions")
 	}
 	if !strings.Contains(html, `roomMoreMenu?.addEventListener('keydown'`) || !strings.Contains(html, `event.key === 'ArrowDown'`) || !strings.Contains(html, `roomMoreToggleButton?.focus()`) {
 		t.Fatal("More menu lacks keyboard traversal or exact focus return")
@@ -45,16 +53,16 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 	if strings.Contains(html, `#appShell.is-guest.is-in-room .room-more`) {
 		t.Fatal("guest-safe Chat must remain reachable through More")
 	}
-	for _, destination := range []string{`roomChatInput.focus()`, `roomMeetingRecapTab?.focus()`, `roomMeetingTranscriptTab?.focus()`, `artifactSearch?.focus()`} {
-		if !strings.Contains(html, destination) {
-			t.Fatalf("More action lacks an explicit visible focus destination: %s", destination)
-		}
-		if !strings.Contains(html, `meetingSpecialistsRestoreFocus = roomMoreToggleButton`) || !strings.Contains(html, `target.getClientRects().length`) {
-			t.Fatal("Agent team must restore focus to the visible More button, never a hidden menu item")
-		}
+	if !strings.Contains(html, `roomChatInput.focus()`) {
+		t.Fatal("Chat action lacks an explicit visible focus destination")
 	}
-	if !strings.Contains(html, `roomMoreWorkspaceButton.hidden = Boolean(guestMode)`) {
-		t.Fatal("member-only workspace actions are not hidden independently from guest-safe Chat")
+	if !strings.Contains(html, `meetingSpecialistsRestoreFocus = roomMoreToggleButton`) || !strings.Contains(html, `target.getClientRects().length`) {
+		t.Fatal("Agent team must restore focus to the visible More button, never a hidden menu item")
+	}
+	for _, nestedCapability := range []string{`Bring someone into this room`, `Scout and specialist participants`, `roomMeetingRecapToolbar()`, `Microphone privacy`} {
+		if !strings.Contains(html, nestedCapability) {
+			t.Fatalf("removed top-level action is orphaned instead of moving to a contextual surface: %s", nestedCapability)
+		}
 	}
 	for _, retired := range []string{`id="roomBoardToggle"`, `id="roomBoardPanel"`, `id="roomMoreBoard"`, `id="toolBoard"`} {
 		if strings.Contains(html, retired) {
@@ -91,9 +99,11 @@ const server=http.createServer((req,res)=>{
  const base='http://127.0.0.1:'+server.address().port;
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
- await page.goto(base+'/',{waitUntil:'domcontentloaded'});
+ await page.goto(base+'/video',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.waitForTimeout(700);
+ await page.waitForFunction(()=>{const shell=document.getElementById('appShell');return shell?.dataset.tool==='room'&&shell?.dataset.pd1Destination==='Video'});
+ await page.waitForLoadState('networkidle');
+ await page.waitForTimeout(400);
  await page.evaluate(()=>{for(let timer=1;timer<50000;timer++){clearTimeout(timer);clearInterval(timer)}});
  const renderDir=String(process.env.MEETING_CONTROL_RENDER_DIR||'').trim(); if(renderDir)fs.mkdirSync(renderDir,{recursive:true});
  const capture=async(candidate,theme,open=false)=>{
@@ -126,18 +136,31 @@ const server=http.createServer((req,res)=>{
  await capture({name:'desktop-320',width:320,height:700},'dark',false);
 	 await capture({name:'desktop-320',width:320,height:700},'dark',true);
 	 assert.equal(await page.locator('#roomMoreBoard').count(),0,'retired Board action remains mounted in the meeting menu');
+	 for(const retired of ['roomMoreRecap','roomMoreTranscript','roomMoreRecord','roomMoreWorkspace','roomMoreSpecialists','roomMoreInvite','roomMoreConsent','roomMoreArchive'])assert.equal(await page.locator('#'+retired).count(),0,retired+' remains mounted in More');
  await page.setViewportSize({width:1280,height:800}); await page.evaluate(()=>{renderTheme('dark');const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-authed','is-in-room');document.querySelector('.meeting-bar').style.display='block';document.querySelector('.meeting-bar .controls').style.display='inline-flex';document.getElementById('roomChatInput').disabled=false;document.getElementById('roomMoreMenu').hidden=false;document.getElementById('roomMoreMenu').style.display='grid';});
- await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');document.getElementById('roomMoreRecap').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomMeetingRecapTab');
- await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');setRoomMoreOpen(true);document.getElementById('roomMoreTranscript').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomMeetingTranscriptTab');
  await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');ws={readyState:WebSocket.OPEN};updateRoomChatAvailability();setRoomMoreOpen(true);document.getElementById('roomMoreChat').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomChatInput');
- const unqualified=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:false};roomScoutVoiceAvailability={enabled:false,reason:'quality_gate_pending'};roomAgentParticipants=[];syncRoomMoreActions();setRoomMoreOpen(true);return {hidden:document.getElementById('roomMoreSpecialists').hidden,chatHidden:document.getElementById('roomMoreChat').hidden}});
- assert.deepEqual(unqualified,{hidden:true,chatHidden:false},'unqualified voice agents must disappear while meeting chat stays available');
- await page.evaluate(()=>{meetingSpecialistsSnapshot={available:true};syncRoomMoreActions()});
- await page.evaluate(()=>setRoomMoreOpen(true)); await page.waitForTimeout(1); await page.evaluate(()=>document.getElementById('roomMoreSpecialists').click()); await page.waitForFunction(()=>!document.getElementById('meetingSpecialistsPanel').hidden);
+	 await page.evaluate(()=>document.getElementById('roomMeetingRecapTab').click()); assert.equal(await page.evaluate(()=>roomMeetingMode),'recap');
+	 await page.evaluate(()=>document.getElementById('roomMeetingTranscriptTab').click()); assert.equal(await page.evaluate(()=>roomMeetingMode),'transcript'); assert.equal(await page.locator('#roomMeetingTranscript > .room-meeting-transcription-toolbar').count(),1);
+	 const unqualified=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:false};roomScoutVoiceAvailability={enabled:false,reason:'quality_gate_pending'};roomAgentParticipants=[];openRoomPeoplePopover();return {manage:Array.from(document.querySelectorAll('.invite-pop__action')).some(button=>button.textContent.trim()==='Manage'),chatHidden:document.getElementById('roomMoreChat').hidden}});
+	 assert.deepEqual(unqualified,{manage:false,chatHidden:false},'unqualified agent controls must disappear inside People while meeting chat stays available');
+	 await page.evaluate(()=>{closeInvitePopover();meetingSpecialistsSnapshot={available:true};openRoomPeoplePopover();Array.from(document.querySelectorAll('.invite-pop__action')).find(button=>button.textContent.trim()==='Manage').click()}); await page.waitForFunction(()=>!document.getElementById('meetingSpecialistsPanel').hidden);
  await page.evaluate(()=>document.getElementById('meetingSpecialistsClose').click()); assert.equal(await page.evaluate(()=>document.activeElement?.id),'roomMoreToggle');
+	 const peopleActions=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:true};openRoomPeoplePopover();return Array.from(document.querySelectorAll('.invite-pop__action')).map(button=>button.textContent.trim())}); assert.deepEqual(peopleActions,['Invite','Manage']);
+	 await page.evaluate(()=>Array.from(document.querySelectorAll('.invite-pop__action')).find(button=>button.textContent.trim()==='Invite').click());
+	 const inviteActions=await page.locator('.invite-pop__action').allTextContents(); assert.deepEqual(inviteActions.map(value=>value.trim()),['copy room link','mint guest link']); await page.evaluate(()=>closeInvitePopover());
+	 // Room settings remains a truthful action while the transient dock-level
+	 // device button is locked during media reconciliation.
+	 await page.evaluate(()=>{document.getElementById('audioSettingsButton').disabled=true;syncRoomMoreActions();setRoomMoreOpen(true);document.getElementById('roomMoreSettings').click()}); await page.locator('#settingsClose').waitFor({state:'visible'});
+	 // A late auth/path reconciliation of the already-current Video destination
+	 // must not erase the newer, deliberate Room settings interaction.
+	 await page.evaluate(()=>syncAuthenticatedShell());
+	 assert.equal(await page.locator('#settingsClose').isVisible(),true,'same-destination reconciliation closed Room settings');
+	 assert.equal(await page.locator('section[data-settings-section="devices"]').evaluate(section=>section.hidden),false); await page.locator('#settingsClose').click(); assert.equal(await page.evaluate(()=>document.activeElement?.id),'roomMoreToggle');
  await page.evaluate(()=>{guestMode=true;const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-guest','is-in-room');syncRoomMoreActions();setRoomMoreOpen(true)});
  const guest=await page.locator('#roomMoreMenu button').evaluateAll(items=>items.filter(item=>!item.hidden).map(item=>item.textContent.trim()));
- assert.ok(guest.includes('Chat')); assert.ok(!guest.includes('Agent team')&&!guest.includes('Board')&&!guest.includes('Open advanced workspace')&&!guest.includes('Invite people')&&!guest.includes('Send notes'),guest.join(','));
+	 assert.deepEqual(guest,['Chat','People','Microphone privacy'],guest.join(','));
+	 await page.evaluate(()=>{const consent=document.getElementById('consentToggle');consent.hidden=false;consent.disabled=false;syncRoomMoreActions();setRoomMoreOpen(true);document.getElementById('roomMoreSettings').click()}); await page.waitForFunction(()=>!document.getElementById('consentPanel').hidden&&document.activeElement?.id==='consentClose');
+	 await page.locator('#consentClose').click(); assert.equal(await page.evaluate(()=>document.activeElement?.id),'roomMoreToggle');
 	 await page.evaluate(()=>{const shell=document.getElementById('appShell');shell.dataset.tool='room';shell.classList.add('is-in-room');ws={readyState:WebSocket.OPEN};updateRoomChatAvailability();syncRoomMoreActions();document.getElementById('roomMoreChat').click()});
 	 await page.waitForTimeout(50);
 	 const guestChatFocus=await page.evaluate(()=>{const input=document.getElementById('roomChatInput');const panel=document.getElementById('roomChatPanel');const rail=document.querySelector('.scout-rail');return {active:document.activeElement?.id||document.activeElement?.tagName||'',disabled:input.disabled,panelHidden:panel.hidden,roomChatOpen:document.getElementById('appShell').classList.contains('is-room-chat-open'),mode:roomMeetingMode,railDisplay:getComputedStyle(rail).display,inputDisplay:getComputedStyle(input).display,inputRects:input.getClientRects().length};});

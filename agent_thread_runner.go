@@ -1951,7 +1951,7 @@ func (app *kanbanBoardApp) reauthorizedAgentLearningForRequester(values []STRIDE
 			if user == nil {
 				continue
 			}
-			if _, ok := authorizedArtifactForActions(context.Background(), user, learning.ArtifactID, ACLReadContent); !ok {
+			if _, ok := app.authorizedArtifactForActions(context.Background(), user, learning.ArtifactID, ACLReadContent); !ok {
 				continue
 			}
 		}

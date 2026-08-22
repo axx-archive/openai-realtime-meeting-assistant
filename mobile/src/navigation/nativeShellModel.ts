@@ -87,6 +87,7 @@ const focusedRoutes = new Set<keyof RootStackParamList>([
   'CreateRoom',
   'NewConversation',
   'OSWeb',
+  'DeckViewer',
 ]);
 
 export function nativeShellLayout(

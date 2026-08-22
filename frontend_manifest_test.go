@@ -41,7 +41,7 @@ func TestIndexManifestCardComponentContract(t *testing.T) {
 		"manifest-card__skip-dot",
 		"manifest-card__foot-link",
 		"manifest-card__deck-result scout-chat-deck-result",
-		"renderArtifactDeck(deckResult, deliveredDeckArtifact)",
+		"renderArtifactDeck(deckResult, deliveredDeckArtifact, goalResultCapabilities)",
 		"Deck files & feedback",
 		"The editable deck is above.",
 		".manifest-card {",
@@ -111,8 +111,8 @@ func TestIndexManifestHeldQuieting(t *testing.T) {
 		"manifest-card--held",
 		".manifest-card--held {",
 		"opacity: 0.82;",
-		"if (!held && deliverable.present && !richDeckRow)",
-		"if (!held && /^[0-9a-f]{64}$/",
+		"if (!held && deliverable.present && !richDeckRow && rowCapabilities.canPresent === true)",
+		"if (!held && rowCapabilities.canExport === true && /^[0-9a-f]{64}$/",
 		"if (!held && manifest.shareArtifactId)",
 		"release requires ${manifestActorShortName(manifest.heldBy || 'admin')}",
 	} {
@@ -130,10 +130,11 @@ func TestIndexManifestPresentRouting(t *testing.T) {
 	html := readIndexForManifest(t)
 	for _, want := range []string{
 		"function openArtifactStage(artifactId, fallbackTitle, options)",
-		"{ present: true }",
+		"{ ...rowCapabilities, present: true }",
 		"autoPresent: Boolean(options?.present)",
 		"let autoPresentPending = Boolean(options.autoPresent)",
-		"if (autoPresentPending)",
+		"if (autoPresentPending && canPresent)",
+		"watchArtifactPublicationCapability(",
 		"openDeckPresentation(artifactId, title, deckAccess)",
 	} {
 		if !strings.Contains(html, want) {

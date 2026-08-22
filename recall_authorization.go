@@ -26,6 +26,12 @@ type RecallPrincipal struct {
 	// It is never accepted from a browser or tool payload.
 	MediaGeneration uint64
 	Audience        string
+	// ConversationContinuityRecall enables the dynamic-channel compatibility
+	// join only for a caller that also owns the post-provider source fence. It is
+	// server-stamped by the private thread answer path, never accepted from a
+	// client/model payload. Other recall consumers stay on the ordinary STRIDE
+	// projection until they implement the same final-effect authority hold.
+	ConversationContinuityRecall bool
 }
 
 func recallPrincipalForUser(user *userAccount) RecallPrincipal {
@@ -233,7 +239,13 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 		id     string
 		header ArtifactAuthorizationHeader
 	}
+	type promotedFileCandidate struct {
+		index  int
+		id     string
+		header meetingMemoryEntry
+	}
 	var artifacts []artifactCandidate
+	var promotedFiles []promotedFileCandidate
 	ordered := map[int]meetingMemoryEntry{}
 	app.memory.mu.Lock()
 	sourceLen := len(app.memory.entries)
@@ -249,6 +261,15 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 			artifacts = append(artifacts, artifactCandidate{index: index, id: stored.ID, header: header})
 			continue
 		}
+		if stored.Kind == meetingMemoryKindFile {
+			header := promotedChatFileAuthorizationHeader(stored)
+			if _, promoted, valid := promotedChatFileBindingFromEntry(header); promoted {
+				if valid {
+					promotedFiles = append(promotedFiles, promotedFileCandidate{index: index, id: stored.ID, header: header})
+				}
+				continue
+			}
+		}
 		ordered[index] = cloneMemoryEntry(stored)
 	}
 	app.memory.mu.Unlock()
@@ -262,6 +283,26 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 		}
 		entry, found := app.memory.artifactSnapshotIfHeaderMatches(candidate.id, candidate.header)
 		if !found {
+			continue
+		}
+		ordered[candidate.index] = entry
+	}
+	// Chat-promoted Files rows carry copied derived text, so they need the same
+	// source reauthorization as their blob handle before that text can enter
+	// lexical scoring or a model prompt. True direct uploads keep the legacy
+	// organization-visible recall contract above.
+	for _, candidate := range promotedFiles {
+		if principal.User == nil {
+			continue
+		}
+		if _, _, _, allowed := app.promotedChatFileSource(ctx, principal.User, candidate.header); !allowed {
+			continue
+		}
+		entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, candidate.id)
+		if !found || !promotedChatFileAuthorizationHeaderEqual(candidate.header, promotedChatFileAuthorizationHeader(entry)) || !recallEntryScopeAllowed(entry.Metadata, principal) {
+			continue
+		}
+		if _, _, _, allowed := app.promotedChatFileSource(ctx, principal.User, entry); !allowed {
 			continue
 		}
 		ordered[candidate.index] = entry

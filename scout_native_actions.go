@@ -23,6 +23,7 @@ type scoutNativeActionSpec struct {
 }
 
 var scoutNativeActionSpecs = []scoutNativeActionSpec{
+	{ID: "open_chat_thread", Description: "Open one currently visible, unarchived Bonfire Chat thread by exact title. fields: title, optional visibility (public or private). This is navigation only; it never posts, publishes, or rebinds a private Scout voice conversation.", Required: []string{"title"}, Allowed: []string{"title", "visibility"}},
 	{ID: "control_app", Description: "Open a Stride surface. fields: tool (office, room, chat, artifacts, research, design, grill, board, memory, files), optional artifact_id.", Required: []string{"tool"}, Allowed: []string{"tool", "artifact_id", "also_open"}},
 	{ID: "create_ticket", Description: "Create a Board card. fields: title, notes, owner, status, optional tags, due_date, and key_dates as comma-separated text.", Required: []string{"title"}, Allowed: []string{"title", "notes", "owner", "status", "tags", "due_date", "key_dates"}},
 	{ID: "move_ticket", Description: "Move a Board card. fields: card_id or exact title, status.", Required: []string{"status"}, Allowed: []string{"card_id", "title", "card_title", "status"}},
@@ -40,6 +41,15 @@ var scoutNativeActionSpecs = []scoutNativeActionSpec{
 	{ID: "organize_files", Description: "Put visible files into a Drive folder. fields: folderName, optional fileNames as comma-separated name fragments.", Required: []string{"folderName"}, Allowed: []string{"folderName", "fileNames", "createIfMissing"}},
 	{ID: "save_to_files", Description: "Save finished deliverables to Drive. fields: fileNames as comma-separated title fragments, optional folderName.", Required: []string{"fileNames"}, Allowed: []string{"fileNames", "folderName"}},
 	{ID: "send_notification", Description: "Create a Stride notification. fields: text, kind (info, task, agent, chat, alert), audience (me or everyone), optional tool and deliver.", Required: []string{"text", "kind", "audience"}, Allowed: []string{"text", "kind", "audience", "tool", "deliver"}},
+}
+
+// open_chat_thread is the sole native action admitted through the first
+// server-owned conversation manifest. It is a read-only navigation receipt:
+// the server resolves an exact current destination under the requester's ACL,
+// and the client may open only the returned stable thread id. Every legacy
+// mutation stays fenced behind tool_unadmitted.
+func scoutNativeActionAdmittedReadOnly(toolID string) bool {
+	return strings.EqualFold(strings.TrimSpace(toolID), "open_chat_thread")
 }
 
 // scoutNativeActionApprovalClass is the server-owned effect boundary for the
@@ -109,12 +119,42 @@ func scoutMessageMayRequestNativeAction(text string) bool {
 	if !verb {
 		return false
 	}
-	for _, object := range []string{"board", "project", "card", "ticket", "channel", "folder", "file", "drive", "notification", "bonfire map", " it", "that"} {
+	for _, object := range []string{"board", "project", "card", "ticket", "channel", "chat", "thread", "folder", "file", "drive", "notification", "bonfire map", " it", "that"} {
 		if strings.Contains(lower, object) {
 			return true
 		}
 	}
 	return false
+}
+
+func exactVisibleChatThread(app *kanbanBoardApp, requesterEmail string, title string, visibilityHint string) (scoutChatThreadRecord, error) {
+	wanted := strings.TrimPrefix(strings.TrimSpace(title), "#")
+	if wanted == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat title is required")
+	}
+	hint := strings.ToLower(strings.TrimSpace(visibilityHint))
+	if hint != "" && hint != scoutChatVisibilityPublic && hint != scoutChatVisibilityPrivate {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat visibility must be public or private")
+	}
+	var match scoutChatThreadRecord
+	matches := 0
+	for _, thread := range app.scoutChatThreadsSnapshot(requesterEmail, true, 0) {
+		visibility := scoutChatThreadVisibility(thread)
+		if strings.TrimSpace(thread.ArchivedAt) != "" ||
+			!strings.EqualFold(strings.TrimSpace(thread.Title), wanted) ||
+			(hint != "" && visibility != hint) {
+			continue
+		}
+		match = thread
+		matches++
+	}
+	if matches == 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat %q is unavailable", wanted)
+	}
+	if matches != 1 {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat %q is ambiguous; specify public or private", wanted)
+	}
+	return match, nil
 }
 
 func scoutNativeActionSpecByID(id string) (scoutNativeActionSpec, bool) {
@@ -252,6 +292,26 @@ func (app *kanbanBoardApp) executeScoutNativeAction(ctx context.Context, user *u
 	}
 	args := scoutNativeActionArgs(action.Fields)
 	switch action.ToolID {
+	case "open_chat_thread":
+		thread, err := exactVisibleChatThread(app, user.Email, asString(args["title"]), asString(args["visibility"]))
+		if err != nil {
+			return nil, false, err
+		}
+		visibility := scoutChatThreadVisibility(thread)
+		label := strings.TrimSpace(thread.Title)
+		if visibility == scoutChatVisibilityPublic {
+			label = "#" + strings.TrimPrefix(label, "#")
+		}
+		actionEnvelope := map[string]any{
+			"type": "open_chat_thread", "threadId": thread.ID, "title": thread.Title,
+			"visibility": visibility,
+		}
+		return map[string]any{
+			"ok": true, "action": action.ToolID, "threadId": thread.ID, "title": thread.Title,
+			"visibility": visibility, "changed": false,
+			"summary": "Opening " + label + ". Nothing was posted there.",
+			"actions": []map[string]any{actionEnvelope},
+		}, false, nil
 	case "archive_channel":
 		thread, err := exactVisibleChannel(app, user.Email, asString(args["channel"]))
 		if err != nil {

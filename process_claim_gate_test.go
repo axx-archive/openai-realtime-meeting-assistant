@@ -41,7 +41,7 @@ func TestProcessClaimGateStoryRejectsMissingClaimIDOrExactText(t *testing.T) {
 		{
 			name: "missing exact admitted text",
 			body: `{"turns":[{"argument":"The market was $4.2 billion in 2026.","claim_ids":["` + claim.ID + `"]}]}`,
-			want: "missing its exact admitted text",
+			want: "missing an approved admitted rendering",
 		},
 		{
 			name: "rejected id",
@@ -69,6 +69,253 @@ func TestProcessClaimGateDeckCopyAcceptsSiblingExactAnchor(t *testing.T) {
 	tampered := strings.Replace(body, "$4.2 billion", "$6.8 billion", 1)
 	if err := validateProcessFactualClaims(tampered, manifest); err == nil || !strings.Contains(err.Error(), "$6.8 billion") {
 		t.Fatalf("numerically drifted deck copy passed: %v", err)
+	}
+}
+
+func TestProcessClaimGateAcceptsOnlyTheEvidenceApprovedShortRendering(t *testing.T) {
+	manifest, claim := processClaimGateFixture()
+	claim.DisplayClaim = "Creator market: $4.2 billion in 2026."
+	manifest[claim.ID] = claim
+	body := `{"slides":[{"slide_id":"slide-2","visible_copy":"` + claim.DisplayClaim + `","source_url":"https://example.com/market","claim_ids":["` + claim.ID + `"],"claim_renderings":["` + claim.DisplayClaim + `"]}]}`
+	if err := validateProcessFactualClaims(body, manifest); err != nil {
+		t.Fatalf("approved short rendering failed: %v", err)
+	}
+	altered := strings.Replace(body, "$4.2 billion", "$6.8 billion", 1)
+	if err := validateProcessFactualClaims(altered, manifest); err == nil || !strings.Contains(err.Error(), "$6.8 billion") {
+		t.Fatalf("unapproved edited rendering passed: %v", err)
+	}
+}
+
+func scopedEvidenceAuthorityFixture() processEvidenceGateAuthority {
+	return processEvidenceGateAuthority{
+		Claims:        processAdmittedClaimManifest{},
+		Adequacy:      processEvidenceAdequacyScoped,
+		DossierDigest: strings.Repeat("7", 64),
+	}
+}
+
+func TestProcessScopedEvidenceGateBindsConditionalJSONToExactDossier(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	stage := ProcessStage{ID: "story_architects"}
+	valid := `{"evidence_scope":"scoped","evidence_scope_receipt":"` + authority.DossierDigest + `","decision_posture":"conditional","evidence_scope_disclosure":"` + processScopedEvidenceDisclosure + `","story":{"headline":"A hypothesis worth testing","statement_type":"recommendation","text":"Recommendation: test a narrow pilot."}}`
+	if err := validateProcessScopedEvidenceOutput(valid, stage, authority); err != nil {
+		t.Fatalf("dossier-bound conditional JSON failed: %v", err)
+	}
+	if err := validateProcessFactualClaims(valid, authority.Claims); err != nil {
+		t.Fatalf("scoped metadata conflicted with factual gate: %v", err)
+	}
+
+	for name, body := range map[string]string{
+		"wrong dossier":    strings.Replace(valid, authority.DossierDigest, strings.Repeat("8", 64), 1),
+		"definitive story": strings.Replace(valid, "A hypothesis worth testing", "The clear choice", 1),
+		"unlabeled action": strings.Replace(valid, "A hypothesis worth testing", "Launch the network", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessScopedEvidenceOutput(body, stage, authority); err == nil {
+				t.Fatal("unbound or definitive scoped JSON passed")
+			}
+		})
+	}
+	conditional := strings.Replace(valid, "A hypothesis worth testing", "If the signal holds, scale deliberately", 1)
+	if err := validateProcessScopedEvidenceOutput(conditional, stage, authority); err != nil {
+		t.Fatalf("explicitly conditional story failed: %v", err)
+	}
+}
+
+func TestProcessScopedEvidenceGateInspectsEveryNestedNarrativeField(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	stage := ProcessStage{ID: "write"}
+	base := `{"evidence_scope":"scoped","evidence_scope_receipt":"` + authority.DossierDigest + `","decision_posture":"conditional","evidence_scope_disclosure":"` + processScopedEvidenceDisclosure + `","deck_copy":{"purpose":"Hypothesis: test a bounded pilot.","slides":[{"speaker_intent":"Explore the open question.","transition":"Move to the next hypothesis.","custom":{"free_text":"Recommendation: test the premise before committing resources."}}]}}`
+	if err := validateProcessScopedEvidenceOutput(base, stage, authority); err != nil {
+		t.Fatalf("conditional nested narrative failed: %v", err)
+	}
+
+	unsafe := map[string]string{
+		"purpose":                strings.Replace(base, "Hypothesis: test a bounded pilot.", "Launch the network now.", 1),
+		"rhetorical directive":   strings.Replace(base, "Hypothesis: test a bounded pilot.", "Launch the network now?", 1),
+		"speaker intent":         strings.Replace(base, "Explore the open question.", "Convince leadership to launch the network now.", 1),
+		"transition":             strings.Replace(base, "Move to the next hypothesis.", "We launch the network now.", 1),
+		"transition adverb":      strings.Replace(base, "Move to the next hypothesis.", "Next, launch the network now.", 1),
+		"custom free text":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: launch the network now.", 1),
+		"named subject":          strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: Acme launches the network now", 1),
+		"unbounded prototype":    strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: deploy the prototype to production for every customer", 1),
+		"unbounded pilot":        strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: launch a pilot for every customer", 1),
+		"universal pilot":        strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: launch a pilot to every creator", 1),
+		"unrelated caveat":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Demand is still a hypothesis. Launch the network now.", 1),
+		"comma caveat":           strings.Replace(base, "Recommendation: test the premise before committing resources.", "Demand is still a hypothesis, launch the network to every customer", 1),
+		"colon caveat":           strings.Replace(base, "Recommendation: test the premise before committing resources.", "Demand is still a hypothesis: launch the network to every customer", 1),
+		"dash caveat":            strings.Replace(base, "Recommendation: test the premise before committing resources.", "Demand is still a hypothesis — launch the network to every customer", 1),
+		"unrelated bounded act":  strings.Replace(base, "Recommendation: test the premise before committing resources.", "Build a prototype, launch the network now", 1),
+		"activate universal":     strings.Replace(base, "Recommendation: test the premise before committing resources.", "Activate the network for every customer", 1),
+		"release public":         strings.Replace(base, "Recommendation: test the premise before committing resources.", "Release the network publicly", 1),
+		"roll out globally":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Roll out the network globally", 1),
+		"go live":                strings.Replace(base, "Recommendation: test the premise before committing resources.", "Go live now", 1),
+		"unknown universal verb": strings.Replace(base, "Recommendation: test the premise before committing resources.", "Enable the network for every customer", 1),
+		"later clause condition": strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch the network; if retention clears, send a report", 1),
+		"capability modal":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "We can deploy globally", 1),
+		"migrate universal":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Migrate every customer now", 1),
+		"switch universal":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Switch every customer now", 1),
+		"approve universal":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Approve every customer now", 1),
+		"authorize universal":    strings.Replace(base, "Recommendation: test the premise before committing resources.", "Authorize every customer now", 1),
+		"acquire universal":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Acquire every company now", 1),
+		"purchase universal":     strings.Replace(base, "Recommendation: test the premise before committing resources.", "Purchase every company now", 1),
+		"delete universal":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Delete every account now", 1),
+		"charge universal":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Charge every customer now", 1),
+		"enroll universal":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Enroll every user now", 1),
+		"erase universal":        strings.Replace(base, "Recommendation: test the premise before committing resources.", "Erase all records now", 1),
+		"terminate universal":    strings.Replace(base, "Recommendation: test the premise before committing resources.", "Terminate every employee now", 1),
+		"sell universal":         strings.Replace(base, "Recommendation: test the premise before committing resources.", "Sell the whole company now", 1),
+		"generic subject modal":  strings.Replace(base, "Recommendation: test the premise before committing resources.", "We may charge every customer now", 1),
+		"adverb imperative":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: immediately charge every customer", 1),
+		"polite imperative":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Please charge every customer", 1),
+		"aspect imperative":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Begin charging every customer", 1),
+		"kindly imperative":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: kindly charge every customer", 1),
+		"go-ahead imperative":    strings.Replace(base, "Recommendation: test the premise before committing resources.", "Recommendation: go ahead and charge every customer", 1),
+		"recommend gerund":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "I recommend charging every customer", 1),
+		"universal passive":      strings.Replace(base, "Recommendation: test the premise before committing resources.", "Every customer should be charged now", 1),
+		"generic comma caveat":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "Demand is still a hypothesis, charge every customer", 1),
+		"generic colon caveat":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "Background: enroll every user", 1),
+		"generic dash caveat":    strings.Replace(base, "Recommendation: test the premise before committing resources.", "Open question — erase all records", 1),
+		"convenient condition":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer when convenient", 1),
+		"whim condition":         strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer if we feel like it", 1),
+		"broken condition":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer if retention clears, but regardless of the result", 1),
+		"failed pilot condition": strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer if the pilot fails", 1),
+		"denied condition":       strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer if approval is denied", 1),
+		"negative proof":         strings.Replace(base, "Recommendation: test the premise before committing resources.", "Launch every customer if evidence does not support it", 1),
+		"newline imperative":     strings.Replace(base, "Recommendation: test the premise before committing resources.", "Hypothesis:\\nLaunch the network to every customer", 1),
+		"coordinated unsafe act": strings.Replace(base, "Recommendation: test the premise before committing resources.", "Review every source and charge every customer.", 1),
+		"negation scope escape":  strings.Replace(base, "Recommendation: test the premise before committing resources.", "We do not have evidence for every customer and charge every customer.", 1),
+		"subordinate unsafe act": strings.Replace(base, "Recommendation: test the premise before committing resources.", "Review every source before charging every customer.", 1),
+		"subordinate negation":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "We should not review every source while charging every customer.", 1),
+		"as-clause unsafe act":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "Review every source as we charge every customer.", 1),
+		"so-clause unsafe act":   strings.Replace(base, "Recommendation: test the premise before committing resources.", "Review every source so we can charge every customer.", 1),
+	}
+	for name, body := range unsafe {
+		t.Run(name, func(t *testing.T) {
+			err := validateProcessScopedEvidenceOutput(body, stage, authority)
+			if err == nil || !strings.Contains(err.Error(), "unconditional high-consequence action") {
+				t.Fatalf("unconditional directive in arbitrary nested field passed: %v", err)
+			}
+		})
+	}
+}
+
+func TestProcessScopedEvidenceGateAllowsConditionalAndBoundedRecommendations(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	stage := ProcessStage{ID: "story_architects"}
+	prefix := `{"evidence_scope":"scoped","evidence_scope_receipt":"` + authority.DossierDigest + `","decision_posture":"conditional","evidence_scope_disclosure":"` + processScopedEvidenceDisclosure + `","story":{"purpose":`
+	for _, narrative := range []string{
+		`"Funding options remain an open question."`,
+		`"Product launches are a separate research lane."`,
+		`"We do not have evidence for every customer."`,
+		`"The sample does not represent every creator."`,
+		`"Review all the evidence before deciding."`,
+		`"Review every source and discuss every option."`,
+		`"Review every source before discussing every option."`,
+		`"Review every source as we discuss every option."`,
+		`"We should not charge every customer."`,
+		`"Should we launch the network after a bounded pilot validates demand?"`,
+		`"Recommendation: launch the network only if the pilot clears the retention threshold."`,
+		`"Hypothesis: launch the network if the bounded test validates demand."`,
+		`"Recommendation: if the pilot clears the retention threshold, we will launch the network."`,
+		`"Demand is still a hypothesis; if retention clears 40%, launch the network."`,
+		`"If retention clears the threshold, charge every customer."`,
+		`"Recommendation: launch a pilot."`,
+		`"Proposal: build a prototype."`,
+	} {
+		body := prefix + narrative + `}}`
+		if err := validateProcessScopedEvidenceOutput(body, stage, authority); err != nil {
+			t.Fatalf("conditional or bounded recommendation failed (%s): %v", narrative, err)
+		}
+	}
+}
+
+func TestProcessScopedEvidenceLawIsBoundToEveryNarrativeStage(t *testing.T) {
+	tests := []struct {
+		name string
+		def  ProcessDefinition
+		ids  []string
+	}{
+		{name: "deck", def: packagingStudioDefinition(), ids: []string{"story_architects", "write", "layout_plan", "ship_deck"}},
+		{name: "document", def: documentReportDefinition(), ids: []string{"story", "write"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := &goalPlan{ProcessID: test.def.ID, Objective: "Create the requested artifact"}
+			for _, id := range test.ids {
+				stage, ok := test.def.stageByID(id)
+				if !ok || !processClaimGateStage(plan, stage) {
+					t.Fatalf("narrative stage %s is outside the executable scoped-evidence gate", id)
+				}
+				task := processStageTaskWithInputs(plan, &goalSubtask{ID: id}, stage, "")
+				for _, law := range []string{"SCOPED-EVIDENCE LAW", "Every high-consequence action", "label alone does not make an unconditional directive safe"} {
+					if !strings.Contains(task, law) {
+						t.Fatalf("stage %s is missing scoped-evidence instruction %q", id, law)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestProcessScopedEvidenceGateEnforcesDocumentsAndFinalDecks(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	marker := "<!-- stride-evidence-scope:scoped digest=" + authority.DossierDigest + " -->"
+	document := strings.Join([]string{
+		"# Opportunity",
+		"",
+		processScopedEvidenceDisclosure,
+		"",
+		"Recommendation: test the thesis with a bounded pilot.",
+		"",
+		marker,
+	}, "\n")
+	if err := validateProcessScopedEvidenceOutput(document, ProcessStage{ID: "write"}, authority); err != nil {
+		t.Fatalf("conditional scoped document failed: %v", err)
+	}
+	if err := validateProcessFactualClaims(document, authority.Claims); err != nil {
+		t.Fatalf("conditional scoped document failed factual gate: %v", err)
+	}
+	definitiveDocument := strings.Replace(document, "Recommendation: test the thesis with a bounded pilot.", "The best strategy is settled.", 1)
+	if err := validateProcessScopedEvidenceOutput(definitiveDocument, ProcessStage{ID: "write"}, authority); err == nil {
+		t.Fatal("definitive scoped document passed")
+	}
+
+	deck := strings.Replace(faithfulDeckHTML, `<div data-deck-element="headline"`, marker+`<div data-deck-element="headline"`, 1)
+	deck = strings.Replace(deck, "Like a Farmer", processScopedEvidenceDisclosure, 1)
+	if err := validateProcessScopedEvidenceOutput(deck, ProcessStage{ID: "ship_deck"}, authority); err != nil {
+		t.Fatalf("conditional scoped final deck failed: %v", err)
+	}
+	if err := validateProcessDeckFactualClaims(deck, authority.Claims); err != nil {
+		t.Fatalf("conditional scoped final deck failed factual gate: %v", err)
+	}
+	definitiveDeck := strings.Replace(deck, processScopedEvidenceDisclosure, processScopedEvidenceDisclosure+" The winning strategy", 1)
+	if err := validateProcessScopedEvidenceOutput(definitiveDeck, ProcessStage{ID: "ship_deck"}, authority); err == nil {
+		t.Fatal("definitive scoped final deck passed")
+	}
+	attributeDirectiveDeck := strings.Replace(deck, `data-deck-element="headline"`, `data-deck-element="headline" aria-label="Launch every customer now"`, 1)
+	if err := validateProcessScopedEvidenceOutput(attributeDirectiveDeck, ProcessStage{ID: "ship_deck"}, authority); err == nil {
+		t.Fatal("unconditional directive in a surfaced deck attribute passed")
+	}
+}
+
+func TestProcessScopedEvidenceGateDoesNotConstrainSufficientEvidence(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	authority.Adequacy = processEvidenceAdequacySufficient
+	if err := validateProcessScopedEvidenceOutput(`{"story":{"headline":"The clear choice"}}`, ProcessStage{ID: "story_architects"}, authority); err != nil {
+		t.Fatalf("sufficient evidence was forced into scoped posture: %v", err)
+	}
+	falseScope := `{"evidence_scope":"scoped","story":{"headline":"A hypothesis"}}`
+	if err := validateProcessScopedEvidenceOutput(falseScope, ProcessStage{ID: "story_architects"}, authority); err == nil {
+		t.Fatal("sufficient evidence output falsely claimed a scoped posture")
+	}
+}
+
+func TestProcessScopedEvidenceGateStopsDownstreamWorkWhenCoverageIsInsufficient(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	authority.Adequacy = processEvidenceAdequacyInsufficient
+	if err := validateProcessScopedEvidenceOutput(`{"story":{"headline":"A hypothesis"}}`, ProcessStage{ID: "story_architects"}, authority); err == nil {
+		t.Fatal("downstream story passed with no authorized external question coverage")
 	}
 }
 

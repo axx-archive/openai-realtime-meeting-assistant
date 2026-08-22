@@ -196,17 +196,16 @@ func (app *kanbanBoardApp) strideConversationProjectionPrincipal(principal Recal
 
 func (app *kanbanBoardApp) authorizedSTRIDEConversationEntries(principal RecallPrincipal) []meetingMemoryEntry {
 	projectedPrincipal, organizationOnly, ok := app.strideConversationProjectionPrincipal(principal)
-	if !ok {
-		return nil
-	}
 	var projections []STRIDEConversationMessageProjection
-	err := app.strideRuntime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
-		var projectErr error
-		projections, projectErr = domains.ConversationLedger.ProjectForTenantPrincipal(canonicalTenantID(), projectedPrincipal)
-		return projectErr
-	})
-	if err != nil || len(projections) == 0 {
-		return nil
+	if ok {
+		err := app.strideRuntime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
+			var projectErr error
+			projections, projectErr = domains.ConversationLedger.ProjectForTenantPrincipal(canonicalTenantID(), projectedPrincipal)
+			return projectErr
+		})
+		if err != nil {
+			projections = nil
+		}
 	}
 	byThread := map[string]map[string]STRIDEConversationMessageProjection{}
 	for _, projection := range projections {
@@ -220,6 +219,7 @@ func (app *kanbanBoardApp) authorizedSTRIDEConversationEntries(principal RecallP
 	}
 
 	entries := make([]meetingMemoryEntry, 0, len(projections))
+	seenSources := make(map[string]bool, len(projections))
 	for _, stored := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
 		thread, decoded := decodeScoutChatThreadEntry(stored)
 		threadProjection := byThread[thread.ID]
@@ -256,8 +256,23 @@ func (app *kanbanBoardApp) authorizedSTRIDEConversationEntries(principal RecallP
 				continue
 			}
 			entries = append(entries, strideConversationRecallEntry(thread, message, projection, createdAt))
+			seenSources[thread.ID+"\x00"+message.ID] = true
 		}
 	}
+
+	// RecallThreadIDs was intentionally an E1 rollout allowlist. Production
+	// channels are dynamic, however, so treating that static list as the company
+	// Brain corpus made older readable channels disappear from a private Scout
+	// question even though their current source and ACL were still available.
+	//
+	// ConversationContinuity is the provider-independent, body-free authority
+	// for exactly this bridge. For a fenced authenticated private Scout turn, join
+	// its current checkpoint back to the current public thread only after the
+	// viewer, audience digest, and whole-source digest all reauthorize. Shared
+	// rooms/publication services deliberately do not receive this compatibility
+	// lane: widening a private answer into another audience still requires the
+	// ordinary STRIDE projection/destination checks above.
+	entries = append(entries, app.authorizedConversationContinuityEntries(principal, seenSources)...)
 	sort.SliceStable(entries, func(i, j int) bool {
 		if !entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
 			return entries[i].CreatedAt.Before(entries[j].CreatedAt)
@@ -267,10 +282,263 @@ func (app *kanbanBoardApp) authorizedSTRIDEConversationEntries(principal RecallP
 	return entries
 }
 
+func (app *kanbanBoardApp) authorizedConversationContinuityEntries(principal RecallPrincipal, seenSources map[string]bool) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || principal.User == nil || principal.Audience != "private" || !principal.ConversationContinuityRecall ||
+		strings.TrimSpace(principal.ServiceID) != "" || strings.TrimSpace(principal.GuestID) != "" ||
+		strings.TrimSpace(principal.TenantID) != canonicalArtifactTenantID() {
+		return nil
+	}
+	viewer := accountStore().findUser(principal.User.Email)
+	if viewer == nil {
+		return nil
+	}
+	if seenSources == nil {
+		seenSources = map[string]bool{}
+	}
+	latestContinuity := map[string]conversationContinuityCheckpoint{}
+	for _, stored := range app.memory.entriesOfKind(meetingMemoryKindConversationContinuity, 0) {
+		checkpoint, decoded := decodeConversationContinuity(stored)
+		if !decoded {
+			continue
+		}
+		prior := latestContinuity[checkpoint.ThreadID]
+		if prior.ID == "" || checkpoint.Revision > prior.Revision || checkpoint.Revision == prior.Revision && checkpoint.UpdatedAt.After(prior.UpdatedAt) {
+			latestContinuity[checkpoint.ThreadID] = checkpoint
+		}
+	}
+
+	entries := []meetingMemoryEntry{}
+	for _, stored := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
+		candidate, decoded := decodeScoutChatThreadEntry(stored)
+		if !decoded || candidate.ID == "" {
+			continue
+		}
+		// Re-read under the same per-thread authority lock used by message,
+		// archive, and audience mutations. A stale enumeration can only make this
+		// source disappear; it can never carry a revoked body into the prompt.
+		lock := app.scoutChatThreadLock(candidate.ID)
+		lock.Lock()
+		thread, _, readErr := app.scoutChatThreadByID(viewer.Email, candidate.ID)
+		if readErr != nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" {
+			lock.Unlock()
+			continue
+		}
+		checkpoint := latestContinuity[thread.ID]
+		if !conversationContinuityCheckpointCurrentForViewer(viewer.Email, thread, checkpoint) {
+			lock.Unlock()
+			continue
+		}
+		checkpointSources := make(map[string]bool, len(checkpoint.SourceMessageIDs))
+		for _, messageID := range checkpoint.SourceMessageIDs {
+			checkpointSources[strings.TrimSpace(messageID)] = true
+		}
+		for _, message := range thread.Messages {
+			key := thread.ID + "\x00" + message.ID
+			if seenSources[key] || !checkpointSources[message.ID] || strings.TrimSpace(message.Text) == "" {
+				continue
+			}
+			createdAt, timeErr := parseSTRIDEChatTime(message.CreatedAt)
+			contentDigest, digestErr := strideChatMessageContentDigest(false, message)
+			if timeErr != nil || digestErr != nil {
+				continue
+			}
+			entry := conversationContinuityRecallEntry(thread, message, checkpoint, contentDigest, createdAt)
+			if !recallEntryScopeAllowed(entry.Metadata, principal) {
+				continue
+			}
+			entries = append(entries, entry)
+			seenSources[key] = true
+		}
+		lock.Unlock()
+	}
+	return entries
+}
+
 func strideConversationRecallEntry(thread scoutChatThreadRecord, message scoutChatMessageRecord, projection STRIDEConversationMessageProjection, createdAt time.Time) meetingMemoryEntry {
 	author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), projection.AuthorName, participantNameForEmail(message.AuthorEmail), scoutParticipantName)
+	text := conversationRecallBody(thread, message, author, createdAt)
+	metadata := conversationRecallMetadata(thread, message, author, projection.TenantID, projection.LatestEvent.ID, "stride_conversation_ledger", projection.LatestEvent.Digest, createdAt)
+	return meetingMemoryEntry{
+		ID:        "stride_chat_recall_" + projection.LatestEvent.ID,
+		Kind:      memoryContextKindCompanyConversation,
+		Text:      text,
+		CreatedAt: createdAt,
+		Metadata:  metadata,
+	}
+}
+
+func conversationContinuityRecallEntry(thread scoutChatThreadRecord, message scoutChatMessageRecord, checkpoint conversationContinuityCheckpoint, contentDigest string, createdAt time.Time) meetingMemoryEntry {
+	author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), participantNameForEmail(message.AuthorEmail), scoutParticipantName)
+	identity := sha256Hex([]byte(checkpoint.ID + "\x00" + message.ID + "\x00" + contentDigest))
+	metadata := conversationRecallMetadata(thread, message, author, canonicalArtifactTenantID(), checkpoint.ID, "conversation_continuity", contentDigest, createdAt)
+	metadata["sourceRevision"] = fmt.Sprint(checkpoint.Revision)
+	metadata["sourceDigest"] = checkpoint.SourceDigest
+	return meetingMemoryEntry{
+		ID:        "continuity_chat_recall_" + identity[:24],
+		Kind:      memoryContextKindCompanyConversation,
+		Text:      conversationRecallBody(thread, message, author, createdAt),
+		CreatedAt: createdAt,
+		Metadata:  metadata,
+	}
+}
+
+// currentCompanyConversationSource is deliberately not a meetingMemoryEntry.
+// It can be minted only by re-reading an exact source message under its current
+// per-thread authority lock after the provider returns. Keeping this capability
+// distinct prevents a stored transcript or prompt wrapper from being mistaken
+// for an openable, current citation.
+type currentCompanyConversationSource struct {
+	ThreadID    string
+	ThreadTitle string
+	MessageID   string
+	Author      string
+	AuthorEmail string
+	Role        string
+	OccurredAt  string
+	Text        string
+}
+
+// lockCurrentCompanyConversationSources reauthorizes every company-channel
+// context row used by a private Scout answer after the provider returns and
+// holds the exact source thread locks through the caller's final persistence
+// effect. A concurrent edit, delete, archive, or audience narrowing therefore
+// either lands first and makes validation fail closed, or waits until the
+// already-authorized private answer is durably committed.
+func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal RecallPrincipal, destinationThreadID string, contextEntries []meetingMemoryEntry) ([]currentCompanyConversationSource, func(), error) {
+	sourceEntries := make([]meetingMemoryEntry, 0, len(contextEntries))
+	threadSet := map[string]bool{}
+	for _, entry := range contextEntries {
+		conversationTranscript := entry.Kind == meetingMemoryKindTranscript && oneOf(strings.TrimSpace(entry.Metadata["source"]), transcriptSourceChannel, transcriptSourceRiff)
+		if entry.Kind != memoryContextKindCompanyConversation && !conversationTranscript {
+			continue
+		}
+		threadID := strings.TrimSpace(entry.Metadata["threadId"])
+		messageID := strings.TrimSpace(entry.Metadata["messageId"])
+		if threadID == "" || messageID == "" {
+			return nil, func() {}, fmt.Errorf("company conversation source is unavailable")
+		}
+		sourceEntries = append(sourceEntries, entry)
+		threadSet[threadID] = true
+	}
+	if len(sourceEntries) == 0 {
+		return nil, func() {}, nil
+	}
+	if app == nil || app.memory == nil || principal.User == nil || principal.Audience != "private" ||
+		strings.TrimSpace(principal.ServiceID) != "" || strings.TrimSpace(principal.GuestID) != "" ||
+		strings.TrimSpace(principal.TenantID) != canonicalArtifactTenantID() {
+		return nil, func() {}, fmt.Errorf("company conversation source is unavailable")
+	}
+	viewer := accountStore().findUser(principal.User.Email)
+	if viewer == nil {
+		return nil, func() {}, fmt.Errorf("company conversation source is unavailable")
+	}
+	if destinationThreadID = strings.TrimSpace(destinationThreadID); destinationThreadID != "" {
+		threadSet[destinationThreadID] = true
+	}
+
+	threadIDs := make([]string, 0, len(threadSet))
+	for threadID := range threadSet {
+		threadIDs = append(threadIDs, threadID)
+	}
+	sort.Strings(threadIDs)
+	release := app.lockScoutChatThreadSet(threadIDs...)
+	fail := func() ([]currentCompanyConversationSource, func(), error) {
+		release()
+		return nil, func() {}, fmt.Errorf("company conversation source changed while Scout was answering")
+	}
+
+	threads := make(map[string]scoutChatThreadRecord, len(threadIDs))
+	for _, threadID := range threadIDs {
+		thread, _, err := app.scoutChatThreadByID(viewer.Email, threadID)
+		if err != nil || thread.ArchivedAt != "" {
+			return fail()
+		}
+		threads[threadID] = thread
+	}
+
+	current := make([]currentCompanyConversationSource, 0, len(sourceEntries))
+	seen := map[string]bool{}
+	for _, entry := range sourceEntries {
+		threadID := strings.TrimSpace(entry.Metadata["threadId"])
+		messageID := strings.TrimSpace(entry.Metadata["messageId"])
+		key := threadID + "\x00" + messageID
+		thread := threads[threadID]
+		messageIndex := scoutChatMessageIndex(thread, messageID)
+		if messageIndex < 0 {
+			return fail()
+		}
+		message := thread.Messages[messageIndex]
+		if entry.Kind == meetingMemoryKindTranscript {
+			source := strings.TrimSpace(entry.Metadata["source"])
+			var expectedMetadata map[string]string
+			var expectedText string
+			switch source {
+			case transcriptSourceChannel:
+				if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+					return fail()
+				}
+				expectedMetadata = channelBrainMetadata(thread, message)
+				expectedText = strings.TrimSpace(message.Text)
+				if title := strings.TrimSpace(thread.Title); title != "" {
+					expectedText = "[#" + title + "] " + expectedText
+				}
+			case transcriptSourceRiff:
+				if thread.Riff == nil {
+					return fail()
+				}
+				expectedMetadata = riffBrainMetadata(thread, message)
+				expectedText = strings.TrimSpace(message.Text)
+				if title := strings.TrimSpace(thread.Riff.SourceTitle); title != "" {
+					expectedText = "[Riff on #" + title + "] " + expectedText
+				}
+			default:
+				return fail()
+			}
+			if !recallEntryScopeAllowed(expectedMetadata, principal) || entry.Text != expectedText || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+				return fail()
+			}
+			for _, field := range []string{"source", "threadId", "messageId", "channelTitle", "sourceThreadId", "sourceTitle", "visibility", "ownerEmail", "memberEmails"} {
+				if strings.TrimSpace(entry.Metadata[field]) != strings.TrimSpace(expectedMetadata[field]) {
+					return fail()
+				}
+			}
+			continue
+		}
+		if seen[key] || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+			if seen[key] {
+				continue
+			}
+			return fail()
+		}
+		createdAt, timeErr := parseSTRIDEChatTime(message.CreatedAt)
+		contentDigest, digestErr := strideChatMessageContentDigest(false, message)
+		author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), participantNameForEmail(message.AuthorEmail), scoutParticipantName)
+		currentMetadata := conversationRecallMetadata(thread, message, author, canonicalArtifactTenantID(), "current", "current_chat_source", contentDigest, createdAt)
+		if timeErr != nil || digestErr != nil || strings.TrimSpace(message.Text) == "" ||
+			!recallEntryScopeAllowed(currentMetadata, principal) ||
+			!oneOf(strings.TrimSpace(entry.Metadata["sourceAuthority"]), "stride_conversation_ledger", "conversation_continuity") ||
+			entry.Metadata["tenantId"] != canonicalArtifactTenantID() ||
+			entry.Metadata["contentDigest"] != contentDigest ||
+			entry.Metadata["threadTitle"] != strings.TrimSpace(thread.Title) ||
+			entry.Metadata["author"] != author ||
+			normalizeAccountEmail(entry.Metadata["authorEmail"]) != normalizeAccountEmail(message.AuthorEmail) ||
+			entry.Metadata["occurredAt"] != createdAt.UTC().Format(time.RFC3339Nano) ||
+			entry.Text != conversationRecallBody(thread, message, author, createdAt) {
+			return fail()
+		}
+		seen[key] = true
+		current = append(current, currentCompanyConversationSource{
+			ThreadID: thread.ID, ThreadTitle: strings.TrimSpace(thread.Title), MessageID: message.ID,
+			Author: author, AuthorEmail: normalizeAccountEmail(message.AuthorEmail), Role: strings.ToLower(strings.TrimSpace(message.Role)),
+			OccurredAt: createdAt.UTC().Format(time.RFC3339Nano), Text: message.Text,
+		})
+	}
+	return current, release, nil
+}
+
+func conversationRecallBody(thread scoutChatThreadRecord, message scoutChatMessageRecord, author string, createdAt time.Time) string {
 	var body strings.Builder
-	fmt.Fprintf(&body, "Channel #%s\nAuthor: %s\n", strings.TrimSpace(thread.Title), author)
+	fmt.Fprintf(&body, "Channel #%s\nAuthor: %s\nPosted: %s\n", strings.TrimSpace(thread.Title), author, createdAt.UTC().Format(time.RFC3339))
 	if text := strings.TrimSpace(message.Text); text != "" {
 		body.WriteString("Message: ")
 		body.WriteString(text)
@@ -304,23 +572,32 @@ func strideConversationRecallEntry(thread scoutChatThreadRecord, message scoutCh
 		}
 		body.WriteByte('\n')
 	}
+	return strings.TrimSpace(body.String())
+}
+
+func conversationRecallMetadata(thread scoutChatThreadRecord, message scoutChatMessageRecord, author, tenantID, eventRef, authority, contentDigest string, createdAt time.Time) map[string]string {
 	visibility := "project"
 	if scoutChatThreadIsOrganizationPublic(thread) {
 		visibility = "organization"
 	}
-	return meetingMemoryEntry{
-		ID:        "stride_chat_recall_" + projection.LatestEvent.ID,
-		Kind:      memoryContextKindCompanyConversation,
-		Text:      strings.TrimSpace(body.String()),
-		CreatedAt: createdAt,
-		Metadata: map[string]string{
-			"title":        "#" + strings.TrimSpace(thread.Title) + " — " + author,
-			"visibility":   visibility,
-			"tenantId":     projection.TenantID,
-			"threadId":     thread.ID,
-			"messageId":    message.ID,
-			"sourceFamily": "company_conversation",
-			"eventRef":     projection.LatestEvent.ID,
-		},
+	metadata := map[string]string{
+		"title":           "#" + strings.TrimSpace(thread.Title) + " — " + author,
+		"visibility":      visibility,
+		"tenantId":        strings.TrimSpace(tenantID),
+		"threadId":        thread.ID,
+		"threadTitle":     strings.TrimSpace(thread.Title),
+		"messageId":       message.ID,
+		"author":          author,
+		"authorEmail":     normalizeAccountEmail(message.AuthorEmail),
+		"occurredAt":      createdAt.UTC().Format(time.RFC3339Nano),
+		"sourceFamily":    "company_conversation",
+		"sourceAuthority": strings.TrimSpace(authority),
+		"eventRef":        strings.TrimSpace(eventRef),
+		"contentDigest":   strings.TrimSpace(contentDigest),
 	}
+	if visibility == "project" {
+		metadata["ownerEmail"] = normalizeAccountEmail(thread.OwnerEmail)
+		metadata["memberEmails"] = strings.Join(scoutChatThreadMemberEmails(thread), ",")
+	}
+	return metadata
 }

@@ -175,6 +175,15 @@ type StrideE10LegacyIdentityAuthority interface {
 	WithMappedLegacyPerson(context.Context, string, func(string) error) error
 }
 
+// StrideE10LegacyOrganizationPrincipalAuthority is the optional audience-proof
+// seam for shared delivery. A canonical request principal cannot be reused to
+// test another viewer's ACL: the account digest must resolve to that viewer's
+// active person and membership while the organization read fence is held.
+// This projection is read-only and carries no impersonated session revision.
+type StrideE10LegacyOrganizationPrincipalAuthority interface {
+	WithMappedLegacyOrganizationPrincipal(context.Context, string, StrideE10TenantPrincipal, func(StrideE10TenantPrincipal) error) error
+}
+
 type StrideE10TenantPrincipal struct {
 	TenantID                     string
 	PersonID                     string

@@ -412,6 +412,23 @@ func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, pr
 	for key, value := range readinessAgentSnapshot(agent) {
 		snap[key] = value
 	}
+	// `enabled` is the legacy worker's boot configuration. Product ownership can
+	// fence that configured worker before a supervisor is registered, so expose
+	// the effective state separately instead of reporting a missing supervisor as
+	// an outage for a lane STRIDE intentionally replaced.
+	snap["configuredEnabled"] = snap["enabled"]
+	snap["effectiveEnabled"] = snap["enabled"]
+	supersededBy, superseded := ambientWorkerSupersession(kanbanApp, agent)
+	if superseded {
+		snap["effectiveEnabled"] = false
+		snap["ownershipState"] = "superseded"
+		snap["supersededBy"] = supersededBy
+		snap["fenced"] = true
+		snap["supervisorRequired"] = false
+	} else {
+		snap["ownershipState"] = "active"
+		snap["fenced"] = false
+	}
 	backfillArmed := boolEnv(agent.backfillEnv)
 	snap["backfillArmed"] = backfillArmed
 	registered, running, pendingRooms := ambientWorkerSupervisorState(kanbanApp, agent.name)
@@ -424,11 +441,16 @@ func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, pr
 		}
 	}
 	snap["provider"] = provider
-	markNamedProviderFailure(snap, provider, providerReady)
+	if !superseded {
+		markNamedProviderFailure(snap, provider, providerReady)
+	}
 	// Cadence-gated specialty workers can also run synchronously on demand and
 	// prove current health from their typed artifact + workDue contract. Generic
 	// meeting-intelligence workers always require a live supervisor.
-	requiresSupervisor := agent.healthWorkDue == nil
+	requiresSupervisor := agent.healthWorkDue == nil && !superseded
+	if _, reported := snap["supervisorRequired"]; !reported {
+		snap["supervisorRequired"] = requiresSupervisor
+	}
 	if snap["enabled"] == true && providerReady && !running && requiresSupervisor {
 		snap["supervisorError"] = true
 		if strings.TrimSpace(asString(snap["lastError"])) == "" {
@@ -446,11 +468,28 @@ func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, pr
 		}
 	}
 	snap["status"] = capabilityStatus(snap, providerReady)
-	if snap["unsafeActivation"] == true {
+	if superseded {
+		// A superseded worker is neither healthy nor disabled: it is deliberately
+		// dormant behind a named owner. Ignore stale/provider/supervisor evidence
+		// from the legacy execution lane, but never hide a corrupt or blocked
+		// durable checkpoint that still requires operator reconciliation.
+		snap["status"] = "superseded"
+	}
+	if snap["unsafeActivation"] == true || snap["ambientContinuityHealthy"] == false || snap["checkpointError"] == true || snap["persistenceError"] == true {
 		snap["status"] = "degraded"
 	}
 	snap["analysisReady"] = snap["status"] == "healthy" && running && snap["ambientContinuityHealthy"] != false
 	return snap
+}
+
+// ambientWorkerSupersession names an authority replacement that fences a
+// legacy worker before boot. Keep this narrow and product-owned: an absent
+// supervisor for any ordinary enabled worker must remain a degradation.
+func ambientWorkerSupersession(app *kanbanBoardApp, agent ambientAgentConfig) (string, bool) {
+	if agent.name == researchSuggestionAgentName && app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
+		return "stride_suggested_work", true
+	}
+	return "", false
 }
 
 // ambientWorkerSupervisorState reports process liveness without manufacturing

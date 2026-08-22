@@ -957,6 +957,14 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 			}
 			header := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
 			kanbanApp.memory.mu.Unlock()
+			if _, promoted, valid := promotedChatFileBindingFromEntry(header); promoted {
+				if !valid {
+					return assistantFileRecord{}, false
+				}
+				if _, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, header); !authorized {
+					return assistantFileRecord{}, false
+				}
+			}
 			row := fileRecordFromEntry(header)
 			writable := false
 			if canonical {

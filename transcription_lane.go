@@ -520,9 +520,17 @@ func (lane *meetingTranscriptionLane) setConnected(connected bool) {
 	}
 	if connected {
 		broadcastAssistantEvent("status", "Transcript lane connected", map[string]any{"model": lane.transcriptionModel})
-		return
+	} else {
+		broadcastAssistantEvent("status", "Transcript lane disconnected", map[string]any{"model": lane.transcriptionModel})
 	}
-	broadcastAssistantEvent("status", "Transcript lane disconnected", map[string]any{"model": lane.transcriptionModel})
+	// The room status pill is server-authoritative. Publish the connection
+	// edge through the same versioned participant snapshot as recording
+	// toggles so clients never keep a green "Live" claim during provider
+	// reconnects. Source managers project true while any admitted source lane
+	// remains connected.
+	if lane.app != nil {
+		broadcastRoomKanbanEvent(lane.roomID, "participants", lane.app.roomSnapshotForTranscriptionConnectionEdge(lane.roomID))
+	}
 }
 
 func (lane *meetingTranscriptionLane) noteForwardedAudio() {

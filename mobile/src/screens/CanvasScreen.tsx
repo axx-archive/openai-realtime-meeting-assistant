@@ -23,6 +23,7 @@ import {
 } from '../canvas/homeScoutOpening';
 import { canvasCradleComposition } from '../components/CanvasCradleComposition';
 import { Waveform } from '../components/Waveform';
+import { BonfireChatShortcut } from '../components/BonfireChatShortcut';
 import { useHomeCanvas } from '../canvas/useLiveLine';
 import { createConversationOperationId } from '../conversations/newConversation';
 import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
@@ -33,15 +34,17 @@ import type { HomeStarterDestination } from '../api/types';
 import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
+import { personalizedHomeGreeting } from '../canvas/homeGreeting';
+import { isBonfireChat } from '../messaging/channelPresentation';
 
 type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
  * The Canvas — design §4 and §9 (STRIDE mobile E2E evolution).
  *
- * Home is continuity: last work and threads to resume. The greeting and
- * starter cards (Continue / Explore / Create / Challenge Canvas) are gone.
- * The root is a conversation, not a dashboard. Realtime voice and one ordinary
+ * Home is continuity: a personal greeting, direct Bonfire Chat, and the last
+ * work and threads to resume. Starter dashboards stay retired. The root is a
+ * conversation, not a dashboard. Realtime voice and one ordinary
  * text field are two inputs to the same private Scout contract.
  *
  * Nothing here blocks first paint: the compact voice control renders before
@@ -51,7 +54,7 @@ type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
 
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
-  const { sessionToken } = useAuth();
+  const { sessionToken, user } = useAuth();
   const home = useHomeCanvas();
   const realtime = usePersonalRealtimeContext();
   const listening = realtime.active;
@@ -68,6 +71,8 @@ export function CanvasScreen() {
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [projectError, setProjectError] = useState('');
   const [projectFocusGeneration, setProjectFocusGeneration] = useState(0);
+  const [bonfireTarget, setBonfireTarget] = useState<{ sessionToken: string; threadId: string } | null>(null);
+  const [bonfireOpening, setBonfireOpening] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const draftRef = useRef(draft);
   const draftDestinationRef = useRef<HomeStarterDestination | null>(draftDestination);
@@ -76,6 +81,7 @@ export function CanvasScreen() {
   const sessionTokenRef = useRef(sessionToken);
   const openingAttemptRef = useRef<HomeScoutOpeningAttempt | null>(null);
   const threadAttemptRef = useRef<{ key: string; operationId: string } | null>(null);
+  const bonfireRequestRef = useRef<{ sessionToken: string; promise: Promise<string | null> } | null>(null);
   draftRef.current = draft;
   draftDestinationRef.current = draftDestination;
   sessionTokenRef.current = sessionToken;
@@ -93,6 +99,57 @@ export function CanvasScreen() {
   });
   const dictationActive = dictation.state !== 'idle';
   const dictationCanCommit = ['listening', 'held', 'error'].includes(dictation.state);
+
+  const loadBonfireTarget = useCallback(async (): Promise<string | null> => {
+    if (!sessionToken) return null;
+    const cached = bonfireTarget?.sessionToken === sessionToken ? bonfireTarget.threadId : '';
+    if (cached) return cached;
+    if (bonfireRequestRef.current?.sessionToken === sessionToken) return bonfireRequestRef.current.promise;
+    const token = sessionToken;
+    const promise = api.scoutThreadIndex(token)
+      .then((response) => {
+        if (sessionTokenRef.current !== token) return null;
+        const thread = (response.threads ?? []).find(isBonfireChat);
+        const threadId = String(thread?.id ?? '').trim();
+        if (threadId) setBonfireTarget({ sessionToken: token, threadId });
+        return threadId || null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (bonfireRequestRef.current?.promise === promise) bonfireRequestRef.current = null;
+      });
+    bonfireRequestRef.current = { sessionToken: token, promise };
+    return promise;
+  }, [bonfireTarget, sessionToken]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadBonfireTarget();
+      return undefined;
+    }, [loadBonfireTarget]),
+  );
+
+  useEffect(() => {
+    if (bonfireRequestRef.current?.sessionToken !== sessionToken) {
+      bonfireRequestRef.current = null;
+    }
+    setBonfireTarget((current) => current?.sessionToken === sessionToken ? current : null);
+    setBonfireOpening(false);
+  }, [sessionToken]);
+
+  const openBonfireChat = useCallback(async () => {
+    const token = sessionToken;
+    if (!token || bonfireOpening) return;
+    setBonfireOpening(true);
+    const threadId = await loadBonfireTarget();
+    if (sessionTokenRef.current !== token) return;
+    setBonfireOpening(false);
+    if (threadId) {
+      navigation.navigate('Thread', { threadId, title: 'Bonfire Chat' });
+      return;
+    }
+    navigation.navigate('Chat');
+  }, [bonfireOpening, loadBonfireTarget, navigation, sessionToken]);
 
   const refreshProjectContext = useCallback(async (createTitle = '') => {
     if (!sessionToken) return;
@@ -327,7 +384,6 @@ export function CanvasScreen() {
       >
           <View style={[canvasCradleComposition.skyAbove, keyboardVisible && styles.keyboardSky]} />
 
-          {/* Home is continuity — no greeting, no starters. Just live meeting + composer. */}
           {liveMeeting ? (
             <Pressable
               accessibilityRole="button"
@@ -340,6 +396,17 @@ export function CanvasScreen() {
               <Text maxFontSizeMultiplier={1.5} numberOfLines={1} style={styles.liveMeetingDetail}>{liveMeeting.detail}</Text>
               <SymbolView name="chevron.right" size={12} tintColor={colors.text3} />
             </Pressable>
+          ) : null}
+
+          {!keyboardVisible ? (
+            <View style={styles.greeting}>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={1.8} style={styles.greetingTitle}>
+                {personalizedHomeGreeting(user?.name)}
+              </Text>
+              <Text maxFontSizeMultiplier={1.8} style={styles.greetingBody}>
+                What can Scout help move forward?
+              </Text>
+            </View>
           ) : null}
 
           <View style={styles.composerBlock}>
@@ -506,6 +573,9 @@ export function CanvasScreen() {
 
         <View style={[canvasCradleComposition.skyBelow, keyboardVisible && styles.keyboardSky]} />
       </ScrollView>
+      {!keyboardVisible ? (
+        <BonfireChatShortcut busy={bonfireOpening} onPress={() => { void openBonfireChat(); }} />
+      ) : null}
 		  <Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
 		<SafeAreaView style={styles.projectSheet}>
 		  <View style={styles.projectSheetHeader}>
@@ -549,6 +619,24 @@ const styles = StyleSheet.create({
   bellPressed: {
     opacity: 0.7,
     backgroundColor: colors.surface2,
+  },
+  greeting: {
+    width: '100%',
+    maxWidth: 560,
+    alignItems: 'center',
+    gap: space[1],
+    marginTop: space[3],
+    paddingHorizontal: space[4],
+  },
+  greetingTitle: {
+    ...type.title1,
+    color: colors.text1,
+    textAlign: 'center',
+  },
+  greetingBody: {
+    ...type.body,
+    color: colors.text2,
+    textAlign: 'center',
   },
   projectChip: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1 },
   projectChipText: { ...type.caption, color: colors.text2 },

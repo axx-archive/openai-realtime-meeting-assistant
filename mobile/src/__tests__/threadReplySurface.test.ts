@@ -14,9 +14,15 @@ const apiSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'api',
 
 test('mobile channel rows render only topology roots with one persistent reply affordance', () => {
   assert.match(screenSource, /buildThreadReplyTopology\(visibleMessages\)/);
-  assert.match(screenSource, /const feedMessages = replyTopology\.feedMessages/);
+  assert.match(screenSource, /const transcriptFeedMessages = replyTopology\.feedMessages/);
+  assert.match(screenSource, /compactThreadWorkMessages\(transcriptFeedMessages\)/);
+  assert.match(screenSource, /compactThreadWorkMessages\(replyTopology\.repliesFor\(threadContextRoot\)\)/u);
+  assert.match(screenSource, /threadReplies: compactThreadWorkMessages\(replyTopology\.repliesFor\(message\)\)\.map/u);
+  assert.match(screenSource, /feedMessagesRef\.current = feedMessages/);
+  assert.match(screenSource, /if \(isScoutWorkMessage\(message\)\)[\s\S]*setWorkActivityMessage\(message\)/u);
+  assert.match(screenSource, /const currentWorkMessage = useMemo\([\s\S]*latestScoutWorkMessage\(visibleMessages\)/u);
+  assert.doesNotMatch(screenSource, /activeWorkMessage \?\? latestResultWorkMessage/u);
   assert.match(screenSource, /feedMessages\.map\(\(message, index\)/);
-  assert.match(screenSource, /threadReplies: replyTopology\.repliesFor\(message\)/);
   assert.match(screenSource, /onOpenThread=\{openThreadContext\}/);
   assert.doesNotMatch(screenSource, /const \[replyingTo,/);
   assert.doesNotMatch(screenSource, /Replying to \{String\(replyingTo/);

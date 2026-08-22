@@ -28,6 +28,20 @@ var ErrAgentThreadSourceChanged = errors.New("agent work source changed or is no
 
 type assistantContextRefsContextKey struct{}
 
+func agentThreadEntrySourceThreadID(entry meetingMemoryEntry) string {
+	if threadID := strings.TrimSpace(entry.Metadata["originThreadId"]); threadID != "" {
+		return threadID
+	}
+	originSurface := strings.TrimSpace(entry.Metadata["originSurface"])
+	if strings.HasPrefix(originSurface, "chat:") {
+		return strings.TrimSpace(strings.TrimPrefix(originSurface, "chat:"))
+	}
+	if oneOf(strings.TrimSpace(entry.Metadata["originKind"]), agentThreadOriginChannel, agentThreadOriginPrivateThread) {
+		return strings.TrimSpace(entry.Metadata["originId"])
+	}
+	return ""
+}
+
 func assistantFilePrincipalCanRead(principal RecallPrincipal) bool {
 	member := principal.User != nil && accountStore().findUser(principal.User.Email) != nil
 	sharedService := principal.Audience == "shared_room" && strings.TrimSpace(principal.ServiceID) != ""
@@ -677,13 +691,16 @@ func (app *kanbanBoardApp) agentThreadEntryAuthorizedForDestination(ctx context.
 			return false
 		}
 		if scoutChatThreadIsOrganizationPublic(destination) {
-			for _, seed := range seededAccounts {
-				destinationEmails = append(destinationEmails, normalizeAccountEmail(seed.Email))
-			}
+			// An organization-public channel is readable by every persisted
+			// account, not just the compile-time bootstrap roster. The account
+			// store deliberately preserves authenticated accounts outside
+			// seededAccounts, so using the seed list here would skip one of the
+			// destination viewers when proving a shared artifact's ACL.
+			destinationEmails = append(destinationEmails, accountStore().accountEmails()...)
 		} else {
 			destinationEmails = scoutChatThreadMemberEmails(destination)
 		}
-		if sourceThreadID := strings.TrimSpace(entry.Metadata["originThreadId"]); sourceThreadID != "" {
+		if sourceThreadID := agentThreadEntrySourceThreadID(entry); sourceThreadID != "" {
 			source, _, sourceErr := app.scoutChatThreadByID(requester, sourceThreadID)
 			if sourceErr != nil || scoutChatThreadVisibility(source) != scoutChatVisibilityPublic || source.ArchivedAt != "" {
 				return false
@@ -701,7 +718,7 @@ func (app *kanbanBoardApp) agentThreadEntryAuthorizedForDestination(ctx context.
 				destinationEmails = append(destinationEmails, email)
 			}
 		}
-		if sourceThreadID := strings.TrimSpace(entry.Metadata["originThreadId"]); sourceThreadID != "" {
+		if sourceThreadID := agentThreadEntrySourceThreadID(entry); sourceThreadID != "" {
 			requester := normalizeAccountEmail(metadata["requestedBy"])
 			source, _, sourceErr := app.scoutChatThreadByID(requester, sourceThreadID)
 			if sourceErr != nil || !scoutChatThreadIsOrganizationPublic(source) || source.ArchivedAt != "" {
@@ -713,15 +730,64 @@ func (app *kanbanBoardApp) agentThreadEntryAuthorizedForDestination(ctx context.
 	if entry.Kind != meetingMemoryKindOSArtifact {
 		return true
 	}
-	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(entry))
+	header := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(entry))
 	if !strings.EqualFold(strings.TrimSpace(header.Visibility), "organization") && len(destinationEmails) == 0 {
 		return false
 	}
-	for _, email := range destinationEmails {
-		user := accountStore().findUser(email)
-		if user == nil || !artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
+	requestPrincipal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	var canonicalMapper StrideE10LegacyOrganizationPrincipalAuthority
+	if canonical {
+		converter := currentStrideE10TenantRuntimeConverter()
+		if converter == nil || converter.legacyIDs == nil {
 			return false
 		}
+		var ok bool
+		canonicalMapper, ok = converter.legacyIDs.(StrideE10LegacyOrganizationPrincipalAuthority)
+		if !ok {
+			return false
+		}
+	}
+	seenEmails := map[string]struct{}{}
+	seenPeople := map[string]struct{}{}
+	for _, email := range destinationEmails {
+		email = normalizeAccountEmail(email)
+		if email == "" {
+			return false
+		}
+		if _, duplicate := seenEmails[email]; duplicate {
+			continue
+		}
+		seenEmails[email] = struct{}{}
+		user := accountStore().findUser(email)
+		if user == nil {
+			return false
+		}
+		if !canonical {
+			if !app.artifactAuthorized(ctx, user, ACLReadContent, entry) {
+				return false
+			}
+			continue
+		}
+		allowed := false
+		mappedPersonID := ""
+		err := canonicalMapper.WithMappedLegacyOrganizationPrincipal(ctx, sha256Hex([]byte(email)), requestPrincipal, func(viewer StrideE10TenantPrincipal) error {
+			mappedPersonID = strings.TrimSpace(viewer.PersonID)
+			if viewer.TenantID != requestPrincipal.TenantID || mappedPersonID == "" {
+				return ErrStrideE10TenantAuthorityStale
+			}
+			viewerContext := context.WithValue(ctx, strideE10TenantPrincipalContextKey{}, viewer)
+			allowed = app.artifactAuthorized(viewerContext, user, ACLReadContent, entry)
+			return nil
+		})
+		if err != nil || !allowed {
+			return false
+		}
+		if _, duplicate := seenPeople[mappedPersonID]; duplicate {
+			// Two different authenticated accounts cannot be treated as one
+			// canonical viewer to make an all-audience proof pass.
+			return false
+		}
+		seenPeople[mappedPersonID] = struct{}{}
 	}
 	return true
 }

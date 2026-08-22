@@ -213,6 +213,143 @@ func fileRecordFromEntry(entry meetingMemoryEntry) assistantFileRecord {
 	}
 }
 
+// promotedChatFileBinding distinguishes an explicitly promoted chat file from
+// a true Files upload. Promoted rows own their Files name/folder lifecycle, but
+// their bytes and derived text remain bound to the exact committed chat
+// attachment that supplied them. Older promoted rows predate
+// sourceAttachmentId; their exact thread/message/index, ref, and revision are
+// still a complete source binding.
+type promotedChatFileBinding struct {
+	SourceFileID       string
+	SourceThreadID     string
+	SourceMessageID    string
+	SourceFileIndex    int
+	SourceRevision     string
+	SourceAttachmentID string
+	BlobRef            string
+}
+
+var promotedChatFileAuthorizationMetadataKeys = []string{
+	"sourceChatFileId", "sourceThreadId", "sourceMessageId", "sourceFileRevision", "sourceAttachmentId",
+	"blobRef", "mime", "size", "tenantId", "visibility", "ownerEmail",
+}
+
+func promotedChatFileAuthorizationHeader(entry meetingMemoryEntry) meetingMemoryEntry {
+	metadata := make(map[string]string, len(promotedChatFileAuthorizationMetadataKeys))
+	for _, key := range promotedChatFileAuthorizationMetadataKeys {
+		if value := entry.Metadata[key]; value != "" {
+			metadata[key] = value
+		}
+	}
+	return meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
+}
+
+func promotedChatFileAuthorizationHeaderEqual(left meetingMemoryEntry, right meetingMemoryEntry) bool {
+	if left.ID != right.ID || left.Kind != right.Kind {
+		return false
+	}
+	for _, key := range promotedChatFileAuthorizationMetadataKeys {
+		if left.Metadata[key] != right.Metadata[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func promotedChatFileBindingFromEntry(entry meetingMemoryEntry) (promotedChatFileBinding, bool, bool) {
+	metadata := entry.Metadata
+	if metadata == nil {
+		return promotedChatFileBinding{}, false, true
+	}
+	keys := []string{"sourceChatFileId", "sourceThreadId", "sourceMessageId", "sourceFileRevision", "sourceAttachmentId"}
+	promoted := false
+	for _, key := range keys {
+		if strings.TrimSpace(metadata[key]) != "" {
+			promoted = true
+			break
+		}
+	}
+	if !promoted {
+		return promotedChatFileBinding{}, false, true
+	}
+
+	sourceFileID := strings.TrimSpace(metadata["sourceChatFileId"])
+	threadID, messageID, fileIndex, parsed := parseChatAttachmentFileID(sourceFileID)
+	binding := promotedChatFileBinding{
+		SourceFileID:       sourceFileID,
+		SourceThreadID:     strings.TrimSpace(metadata["sourceThreadId"]),
+		SourceMessageID:    strings.TrimSpace(metadata["sourceMessageId"]),
+		SourceFileIndex:    fileIndex,
+		SourceRevision:     strings.TrimSpace(metadata["sourceFileRevision"]),
+		SourceAttachmentID: strings.TrimSpace(metadata["sourceAttachmentId"]),
+		BlobRef:            strings.TrimSpace(metadata["blobRef"]),
+	}
+	valid := parsed && binding.SourceThreadID == threadID && binding.SourceMessageID == messageID &&
+		binding.SourceRevision != "" && validBlobRef(binding.BlobRef)
+	return binding, true, valid
+}
+
+// promotedChatFileSource reauthorizes a promoted Files row against the exact
+// current chat message and the committed source-grant store. The committed
+// source check also follows an attachment's OriginFileID, so a managed
+// artifact-backed PDF/PPTX must still satisfy its current revision,
+// publication admission, audience, and export ACL before this promoted row can
+// expose it. Direct uploads never enter this path.
+func (app *kanbanBoardApp) promotedChatFileSource(ctx context.Context, viewer *userAccount, entry meetingMemoryEntry) (scoutChatThreadRecord, scoutChatFileAttachment, promotedChatFileBinding, bool) {
+	binding, promoted, valid := promotedChatFileBindingFromEntry(entry)
+	if app == nil || app.memory == nil || viewer == nil || !promoted || !valid {
+		return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+	}
+
+	var thread scoutChatThreadRecord
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	if canonical {
+		threadEntry, found := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, binding.SourceThreadID)
+		if !found || !scoutChatThreadMetadataAllowsPrincipal(threadEntry.Metadata, principal) {
+			return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+		}
+		var decoded bool
+		thread, decoded = decodeScoutChatThreadEntry(threadEntry)
+		if !decoded {
+			return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+		}
+	} else {
+		var err error
+		thread, _, err = app.scoutChatThreadByID(viewer.Email, binding.SourceThreadID)
+		if err != nil {
+			return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+		}
+	}
+
+	messageIndex := scoutChatMessageIndex(thread, binding.SourceMessageID)
+	if messageIndex < 0 || binding.SourceFileIndex >= len(thread.Messages[messageIndex].Files) {
+		return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+	}
+	source := thread.Messages[messageIndex].Files[binding.SourceFileIndex]
+	if strings.TrimSpace(source.Ref) != binding.BlobRef || strings.TrimSpace(source.SourceRevision) != binding.SourceRevision ||
+		(binding.SourceAttachmentID != "" && strings.TrimSpace(source.SourceID) != binding.SourceAttachmentID) {
+		return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+	}
+	if storedMime := strings.ToLower(strings.TrimSpace(entry.Metadata["mime"])); storedMime != "" && storedMime != strings.ToLower(strings.TrimSpace(source.Mime)) {
+		return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+	}
+	if storedSize := strings.TrimSpace(entry.Metadata["size"]); storedSize != "" {
+		size, err := strconv.ParseInt(storedSize, 10, 64)
+		if err != nil || size != source.Size {
+			return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+		}
+	}
+
+	authorized := app.committedChatAttachmentAuthorized(viewer.Email, binding.SourceThreadID, binding.SourceMessageID, source)
+	if canonical {
+		authorized = app.committedChatAttachmentAuthorizedForPrincipal(ctx, principal, thread, binding.SourceMessageID, source)
+	}
+	if !authorized {
+		return scoutChatThreadRecord{}, scoutChatFileAttachment{}, binding, false
+	}
+	return thread, source, binding, true
+}
+
 // fileRecordsFromThread adapts one chat thread's persisted attachments (085's
 // scoutChatFileAttachment records) into rows. Only files with durable bytes
 // (Ref) or ingested text qualify — a pre-085 name-only chip has nothing to
@@ -404,6 +541,13 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
 			continue
 		}
+		if _, promoted, valid := promotedChatFileBindingFromEntry(entry); promoted && (!valid || viewer == nil) {
+			continue
+		} else if promoted {
+			if _, _, _, authorized := app.promotedChatFileSource(ctx, viewer, entry); !authorized {
+				continue
+			}
+		}
 		row := fileRecordFromEntry(entry)
 		if canonical {
 			row.CanDelete = strings.TrimSpace(entry.Metadata["uploaderPersonId"]) == principal.PersonID
@@ -447,14 +591,39 @@ func (app *kanbanBoardApp) assistantFileAttachmentSource(ctx context.Context, vi
 		if !allowed {
 			return scoutChatFileAttachment{}, blobMeta{}, "", false
 		}
+		if strings.TrimSpace(firstNonEmptyString(artifact.Metadata["goalId"], artifact.Metadata["goalParentId"])) != "" &&
+			!app.authoredResultPublicationReady(artifact) {
+			// A saved working draft remains openable in Files and editable in its
+			// Studio, but it is not silently flattened into an unlabeled chat
+			// attachment. Review is the explicit publication boundary.
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
 		row, visible := fileDeliverableRecord(artifact)
 		if !visible {
 			return scoutChatFileAttachment{}, blobMeta{}, "", false
 		}
+		finalExportChecked := false
+		finalExportAllowed := false
+		allowFinalExportAsset := func() bool {
+			if finalExportChecked {
+				return finalExportAllowed
+			}
+			finalExportChecked = true
+			exact, allowed := authorizedArtifactForActions(ctx, viewer, fileID, ACLReadContent, ACLExport)
+			if !allowed || !artifactAuthorizationHeaderEqual(
+				resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)),
+				resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(exact)),
+			) {
+				return false
+			}
+			finalExportAllowed = app.authoredResultPublicationReady(exact)
+			return finalExportAllowed
+		}
 		ref := ""
 		for _, preferredKind := range []string{"pdf", "image", "export"} {
 			for _, asset := range artifactAssets(artifact) {
-				if strings.EqualFold(strings.TrimSpace(asset.Kind), preferredKind) && validBlobRef(asset.Ref) {
+				if strings.EqualFold(strings.TrimSpace(asset.Kind), preferredKind) && validBlobRef(asset.Ref) &&
+					(!artifactAssetRefRequiresFinalExportAdmission(asset) || allowFinalExportAsset()) {
 					ref = asset.Ref
 					if strings.TrimSpace(asset.Name) != "" && preferredKind != "pdf" {
 						row.Name = strings.TrimSpace(asset.Name)
@@ -497,16 +666,43 @@ func (app *kanbanBoardApp) assistantFileAttachmentSource(ctx context.Context, vi
 	if entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
 		row := fileRecordFromEntry(entry)
 		ref := strings.TrimSpace(entry.Metadata["blobRef"])
+		var promotedThread scoutChatThreadRecord
+		var promotedSource scoutChatFileAttachment
+		var promotedBinding promotedChatFileBinding
+		if _, promoted, valid := promotedChatFileBindingFromEntry(entry); promoted {
+			if !valid {
+				return scoutChatFileAttachment{}, blobMeta{}, "", false
+			}
+			var authorized bool
+			promotedThread, promotedSource, promotedBinding, authorized = app.promotedChatFileSource(ctx, viewer, entry)
+			if !authorized {
+				return scoutChatFileAttachment{}, blobMeta{}, "", false
+			}
+		}
 		meta, err := blobStatForRef(ref)
 		if err != nil {
 			return scoutChatFileAttachment{}, blobMeta{}, "", false
 		}
-		revision, err := STRIDEContractDigest(struct {
-			FileID string `json:"fileId"`
-			Ref    string `json:"ref"`
-			Mime   string `json:"mime"`
-			Size   int64  `json:"size"`
-		}{fileID, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size})
+		var revision string
+		if promotedBinding.SourceFileID != "" {
+			revision, err = STRIDEContractDigest(struct {
+				FileID              string `json:"fileId"`
+				Ref                 string `json:"ref"`
+				Mime                string `json:"mime"`
+				Size                int64  `json:"size"`
+				SourceFileID        string `json:"sourceFileId"`
+				SourceID            string `json:"sourceId"`
+				SourceRevision      string `json:"sourceRevision"`
+				DestinationRevision string `json:"destinationRevision"`
+			}{fileID, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size, promotedBinding.SourceFileID, strings.TrimSpace(promotedSource.SourceID), promotedBinding.SourceRevision, scoutChatAttachmentDestinationRevision(promotedThread)})
+		} else {
+			revision, err = STRIDEContractDigest(struct {
+				FileID string `json:"fileId"`
+				Ref    string `json:"ref"`
+				Mime   string `json:"mime"`
+				Size   int64  `json:"size"`
+			}{fileID, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size})
+		}
 		if err != nil {
 			return scoutChatFileAttachment{}, blobMeta{}, "", false
 		}
@@ -600,9 +796,21 @@ func (app *kanbanBoardApp) assistantFileSourceAllowsDestination(ctx context.Cont
 		}
 		return destinationPrivate && destinationOwner == viewerEmail && normalizeAccountEmail(header.OwnerEmail) == viewerEmail
 	}
-	// Direct uploads are the existing shared-company Drive contract.
-	if _, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
-		return true
+	// True direct uploads retain the existing shared-company Drive contract.
+	// A promoted chat row preserves its source audience and cannot widen a
+	// private/project attachment merely because it now has a Files name.
+	if entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
+		binding, promoted, valid := promotedChatFileBindingFromEntry(entry)
+		if !promoted {
+			return true
+		}
+		if !valid {
+			return false
+		}
+		if _, _, _, authorized := app.promotedChatFileSource(ctx, viewer, entry); !authorized {
+			return false
+		}
+		return app.assistantFileSourceAllowsDestination(ctx, viewer, binding.SourceFileID, destination)
 	}
 
 	threadID, _, _, parsed := parseChatAttachmentFileID(fileID)
@@ -1227,8 +1435,8 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 
 // saveChatAttachmentToFiles explicitly promotes one readable chat attachment
 // into Drive. The new kind=file entry owns its Drive name/folder lifecycle but
-// points at the same immutable blob, so renaming or deleting it never mutates
-// the source message.
+// remains source-bound: renaming or filing it never mutates the source message,
+// while source revocation immediately removes its read authority.
 func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
 	return app.saveChatAttachmentToFilesBound(context.Background(), user, nil, sourceFileID, folderID, fileName)
 }
@@ -1236,6 +1444,11 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 func (app *kanbanBoardApp) saveChatAttachmentToFilesForPrincipal(ctx context.Context, user *userAccount, principal StrideE10TenantPrincipal, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
 	return app.saveChatAttachmentToFilesBound(ctx, user, &principal, sourceFileID, folderID, fileName)
 }
+
+// saveChatAttachmentToFilesAfterAuthorizationProbe is test-only timing
+// instrumentation for proving the source is checked again before a Files row
+// becomes durable.
+var saveChatAttachmentToFilesAfterAuthorizationProbe func()
 
 func (app *kanbanBoardApp) saveChatAttachmentToFilesBound(ctx context.Context, user *userAccount, principal *StrideE10TenantPrincipal, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
 	if app == nil || app.memory == nil || user == nil {
@@ -1339,17 +1552,32 @@ func (app *kanbanBoardApp) saveChatAttachmentToFilesBound(ctx context.Context, u
 		"sourceThreadId":     threadID,
 		"sourceMessageId":    messageID,
 		"sourceFileRevision": strings.TrimSpace(source.SourceRevision),
+		"sourceAttachmentId": strings.TrimSpace(source.SourceID),
 	}
 	if principal != nil {
 		metadata["tenantId"] = principal.TenantID
 		metadata["uploaderPersonId"] = principal.PersonID
+		ctx = context.WithValue(ctx, strideE10TenantPrincipalContextKey{}, *principal)
 	}
 	if brainStatus == fileBrainStatusIngested {
 		metadata["ingestedAt"] = now.Format(time.RFC3339Nano)
 	}
+	prospective := meetingMemoryEntry{ID: entryID, Kind: meetingMemoryKindFile, CreatedAt: now, Metadata: metadata}
+	if _, _, _, authorized := app.promotedChatFileSource(ctx, user, prospective); !authorized {
+		return assistantFileRecord{}, errFileSaveSourceNotFound
+	}
+	if saveChatAttachmentToFilesAfterAuthorizationProbe != nil {
+		saveChatAttachmentToFilesAfterAuthorizationProbe()
+	}
 	entry, _, err := app.memory.appendEntry(meetingMemoryKindFile, entryID, entryText, metadata)
 	if err != nil {
 		return assistantFileRecord{}, err
+	}
+	if _, _, _, authorized := app.promotedChatFileSource(ctx, user, entry); !authorized {
+		if _, deleted, deleteErr := app.memory.deleteEntryByID(entryID); deleteErr != nil || !deleted {
+			return assistantFileRecord{}, fmt.Errorf("save chat attachment source changed (rollback failed: %v)", deleteErr)
+		}
+		return assistantFileRecord{}, errFileSaveSourceNotFound
 	}
 	if folderID != "" {
 		if err := moveFileToFolder(entryID, folderID); err != nil {

@@ -2043,7 +2043,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		return
 	}
 	result = currentResult
-	resultCanEdit := artifactAuthorized(ctx, viewer, ACLWrite, result)
+	resultCanEdit := app.artifactAuthorized(ctx, viewer, ACLWrite, result)
 	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
 		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, artifactCapabilityDigest(result))) {
 		acceptedBinding.State = scoutChatResultApprovalEdited
@@ -2066,10 +2066,12 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	// gated by the exact rendered jury and publication tuple.
 	resultQualityState := ""
 	resultCanContinue := false
+	resultPublicationStable := true
+	resultCanPublish := true
 	if goalResult {
 		plan := index.goalPlanByID[artifact.ID]
-		resultQualityState = app.authoredGoalResultQuality(plan, artifact.ID, result)
-		resultCanContinue = resultCanEdit && artifactAuthorized(ctx, viewer, ACLWrite, artifact) && ((resultQualityState == authoredResultQualityDraftNeedsAttention && plan.State == goalStateBlocked) ||
+		resultQualityState, resultCanPublish, resultPublicationStable = app.authoredResultFinalExportState(result)
+		resultCanContinue = resultPublicationStable && resultCanEdit && app.artifactAuthorized(ctx, viewer, ACLWrite, artifact) && ((resultQualityState == authoredResultQualityDraftNeedsAttention && plan.State == goalStateBlocked) ||
 			(resultQualityState == authoredResultQualityEditedAfterAdmission && plan.State == goalStateVerified))
 	}
 	resultType := artifactType(result)
@@ -2080,8 +2082,8 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		ref.ResultQualityState = resultQualityState
 		ref.ResultCanEdit = resultCanEdit
 		ref.ResultCanContinue = resultCanContinue
-		ref.ResultCanPresent = !goalResult || resultQualityState == authoredResultQualityAdmitted
-		ref.ResultCanExport = !goalResult || resultQualityState == authoredResultQualityAdmitted
+		ref.ResultCanPresent = !goalResult || (resultPublicationStable && resultCanPublish)
+		ref.ResultCanExport = !goalResult || (resultPublicationStable && resultCanPublish)
 		if selectedAcceptedDeck {
 			ref.ResultApprovalState = acceptedBinding.State
 		}
@@ -2097,7 +2099,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref.ResultQualityState = resultQualityState
 	ref.ResultCanEdit = resultCanEdit
 	ref.ResultCanContinue = resultCanContinue
-	ref.ResultCanExport = !goalResult || resultQualityState == authoredResultQualityAdmitted
+	ref.ResultCanExport = !goalResult || (resultPublicationStable && resultCanPublish)
 }
 
 // authorizedScoutChatResultArtifact performs the authorization check against

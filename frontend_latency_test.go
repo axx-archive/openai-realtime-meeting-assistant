@@ -2362,11 +2362,15 @@ func TestPrivateRealtimeToolContinuationWaitsForResponseDone(t *testing.T) {
 		t.Fatal("private Realtime tool continuation is not fenced to its exact peer after async work")
 	}
 	continuation := functionBody(string(rawHTML), "async function continuePrivateRealtimeToolCalls(items, sessionToken, peer)")
-	if !strings.Contains(continuation, "for (const item of items)") ||
+	if !strings.Contains(continuation, "const batchValid = calls.length === 1") ||
+		!strings.Contains(continuation, "if (!batchValid)") ||
+		!strings.Contains(continuation, "for (const item of calls)") ||
 		!strings.Contains(continuation, "await handlePrivateRealtimeToolCall(item, sessionToken, peer)") ||
-		strings.Count(continuation, "type: 'response.create'") != 1 ||
+		strings.Count(continuation, "type: 'response.create'") != 2 ||
+		strings.Count(continuation, "tool_choice: 'none'") != 2 ||
+		!strings.Contains(continuation, "privateRealtimeVoiceHandledCalls.add(callId)") ||
 		strings.Contains(handler, "type: 'response.create'") {
-		t.Fatal("private Realtime must serialize every tool output and emit one continuation per completed response")
+		t.Fatal("private Realtime must reject multi-call batches before effects, serialize the one admitted output, and keep speech continuation outside the tool handler")
 	}
 }
 

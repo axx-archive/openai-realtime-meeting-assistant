@@ -1212,6 +1212,7 @@ func main() {
 	http.HandleFunc("/artifacts/document", documentEditorHandler)
 	http.HandleFunc("/artifacts/document/copies", documentEditorCopyHandler)
 	http.HandleFunc("/artifacts/document/images", documentEditorImageUploadHandler)
+	http.HandleFunc("/artifacts/final-export-capability", authoredResultFinalExportCapabilityHandler)
 	http.HandleFunc("/artifacts/deck/image-generations", deckEditorImageGenerationHandler)
 	http.HandleFunc("/artifacts/deck/assets", deckEditorAssetUploadHandler)
 	http.HandleFunc("/artifacts/workstream", artifactWorkstreamCorrectionHandler)
@@ -1640,6 +1641,52 @@ func activeRenderJobForBinding(artifact meetingMemoryEntry, binding renderPDFJob
 	return *job, true, nil
 }
 
+// completedRenderAssetForBinding recognizes a PDF that is already the exact
+// completed render of the artifact's current authored content. Completion
+// attaches the PDF in a metadata revision, so the asset's source revision is
+// normally one behind the artifact revision; renderPdfArtifactVersion binds
+// that attachment revision while the source digest + scene bind the bytes.
+// Every signal is required. A legacy or partially stamped PDF is never
+// treated as current merely because an asset happens to be attached.
+func completedRenderAssetForBinding(artifact meetingMemoryEntry, binding renderPDFJobBinding) (artifactAsset, int, bool) {
+	if strings.ToLower(strings.TrimSpace(artifact.Metadata["renderStatus"])) != renderJobStatusComplete ||
+		strings.TrimSpace(artifact.Metadata["renderJobId"]) != "" ||
+		strings.ToLower(strings.TrimSpace(artifact.Metadata["renderKind"])) != binding.Kind ||
+		strings.TrimSpace(artifact.Metadata[renderSourceContentDigestMetadataKey]) != binding.SourceContentDigest {
+		return artifactAsset{}, 0, false
+	}
+	boundVersion, boundErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata[renderPDFArtifactVersionMetadataKey]))
+	sourceVersion, sourceErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata[renderPDFSourceVersionMetadataKey]))
+	queuedSourceVersion, queuedSourceErr := strconv.Atoi(strings.TrimSpace(artifact.Metadata[renderSourceArtifactVersionMetadataKey]))
+	if boundErr != nil || sourceErr != nil || queuedSourceErr != nil || boundVersion != artifactVersion(artifact) || boundVersion != binding.SourceArtifactVersion ||
+		sourceVersion < 1 || sourceVersion != queuedSourceVersion || sourceVersion > boundVersion {
+		return artifactAsset{}, 0, false
+	}
+	currentSceneRef := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
+	sourceSceneRef := strings.TrimSpace(artifact.Metadata[renderPDFSourceSceneRefMetadataKey])
+	if currentSceneRef != strings.TrimSpace(binding.SourceSceneRef) || sourceSceneRef != currentSceneRef ||
+		strings.TrimSpace(artifact.Metadata[renderSourceSceneRefMetadataKey]) != currentSceneRef {
+		return artifactAsset{}, 0, false
+	}
+	assetRef := strings.TrimSpace(artifact.Metadata[renderPDFAssetRefMetadataKey])
+	if !validBlobRef(assetRef) {
+		return artifactAsset{}, 0, false
+	}
+	for _, asset := range artifactAssets(artifact) {
+		if asset.Ref != assetRef || !strings.EqualFold(strings.TrimSpace(asset.Kind), "pdf") ||
+			!strings.EqualFold(strings.TrimSpace(asset.Mime), "application/pdf") ||
+			asset.SourceArtifactVersion != sourceVersion || strings.TrimSpace(asset.SourceSceneRef) != currentSceneRef {
+			continue
+		}
+		meta, err := blobStatForRef(asset.Ref)
+		if err != nil || meta.Size <= 0 || !strings.EqualFold(strings.TrimSpace(meta.Mime), "application/pdf") {
+			return artifactAsset{}, 0, false
+		}
+		return asset, sourceVersion, true
+	}
+	return artifactAsset{}, 0, false
+}
+
 func writeAcceptedRenderJob(w http.ResponseWriter, job renderRunnerJob, binding renderPDFJobBinding, reused bool) {
 	writeAuthJSON(w, http.StatusAccepted, map[string]any{
 		"ok":            true,
@@ -1649,6 +1696,21 @@ func writeAcceptedRenderJob(w http.ResponseWriter, job renderRunnerJob, binding 
 		"sceneRef":      binding.SourceSceneRef,
 		"renderStatus":  firstNonEmptyString(strings.TrimSpace(job.Status), renderJobStatusQueued),
 		"reused":        reused,
+	})
+}
+
+func writeCompletedRenderAsset(w http.ResponseWriter, asset artifactAsset, binding renderPDFJobBinding, sourceVersion int) {
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"kind":            binding.Kind,
+		"sourceVersion":   sourceVersion,
+		"artifactVersion": binding.SourceArtifactVersion,
+		"sceneRef":        binding.SourceSceneRef,
+		"renderStatus":    renderJobStatusComplete,
+		"reused":          true,
+		"asset": map[string]any{
+			"ref": asset.Ref, "name": asset.Name, "mime": asset.Mime,
+		},
 	})
 }
 
@@ -1756,6 +1818,37 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		SourceArtifactVersion: sourceVersion, SourceSceneRef: sourceSceneRef,
 		SourceContentDigest: renderPDFContentDigest(kind, printHTML),
 	}
+	revalidateExport := func() (meetingMemoryEntry, bool) {
+		current, ok := authorizedArtifactByID(r.Context(), user, ACLExport, artifact.ID)
+		if !ok || artifactVersion(current) != sourceVersion || strings.TrimSpace(current.Metadata[deckSceneRefMetadataKey]) != sourceSceneRef ||
+			kanbanApp.requireFinalExportAdmission(current) != nil {
+			return meetingMemoryEntry{}, false
+		}
+		return current, true
+	}
+	if current, currentOK := revalidateExport(); !currentOK {
+		writeAuthError(w, http.StatusConflict, "the artifact or its review changed while PDF export was starting")
+		return
+	} else {
+		artifact = current
+	}
+	if completedAsset, renderedFromVersion, reusable := completedRenderAssetForBinding(artifact, binding); reusable {
+		// Parent-goal admission and ACL authority can change without changing
+		// the child artifact revision. Re-authorize immediately before exposing
+		// the completed capability just as the enqueue path does before binding.
+		current, currentOK := revalidateExport()
+		if !currentOK {
+			writeAuthError(w, http.StatusConflict, "the artifact or its review changed while PDF export was starting")
+			return
+		}
+		if exactAsset, exactSourceVersion, stillReusable := completedRenderAssetForBinding(current, binding); !stillReusable ||
+			exactAsset.Ref != completedAsset.Ref || exactSourceVersion != renderedFromVersion {
+			writeAuthError(w, http.StatusConflict, "the completed PDF changed while export was starting")
+			return
+		}
+		writeCompletedRenderAsset(w, completedAsset, binding, renderedFromVersion)
+		return
+	}
 	if existingJob, reusable, reuseErr := activeRenderJobForBinding(artifact, binding); reuseErr == nil && reusable {
 		writeAcceptedRenderJob(w, existingJob, binding, true)
 		return
@@ -1783,10 +1876,23 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "render sidecar not available — start the render-runner container (or run with -render-runner) to export PDFs")
 		return
 	}
+	if current, currentOK := revalidateExport(); !currentOK {
+		writeAuthError(w, http.StatusConflict, "the artifact or its review changed while PDF export was starting")
+		return
+	} else {
+		artifact = current
+	}
 	job, reused, err := enqueueBoundRenderExportPDFJob(binding)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if current, currentOK := revalidateExport(); !currentOK {
+		log.Warnf("PDF export job %s became orphaned because authored review changed before binding", job.ID)
+		writeAuthError(w, http.StatusConflict, "the artifact or its review changed while PDF export was starting")
+		return
+	} else {
+		artifact = current
 	}
 	// Stamp job + source binding only while the artifact is still the exact
 	// authorized revision used to build printHTML. The queue write necessarily
@@ -2530,7 +2636,7 @@ func assistantThreadFollowUpHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read follow-up request")
 		return
 	}
-	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLExecute, ACLWrite)
+	artifact, ok := kanbanApp.authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLExecute, ACLWrite)
 	if !ok {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -2805,8 +2911,10 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	ok := err == nil
 	if err != nil {
 		result = map[string]any{
-			"ok":    false,
-			"error": err.Error(),
+			"ok":      false,
+			"outcome": string(conversationIntentUnavailable),
+			"message": "I couldn't safely complete that voice turn. Nothing else was launched.",
+			"error":   err.Error(),
 		}
 		log.Errorf("Private Realtime tool %q failed for %s: %v", name, user.Email, err)
 	}
@@ -2949,6 +3057,10 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if payload.Published != nil && *payload.Published && artifactPublicationDisabled(prior) {
 			writeAuthError(w, http.StatusConflict, "this private workbook cannot be published")
+			return
+		}
+		if payload.Published != nil && *payload.Published && strings.TrimSpace(firstNonEmptyString(prior.Metadata["goalId"], prior.Metadata["goalParentId"])) != "" {
+			writeAuthError(w, http.StatusConflict, "authored deliverables publish through their review stage")
 			return
 		}
 		metadata := map[string]string{}

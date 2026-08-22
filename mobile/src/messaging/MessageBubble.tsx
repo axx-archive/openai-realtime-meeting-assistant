@@ -601,7 +601,8 @@ export const MessageBubble = React.memo(function MessageBubble({
                 needsAttention={workThread.failed || authoredResultNeedsAttention}
                 artifactId={richArtifactId || undefined}
                 sessionToken={sessionToken}
-                onEdit={richArtifactId && workThread.ref.resultCanEdit === true ? () => onOpenWorkArtifact?.(message) : undefined}
+                desktopEditingOnly={Boolean(inlineArtifactKind === 'html_deck' && richArtifactId && workThread.ref.resultCanEdit === true)}
+                onEdit={inlineArtifactKind === 'document' && richArtifactId && workThread.ref.resultCanEdit === true ? () => onOpenWorkArtifact?.(message) : undefined}
                 onPresent={authoredResultCanPresent ? () => onViewArtifactFullscreen?.(message) : undefined}
                 onExpand={richArtifactId && (inlineArtifactKind !== 'html_deck' || authoredResultCanPresent) ? () => onViewArtifactFullscreen?.(message) : undefined}
               />

@@ -22,6 +22,7 @@ import {
   artifactStudioKind,
   artifactStudioPath,
 } from '../artifacts/studioRoutes';
+import { nativeTextArtifactIsRenderable } from '../artifacts/nativeDeckViewer';
 import { useAuth } from '../auth/AuthContext';
 import { FilePreviewModal } from '../components/FilePreviewModal';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
@@ -599,6 +600,14 @@ export function FilesScreen({ navigation, route }: Props) {
                 file.artifactId,
                 studioKind,
               );
+              if (studioKind === 'deck') {
+                navigation.navigate('DeckViewer', {
+                  artifactId: file.artifactId,
+                  title,
+                  desktopEditable: access.canWrite === true,
+                });
+                return;
+              }
               navigation.navigate('OSWeb', {
                 path: artifactStudioPath(
                   file.artifactId,
@@ -611,6 +620,9 @@ export function FilesScreen({ navigation, route }: Props) {
             }
             const text = String(artifact?.text ?? '').trim();
             if (!text) throw new Error('The completed deliverable is not available yet.');
+            if (!nativeTextArtifactIsRenderable(text)) {
+              throw new Error('This structured deliverable needs its supported viewer.');
+            }
             setArtifactPreview({
               title,
               text,

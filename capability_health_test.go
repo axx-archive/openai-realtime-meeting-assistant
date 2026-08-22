@@ -243,6 +243,70 @@ func TestAmbientWorkerHealthExposesSupervisorAndDisabledBackfillHazard(t *testin
 	}
 }
 
+func TestResearchSuggestionHealthNamesSTRIDESupersessionWithoutMaskingLegacyFailures(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	t.Setenv("RESEARCH_SUGGESTION_DISABLED", "false")
+	t.Setenv("RESEARCH_SUGGESTION_BACKFILL", "false")
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		_ = app.Close()
+		kanbanApp = previousApp
+	})
+	agent := researchSuggestionAgent()
+
+	t.Run("STRIDE Suggested Work owns the lane", func(t *testing.T) {
+		app.strideRuntime = &STRIDERuntime{config: STRIDERuntimeConfig{ProductPreviewEnabled: true}}
+		health := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+		if health["status"] != "superseded" || health["ownershipState"] != "superseded" || health["supersededBy"] != "stride_suggested_work" || health["fenced"] != true {
+			t.Fatalf("STRIDE-owned suggestion health=%v", health)
+		}
+		if health["configuredEnabled"] != true || health["effectiveEnabled"] != false || health["supervisorRequired"] != false || health["supervisorError"] != nil || health["analysisReady"] != false {
+			t.Fatalf("STRIDE-owned effective/supervisor health=%v", health)
+		}
+		_, degraded := capabilitySnapshot(time.Now().UTC())
+		if slices.Contains(degraded, "ambient.researchSuggestion") {
+			t.Fatalf("intentional STRIDE supersession counted as degradation: %v", degraded)
+		}
+	})
+
+	t.Run("legacy enabled worker still requires its supervisor", func(t *testing.T) {
+		app.strideRuntime = nil
+		health := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+		if health["status"] != "degraded" || health["ownershipState"] != "active" || health["effectiveEnabled"] != true || health["supervisorRequired"] != true || health["supervisorError"] != true {
+			t.Fatalf("unowned legacy suggestion health=%v", health)
+		}
+		_, degraded := capabilitySnapshot(time.Now().UTC())
+		if !slices.Contains(degraded, "ambient.researchSuggestion") {
+			t.Fatalf("missing legacy supervisor was not counted as degradation: %v", degraded)
+		}
+	})
+
+	t.Run("ambiguous legacy checkpoint remains degraded after supersession", func(t *testing.T) {
+		app.strideRuntime = &STRIDERuntime{config: STRIDERuntimeConfig{ProductPreviewEnabled: true}}
+		roomID := "room-suggestion-ambiguous"
+		state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+			ambientAgentScopeKey(agent, roomID): {
+				Agent: agent.name, RoomID: roomID, InputKind: agent.inputKind, ArtifactKind: agent.artifactKind,
+				CursorMetadataKey: agent.cursorMetadataKey, BlockedReason: ambientContinuityAmbiguous,
+			},
+		}}
+		if err := persistAmbientHeldWindowState(app.ambientHeldWindowPath(), state); err != nil {
+			t.Fatalf("persist ambiguous suggestion checkpoint: %v", err)
+		}
+		health := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+		if health["ownershipState"] != "superseded" || health["status"] != "degraded" || health["continuityError"] != true || health["checkpointStatus"] != "blocked" || health["blockedScopeCount"] != 1 {
+			t.Fatalf("supersession masked ambiguous continuity=%v", health)
+		}
+		_, degraded := capabilitySnapshot(time.Now().UTC())
+		if !slices.Contains(degraded, "ambient.researchSuggestion") {
+			t.Fatalf("ambiguous superseded checkpoint was not counted as degradation: %v", degraded)
+		}
+	})
+}
+
 func TestAmbientWorkerHealthValidatesCheckpointReferencesWithoutLeakingIDs(t *testing.T) {
 	resetCapabilityRuntimeForTest(t)
 	app := newIsolatedKanbanBoardApp(t)

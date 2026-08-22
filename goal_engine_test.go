@@ -862,6 +862,13 @@ func TestProcessGateBlockerProjectsActionableCheckpoint(t *testing.T) {
 	if err := instantiateProcessPlan(processProbeDefinition(), &plan); err != nil {
 		t.Fatal(err)
 	}
+	draftStage := packagingStudioStage(t, processProbeDefinition(), "draft")
+	draft := plan.subtaskByID(draftStage.ID)
+	draft.Status = subtaskRunning
+	engine.completeProcessStage(&plan, run.Artifact.ID, draft, draftStage, "# Decision note\n\nProceed with the evidence gap disclosed.", "test fixture", nil)
+	if draft.Status != subtaskComplete || strings.TrimSpace(draft.ArtifactID) == "" {
+		t.Fatalf("seed gate input: %+v", draft)
+	}
 	stage := packagingStudioStage(t, processProbeDefinition(), "note_gate")
 	stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: false, Dimensions: []string{"Grounding"}}
 	st := plan.subtaskByID(stage.ID)
@@ -921,6 +928,13 @@ func TestProcessGateScorerFailuresTerminalCannotBeOverridden(t *testing.T) {
 			}
 			if err := instantiateProcessPlan(processProbeDefinition(), &plan); err != nil {
 				t.Fatal(err)
+			}
+			draftStage := packagingStudioStage(t, processProbeDefinition(), "draft")
+			draft := plan.subtaskByID(draftStage.ID)
+			draft.Status = subtaskRunning
+			engine.completeProcessStage(&plan, run.Artifact.ID, draft, draftStage, "# Decision note\n\nProceed with the recommendation.", "test fixture", nil)
+			if draft.Status != subtaskComplete || strings.TrimSpace(draft.ArtifactID) == "" {
+				t.Fatalf("seed gate input: %+v", draft)
 			}
 			stage := packagingStudioStage(t, processProbeDefinition(), "note_gate")
 			stage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: true}
@@ -4200,7 +4214,7 @@ func TestFreshStoryAndIdentityPanelsRequireTwoSuccessfulSeats(t *testing.T) {
 		role      string
 	}{
 		{packagingStudioProcessID, "story_architects", processRolePanel},
-		{packagingStudioProcessID, "identity", processRoleJudges},
+		{packagingStudioProcessID, "identity_judges", processRoleJudges},
 		{documentReportProcessID, "story", processRolePanel},
 	} {
 		plan := &goalPlan{ProcessID: test.processID}
@@ -4496,7 +4510,7 @@ func TestResumeLegacyStudioGoalFreezesApprovedDeckBeforeFreshRetryPark(t *testin
 		t.Fatalf("legacy approval was not durably backfilled: plan=%q metadata=%q want=%q", reopened.Report.AcceptedResultArtifactID, reopenedArtifact.Metadata["acceptedResultArtifactId"], approved.ID)
 	}
 
-	retry, _, err := app.createOSArtifactWithMetadata("workflow", "Retry candidate", "<!doctype html><html><body><section class=\"pg\">candidate</section></body></html>", "AJ", map[string]string{
+	_, _, err = app.createOSArtifactWithMetadata("workflow", "Retry candidate", "<!doctype html><html><body><section class=\"pg\">candidate</section></body></html>", "AJ", map[string]string{
 		"source": "packaging_studio_ship", "artifactContract": packagingStudioDeckContract,
 		"goalId": parent.ID, "type": artifactTypeHTMLDeck,
 	})
@@ -4507,8 +4521,8 @@ func TestResumeLegacyStudioGoalFreezesApprovedDeckBeforeFreshRetryPark(t *testin
 	reopened.Checkpoint = &goalProcessCheckpoint{StageID: "ship_approval"}
 	newGoalEngine(app).persist(&reopened, parent.ID, "")
 	index := app.scoutChatResultIndex()
-	if index.deckByGoal[parent.ID].ID != retry.ID || index.acceptedDeckByGoal[parent.ID].ID != approved.ID {
-		t.Fatalf("projection index latest/accepted=%q/%q, want retry/approved %q/%q", index.deckByGoal[parent.ID].ID, index.acceptedDeckByGoal[parent.ID].ID, retry.ID, approved.ID)
+	if index.deckByGoal[parent.ID].ID != "" || index.acceptedDeckByGoal[parent.ID].ID != approved.ID {
+		t.Fatalf("projection index latest/accepted=%q/%q, want hidden unreviewed retry/stable approved %q", index.deckByGoal[parent.ID].ID, index.acceptedDeckByGoal[parent.ID].ID, approved.ID)
 	}
 	message := scoutChatMessageRecord{Thread: &scoutChatThreadRef{ArtifactID: parent.ID}}
 	app.projectScoutChatResultRef(context.Background(), accountStore().findUser("aj@shareability.com"), &message, index)

@@ -78,7 +78,7 @@ func TestIndexThreadClickPathSharesTheUpgradeRenderer(t *testing.T) {
 	if body == "" {
 		t.Fatal("could not extract selectScoutChatThread body")
 	}
-	if !strings.Contains(body, "renderActiveScoutThread()") {
+	if !strings.Contains(body, "renderActiveScoutThread(") {
 		t.Error("selectScoutChatThread no longer calls renderActiveScoutThread — the click path and the artifact-land upgrade path must share one renderer")
 	}
 }

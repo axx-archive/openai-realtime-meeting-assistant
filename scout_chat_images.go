@@ -209,6 +209,23 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 		return
 	}
 	commitOwner := firstNonEmptyString(normalizeAccountEmail(thread.OwnerEmail), normalizeAccountEmail(ownerEmail))
+	if thread.Riff != nil {
+		pending, ok := app.scoutChatImagePending(commitOwner, threadID, pendingMessageID)
+		if !ok {
+			return
+		}
+		if _, _, sourceErr := app.privateRiffWorkSourceWindow(commitOwner, thread, pending); sourceErr != nil {
+			changed, _ := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseQueued}, func(state *scoutChatImageGenerationState) {
+				state.Phase = scoutChatImagePhaseProviderFailed
+				state.FailureClass = "source_authority_changed"
+				state.FailureText = "the private Riff source changed before the render started; send the request again from current context"
+			})
+			if changed {
+				app.resumeScoutChatImagePending(commitOwner, threadID, pendingMessageID, createdBy)
+			}
+			return
+		}
+	}
 	claimed, err := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseQueued}, func(state *scoutChatImageGenerationState) {
 		state.Phase = scoutChatImagePhaseProviderStarted
 	})
@@ -230,6 +247,25 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 		})
 		app.resumeScoutChatImagePending(commitOwner, threadID, pendingMessageID, createdBy)
 		return
+	}
+	if latest, _, latestErr := app.scoutChatThreadByID(commitOwner, threadID); latestErr != nil {
+		return
+	} else if latest.Riff != nil {
+		pending, ok := app.scoutChatImagePending(commitOwner, threadID, pendingMessageID)
+		if !ok {
+			return
+		}
+		if _, _, sourceErr := app.privateRiffWorkSourceWindow(commitOwner, latest, pending); sourceErr != nil {
+			changed, _ := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderStarted}, func(state *scoutChatImageGenerationState) {
+				state.Phase = scoutChatImagePhaseProviderFailed
+				state.FailureClass = "source_authority_changed"
+				state.FailureText = "the private Riff source changed before the render could be filed; send the request again from current context"
+			})
+			if changed {
+				app.resumeScoutChatImagePending(commitOwner, threadID, pendingMessageID, createdBy)
+			}
+			return
+		}
 	}
 	stored, storeErr := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderStarted}, func(state *scoutChatImageGenerationState) {
 		state.Phase = scoutChatImagePhaseGenerated
@@ -407,6 +443,19 @@ func (app *kanbanBoardApp) resumeScoutChatImagePending(ownerEmail, threadID, pen
 		thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
 		if err != nil {
 			return
+		}
+		if thread.Riff != nil {
+			if _, _, sourceErr := app.privateRiffWorkSourceWindow(ownerEmail, thread, pending); sourceErr != nil {
+				changed, _ := app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseGenerated}, func(current *scoutChatImageGenerationState) {
+					current.Phase = scoutChatImagePhaseProviderFailed
+					current.FailureClass = "source_authority_changed"
+					current.FailureText = "the private Riff source changed before the render could be filed; send the request again from current context"
+				})
+				if changed {
+					app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+				}
+				return
+			}
 		}
 		artifact, asset, err := app.fileScoutChatImageArtifact(thread, pendingMessageID, prompt, state.ResultRef, state.ResultMime, createdBy)
 		if err != nil {
@@ -594,17 +643,55 @@ func scoutChatImageReplyEqual(left, right *scoutChatReplyRef) bool {
 // image before releasing that authority. A late provider response can never
 // escape into a channel top level after its thread or audience changed.
 func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, threadID, pendingMessageID, prompt string, replyTo *scoutChatReplyRef, message scoutChatMessageRecord) (scoutChatThreadRecord, error) {
-	lock := app.scoutChatThreadLock(threadID)
-	lock.Lock()
+	// A Riff image has two mutable authorities: its private destination and the
+	// public checkpoint it was derived from. Resolve the source id without using
+	// its body, then hold both per-thread locks in lexical order through the
+	// final commit. This closes the edit-after-reauthorization gap without ever
+	// holding the public source lock across the provider call.
+	preflight, _, preflightErr := app.scoutChatThreadByID(requesterEmail, threadID)
+	if preflightErr != nil {
+		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+	}
+	preflightRiff := preflight.Riff != nil
+	sourceThreadID := ""
+	if preflightRiff {
+		sourceThreadID = strings.TrimSpace(preflight.Riff.SourceThreadID)
+		if sourceThreadID == "" || sourceThreadID == strings.TrimSpace(threadID) {
+			return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+		}
+	}
+	firstID, secondID := strings.TrimSpace(threadID), sourceThreadID
+	if secondID != "" && secondID < firstID {
+		firstID, secondID = secondID, firstID
+	}
+	firstLock := app.scoutChatThreadLock(firstID)
+	firstLock.Lock()
+	unlockSecond := func() {}
+	if secondID != "" {
+		secondLock := app.scoutChatThreadLock(secondID)
+		secondLock.Lock()
+		unlockSecond = secondLock.Unlock
+	}
+	locked := true
+	unlock := func() {
+		if !locked {
+			return
+		}
+		unlockSecond()
+		firstLock.Unlock()
+		locked = false
+	}
+	defer unlock()
 
 	thread, _, err := app.scoutChatThreadByID(requesterEmail, threadID)
-	if err != nil || thread.ArchivedAt != "" || !scoutChatThreadAllowsViewer(thread, requesterEmail) {
-		lock.Unlock()
+	if err != nil || thread.ArchivedAt != "" || !scoutChatThreadAllowsViewer(thread, requesterEmail) ||
+		(thread.Riff != nil) != preflightRiff || thread.Riff != nil && strings.TrimSpace(thread.Riff.SourceThreadID) != sourceThreadID {
+		unlock()
 		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
 	}
 	pendingIndex := scoutChatMessageIndex(thread, pendingMessageID)
 	if pendingIndex < 0 {
-		lock.Unlock()
+		unlock()
 		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
 	}
 	pending := thread.Messages[pendingIndex]
@@ -619,14 +706,31 @@ func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, thread
 		strings.TrimSpace(pending.ImageGeneration.Prompt) != strings.TrimSpace(prompt) ||
 		normalizeAccountEmail(pending.ImageGeneration.RequestedByEmail) != normalizeAccountEmail(requesterEmail) ||
 		!scoutChatImageReplyEqual(pending.ReplyTo, replyTo) {
-		lock.Unlock()
+		unlock()
 		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
 	}
 	if replyTo != nil && scoutChatMessageIndex(thread, replyTo.MessageID) < 0 {
-		lock.Unlock()
+		unlock()
 		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
 	}
 	message.ReplyTo = replyTo
+	if thread.Riff != nil {
+		if message.Kind == scoutChatMessageKindImage {
+			if _, _, sourceErr := app.privateRiffWorkSourceWindow(requesterEmail, thread, pending); sourceErr != nil {
+				unlock()
+				return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+			}
+		}
+		message.AuthorName = firstNonEmptyString(strings.TrimSpace(message.AuthorName), scoutParticipantName)
+		message.RiffEpisodeID = pending.RiffEpisodeID
+		message.RiffCheckpointID = pending.RiffCheckpointID
+		authority, authorityErr := privateRiffMessageAuthorityForThread(thread, message)
+		if authorityErr != nil {
+			unlock()
+			return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+		}
+		message.RiffAuthority = authority
+	}
 	removed := []scoutChatMessageRecord{pending}
 	filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages))
 	for _, candidate := range thread.Messages {
@@ -645,14 +749,14 @@ func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, thread
 		for _, removedMessage := range removed {
 			if removedMessage.Kind == scoutChatMessageKindImage && removedMessage.Image != nil {
 				if err := store.invalidateProjectChatReplyParentsByLegacyMutation(context.Background(), thread.ID, removedMessage.ID, "parent_regenerated"); err != nil {
-					lock.Unlock()
+					unlock()
 					return scoutChatThreadRecord{}, err
 				}
 			}
 		}
 	}
 	if err := saveScoutChatImageThread(app, thread); err != nil {
-		lock.Unlock()
+		unlock()
 		return scoutChatThreadRecord{}, err
 	}
 	for _, removedMessage := range removed {
@@ -662,7 +766,7 @@ func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, thread
 	app.observeSTRIDETeamChatMessage(thread, message, "message", "")
 	deliverScoutChatThreadUpdate(thread, message)
 	app.rebuildPrivateConversationContinuity(thread, "message")
-	lock.Unlock()
+	unlock()
 	for _, removedMessage := range removed {
 		if removedMessage.Kind == scoutChatMessageKindImage {
 			app.discardUnsavedScoutChatImageArtifact(removedMessage.Image)

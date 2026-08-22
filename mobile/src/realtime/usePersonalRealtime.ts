@@ -27,6 +27,7 @@ import {
   normalizeRealtimeSDP,
   realtimeFunctionCalls,
   realtimeStatusForEvent,
+  realtimeToolContinuationPolicy,
   transcriptFromRealtimeEvent,
   type PersonalRealtimeStatus,
   type RealtimeFunctionCall,
@@ -422,6 +423,18 @@ export function usePersonalRealtime(options: {
     })
   ), [sendEvent]);
 
+  const sendSpokenToolContinuation = useCallback((instructions: string): boolean => {
+    if (!instructions.trim()) return false;
+    return sendEvent({
+      type: 'response.create',
+      response: {
+        output_modalities: ['audio'],
+        tool_choice: 'none',
+        instructions,
+      },
+    });
+  }, [sendEvent]);
+
   const handleToolCall = useCallback(async (
     call: RealtimeFunctionCall,
     connectionGeneration: number,
@@ -436,14 +449,23 @@ export function usePersonalRealtime(options: {
       || handledCallsRef.current.has(call.callId)
     ) return false;
     handledCallsRef.current.add(call.callId);
-    setLiveStatus(call.name === 'do_nothing' ? 'thinking' : 'acting');
+    setLiveStatus(
+      call.name === 'do_nothing' || call.name === 'route_conversation_turn'
+        ? 'thinking'
+        : 'acting',
+    );
     let argumentsValue: Record<string, unknown> = {};
     try {
       const parsed = call.argumentsText.trim() ? JSON.parse(call.argumentsText) : {};
       if (!isRecord(parsed)) throw new Error('arguments must be an object');
       argumentsValue = parsed;
     } catch {
-      return sendToolOutput(call.callId, { ok: false, error: 'could not read tool arguments' });
+      return sendToolOutput(call.callId, {
+        ok: false,
+        outcome: 'unavailable',
+        message: "I couldn't safely read that voice turn. Please try again.",
+        error: 'could not read tool arguments',
+      });
     }
     try {
       const controlReady = await waitForOfficeControlChannel(
@@ -456,7 +478,12 @@ export function usePersonalRealtime(options: {
         ),
       );
       if (!controlReady) {
-        return sendToolOutput(call.callId, { ok: false, error: 'Scout could not re-establish its authenticated control channel.' });
+        return sendToolOutput(call.callId, {
+          ok: false,
+          outcome: 'unavailable',
+          message: "I couldn't safely complete that voice turn. Nothing else was launched.",
+          error: 'Scout could not re-establish its authenticated control channel.',
+        });
       }
       if (
         generationRef.current !== connectionGeneration
@@ -485,7 +512,11 @@ export function usePersonalRealtime(options: {
         || toolAbortController.signal.aborted
       ) return false;
       if (response.actions?.length) onActionsRef.current?.(response.actions);
-      const result = response.result ?? { ok: response.ok !== false };
+      const result = { ...(response.result ?? { ok: response.ok !== false }) };
+      if ((response.ok === false || result.ok === false) && !String(result.message ?? '').trim()) {
+        result.outcome = 'unavailable';
+        result.message = "I couldn't safely complete that voice turn. Nothing else was launched.";
+      }
       const durableMessage = isRecord(result) ? String(result.message ?? '').trim() : '';
       if (durableMessage && mountedRef.current) {
         durableToolAnswerRef.current = durableMessage;
@@ -499,7 +530,12 @@ export function usePersonalRealtime(options: {
         || !lease.isCurrent()
         || toolAbortController.signal.aborted
       ) return false;
-      return sendToolOutput(call.callId, { ok: false, error: userFacingRealtimeError(toolError) });
+      return sendToolOutput(call.callId, {
+        ok: false,
+        outcome: 'unavailable',
+        message: "I couldn't safely complete that voice turn. Nothing else was launched.",
+        error: userFacingRealtimeError(toolError),
+      });
     }
   }, [sendToolOutput, sessionToken, setLiveStatus]);
 
@@ -507,15 +543,46 @@ export function usePersonalRealtime(options: {
     calls: RealtimeFunctionCall[],
     connectionGeneration: number,
   ) => {
+    if (
+      generationRef.current !== connectionGeneration
+      || dataChannelRef.current?.readyState !== 'open'
+    ) return;
+    const continuation = realtimeToolContinuationPolicy(calls);
+    if (!continuation.valid) {
+      // A Realtime response is one accepted user turn and may resolve to one
+      // server route or one no-effect decision—never a batch of effects. Settle
+      // every provider call so the conversation stays coherent, but execute
+      // none of them when that invariant is violated.
+      for (const call of calls) {
+        if (!call.callId || handledCallsRef.current.has(call.callId)) continue;
+        handledCallsRef.current.add(call.callId);
+        sendToolOutput(call.callId, {
+          ok: false,
+          outcome: 'unavailable',
+          message: continuation.failureMessage,
+        });
+      }
+      if (continuation.shouldRespond) {
+        sendSpokenToolContinuation(continuation.instructions);
+        setLiveStatus('error');
+      } else {
+        setLiveStatus('listening');
+      }
+      return;
+    }
     for (const call of calls) {
       if (!await handleToolCall(call, connectionGeneration)) return;
     }
     if (generationRef.current !== connectionGeneration || dataChannelRef.current?.readyState !== 'open') return;
-    sendEvent({
-      type: 'response.create',
-      response: { output_modalities: ['audio'], tool_choice: 'none' },
-    });
-  }, [handleToolCall, sendEvent]);
+    if (!continuation.shouldRespond) {
+      setLiveStatus('listening');
+      return;
+    }
+    // The server-created session remains tool_choice=required for the next
+    // completed user utterance. Override only this continuation so Scout can
+    // speak the exact durable router result without recursively routing it.
+    sendSpokenToolContinuation(continuation.instructions);
+  }, [handleToolCall, sendSpokenToolContinuation, sendToolOutput, setLiveStatus]);
 
   const handleProviderEvent = useCallback((raw: unknown, connectionGeneration: number) => {
     let event: Record<string, unknown>;

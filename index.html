@@ -1220,6 +1220,96 @@
         transform: scale(var(--press-scale));
       }
 
+      /* One authoritative transcription affordance replaces the scattered
+         recording/listening labels that used to live in the dock and menus.
+         It is both status and destination: activating it opens the readable
+         live transcript. Pause/resume remains an explicit action inside that
+         view; the pill never doubles as a destructive toggle. */
+      .room-transcription-pill {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        height: 36px;
+        padding: 0 13px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        box-shadow: var(--shadow-mark);
+        font: var(--type-caption-medium);
+        white-space: nowrap;
+        cursor: pointer;
+        transition-property: background-color, color, box-shadow, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .room-transcription-pill[hidden] {
+        display: none;
+      }
+
+      .room-transcription-pill::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: inherit;
+      }
+
+      .room-transcription-pill:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+        box-shadow: var(--shadow-1);
+      }
+
+      .room-transcription-pill:active {
+        transform: scale(0.96);
+      }
+
+      .room-transcription-pill:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px var(--ring), var(--shadow-mark);
+      }
+
+      .room-transcription-pill__dot {
+        width: 7px;
+        height: 7px;
+        border-radius: var(--r-full);
+        background: currentColor;
+        flex: none;
+      }
+
+      .room-transcription-pill__label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .room-transcription-pill[data-state="live"] {
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .room-transcription-pill[data-state="live"] .room-transcription-pill__dot {
+        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+
+      .room-transcription-pill[data-state="paused"] {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+
+      .room-transcription-pill[data-state="pending"] {
+        background: var(--info-soft);
+        color: var(--info);
+      }
+
+      .room-transcription-pill[data-state="unavailable"] {
+        background: var(--surface-3);
+        color: var(--text-3);
+      }
+
       .topbar__meta {
         display: flex;
         align-items: center;
@@ -3763,6 +3853,71 @@
 		width: 100%;
 		margin-bottom: 12px;
 		backdrop-filter: blur(14px);
+	  }
+
+	  .room-meeting-transcription-toolbar {
+		position: sticky;
+		top: 0;
+		z-index: 3;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px;
+		border: 1px solid var(--line-1);
+		border-radius: var(--r-lg);
+		background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+		box-shadow: var(--shadow-mark);
+		backdrop-filter: blur(14px);
+		-webkit-backdrop-filter: blur(14px);
+	  }
+
+	  .room-meeting-transcription-toolbar .room-meeting-record-action,
+	  .room-meeting-transcription-action {
+		position: relative;
+		top: auto;
+		width: auto;
+		min-height: 40px;
+		margin: 0;
+		padding: 0 12px;
+		border: 0;
+		border-radius: var(--r-md);
+		background: transparent;
+		color: var(--text-2);
+		font: var(--type-button);
+		white-space: nowrap;
+		cursor: pointer;
+		backdrop-filter: none;
+		transition-property: background-color, color, transform;
+		transition-duration: var(--dur-fast);
+		transition-timing-function: var(--ease);
+	  }
+
+	  .room-meeting-transcription-action {
+		margin-left: auto;
+		background: var(--surface-3);
+		color: var(--text-1);
+	  }
+
+	  .room-meeting-transcription-toolbar .room-meeting-record-action:hover,
+	  .room-meeting-transcription-action:hover:not([disabled]) {
+		background: var(--surface-3);
+		color: var(--text-1);
+	  }
+
+	  .room-meeting-transcription-toolbar .room-meeting-record-action:active,
+	  .room-meeting-transcription-action:active:not([disabled]) {
+		transform: scale(0.97);
+	  }
+
+	  .room-meeting-transcription-toolbar .room-meeting-record-action:focus-visible,
+	  .room-meeting-transcription-action:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	  }
+
+	  .room-meeting-transcription-action[disabled] {
+		opacity: 0.52;
+		cursor: default;
 	  }
 
       .assistant-link {
@@ -12658,9 +12813,12 @@
       }
       @media (pointer: coarse) {
         .chat-deck__btn,
-        .chat-deck__download-menu button,
         .scout-chat-document-result__action,
         .scout-authored-result__continue { min-height: 44px; }
+        /* Chromium can quantize a 44px menu row to 43.999 CSS pixels at a
+           2x mobile scale. Keep the rendered target safely above the 44px
+           floor instead of relying on an equality lost to subpixel layout. */
+        .chat-deck__download-menu button { min-height: 45px; }
         .chat-deck__nav button { width: 44px; height: 44px; }
       }
 
@@ -18747,6 +18905,20 @@
         margin-bottom: 5px;
         color: var(--text-3);
         font: var(--type-caption);
+      }
+
+      @media (max-width: 520px) {
+        .room-meeting-transcription-toolbar {
+          align-items: stretch;
+          flex-direction: column-reverse;
+        }
+
+        .room-meeting-transcription-toolbar .room-meeting-record-action,
+        .room-meeting-transcription-action {
+          width: 100%;
+          margin-left: 0;
+          text-align: center;
+        }
       }
 
       .room-chat__thread {
@@ -28148,6 +28320,27 @@
           transform: scale(0.96);
         }
 
+        #appShell.is-in-room[data-tool="room"] .topbar__bell,
+        #appShell.is-in-room[data-tool="room"] .topbar__mobile-account {
+          display: none;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .topbar__context {
+          flex: 1 1 auto;
+          overflow: hidden;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .topbar__subtitle {
+          display: none;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .room-transcription-pill {
+          flex: 0 1 auto;
+          height: 36px;
+          max-width: min(58vw, 180px);
+          padding-inline: 11px;
+        }
+
         /* tool pages zero the workspace padding at (1-3-1) specificity, which
            silently beat the clearance above and slid the chat composer under
            the fixed bottom rail (56px pill + 16px inset). Restore a safe-area
@@ -28934,6 +29127,10 @@
           display: none;
         }
 
+        .room-more__group {
+          display: grid;
+        }
+
         .room-more__action {
           display: flex;
           align-items: center;
@@ -28949,6 +29146,12 @@
         }
 
         .room-more__action:active {
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .room-more__action:focus-visible {
+          outline: 2px solid rgba(255, 255, 255, 0.82);
+          outline-offset: -3px;
           background: rgba(255, 255, 255, 0.1);
         }
 
@@ -32897,6 +33100,7 @@
         .board-preview__card:hover { transform: none; }
         .pill--listening .pill__dot,
         .pill--connecting .pill__dot,
+        .room-transcription-pill__dot,
         .dock-scout-state__dot { animation: none; }
         .board-preview__card.is-moved::after { animation: none; }
         .board-preview__card.is-moved { animation: none; }
@@ -33772,6 +33976,8 @@
 
       #appShell.is-in-room[data-tool="room"] .room-more__menu[hidden] { display: none; }
 
+      #appShell.is-in-room[data-tool="room"] .room-more__group { display: grid; }
+
       #appShell.is-in-room[data-tool="room"] .room-more__action {
         display: flex;
         align-items: center;
@@ -33788,6 +33994,10 @@
 
       #appShell.is-in-room[data-tool="room"] .room-more__action:hover,
       #appShell.is-in-room[data-tool="room"] .room-more__action:focus-visible { background: rgba(255, 255, 255, 0.1); }
+      #appShell.is-in-room[data-tool="room"] .room-more__action:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.82);
+        outline-offset: -3px;
+      }
       #appShell.is-in-room[data-tool="room"] .room-more__action[hidden] { display: none; }
       #appShell.is-in-room[data-tool="room"] .room-more__action[disabled] { opacity: 0.45; }
 
@@ -34057,6 +34267,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           </button>
         </span>
+        <button id="roomTranscriptPill" class="room-transcription-pill" type="button" data-state="unavailable" aria-controls="roomMeetingTranscript" aria-label="Open live transcription" hidden>
+          <span class="room-transcription-pill__dot" aria-hidden="true"></span>
+          <span id="roomTranscriptPillLabel" class="room-transcription-pill__label" role="status" aria-live="polite">Transcription unavailable</span>
+        </button>
         <button id="topbarBell" class="topbar__bell" type="button" aria-label="Notifications" aria-haspopup="dialog">
           <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8H3.5S6 15 6 9"/><path d="M10.5 21a2 2 0 0 0 3 0"/></svg>
           <span id="topbarBellBadge" class="chat-thread-item__unread topbar__bell-badge" hidden>0</span>
@@ -34374,7 +34588,7 @@
               <button id="roomMeetingChatTab" class="room-meeting-tab is-selected" type="button" role="tab" aria-controls="roomMeetingChat" aria-selected="true">Chat</button>
             </div>
             <div id="roomMeetingRecap" class="room-meeting-view" role="tabpanel" aria-labelledby="roomMeetingRecapTab" hidden></div>
-            <div id="roomMeetingTranscript" class="room-meeting-view room-meeting-transcript" role="tabpanel" aria-labelledby="roomMeetingTranscriptTab" hidden></div>
+            <div id="roomMeetingTranscript" class="room-meeting-view room-meeting-transcript" role="tabpanel" aria-labelledby="roomMeetingTranscriptTab" tabindex="-1" hidden></div>
             <div id="roomMeetingChat" class="room-meeting-view room-meeting-chat" role="tabpanel" aria-labelledby="roomMeetingChatTab">
               <div id="roomChatThread" class="scout-chat-thread room-chat__thread" role="log" aria-label="Room chat messages">
                 <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
@@ -35381,7 +35595,7 @@
                   <path d="M12 16v4"></path>
                 </svg>
               </button>
-              <button id="boardDockRecord" class="board-dock-icon recording-toggle is-recording" type="button" aria-label="Pause transcript recording" aria-pressed="true" title="recording">
+              <button id="boardDockRecord" class="board-dock-icon recording-toggle" type="button" aria-label="Open live transcription" aria-pressed="false" title="Open live transcription" hidden>
                 <span class="record-dot" aria-hidden="true"></span>
               </button>
               <button id="boardDockArchive" class="board-dock-btn primary" type="button">Send notes</button>
@@ -35504,16 +35718,11 @@
               </svg>
             </button>
             <div id="roomMoreMenu" class="room-more__menu" role="menu" aria-label="More call actions" hidden>
-              <button id="roomMoreChat" class="room-more__action" type="button" role="menuitem">Chat</button>
-              <button id="roomMoreRecap" class="room-more__action" type="button" role="menuitem">Meeting recap</button>
-              <button id="roomMoreTranscript" class="room-more__action" type="button" role="menuitem">Live transcript</button>
-              <button id="roomMoreRecord" class="room-more__action" type="button" role="menuitem">Recording</button>
-              <button id="roomMorePeople" class="room-more__action" type="button" role="menuitem">People in this room</button>
-              <button id="roomMoreSpecialists" class="room-more__action" type="button" role="menuitem">Agent team</button>
-              <button id="roomMoreInvite" class="room-more__action" type="button" role="menuitem">Invite people</button>
-              <button id="roomMoreConsent" class="room-more__action" type="button" role="menuitem">Microphone data</button>
-              <button id="roomMoreWorkspace" class="room-more__action" type="button" role="menuitem">Open advanced workspace</button>
-              <button id="roomMoreArchive" class="room-more__action" type="button" role="menuitem">Send notes</button>
+              <div class="room-more__group" role="none">
+                <button id="roomMoreChat" class="room-more__action" type="button" role="menuitem">Chat</button>
+                <button id="roomMorePeople" class="room-more__action" type="button" role="menuitem">People &amp; invite</button>
+                <button id="roomMoreSettings" class="room-more__action" type="button" role="menuitem">Room settings</button>
+              </div>
             </div>
           </div>
           <span class="controls__divider" aria-hidden="true"></span>
@@ -36571,16 +36780,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const roomMoreToggleButton = document.getElementById('roomMoreToggle')
       const roomMoreMenu = document.getElementById('roomMoreMenu')
       const roomMoreChatButton = document.getElementById('roomMoreChat')
-      const roomMoreRecapButton = document.getElementById('roomMoreRecap')
-      const roomMoreTranscriptButton = document.getElementById('roomMoreTranscript')
-      const roomMoreRecordButton = document.getElementById('roomMoreRecord')
       const roomMorePeopleButton = document.getElementById('roomMorePeople')
-      const roomMoreSpecialistsButton = document.getElementById('roomMoreSpecialists')
-      const roomMoreInviteButton = document.getElementById('roomMoreInvite')
-      const roomMoreBoardButton = document.getElementById('roomMoreBoard')
-      const roomMoreConsentButton = document.getElementById('roomMoreConsent')
-      const roomMoreWorkspaceButton = document.getElementById('roomMoreWorkspace')
-      const roomMoreArchiveButton = document.getElementById('roomMoreArchive')
+      const roomMoreSettingsButton = document.getElementById('roomMoreSettings')
       const roomScoutQuickActionButton = document.getElementById('roomScoutQuickAction')
       const meetingSpecialistsPanel = document.getElementById('meetingSpecialistsPanel')
       const meetingSpecialistsCloseButton = document.getElementById('meetingSpecialistsClose')
@@ -36860,6 +37061,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const topbarLivePill = document.getElementById('topbarLivePill')
       const topbarLiveText = document.getElementById('topbarLiveText')
       const topbarLiveLeave = document.getElementById('topbarLiveLeave')
+      const roomTranscriptPill = document.getElementById('roomTranscriptPill')
+      const roomTranscriptPillLabel = document.getElementById('roomTranscriptPillLabel')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
       // header board subtitle — stamped whenever a board snapshot lands
       let boardLastUpdatedAt = 0
@@ -37229,11 +37432,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let privateRealtimeVoiceAudio
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
-      // Conversational voice: track pending action classification for tool_choice
-      // flip. Session default is none; server decides when to flip to auto.
-      // Timing: transcription may arrive before or after response.done.
-      let privateRealtimeVoicePendingRouteCheck = null // { shouldRoute, resolved }
-      let privateRealtimeVoiceResponseDoneWithoutTool = false
       let privateRealtimeVoiceSessionToken = 0
       let privateRealtimeVoiceID = ''
       let privateRealtimeVoiceThreadID = ''
@@ -37354,6 +37552,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // the calm "you joined from another device" chip.
       let participantEndpointCounts = {}
       let roomRecordingEnabled = true
+      let roomRecordingAvailable = false
+      let roomRecordingConnected = false
+      let roomRecordingRevision = 0
+      let roomRecordingStatusRevision = 0
+      let roomRecordingRoomId = ''
+      let roomRecordingKnown = false
+      let roomRecordingSocketConfirmed = false
+      let roomRecordingPendingDesired = null
+      let roomRecordingPendingRevision = 0
+      let roomRecordingPendingTimer = 0
       let profileAvatarDraft = null
       let settingsRestoreFocusEl = audioSettingsButton
       let settingsActiveSection = 'profile'
@@ -37985,7 +38193,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         setConsentPanelOpen(consentPanel.hidden)
         if (!consentPanel.hidden) loadConsentStatus()
       })
-      consentCloseButton?.addEventListener('click', () => setConsentPanelOpen(false))
+      consentCloseButton?.addEventListener('click', () => {
+        setConsentPanelOpen(false)
+        const target = appShell.classList.contains('is-in-room') ? roomMoreToggleButton : consentToggleButton
+        if (target?.getClientRects().length) target.focus()
+      })
       document.getElementById('dockScoutState')?.addEventListener('click', () => {
         // Scout now lives in the chat tool under the Stride design; jump there.
         setActiveTool('chat')
@@ -38120,30 +38332,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
         setRoomChatOpen(true)
         focusRoomChatComposer()
       })
-      roomMoreRecapButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        setRoomMeetingMode('recap')
-        setRoomChatOpen(true)
-        roomMeetingRecapTab?.focus()
-      })
-      roomMoreTranscriptButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        setRoomMeetingMode('transcript')
-        setRoomChatOpen(true)
-        roomMeetingTranscriptTab?.focus()
-      })
-      roomMoreRecordButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        if (!guestMode && !recordMeetingButton.disabled) recordMeetingButton.click()
-      })
       roomMorePeopleButton?.addEventListener('click', () => {
         setRoomMoreOpen(false)
         openRoomPeoplePopover()
       })
-      roomMoreSpecialistsButton?.addEventListener('click', () => {
-        meetingSpecialistsRestoreFocus = roomMoreToggleButton
+      roomMoreSettingsButton?.addEventListener('click', () => {
         setRoomMoreOpen(false)
-        openMeetingSpecialists()
+        if (guestMode) {
+          if (consentToggleButton?.disabled || consentToggleButton?.hidden) return
+          setConsentPanelOpen(true)
+          loadConsentStatus()
+          window.requestAnimationFrame(() => consentCloseButton?.focus())
+          return
+        }
+        // This menu item represents the whole Room settings surface, not the
+        // live microphone switcher button. A transient media/control teardown
+        // may disable that dock button while the signed-in member still has a
+        // valid room and should be able to inspect settings.
+        openSettings({ section: 'devices', restoreFocusTo: roomMoreToggleButton, allowLocked: true })
       })
       roomScoutQuickActionButton?.addEventListener('click', () => {
         if (!roomScoutVoiceAvailability.enabled) return
@@ -38152,30 +38358,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         setDesktopRoomScout('invite')
-      })
-      roomMoreInviteButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        if (!guestMode) inviteToggleButton.click()
-      })
-      roomMoreBoardButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        if (!roomBoardToggleButton?.disabled) {
-          roomBoardToggleButton.click()
-          roomBoardPanel?.focus?.()
-        }
-      })
-      roomMoreConsentButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        if (!consentToggleButton?.disabled && !consentToggleButton?.hidden) consentToggleButton.click()
-      })
-      roomMoreWorkspaceButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        setActiveTool('artifacts')
-        artifactSearch?.focus()
-      })
-      roomMoreArchiveButton?.addEventListener('click', () => {
-        setRoomMoreOpen(false)
-        if (!guestMode && !archiveMeetingButton.disabled) archiveMeetingButton.click()
       })
       roomMoreMenu?.addEventListener('keydown', event => {
         const items = Array.from(roomMoreMenu.querySelectorAll('button:not([hidden]):not([disabled])'))
@@ -38321,7 +38503,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })
             return
           }
-          selectPD1Destination(destination)
+          // A deliberate rail tap owns the transition even when the user taps
+          // the already-current destination; dismiss any open overlay then.
+          // Background auth/path reconciliation uses the default below and
+          // must not close a sheet the user opened after navigation settled.
+          selectPD1Destination(destination, { closeOverlays: true })
         })
       })
       pd1PrimaryNav.addEventListener('keydown', event => {
@@ -38505,6 +38691,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // header live chip: pill → room, leave → exit
       topbarLivePill?.addEventListener('click', () => setActiveTool('room'))
       topbarLiveLeave?.addEventListener('click', () => leaveRoom())
+      roomTranscriptPill?.addEventListener('click', openLiveMeetingTranscript)
       // mobile header (design §1): back chevron leaves the intel sub-screen,
       // the bell opens notifications, the avatar opens the settings sheet
       topbarBackButton?.addEventListener('click', () => setActiveTool('office'))
@@ -38636,7 +38823,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       boardDockMute.addEventListener('click', () => muteMicButton.disabled || muteMicButton.click())
       boardDockCamera.addEventListener('click', () => toggleCameraButton.disabled || toggleCameraButton.click())
       boardDockShare.addEventListener('click', () => screenShareButton.disabled || screenShareButton.click())
-      boardDockRecord.addEventListener('click', () => recordMeetingButton.disabled || recordMeetingButton.click())
+      boardDockRecord.addEventListener('click', openLiveMeetingTranscript)
       boardDockArchive.addEventListener('click', () => archiveMeetingButton.disabled || archiveMeetingButton.click())
       boardDockMenuButton.addEventListener('click', event => {
         event.stopPropagation()
@@ -38862,6 +39049,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       window.addEventListener('resize', () => {
         window.requestAnimationFrame(updateMobileRoomStageMetrics)
         window.requestAnimationFrame(positionNotificationPanel)
+        window.requestAnimationFrame(syncRoomTranscriptionPill)
         scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160)
         schedulePrimaryVideoPlaybackRepair('viewport resize', 180)
         // The Stride Signal needs nothing on resize: the aperture is drawn in
@@ -40131,6 +40319,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           try { history.replaceState(null, '', location.pathname + location.search) } catch { /* sandboxed */ }
         }
         activeJoin = { roomId: guestSession.roomId || 'office', passcode: '', guest: true }
+        resetRoomRecordingAuthority(activeJoin.roomId)
         renderLoginMode()
         joinRoom({ guest: true })
       }
@@ -41981,7 +42170,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           occupiedSeats = Number.isFinite(Number(payload?.occupiedSeats)) ? Number(payload.occupiedSeats) : names.length
           applyParticipantMediaStates(payload?.mediaStates)
           applyParticipantEndpointCounts(payload?.endpointCounts)
-          applyRoomRecordingState(payload?.recording)
+          applyRoomRecordingState(payload?.recording, payload?.roomId)
         } else {
           occupiedSeats = names.length
         }
@@ -41989,17 +42178,113 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return normalizeParticipantList(names)
       }
 
-      function applyRoomRecordingState(recording) {
+      function resetRoomRecordingAuthority(roomId = '') {
+        if (roomRecordingPendingTimer) {
+          window.clearTimeout(roomRecordingPendingTimer)
+          roomRecordingPendingTimer = 0
+        }
+        roomRecordingEnabled = true
+        roomRecordingAvailable = false
+        roomRecordingConnected = false
+        roomRecordingRevision = 0
+        roomRecordingStatusRevision = 0
+        roomRecordingRoomId = String(roomId || '').trim()
+        roomRecordingKnown = false
+        roomRecordingSocketConfirmed = false
+        roomRecordingPendingDesired = null
+        roomRecordingPendingRevision = 0
+        roomRecordingUpdatedAt = ''
+        roomRecordingUpdatedBy = ''
+        updateRoomRecordingControls()
+        applyRoomListeningStatus()
+      }
+
+      function roomRecordingAuthorityOrder(recording) {
+        const revision = Number(recording?.revision)
+        const statusRevision = Number(recording?.statusRevision)
+        const updatedAt = String(recording?.updatedAt || '').trim()
+        const updatedAtMs = Date.parse(updatedAt)
+        return {
+          revision: Number.isSafeInteger(revision) && revision > 0 ? revision : 0,
+          statusRevision: Number.isSafeInteger(statusRevision) && statusRevision > 0 ? statusRevision : 0,
+          updatedAt,
+          updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0
+        }
+      }
+
+      function roomRecordingAuthorityIsCurrent(recording, roomId) {
+        const targetRoomId = String(roomId || activeJoin.roomId || 'office').trim() || 'office'
+        if (targetRoomId !== (activeJoin.roomId || 'office')) return false
+        if (!roomRecordingKnown || roomRecordingRoomId !== targetRoomId) return true
+
+        const next = roomRecordingAuthorityOrder(recording)
+        // New snapshots carry a monotonic status authority for both recording
+        // toggles and provider connection edges. Once observed, a legacy frame
+        // cannot overwrite it; equal authority is an idempotent replay only.
+        if (next.statusRevision || roomRecordingStatusRevision) {
+          if (!next.statusRevision) return false
+          if (!roomRecordingStatusRevision) return true
+          if (next.statusRevision !== roomRecordingStatusRevision) {
+            return next.statusRevision > roomRecordingStatusRevision
+          }
+          return (recording?.enabled !== false) === roomRecordingEnabled
+            && (recording?.available !== false) === roomRecordingAvailable
+            && (recording?.connected === true) === roomRecordingConnected
+            && (!next.revision || !roomRecordingRevision || next.revision === roomRecordingRevision)
+        }
+        const currentUpdatedAtMs = Date.parse(roomRecordingUpdatedAt)
+        const currentAt = Number.isFinite(currentUpdatedAtMs) ? currentUpdatedAtMs : 0
+        if (next.updatedAtMs && currentAt && next.updatedAtMs !== currentAt) {
+          return next.updatedAtMs > currentAt
+        }
+        if (next.revision && roomRecordingRevision && next.revision !== roomRecordingRevision) {
+          return next.revision > roomRecordingRevision
+        }
+        // The lane can become available after admission without changing the
+        // on/off revision. Equal authority may therefore refine capability,
+        // but it may never contradict the already-confirmed enabled value.
+        if ((next.revision || next.updatedAtMs) && (recording?.enabled !== false) !== roomRecordingEnabled) {
+          return false
+        }
+        if (next.revision || next.updatedAtMs) return true
+        // A versionless legacy frame may seed an empty client, never overwrite
+        // a versioned authority already observed in this room.
+        return !roomRecordingRevision && !currentAt
+      }
+
+      function applyRoomRecordingState(recording, roomId = '') {
         if (!recording || typeof recording !== 'object') {
           updateRoomRecordingControls()
           applyRoomListeningStatus()
-          return
+          return false
         }
+        const targetRoomId = String(roomId || activeJoin.roomId || 'office').trim() || 'office'
+        if (!roomRecordingAuthorityIsCurrent(recording, targetRoomId)) return false
+        const order = roomRecordingAuthorityOrder(recording)
         roomRecordingEnabled = recording.enabled !== false
-        roomRecordingUpdatedAt = recording.updatedAt || ''
-        roomRecordingUpdatedBy = recording.updatedBy || ''
+        roomRecordingAvailable = recording.available !== false
+        roomRecordingConnected = recording.connected === true
+        roomRecordingRevision = order.revision
+        roomRecordingStatusRevision = order.statusRevision
+        roomRecordingRoomId = targetRoomId
+        roomRecordingKnown = true
+        roomRecordingSocketConfirmed = Boolean(ws && ws.readyState === WebSocket.OPEN)
+        roomRecordingUpdatedAt = order.updatedAt
+        roomRecordingUpdatedBy = String(recording.updatedBy || '').trim()
+        const pendingSettled = roomRecordingPendingDesired !== null
+          && (roomRecordingPendingDesired === roomRecordingEnabled
+            || (order.revision && order.revision > roomRecordingPendingRevision))
+        if (pendingSettled) {
+          if (roomRecordingPendingTimer) window.clearTimeout(roomRecordingPendingTimer)
+          roomRecordingPendingTimer = 0
+          const superseded = roomRecordingPendingDesired !== roomRecordingEnabled
+          roomRecordingPendingDesired = null
+          roomRecordingPendingRevision = 0
+          if (superseded) showToast({ text: 'transcription changed in the room', kind: 'note' })
+        }
         updateRoomRecordingControls()
         applyRoomListeningStatus()
+        return true
       }
 
       function applyParticipantEndpointCounts(endpointCounts) {
@@ -42360,6 +42645,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         syncAuthenticatedShell()
         syncVoiceIslandVisibility()
         syncToolTopbar()
+        syncRoomTranscriptionPill()
         if (!inRoom) {
           setRoomBoardPanel(false)
           // a minted one-time token never outlives the seat
@@ -43589,9 +43875,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function selectPD1Destination(destination, options = {}) {
         if (!pd1DestinationAllowed(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
-        if (!closePD1OverlaysForNavigation()) return false
-        setWorkToolMenuOpen(false)
         const path = PD1_PATHS[destination]
+        const destinationChanges = appShell.dataset.pd1Destination !== destination || location.pathname !== path
+        // Session/bootstrap reconciliation may repeat the already-canonical
+        // destination after the user has opened Settings. Treat that as state
+        // confirmation, not navigation, so it cannot tear down newer intent.
+        if ((destinationChanges || options.closeOverlays === true) && !closePD1OverlaysForNavigation()) return false
+        setWorkToolMenuOpen(false)
         if (options.push !== false && location.pathname !== path) {
           history.pushState({ view: 'pd1', destination }, '', path)
         }
@@ -43812,7 +44102,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return window.__strideCurrentOrganizationLabel || 'Organization unavailable'
           case 'room':
             return appShell.classList.contains('is-in-room')
-              ? (roomRecordingEnabled ? 'listening' : 'not listening')
+              ? 'live meeting'
               : 'not connected'
           case 'chat':
             return chatThreadIsChannel(selectedScoutChatThread())
@@ -43881,6 +44171,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
         syncHeaderLivePill()
+        syncRoomTranscriptionPill()
       }
 
       /* on a tool page with a live connection the pill reads "memory ready";
@@ -44043,6 +44334,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          text-less artifact whose payload is its pdf assets embeds the newest
          pdf. "open in intelligence" stays as the data-room escape hatch. */
       var artifactStageNode = null
+      var artifactStagePublicationWatch = null
       var artifactStageReturnFocus = null
       const contentStudioURL = 'https://kino.grok.me'
       var contentStudioDrawerNode = null
@@ -44251,6 +44543,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function closeArtifactStage() {
         if (!artifactStageNode) return
+		artifactStagePublicationWatch?.stop?.()
+		artifactStagePublicationWatch = null
 		const deepLink = activeStudioDeepLink?.kind === 'document' && activeStudioDeepLink?.mode === 'view'
 		  ? { ...activeStudioDeepLink }
 		  : null
@@ -44953,8 +45247,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         foot.appendChild(meta)
 
         const actions = bfEl('div', 'artifact-stage__hero-actions')
-        if (ctx.shareArtifactId) {
+        if (ctx.shareArtifactId && opts.canExport === true) {
           const moreWrap = bfEl('span', 'artifact-stage__hero-more')
+		  moreWrap.dataset.finalPublicationControl = 'export'
           const moreTrigger = bfEl('button', 'artifact-stage__hero-btn')
           moreTrigger.type = 'button'
           moreTrigger.setAttribute('aria-label', 'More actions')
@@ -45001,24 +45296,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
               document.removeEventListener('pointerdown', onOutsidePointerDown)
               outsideBound = false
             }
-            manifestMintShareLink(String(ctx.shareArtifactId))
+            manifestMintShareLink(String(ctx.shareArtifactId), opts)
           })
           moreMenu.appendChild(shareItem)
           moreWrap.append(moreTrigger, moreMenu)
           actions.appendChild(moreWrap)
         }
-        if (/^[0-9a-f]{64}$/.test(String(ctx.pdfRef || ''))) {
+        if (opts.canExport === true && /^[0-9a-f]{64}$/.test(String(ctx.pdfRef || ''))) {
           const pdf = document.createElement('a')
           pdf.className = 'artifact-stage__hero-btn'
           pdf.textContent = 'pdf ↓'
           pdf.href = artifactBlobUrl({ ref: String(ctx.pdfRef), name: String(ctx.pdfName || '') })
           pdf.setAttribute('download', String(ctx.pdfName || ''))
+		  pdf.dataset.finalPublicationControl = 'export'
+		  guardArtifactPublicationDownload(pdf, () => (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+			String(candidate?.id || '') === String(ctx.deckArtifactId || '')) || artifactPublicationEntry(ctx.deckArtifactId, 1), opts)
           actions.appendChild(pdf)
         }
-        const present = bfEl('button', 'artifact-stage__hero-btn artifact-stage__hero-btn--primary', 'present')
-        present.type = 'button'
-        present.addEventListener('click', presentDeck)
-        actions.appendChild(present)
+        if (opts.canPresent === true) {
+          const present = bfEl('button', 'artifact-stage__hero-btn artifact-stage__hero-btn--primary', 'present')
+          present.type = 'button'
+		  present.dataset.finalPublicationControl = 'present'
+          present.addEventListener('click', presentDeck)
+          actions.appendChild(present)
+        }
         foot.appendChild(actions)
         hero.appendChild(foot)
         body.appendChild(hero)
@@ -45045,9 +45346,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
           body.appendChild(details)
         }
 
-        function presentDeck() {
+        async function presentDeck() {
           const deckEntry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
             String(candidate?.id || '') === String(ctx.deckArtifactId || '')) || { id: String(ctx.deckArtifactId || ''), metadata: {} }
+		  if (!(await authorizeArtifactPublicationAction(deckEntry, opts, 'present'))) {
+			body.querySelectorAll('[data-final-publication-control]').forEach(control => { control.hidden = true; control.disabled = true })
+			showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
+			return
+		  }
           body.classList.remove('artifact-stage__body--deck-hero')
           body.classList.add('artifact-stage__body--deck')
           body.replaceChildren()
@@ -45057,18 +45363,32 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  })
         }
 
-        if (ctx.autoPresent) presentDeck()
+        if (ctx.autoPresent && opts.canPresent === true) presentDeck()
       }
 
       async function openArtifactStage(artifactId, fallbackTitle, options) {
         const id = String(artifactId || '').trim()
 		if (!id) return false
-		const stageQualityState = String(options?.qualityState || '').trim()
-		const stageCanExport = options?.canExport !== false && (!stageQualityState || stageQualityState === 'admitted')
+		let stageQualityState = String(options?.qualityState || '').trim()
+		let stageCanExport = options?.canExport !== false && (!stageQualityState || stageQualityState === 'admitted')
+		let stageCanPresent = options?.canPresent !== false && stageCanExport
+		const stageProjectedPublication = {
+		  qualityState: stageQualityState,
+		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canPresent') ? { canPresent: options.canPresent === true } : {}),
+		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canExport') ? { canExport: options.canExport === true } : {})
+		}
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
         if (!entry && canUseArtifactLibrary()) {
           entry = await fetchArtifactEntryById(id)
         }
+		const managedAuthoredEntry = artifactPublicationManagedHint(entry, stageProjectedPublication)
+		const internalProcessArtifact = Boolean(String(entry?.metadata?.goalParentId || '').trim() && String(entry?.metadata?.processStage || entry?.metadata?.goalSubtaskId || '').trim())
+		if (entry && managedAuthoredEntry) {
+		  const freshCapability = await ensureArtifactFinalExportCapability(entry, { force: true })
+		  if (!internalProcessArtifact) stageQualityState = String(freshCapability?.qualityState || 'draft_needs_attention').trim()
+		  stageCanExport = artifactPublicationCapabilityAllows(freshCapability, stageProjectedPublication, 'export')
+		  stageCanPresent = artifactPublicationCapabilityAllows(freshCapability, stageProjectedPublication, 'present')
+		}
         // DD-1: resolve the deck-hero context. The manifest card hands one in
         // (options.deck) so a deck leads with its cover even when the deck
         // artifact isn't in the loaded window (keyless); otherwise a goal
@@ -45154,8 +45474,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // a queued/running/error scaffold never does.
         const stagePdfStatus = artifactStatusValue(entry)
         if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim()
-			&& stageCanExport && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
+			&& projectedArtifactPublicationAllows(stageProjectedPublication, 'export') && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
           const pdfControl = artifactPdfControl(entry, {
+			authorize: () => authorizeArtifactPublicationAction(entry, stageProjectedPublication, 'export'),
             onLanded: (fresh) => {
               // the assets block lives inside the read pane — re-render it so
               // the new PDF shows without reopening the stage
@@ -45163,7 +45484,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			  if (readPane) renderArtifactRead(readPane, fresh, { allowFinalExport: stageCanExport })
             }
           })
-          if (pdfControl) headActions.appendChild(pdfControl)
+		  if (pdfControl) {
+			pdfControl.dataset.finalPublicationControl = 'export'
+			pdfControl.hidden = stageCanExport !== true
+			pdfControl.disabled = stageCanExport !== true
+			headActions.appendChild(pdfControl)
+		  }
         }
         // Explicit-save gate (card-110): a finished deliverable no longer files
         // itself onto Files — it offers a Save-to-Files action from the stage.
@@ -45182,7 +45508,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           // iframe below, and the run-log demotes to a "run details" disclosure
 		  renderArtifactStageDeckHero(body, deckContext, {
 			headActions, qualityState: stageQualityState, canEdit: options?.canEdit,
-			canPresent: options?.canPresent, canExport: stageCanExport
+			canPresent: stageCanPresent, canExport: stageCanExport
 		  })
         } else if (stageActivity) {
           body.classList.add('artifact-stage__body--activity')
@@ -45195,9 +45521,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           body.classList.add('artifact-stage__body--deck')
 		  renderArtifactDeck(body, entry, {
 			surface: 'stage', presentSlot: headActions,
-			autoPresent: Boolean(options?.present) && options?.canPresent !== false,
+			autoPresent: Boolean(options?.present) && stageCanPresent,
 			qualityState: stageQualityState, canEdit: options?.canEdit,
-			canPresent: options?.canPresent, canExport: stageCanExport
+			canPresent: stageCanPresent, canExport: stageCanExport
 		  })
         } else if (pdfAssets.length && !String(entry.text || '').trim()) {
           // the payload IS the pdf: embed the newest, list every asset
@@ -45246,11 +45572,49 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         artifactStageNode = stage
         document.body.appendChild(stage)
+		if (managedAuthoredEntry) {
+		  artifactStagePublicationWatch = watchArtifactPublicationCapability(
+			() => artifactPublicationEntry(id, entry?.metadata?.artifactVersion, entry),
+			stageProjectedPublication,
+			capability => {
+			  if (artifactStageNode !== stage) return
+			  stageCanExport = artifactPublicationCapabilityAllows(capability, stageProjectedPublication, 'export')
+			  stageCanPresent = artifactPublicationCapabilityAllows(capability, stageProjectedPublication, 'present')
+			  stage.querySelectorAll('[data-final-publication-control="export"]').forEach(control => { control.hidden = !stageCanExport; control.disabled = !stageCanExport })
+			  stage.querySelectorAll('[data-final-publication-control="present"]').forEach(control => { control.hidden = !stageCanPresent; control.disabled = !stageCanPresent })
+				  const readPane = stage.querySelector('.artifact-stage__read')
+				  // Process-stage records stay disclosure-lazy; a capability refresh must
+				  // never expand or eagerly build their potentially heavy read surface.
+				  if (readPane && !stageActivity && !artifactIsHTMLDeck(entry)) renderArtifactRead(readPane, entry, { allowFinalExport: stageCanExport })
+			},
+			{ isActive: () => artifactStageNode === stage && stage.isConnected }
+		  )
+		}
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
         close.focus()
 		return true
+      }
+
+      async function openAuthorizedChatThreadAction(action) {
+        const threadId = String(action?.threadId || '').trim()
+        if (!authedUser || !threadId) return false
+        setActiveTool('chat')
+        let target = scoutChatThreads.find(thread => String(thread?.id || '') === threadId)
+        if (!target) {
+          await loadScoutChatThreads()
+          target = scoutChatThreads.find(thread => String(thread?.id || '') === threadId)
+        }
+        if (!target || String(target?.archivedAt || '').trim()) {
+          showToast({ text: 'that chat is no longer available', kind: 'note' })
+          return false
+        }
+        // The server resolved this exact stable id under the signed-in user's
+        // current ACL. Never fall back to the model-supplied/display title.
+        selectScoutChatThread(threadId)
+        setMobileChatView('convo')
+        return true
       }
 
       function handleOSAssistantActions(actions) {
@@ -45266,7 +45630,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const type = String(action.type || '').trim()
           const tool = String(action.tool || '').trim()
           const artifactId = String(action.artifactId || '').trim()
-          if (type === 'open_tool' && TOOL_IDS.includes(tool)) {
+          if (type === 'open_chat_thread') {
+            void openAuthorizedChatThreadAction(action)
+          } else if (type === 'open_tool' && TOOL_IDS.includes(tool)) {
             if (agentToolIds.includes(tool) || tool === 'workflow') {
               if (artifactId) {
                 selectedArtifactId = artifactId
@@ -47278,7 +47644,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (activeDocumentEditor) closeDocumentStudio()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 		const documentQualityState = String(payload?.qualityState || options?.qualityState || '').trim()
+		const documentManagedAuthoredResult = artifactPublicationManagedHint(options?.entry, {
+		  qualityState: documentQualityState,
+		  managed: payload?.managed === true
+		})
 		const hasDocumentExportCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canExport') || Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
+		const documentProjectedPublication = {
+		  qualityState: String(options?.qualityState || '').trim(),
+		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canExport') ? { canExport: options.canExport === true } : {})
+		}
 		const initialDocumentCanExport = hasDocumentExportCapability
 		  ? payload?.canExport === true && options?.canExport !== false
 		  : true
@@ -47294,7 +47668,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           sourceMode: false,
 		  savedToFiles: payload?.artifact?.savedToFiles === true,
 		  qualityState: documentQualityState,
-		  managedAuthoredResult: Boolean(documentQualityState),
+			  managedAuthoredResult: documentManagedAuthoredResult,
 		  savedCanExport: initialDocumentCanExport,
 		  canExport: initialDocumentCanExport
         }
@@ -47407,6 +47781,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  documentPDFButton.disabled = state.canExport !== true
 		  documentPDFButton.title = state.canExport === true ? 'Download final PDF' : 'Final PDF becomes available after this exact revision passes review.'
 		}
+		async function refreshDocumentPublication(force = true) {
+		  if (!state.managedAuthoredResult) return state.canExport === true
+		  const capability = await ensureArtifactFinalExportCapability(
+			artifactPublicationEntry(state.artifactId, state.version, options?.entry),
+			{ force }
+		  )
+		  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
+		  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
+		  state.savedCanExport = artifactPublicationCapabilityAllows(capability, documentProjectedPublication, 'export')
+		  state.canExport = state.dirty ? false : state.savedCanExport
+		  updateDocumentPublicationControls()
+		  return state.canExport === true
+		}
+		let documentPublicationWatch = null
 		updateDocumentPublicationControls()
 
         const documentHistory = {
@@ -48011,7 +48399,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.markdown = String(result.document.markdown || '')
             state.title = String(result?.artifact?.title || titleInput.value)
 			state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
-			state.managedAuthoredResult = Boolean(state.qualityState)
+			state.managedAuthoredResult = Boolean(state.qualityState) || state.managedAuthoredResult
 			if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) {
 			  state.savedCanExport = result.canExport === true
 			  state.canExport = state.savedCanExport
@@ -48101,7 +48489,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           state.markdown = String(result.document.markdown || '')
           state.title = String(result.artifact.title || state.title)
 		  state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
-		  state.managedAuthoredResult = Boolean(state.qualityState)
+		  state.managedAuthoredResult = Boolean(state.qualityState) || state.managedAuthoredResult
 		  if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) {
 			state.savedCanExport = result.canExport === true
 			state.canExport = state.savedCanExport
@@ -48120,7 +48508,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  updateDocumentPublicationControls()
           setStatus('Current version loaded', 'saved')
         }
-        async function exportDocumentPDF(button) {
+		async function exportDocumentPDF(button) {
+		  if (state.managedAuthoredResult && !(await refreshDocumentPublication(true))) {
+			showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
+			return
+		  }
 		  if (state.canExport !== true) {
 			showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
 			return
@@ -48359,8 +48751,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const responsiveDocumentChange = () => syncResponsiveDocumentStudio()
         responsiveDocumentMedia.addEventListener?.('change', responsiveDocumentChange)
         document.addEventListener('keydown', keydown)
-        activeDocumentEditor = { element: editor, artifactId, returnFocus, cleanup: () => { finishDocumentTypingBatch(); document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange); responsiveDocumentMedia.removeEventListener?.('change', responsiveDocumentChange) } }
-        document.body.appendChild(editor)
+		activeDocumentEditor = { element: editor, artifactId, returnFocus, cleanup: () => { finishDocumentTypingBatch(); documentPublicationWatch?.stop?.(); document.removeEventListener('keydown', keydown); document.removeEventListener('selectionchange', selectionChange); responsiveDocumentMedia.removeEventListener?.('change', responsiveDocumentChange) } }
+		document.body.appendChild(editor)
+		if (state.managedAuthoredResult) {
+		  documentPublicationWatch = watchArtifactPublicationCapability(
+			() => artifactPublicationEntry(state.artifactId, state.version, options?.entry),
+			documentProjectedPublication,
+			capability => {
+			  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
+			  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
+			  state.savedCanExport = artifactPublicationCapabilityAllows(capability, documentProjectedPublication, 'export')
+			  state.canExport = state.dirty ? false : state.savedCanExport
+			  updateDocumentPublicationControls()
+			},
+			{ isActive: () => activeDocumentEditor?.element === editor && editor.isConnected }
+		  )
+		}
         hydrateDocumentImageRuntimeStates(rich)
         syncStudioBackgroundInert()
         renderPipMeeting()
@@ -48398,10 +48804,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (activeDeckEditor) closeDeckEditor()
         const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 		const deckQualityState = String(payload?.qualityState || options?.qualityState || '').trim()
+		const deckManagedAuthoredResult = artifactPublicationManagedHint(options?.entry, {
+		  qualityState: deckQualityState,
+		  managed: payload?.managed === true
+		})
 		const payloadHasDeckPresentCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canPresent')
 		const payloadHasDeckExportCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canExport')
 		const optionsHaveDeckPresentCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canPresent')
 		const optionsHaveDeckExportCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
+		const deckProjectedPublication = {
+		  qualityState: String(options?.qualityState || '').trim(),
+		  ...(optionsHaveDeckPresentCapability ? { canPresent: options.canPresent === true } : {}),
+		  ...(optionsHaveDeckExportCapability ? { canExport: options.canExport === true } : {})
+		}
 		const initialDeckCanPresent = (payloadHasDeckPresentCapability ? payload?.canPresent === true : true) && (optionsHaveDeckPresentCapability ? options?.canPresent === true : true)
 		const initialDeckCanExport = (payloadHasDeckExportCapability ? payload?.canExport === true : true) && (optionsHaveDeckExportCapability ? options?.canExport === true : true)
 
@@ -48426,7 +48841,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           textEditingId: '',
           canWrite: true,
 		  qualityState: deckQualityState,
-		  managedAuthoredResult: Boolean(deckQualityState),
+		  managedAuthoredResult: deckManagedAuthoredResult,
 		  canPresent: initialDeckCanPresent,
 		  canExport: initialDeckCanExport,
           savedToFiles: payload?.artifact?.savedToFiles === true || String(payload?.artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true',
@@ -48667,6 +49082,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  state.canExport = false
 		  updateDeckPublicationControls()
 		}
+		async function refreshDeckPublication(force = true) {
+		  if (!state.managedAuthoredResult) return state.canPresent === true || state.canExport === true
+		  const capability = await ensureArtifactFinalExportCapability(
+			artifactPublicationEntry(state.artifactId, state.version, options?.entry),
+			{ force }
+		  )
+		  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
+		  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
+		  state.canPresent = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
+		  state.canExport = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+		  updateDeckPublicationControls()
+		  return state.canPresent === true || state.canExport === true
+		}
+		let deckPublicationWatch = null
 		updateDeckPublicationControls()
 
         function normalizeDeckDocument(input) {
@@ -49328,7 +49757,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return saveDeck(false)
         }
 
-        async function exportPowerPoint(button) {
+		async function exportPowerPoint(button) {
+		  if (state.managedAuthoredResult && !(await refreshDeckPublication(true))) {
+			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
+			return
+		  }
 		  if (state.canExport !== true) {
 			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
 			return
@@ -49367,7 +49800,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         }
 
-        async function exportPDF(button) {
+		async function exportPDF(button) {
+		  if (state.managedAuthoredResult && !(await refreshDeckPublication(true))) {
+			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
+			return
+		  }
 		  if (state.canExport !== true) {
 			showToast({ text: 'This draft needs review before final PowerPoint or PDF downloads are available.', kind: 'note' })
 			return
@@ -49562,7 +49999,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
             state.title = String(result?.artifact?.title || state.title)
 			state.qualityState = String(result?.qualityState || state.qualityState || '').trim()
-			state.managedAuthoredResult = Boolean(state.qualityState)
+			state.managedAuthoredResult = Boolean(state.qualityState) || state.managedAuthoredResult
 			if (Object.prototype.hasOwnProperty.call(result || {}, 'canPresent')) state.canPresent = result.canPresent === true
 			else if (state.managedAuthoredResult && result?.updated === true) state.canPresent = false
 			if (Object.prototype.hasOwnProperty.call(result || {}, 'canExport')) state.canExport = result.canExport === true
@@ -49733,7 +50170,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           items[nextIndex]?.focus()
         })
 
-        editor.addEventListener('click', event => {
+		editor.addEventListener('click', async event => {
           const inspectorTab = event.target.closest('[data-inspector-tab]')?.dataset.inspectorTab
           if (inspectorTab) {
             setInspectorTab(inspectorTab)
@@ -49769,7 +50206,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setInspectorOpen(open, open)
           }
           else if (action === 'close-inspector') { setInspectorOpen(false); inspectorButton?.focus() }
-          else if (action === 'present') {
+		  else if (action === 'present') {
+			if (state.managedAuthoredResult && !(await refreshDeckPublication(true))) {
+			  showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
+			  return
+			}
 			if (state.canPresent !== true) {
 			  showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
 			  return
@@ -49784,7 +50225,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'open-scout') {
             setInspectorTab('scout')
             if (compactStudioMedia.matches) setInspectorOpen(true)
-            requestAnimationFrame(() => editor.querySelector('[data-image-prompt]')?.focus())
+            const focusScoutPrompt = () => editor.querySelector('[data-image-prompt]')?.focus({ preventScroll: true })
+            // The prompt already exists, so focus it in this activation turn.
+            // Keep one animation-frame retry for compact layouts whose inspector
+            // becomes visible only after its slide-in state is committed.
+            focusScoutPrompt()
+            requestAnimationFrame(focusScoutPrompt)
           }
           else if (action === 'bring-front') changeLayer('front')
           else if (action === 'send-back') changeLayer('back')
@@ -49944,18 +50390,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
         compactStudioMedia.addEventListener?.('change', responsiveDeckChange)
         document.addEventListener('keydown', handleKey)
 
-        activeDeckEditor = {
+		activeDeckEditor = {
           element: editor,
           artifactId,
-          cleanup: () => {
-            document.removeEventListener('keydown', handleKey)
+		  cleanup: () => {
+			deckPublicationWatch?.stop?.()
+			document.removeEventListener('keydown', handleKey)
             compactStudioMedia.removeEventListener?.('change', responsiveDeckChange)
             resizeObserver.disconnect()
           },
           getDeck: () => clone(state.deck),
           returnFocus
         }
-        document.body.appendChild(editor)
+		document.body.appendChild(editor)
+		if (state.managedAuthoredResult) {
+		  deckPublicationWatch = watchArtifactPublicationCapability(
+			() => artifactPublicationEntry(state.artifactId, state.version, options?.entry),
+			deckProjectedPublication,
+			capability => {
+			  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
+			  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
+			  state.canPresent = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
+			  state.canExport = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+			  updateDeckPublicationControls()
+			},
+			{ isActive: () => activeDeckEditor?.element === editor && editor.isConnected }
+		  )
+		}
         syncStudioBackgroundInert()
         renderPipMeeting()
         callPipSyncOpenSurfaceContracts()
@@ -50185,8 +50646,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function renderArtifactDeck(container, entry, options = {}) {
         // Extract title from entry metadata
         const title = String(entry?.metadata?.title || entry?.title || 'Presentation').trim()
-	    const projectedQualityState = String(options?.qualityState || '').trim().toLowerCase()
-	    const hasProjectedQuality = ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(projectedQualityState)
+		    const projectedQualityState = String(options?.qualityState || '').trim().toLowerCase()
+		    const hasProjectedQuality = ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(projectedQualityState)
+		const projectedPublication = {
+		  qualityState: projectedQualityState,
+		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canPresent') ? { canPresent: options.canPresent === true } : {}),
+		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canExport') ? { canExport: options.canExport === true } : {})
+		}
 
         // First-class cover structure — matches renderInlineChatDeck
         const deck = document.createElement('section')
@@ -50382,16 +50848,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const artifactId = String(entry?.id || '').trim()
         let deckAccess = null
         let loading = false
-        let autoPresentPending = Boolean(options.autoPresent)
-        let previewAttempt = 0
+		let autoPresentPending = Boolean(options.autoPresent)
+		let previewAttempt = 0
+		const publicationEntry = () => artifactPublicationEntry(artifactId, deckAccess?.artifact?.version || entry?.metadata?.artifactVersion, entry)
+		const applyDeckPublicationControls = (canPresent, canExport) => {
+		  const deckReady = Boolean(deckAccess?.deck)
+		  presentBtn.disabled = !deckReady || !canPresent
+		  presentBtn.hidden = !deckReady || !canPresent
+		  downloadBtn.disabled = !deckAccess?.deck || !canExport
+		  downloadWrap.hidden = !canExport
+		  if (!canExport) {
+			downloadMenu.hidden = true
+			downloadBtn.setAttribute('aria-expanded', 'false')
+		  }
+		}
 
-        const present = async () => {
+		const present = async () => {
           if (presentBtn.dataset.deckAction === 'retry') {
             await loadPreview()
             return
-          }
-	      if (presentBtn.hidden || presentBtn.disabled) return
-          if (await openDeckPresentation(artifactId, title, deckAccess)) return
+		  }
+		  if (presentBtn.hidden || presentBtn.disabled) return
+		  if (!(await authorizeArtifactPublicationAction(publicationEntry(), projectedPublication, 'present'))) {
+			applyDeckPublicationControls(false, false)
+			showToast({ text: 'This draft needs review before it can be presented.', kind: 'note' })
+			return
+		  }
+		  if (await openDeckPresentation(artifactId, title, deckAccess)) return
           if (frame.requestFullscreen) {
             frame.requestFullscreen().catch(() => {})
           } else if (frame.webkitRequestFullscreen) {
@@ -50418,11 +50901,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
         downloadMenu.addEventListener('click', async event => {
           const format = event.target.closest('[data-deck-download]')?.dataset.deckDownload
-          const button = event.target.closest('[data-deck-download]')
-          if (!format || !button || !deckAccess?.artifact?.version) return
-          const original = button.innerHTML
-          button.disabled = true
-          try {
+		  const button = event.target.closest('[data-deck-download]')
+		  if (!format || !button || !deckAccess?.artifact?.version) return
+		  const original = button.innerHTML
+		  button.disabled = true
+		  try {
+			if (!(await authorizeArtifactPublicationAction(publicationEntry(), projectedPublication, 'export'))) {
+			  applyDeckPublicationControls(false, false)
+			  throw new Error('This draft needs review before final downloads are available.')
+			}
             if (format === 'pptx') {
               button.innerHTML = '<span>Preparing…</span><small>.pptx</small>'
               const response = await fetch('/artifacts/export-pptx', {
@@ -50518,10 +51005,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        const canEdit = deckAccess?.canWrite === true && (!hasProjectedQuality || options.canEdit === true)
             editBtn.disabled = !canEdit
 	        editBtn.hidden = !canEdit
-	        presentBtn.disabled = !canPresent
-	        presentBtn.hidden = !canPresent
-	        downloadBtn.disabled = !deckAccess?.deck || !canExport
-	        downloadWrap.hidden = !canExport
+		        applyDeckPublicationControls(canPresent, canExport)
             editBtn.title = canEdit ? 'Edit deck' : String(deckAccess?.writeBlockedReason || 'View-only deck')
 	        deck.dataset.previewState = 'ready'
 	        deck.dataset.qualityState = String(deckAccess?.qualityState || projectedQualityState || '')
@@ -50544,8 +51028,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
           } finally {
             loading = false
           }
-        }
-        loadPreview()
+		}
+		loadPreview()
+		if (artifactPublicationManagedHint(entry, projectedPublication)) {
+		  watchArtifactPublicationCapability(
+			publicationEntry,
+			projectedPublication,
+			capability => applyDeckPublicationControls(
+			  artifactPublicationCapabilityAllows(capability, projectedPublication, 'present'),
+			  artifactPublicationCapabilityAllows(capability, projectedPublication, 'export')
+			),
+			{ isActive: () => deck.isConnected }
+		  )
+		}
       }
 
       function artifactIsDeckOutline(entry) {
@@ -51260,6 +51755,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const compact = Boolean(options.compact)
         const className = String(options.className || 'artifact-stage__pdf-btn')
         const downloadLabel = compact ? 'PDF' : 'Download PDF'
+		const authorize = async () => typeof options.authorize !== 'function' || await options.authorize() === true
 
         const pdfDownloadLink = (asset) => {
           const link = document.createElement('a')
@@ -51268,6 +51764,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
           link.title = 'Download PDF'
           link.href = artifactBlobUrl(asset)
           link.setAttribute('download', String(asset.name || 'report.pdf'))
+		  if (typeof options.authorize === 'function') {
+			link.dataset.finalPublicationControl = 'export'
+			link.addEventListener('click', async event => {
+			  event.preventDefault()
+			  event.stopImmediatePropagation()
+			  if (!(await authorize())) {
+				link.hidden = true
+				showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
+				return
+			  }
+			  const authorized = link.cloneNode(true)
+			  authorized.hidden = true
+			  document.body.appendChild(authorized)
+			  authorized.click()
+			  authorized.remove()
+			})
+		  }
           return link
         }
 
@@ -51282,6 +51795,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         button.textContent = downloadLabel
         button.title = 'Render a branded PDF of this report'
         button.addEventListener('click', async () => {
+		  if (!(await authorize())) {
+			button.hidden = true
+			showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
+			return
+		  }
           let waiting = false
           button.disabled = true
           button.dataset.state = 'rendering'
@@ -52509,8 +53027,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
           assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceAttempt(attempt))
           privateRealtimeVoicePeer = peer
           privateRealtimeVoiceHandledCalls = new Set()
-          privateRealtimeVoicePendingRouteCheck = null
-          privateRealtimeVoiceResponseDoneWithoutTool = false
           peer.ontrack = event => {
             if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
             postPrivateRealtimeMilestone('remote_track')
@@ -53298,40 +53814,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }, { once: true })
       }
 
-      // Conversational voice: check server to see if we should flip tool_choice
-      // from none to auto for this utterance. Server decides based on:
-      // - Riff-bound sessions (always need route)
-      // - Transcript content (action keywords, studio asks, confirmations)
-      async function checkPrivateRealtimeShouldRoute(transcript, sessionToken, peer) {
-        if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
-        if (!privateRealtimeVoiceActive()) return
-        try {
-          const response = await postAuthJSON('/assistant/realtime/should-route', {
-            voiceSessionId: privateRealtimeVoiceID,
-            threadId: privateRealtimeVoiceThreadID,
-            transcript: transcript || '',
-            leaseToken: privateRealtimeVoiceLeaseToken,
-            leaseGeneration: privateRealtimeVoiceLeaseGeneration,
-            transportRevision: privateRealtimeVoiceTransportRevision
-          })
-          if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
-          if (!privateRealtimeVoiceActive()) return
-          const shouldRoute = Boolean(response.data?.shouldRoute)
-          // Store result for when response.done arrives (or fire now if it already did)
-          if (privateRealtimeVoicePendingRouteCheck) {
-            privateRealtimeVoicePendingRouteCheck.shouldRoute = shouldRoute
-            privateRealtimeVoicePendingRouteCheck.resolved = true
-          }
-          // If response.done already happened without tools, flip now
-          if (shouldRoute && privateRealtimeVoiceResponseDoneWithoutTool) {
-            privateRealtimeVoiceResponseDoneWithoutTool = false
-            enablePrivateRealtimeToolsForAction(sessionToken, peer)
-          }
-        } catch {
-          // Classification failed — don't flip (ordinary talk continues)
-        }
-      }
-
       function handlePrivateRealtimeVoiceEvent(raw, sessionToken, peer) {
         if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
         let event
@@ -53343,15 +53825,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const type = String(event?.type || '')
         if (!type) {
           return
-        }
-        // Capture user's input transcription for action detection (server-side).
-        // Transcription may arrive before or after response.done.
-        if (type.includes('input_audio_transcription') && type.includes('completed')) {
-          const transcript = String(event.transcript || '').trim()
-          // Initialize pending check state
-          privateRealtimeVoicePendingRouteCheck = { shouldRoute: false, resolved: false }
-          // Ask server if we should route (async — may complete after response.done)
-          void checkPrivateRealtimeShouldRoute(transcript, sessionToken, peer)
         }
         // During Act II only, feed Scout's own spoken lines into the struck-
         // question ritual (Act I is pitch capture — her "pitch me" prompt is not
@@ -53375,25 +53848,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const toolCalls = interrupted ? [] : (event.response?.output || [])
             .filter(item => item?.type === 'function_call')
           if (toolCalls.length) {
-            // Tool calls present — process them, don't flip
-            privateRealtimeVoiceResponseDoneWithoutTool = false
-            privateRealtimeVoicePendingRouteCheck = null
             void continuePrivateRealtimeToolCalls(toolCalls, sessionToken, peer)
-          } else if (!interrupted) {
-            // No tool calls — check if we should flip for action
-            if (privateRealtimeVoicePendingRouteCheck?.resolved && privateRealtimeVoicePendingRouteCheck?.shouldRoute) {
-              // Classification already done and says route — flip now
-              privateRealtimeVoicePendingRouteCheck = null
-              privateRealtimeVoiceResponseDoneWithoutTool = false
-              enablePrivateRealtimeToolsForAction(sessionToken, peer)
-            } else if (privateRealtimeVoicePendingRouteCheck && !privateRealtimeVoicePendingRouteCheck.resolved) {
-              // Classification still pending (late ASR) — mark that response is done
-              // When classification completes, it will check this flag and flip
-              privateRealtimeVoiceResponseDoneWithoutTool = true
-            } else {
-              // No pending check (no transcription) — ordinary talk, done
-              privateRealtimeVoiceResponseDoneWithoutTool = false
-            }
           }
           // W0 usage beacon: the private voice peer is browser-owned, so this
           // page is the only place its usage exists — post each response.done
@@ -53409,14 +53864,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         } else if (type.includes('speech_started')) {
           setVoiceIslandState('hearing', 'listening…')
-          // New utterance — clear stale state
-          privateRealtimeVoicePendingRouteCheck = null
-          privateRealtimeVoiceResponseDoneWithoutTool = false
         } else if (type.includes('speech_stopped')) {
-          // Conversational voice: do NOT flip to thinking on speech_stopped.
-          // Stay in listening/hearing state until first_audio arrives, so the
-          // user doesn't see a "thinking" beat before every response. The model
-          // should speak first without a visible routing/thinking delay.
+          // Every completed utterance now enters the server-owned Scout route.
+          // Make that brief context/work lookup legible until the exact durable
+          // result begins speaking.
+          setVoiceIslandState('thinking', 'checking context…')
         } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
           postPrivateRealtimeMilestone('first_audio')
           setVoiceIslandState('talking', 'answering…')
@@ -53425,30 +53877,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
             setVoiceIslandState('listening', 'listening…')
           }
         }
-      }
-
-      // Conversational voice: flip tool_choice to auto and create a follow-up
-      // response so the model can call route_conversation_turn for action requests.
-      // The model's first response (with tool_choice=none) already spoke; this
-      // follow-up lets it complete the action.
-      function enablePrivateRealtimeToolsForAction(sessionToken, peer) {
-        if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
-        if (!privateRealtimeVoiceActive()) return
-        // Flip tool_choice to auto so model can call route_conversation_turn
-        sendPrivateRealtimeEvent({
-          type: 'session.update',
-          session: { tool_choice: 'auto' }
-        })
-        // Create follow-up response — the model sees the conversation history
-        // and will call route_conversation_turn for the pending action request.
-        // Use tool_choice=auto for this response only; continuePrivateRealtimeToolCalls
-        // will reset to none after the tool call completes.
-        sendPrivateRealtimeEvent({
-          type: 'response.create',
-          response: {
-            tool_choice: 'auto'
-          }
-        })
       }
 
       // W0 private-voice usage beacon (model-routing plan, founder decision 3):
@@ -53788,23 +54216,64 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       async function continuePrivateRealtimeToolCalls(items, sessionToken, peer) {
-        for (const item of items) {
+        if (sessionToken !== privateRealtimeVoiceSessionToken
+          || privateRealtimeVoicePeer !== peer
+          || !privateRealtimeVoiceActive()) return
+        const calls = items.filter(item => String(item?.call_id || item?.callId || '').trim() && String(item?.name || '').trim())
+        const onlyCallName = String(calls[0]?.name || '').trim()
+        const batchValid = calls.length === 1
+          && (onlyCallName === 'route_conversation_turn' || onlyCallName === 'do_nothing')
+        if (!batchValid) {
+          // One provider response represents one accepted user turn. Never let
+          // parallel/distinct function-call ids multiply that turn into two
+          // typed messages or two work launches. Settle the provider calls,
+          // execute none, and return one fixed no-effect explanation.
+          const failureMessage = "I couldn't safely route that voice turn. Please try again."
+          for (const item of calls) {
+            const callId = String(item?.call_id || item?.callId || '').trim()
+            if (privateRealtimeVoiceHandledCalls.has(callId)) continue
+            privateRealtimeVoiceHandledCalls.add(callId)
+            sendPrivateRealtimeToolOutput(callId, { ok: false, outcome: 'unavailable', message: failureMessage })
+          }
+          if (calls.some(item => String(item?.name || '').trim() === 'route_conversation_turn')) {
+            setVoiceIslandState('error', failureMessage)
+            sendPrivateRealtimeEvent({
+              type: 'response.create',
+              response: {
+                output_modalities: ['audio'],
+                tool_choice: 'none',
+                instructions: `Say exactly: "${failureMessage}" Do not say anything else.`
+              }
+            })
+          } else {
+            setVoiceIslandState('listening', 'listening…')
+          }
+          return
+        }
+        for (const item of calls) {
           if (!await handlePrivateRealtimeToolCall(item, sessionToken, peer)) return
         }
         if (sessionToken !== privateRealtimeVoiceSessionToken
           || privateRealtimeVoicePeer !== peer
           || !privateRealtimeVoiceActive()) return
-        // Reset session tool_choice to none so subsequent VAD-triggered responses
-        // speak first without route HTTP. Action requests will flip to auto again.
-        sendPrivateRealtimeEvent({
-          type: 'session.update',
-          session: { tool_choice: 'none' }
-        })
+		const hasRoutedTurn = items.some(item => String(item?.name || '').trim() === 'route_conversation_turn')
+		if (!hasRoutedTurn) {
+		  // do_nothing is the terminal no-effect result for silence, noise, and
+		  // abandoned fragments. Creating another response here would make the
+		  // assistant speak into silence.
+		  setVoiceIslandState('listening', 'listening…')
+		  return
+		}
+        // The session remains tool_choice=required for the next completed user
+        // utterance. This response overrides to none only so Scout can speak the
+        // exact server result without recursively routing it as a new turn. The
+		// Realtime response-level instruction overrides only this response.
         sendPrivateRealtimeEvent({
           type: 'response.create',
           response: {
             output_modalities: ['audio'],
-            tool_choice: 'none'
+			tool_choice: 'none',
+			instructions: 'Speak only the message string from the most recent route_conversation_turn function result, exactly as written. Do not add, omit, paraphrase, explain, or answer anything else.'
           }
         })
       }
@@ -53862,6 +54331,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!response.ok && !output.error) {
             output.error = response.data?.error || 'tool request failed'
           }
+          if (output?.ok === false && !String(output?.message || '').trim()) {
+            output.outcome = 'unavailable'
+            output.message = "I couldn't safely complete that voice turn. Nothing else was launched."
+          }
           const threadOutput = output?.thread || response.data?.result?.thread
           if (response.data?.artifact) {
             addArtifactEntry(response.data.artifact, { select: !(name === 'launch_agent_thread' || name === 'initiate_goal' || threadOutput) })
@@ -53910,7 +54383,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
         } catch (error) {
           if (!sessionIsCurrent()) return false
-          output = { ok: false, error: error.message || 'tool request failed' }
+          output = {
+            ok: false,
+            outcome: 'unavailable',
+            message: "I couldn't safely complete that voice turn. Nothing else was launched.",
+            error: error.message || 'tool request failed'
+          }
           setVoiceIslandState('error', output.error)
         }
         return sendPrivateRealtimeToolOutput(callId, output)
@@ -53953,8 +54431,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
-        privateRealtimeVoicePendingRouteCheck = null
-        privateRealtimeVoiceResponseDoneWithoutTool = false
         privateRealtimeVoiceID = ''
         privateRealtimeVoiceThreadID = ''
         privateRealtimeVoiceTransportRevision = 0
@@ -55790,6 +56266,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           setLog('joining the room…')
           return
         }
+        resetRoomRecordingAuthority(activeJoin.roomId || 'office')
         beginRoomJoinTiming()
         const voiceOnly = Boolean(options.voiceOnly)
         // A room join must park a local dictated clip. It must never upload or
@@ -56038,6 +56515,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function openRoomWebSocket(options = {}) {
         const reconnect = Boolean(options.reconnect)
+        // A new signaling socket is a new authority generation. Clear the
+        // prior server's revision before accepting its first snapshot so a
+        // process restart (whose room epoch begins again at one) cannot leave
+        // this tab permanently unavailable behind an old higher revision.
+        // Old-socket callbacks are already fenced by `ws !== socket` below.
+        if (reconnect) resetRoomRecordingAuthority(activeJoin.roomId || 'office')
         // A transfer is a one-shot admission choice from the explicit desktop
         // prompt. Every signaling reconnect intentionally recomputes this as
         // false, so recovering transport can never evict a newly joined device.
@@ -56055,6 +56538,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const socket = new WebSocket(`${scheme}://${window.location.host}/websocket?room=${encodeURIComponent(activeJoin.roomId || 'office')}${guestMode ? '&as=guest' : ''}`)
         const handledOfferKeys = new Set()
         ws = socket
+        roomRecordingSocketConfirmed = false
+        syncRoomTranscriptionPill()
         socket.onopen = () => {
           // handshake truth for onclose: a socket that NEVER opened was
           // refused by the server (403 on an archived room / revoked access),
@@ -56148,6 +56633,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (ws === socket) {
             ws = undefined
           }
+          roomRecordingSocketConfirmed = false
+          syncRoomTranscriptionPill()
           handleRoomWebSocketClose(event, { reconnect, opened: Boolean(socket.__everOpened) })
         }
         socket.onerror = () => {
@@ -56255,6 +56742,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         isSignalReconnecting = true
+        roomRecordingSocketConfirmed = false
+        syncRoomTranscriptionPill()
         lastSignalReconnectReason = reason || 'room signal interrupted'
         clearConnectionRecoveryTimer()
         clearIceDisconnectRestartTimer()
@@ -68138,10 +68627,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function meetingIntelligenceStatusLabel(snapshot) {
-        if (!snapshot) return 'Meeting notes unavailable'
-        if (snapshot.transcript.state === 'not_listening') return 'Not listening'
-        if (snapshot.transcript.state === 'transcript_paused') return 'Transcript paused'
-        return snapshot.notes.state === 'current' ? 'Listening · Notes current' : 'Listening · Notes catching up'
+        const transcription = roomTranscriptionPresentation()
+        if (!snapshot) return transcription.state === 'live' ? 'Notes are getting ready' : transcription.label
+        if (transcription.state !== 'live') return transcription.label
+        return snapshot.notes.state === 'current' ? 'Notes current' : 'Notes catching up'
       }
 
       function meetingIntelligenceCoverageLabel(snapshot) {
@@ -68189,7 +68678,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const fragment = document.createDocumentFragment()
         const snapshot = currentMeetingIntelligence
         const status = document.createElement('div')
-        status.className = `room-meeting-status${snapshot?.notes?.state === 'catching_up' ? ' is-catching-up' : ''}${snapshot?.transcript?.state !== 'listening' ? ' is-paused' : ''}`
+        const transcription = roomTranscriptionPresentation()
+        status.className = `room-meeting-status${snapshot?.notes?.state === 'catching_up' ? ' is-catching-up' : ''}${transcription.state !== 'live' ? ' is-paused' : ''}`
         const line = document.createElement('div')
         line.className = 'room-meeting-status__line'
         const dot = document.createElement('span')
@@ -68206,15 +68696,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           status.appendChild(coverage)
         }
         fragment.appendChild(status)
-        const recordAction = roomMeetingPermanentRecordAction('recap')
-        if (recordAction) fragment.appendChild(recordAction)
+        const recapToolbar = roomMeetingRecapToolbar()
+        if (recapToolbar) fragment.appendChild(recapToolbar)
 
         if (!snapshot?.recap) {
           const empty = document.createElement('div')
           empty.className = 'room-meeting-empty'
           const text = document.createElement('p')
           text.textContent = snapshot
-            ? 'The live transcript is being captured. A grounded recap will appear after the first analysis finishes.'
+            ? transcription.state === 'live'
+              ? 'The live transcript is being captured. A grounded recap will appear after the first analysis finishes.'
+              : `${transcription.label}. Existing notes remain available here.`
             : 'Join the meeting to see its live, grounded recap.'
           empty.appendChild(text)
           fragment.appendChild(empty)
@@ -68235,6 +68727,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           fragment.appendChild(recap)
         }
         roomMeetingRecap.replaceChildren(fragment)
+      }
+
+      function roomMeetingRecapToolbar() {
+        if (guestMode) return null
+        const toolbar = document.createElement('div')
+        toolbar.className = 'room-meeting-transcription-toolbar room-meeting-recap-toolbar'
+        toolbar.setAttribute('role', 'toolbar')
+        toolbar.setAttribute('aria-label', 'Meeting recap actions')
+        const recordAction = roomMeetingPermanentRecordAction('recap')
+        if (recordAction) toolbar.appendChild(recordAction)
+        const send = document.createElement('button')
+        send.type = 'button'
+        send.className = 'room-meeting-transcription-action room-meeting-recap-send'
+        send.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
+        send.disabled = archiveMeetingButton.disabled
+        send.addEventListener('click', () => {
+          if (send.disabled || archiveMeetingButton.disabled) return
+          send.disabled = true
+          send.textContent = 'Generating notes…'
+          archiveMeeting()
+          window.setTimeout(() => {
+            send.disabled = archiveMeetingButton.disabled
+            send.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
+          }, 1500)
+        })
+        toolbar.appendChild(send)
+        return toolbar
       }
 
       function roomMeetingTranscriptEntries() {
@@ -68259,16 +68778,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderMeetingTranscript() {
         const entries = roomMeetingTranscriptEntries()
-        const recordAction = roomMeetingPermanentRecordAction('transcript')
+        const toolbar = roomMeetingTranscriptToolbar()
+        const transcription = roomTranscriptionPresentation()
         if (!entries.length) {
           const empty = document.createElement('div')
           empty.className = 'room-meeting-empty'
           const text = document.createElement('p')
-          text.textContent = currentMeetingIntelligence?.transcript?.state === 'transcript_paused'
-            ? 'Transcript capture is paused.'
-            : 'Spoken moments will appear here as the meeting captures them.'
+          text.textContent = transcription.state === 'live'
+            ? 'Spoken moments will appear here as the meeting captures them.'
+            : transcription.state === 'paused'
+              ? 'Transcript capture is paused. Resume it above when you are ready.'
+              : 'Transcription is unavailable right now. Existing captured moments will remain here.'
           empty.appendChild(text)
-          roomMeetingTranscript.replaceChildren(...(recordAction ? [recordAction, empty] : [empty]))
+          roomMeetingTranscript.replaceChildren(...(toolbar ? [toolbar, empty] : [empty]))
           return
         }
         const nodes = entries.map(entry => {
@@ -68290,10 +68812,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.append(meta, copy)
           return item
         })
-        roomMeetingTranscript.replaceChildren(...(recordAction ? [recordAction, ...nodes] : nodes))
+        roomMeetingTranscript.replaceChildren(...(toolbar ? [toolbar, ...nodes] : nodes))
         if (roomMeetingMode === 'transcript') {
           roomMeetingTranscript.scrollTop = roomMeetingTranscript.scrollHeight
         }
+      }
+
+      function roomMeetingTranscriptToolbar() {
+        if (guestMode) return null
+        const toolbar = document.createElement('div')
+        toolbar.className = 'room-meeting-transcription-toolbar'
+        toolbar.setAttribute('role', 'toolbar')
+        toolbar.setAttribute('aria-label', 'Live transcription actions')
+        const recordAction = roomMeetingPermanentRecordAction('transcript')
+        if (recordAction) toolbar.appendChild(recordAction)
+
+        const transcription = roomTranscriptionPresentation()
+        const control = document.createElement('button')
+        control.type = 'button'
+        control.className = 'room-meeting-transcription-action'
+        control.dataset.state = transcription.state
+        control.textContent = transcription.state === 'live'
+          ? 'Pause transcription'
+          : transcription.state === 'paused'
+            ? 'Resume transcription'
+            : transcription.state === 'pending'
+              ? roomRecordingPendingDesired !== null ? 'Updating transcription…' : 'Connecting transcription…'
+              : 'Transcription unavailable'
+        control.disabled = !['live', 'paused'].includes(transcription.state) || recordMeetingButton.disabled
+        control.setAttribute('aria-label', control.textContent)
+        control.addEventListener('click', () => {
+          if (!control.disabled) toggleRoomRecording()
+        })
+        toolbar.appendChild(control)
+        return toolbar
       }
 
       function roomMeetingPermanentRecordAction(mode) {
@@ -68469,6 +69021,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomChatThread.scrollTop = roomChatThread.scrollHeight
           window.requestAnimationFrame(() => { roomChatThread.scrollTop = roomChatThread.scrollHeight })
         }
+        syncRoomTranscriptionPill()
+      }
+
+      function openLiveMeetingTranscript() {
+        if (!appShell.classList.contains('is-in-room')) return
+        setActiveTool('room')
+        setRoomChatOpen(true)
+        setRoomMeetingMode('transcript')
+        window.requestAnimationFrame(() => {
+          roomMeetingTranscript?.focus({ preventScroll: true })
+          if (roomMeetingTranscript) roomMeetingTranscript.scrollTop = roomMeetingTranscript.scrollHeight
+        })
       }
 
       function isRoomChatOpen() {
@@ -68487,6 +69051,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             roomChatInput.focus()
           }
         }
+        syncRoomTranscriptionPill()
       }
 
       function clearRoomChatUnread() {
@@ -73505,8 +74070,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const result = document.createElement('article')
 	        result.className = 'scout-chat-document-result'
 	        result.dataset.resultArtifactId = resultId
-	        const qualityState = authoredResultQualityState(message)
-	        const admitted = qualityState === 'admitted'
+		        const qualityState = authoredResultQualityState(message)
+		        const admitted = qualityState === 'admitted'
+			const projectedPublication = {
+			  qualityState,
+			  canExport: message?.thread?.resultCanExport === true
+			}
+			const managedAuthoredResult = artifactPublicationManagedHint(artifact, projectedPublication)
 	        result.dataset.qualityState = qualityState
 	        result.setAttribute('aria-label', `${title} document`)
 
@@ -73540,12 +74110,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const preview = bfEl('div', 'scout-chat-document-result__preview artifact-read')
 	        preview.setAttribute('aria-hidden', 'true')
 	        preview.setAttribute('inert', '')
-	        renderArtifactRead(preview, artifact, { allowFinalExport: message?.thread?.resultCanExport === true })
+		        renderArtifactRead(preview, artifact, { allowFinalExport: !managedAuthoredResult && projectedArtifactPublicationAllows(projectedPublication, 'export') })
 	        const qualityNote = authoredResultQualityNote(message, 'document')
 	        result.appendChild(head)
 	        if (qualityNote) result.appendChild(qualityNote)
-	        result.appendChild(preview)
-	        return result
+		        result.appendChild(preview)
+			if (managedAuthoredResult) {
+			  watchArtifactPublicationCapability(
+				() => artifactPublicationEntry(resultId, artifact?.metadata?.artifactVersion, artifact),
+				projectedPublication,
+				capability => {
+				  if (!result.isConnected) return
+				  renderArtifactRead(preview, artifact, { allowFinalExport: artifactPublicationCapabilityAllows(capability, projectedPublication, 'export') })
+				},
+				{ isActive: () => result.isConnected }
+			  )
+			}
+		        return result
 	      }
 
 	      // §1 the run log (P0 signature): consecutive kind:"artifact" stage
@@ -74263,8 +74844,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return card
 	        }
 
-	        // deliverable rows: badge · title + facts · pill actions
-	        const rows = bfEl('div', 'manifest-card__rows')
+		        // deliverable rows: badge · title + facts · pill actions
+		        const rows = bfEl('div', 'manifest-card__rows')
+			const manifestPublicationBindings = []
 	        for (const deliverable of deliverables) {
 	          const row = bfEl('div', 'manifest-card__row')
 	          row.appendChild(bfEl('span', 'manifest-card__badge', String(deliverable.badge || 'doc')))
@@ -74279,28 +74861,44 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // a deck deliverable leads with its cover hero (DD-1); the context
 	          // rides in so the hero stands even before the deck artifact loads
 	          const deckHero = deckHeroContextFromManifest(deliverable, manifest)
+	          const rowIsGoalResult = Boolean(artifactId && goalResultId && artifactId === goalResultId)
+		          const rowCapabilities = rowIsGoalResult
+		            ? goalResultCapabilities
+		            : { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false }
+			  const rowEntry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId) || artifactPublicationEntry(artifactId, 1)
+			  const rowManaged = artifactPublicationManagedHint(rowEntry, rowCapabilities)
+			  const rowPublicationControls = []
 	          if (!richDeckRow) {
 	            const open = bfEl('button', 'manifest-card__pill manifest-card__pill--primary', 'open')
 	            open.type = 'button'
-	            open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), deckHero ? { deck: deckHeroContextFromManifest(deliverable, manifest) } : undefined))
+	            open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), {
+	              ...rowCapabilities,
+	              ...(deckHero ? { deck: deckHeroContextFromManifest(deliverable, manifest) } : {})
+	            }))
 	            actions.appendChild(open)
 	          }
 	          // held quieting: open is the ONLY door — present and pdf recede
-	          if (!held && deliverable.present && !richDeckRow) {
-	            const present = bfEl('button', 'manifest-card__pill manifest-card__pill--outline', 'present')
-	            present.type = 'button'
-	            present.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), { present: true }))
-	            actions.appendChild(present)
+	          if (!held && deliverable.present && !richDeckRow && rowCapabilities.canPresent === true) {
+		            const present = bfEl('button', 'manifest-card__pill manifest-card__pill--outline', 'present')
+		            present.type = 'button'
+		            present.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), { ...rowCapabilities, present: true }))
+				present.hidden = rowManaged
+				present.disabled = rowManaged
+				rowPublicationControls.push({ node: present, action: 'present' })
+		            actions.appendChild(present)
 	          }
 	          // direct download via the session-gated blob route — the ref is
 	          // validated to the 64-hex sha256 shape before any url is built
-	          if (!held && /^[0-9a-f]{64}$/.test(String(deliverable.pdfRef || ''))) {
+	          if (!held && rowCapabilities.canExport === true && /^[0-9a-f]{64}$/.test(String(deliverable.pdfRef || ''))) {
 	            const pdf = document.createElement('a')
 	            pdf.className = 'manifest-card__pill manifest-card__pill--outline'
 	            pdf.textContent = 'pdf ↓'
-	            pdf.href = artifactBlobUrl({ ref: String(deliverable.pdfRef), name: String(deliverable.pdfName || '') })
-	            pdf.setAttribute('download', String(deliverable.pdfName || ''))
-	            actions.appendChild(pdf)
+		            pdf.href = artifactBlobUrl({ ref: String(deliverable.pdfRef), name: String(deliverable.pdfName || '') })
+		            pdf.setAttribute('download', String(deliverable.pdfName || ''))
+				pdf.hidden = rowManaged
+				guardArtifactPublicationDownload(pdf, rowEntry, rowCapabilities)
+				rowPublicationControls.push({ node: pdf, action: 'export' })
+		            actions.appendChild(pdf)
 	          }
 	          // deep 1:1 linkage: give feedback on THIS deliverable — arms the
 	          // follow-up seam so the next message resumes and revises it in place
@@ -74310,9 +74908,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            feedback.addEventListener('click', () => armScoutFollowUpTarget(artifactId, { title: String(deliverable.title || ''), label: String(deliverable.title || '') }))
 	            actions.appendChild(feedback)
 	          }
-	          row.appendChild(actions)
-	          rows.appendChild(row)
-	        }
+		          row.appendChild(actions)
+		          rows.appendChild(row)
+			  if (rowManaged && rowPublicationControls.length) manifestPublicationBindings.push({ entry: rowEntry, projected: rowCapabilities, controls: rowPublicationControls })
+		        }
 	        card.appendChild(rows)
 
 	        // amber disclosed-skip bullets — honesty as a design element
@@ -74337,8 +74936,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          attached.appendChild(bfEl('b', '', String(manifest.attachedTo)))
 	          foot.appendChild(attached)
 	        }
-	        if (!held && manifest.shareArtifactId) {
-	          const moreWrap = bfEl('span', 'manifest-card__more')
+		        if (!held && manifest.shareArtifactId) {
+		          const moreWrap = bfEl('span', 'manifest-card__more')
+			  const shareArtifactId = String(manifest.shareArtifactId)
+			  const shareEntry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === shareArtifactId) || artifactPublicationEntry(shareArtifactId, 1)
+			  const shareCapabilities = shareArtifactId === goalResultId
+				? goalResultCapabilities
+				: { qualityState: 'draft_needs_attention', canExport: false }
+			  const shareManaged = artifactPublicationManagedHint(shareEntry, shareCapabilities)
+			  moreWrap.hidden = shareManaged
 	          const moreTrigger = bfEl('button', 'manifest-card__more-trigger', '•••')
 	          moreTrigger.type = 'button'
 	          moreTrigger.setAttribute('aria-label', 'More actions')
@@ -74384,11 +74990,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              document.removeEventListener('pointerdown', onOutsidePointerDown)
 	              outsideBound = false
 	            }
-	            manifestMintShareLink(String(manifest.shareArtifactId))
+		            manifestMintShareLink(shareArtifactId, shareCapabilities)
 	          })
 	          moreMenu.appendChild(shareItem)
-	          moreWrap.append(moreTrigger, moreMenu)
-	          foot.appendChild(moreWrap)
+		          moreWrap.append(moreTrigger, moreMenu)
+		          foot.appendChild(moreWrap)
+			  if (shareManaged && projectedArtifactPublicationAllows(shareCapabilities, 'export')) {
+				manifestPublicationBindings.push({ entry: shareEntry, projected: shareCapabilities, controls: [{ node: moreWrap, action: 'export' }] })
+			  }
 	        }
 	        if (manifest.findingsArtifactId) {
 	          const attacked = bfEl('button', 'manifest-card__foot-link', 'see how it was attacked')
@@ -74396,8 +75005,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          attacked.addEventListener('click', () => openArtifactStage(String(manifest.findingsArtifactId), 'Findings record'))
 	          foot.appendChild(attacked)
 	        }
-	        if (foot.childNodes.length) card.appendChild(foot)
-	        return card
+		        if (foot.childNodes.length) card.appendChild(foot)
+			for (const binding of manifestPublicationBindings) {
+			  watchArtifactPublicationCapability(
+				() => {
+				  const current = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === String(binding.entry?.id || ''))
+				  return artifactPublicationEntry(binding.entry?.id, current?.metadata?.artifactVersion || binding.entry?.metadata?.artifactVersion, current || binding.entry)
+				},
+				binding.projected,
+				capability => binding.controls.forEach(control => {
+				  const allowed = artifactPublicationCapabilityAllows(capability, binding.projected, control.action)
+				  control.node.hidden = !allowed
+				  if ('disabled' in control.node) control.node.disabled = !allowed
+				}),
+				{ isActive: () => card.isConnected }
+			  )
+			}
+		        return card
 	      }
 
 	      // "gate 9.5 · 3 assumed · 4 decisions · 2h 25m" — built from what the
@@ -74428,9 +75052,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // the footer's share door: mints via the EXISTING share machinery
 	      // (server-side eligibility stays the enforcement point) and copies
 	      // the minted url — same grammar as the intelligence panel's mint
-	      async function manifestMintShareLink(artifactId) {
-	        try {
-	          const response = await fetch('/artifacts/share', {
+		      async function manifestMintShareLink(artifactId, projected = {}) {
+		        try {
+			  if (!(await authorizeArtifactPublicationAction(String(artifactId || ''), projected, 'export'))) {
+				throw new Error('This draft needs review before it can be shared.')
+			  }
+		          const response = await fetch('/artifacts/share', {
 	            method: 'POST',
 	            headers: { 'Content-Type': 'application/json' },
 	            body: JSON.stringify({ artifactId })
@@ -75936,8 +76563,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function updateRoomRecordingControls() {
         const inRoom = appShell.classList.contains('is-in-room') && roomMediaActive()
         const connected = Boolean(ws && ws.readyState === WebSocket.OPEN)
-        const disabled = !inRoom || !connected
-        const label = roomRecordingEnabled ? 'Recording' : 'Record off'
+        const disabled = !inRoom || !connected || !roomRecordingKnown || !roomRecordingAvailable || roomRecordingPendingDesired !== null
+        const label = roomRecordingEnabled ? 'Pause transcription' : 'Resume transcription'
         const action = roomRecordingEnabled ? 'Pause transcript recording' : 'Resume transcript recording'
         const stateClass = roomRecordingEnabled ? 'is-recording' : 'is-paused'
         const staleClass = roomRecordingEnabled ? 'is-paused' : 'is-recording'
@@ -75950,23 +76577,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         recordMeetingButton.classList.toggle(staleClass, false)
         recordMeetingLabel.textContent = label
 
-        boardDockRecord.disabled = disabled
-        boardDockRecord.setAttribute('aria-pressed', roomRecordingEnabled ? 'true' : 'false')
-        boardDockRecord.setAttribute('aria-label', action)
-        boardDockRecord.title = roomRecordingUpdatedBy
-          ? `${label.toLowerCase()} · ${roomRecordingUpdatedBy}`
-          : label.toLowerCase()
-        boardDockRecord.classList.toggle(stateClass, true)
-        boardDockRecord.classList.toggle(staleClass, false)
+        boardDockRecord.disabled = !inRoom
+        boardDockRecord.setAttribute('aria-pressed', 'false')
+        boardDockRecord.setAttribute('aria-label', 'Open live transcription')
+        boardDockRecord.title = 'Open live transcription'
+        boardDockRecord.classList.remove('is-recording', 'is-paused')
         syncRoomMoreActions()
+        syncRoomTranscriptionPill()
       }
 
       function roomListeningLabel() {
-        return roomRecordingEnabled ? 'the room is listening' : 'the room is not listening'
+        return 'room connected'
       }
 
       function roomListeningConnectionState() {
-        return roomRecordingEnabled ? 'listening' : 'idle'
+        return 'room'
       }
 
       function setRoomListeningConnectionState() {
@@ -75974,12 +76599,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function applyRoomListeningStatus() {
-        if (appShell.classList.contains('is-in-room')) {
-          setRoomListeningConnectionState()
-        }
+        syncRoomTranscriptionPill()
         renderAssistantMessages()
-        // the phone header sub mirrors listening / not listening
+        renderMeetingTranscript()
         syncToolTopbar()
+      }
+
+      function roomTranscriptionPresentation() {
+        const inRoom = appShell.classList.contains('is-in-room')
+        const correctRoom = roomRecordingRoomId === (activeJoin.roomId || 'office')
+        const socketConnected = Boolean(ws && ws.readyState === WebSocket.OPEN)
+        const mediaConnected = Boolean(pc && (
+          pc.connectionState === 'connected'
+          || (!pc.connectionState && ['connected', 'completed'].includes(pc.iceConnectionState))
+        ))
+        if (roomRecordingPendingDesired !== null) {
+          return { state: 'pending', label: 'Updating transcription…' }
+        }
+        if (!inRoom || !correctRoom || !roomRecordingKnown || !roomRecordingSocketConfirmed
+            || !socketConnected || !roomMediaActive() || !mediaConnected || !roomRecordingAvailable) {
+          return { state: 'unavailable', label: 'Transcription unavailable' }
+        }
+        if (!roomRecordingEnabled) {
+          return { state: 'paused', label: 'Transcription paused' }
+        }
+        if (!roomRecordingConnected) {
+          return { state: 'pending', label: 'Connecting transcription…' }
+        }
+        return { state: 'live', label: 'Live transcription' }
+      }
+
+      function syncRoomTranscriptionPill() {
+        if (!roomTranscriptPill || !roomTranscriptPillLabel) return
+        const visible = Boolean(authedUser) && !guestMode
+          && appShell.classList.contains('is-in-room')
+          && (appShell.dataset.tool || 'office') === 'room'
+        roomTranscriptPill.hidden = !visible
+        if (!visible) {
+          roomTranscriptPill.setAttribute('aria-expanded', 'false')
+          return
+        }
+        const presentation = roomTranscriptionPresentation()
+        roomTranscriptPill.dataset.state = presentation.state
+        const compact = window.matchMedia?.('(max-width: 360px)')?.matches
+        const compactLabel = presentation.state === 'pending'
+          ? presentation.label.startsWith('Connecting') ? 'Connecting…' : 'Updating…'
+          : ({ paused: 'Paused', unavailable: 'Unavailable' })[presentation.state]
+        roomTranscriptPillLabel.textContent = compact && compactLabel ? compactLabel : presentation.label
+        roomTranscriptPill.setAttribute('aria-label', `${presentation.label}. Open transcript`)
+        roomTranscriptPill.setAttribute('aria-expanded', String(isRoomChatOpen() && roomMeetingMode === 'transcript'))
+        const actor = roomRecordingUpdatedBy ? ` Last changed by ${roomRecordingUpdatedBy}.` : ''
+        roomTranscriptPill.title = `${presentation.label}.${actor} Open transcript.`
       }
 
       function toggleRoomRecording() {
@@ -75990,15 +76660,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
-        roomRecordingEnabled = !roomRecordingEnabled
-        roomRecordingUpdatedBy = currentParticipantName || ''
+        if (!roomRecordingKnown || !roomRecordingAvailable) {
+          const message = 'transcription is unavailable right now.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
+
+        if (roomRecordingPendingDesired !== null) return
+
+        const desired = !roomRecordingEnabled
+        roomRecordingPendingDesired = desired
+        roomRecordingPendingRevision = roomRecordingRevision
         updateRoomRecordingControls()
         applyRoomListeningStatus()
 
-        ws.send(JSON.stringify({
-          event: 'set_recording',
-          data: JSON.stringify({ enabled: roomRecordingEnabled })
-        }))
+        try {
+          ws.send(JSON.stringify({
+            event: 'set_recording',
+            data: JSON.stringify({ enabled: desired })
+          }))
+        } catch {
+          roomRecordingPendingDesired = null
+          roomRecordingPendingRevision = 0
+          roomRecordingSocketConfirmed = false
+          updateRoomRecordingControls()
+          return
+        }
+        roomRecordingPendingTimer = window.setTimeout(() => {
+          roomRecordingPendingTimer = 0
+          roomRecordingPendingDesired = null
+          roomRecordingPendingRevision = 0
+          roomRecordingSocketConfirmed = false
+          updateRoomRecordingControls()
+          refreshRoomStateSnapshot('transcription acknowledgement timeout').catch(() => {})
+        }, 8000)
       }
 
       // the label lives in a span beside the phone-only icon — writing
@@ -80810,7 +81506,200 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return item
       }
 
+      // Intelligence can preview the same rendered PDF assets used by the
+      // authored jury, so it needs a fresh server-owned publication decision
+      // rather than trusting persisted asset metadata. Cache only the exact
+      // artifact revision for five seconds; a goal may become admitted without
+      // changing the result bytes, so the short refresh window is intentional.
+      // `var` plus lazy initialization avoids the boot-render TDZ class that
+      // previously took down the artifact surface.
+      var artifactFinalExportCapabilityCache
+      var artifactFinalExportCapabilityFetches
+      var artifactFinalExportCapabilityRefreshTimer
+      var artifactFinalExportCapabilityTTLMS
+      var artifactFinalExportCapabilityPollMS
+
+      function artifactPublicationEntry(artifactId, artifactVersion, entry = null) {
+        const source = entry && typeof entry === 'object' ? entry : {}
+        return {
+          ...source,
+          id: String(artifactId || source.id || '').trim(),
+          metadata: {
+            ...(source.metadata || {}),
+            artifactVersion: String(Math.max(1, Number(artifactVersion || source?.metadata?.artifactVersion || 1) || 1))
+          }
+        }
+      }
+
+      function artifactPublicationManagedHint(entry, projected = {}) {
+        const qualityState = String(projected?.qualityState || '').trim().toLowerCase()
+        return projected?.managed === true || Boolean(qualityState) || Boolean(String(entry?.metadata?.goalId || entry?.metadata?.goalParentId || '').trim())
+      }
+
+      // Chat and manifest projections are useful revocation hints, but they are
+      // never publication grants. A positive action needs both the projection
+      // and a fresh server-owned capability for this exact revision.
+      function projectedArtifactPublicationAllows(projected = {}, action = 'export') {
+        const qualityState = String(projected?.qualityState || '').trim().toLowerCase()
+        if (qualityState && qualityState !== 'admitted') return false
+        const key = action === 'present' ? 'canPresent' : 'canExport'
+        return !Object.prototype.hasOwnProperty.call(projected || {}, key) || projected?.[key] === true
+      }
+
+      function artifactPublicationCapabilityAllows(capability, projected = {}, action = 'export') {
+        return capability?.ready === true && capability?.canExport === true && projectedArtifactPublicationAllows(projected, action)
+      }
+
+      function exactArtifactFinalExportCapability(entry) {
+        const blocked = { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false }
+        const artifactId = String(entry?.id || '').trim()
+        if (!artifactId) return blocked
+        const artifactVersion = Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1)
+        const cache = artifactFinalExportCapabilityCache || (artifactFinalExportCapabilityCache = new Map())
+        const cached = cache.get(artifactId)
+        return cached && cached.artifactVersion === artifactVersion ? cached : blocked
+      }
+
+      function requestArtifactFinalExportCapability(entry) {
+        const artifactId = String(entry?.id || '').trim()
+        const artifactVersion = Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1)
+        if (!artifactId) return Promise.resolve()
+        const cache = artifactFinalExportCapabilityCache || (artifactFinalExportCapabilityCache = new Map())
+        const fetches = artifactFinalExportCapabilityFetches || (artifactFinalExportCapabilityFetches = new Map())
+        const requestKey = `${artifactId}:${artifactVersion}`
+        if (fetches.has(requestKey)) return fetches.get(requestKey)
+        const request = fetch(`/artifacts/final-export-capability?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+          .then(async response => {
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok || payload?.artifactId !== artifactId || Number(payload?.artifactVersion || 0) !== artifactVersion || typeof payload?.canExport !== 'boolean') {
+              throw new Error('artifact export capability is unavailable')
+            }
+            const capability = {
+              ready: true,
+              artifactVersion,
+              qualityState: String(payload?.qualityState || '').trim().toLowerCase(),
+              managed: payload?.managed === true,
+              canExport: payload.canExport === true,
+              checkedAt: Date.now()
+            }
+            cache.set(artifactId, capability)
+            return capability
+          })
+          .catch(() => {
+            const capability = { ready: false, artifactVersion, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false, checkedAt: Date.now() }
+            cache.set(artifactId, capability)
+            return capability
+          })
+          .finally(() => {
+            fetches.delete(requestKey)
+          })
+        fetches.set(requestKey, request)
+        return request
+      }
+
+      function artifactFinalExportCapability(entry) {
+        const cached = exactArtifactFinalExportCapability(entry)
+        const fresh = cached.ready === true && Date.now() - Number(cached.checkedAt || 0) <= (Number(artifactFinalExportCapabilityTTLMS) || 5000)
+        if (!fresh) {
+          requestArtifactFinalExportCapability(entry)
+        }
+        return fresh ? cached : { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false }
+      }
+
+      async function ensureArtifactFinalExportCapability(entry, options = {}) {
+        const current = exactArtifactFinalExportCapability(entry)
+        const fresh = current.ready === true && Date.now() - Number(current.checkedAt || 0) <= (Number(artifactFinalExportCapabilityTTLMS) || 5000)
+        if (!options.force && fresh) return current
+        await requestArtifactFinalExportCapability(entry)
+        return exactArtifactFinalExportCapability(entry)
+      }
+
+      async function artifactPublicationEntryByID(artifactId, fallback = null) {
+        const id = String(artifactId || fallback?.id || '').trim()
+        if (!id) return null
+        let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '').trim() === id) || fallback
+        if (!entry && typeof fetchArtifactEntryById === 'function' && canUseArtifactLibrary()) {
+          entry = await fetchArtifactEntryById(id)
+        }
+        return entry ? artifactPublicationEntry(id, entry?.metadata?.artifactVersion, entry) : null
+      }
+
+      async function authorizeArtifactPublicationAction(entryOrID, projected = {}, action = 'export', options = {}) {
+        let entry = typeof entryOrID === 'string'
+          ? await artifactPublicationEntryByID(entryOrID, options.fallback)
+          : entryOrID
+        if (!entry) return false
+        if (!projectedArtifactPublicationAllows(projected, action)) return false
+        if (!artifactPublicationManagedHint(entry, projected)) return true
+        const capability = await ensureArtifactFinalExportCapability(entry, { force: true })
+        return artifactPublicationCapabilityAllows(capability, projected, action)
+      }
+
+      function guardArtifactPublicationDownload(link, entryProvider, projected = {}) {
+        if (!link) return link
+        link.addEventListener('click', async event => {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          const entry = typeof entryProvider === 'function' ? entryProvider() : entryProvider
+          if (!(await authorizeArtifactPublicationAction(entry, projected, 'export'))) {
+            link.hidden = true
+            showToast({ text: 'This draft needs review before a final download is available.', kind: 'note' })
+            return
+          }
+          const authorized = link.cloneNode(true)
+          authorized.hidden = true
+          authorized.removeAttribute('id')
+          document.body.appendChild(authorized)
+          authorized.click()
+          authorized.remove()
+        })
+        return link
+      }
+
+      // Open publication surfaces recheck before the five-second lease expires,
+      // and immediately on focus/visibility recovery. The callback always gets
+      // a conservative capability when the request fails or the revision moves.
+      function watchArtifactPublicationCapability(entryProvider, projected, apply, options = {}) {
+        let stopped = false
+        let timer = 0
+        let running = null
+        const resolveEntry = () => typeof entryProvider === 'function' ? entryProvider() : entryProvider
+        const active = () => !stopped && (typeof options.isActive !== 'function' || options.isActive())
+        const schedule = () => {
+          window.clearTimeout(timer)
+          if (active()) timer = window.setTimeout(() => refresh(true), Number(artifactFinalExportCapabilityPollMS) || 4000)
+        }
+        const refresh = (force = true) => {
+          if (!active()) { stop(); return Promise.resolve(null) }
+          if (running) return running
+          const entry = resolveEntry()
+          if (!entry || !artifactPublicationManagedHint(entry, projected)) { schedule(); return Promise.resolve(null) }
+          running = ensureArtifactFinalExportCapability(entry, { force })
+            .then(capability => {
+              if (active()) apply(capability, entry)
+              return capability
+            })
+            .finally(() => { running = null; schedule() })
+          return running
+        }
+        const onFocus = () => { if (active()) refresh(true) }
+        const onVisibility = () => { if (!document.hidden && active()) refresh(true) }
+        const stop = () => {
+          if (stopped) return
+          stopped = true
+          window.clearTimeout(timer)
+          window.removeEventListener('focus', onFocus)
+          document.removeEventListener('visibilitychange', onVisibility)
+        }
+        window.addEventListener('focus', onFocus)
+        document.addEventListener('visibilitychange', onVisibility)
+        Promise.resolve().then(() => refresh(true))
+        return { refresh, stop }
+      }
+
       function renderArtifactDetail() {
+        globalThis.clearTimeout(artifactFinalExportCapabilityRefreshTimer)
+        artifactFinalExportCapabilityRefreshTimer = 0
         const artifact = selectedArtifact()
         // The detail pane loads the body into an EDITABLE field — never let it
         // hold a list excerpt, or an edit-and-save would overwrite the full body
@@ -80835,7 +81724,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         artifactTitleInput.disabled = disabled || !artifactEditMode
         artifactBodyInput.disabled = disabled || !artifactEditMode
         artifactCopyButton.disabled = disabled
-        const publicationLocked = artifactPublicationLocked(artifact)
+        let publicationLocked = artifactPublicationLocked(artifact)
         artifactPublishButton.disabled = disabled || publicationLocked
         artifactPublishButton.title = publicationLocked
           ? 'This private artifact cannot be published, shared, or sent.'
@@ -80867,25 +81756,52 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
            is confirmed — keyless/sidecar-absent degrades to a visible,
            explained no-op, never a mystery 503. */
         const deckArtifact = Boolean(artifact) && artifactIsHTMLDeck(artifact)
-        if (artifactExportPdfButton) {
-          probeRenderSidecar()
-          artifactExportPdfButton.hidden = !deckArtifact
-          artifactExportPdfButton.disabled = !deckArtifact || !renderSidecarReady
-          artifactExportPdfButton.title = deckArtifact && !renderSidecarReady
-            ? 'render sidecar not available — PDF export is disabled'
+        const finalExportCapability = artifactFinalExportCapability(artifact)
+        const finalExportAllowed = finalExportCapability.ready === true && finalExportCapability.canExport === true
+        const managedAuthoredResult = artifactPublicationManagedHint(artifact, finalExportCapability)
+        publicationLocked = publicationLocked || managedAuthoredResult
+        artifactPublishButton.disabled = disabled || publicationLocked
+        artifactPublishButton.title = managedAuthoredResult
+          ? 'This authored result is published through its review workflow.'
+          : artifactPublicationLocked(artifact)
+            ? 'This private artifact cannot be published, shared, or sent.'
             : ''
+        if (artifact && (managedAuthoredResult || finalExportCapability.ready !== true)) {
+          const refreshID = String(artifact.id || '')
+          const refreshVersion = Math.max(1, Number(artifact?.metadata?.artifactVersion || 1) || 1)
+          const exactCapability = exactArtifactFinalExportCapability(artifact)
+          const delay = exactCapability.checkedAt ? (Number(artifactFinalExportCapabilityPollMS) || 4000) : 1000
+          artifactFinalExportCapabilityRefreshTimer = globalThis.setTimeout(async () => {
+            const current = selectedArtifact()
+            if (String(current?.id || '') === refreshID && Math.max(1, Number(current?.metadata?.artifactVersion || 1) || 1) === refreshVersion) {
+              await ensureArtifactFinalExportCapability(current, { force: Boolean(exactCapability.checkedAt) })
+              const latest = selectedArtifact()
+              if (String(latest?.id || '') !== refreshID || Math.max(1, Number(latest?.metadata?.artifactVersion || 1) || 1) !== refreshVersion) return
+              renderArtifactDetail()
+            }
+          }, delay)
+        }
+        if (artifactExportPdfButton) {
+          if (deckArtifact && finalExportAllowed) probeRenderSidecar()
+          artifactExportPdfButton.hidden = !deckArtifact || !finalExportAllowed
+          artifactExportPdfButton.disabled = !deckArtifact || !finalExportAllowed || !renderSidecarReady
+          artifactExportPdfButton.title = deckArtifact && finalExportCapability.ready && !finalExportAllowed
+            ? 'final PDF export is available after rendered review'
+            : deckArtifact && finalExportAllowed && !renderSidecarReady
+              ? 'render sidecar not available — PDF export is disabled'
+              : ''
         }
         /* Share mirrors the SERVER's approval gate (status approved, or the
            admin's humanApprovedAt stamp on landed work) so the button
            explains itself — the route is the enforcement point. */
-        const shareable = artifactShareable(artifact)
+        const shareable = artifactShareable(artifact) && (!managedAuthoredResult || finalExportAllowed)
         if (artifactShareButton) {
           artifactShareButton.disabled = disabled || !shareable
           artifactShareButton.title = !disabled && !shareable
             ? 'share links need an approved artifact'
             : ''
         }
-        if (artifactSharePanel && (disabled || artifactSharePanelFor !== artifact?.id)) {
+        if (artifactSharePanel && (disabled || !shareable || artifactSharePanelFor !== artifact?.id)) {
           artifactSharePanel.hidden = true
           artifactSharePanelFor = null
         }
@@ -80895,12 +81811,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         artifactDetailStatus.textContent = artifact ? `${artifactStatusLabel(artifact)} · ${artifactTimeLabel(artifact)}` : 'no selection'
         artifactTitleInput.value = artifact?.metadata?.title || ''
-        renderArtifactRead(artifactReadPane, artifact)
+        renderArtifactRead(artifactReadPane, artifact, { allowFinalExport: finalExportAllowed })
         artifactBodyInput.value = artifact?.text || ''
         // canon publish affordance — primary when unpublished, secondary when live
-        artifactPublishButton.textContent = publicationLocked
+        artifactPublishButton.textContent = artifactPublicationLocked(artifact)
           ? 'Private · cannot publish'
-          : (published ? 'Published ✓' : 'Publish to team')
+          : managedAuthoredResult
+            ? 'Published through review'
+            : (published ? 'Published ✓' : 'Publish to team')
         artifactPublishButton.classList.toggle('btn--primary', !published && !publicationLocked)
         artifactPublishButton.classList.toggle('btn--secondary', published || publicationLocked)
       }
@@ -80961,6 +81879,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!artifact) {
           return
         }
+        if (!(await authorizeArtifactPublicationAction(artifact, { managed: artifactFinalExportCapability(artifact)?.managed === true }, 'export'))) {
+          renderArtifactDetail()
+          showToast({ text: 'This draft needs review before a final PDF can be downloaded.', kind: 'note' })
+          return
+        }
         artifactExportPdfButton.disabled = true
         setArtifactDetailStatus('queueing PDF export')
         try {
@@ -80995,7 +81918,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          renderSidecarProbe (2026-07-05 outage). */
       var artifactSharePanelFor = null
 
-      function toggleArtifactSharePanel() {
+      async function toggleArtifactSharePanel() {
         const artifact = selectedArtifact()
         if (!artifact || !artifactSharePanel) {
           return
@@ -81003,6 +81926,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!artifactSharePanel.hidden && artifactSharePanelFor === artifact.id) {
           artifactSharePanel.hidden = true
           artifactSharePanelFor = null
+          return
+        }
+        if (!(await authorizeArtifactPublicationAction(artifact, { managed: artifactFinalExportCapability(artifact)?.managed === true }, 'export'))) {
+          artifactSharePanel.hidden = true
+          artifactSharePanelFor = null
+          renderArtifactDetail()
+          showToast({ text: 'This draft needs review before it can be shared.', kind: 'note' })
           return
         }
         artifactSharePanelFor = artifact.id
@@ -81058,6 +81988,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         mintButton.addEventListener('click', async () => {
           mintButton.disabled = true
           try {
+            if (!(await authorizeArtifactPublicationAction(artifact, { managed: artifactFinalExportCapability(artifact)?.managed === true }, 'export'))) {
+              throw new Error('This draft needs review before it can be shared.')
+            }
             const response = await fetch('/artifacts/share', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -81179,6 +82112,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           renderArtifactDetail()
           return
         }
+        if (artifactPublicationManagedHint(artifact, artifactFinalExportCapability(artifact))) {
+          setArtifactDetailStatus('published through review', true)
+          showToast({ text: 'This authored result is published through its review workflow.', kind: 'note' })
+          renderArtifactDetail()
+          return
+        }
         const published = !artifactPublished(artifact)
         artifactPublishButton.disabled = true
         setArtifactDetailStatus(published ? 'publishing' : 'unpublishing')
@@ -81208,6 +82147,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } finally {
           const currentArtifact = selectedArtifact()
           artifactPublishButton.disabled = !currentArtifact || artifactPublicationLocked(currentArtifact)
+          if (!artifactPublishButton.disabled) {
+            artifactPublishButton.disabled = artifactPublicationManagedHint(currentArtifact, artifactFinalExportCapability(currentArtifact))
+          }
         }
       }
 
@@ -85166,6 +86108,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // resets to the room just left, not the office (a server-accepted
         // passcode is latched in lobbyPasscodeMemory, so the gate stays down)
         activeJoin = { roomId: leftRoomId, passcode: '', guest: false }
+        resetRoomRecordingAuthority(leftRoomId)
         renderHomeLiveNow()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
@@ -85188,6 +86131,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         lastConnectionState = state
         lastConnectionLabel = label
         applyStatusPillForTool()
+        syncRoomTranscriptionPill()
         renderPipMeeting()
         updateOfficeHome()
         if (state === 'listening') {
@@ -86047,6 +86991,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         stopGreenRoomPreview()
         clearLobbyJoinError()
         activeJoin.roomId = roomId || 'office'
+        resetRoomRecordingAuthority(activeJoin.roomId)
         // a session-verified passcode rides along so join stays one click
         activeJoin.passcode = lobbyPasscodeMemory[activeJoin.roomId] || ''
         renderLobby()
@@ -86598,48 +87543,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!roomMoreMenu) {
           return
         }
-        if (roomMoreRecordButton) {
-          roomMoreRecordButton.hidden = Boolean(guestMode)
-          roomMoreRecordButton.disabled = recordMeetingButton.disabled
-          roomMoreRecordButton.textContent = roomRecordingEnabled ? 'Pause recording' : 'Resume recording'
-        }
-        if (roomMoreInviteButton) {
-          roomMoreInviteButton.hidden = Boolean(guestMode)
-          roomMoreInviteButton.disabled = !appShell.classList.contains('is-in-room')
-        }
-        if (roomMoreSpecialistsButton) {
-          roomMoreSpecialistsButton.hidden = Boolean(guestMode) || !roomVoiceAgentControlsAvailable()
-          roomMoreSpecialistsButton.disabled = !appShell.classList.contains('is-in-room')
-        }
+        const inRoom = appShell.classList.contains('is-in-room')
         if (roomMoreChatButton) {
-          roomMoreChatButton.disabled = !appShell.classList.contains('is-in-room') || Boolean(roomChatInput?.disabled)
-        }
-        if (roomMoreRecapButton) {
-          roomMoreRecapButton.hidden = Boolean(guestMode)
-        }
-        if (roomMoreTranscriptButton) {
-          roomMoreTranscriptButton.hidden = Boolean(guestMode)
+          roomMoreChatButton.disabled = !inRoom || Boolean(roomChatInput?.disabled)
         }
         if (roomMorePeopleButton) {
-          roomMorePeopleButton.disabled = !appShell.classList.contains('is-in-room')
+          roomMorePeopleButton.disabled = !inRoom
+          roomMorePeopleButton.textContent = guestMode ? 'People' : 'People & invite'
         }
-        if (roomMoreArchiveButton) {
-          roomMoreArchiveButton.hidden = Boolean(guestMode)
-          roomMoreArchiveButton.disabled = archiveMeetingButton.disabled
-          roomMoreArchiveButton.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
-        }
-        if (roomMoreBoardButton) {
-          roomMoreBoardButton.hidden = true
-          roomMoreBoardButton.disabled = Boolean(roomBoardToggleButton?.disabled)
-          roomMoreBoardButton.textContent = roomBoardPanel?.hidden === false ? 'Close board' : 'Board'
-        }
-        if (roomMoreConsentButton) {
-          roomMoreConsentButton.hidden = Boolean(consentToggleButton?.hidden)
-          roomMoreConsentButton.disabled = Boolean(consentToggleButton?.disabled)
-        }
-        if (roomMoreWorkspaceButton) {
-          roomMoreWorkspaceButton.hidden = Boolean(guestMode)
-          roomMoreWorkspaceButton.disabled = !appShell.classList.contains('is-in-room')
+        if (roomMoreSettingsButton) {
+          roomMoreSettingsButton.textContent = guestMode ? 'Microphone privacy' : 'Room settings'
+          roomMoreSettingsButton.disabled = !inRoom || Boolean(guestMode && (consentToggleButton?.hidden || consentToggleButton?.disabled))
         }
         syncRoomScoutQuickAction()
       }
@@ -86944,10 +87858,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ...roomAgentParticipants.map(agent => agent.name),
         ])
         if (!people.length) {
-          pop.append(invitePopRow('No one else is seated yet.', 'Invite', () => {
-            closeInvitePopover()
-            inviteToggleButton.click()
-          }))
+          const row = document.createElement('div')
+          row.className = 'invite-pop__row'
+          const label = document.createElement('span')
+          label.className = 'invite-pop__label'
+          label.textContent = 'No one else is seated yet.'
+          row.append(label)
+          pop.append(row)
         } else {
           people.forEach(name => {
             const row = document.createElement('div')
@@ -86958,6 +87875,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             row.append(label)
             pop.append(row)
           })
+        }
+        if (!guestMode) {
+          pop.append(invitePopRow('Bring someone into this room', 'Invite', () => {
+            closeInvitePopover()
+            inviteToggleButton.click()
+          }))
+          if (roomVoiceAgentControlsAvailable()) {
+            pop.append(invitePopRow('Scout and specialist participants', 'Manage', () => {
+              meetingSpecialistsRestoreFocus = roomMoreToggleButton
+              closeInvitePopover()
+              openMeetingSpecialists()
+            }))
+          }
         }
         invitePopoverEl = pop
         bar.append(pop)

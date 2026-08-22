@@ -143,25 +143,28 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	for missing := range allowed {
 		t.Fatalf("private dashboard Realtime voice missing OS tool %q", missing)
 	}
-	for _, directTool := range []string{"launch_agent_thread", "initiate_goal", "delete_ticket", "post_to_channel", "create_artifact", "answer_memory_question", "start_private_grill", "set_voice_control"} {
+	for _, directTool := range []string{"open_chat_thread", "launch_agent_thread", "initiate_goal", "delete_ticket", "post_to_channel", "create_artifact", "answer_memory_question", "start_private_grill", "set_voice_control"} {
 		if privateRealtimeVoiceToolAllowed(directTool) {
 			t.Fatalf("private realtime voice must not expose direct tool %q", directTool)
 		}
 	}
-	// Conversational voice defaults to tool_choice=none so ordinary talk speaks
-	// on the first response with no route HTTP. The client flips to auto via
-	// session.update only when the user's transcription indicates an action.
-	if toolChoice := session["tool_choice"]; toolChoice != "none" {
-		t.Fatalf("tool_choice=%v, want none so ordinary talk speaks first without route HTTP", toolChoice)
+	// Every completed user utterance must enter the shared server-owned Scout
+	// router before the model may speak. do_nothing is the no-effect escape hatch
+	// for silence/noise, not a way to answer around the router.
+	if toolChoice := session["tool_choice"]; toolChoice != "required" {
+		t.Fatalf("tool_choice=%v, want required so every completed utterance routes first", toolChoice)
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{
 		"private Stride voice assistant",
 		"outside the video room",
 		"You are NOT the room's shared voice",
-		"speak your answer directly",
-		"For explicit action requests",
-		"call route_conversation_turn with the user's exact words",
+		"For every completed natural-language user utterance",
+		"call route_conversation_turn exactly once",
+		"Brain or company-memory questions",
+		"presentations, documents and reports, images",
+		"do not add an earlier answer",
+		"Speak the durable server result exactly",
 		"never choose a tool, deliverable template, model, provider",
 		"The Kanban Board is retired",
 		"Current Work and Project context is server-resolved",

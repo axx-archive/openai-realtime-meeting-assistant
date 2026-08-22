@@ -68,9 +68,11 @@ func TestIndexExportPdfButtonContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"artifactIsHTMLDeck(artifact)",
+		"artifactFinalExportCapability(artifact)",
 		"probeRenderSidecar()",
-		"!deckArtifact || !renderSidecarReady",
+		"!deckArtifact || !finalExportAllowed || !renderSidecarReady",
 		"render sidecar not available — PDF export is disabled",
+		"renderArtifactRead(artifactReadPane, artifact, { allowFinalExport: finalExportAllowed })",
 	} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("renderArtifactDetail body missing export-pdf marker %q", want)
@@ -115,7 +117,7 @@ func TestIndexArtifactAssetsViewerContract(t *testing.T) {
 		t.Error("artifactBlobUrl must target the session-gated /artifacts/blob route with an encoded ref")
 	}
 
-	assets := functionBody(html, "function renderArtifactAssets(container, entry)")
+	assets := functionBodyAfterSignature(html, "function renderArtifactAssets(container, entry, options = {})")
 	if assets == "" {
 		t.Fatal("could not extract renderArtifactAssets body")
 	}
@@ -138,7 +140,7 @@ func TestIndexArtifactAssetsViewerContract(t *testing.T) {
 	if read == "" {
 		t.Fatal("could not extract renderArtifactRead body")
 	}
-	if strings.Count(read, "renderArtifactAssets(container, entry)") < 2 {
+	if strings.Count(read, "renderArtifactAssets(container, entry, options)") < 2 {
 		t.Error("renderArtifactRead must list assets on both the deck branch and the safe path")
 	}
 }

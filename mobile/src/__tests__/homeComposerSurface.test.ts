@@ -16,8 +16,9 @@ test('home is conversation-first through voice or direct text with no picker', (
   assert.match(canvas, /openingAttemptRef/);
   const sendOpening = canvas.slice(canvas.indexOf('const sendOpening'), canvas.indexOf('const voiceNotice'));
   assert.doesNotMatch(sendOpening, /realtime\.stop/);
-  // Greeting removed per continuity-first design (STRIDE mobile E2E evolution)
-  assert.doesNotMatch(canvas, /styles\.greeting/);
+  assert.match(canvas, /personalizedHomeGreeting\(user\?\.name\)/);
+  assert.match(canvas, /styles\.greeting/);
+  assert.match(canvas, /What can Scout help move forward\?/);
   assert.match(canvas, /maxFontSizeMultiplier=\{1\.6\}[\s\S]*?style=\{styles\.composerInput\}/);
   assert.match(canvas, /<Text maxFontSizeMultiplier=\{1\} style=\{styles\.composerSendGlyph\}>/);
   assert.doesNotMatch(canvas, /toolTemplate|deliverable picker/);

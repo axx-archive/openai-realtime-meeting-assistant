@@ -61,7 +61,7 @@ export function packagingStudioPhase(work?: WorkPresentationInput | null): WorkP
   const stage = String(work?.currentStage ?? '').trim().toLowerCase();
   const processId = String(work?.processId ?? '').trim().toLowerCase();
   const stagePhase = packagingStudioCustomerPhases.find((phase) => phase.stages.includes(stage));
-  if (processId !== 'packaging_studio') return null;
+  if (!processId.startsWith('packaging_studio')) return null;
   const percent = canonicalWorkPercent(work);
   const phase = stagePhase ?? [...packagingStudioCustomerPhases].reverse().find((candidate) => percent >= candidate.startsAtPercent) ?? packagingStudioCustomerPhases[0];
   const index = packagingStudioCustomerPhases.indexOf(phase);
@@ -84,7 +84,7 @@ export function workFamilyLabel(work?: WorkPresentationInput | null): string {
   // Only use mode, never infer from query (the prompt)
   const mode = String(work?.mode ?? '').toLowerCase();
   const processId = String(work?.processId ?? '').toLowerCase();
-  if (processId === 'packaging_studio') return 'Presentation';
+  if (processId.startsWith('packaging_studio')) return 'Presentation';
   if (/schedul|recurring/u.test(mode)) return 'Scheduled work';
   if (/revis|redline|translat|regenerat/u.test(mode)) return 'Revision';
   if (/mixed|package/u.test(mode)) return 'Mixed package';

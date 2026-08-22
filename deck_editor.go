@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -177,7 +178,7 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "a valid deck name and Files destination are required")
 		return
 	}
-	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite, ACLCreateChild)
 	if !ok || !artifactIsDeckEditorDocument(prior) {
 		writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 		return
@@ -194,22 +195,54 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	copyEntry, err := createDeckEditorCopy(user, prior, payload.Deck, payload.Title)
-	if err != nil {
-		log.Errorf("Deck copy create failed: %v", err)
-		writeAuthError(w, http.StatusInternalServerError, "deck copy could not be created")
+	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+	var copyEntry meetingMemoryEntry
+	var file assistantFileRecord
+	var fileErr error
+	var internalCopyErr bool
+	sourceEntry := prior
+	guardErr := kanbanApp.withFinalExportAdmissionOperation(prior, func(current meetingMemoryEntry) error {
+		sourceEntry = current
+		if artifactVersion(current) != payload.ExpectedVersion {
+			return fmt.Errorf("the deck changed; reopen the current revision")
+		}
+		if validateErr := validateDeckDocument(payload.Deck, artifactAssetRefSet(current)); validateErr != nil {
+			return validateErr
+		}
+		if strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != "" {
+			currentDeck, _, _, loadErr := loadDeckDocument(current)
+			if loadErr != nil || !reflect.DeepEqual(payload.Deck, currentDeck) {
+				return fmt.Errorf("review the current authored deck before saving an independent copy")
+			}
+		}
+		var createErr error
+		copyEntry, createErr = createDeckEditorCopy(user, current, payload.Deck, payload.Title)
+		if createErr != nil {
+			internalCopyErr = true
+			return createErr
+		}
+		file, fileErr = kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, normalizedFileName, actor)
+		return nil
+	})
+	if guardErr != nil {
+		if copyEntry.ID != "" {
+			rollbackAuthoredIndependentCopy(kanbanApp, copyEntry.ID)
+		}
+		if internalCopyErr {
+			log.Errorf("Deck copy create failed: %v", guardErr)
+			writeAuthError(w, http.StatusInternalServerError, "deck copy could not be created")
+		} else {
+			writeAuthError(w, http.StatusConflict, guardErr.Error())
+		}
 		return
 	}
-	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
-	file, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(copyEntry, payload.FolderID, normalizedFileName, actor)
-	if err != nil {
-		if fileSaveErrorStatus(err) == http.StatusInternalServerError {
-			log.Errorf("Deck copy Files save failed: %v", err)
+	if fileErr != nil {
+		if fileSaveErrorStatus(fileErr) == http.StatusInternalServerError {
+			log.Errorf("Deck copy Files save failed: %v", fileErr)
 		}
 		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 		storedView := deckArtifactViewFromEntry(stored)
-		writeAuthJSON(w, fileSaveErrorStatus(err), map[string]any{
+		writeAuthJSON(w, fileSaveErrorStatus(fileErr), map[string]any{
 			"ok": false, "partialSuccess": true,
 			"error":    "deck copy was created, but Files filing failed",
 			"artifact": storedView, "deck": payload.Deck,
@@ -218,7 +251,7 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 				"artifactVersion": artifactVersion(stored), "contentSaved": true,
 				"filingCompleted": false, "savedToFiles": storedView.SavedToFiles,
 				"branchedFromArtifactVersion": payload.ExpectedVersion,
-				"sourceCurrentVersion":        artifactVersion(prior), "staleBranch": false,
+				"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": false,
 				"retryable": true, "retryUrl": "/assistant/files/save", "retryMethod": http.MethodPost,
 				"fileName": normalizedFileName, "folderId": payload.FolderID,
 			},
@@ -233,7 +266,7 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
 			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
 			"branchedFromArtifactVersion": payload.ExpectedVersion,
-			"sourceCurrentVersion":        artifactVersion(prior), "staleBranch": false,
+			"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": false,
 		},
 	})
 }
@@ -342,9 +375,8 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		_, aclCanWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
 		canWrite := aclCanWrite && importQuality != "approximate"
-		qualityState := kanbanApp.authoredResultQualityForArtifact(artifact)
-		managedAuthoredResult := qualityState != ""
-		admitted := !managedAuthoredResult || qualityState == authoredResultQualityAdmitted
+		qualityState, admitted, stable := kanbanApp.authoredResultFinalExportState(artifact)
+		admitted = stable && admitted
 		response := map[string]any{
 			"ok": true, "artifact": deckArtifactViewFromEntry(artifact), "deck": deck, "imported": imported, "importQuality": importQuality, "canWrite": canWrite,
 			"qualityState": qualityState, "canPresent": admitted, "canExport": admitted,
@@ -408,8 +440,8 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "deck could not be saved")
 		return
 	}
-	qualityState := kanbanApp.authoredResultQualityForArtifact(updated)
-	canPublish := qualityState == "" || qualityState == authoredResultQualityAdmitted
+	qualityState, canPublish, stable := kanbanApp.authoredResultFinalExportState(updated)
+	canPublish = stable && canPublish
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": deckArtifactViewFromEntry(updated), "deck": payload.Deck,
 		"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish,

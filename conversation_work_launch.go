@@ -132,7 +132,7 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 	if sourceErr != nil || currentSourceThread.ArchivedAt != "" || scoutChatThreadVisibility(currentSourceThread) != scoutChatVisibilityPrivate {
 		return nil, fmt.Errorf("the source conversation changed or is no longer available")
 	}
-	_, sourceBinding, sourceErr := scoutChatSourceWindow(currentSourceThread, userMessage.ID)
+	_, sourceBinding, sourceErr := goalRouteConversationSourceWindow(currentSourceThread, userMessage.ID)
 	if sourceErr != nil {
 		return nil, fmt.Errorf("the source conversation could not be bound to this work")
 	}

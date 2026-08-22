@@ -298,6 +298,12 @@ func deckPPTXExportHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	current, currentOK := authorizedArtifactByID(r.Context(), user, ACLExport, artifact.ID)
+	if !currentOK || artifactVersion(current) != artifactVersion(artifact) || strings.TrimSpace(current.Metadata[deckSceneRefMetadataKey]) != currentRef ||
+		kanbanApp.requireFinalExportAdmission(current) != nil {
+		writeAuthError(w, http.StatusConflict, "the deck or its review changed; reopen it before downloading PowerPoint")
+		return
+	}
 	filename := deckPPTXFilename(strings.TrimSpace(artifact.Metadata["title"]))
 	w.Header().Set("Content-Type", deckPPTXContentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))

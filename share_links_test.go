@@ -124,6 +124,85 @@ func TestShareCapabilityStoresOnlyHashAndBodyEditInvalidatesRevision(t *testing.
 	}
 }
 
+func TestShareLinkManagementReportsParentAdmissionRevocationWithoutChangingStoredStatus(t *testing.T) {
+	setupAuthTestEnv(t)
+	fixture := seedDocumentReportQualityFixture(t, 2)
+	if _, changed, err := fixture.app.memory.updateOSArtifactMetadata(fixture.report.ID, map[string]string{"status": artifactStatusApproved}); err != nil || !changed {
+		t.Fatalf("approve report before rendered review: changed=%t err=%v", changed, err)
+	}
+	attachFreshDocumentRender(t, &fixture)
+	if _, changed, err := fixture.app.memory.updateOSArtifactMetadata(fixture.report.ID, map[string]string{"status": artifactStatusApproved}); err != nil || !changed {
+		t.Fatalf("approve exact rendered report: changed=%t err=%v", changed, err)
+	}
+	fixture.fileJury(t, 9.4, 2, "KEEP")
+	fileAdmittedPublishedDocument(t, &fixture)
+
+	previousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	member := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	link := mintShareLinkForTest(t, fixture.report.ID, member)
+	if link["status"] != shareLinkStatusActive || link["storedStatus"] != shareLinkStatusActive ||
+		link["effectiveStatus"] != shareLinkStatusActive || link["available"] != true {
+		t.Fatalf("fresh management payload=%v, want stored/effective active", link)
+	}
+	publicURL := fmt.Sprint(link["url"])
+
+	parent := mustArtifact(t, fixture.app, fixture.parentID)
+	blockedPlan := *fixture.plan
+	blockedPlan.State = goalStateBlocked
+	blockedRaw, err := json.Marshal(blockedPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, changed, err := fixture.app.updateOSArtifactWithMetadata(parent.ID, "", parent.Text, "AJ", map[string]string{"goalPlan": string(blockedRaw)}); err != nil || !changed {
+		t.Fatalf("block parent only: changed=%t err=%v", changed, err)
+	}
+	childAfter, _ := fixture.app.osArtifactByID(fixture.report.ID)
+	if artifactVersion(childAfter) != artifactVersion(fixture.report) {
+		t.Fatalf("parent-only change mutated child revision: before=%d after=%d", artifactVersion(fixture.report), artifactVersion(childAfter))
+	}
+
+	listed := shareLinkRequest(t, http.MethodGet, "/artifacts/share?artifactId="+fixture.report.ID, "", member)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	links, _ := decodeJSON(t, listed)["links"].([]any)
+	if len(links) != 1 {
+		t.Fatalf("links=%v, want one historical capability", links)
+	}
+	entry, _ := links[0].(map[string]any)
+	if entry["status"] != shareLinkStatusActive || entry["storedStatus"] != shareLinkStatusActive ||
+		entry["effectiveStatus"] != shareLinkEffectiveStatusUnavailable || entry["available"] != false || entry["url"] != nil {
+		t.Fatalf("revoked admission payload=%v, want stored active/effective unavailable/no URL", entry)
+	}
+	if opened := shareLinkRequest(t, http.MethodGet, publicURL, "", nil); opened.Code != http.StatusNotFound {
+		t.Fatalf("parent-revoked share status=%d body=%s, want 404", opened.Code, opened.Body.String())
+	}
+}
+
+func TestShareLinkManagementFailsClosedAfterACLGenerationChanges(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	artifact := seedShareArtifact(t, artifactStatusApproved, "approved ACL-bound report", map[string]string{"aclVersion": "1"})
+	link := mintShareLinkForTest(t, artifact.ID, member)
+	publicURL := fmt.Sprint(link["url"])
+	if _, changed, err := kanbanApp.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{"aclVersion": "2"}); err != nil || !changed {
+		t.Fatalf("bump ACL generation: changed=%t err=%v", changed, err)
+	}
+	listed := shareLinkRequest(t, http.MethodGet, "/artifacts/share?artifactId="+artifact.ID, "", member)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	links, _ := decodeJSON(t, listed)["links"].([]any)
+	entry, _ := links[0].(map[string]any)
+	if entry["storedStatus"] != shareLinkStatusActive || entry["effectiveStatus"] != shareLinkEffectiveStatusUnavailable || entry["available"] != false {
+		t.Fatalf("ACL-revoked payload=%v, want stored active/effective unavailable", entry)
+	}
+	if opened := shareLinkRequest(t, http.MethodGet, publicURL, "", nil); opened.Code != http.StatusNotFound {
+		t.Fatalf("ACL-revoked share status=%d, want 404", opened.Code)
+	}
+}
+
 func TestLegacyPlaintextShareCapabilityFailsClosed(t *testing.T) {
 	shareLinkTestEnv(t)
 	now := time.Now().UTC()

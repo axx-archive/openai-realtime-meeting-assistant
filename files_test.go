@@ -21,6 +21,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -563,7 +564,7 @@ func TestAssistantFilesRequireExplicitChatAttachmentSave(t *testing.T) {
 	}
 
 	// A reader can explicitly promote the public-channel attachment, choose a
-	// Drive name, and get an independently owned first-class file row.
+	// Drive name, and get a source-bound first-class file row.
 	publicSourceID := fmt.Sprintf("%s:%s:%d", channel.ID, "msg-channel-1", 0)
 	saved, err := app.saveChatAttachmentToFiles(aj, publicSourceID, "", "Country Golf report.pdf")
 	if err != nil {
@@ -578,6 +579,12 @@ func TestAssistantFilesRequireExplicitChatAttachmentSave(t *testing.T) {
 	}
 	if _, _, err := getBlob(publicRef); err != nil {
 		t.Fatalf("shared blob missing after promotion: %v", err)
+	}
+	savedEntry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, saved.ID)
+	if !found || savedEntry.Metadata["sourceChatFileId"] != publicSourceID ||
+		savedEntry.Metadata["sourceAttachmentId"] != publicFile.SourceID ||
+		savedEntry.Metadata["sourceFileRevision"] != publicFile.SourceRevision {
+		t.Fatalf("saved provenance=%+v, want exact committed chat source", savedEntry.Metadata)
 	}
 
 	// Readability remains the source authority: a teammate cannot promote AJ's
@@ -612,6 +619,252 @@ func TestAssistantFilesRequireExplicitChatAttachmentSave(t *testing.T) {
 	}
 	if notesFound {
 		t.Fatal("a later channel attachment must also stay out of Drive until explicitly saved")
+	}
+}
+
+func TestSaveChatAttachmentToFilesRejectsRevocationAfterInitialAuthorization(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	owner := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(owner.Email, owner.Name, "Promotion race", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := putBlob([]byte("promotion race bytes"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservationID := "files-promotion-race-reservation"
+	file := reserveTestAttachment(t, app, owner, thread, scoutChatFileAttachment{Name: "race.pdf", Kind: "pdf", Ref: ref}, reservationID)
+	const messageID = "files-promotion-race-message"
+	if _, err := app.commitScoutChatThreadMessages(owner.Email, thread.ID, scoutChatMessageRecord{
+		ID: messageID, Kind: "message", Role: "user", Text: "save this", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorName: owner.Name, AuthorEmail: owner.Email, Files: []scoutChatFileAttachment{file},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	previousProbe := saveChatAttachmentToFilesAfterAuthorizationProbe
+	t.Cleanup(func() { saveChatAttachmentToFilesAfterAuthorizationProbe = previousProbe })
+	var revokeErr error
+	probeCalls := 0
+	saveChatAttachmentToFilesAfterAuthorizationProbe = func() {
+		probeCalls++
+		revokeErr = app.revokeAttachmentSource(file.SourceID)
+		saveChatAttachmentToFilesAfterAuthorizationProbe = nil
+	}
+	before := len(app.memory.entriesOfKind(meetingMemoryKindFile, 0))
+	_, err = app.saveChatAttachmentToFiles(owner, fmt.Sprintf("%s:%s:0", thread.ID, messageID), "", "race copy.pdf")
+	if !errors.Is(err, errFileSaveSourceNotFound) {
+		t.Fatalf("save err=%v, want source not found after revocation", err)
+	}
+	if revokeErr != nil || probeCalls != 1 {
+		t.Fatalf("revocation err=%v probeCalls=%d", revokeErr, probeCalls)
+	}
+	if after := len(app.memory.entriesOfKind(meetingMemoryKindFile, 0)); after != before {
+		t.Fatalf("Files rows=%d before/%d after; revoked promotion must append nothing", before, after)
+	}
+}
+
+func TestPromotedChatFileReadsRemainSourceBoundWhileDirectUploadsDoNot(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	owner := accountStore().findUser("aj@shareability.com")
+	cookies := loginAs(t, owner.Email, "B0NFIRE!")
+
+	thread, err := kanbanApp.createScoutChatThread(owner.Email, owner.Name, "Promotion authority", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotedRef, err := putBlob([]byte("source-bound report"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservationID := "files-source-bound-reservation"
+	source := reserveTestAttachment(t, kanbanApp, owner, thread, scoutChatFileAttachment{Name: "bound.pdf", Kind: "pdf", Ref: promotedRef, Text: "BOUND-SOURCE-CONTEXT"}, reservationID)
+	const messageID = "files-source-bound-message"
+	if _, err := kanbanApp.commitScoutChatThreadMessages(owner.Email, thread.ID, scoutChatMessageRecord{
+		ID: messageID, Kind: "message", Role: "user", Text: "source", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorName: owner.Name, AuthorEmail: owner.Email, Files: []scoutChatFileAttachment{source},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sourceFileID := fmt.Sprintf("%s:%s:0", thread.ID, messageID)
+	promoted, err := kanbanApp.saveChatAttachmentToFiles(owner, sourceFileID, "", "promoted.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotedEntry, found := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, promoted.ID)
+	if !found {
+		t.Fatal("promoted Files row missing")
+	}
+
+	// Rows written before sourceAttachmentId shipped still bind to the exact
+	// historical thread/message/index, ref, and source revision.
+	legacyMetadata := make(map[string]string, len(promotedEntry.Metadata))
+	for key, value := range promotedEntry.Metadata {
+		if key != "sourceAttachmentId" {
+			legacyMetadata[key] = value
+		}
+	}
+	legacy, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, "file-legacy-promoted", promotedEntry.Text, legacyMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, allowed := kanbanApp.promotedChatFileSource(context.Background(), owner, legacy); !allowed {
+		t.Fatal("historical promoted provenance was denied while its exact source remained current")
+	}
+
+	directRef, err := putBlob([]byte("independent direct upload"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directMeta, err := blobStatForRef(directRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, "file-direct-independent", "DIRECT-UPLOAD-CONTEXT", map[string]string{
+		"name": "direct.pdf", "blobRef": directRef, "mime": directMeta.Mime, "size": strconv.FormatInt(directMeta.Size, 10),
+		"uploaderEmail": owner.Email, "uploaderName": owner.Name, "origin": "files", "brainStatus": fileBrainStatusIngested,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	embeddingIDs := map[string]bool{}
+	for _, entry := range kanbanApp.memory.eligibleEmbeddingEntriesSnapshot() {
+		embeddingIDs[entry.ID] = true
+	}
+	if embeddingIDs[promoted.ID] || embeddingIDs[legacy.ID] || !embeddingIDs[direct.ID] {
+		t.Fatalf("embedding corpus ids=%v; promoted copies must stay request-authorized while direct uploads remain eligible", embeddingIDs)
+	}
+
+	requestBlob := func(ref string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/artifacts/blob?ref="+ref, nil)
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		artifactBlobHandler(recorder, request)
+		return recorder
+	}
+	if got := requestBlob(promotedRef); got.Code != http.StatusOK {
+		t.Fatalf("authorized promoted blob status=%d body=%s", got.Code, got.Body.String())
+	}
+	if _, _, _, ok := kanbanApp.assistantFileAttachmentSource(context.Background(), owner, promoted.ID); !ok {
+		t.Fatal("authorized promoted file attachment source denied")
+	}
+	if _, ok := kanbanApp.recallStoreForPrincipal(context.Background(), recallPrincipalForUser(owner)).entryByID(promoted.ID); !ok {
+		t.Fatal("authorized promoted derived text missing from recall")
+	}
+
+	if err := kanbanApp.revokeAttachmentSource(source.SourceID); err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]bool{}
+	for _, row := range kanbanApp.assistantFilesForUser(owner.Email) {
+		visible[row.ID] = true
+	}
+	if visible[promoted.ID] || visible[legacy.ID] || !visible[direct.ID] {
+		t.Fatalf("post-revocation visible rows=%v; promoted rows must disappear and direct upload must remain", visible)
+	}
+	if _, _, _, ok := kanbanApp.assistantFileAttachmentSource(context.Background(), owner, promoted.ID); ok {
+		t.Fatal("revoked promoted file remained available to assistant attachment reads")
+	}
+	if _, _, _, allowed := kanbanApp.promotedChatFileSource(context.Background(), owner, legacy); allowed {
+		t.Fatal("revoked source authorized a historical promoted row")
+	}
+	if _, ok := kanbanApp.recallStoreForPrincipal(context.Background(), recallPrincipalForUser(owner)).entryByID(promoted.ID); ok {
+		t.Fatal("revoked promoted derived text reached assistant recall")
+	}
+	if got := requestBlob(promotedRef); got.Code != http.StatusNotFound {
+		t.Fatalf("revoked promoted blob status=%d body=%s, want 404", got.Code, got.Body.String())
+	}
+	if got := requestBlob(directRef); got.Code != http.StatusOK || got.Body.String() != "independent direct upload" {
+		t.Fatalf("direct upload status=%d body=%q, want unchanged independent read", got.Code, got.Body.String())
+	}
+}
+
+func TestPromotedManagedPDFRevalidatesCurrentFinalExportAdmission(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	fixture := seedDocumentReportQualityFixture(t, documentReportMinimumJurySeats)
+	fixture.fileJury(t, 9.4, documentReportMinimumJurySeats, "KEEP")
+	fileAdmittedPublishedDocument(t, &fixture)
+	if _, err := fixture.app.saveDeliverableToFiles(fixture.report.ID, "", "AJ"); err != nil {
+		t.Fatalf("save admitted report to Files: %v", err)
+	}
+	fixture.report = mustArtifact(t, fixture.app, fixture.report.ID)
+	previousApp := kanbanApp
+	kanbanApp = fixture.app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	owner := accountStore().findUser("aj@shareability.com")
+	cookies := loginAs(t, owner.Email, "B0NFIRE!")
+	thread, err := kanbanApp.createScoutChatThread(owner.Email, owner.Name, "Managed PDF promotion", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := postAttachmentFromFileForTest(t, cookies, thread.ID, fixture.report.ID)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("attach admitted report status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	source := decodeAttachmentFromFileForTest(t, recorder)
+	if source.Mime != "application/pdf" {
+		t.Fatalf("attached source mime=%q, want admitted PDF", source.Mime)
+	}
+	const reservationID = "managed-pdf-promotion-reservation"
+	cleaned, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), owner, thread, []scoutChatFileAttachment{source}, reservationID)
+	if err != nil || len(cleaned) != 1 {
+		t.Fatalf("sanitize admitted report: files=%+v err=%v", cleaned, err)
+	}
+	const messageID = "managed-pdf-promotion-message"
+	if _, err := kanbanApp.commitScoutChatThreadMessages(owner.Email, thread.ID, scoutChatMessageRecord{
+		ID: messageID, Kind: "message", Role: "user", Text: "file this", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorName: owner.Name, AuthorEmail: owner.Email, Files: cleaned,
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := kanbanApp.saveChatAttachmentToFiles(owner, fmt.Sprintf("%s:%s:0", thread.ID, messageID), "", "admitted-report.pdf")
+	if err != nil {
+		t.Fatalf("promote admitted report: %v", err)
+	}
+	if _, _, _, ok := kanbanApp.assistantFileAttachmentSource(context.Background(), owner, promoted.ID); !ok {
+		t.Fatal("freshly admitted managed PDF promotion was denied")
+	}
+
+	// Move only the jury evidence after promotion. The artifact and immutable PDF
+	// remain present, but stable final-export admission is no longer current.
+	juryStage := fixture.plan.subtaskByID(documentReportJuryStageID)
+	if juryStage == nil || juryStage.ArtifactID == "" {
+		t.Fatal("document jury stage missing")
+	}
+	juryRecord := mustArtifact(t, kanbanApp, juryStage.ArtifactID)
+	jury := mustArtifact(t, kanbanApp, juryRecord.Metadata["documentJuryArtifactId"])
+	if _, _, err := kanbanApp.updateOSArtifact(jury.ID, jury.Metadata["title"], jury.Text+"\nADMISSION DRIFT", owner.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, ok := kanbanApp.assistantFileAttachmentSource(context.Background(), owner, promoted.ID); ok {
+		t.Fatal("promoted managed PDF survived stale final-export admission")
+	}
+	for _, row := range kanbanApp.assistantFilesForUser(owner.Email) {
+		if row.ID == promoted.ID {
+			t.Fatal("stale managed PDF promotion remained visible in Files")
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/artifacts/blob?ref="+source.Ref, nil)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	blobResponse := httptest.NewRecorder()
+	artifactBlobHandler(blobResponse, request)
+	if blobResponse.Code != http.StatusNotFound || blobResponse.Header().Get("ETag") != "" {
+		t.Fatalf("stale promoted managed PDF status=%d headers=%v body=%s", blobResponse.Code, blobResponse.Header(), blobResponse.Body.String())
 	}
 }
 

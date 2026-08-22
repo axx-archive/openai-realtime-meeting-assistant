@@ -187,7 +187,7 @@ test('deep destinations preserve their owning top-level context', () => {
 });
 
 test('focused flows hide compact chrome while iPad threads may retain only the sidebar', () => {
-  for (const route of ['Login', 'Thread', 'Room', 'CreateRoom', 'NewConversation', 'OSWeb'] as const) {
+  for (const route of ['Login', 'Thread', 'Room', 'CreateRoom', 'NewConversation', 'OSWeb', 'DeckViewer'] as const) {
     assert.equal(nativeShellVisibleForRoute(route), false, route);
   }
   assert.equal(nativeShellVisibleForRoute('Canvas'), true);
@@ -200,7 +200,8 @@ test('focused flows hide compact chrome while iPad threads may retain only the s
   assert.match(root, /isWorkstationWidth && \(activeRoute === 'NewConversation' \|\| activeRoute === 'CreateRoom'\)/);
   assert.match(root, /WORKSTATION_MIN_WIDTH = 1024/);
   assert.match(root, /presentation: 'card'/);
-  assert.doesNotMatch(root, /presentation: 'fullScreenModal'/);
+  assert.match(root, /name="DeckViewer"[\s\S]*?presentation: 'fullScreenModal'/);
+  assert.equal((root.match(/presentation: 'fullScreenModal'/g) ?? []).length, 1);
 });
 
 test('compact and iPad compositions are accessible, touch-safe, and resize-driven', () => {

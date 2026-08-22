@@ -146,6 +146,13 @@ import {
 } from "../artifacts/artifactDisposition";
 import { createConversationOperationId } from "../conversations/newConversation";
 import { RegenerateWorkSheet } from "../artifacts/RegenerateWorkSheet";
+import { nativeTextArtifactIsRenderable } from "../artifacts/nativeDeckViewer";
+import { WorkActivitySheet } from "../messaging/WorkActivitySheet";
+import {
+  compactThreadWorkMessages,
+  isScoutWorkMessage,
+  latestScoutWorkMessage,
+} from "../messaging/workTimeline";
 import { PrivateRiffContextSheet } from "../messaging/PrivateRiffContextSheet";
 import { PrivateRiffShareSheet } from "../messaging/PrivateRiffShareSheet";
 import {
@@ -522,6 +529,8 @@ export function ThreadScreen({ route, navigation }: Props) {
   } | null>(null);
   const expandedMessageReturnFocusHandleRef = useRef<number | null>(null);
   const activeWorkTriggerRef = useRef<View>(null);
+  const [workActivityMessage, setWorkActivityMessage] = useState<ScoutMessage | null>(null);
+  const [workActivityReturnFocusHandle, setWorkActivityReturnFocusHandle] = useState<number | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([
     { name: "Scout", kind: "scout" },
   ]);
@@ -623,15 +632,24 @@ export function ThreadScreen({ route, navigation }: Props) {
   );
   const replyTopologyRef = useRef(replyTopology);
   replyTopologyRef.current = replyTopology;
-  const feedMessages = replyTopology.feedMessages;
+  const transcriptFeedMessages = replyTopology.feedMessages;
+  const feedMessages = useMemo(
+    () => compactThreadWorkMessages(transcriptFeedMessages),
+    [transcriptFeedMessages],
+  );
   const feedMessagesRef = useRef<ScoutMessage[]>([]);
+  // FlashList indices must always use the compact rows actually mounted.
+  // Hidden process records remain reachable through the native Activity sheet.
   feedMessagesRef.current = feedMessages;
   const threadContextRoot = threadContextRootID
     ? (replyTopology.rootFor(threadContextRootID) ?? null)
     : null;
-  const threadContextReplies = threadContextRoot
-    ? replyTopology.repliesFor(threadContextRoot)
-    : [];
+  const threadContextReplies = useMemo(
+    () => threadContextRoot
+      ? compactThreadWorkMessages(replyTopology.repliesFor(threadContextRoot))
+      : [],
+    [replyTopology, threadContextRoot],
+  );
   // Starts false while the thread loads. A normal open flips it true once the
   // bottom-rendered list is on screen; a targeted message link stays false
   // until the viewer actually reaches the latest message.
@@ -819,7 +837,14 @@ export function ThreadScreen({ route, navigation }: Props) {
     const index = feedMessagesRef.current.findIndex(
       (candidate) => String(candidate.id) === messageId,
     );
-    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
+    if (index >= 0) {
+      listRef.current?.scrollToIndex({ index, animated: true });
+      return;
+    }
+    if (isScoutWorkMessage(message)) {
+      setWorkActivityReturnFocusHandle(null);
+      setWorkActivityMessage(message);
+    }
   }, []);
 
 	const openAnswerSource = useCallback((source: ScoutAnswerSource) => {
@@ -1288,7 +1313,20 @@ export function ThreadScreen({ route, navigation }: Props) {
       for (const candidate of raw) {
         if (!candidate || typeof candidate !== "object") continue;
         const action = candidate as Record<string, unknown>;
-        if (String(action.type ?? "").trim() !== "open_tool") continue;
+        const actionType = String(action.type ?? "").trim();
+        if (actionType === "open_chat_thread") {
+          const threadId = String(action.threadId ?? "").trim();
+          const title = String(action.title ?? "").trim();
+          const visibility = String(action.visibility ?? "").trim();
+          if (threadId) {
+            navigation.navigate("Thread", {
+              threadId,
+              title: visibility === "public" ? `#${title.replace(/^#/, "")}` : title || "Private chat",
+            });
+          }
+          continue;
+        }
+        if (actionType !== "open_tool") continue;
         const tool = String(action.tool ?? "").trim();
         if (tool === "chat")
           navigation.navigate("Chat");
@@ -1338,10 +1376,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     [feedMessages],
   );
 
-  const activeWorkMessage = useMemo(
-    () => [...messages].reverse().find(workThreadIsActive) ?? null,
-    [messages],
+  const currentWorkMessage = useMemo(
+    () => latestScoutWorkMessage(visibleMessages),
+    [visibleMessages],
   );
+  const showCurrentWorkActivity = Boolean(currentWorkMessage);
   const latestRiffAnchor = useMemo(
     () => [...messages].reverse().find((message) => Boolean(String(message.id ?? "").trim())) ?? null,
     [messages],
@@ -1379,7 +1418,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         const unreadCount = isBoundary ? feedMessages.length - boundary : 0;
         return {
           message,
-          threadReplies: replyTopology.repliesFor(message).map((reply) => {
+          threadReplies: compactThreadWorkMessages(replyTopology.repliesFor(message)).map((reply) => {
             const replyParticipant = participantByEmail.get(
               String(reply.authorEmail ?? "")
                 .trim()
@@ -2708,29 +2747,90 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openWorkArtifact = useCallback(
     async (message: ScoutMessage, returnFocusHandle?: number) => {
       expandedMessageReturnFocusHandleRef.current = returnFocusHandle ?? null;
-      const resultArtifactId = String(message.thread?.resultArtifactId ?? '').trim()
+      const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+      const resultArtifactId = explicitResultArtifactId
         || String(message.thread?.artifactId ?? '').trim();
       const resultArtifactType = String(message.thread?.resultArtifactType ?? '').toLowerCase();
       const resultStudioKind = artifactStudioKind(resultArtifactType)
         ?? artifactStudioKind(message.thread?.mode);
+      const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
+      const managedAuthoredResult = Boolean(explicitResultArtifactId)
+        && (String(message.thread?.mode ?? '').trim().toLowerCase() === 'goal' || qualityState !== '');
+      const admittedPresentation = qualityState === 'admitted'
+        && message.thread?.resultCanPresent === true;
       if (resultArtifactId && resultStudioKind) {
-        const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
-        const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
-        const managedAuthoredResult = Boolean(explicitResultArtifactId)
-          && (String(message.thread?.mode ?? '').trim().toLowerCase() === 'goal' || qualityState !== '');
-        const admittedPresentation = qualityState === 'admitted'
-          && message.thread?.resultCanPresent === true;
         if (resultStudioKind === 'deck' && managedAuthoredResult && !admittedPresentation && message.thread?.resultCanEdit !== true) {
           setError('This draft needs review before it can be presented.');
+          return;
+        }
+        if (resultStudioKind === 'deck') {
+          if (managedAuthoredResult && !admittedPresentation) {
+            setError('This draft needs a fresh review. Deck editing is available on desktop.');
+            return;
+          }
+          navigation.navigate('DeckViewer', {
+            artifactId: resultArtifactId,
+            title: String(message.thread?.resultTitle ?? 'Presentation').trim() || 'Presentation',
+            desktopEditable: message.thread?.resultCanEdit === true,
+          });
           return;
         }
         navigation.navigate('OSWeb', {
           path: artifactStudioPath(resultArtifactId, resultStudioKind, message.thread?.resultCanEdit === true ? 'edit' : 'present'),
           title: String(
             message.thread?.resultTitle
-              ?? (resultStudioKind === 'deck' ? 'Presentation' : 'Document'),
-          ).trim() || (resultStudioKind === 'deck' ? 'Presentation' : 'Document'),
+              ?? 'Document',
+          ).trim() || 'Document',
         });
+        return;
+      }
+      // Explicit non-Studio results still open the exact final artifact. If an
+      // older server omitted its result type, inspect authoritative metadata
+      // before rendering so an untyped deck can never fall through as JSON.
+      if (explicitResultArtifactId && sessionToken) {
+        try {
+          const response = await api.artifact(sessionToken, explicitResultArtifactId);
+          const artifact = response.artifacts[0];
+          const discoveredKind = artifactStudioKind(
+            artifact?.metadata?.type ?? artifact?.metadata?.artifactType,
+          );
+          const title = String(
+            message.thread?.resultTitle
+              ?? artifact?.metadata?.title
+              ?? 'Deliverable',
+          ).trim() || 'Deliverable';
+          if (discoveredKind === 'deck') {
+            if (managedAuthoredResult && !admittedPresentation) {
+              setError('This draft needs a fresh review. Deck editing is available on desktop.');
+              return;
+            }
+            navigation.navigate('DeckViewer', {
+              artifactId: explicitResultArtifactId,
+              title,
+              desktopEditable: message.thread?.resultCanEdit === true,
+            });
+            return;
+          }
+          if (discoveredKind === 'document') {
+            navigation.navigate('OSWeb', {
+              path: artifactStudioPath(
+                explicitResultArtifactId,
+                discoveredKind,
+                message.thread?.resultCanEdit === true ? 'edit' : 'present',
+              ),
+              title,
+            });
+            return;
+          }
+          const text = String(artifact?.text ?? message.thread?.resultPreview ?? '').trim();
+          if (!text) throw new Error('The completed deliverable is not available yet.');
+          if (!nativeTextArtifactIsRenderable(text)) {
+            throw new Error('This deliverable is not available in the native viewer.');
+          }
+          setExpandedMessage({ text, authorName: title, scout: true });
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : 'Could not open that deliverable.');
+        }
         return;
       }
       const governedWork = message.work;
@@ -2939,6 +3039,15 @@ export function ThreadScreen({ route, navigation }: Props) {
         } else {
           setError('This draft needs review before it can be presented.');
         }
+        return;
+      }
+
+      if (studioKind === 'deck') {
+        navigation.navigate('DeckViewer', {
+          artifactId,
+          title: title || 'Presentation',
+          desktopEditable: message.thread?.resultCanEdit === true,
+        });
         return;
       }
 
@@ -3737,6 +3846,18 @@ export function ThreadScreen({ route, navigation }: Props) {
         }}
       />
 
+      <WorkActivitySheet
+        visible={Boolean(workActivityMessage)}
+        message={workActivityMessage}
+        returnFocusHandle={workActivityReturnFocusHandle}
+        onClose={() => setWorkActivityMessage(null)}
+        onOpenResult={(message) => {
+          setWorkActivityReturnFocusHandle(null);
+          setWorkActivityMessage(null);
+          requestAnimationFrame(() => viewArtifactFullscreen(message));
+        }}
+      />
+
       <ArtifactSaveSheet
         visible={Boolean(workSaveTarget)}
         sessionToken={sessionToken ?? ""}
@@ -4086,14 +4207,18 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         )}
 
-        {!editingMessage && activeWorkMessage ? (
+        {!editingMessage && currentWorkMessage && showCurrentWorkActivity ? (
           <Pressable
             ref={activeWorkTriggerRef}
             accessibilityRole="button"
-            accessibilityLabel={`${String(activeWorkMessage.thread?.agentName ?? "Scout")}, ${workFamilyLabel(activeWorkMessage.thread)} work, ${workThreadPhase(activeWorkMessage)}${Number(activeWorkMessage.thread?.progressPercent) > 0 ? `, ${Math.round(Number(activeWorkMessage.thread?.progressPercent))}% complete` : ""}`}
-            accessibilityHint="Opens current work activity"
+            accessibilityLabel={`${String(currentWorkMessage.thread?.agentName ?? "Scout")}, ${workFamilyLabel(currentWorkMessage.thread)} work, ${workThreadPhase(currentWorkMessage)}${Number(currentWorkMessage.thread?.progressPercent) > 0 ? `, ${Math.round(Number(currentWorkMessage.thread?.progressPercent))}% complete` : ""}`}
+            accessibilityHint="Opens the work activity sheet"
             focusable
-            onPress={() => void openWorkArtifact(activeWorkMessage, findNodeHandle(activeWorkTriggerRef.current) ?? undefined)}
+            onPress={() => {
+              setWorkActivityReturnFocusHandle(findNodeHandle(activeWorkTriggerRef.current) ?? null);
+              setWorkActivityMessage(currentWorkMessage);
+              void Haptics.selectionAsync();
+            }}
             style={({ pressed }) => [
               styles.activeWork,
               workspaceLayout.stackedActivity && styles.activeWorkStacked,
@@ -4106,11 +4231,13 @@ export function ThreadScreen({ route, navigation }: Props) {
               <View style={styles.activeWorkBarMid} />
             </View>
             <Text maxFontSizeMultiplier={1.8} style={[styles.activeWorkText, workspaceLayout.stackedActivity && styles.activeWorkTextStacked]}>
-              {String(activeWorkMessage.thread?.agentName ?? "Scout")} ·{" "}
-              {workFamilyLabel(activeWorkMessage.thread)} ·{" "}
-              {workThreadPhase(activeWorkMessage)}
+              {String(currentWorkMessage.thread?.agentName ?? "Scout")} ·{" "}
+              {workFamilyLabel(currentWorkMessage.thread)} ·{" "}
+              {workThreadPhase(currentWorkMessage)}
             </Text>
-            <Text maxFontSizeMultiplier={1.8} style={[styles.activeWorkAction, workspaceLayout.stackedActivity && styles.activeWorkActionStacked]}>View activity</Text>
+            <Text maxFontSizeMultiplier={1.8} style={[styles.activeWorkAction, workspaceLayout.stackedActivity && styles.activeWorkActionStacked]}>
+              {workThreadIsActive(currentWorkMessage) ? "View activity" : "Details"}
+            </Text>
           </Pressable>
         ) : null}
 

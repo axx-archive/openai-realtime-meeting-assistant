@@ -3,6 +3,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import {
   DECK_PREVIEW_NAVIGATION_JS,
+  deckPreviewFitFrame,
   deckPreviewNavigationCommand,
   deckPreviewNavigationTarget,
   initialDeckPreviewNavigationState,
@@ -44,6 +45,22 @@ test('deck preview navigation accepts only bounded authoritative state', () => {
   assert.match(deckPreviewNavigationCommand(2), /controller\.show\(2\)/u);
 });
 
+test('shared fit law contains the real packaging chassis on phone, landscape, iPad, and Split View', () => {
+  for (const [name, width, height] of [
+    ['phone preview', 358, 201],
+    ['phone landscape presenter', 389, 219],
+    ['iPad presenter', 960, 540],
+    ['iPad Split View', 551, 310],
+  ] as const) {
+    const fit = deckPreviewFitFrame(width, height);
+    assert.ok(fit.scale > 0, `${name} has a positive scale`);
+    assert.ok(fit.left >= 0 && fit.top >= 0, `${name} is centered inside the viewport`);
+    assert.ok(fit.left + fit.width <= width + 0.001, `${name} does not crop horizontally`);
+    assert.ok(fit.top + fit.height <= height + 0.001, `${name} does not crop vertically`);
+    assert.ok(Math.abs(fit.width / fit.height - (16 / 9)) < 0.001, `${name} preserves 16:9`);
+  }
+});
+
 test('injected controller navigates only top-level pages and reports stable position', () => {
   class FakeStyle {
     readonly values = new Map<string, { value: string; priority: string }>();
@@ -73,22 +90,48 @@ test('injected controller navigates only top-level pages and reports stable posi
   const pages = [page(['pg', 'on']), page(['pg']), page(['pg'])];
   const nestedSection = page(['slide']);
   const embeddedNavigation = { style: new FakeStyle() };
+  const stageStyle = new FakeStyle();
+  stageStyle.setProperty('width', '1920px');
+  stageStyle.setProperty('height', '1080px');
+  const stage = {
+    children: pages,
+    style: stageStyle,
+    getAttribute: () => null,
+  };
+  const documentElement = {
+    clientWidth: 358,
+    clientHeight: 201,
+    dataset: {} as Record<string, string>,
+    style: new FakeStyle(),
+  };
   const posted: Array<Record<string, unknown>> = [];
+  let resizeHandler: () => void = () => assert.fail('native deck controller did not register resize fitting');
+  const fakeWindow = {
+    innerWidth: 358,
+    innerHeight: 201,
+    ReactNativeWebView: {
+      postMessage: (value: string) => { posted.push(JSON.parse(value) as Record<string, unknown>); },
+    },
+    getComputedStyle: (candidate: ReturnType<typeof page> | typeof stage) => ({
+      display: 'classList' in candidate
+        ? candidate.style.getPropertyValue('display') || (candidate.classList.contains('on') ? 'block' : 'none')
+        : 'block',
+      width: candidate.style.getPropertyValue('width'),
+      height: candidate.style.getPropertyValue('height'),
+    }),
+    addEventListener: (event: string, handler: () => void) => {
+      if (event === 'resize') resizeHandler = handler;
+    },
+  };
   const context = vm.createContext({
     document: {
       body: { style: new FakeStyle() },
-      getElementById: (id: string) => id === 'stage' ? { children: pages } : null,
+      documentElement,
+      getElementById: (id: string) => id === 'stage' ? stage : null,
       querySelectorAll: () => [nestedSection],
       querySelector: () => embeddedNavigation,
     },
-    window: {
-      ReactNativeWebView: {
-        postMessage: (value: string) => { posted.push(JSON.parse(value) as Record<string, unknown>); },
-      },
-      getComputedStyle: (candidate: ReturnType<typeof page>) => ({
-        display: candidate.style.getPropertyValue('display') || (candidate.classList.contains('on') ? 'block' : 'none'),
-      }),
-    },
+    window: fakeWindow,
   });
   vm.runInContext(DECK_PREVIEW_NAVIGATION_JS, context);
   assert.deepEqual(posted.at(-1), {
@@ -98,6 +141,12 @@ test('injected controller navigates only top-level pages and reports stable posi
     slideCount: 3,
   });
   assert.equal(embeddedNavigation.style.getPropertyValue('display'), 'none');
+  assert.equal(documentElement.dataset.bonfireNativeDeckReady, 'true');
+  assert.equal(stageStyle.getPropertyValue('visibility'), 'visible');
+  assert.equal(stageStyle.getPropertyPriority('transform'), 'important');
+  assert.match(stageStyle.getPropertyValue('transform'), /^scale\(0\.18/u);
+  assert.ok(Number.parseFloat(stageStyle.getPropertyValue('left')) >= 0);
+  assert.ok(Number.parseFloat(stageStyle.getPropertyValue('top')) >= 0);
   assert.equal(pages[0].attributes.get('aria-hidden'), 'false');
   assert.equal(pages[1].attributes.get('aria-hidden'), 'true');
   assert.equal(nestedSection.style.getPropertyValue('display'), '');
@@ -112,6 +161,10 @@ test('injected controller navigates only top-level pages and reports stable posi
   assert.equal(pages[0].style.getPropertyValue('display'), 'none');
   assert.equal(pages[1].style.getPropertyValue('display'), '');
   assert.equal(pages[1].classList.contains('on'), true);
+  fakeWindow.innerWidth = 551;
+  fakeWindow.innerHeight = 310;
+  resizeHandler();
+  assert.match(stageStyle.getPropertyValue('transform'), /^scale\(0\.28/u);
   assert.doesNotMatch(DECK_PREVIEW_NAVIGATION_JS, /\[class\*=["']slide/u);
 });
 
@@ -148,7 +201,7 @@ test('native preview keeps deck navigation top-right and actions separate from n
   await act(async () => {
     renderer = create(React.createElement(InlineArtifactPreview, {
       kind: 'html_deck', title: 'Field network', text: '', htmlContent: '<html><body></body></html>',
-      onEdit: () => { edited += 1; }, onPresent: () => { presented += 1; },
+      desktopEditingOnly: true, onEdit: () => { edited += 1; }, onPresent: () => { presented += 1; },
     }));
   });
   const previous = renderer!.root.findByProps({ accessibilityLabel: 'Previous slide' });
@@ -158,12 +211,18 @@ test('native preview keeps deck navigation top-right and actions separate from n
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Deck preview loading' }).children.join(''), '— / —');
 
   const webView = renderer!.root.findByType('WebViewHost' as any);
+  assert.deepEqual(webView.props.source, { html: '<html><body></body></html>' });
+  assert.equal(webView.props.injectedJavaScript, DECK_PREVIEW_NAVIGATION_JS);
+  assert.equal(webView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), true);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Fitting presentation preview' }).length, 1);
   await act(async () => {
     webView.props.onMessage({ nativeEvent: { data: JSON.stringify({
       kind: 'bonfire:deck-preview-navigation', status: 'ready', currentIndex: 0, slideCount: 3,
     }) } });
   });
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Slide 1 of 3' }).children.join(''), '1 / 3');
+  assert.equal(webView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), false);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Fitting presentation preview' }).length, 0);
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Previous slide' }).props.disabled, true);
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Next slide' }).props.disabled, false);
   await act(async () => {
@@ -172,11 +231,30 @@ test('native preview keeps deck navigation top-right and actions separate from n
     }) } });
   });
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Slide 2 of 3' }).children.join(''), '2 / 3');
-  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Edit presentation' }).props.onPress(); });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Edit presentation' }).length, 0);
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Editing is available on desktop' }).length, 1);
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Present' }).props.onPress(); });
-  assert.deepEqual({ edited, presented }, { edited: 1, presented: 1 });
+  assert.deepEqual({ edited, presented }, { edited: 0, presented: 1 });
 
-  await act(async () => { webView.props.onError(); });
+  await act(async () => {
+    renderer!.update(React.createElement(InlineArtifactPreview, {
+      kind: 'html_deck', title: 'Signed field network', text: '', artifactId: 'deck', sessionToken: 'session',
+      desktopEditingOnly: true, onPresent: () => { presented += 1; },
+    }));
+    await Promise.resolve();
+  });
+  const signedWebView = renderer!.root.findByType('WebViewHost' as any);
+  assert.deepEqual(signedWebView.props.source, { uri: 'https://example.test/artifacts/render?id=deck' });
+  assert.equal(signedWebView.props.injectedJavaScript, DECK_PREVIEW_NAVIGATION_JS);
+  assert.equal(signedWebView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), true);
+  await act(async () => {
+    signedWebView.props.onMessage({ nativeEvent: { data: JSON.stringify({
+      kind: 'bonfire:deck-preview-navigation', status: 'ready', currentIndex: 0, slideCount: 3,
+    }) } });
+  });
+  assert.equal(signedWebView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), false);
+
+  await act(async () => { signedWebView.props.onError(); });
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Previous slide' }).length, 0);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Retry deck preview' }).length, 1);
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Retry deck preview' }).props.onPress(); });
