@@ -70,7 +70,7 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 		"? `Channel chat ${chatThreadDisplayTitle(thread)}`",
 		"Message the team. Mention @Scout when you want help.",
 		"'.scout-chat-empty, .scout-starters'",
-		"function desktopChatUnreadBoundaryNode()",
+		"function desktopChatUnreadBoundaryNode(count = 0)",
 		"function decorateDesktopChatMessage(node, message, kind, authorLabel)",
 		"message.replyTo",
 		"message.reactions",

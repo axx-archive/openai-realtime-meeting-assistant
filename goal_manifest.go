@@ -31,13 +31,15 @@ const (
 // always available (every row names its artifact); present is deck-only; the
 // pdf download exists only when a rendered pdf asset landed on the artifact.
 type scoutChatManifestDeliverable struct {
-	ArtifactID string `json:"artifactId"`
-	Title      string `json:"title"`
-	Badge      string `json:"badge"`           // deck | paper | doc
-	Facts      string `json:"facts,omitempty"` // "html · 8 pages · presenter mode"
-	Present    bool   `json:"present,omitempty"`
-	PdfRef     string `json:"pdfRef,omitempty"` // blob ref of the newest pdf asset
-	PdfName    string `json:"pdfName,omitempty"`
+	ArtifactID      string `json:"artifactId"`
+	ArtifactVersion int    `json:"artifactVersion,omitempty"`
+	ContentDigest   string `json:"contentDigest,omitempty"`
+	Title           string `json:"title"`
+	Badge           string `json:"badge"`           // deck | paper | doc
+	Facts           string `json:"facts,omitempty"` // "html · 8 pages · presenter mode"
+	Present         bool   `json:"present,omitempty"`
+	PdfRef          string `json:"pdfRef,omitempty"` // blob ref of the newest pdf asset
+	PdfName         string `json:"pdfName,omitempty"`
 }
 
 // scoutChatManifestProvenance is the right-aligned mono provenance line:
@@ -158,11 +160,13 @@ func (app *kanbanBoardApp) composeStudioShipManifest(plan *goalPlan, parentID st
 			continue
 		}
 		deliverable := scoutChatManifestDeliverable{
-			ArtifactID: artifact.ID,
-			Title:      firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), artifact.ID),
-			Badge:      manifestDeliverableBadge(artifact),
-			Facts:      manifestDeliverableFacts(artifact),
-			Present:    artifactType(artifact) == artifactTypeHTMLDeck,
+			ArtifactID:      artifact.ID,
+			ArtifactVersion: artifactVersion(artifact),
+			ContentDigest:   artifactCapabilityDigest(artifact),
+			Title:           firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), artifact.ID),
+			Badge:           manifestDeliverableBadge(artifact),
+			Facts:           manifestDeliverableFacts(artifact),
+			Present:         artifactType(artifact) == artifactTypeHTMLDeck,
 		}
 		if asset, hasPdf := firstArtifactAssetOfKind(artifact, "pdf"); hasPdf {
 			deliverable.PdfRef = asset.Ref

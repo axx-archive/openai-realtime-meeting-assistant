@@ -22,6 +22,7 @@ var (
 	errPrivateRealtimeLeaseConflict          = errors.New("private Realtime voice lease is held by another client")
 	errPrivateRealtimeLeaseStale             = errors.New("private Realtime voice lease generation is stale")
 	errPrivateRealtimeLeaseReplayUnavailable = errors.New("private Realtime voice replay expired with the server process")
+	errPrivateRealtimeQualificationRevoked   = errors.New("private Scout voice qualification was revoked; this session is stopping")
 )
 
 // scoutChatVoiceLease contains only authority digests and lifecycle receipts.
@@ -164,6 +165,111 @@ func (app *kanbanBoardApp) forgetPrivateRealtimeOfferReplay(requesterEmail, sess
 	delete(app.privateRealtimeOfferReplays, privateRealtimeLeaseReplayKey(requesterEmail, sessionHash, operationID))
 }
 
+func (app *kanbanBoardApp) forgetPrivateRealtimeOfferReplayForLease(threadID string, generation int) {
+	if app == nil || strings.TrimSpace(threadID) == "" || generation <= 0 {
+		return
+	}
+	app.privateRealtimeOfferReplayMu.Lock()
+	defer app.privateRealtimeOfferReplayMu.Unlock()
+	for key, replay := range app.privateRealtimeOfferReplays {
+		if replay.ThreadID == threadID && replay.Generation == generation {
+			delete(app.privateRealtimeOfferReplays, key)
+		}
+	}
+}
+
+// terminalizePrivateRealtimeVoiceRevokedSessions is called synchronously after
+// sessions.json loses exact member-session rows. The durable lease mutation is
+// fenced by owner + auth-session digest + active generation, so a delayed old
+// logout cannot terminate a replacement session's lease.
+func terminalizePrivateRealtimeVoiceRevokedSessions(revoked []revokedMemberSession, at time.Time) {
+	app := kanbanApp
+	if app == nil || len(revoked) == 0 {
+		return
+	}
+	byOwner := map[string][]string{}
+	for _, session := range revoked {
+		email := normalizeAccountEmail(session.Email)
+		hash := strings.TrimSpace(session.SessionHash)
+		if email == "" || !validStrideE10SessionHash(hash) {
+			continue
+		}
+		byOwner[email] = append(byOwner[email], hash)
+	}
+	for email, hashes := range byOwner {
+		if _, err := app.terminalizePrivateRealtimeVoiceLeasesForAuthSessions(email, hashes, at); err != nil {
+			// The session is already revoked, so never roll authority back. A later
+			// claim rechecks sessions.json and retries this terminalization before it
+			// can report a cross-client conflict.
+			log.Errorf("Revoked auth session left private Realtime cleanup pending for %s: %v", email, err)
+		}
+	}
+}
+
+func (app *kanbanBoardApp) terminalizePrivateRealtimeVoiceLeasesForAuthSessions(requesterEmail string, sessionHashes []string, at time.Time) (int, error) {
+	if app == nil {
+		return 0, nil
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	hashByDigest := map[string]string{}
+	for _, sessionHash := range sessionHashes {
+		sessionHash = strings.TrimSpace(sessionHash)
+		if validStrideE10SessionHash(sessionHash) {
+			hashByDigest[privateRealtimeLeaseDigest("auth-session", sessionHash)] = sessionHash
+		}
+	}
+	if requesterEmail == "" || len(hashByDigest) == 0 {
+		return 0, nil
+	}
+	at = at.UTC()
+	ownerLock := app.scoutChatThreadLock("private-realtime-lease-owner-" + sha256Hex([]byte(requesterEmail))[:24])
+	ownerLock.Lock()
+	defer ownerLock.Unlock()
+
+	terminalized := 0
+	for _, candidate := range app.scoutChatThreadsSnapshot(requesterEmail, true, 0) {
+		if normalizeAccountEmail(candidate.OwnerEmail) != requesterEmail || candidate.VoiceSession == nil || candidate.VoiceSession.Lease == nil {
+			continue
+		}
+		candidateLease := candidate.VoiceSession.Lease
+		sessionHash, matches := hashByDigest[candidateLease.AuthSessionDigest]
+		if !matches || !privateRealtimeLeaseActive(candidateLease) {
+			continue
+		}
+		threadLock := app.scoutChatThreadLock(candidate.ID)
+		threadLock.Lock()
+		thread, _, err := app.scoutChatThreadByID(requesterEmail, candidate.ID)
+		if err != nil {
+			threadLock.Unlock()
+			return terminalized, err
+		}
+		if thread.VoiceSession == nil {
+			threadLock.Unlock()
+			continue
+		}
+		lease := thread.VoiceSession.Lease
+		if lease == nil || !privateRealtimeLeaseActive(lease) || lease.AuthSessionDigest != candidateLease.AuthSessionDigest {
+			threadLock.Unlock()
+			continue
+		}
+		lease.State = "session_revoked"
+		lease.TerminalAt = at.Format(time.RFC3339Nano)
+		if attempt := privateRealtimeVoiceTransportAttemptByRevision(thread.VoiceSession, lease.TransportRevision); attempt != nil && (attempt.State == "offering" || attempt.State == "accepted") {
+			attempt.State = "session_revoked"
+			attempt.FailedAt = lease.TerminalAt
+		}
+		err = app.saveScoutChatThread(thread)
+		threadLock.Unlock()
+		if err != nil {
+			return terminalized, err
+		}
+		app.forgetPrivateRealtimeOfferReplay(requesterEmail, sessionHash, lease.OperationID)
+		app.forgetPrivateRealtimeOfferReplayForLease(candidate.ID, lease.Generation)
+		terminalized++
+	}
+	return terminalized, nil
+}
+
 func (app *kanbanBoardApp) extendPrivateRealtimeOfferReplay(requesterEmail, sessionHash, operationID string, expiresAt, at time.Time) {
 	app.privateRealtimeOfferReplayMu.Lock()
 	defer app.privateRealtimeOfferReplayMu.Unlock()
@@ -197,6 +303,16 @@ func (app *kanbanBoardApp) claimPrivateRealtimeVoiceLease(requesterEmail, sessio
 	ownerLock := app.scoutChatThreadLock("private-realtime-lease-owner-" + sha256Hex([]byte(requesterEmail))[:24])
 	ownerLock.Lock()
 	defer ownerLock.Unlock()
+	// HTTP callers always carry a 64-character server-derived session hash. The
+	// second check under the owner fence prevents a request authenticated just
+	// before logout from resurrecting a lease after that exact session is gone.
+	// Non-hash values remain accepted only by the direct deterministic unit seam.
+	if validStrideE10SessionHash(sessionHash) {
+		record, current := userSessionStore().lookupMemberRecordByHash(sessionHash, at)
+		if !current || normalizeAccountEmail(record.Email) != requesterEmail {
+			return privateRealtimeLeaseClaim{}, errPrivateRealtimeLeaseStale
+		}
+	}
 
 	maxGeneration := 0
 	threads := app.scoutChatThreadsSnapshot(requesterEmail, true, 0)
@@ -215,6 +331,16 @@ func (app *kanbanBoardApp) claimPrivateRealtimeVoiceLease(requesterEmail, sessio
 			if err := app.terminalizePrivateRealtimeLeaseAttempt(requesterEmail, candidate.ID, lease.Lease.Generation, "expired", at); err != nil {
 				return privateRealtimeLeaseClaim{}, err
 			}
+			continue
+		}
+		if validStrideE10SessionHash(sessionHash) && lease.Lease.AuthSessionDigest != authDigest && !userSessionStore().privateRealtimeLeaseSessionCurrent(requesterEmail, lease.Lease.AuthSessionDigest, at) {
+			// A crash or storage failure between session revocation and its cleanup
+			// receipt must not recreate the 30-second lockout. Reconcile the orphaned
+			// lease under the same owner fence before admitting this new session.
+			if err := app.terminalizePrivateRealtimeLeaseAttempt(requesterEmail, candidate.ID, lease.Lease.Generation, "session_revoked", at); err != nil {
+				return privateRealtimeLeaseClaim{}, err
+			}
+			app.forgetPrivateRealtimeOfferReplayForLease(candidate.ID, lease.Lease.Generation)
 			continue
 		}
 		if candidate.ID == threadID && lease.Lease.OperationID == operationID {
@@ -338,6 +464,14 @@ func (app *kanbanBoardApp) renewPrivateRealtimeVoiceLease(requesterEmail, sessio
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("private Realtime voice renew operation is invalid")
 	}
+	if !privateRealtimeVoiceQualified() {
+		if terminalErr := app.terminalizePrivateRealtimeVoiceLeaseForQualification(
+			requesterEmail, sessionHash, voiceSessionID, threadID, token, generation, revision, at,
+		); terminalErr != nil && !errors.Is(terminalErr, errPrivateRealtimeLeaseStale) {
+			return time.Time{}, false, terminalErr
+		}
+		return time.Time{}, false, errPrivateRealtimeQualificationRevoked
+	}
 	lock := app.scoutChatThreadLock("private-realtime-lease-owner-" + sha256Hex([]byte(normalizeAccountEmail(requesterEmail)))[:24])
 	lock.Lock()
 	defer lock.Unlock()
@@ -374,6 +508,43 @@ func (app *kanbanBoardApp) renewPrivateRealtimeVoiceLease(requesterEmail, sessio
 	expiresAt := privateRealtimeLeaseExpiry(lease)
 	app.extendPrivateRealtimeOfferReplay(requesterEmail, sessionHash, lease.OperationID, expiresAt, at)
 	return expiresAt, false, nil
+}
+
+// terminalizePrivateRealtimeVoiceLeaseForQualification applies the server
+// release kill switch to one exact authenticated transport. It intentionally
+// remains separate from Stop: an unqualified process must still accept the
+// client's best-effort Stop, while Renew and tool admission first make the
+// revoked authority durable and remove its secret-bearing offer replay.
+func (app *kanbanBoardApp) terminalizePrivateRealtimeVoiceLeaseForQualification(requesterEmail, sessionHash, voiceSessionID, threadID, token string, generation, revision int, at time.Time) error {
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	ownerLock := app.scoutChatThreadLock("private-realtime-lease-owner-" + sha256Hex([]byte(requesterEmail))[:24])
+	ownerLock.Lock()
+	defer ownerLock.Unlock()
+	threadLock := app.scoutChatThreadLock(threadID)
+	threadLock.Lock()
+	defer threadLock.Unlock()
+
+	thread, err := app.privateRealtimeVoiceConversation(requesterEmail, voiceSessionID, threadID)
+	if err != nil {
+		return err
+	}
+	lease := thread.VoiceSession.Lease
+	if err := validatePrivateRealtimeLeaseAdmission(lease, sessionHash, voiceSessionID, token, generation, revision, at); err != nil {
+		return err
+	}
+	at = at.UTC()
+	lease.State = "qualification_revoked"
+	lease.TerminalAt = at.Format(time.RFC3339Nano)
+	if attempt := privateRealtimeVoiceTransportAttemptByRevision(thread.VoiceSession, revision); attempt != nil && (attempt.State == "offering" || attempt.State == "accepted") {
+		attempt.State = "qualification_revoked"
+		attempt.FailedAt = lease.TerminalAt
+	}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return err
+	}
+	app.forgetPrivateRealtimeOfferReplay(requesterEmail, sessionHash, lease.OperationID)
+	app.forgetPrivateRealtimeOfferReplayForLease(threadID, generation)
+	return nil
 }
 
 func (app *kanbanBoardApp) stopPrivateRealtimeVoiceLease(requesterEmail, sessionHash, voiceSessionID, threadID, token string, generation, revision int, operationID string, at time.Time) (bool, error) {
@@ -462,7 +633,7 @@ func privateRealtimeVoiceLeaseHTTPStatus(err error) int {
 	switch {
 	case errors.Is(err, errPrivateRealtimeLeaseConflict), errors.Is(err, errPrivateRealtimeLeaseStale):
 		return http.StatusConflict
-	case errors.Is(err, errPrivateRealtimeLeaseReplayUnavailable):
+	case errors.Is(err, errPrivateRealtimeLeaseReplayUnavailable), errors.Is(err, errPrivateRealtimeQualificationRevoked):
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusConflict
@@ -515,8 +686,9 @@ func assistantRealtimeLeaseRenewHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	sessionHash := strideE10SessionHashFromRequest(r)
 	expiresAt, replayed, err := kanbanApp.renewPrivateRealtimeVoiceLease(
-		user.Email, strideE10SessionHashFromRequest(r), payload.VoiceSessionID, payload.ThreadID,
+		user.Email, sessionHash, payload.VoiceSessionID, payload.ThreadID,
 		payload.LeaseToken, payload.LeaseGeneration, payload.TransportRevision, payload.OperationID, time.Now().UTC(),
 	)
 	if err != nil {

@@ -26,6 +26,12 @@ func (deckReadOnlyAuthorizer) AuthorizeArtifactHeader(_ context.Context, _ *user
 	return action != ACLWrite
 }
 
+type deckPresentOnlyAuthorizer struct{}
+
+func (deckPresentOnlyAuthorizer) AuthorizeArtifactHeader(_ context.Context, _ *userAccount, action ACLAction, _ ArtifactAuthorizationHeader) bool {
+	return action != ACLWrite && action != ACLExport
+}
+
 type deckReauthAuthorizer struct {
 	mu         sync.Mutex
 	writeCalls int
@@ -59,6 +65,40 @@ func setupDeckEditorHTTPTest(t *testing.T, authorizer ObjectAuthorizer) ([]*http
 		t.Fatalf("create deck artifact: %v", err)
 	}
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!"), artifact
+}
+
+func TestDeckEndpointSeparatesReadPresentationFromEditAndExport(t *testing.T) {
+	cookies, artifact := setupDeckEditorHTTPTest(t, deckPresentOnlyAuthorizer{})
+	response := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+artifact.ID, "", cookies, deckEditorHandler)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET present-only deck status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		CanWrite   bool `json:"canWrite"`
+		CanPresent bool `json:"canPresent"`
+		CanExport  bool `json:"canExport"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.CanWrite || !payload.CanPresent || payload.CanExport {
+		t.Fatalf("present-only deck capabilities=%+v", payload)
+	}
+}
+
+func TestDeckArtifactViewCarriesExactRevisionAndGoalBinding(t *testing.T) {
+	entry := meetingMemoryEntry{
+		ID:   "deck-bound-view",
+		Kind: meetingMemoryKindOSArtifact,
+		Text: faithfulDeckHTML,
+		Metadata: map[string]string{
+			"title": "Bound deck", "type": artifactTypeHTMLDeck, artifactVersionMetadataKey: "7", "goalId": "goal-bound-view",
+		},
+	}
+	view := deckArtifactViewFromEntry(entry)
+	if view.ID != entry.ID || view.Version != 7 || view.GoalID != "goal-bound-view" || view.ContentDigest != artifactCapabilityDigest(entry) {
+		t.Fatalf("deck view lost exact manifest tuple: %+v", view)
+	}
 }
 
 func TestDeckDocumentValidationAndCompile(t *testing.T) {

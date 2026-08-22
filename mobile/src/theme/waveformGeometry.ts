@@ -18,6 +18,24 @@ export const waveform = {
 } as const;
 
 /**
+ * Exact horizontal footprint of the rendered row. Keeping this calculation
+ * beside the canonical bar geometry prevents compact containers from silently
+ * clipping bars when bar count, width, gap, or scale changes.
+ */
+export function waveformRowWidth(
+  scale = 1,
+  barCount: number = waveform.barCount,
+): number {
+  if (!Number.isFinite(scale) || scale <= 0 || !Number.isSafeInteger(barCount) || barCount <= 0) {
+    return 0;
+  }
+  return (
+    barCount * waveform.barWidth * scale
+    + Math.max(0, barCount - 1) * waveform.barGap * scale
+  );
+}
+
+/**
  * The RESTING silhouette — the correction that matters most.
  *
  * "Rest is static" (the breathe-only-while-listening law) means the bars do not

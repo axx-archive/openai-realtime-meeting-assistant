@@ -331,6 +331,23 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 	if deckRef.ResultArtifactID != standaloneDeck.ID || deckRef.ResultArtifactType != artifactTypeHTMLDeck || deckRef.ResultQualityState != "" || !deckRef.ResultCanEdit || deckRef.ResultCanContinue || !deckRef.ResultCanPresent || !deckRef.ResultCanExport {
 		t.Fatalf("standalone deck lost ordinary Studio capabilities: %+v", deckRef)
 	}
+	exportDeniedAuthorizer := &surfaceRecordingArtifactAuthorizer{allow: func(action ACLAction, _ meetingMemoryEntry) bool {
+		return action != ACLExport
+	}}
+	exportDenied := func() scoutChatThreadRecord {
+		previous := artifactObjectAuthorizer
+		artifactObjectAuthorizer = exportDeniedAuthorizer
+		defer func() { artifactObjectAuthorizer = previous }()
+		return app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	}()
+	deniedDocument := exportDenied.Messages[2].Thread
+	deniedDeck := exportDenied.Messages[3].Thread
+	if deniedDocument.ResultArtifactID != standalone.ID || deniedDocument.ResultCanExport || deniedDeck.ResultArtifactID != standaloneDeck.ID || !deniedDeck.ResultCanPresent || deniedDeck.ResultCanExport {
+		t.Fatalf("standalone projection conflated read/present with export ACL: document=%+v deck=%+v", deniedDocument, deniedDeck)
+	}
+	if !exportDeniedAuthorizer.saw(ACLExport, standalone.ID) || !exportDeniedAuthorizer.saw(ACLExport, standaloneDeck.ID) {
+		t.Fatalf("standalone projection skipped export authorization: calls=%+v", exportDeniedAuthorizer.calls)
+	}
 }
 
 func TestScoutChatViewerProjectionRequiresCurrentResultACL(t *testing.T) {
@@ -518,6 +535,22 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 	if ref.ResultArtifactID != fixture.deck.ID || ref.ResultQualityState != authoredResultQualityAdmitted || !ref.ResultCanPresent || !ref.ResultCanExport {
 		review, qualityErr := resolvePublishedPackagingStudioQuality(fixture.app, &fixture.plan, fixture.parentID)
 		t.Fatalf("exact rendered publication was not admitted: %+v; resolver review=%+v err=%v", ref, review, qualityErr)
+	}
+	exportDeniedAuthorizer := &surfaceRecordingArtifactAuthorizer{allow: func(action ACLAction, _ meetingMemoryEntry) bool {
+		return action != ACLExport
+	}}
+	exportDenied := func() scoutChatThreadRecord {
+		previous := artifactObjectAuthorizer
+		artifactObjectAuthorizer = exportDeniedAuthorizer
+		defer func() { artifactObjectAuthorizer = previous }()
+		return fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	}()
+	deniedRef := exportDenied.Messages[0].Thread
+	if deniedRef.ResultArtifactID != fixture.deck.ID || deniedRef.ResultQualityState != authoredResultQualityAdmitted || !deniedRef.ResultCanPresent || deniedRef.ResultCanExport {
+		t.Fatalf("exact admitted projection conflated presentation with export ACL: %+v", deniedRef)
+	}
+	if !exportDeniedAuthorizer.saw(ACLExport, fixture.deck.ID) {
+		t.Fatalf("exact admitted projection skipped export authorization: calls=%+v", exportDeniedAuthorizer.calls)
 	}
 	handlerPreviousApp := kanbanApp
 	kanbanApp = fixture.app

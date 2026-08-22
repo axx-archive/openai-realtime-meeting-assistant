@@ -61,6 +61,14 @@ type sessionStore struct {
 	sessions map[string]sessionRecord
 }
 
+// revokedMemberSession is the exact authority edge removed from sessions.json.
+// Downstream lifecycle cleanup consumes the hash rather than a user-wide flag,
+// so revoking one device can never tear down a newer session's live transport.
+type revokedMemberSession struct {
+	Email       string
+	SessionHash string
+}
+
 func newSessionStore(path string) *sessionStore {
 	store := &sessionStore{path: path, sessions: map[string]sessionRecord{}}
 	if raw, err := os.ReadFile(path); err == nil {
@@ -197,19 +205,22 @@ func (s *sessionStore) destroyAllForMembershipRevision(personID, organizationID,
 		return 0
 	}
 	devicePushAuthorityMu.Lock()
-	defer devicePushAuthorityMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	removed := 0
+	revoked := make([]revokedMemberSession, 0)
 	for key, record := range s.sessions {
 		if record.Kind == "" && record.PersonID == personID && record.ActiveOrganizationID == organizationID && record.OrganizationMembershipID == membershipID && record.OrganizationMembershipRev <= throughRevision {
 			delete(s.sessions, key)
 			removed++
+			revoked = append(revoked, revokedMemberSession{Email: record.Email, SessionHash: key})
 		}
 	}
 	if removed > 0 {
 		s.persistLocked()
 	}
+	s.mu.Unlock()
+	devicePushAuthorityMu.Unlock()
+	terminalizePrivateRealtimeVoiceRevokedSessions(revoked, time.Now().UTC())
 	return removed
 }
 
@@ -254,6 +265,29 @@ func (s *sessionStore) lookupMemberRecordByHash(sessionHash string, now time.Tim
 	return record, true
 }
 
+// privateRealtimeLeaseSessionCurrent resolves a persisted one-way lease digest
+// against the exact still-live member session. This lets a new login distinguish
+// a genuinely concurrent device (conflict) from a lease whose session has
+// already been revoked, including after a process restart.
+func (s *sessionStore) privateRealtimeLeaseSessionCurrent(email, authSessionDigest string, now time.Time) bool {
+	email = normalizeAccountEmail(email)
+	authSessionDigest = strings.TrimSpace(authSessionDigest)
+	if email == "" || authSessionDigest == "" || now.IsZero() {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sessionHash, record := range s.sessions {
+		if record.Kind != "" || normalizeAccountEmail(record.Email) != email || !now.Before(record.Expires) {
+			continue
+		}
+		if privateRealtimeLeaseDigest("auth-session", sessionHash) == authSessionDigest {
+			return true
+		}
+	}
+	return false
+}
+
 // createGuest mints a guest session (multi-room §3.2): no account email,
 // Kind=guest, bound to exactly ONE room, 12h TTL. It reuses the session
 // store's persistence and expiry sweep, and is deliberately invisible to
@@ -282,26 +316,34 @@ func (s *sessionStore) destroy(token string) {
 	// crossed its authority check finishes before destroy returns; every delivery
 	// after this write lock observes the session as absent.
 	devicePushAuthorityMu.Lock()
-	defer devicePushAuthorityMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, hashResetToken(token))
+	key := hashResetToken(token)
+	record, found := s.sessions[key]
+	delete(s.sessions, key)
 	s.persistLocked()
+	s.mu.Unlock()
+	devicePushAuthorityMu.Unlock()
+	if found && record.Kind == "" {
+		terminalizePrivateRealtimeVoiceRevokedSessions([]revokedMemberSession{{Email: record.Email, SessionHash: key}}, time.Now().UTC())
+	}
 }
 
 func (s *sessionStore) destroyAllForEmail(email string) {
 	email = normalizeAccountEmail(email)
 	// Password reset/rotation has the same linearization contract as logout.
 	devicePushAuthorityMu.Lock()
-	defer devicePushAuthorityMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	revoked := make([]revokedMemberSession, 0)
 	for key, record := range s.sessions {
-		if record.Email == email {
+		if record.Kind == "" && normalizeAccountEmail(record.Email) == email {
 			delete(s.sessions, key)
+			revoked = append(revoked, revokedMemberSession{Email: record.Email, SessionHash: key})
 		}
 	}
 	s.persistLocked()
+	s.mu.Unlock()
+	devicePushAuthorityMu.Unlock()
+	terminalizePrivateRealtimeVoiceRevokedSessions(revoked, time.Now().UTC())
 }
 
 var (

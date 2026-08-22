@@ -14,6 +14,7 @@ type finalExportCapabilityResponse struct {
 	ArtifactVersion int    `json:"artifactVersion"`
 	QualityState    string `json:"qualityState"`
 	Managed         bool   `json:"managed"`
+	CanPresent      bool   `json:"canPresent"`
 	CanExport       bool   `json:"canExport"`
 }
 
@@ -89,7 +90,7 @@ func TestFinalExportCapabilityDistinguishesDraftAdmittedAndUnmanagedArtifacts(t 
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 
 	draft := readFinalExportCapability(t, cookies, blockedReport.ID)
-	if draft.ArtifactID != blockedReport.ID || draft.QualityState != authoredResultQualityDraftNeedsAttention || !draft.Managed || draft.CanExport {
+	if draft.ArtifactID != blockedReport.ID || draft.QualityState != authoredResultQualityDraftNeedsAttention || !draft.Managed || draft.CanPresent || draft.CanExport {
 		t.Fatalf("draft capability=%+v", draft)
 	}
 	lock := goalEngineLock(blockedGoal.ID)
@@ -111,11 +112,11 @@ func TestFinalExportCapabilityDistinguishesDraftAdmittedAndUnmanagedArtifacts(t 
 		t.Fatalf("busy draft blob status=%d headers=%v body=%s", busyBlob.Code, busyBlob.Header(), busyBlob.Body.String())
 	}
 	admitted := readFinalExportCapability(t, cookies, fixture.report.ID)
-	if admitted.ArtifactID != fixture.report.ID || admitted.QualityState != authoredResultQualityAdmitted || !admitted.Managed || !admitted.CanExport {
+	if admitted.ArtifactID != fixture.report.ID || admitted.QualityState != authoredResultQualityAdmitted || !admitted.Managed || !admitted.CanPresent || !admitted.CanExport {
 		t.Fatalf("admitted capability=%+v", admitted)
 	}
 	ordinary := readFinalExportCapability(t, cookies, unmanaged.ID)
-	if ordinary.ArtifactID != unmanaged.ID || ordinary.QualityState != "" || ordinary.Managed || !ordinary.CanExport {
+	if ordinary.ArtifactID != unmanaged.ID || ordinary.QualityState != "" || ordinary.Managed || !ordinary.CanPresent || !ordinary.CanExport {
 		t.Fatalf("unmanaged capability=%+v", ordinary)
 	}
 
@@ -145,7 +146,7 @@ func TestFinalExportCapabilityDistinguishesDraftAdmittedAndUnmanagedArtifacts(t 
 	}
 }
 
-func TestFinalExportCapabilityRequiresReadAndExportAuthority(t *testing.T) {
+func TestFinalExportCapabilitySeparatesReadPresentationFromExportAuthority(t *testing.T) {
 	cookies, artifact, _ := setupArtifactAuthorizationSlice(t)
 	pdfRef, err := putBlob([]byte("%PDF-1.7 denied export"), "application/pdf")
 	if err != nil {
@@ -166,8 +167,15 @@ func TestFinalExportCapabilityRequiresReadAndExportAuthority(t *testing.T) {
 	}}
 	installRecordingArtifactAuthorizer(t, authorizer)
 	response := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/final-export-capability?id="+url.QueryEscape(artifact.ID), "", cookies, authoredResultFinalExportCapabilityHandler)
-	if response.Code != http.StatusNotFound || !authorizer.saw(ACLReadContent, artifact.ID) || !authorizer.saw(ACLExport, artifact.ID) || response.Body.String() == "" {
+	if response.Code != http.StatusOK || !authorizer.saw(ACLReadContent, artifact.ID) || !authorizer.saw(ACLExport, artifact.ID) || response.Body.String() == "" {
 		t.Fatalf("denied export capability status=%d body=%s calls=%+v", response.Code, response.Body.String(), authorizer.calls)
+	}
+	var capability finalExportCapabilityResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &capability); err != nil {
+		t.Fatal(err)
+	}
+	if !capability.CanPresent || capability.CanExport {
+		t.Fatalf("read-only capability should present but not export: %+v", capability)
 	}
 	blobResponse := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/blob?ref="+url.QueryEscape(pdfRef), "", cookies, artifactBlobHandler)
 	if blobResponse.Code != http.StatusNotFound || blobResponse.Header().Get("ETag") != "" || !authorizer.saw(ACLExport, artifact.ID) {

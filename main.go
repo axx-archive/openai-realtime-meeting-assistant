@@ -2901,6 +2901,16 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionHash := strideE10SessionHashFromRequest(r)
+	if !privateRealtimeVoiceQualified() {
+		if err := kanbanApp.terminalizePrivateRealtimeVoiceLeaseForQualification(
+			user.Email, sessionHash, voiceSessionID, threadID, leaseToken,
+			leaseGeneration, transportRevision, time.Now().UTC(),
+		); err != nil && !errors.Is(err, errPrivateRealtimeLeaseStale) {
+			log.Errorf("Private Realtime qualification revocation could not terminalize tool admission for %s: %v", user.Email, err)
+		}
+		writeAuthError(w, http.StatusServiceUnavailable, errPrivateRealtimeQualificationRevoked.Error())
+		return
+	}
 	if err := kanbanApp.authorizePrivateRealtimeVoiceLease(user.Email, sessionHash, voiceSessionID, threadID, leaseToken, leaseGeneration, transportRevision, time.Now().UTC()); err != nil {
 		writeAuthError(w, privateRealtimeVoiceLeaseHTTPStatus(err), err.Error())
 		return
@@ -3914,9 +3924,9 @@ func browserRTCConfigurationFromEnv() map[string]any {
 func nativeRoomClientConfig() map[string]any {
 	return map[string]any{
 		"rtcConfiguration": browserRTCConfigurationFromEnv(),
-		// Private Home voice stays visibly unavailable until the release has
-		// completed provider, browser, native-device, and sustained reliability
-		// qualification. The transport can ship dark without client heuristics.
+		// Private Home voice is exposed only when the exact server release gate is
+		// true. Source inclusion does not imply live/provider/device qualification;
+		// native and web consume the same fail-closed projection.
 		"privateRealtimeVoiceQualified": privateRealtimeVoiceQualified(),
 		// The browser proof ledger is inert unless both the server-side observer
 		// and the explicit probe URL opt in. It records only bounded signaling
@@ -3948,9 +3958,9 @@ func nativeRoomClientConfig() map[string]any {
 }
 
 func privateRealtimeVoiceQualified() bool {
-	// Voice is qualified for any authenticated session by default.
-	// Set PRIVATE_REALTIME_VOICE_QUALIFIED=false to explicitly disable.
-	return !strings.EqualFold(strings.TrimSpace(os.Getenv("PRIVATE_REALTIME_VOICE_QUALIFIED")), "false")
+	// Provider-backed private voice is a server-owned release gate. Missing,
+	// empty, malformed, and explicitly false values all stay dark.
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("PRIVATE_REALTIME_VOICE_QUALIFIED")), "true")
 }
 
 func nativeRosterParticipants() []map[string]string {

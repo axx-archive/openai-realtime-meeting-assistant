@@ -40,6 +40,7 @@ func privateRealtimeLeaseTestJSON(claim privateRealtimeLeaseClaim) string {
 
 func TestPrivateRealtimeHTTPAdmissionRejectsStaleStoppedAndExpiredLeaseBeforeEffectOrReceipt(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
@@ -133,8 +134,72 @@ func TestPrivateRealtimeHTTPAdmissionRejectsStaleStoppedAndExpiredLeaseBeforeEff
 	}
 }
 
+func TestPrivateRealtimeQualificationKillSwitchTerminalizesRenewalAndRefusesTools(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	const owner = "aj@shareability.com"
+	cookies := loginAs(t, owner, "B0NFIRE!")
+
+	voiceSessionID := "voice-qualification-renew"
+	thread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", voiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, owner, voiceSessionID, thread.ID, cookies)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "false")
+	renewBody := fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"leaseToken":%q,"leaseGeneration":%d,"transportRevision":%d,"operationId":"qualification-revoked-renew"}`, voiceSessionID, thread.ID, lease.LeaseToken, lease.Generation, lease.TransportRevision)
+	renewRequest := httptest.NewRequest(http.MethodPost, "/assistant/realtime/lease/renew", strings.NewReader(renewBody))
+	renewRequest.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		renewRequest.AddCookie(cookie)
+	}
+	renewResponse := httptest.NewRecorder()
+	assistantRealtimeLeaseRenewHandler(renewResponse, renewRequest)
+	if renewResponse.Code != http.StatusServiceUnavailable || !strings.Contains(renewResponse.Body.String(), "session is stopping") {
+		t.Fatalf("renew status=%d body=%s", renewResponse.Code, renewResponse.Body.String())
+	}
+	afterRenew, err := kanbanApp.privateRealtimeVoiceConversation(owner, voiceSessionID, thread.ID)
+	if err != nil || afterRenew.VoiceSession.Lease.State != "qualification_revoked" || afterRenew.VoiceSession.Lease.TerminalAt == "" || afterRenew.VoiceSession.TransportAttempts[0].State != "qualification_revoked" {
+		t.Fatalf("revoked renewal binding=%+v err=%v", afterRenew.VoiceSession, err)
+	}
+	if privateRealtimeVoiceLeaseTTL != 30*time.Second {
+		t.Fatalf("lease fallback bound=%s, want 30s", privateRealtimeVoiceLeaseTTL)
+	}
+
+	toolVoiceSessionID := "voice-qualification-tool"
+	toolThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", toolVoiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolLease := activatePrivateRealtimeLeaseForTest(t, kanbanApp, owner, toolVoiceSessionID, toolThread.ID, cookies)
+	before, err := kanbanApp.privateRealtimeVoiceConversation(owner, toolVoiceSessionID, toolThread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageCount := len(before.Messages)
+	toolBody := fmt.Sprintf(`{"voiceSessionId":%q,"threadId":%q,"callId":"qualification-revoked-tool","name":"route_conversation_turn","arguments":{"utterance":"Create work that must not launch"}%s}`, toolVoiceSessionID, toolThread.ID, privateRealtimeLeaseTestJSON(toolLease))
+	toolRequest := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(toolBody))
+	toolRequest.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		toolRequest.AddCookie(cookie)
+	}
+	toolResponse := httptest.NewRecorder()
+	assistantRealtimeToolHandler(toolResponse, toolRequest)
+	if toolResponse.Code != http.StatusServiceUnavailable || !strings.Contains(toolResponse.Body.String(), "session is stopping") {
+		t.Fatalf("tool status=%d body=%s", toolResponse.Code, toolResponse.Body.String())
+	}
+	afterTool, err := kanbanApp.privateRealtimeVoiceConversation(owner, toolVoiceSessionID, toolThread.ID)
+	if err != nil || afterTool.VoiceSession.Lease.State != "qualification_revoked" || len(afterTool.Messages) != messageCount {
+		t.Fatalf("revoked tool binding=%+v messages=%d want=%d err=%v", afterTool.VoiceSession, len(afterTool.Messages), messageCount, err)
+	}
+}
+
 func TestPrivateRealtimeVoiceLeaseAcquireReplayConflictRenewStopAndTakeover(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	app := newIsolatedKanbanBoardApp(t)
 	const (
 		owner          = "aj@shareability.com"
@@ -325,6 +390,191 @@ func TestPrivateRealtimeVoiceConcurrentRecoveryAndOldStopLeaveReplacementActive(
 	reloaded, err := app.privateRealtimeVoiceConversation(owner, "voice-concurrent-new", newThread.ID)
 	if err != nil || reloaded.VoiceSession.Lease.Generation != replacement.Generation || !privateRealtimeLeaseActive(reloaded.VoiceSession.Lease) {
 		t.Fatalf("replacement binding=%+v err=%v", reloaded.VoiceSession, err)
+	}
+}
+
+func TestPrivateRealtimeLogoutTerminalizesExactLeaseAndImmediateReloginCanClaim(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	const owner = "aj@shareability.com"
+
+	oldCookies := loginAs(t, owner, "B0NFIRE!")
+	oldSessionHash := privateRealtimeSessionHashForTest(oldCookies)
+	oldThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-before-logout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldClaim := activatePrivateRealtimeLeaseForTest(t, kanbanApp, owner, "voice-before-logout", oldThread.ID, oldCookies)
+
+	// Another owner's lease proves the revocation is not a process-wide voice
+	// teardown disguised as session cleanup.
+	timCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	timThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation("tim@shareability.com", "Tim", "voice-other-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timClaim := activatePrivateRealtimeLeaseForTest(t, kanbanApp, "tim@shareability.com", "voice-other-owner", timThread.ID, timCookies)
+
+	logout := postAuthJSON(t, "/auth/logout", "", oldCookies)
+	if logout.Code != http.StatusOK {
+		t.Fatalf("logout status=%d body=%s", logout.Code, logout.Body.String())
+	}
+	terminal, err := kanbanApp.privateRealtimeVoiceConversation(owner, "voice-before-logout", oldThread.ID)
+	if err != nil || terminal.VoiceSession.Lease.State != "session_revoked" || terminal.VoiceSession.Lease.TerminalAt == "" || terminal.VoiceSession.TransportAttempts[0].State != "session_revoked" {
+		t.Fatalf("logout lease=%+v err=%v", terminal.VoiceSession, err)
+	}
+	kanbanApp.privateRealtimeOfferReplayMu.Lock()
+	for _, replay := range kanbanApp.privateRealtimeOfferReplays {
+		if replay.ThreadID == oldThread.ID && replay.Generation == oldClaim.Generation {
+			kanbanApp.privateRealtimeOfferReplayMu.Unlock()
+			t.Fatal("revoked session retained its secret-bearing offer replay")
+		}
+	}
+	kanbanApp.privateRealtimeOfferReplayMu.Unlock()
+	timCurrent, err := kanbanApp.privateRealtimeVoiceConversation("tim@shareability.com", "voice-other-owner", timThread.ID)
+	if err != nil || timCurrent.VoiceSession.Lease.Generation != timClaim.Generation || !privateRealtimeLeaseActive(timCurrent.VoiceSession.Lease) {
+		t.Fatalf("other owner lease=%+v err=%v", timCurrent.VoiceSession, err)
+	}
+
+	// A request that crossed authentication just before logout cannot recreate
+	// authority after the store revocation linearizes.
+	staleThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-stale-after-logout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kanbanApp.claimPrivateRealtimeVoiceLease(owner, oldSessionHash, "voice-stale-after-logout", staleThread.ID, "stale-after-logout-offer", privateRealtimeLeaseDigest("offer-sdp", "stale"), time.Now().UTC()); !errors.Is(err, errPrivateRealtimeLeaseStale) {
+		t.Fatalf("revoked session claim err=%v, want stale", err)
+	}
+
+	newCookies := loginAs(t, owner, "B0NFIRE!")
+	newSessionHash := privateRealtimeSessionHashForTest(newCookies)
+	if newSessionHash == oldSessionHash {
+		t.Fatal("re-login reused the revoked auth session")
+	}
+	newThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-immediate-relogin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now().UTC()
+	newClaim, err := kanbanApp.claimPrivateRealtimeVoiceLease(owner, newSessionHash, "voice-immediate-relogin", newThread.ID, "immediate-relogin-offer", privateRealtimeLeaseDigest("offer-sdp", "new"), startedAt)
+	if err != nil || newClaim.Generation != oldClaim.Generation+1 || !startedAt.Add(privateRealtimeVoiceLeaseTTL).Equal(newClaim.ExpiresAt) {
+		t.Fatalf("immediate re-login claim=%+v err=%v", newClaim, err)
+	}
+	// Password reset/change and membership revocation use the bulk store seams;
+	// they inherit the same synchronous exact-session cleanup.
+	userSessionStore().destroyAllForEmail(owner)
+	bulkRevoked, err := kanbanApp.privateRealtimeVoiceConversation(owner, "voice-immediate-relogin", newThread.ID)
+	if err != nil || bulkRevoked.VoiceSession.Lease.State != "session_revoked" {
+		t.Fatalf("bulk session revocation lease=%+v err=%v", bulkRevoked.VoiceSession, err)
+	}
+}
+
+func TestPrivateRealtimeLateOldSessionRevocationCannotKillNewSessionLease(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	const owner = "aj@shareability.com"
+	oldCookies := loginAs(t, owner, "B0NFIRE!")
+	newCookies := loginAs(t, owner, "B0NFIRE!")
+	oldHash := privateRealtimeSessionHashForTest(oldCookies)
+	newHash := privateRealtimeSessionHashForTest(newCookies)
+	now := time.Now().UTC()
+
+	oldThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-late-logout-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldClaim, err := kanbanApp.claimPrivateRealtimeVoiceLease(owner, oldHash, "voice-late-logout-old", oldThread.ID, "late-logout-old-offer", privateRealtimeLeaseDigest("offer-sdp", "old"), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kanbanApp.stopPrivateRealtimeVoiceLease(owner, oldHash, "voice-late-logout-old", oldThread.ID, oldClaim.LeaseToken, oldClaim.Generation, oldClaim.TransportRevision, "late-logout-old-stop", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	newThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-before-late-logout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newClaim, err := kanbanApp.claimPrivateRealtimeVoiceLease(owner, newHash, "voice-before-late-logout", newThread.ID, "new-session-before-late-logout", privateRealtimeLeaseDigest("offer-sdp", "replacement"), now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if logout := postAuthJSON(t, "/auth/logout", "", oldCookies); logout.Code != http.StatusOK {
+		t.Fatalf("late logout status=%d body=%s", logout.Code, logout.Body.String())
+	}
+	// Replaying the already-revoked logout is idempotent as well.
+	if replay := postAuthJSON(t, "/auth/logout", "", oldCookies); replay.Code != http.StatusOK {
+		t.Fatalf("logout replay status=%d body=%s", replay.Code, replay.Body.String())
+	}
+	current, err := kanbanApp.privateRealtimeVoiceConversation(owner, "voice-before-late-logout", newThread.ID)
+	if err != nil || current.VoiceSession.Lease.Generation != newClaim.Generation || current.VoiceSession.Lease.AuthSessionDigest != privateRealtimeLeaseDigest("auth-session", newHash) || !privateRealtimeLeaseActive(current.VoiceSession.Lease) {
+		t.Fatalf("new session lease=%+v err=%v", current.VoiceSession, err)
+	}
+}
+
+func TestPrivateRealtimeLogoutRaceEventuallyLeavesOnlyReloginLeaseActive(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	const owner = "aj@shareability.com"
+	oldCookies := loginAs(t, owner, "B0NFIRE!")
+	newCookies := loginAs(t, owner, "B0NFIRE!")
+	oldHash := privateRealtimeSessionHashForTest(oldCookies)
+	newHash := privateRealtimeSessionHashForTest(newCookies)
+	now := time.Now().UTC()
+	oldThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-racing-logout-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldClaim, err := kanbanApp.claimPrivateRealtimeVoiceLease(owner, oldHash, "voice-racing-logout-old", oldThread.ID, "racing-logout-old-offer", privateRealtimeLeaseDigest("offer-sdp", "old"), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newThread, _, err := kanbanApp.ensurePrivateRealtimeVoiceConversation(owner, "AJ", "voice-racing-relogin-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	wait.Add(2)
+	var logoutStatus int
+	var claim privateRealtimeLeaseClaim
+	var claimErr error
+	go func() {
+		defer wait.Done()
+		<-start
+		logout := postAuthJSON(t, "/auth/logout", "", oldCookies)
+		logoutStatus = logout.Code
+	}()
+	go func() {
+		defer wait.Done()
+		<-start
+		claim, claimErr = kanbanApp.claimPrivateRealtimeVoiceLease(owner, newHash, "voice-racing-relogin-new", newThread.ID, "racing-relogin-new-offer", privateRealtimeLeaseDigest("offer-sdp", "new"), now.Add(time.Second))
+	}()
+	close(start)
+	wait.Wait()
+	if logoutStatus != http.StatusOK {
+		t.Fatalf("racing logout status=%d", logoutStatus)
+	}
+	if errors.Is(claimErr, errPrivateRealtimeLeaseConflict) {
+		claim, claimErr = kanbanApp.claimPrivateRealtimeVoiceLease(owner, newHash, "voice-racing-relogin-new", newThread.ID, "racing-relogin-new-offer", privateRealtimeLeaseDigest("offer-sdp", "new"), now.Add(2*time.Second))
+	}
+	if claimErr != nil || claim.Generation != oldClaim.Generation+1 {
+		t.Fatalf("racing relogin claim=%+v err=%v", claim, claimErr)
+	}
+	oldCurrent, err := kanbanApp.privateRealtimeVoiceConversation(owner, "voice-racing-logout-old", oldThread.ID)
+	if err != nil || privateRealtimeLeaseActive(oldCurrent.VoiceSession.Lease) {
+		t.Fatalf("old racing lease=%+v err=%v", oldCurrent.VoiceSession, err)
+	}
+	newCurrent, err := kanbanApp.privateRealtimeVoiceConversation(owner, "voice-racing-relogin-new", newThread.ID)
+	if err != nil || newCurrent.VoiceSession.Lease.Generation != claim.Generation || !privateRealtimeLeaseActive(newCurrent.VoiceSession.Lease) {
+		t.Fatalf("new racing lease=%+v err=%v", newCurrent.VoiceSession, err)
 	}
 }
 

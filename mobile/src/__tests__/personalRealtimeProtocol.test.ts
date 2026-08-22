@@ -4,10 +4,26 @@ import {
   audioLevelFromStats,
   normalizeRealtimeSDP,
   realtimeFunctionCalls,
+  safePersonalRealtimeErrorMessage,
   realtimeStatusForEvent,
   realtimeToolContinuationPolicy,
   transcriptFromRealtimeEvent,
 } from '../realtime/personalRealtimeProtocol';
+
+test('global Realtime errors preserve useful copy but reject unsafe payloads', () => {
+  assert.equal(
+    safePersonalRealtimeErrorMessage('  Scout voice lost\nits secure connection.  '),
+    'Scout voice lost its secure connection.',
+  );
+  for (const unsafe of [
+    '<html><body>proxy failure</body></html>',
+    'Authorization: Bearer secret-token-value',
+    'session_token=secret-token-value',
+    'x'.repeat(301),
+  ]) {
+    assert.equal(safePersonalRealtimeErrorMessage(unsafe), 'Scout voice could not connect.');
+  }
+});
 
 test('normalizes SDP to the server and native WebRTC CRLF contract', () => {
   assert.equal(normalizeRealtimeSDP(' v=0\na=sendrecv\n'), 'v=0\r\na=sendrecv\r\n');

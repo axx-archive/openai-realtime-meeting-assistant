@@ -2597,6 +2597,9 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 		if deliverable.ArtifactID != filed[contract].ID {
 			t.Errorf("deliverable %d artifact=%q, want the filed %q (%s)", index, deliverable.ArtifactID, contract, filed[contract].ID)
 		}
+		if deliverable.ArtifactVersion != artifactVersion(filed[contract]) || deliverable.ContentDigest != artifactCapabilityDigest(filed[contract]) {
+			t.Errorf("deliverable %d tuple=%s@v%d/%s, want exact filed tuple %s@v%d/%s", index, deliverable.ArtifactID, deliverable.ArtifactVersion, deliverable.ContentDigest, filed[contract].ID, artifactVersion(filed[contract]), artifactCapabilityDigest(filed[contract]))
+		}
 		if deliverable.Badge != wantBadges[index] {
 			t.Errorf("deliverable %d badge=%q, want %q", index, deliverable.Badge, wantBadges[index])
 		}

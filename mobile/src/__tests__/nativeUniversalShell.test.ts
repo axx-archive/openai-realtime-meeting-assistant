@@ -225,7 +225,7 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.doesNotMatch(shell, /Animated\.|LayoutAnimation|setTimeout/);
   assert.equal((shell.match(/\{children\}/g) ?? []).length, 1);
   assert.doesNotMatch(shell, /if \(!visible\) return/);
-  assert.match(shell, /<View style=\{\[styles\.content, sidebar && styles\.contentSidebar, compact && styles\.contentCompact\]\}>\s*\{children\}/);
+  assert.match(shell, /testID="native-shell-content"[\s\S]*personalRealtimePlacement\.contentTopInset[\s\S]*\{children\}/);
 });
 
 test('parent-off surfaces are opaque and do not mount W5, W6, or PN child components', () => {

@@ -450,11 +450,12 @@ func (app *kanbanBoardApp) authoredArtifactShareEligible(result meetingMemoryEnt
 }
 
 // authoredResultFinalExportCapabilityHandler is the small, revision-bound
-// read seam used by generic Intelligence views. Those views can expose assets
-// without opening a Studio, so they must not infer publication rights from
-// persisted artifact metadata or from a stale channel message. Unmanaged
+// publication seam used by generic Intelligence views. Those views can expose
+// assets without opening a Studio, so they must not infer publication rights
+// from persisted artifact metadata or from a stale channel message. Presenting
+// is a read experience; downloading is a separate export authority. Unmanaged
 // artifacts retain their historical behavior; authored goal results require
-// the exact current rendered admission.
+// the exact current rendered admission for either action.
 func authoredResultFinalExportCapabilityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -474,12 +475,13 @@ func authoredResultFinalExportCapabilityHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	artifactID := strings.TrimSpace(r.URL.Query().Get("id"))
-	artifact, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLExport)
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent)
 	if !ok {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
-	qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
+	_, canExportAuthority := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLExport)
+	qualityState, publicationReady, stable := kanbanApp.authoredResultFinalExportState(artifact)
 	if !stable {
 		writeAuthError(w, http.StatusConflict, "artifact revision changed")
 		return
@@ -490,7 +492,8 @@ func authoredResultFinalExportCapabilityHandler(w http.ResponseWriter, r *http.R
 		"artifactVersion": artifactVersion(artifact),
 		"qualityState":    qualityState,
 		"managed":         qualityState != "",
-		"canExport":       canExport,
+		"canPresent":      publicationReady,
+		"canExport":       publicationReady && canExportAuthority,
 	})
 }
 

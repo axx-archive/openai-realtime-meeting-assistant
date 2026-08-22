@@ -30,10 +30,9 @@ export const WEB_APP_URL = (
 ).replace(/\/$/, '');
 
 /**
- * Native private Realtime is intentionally a build-time qualification gate.
- * The complete transport can ship dark while provider/model qualification is
- * still pending; omitting the flag preserves the incumbent dictation fallback
- * and cannot create surprise provider spend.
+ * Native private Realtime remains a build-time release gate. Build 73's
+ * production profile enables the voice-first surface explicitly;
+ * local and ad-hoc builds still stay off unless they opt in.
  */
 export const NATIVE_REALTIME_VOICE_ENABLED =
   process.env.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true';

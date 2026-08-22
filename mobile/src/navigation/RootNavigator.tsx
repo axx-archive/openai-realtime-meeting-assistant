@@ -44,6 +44,7 @@ import { LaunchCradle } from '../components/CanvasCradleComposition';
 import type { RootStackParamList } from './types';
 import { NativeUniversalShell } from './NativeUniversalShell';
 import { PersonalRealtimeProvider } from '../realtime/PersonalRealtimeProvider';
+import { personalRealtimeIslandSurface } from '../realtime/personalRealtimeIslandPlacement';
 import {
   nativeShellDestinationForRoute,
   createNativeShellSelectionCoordinator,
@@ -252,7 +253,14 @@ export function RootNavigator() {
             || activeRoute === 'ChannelRiff'
             || (isWorkstationWidth && (activeRoute === 'NewConversation' || activeRoute === 'CreateRoom'))
           ))}
-          personalRealtimeVisible={Boolean(user && sessionToken && activeRoute !== 'Room')}
+          personalRealtimeSurface={personalRealtimeIslandSurface(activeRoute)}
+          personalRealtimeStartAllowed={Boolean(user && sessionToken && activeRoute !== 'Room')}
+          personalRealtimeVisible={Boolean(
+            user
+            && sessionToken
+            && activeRoute !== 'Room'
+            && nativeShellVisibleForRoute(activeRoute)
+          )}
           visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
           onOpenPersonalRealtimeThread={openPersonalRealtimeThread}
           onSelect={selectShellDestination}

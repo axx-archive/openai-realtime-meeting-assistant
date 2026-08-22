@@ -10,7 +10,7 @@ import BonfireMediaSession, {
   nextMediaSessionGeneration,
 } from '../../modules/bonfire-media-session';
 import { api, BonfireApiError } from '../api/client';
-import { useAuth } from '../auth/AuthContext';
+import { currentAuthStorageGeneration, useAuth } from '../auth/AuthContext';
 import { NATIVE_REALTIME_VOICE_ENABLED } from '../config';
 import { emptyTrace, pushTrace, smoothAmplitude } from '../voice/amplitude';
 import type { AudioFocusLease, AudioFocusTerminalReason } from '../voice/AudioFocusCoordinator';
@@ -26,6 +26,7 @@ import {
   isRecord,
   normalizeRealtimeSDP,
   realtimeFunctionCalls,
+  safePersonalRealtimeErrorMessage,
   realtimeStatusForEvent,
   realtimeToolContinuationPolicy,
   transcriptFromRealtimeEvent,
@@ -43,6 +44,24 @@ import {
   NativeMediaOperationTimeoutError,
   waitForBoundedNativeOperation,
 } from './nativeRoomTerminal';
+import {
+  PersonalRealtimeTerminalLatch,
+  personalRealtimeAppLifecycleAction,
+} from './personalRealtimeAppLifecycle';
+import {
+  privateRealtimeVoiceIsQualified,
+  type NativeClientConfig,
+} from './personalRealtimeQualification';
+import { nativeClientConfigCache } from './nativeClientConfig';
+import {
+  personalRealtimeStartAuthorityIsCurrent,
+  runPersonalRealtimeGuardedStage,
+} from './personalRealtimeStartAuthority';
+import {
+  PersonalRealtimeLeaseWatchdog,
+  personalRealtimeLeaseTiming,
+  type PersonalRealtimeLeaseWatchdogSnapshot,
+} from './personalRealtimeLeaseWatchdog';
 
 type DataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 
@@ -55,6 +74,9 @@ const STATS_INTERVAL_MS = 100;
 const NATIVE_MEDIA_OPERATION_TIMEOUT_MS = 2_500;
 const PERSONAL_REALTIME_RECONNECT_DELAYS_MS = [500, 1_500] as const;
 const PERSONAL_REALTIME_LEASE_RENEW_MS = 10_000;
+const PERSONAL_REALTIME_QUALIFICATION_POLL_MS = 30_000;
+
+type PersonalRealtimeQualification = 'checking' | 'qualified' | 'unqualified';
 
 type PersonalRealtimeReconnectBinding = {
   voiceSessionId: string;
@@ -76,9 +98,9 @@ function userFacingRealtimeError(error: unknown): string {
   if (error instanceof NativeMediaOperationTimeoutError) {
     return 'Scout voice audio did not respond. Please try again.';
   }
-  if (error instanceof BonfireApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return 'Scout voice could not connect.';
+  if (error instanceof BonfireApiError) return safePersonalRealtimeErrorMessage(error.message);
+  if (error instanceof Error) return safePersonalRealtimeErrorMessage(error.message);
+  return safePersonalRealtimeErrorMessage(null);
 }
 
 async function waitForOfferSDP(peer: RTCPeerConnection, offer: { sdp?: string }): Promise<string> {
@@ -122,6 +144,10 @@ export function usePersonalRealtime(options: {
   const [error, setError] = useState<string | null>(null);
   const [trace, setTrace] = useState<number[]>(emptyTrace);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [tearingDown, setTearingDown] = useState(false);
+  const [qualification, setQualification] = useState<PersonalRealtimeQualification>(
+    NATIVE_REALTIME_VOICE_ENABLED && sessionToken ? 'checking' : 'unqualified',
+  );
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const terminalRequestRef = useRef(0);
@@ -135,11 +161,17 @@ export function usePersonalRealtime(options: {
   const handledCallsRef = useRef(new Set<string>());
   const voiceSessionIdRef = useRef('');
   const voiceThreadIdRef = useRef('');
+  const voiceAuthorityTokenRef = useRef('');
   const voiceTransportRevisionRef = useRef(0);
   const voiceLeaseTokenRef = useRef('');
   const voiceLeaseGenerationRef = useRef(0);
   const voiceLeaseExpiresAtRef = useRef('');
   const voiceLeaseRenewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceLeaseRenewAbortControllerRef = useRef<AbortController | null>(null);
+  const voiceLeaseWatchdogRef = useRef<PersonalRealtimeLeaseWatchdog | null>(null);
+  if (voiceLeaseWatchdogRef.current === null) {
+    voiceLeaseWatchdogRef.current = new PersonalRealtimeLeaseWatchdog();
+  }
   const milestoneOperationIdsRef = useRef(new Map<string, string>());
   const pendingMilestonesRef = useRef(new Set<string>());
   const activeTransportRevisionRef = useRef<{ generation: number; revision: number } | null>(null);
@@ -148,11 +180,34 @@ export function usePersonalRealtime(options: {
   const reconnectIntentRef = useRef(0);
   const reconnectRunnerRef = useRef<(binding: PersonalRealtimeReconnectBinding) => void>(() => undefined);
   const authorityTokenRef = useRef(sessionToken);
+  const qualifiedAuthorityTokenRef = useRef('');
+  const qualificationEpochRef = useRef(0);
+  const authorityTransitionsRef = useRef<Array<{ previousToken: string | null }>>([]);
+  const tearingDownRef = useRef(false);
+  const stopInFlightRef = useRef<Promise<void> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const lifecycleStopLatchRef = useRef(new PersonalRealtimeTerminalLatch());
   const toolAbortControllerRef = useRef<AbortController | null>(null);
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const smoothedLevelRef = useRef(0);
   const durableToolAnswerRef = useRef('');
   const onActionsRef = useRef(options.onActions);
+
+  // React effects run after commit. Authentication authority does not get that
+  // grace period: a late qualification/control promise can settle between the
+  // auth render and its passive cleanup. Advance the transport generation and
+  // clear qualification synchronously as soon as this render observes a new
+  // token. Explicit logout/401 additionally invalidates AudioFocusCoordinator
+  // at AuthContext's own synchronous linearization point.
+  if (authorityTokenRef.current !== sessionToken) {
+    const previousToken = authorityTokenRef.current;
+    authorityTokenRef.current = sessionToken;
+    qualifiedAuthorityTokenRef.current = '';
+    qualificationEpochRef.current += 1;
+    generationRef.current += 1;
+    terminalRequestRef.current += 1;
+    authorityTransitionsRef.current.push({ previousToken });
+  }
   onActionsRef.current = options.onActions;
 
   const setLiveStatus = useCallback((next: PersonalRealtimeStatus) => {
@@ -168,6 +223,7 @@ export function usePersonalRealtime(options: {
     if (clearLogicalBinding) {
       voiceSessionIdRef.current = '';
       voiceThreadIdRef.current = '';
+      voiceAuthorityTokenRef.current = '';
       voiceTransportRevisionRef.current = 0;
       milestoneOperationIdsRef.current = new Map();
       pendingMilestonesRef.current = new Set();
@@ -221,8 +277,11 @@ export function usePersonalRealtime(options: {
         && mediaSessionGenerationRef.current === null
         && mountedRef.current
       ) {
+        const wasTearingDown = tearingDownRef.current;
+        tearingDownRef.current = false;
         setTrace(emptyTrace());
-        if (statusRef.current !== 'error') setLiveStatus('idle');
+        setTearingDown(false);
+        if (statusRef.current !== 'error' || wasTearingDown) setLiveStatus('idle');
       }
       return;
     }
@@ -234,6 +293,10 @@ export function usePersonalRealtime(options: {
     statsTimerRef.current = null;
     if (voiceLeaseRenewTimerRef.current) clearInterval(voiceLeaseRenewTimerRef.current);
     voiceLeaseRenewTimerRef.current = null;
+    voiceLeaseWatchdogRef.current?.clear();
+    const leaseRenewAbortController = voiceLeaseRenewAbortControllerRef.current;
+    voiceLeaseRenewAbortControllerRef.current = null;
+    leaseRenewAbortController?.abort();
     const toolAbortController = toolAbortControllerRef.current;
     toolAbortControllerRef.current = null;
     toolAbortController?.abort();
@@ -245,6 +308,7 @@ export function usePersonalRealtime(options: {
     streamRef.current = null;
     remoteStreamRef.current = null;
     handledCallsRef.current = new Set();
+    const serverAuthorityToken = voiceAuthorityTokenRef.current;
     const serverLease = {
       voiceSessionId: voiceSessionIdRef.current,
       threadId: voiceThreadIdRef.current,
@@ -255,6 +319,7 @@ export function usePersonalRealtime(options: {
     if (!preserveLogicalBinding) {
       voiceSessionIdRef.current = '';
       voiceThreadIdRef.current = '';
+      voiceAuthorityTokenRef.current = '';
       voiceTransportRevisionRef.current = 0;
     }
     voiceLeaseTokenRef.current = '';
@@ -273,27 +338,31 @@ export function usePersonalRealtime(options: {
         : BonfireMediaSession.deactivateVideoMeeting(expectedMediaSessionGeneration),
     });
     if (
-      sessionToken
+      serverAuthorityToken
       && serverLease.voiceSessionId
       && serverLease.threadId
       && serverLease.leaseToken
       && serverLease.leaseGeneration > 0
       && serverLease.transportRevision > 0
     ) {
-      void api.realtimeLeaseStop(sessionToken, {
+      void api.realtimeLeaseStop(serverAuthorityToken, {
         ...serverLease,
         operationId: createConversationOperationId(),
       }).catch(() => undefined);
     }
     if (publishIdle && mountedRef.current) {
+      const wasTearingDown = tearingDownRef.current;
+      tearingDownRef.current = false;
       setTrace(emptyTrace());
-      if (statusRef.current !== 'error') setLiveStatus('idle');
+      setTearingDown(false);
+      if (statusRef.current !== 'error' || wasTearingDown) setLiveStatus('idle');
     }
-  }, [sessionToken, setLiveStatus]);
+  }, [setLiveStatus]);
 
   const terminateTransportWithError = useCallback((
     connectionGeneration: number,
     message: string,
+    reconnectEligible = true,
   ) => {
     if (generationRef.current !== connectionGeneration) return;
     const reconnectBinding = reconnectBindingRef.current;
@@ -310,6 +379,8 @@ export function usePersonalRealtime(options: {
       }
       : null;
     if (
+      reconnectEligible
+      &&
       binding
       && binding.attempt <= PERSONAL_REALTIME_RECONNECT_DELAYS_MS.length
       && authorityTokenRef.current === sessionToken
@@ -345,6 +416,11 @@ export function usePersonalRealtime(options: {
     // Fence all peer/channel/provider callbacks synchronously. The exact lease
     // is detached before release so its force-close hook cannot recursively
     // release itself behind the coordinator transition.
+    if (!reconnectEligible) {
+      cancelReconnect(false);
+      tearingDownRef.current = true;
+      if (mountedRef.current) setTearingDown(true);
+    }
     generationRef.current += 1;
     const terminalRequest = ++terminalRequestRef.current;
     const lease = leaseRef.current;
@@ -357,6 +433,10 @@ export function usePersonalRealtime(options: {
       .catch(() => undefined)
       .finally(() => {
         if (terminalRequestRef.current !== terminalRequest || !mountedRef.current) return;
+        if (!reconnectEligible) {
+          tearingDownRef.current = false;
+          setTearingDown(false);
+        }
         setError(message);
         setLiveStatus('error');
       });
@@ -621,9 +701,12 @@ export function usePersonalRealtime(options: {
       }
     }
     if (type === 'error') {
-      const providerError = isRecord(event.error) ? String(event.error.message ?? '') : '';
+      const providerError = safePersonalRealtimeErrorMessage(
+        isRecord(event.error) ? event.error.message : null,
+        'Scout voice needs attention.',
+      );
       publishMilestone('transport_error', connectionGeneration);
-      terminateTransportWithError(connectionGeneration, providerError || 'Scout voice needs attention.');
+      terminateTransportWithError(connectionGeneration, providerError);
       return;
     }
     if (sessionToken && (type.includes('response.audio') || type.includes('output_audio_buffer.started'))) {
@@ -645,6 +728,22 @@ export function usePersonalRealtime(options: {
     }, STATS_INTERVAL_MS);
   }, []);
 
+  const armLeaseExpiryWatchdog = useCallback((
+    snapshot: PersonalRealtimeLeaseWatchdogSnapshot,
+  ) => voiceLeaseWatchdogRef.current?.arm(snapshot, (deadline) => {
+    if (
+      generationRef.current !== deadline.connectionGeneration
+      || voiceLeaseGenerationRef.current !== deadline.leaseGeneration
+      || voiceLeaseTokenRef.current !== deadline.leaseToken
+      || voiceLeaseExpiresAtRef.current !== deadline.leaseExpiresAt
+    ) return;
+    terminateTransportWithError(
+      deadline.connectionGeneration,
+      'Scout voice\'s private session expired. Tap to retry.',
+      false,
+    );
+  }) ?? null, [terminateTransportWithError]);
+
   const startLeaseRenewal = useCallback((connectionGeneration: number) => {
     if (voiceLeaseRenewTimerRef.current) clearInterval(voiceLeaseRenewTimerRef.current);
     voiceLeaseRenewTimerRef.current = setInterval(() => {
@@ -655,6 +754,7 @@ export function usePersonalRealtime(options: {
         leaseGeneration: voiceLeaseGenerationRef.current,
         transportRevision: voiceTransportRevisionRef.current,
       };
+      const leaseExpiresAt = voiceLeaseExpiresAtRef.current;
       if (
         !sessionToken
         || generationRef.current !== connectionGeneration
@@ -664,22 +764,115 @@ export function usePersonalRealtime(options: {
         || binding.leaseGeneration <= 0
         || binding.transportRevision <= 0
       ) return;
+      if (voiceLeaseRenewAbortControllerRef.current) return;
+      const leaseTiming = personalRealtimeLeaseTiming(
+        leaseExpiresAt,
+        voiceLeaseWatchdogRef.current?.now() ?? Date.now(),
+      );
+      if (!leaseTiming) {
+        terminateTransportWithError(
+          connectionGeneration,
+          'Scout voice\'s private session expired. Tap to retry.',
+          false,
+        );
+        return;
+      }
+      const renewAbortController = new AbortController();
+      voiceLeaseRenewAbortControllerRef.current = renewAbortController;
       void api.realtimeLeaseRenew(sessionToken, {
         ...binding,
         operationId: createConversationOperationId(),
+      }, {
+        signal: renewAbortController.signal,
+        timeoutMs: leaseTiming.renewRequestTimeoutMs,
       }).then((result) => {
-        if (generationRef.current === connectionGeneration) {
-          voiceLeaseExpiresAtRef.current = String(result.leaseExpiresAt || '');
+        if (voiceLeaseRenewAbortControllerRef.current === renewAbortController) {
+          voiceLeaseRenewAbortControllerRef.current = null;
+        }
+        const renewedLeaseExpiresAt = String(result.leaseExpiresAt || '');
+        if (
+          generationRef.current !== connectionGeneration
+          || voiceLeaseGenerationRef.current !== binding.leaseGeneration
+          || voiceLeaseTokenRef.current !== binding.leaseToken
+          || voiceLeaseExpiresAtRef.current !== leaseExpiresAt
+        ) return;
+        const renewedExpiryMs = Date.parse(renewedLeaseExpiresAt);
+        if (
+          !Number.isFinite(renewedExpiryMs)
+          || renewedExpiryMs <= Date.parse(leaseExpiresAt)
+        ) {
+          terminateTransportWithError(
+            connectionGeneration,
+            'Scout voice could not renew its private session. Tap to retry.',
+            false,
+          );
+          return;
+        }
+        voiceLeaseExpiresAtRef.current = renewedLeaseExpiresAt;
+        const armed = armLeaseExpiryWatchdog({
+          connectionGeneration,
+          leaseGeneration: binding.leaseGeneration,
+          leaseToken: binding.leaseToken,
+          leaseExpiresAt: renewedLeaseExpiresAt,
+        });
+        if (!armed) {
+          terminateTransportWithError(
+            connectionGeneration,
+            'Scout voice\'s private session expired. Tap to retry.',
+            false,
+          );
         }
       }).catch((renewError) => {
+        if (voiceLeaseRenewAbortControllerRef.current === renewAbortController) {
+          voiceLeaseRenewAbortControllerRef.current = null;
+        }
         if (generationRef.current !== connectionGeneration) return;
-        terminateTransportWithError(connectionGeneration, userFacingRealtimeError(renewError));
+        terminateTransportWithError(
+          connectionGeneration,
+          renewError instanceof BonfireApiError
+            ? userFacingRealtimeError(renewError)
+            : 'Scout voice could not renew its private session. Tap to retry.',
+          false,
+        );
       });
     }, PERSONAL_REALTIME_LEASE_RENEW_MS);
-  }, [sessionToken, terminateTransportWithError]);
+  }, [armLeaseExpiryWatchdog, sessionToken, terminateTransportWithError]);
+
+  const loadQualifiedClientConfig = useCallback(async (
+    force = false,
+  ): Promise<NativeClientConfig | null> => {
+    if (!NATIVE_REALTIME_VOICE_ENABLED || !sessionToken) {
+      if (qualifiedAuthorityTokenRef.current) qualificationEpochRef.current += 1;
+      qualifiedAuthorityTokenRef.current = '';
+      if (mountedRef.current) setQualification('unqualified');
+      return null;
+    }
+    const authorityToken = sessionToken;
+    const clientConfig = await nativeClientConfigCache.load(authorityToken, { force });
+    if (
+      !mountedRef.current
+      || authorityTokenRef.current !== authorityToken
+      || sessionToken !== authorityToken
+    ) return null;
+    if (!privateRealtimeVoiceIsQualified(clientConfig)) {
+      if (qualifiedAuthorityTokenRef.current === authorityToken) {
+        qualificationEpochRef.current += 1;
+      }
+      qualifiedAuthorityTokenRef.current = '';
+      setQualification('unqualified');
+      return null;
+    }
+    qualifiedAuthorityTokenRef.current = authorityToken;
+    setQualification('qualified');
+    return clientConfig;
+  }, [sessionToken]);
 
   const start = useCallback(async (binding?: PersonalRealtimeReconnectBinding | PersonalRealtimeStartBinding) => {
-    if (!NATIVE_REALTIME_VOICE_ENABLED || !sessionToken) return;
+    if (
+      !NATIVE_REALTIME_VOICE_ENABLED
+      || !sessionToken
+      || qualifiedAuthorityTokenRef.current !== sessionToken
+    ) return;
     const reconnecting = Boolean(binding && 'transportRevision' in binding);
     const reconnectBinding = reconnecting ? binding as PersonalRealtimeReconnectBinding : undefined;
     const requestedThreadId = String(binding?.threadId ?? '').trim();
@@ -703,16 +896,63 @@ export function usePersonalRealtime(options: {
     }
     setLiveStatus('connecting');
     const connectionGeneration = ++generationRef.current;
-    const controlReady = await waitForOfficeControlChannel(
+    const authStorageGeneration = currentAuthStorageGeneration();
+    const startAuthority = {
       sessionToken,
-      () => (
-        mountedRef.current
-        && generationRef.current === connectionGeneration
-        && authorityTokenRef.current === sessionToken
-        && statusRef.current === 'connecting'
-      ),
+      authStorageGeneration,
+      connectionGeneration,
+      qualificationEpoch: qualificationEpochRef.current,
+    };
+    const startAuthorityIsCurrent = () => personalRealtimeStartAuthorityIsCurrent(
+      startAuthority,
+      {
+        mounted: mountedRef.current,
+        liveSessionToken: authorityTokenRef.current,
+        qualifiedAuthorityToken: qualifiedAuthorityTokenRef.current,
+        authStorageGeneration: currentAuthStorageGeneration(),
+        connectionGeneration: generationRef.current,
+        qualificationEpoch: qualificationEpochRef.current,
+      },
     );
-    if (generationRef.current !== connectionGeneration || authorityTokenRef.current !== sessionToken) return;
+    let qualifiedClientConfig: NativeClientConfig | null;
+    try {
+      // Reconfirm the server-owned release gate for every fresh transport. The
+      // shared cache coalesces a simultaneous foreground/poll refresh, and no
+      // microphone or native audio work begins before this returns true.
+      const qualificationStage = await runPersonalRealtimeGuardedStage({
+        isCurrent: startAuthorityIsCurrent,
+        run: () => loadQualifiedClientConfig(true),
+      });
+      if (!qualificationStage.current) return;
+      qualifiedClientConfig = qualificationStage.value;
+    } catch (qualificationError) {
+      if (
+        startAuthorityIsCurrent()
+      ) {
+        setError(userFacingRealtimeError(qualificationError));
+        setLiveStatus('error');
+      }
+      return;
+    }
+    if (!qualifiedClientConfig) {
+      if (
+        startAuthorityIsCurrent()
+      ) setLiveStatus('idle');
+      return;
+    }
+    const controlStage = await runPersonalRealtimeGuardedStage({
+      isCurrent: startAuthorityIsCurrent,
+      run: () => waitForOfficeControlChannel(
+        sessionToken,
+        () => (
+          mountedRef.current
+          && startAuthorityIsCurrent()
+          && statusRef.current === 'connecting'
+        ),
+      ),
+    });
+    if (!controlStage.current) return;
+    const controlReady = controlStage.value;
     if (!controlReady) {
       cancelReconnect();
       setError('Scout voice could not reach its control channel. Please try again.');
@@ -724,6 +964,7 @@ export function usePersonalRealtime(options: {
     const previousTransportRevision = reconnectBinding?.transportRevision ?? 0;
     voiceSessionIdRef.current = voiceSessionId;
     voiceThreadIdRef.current = expectedThreadId;
+    voiceAuthorityTokenRef.current = sessionToken;
     voiceTransportRevisionRef.current = 0;
     activeTransportRevisionRef.current = null;
     milestoneOperationIdsRef.current = new Map();
@@ -736,8 +977,10 @@ export function usePersonalRealtime(options: {
     let startupFailureTerminalRequest: number | null = null;
     let startupDrain: Promise<unknown> | null = null;
     try {
-      const lease = await audioFocusRuntime.acquire('personal_realtime', {
-        forceClose: async (reason: AudioFocusTerminalReason) => {
+      const leaseStage = await runPersonalRealtimeGuardedStage({
+        isCurrent: startAuthorityIsCurrent,
+        run: () => audioFocusRuntime.acquire('personal_realtime', {
+          forceClose: async (reason: AudioFocusTerminalReason) => {
           leaseRef.current = null;
           let controlReconnect: PersonalRealtimeReconnectBinding | null = null;
           let controlReconnectExhausted = false;
@@ -791,22 +1034,39 @@ export function usePersonalRealtime(options: {
               setLiveStatus('error');
             }
           }
-        },
+          },
+        }),
+        retireStale: (staleLease) => releasePersonalRealtimeTerminalFocus(
+          staleLease,
+          cleanupSessionTransport,
+          'cancelled',
+        ),
       });
+      if (!leaseStage.current) return;
+      const lease = leaseStage.value;
       if (
-        generationRef.current !== connectionGeneration
+        !startAuthorityIsCurrent()
         || !lease.isCurrent()
         || !officeControlChannelIsLive(sessionToken)
       ) {
-        await lease.release('cancelled');
+        await releasePersonalRealtimeTerminalFocus(
+          lease,
+          cleanupSessionTransport,
+          'cancelled',
+        ).catch(() => undefined);
         return;
       }
       leaseRef.current = lease;
       toolAbortControllerRef.current = new AbortController();
       const capturePromise = Promise.resolve()
-        .then(() => mediaDevices.getUserMedia({ audio: true, video: false }))
+        .then(() => {
+          if (!startAuthorityIsCurrent() || !lease.isCurrent()) {
+            throw new Error('Scout voice start was cancelled.');
+          }
+          return mediaDevices.getUserMedia({ audio: true, video: false });
+        })
         .then((capture) => {
-        if (generationRef.current !== connectionGeneration || !lease.isCurrent()) {
+        if (!startAuthorityIsCurrent() || !lease.isCurrent()) {
           capture.getTracks().forEach((track) => track.stop());
         } else {
           streamRef.current = capture;
@@ -814,9 +1074,12 @@ export function usePersonalRealtime(options: {
         return capture;
       });
       const startup = drainPersonalRealtimeStartup(
-        Promise.resolve().then(() => api.clientConfig(sessionToken)),
+        Promise.resolve(qualifiedClientConfig),
         capturePromise,
         Promise.resolve().then(async () => {
+          if (!startAuthorityIsCurrent() || !lease.isCurrent()) {
+            throw new Error('Scout voice start was cancelled.');
+          }
           const snapshot = await waitForBoundedNativeOperation(
             BonfireMediaSession.activateVideoMeeting(mediaSessionGeneration),
             NATIVE_MEDIA_OPERATION_TIMEOUT_MS,
@@ -836,29 +1099,33 @@ export function usePersonalRealtime(options: {
         },
       );
       startupDrain = startup;
-      const [clientConfig, stream] = await startup;
+      const [startupClientConfig, stream] = await startup;
       startupDrain = null;
       if (
-        generationRef.current !== connectionGeneration
+        !startAuthorityIsCurrent()
         || !lease.isCurrent()
         || !officeControlChannelIsLive(sessionToken)
       ) {
         stream.getTracks().forEach((track) => track.stop());
-        // A stale lease is already being closed by the coordinator transition
-        // that fenced it. Never fall back to global cleanup from this sibling
-        // continuation: that cleanup could outlive the owning close and touch
-        // the replacement session after focus has moved on.
-        await lease.release('cancelled').catch(() => undefined);
+        // A token transition may have made this lease stale before its queued
+        // coordinator acquisition settled. If release reports false, retire
+        // only this attempt's exact native generation and detached resources;
+        // cleanup scope prevents it from touching any replacement session.
+        await releasePersonalRealtimeTerminalFocus(
+          lease,
+          cleanupSessionTransport,
+          'cancelled',
+        ).catch(() => undefined);
         return;
       }
       const peer = new RTCPeerConnection({
-        iceServers: (clientConfig.rtcConfiguration?.iceServers ?? []) as never,
+        iceServers: (startupClientConfig.rtcConfiguration?.iceServers ?? []) as never,
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require',
       });
       peerRef.current = peer;
       peer.ontrack = (event: unknown) => {
-        if (peerRef.current !== peer || generationRef.current !== connectionGeneration) return;
+        if (peerRef.current !== peer || !startAuthorityIsCurrent()) return;
         const trackEvent = event as { streams?: MediaStream[]; track?: { enabled: boolean } };
         const streamValue = trackEvent.streams?.[0];
         if (streamValue) remoteStreamRef.current = streamValue;
@@ -866,7 +1133,7 @@ export function usePersonalRealtime(options: {
         publishMilestone('remote_track', connectionGeneration);
       };
       peer.onconnectionstatechange = () => {
-        if (peerRef.current !== peer || generationRef.current !== connectionGeneration) return;
+        if (peerRef.current !== peer || !startAuthorityIsCurrent()) return;
         if (peer.connectionState === 'connected') {
           publishMilestone('peer_connected', connectionGeneration);
           setLiveStatus('listening');
@@ -881,13 +1148,13 @@ export function usePersonalRealtime(options: {
       const dataChannel = peer.createDataChannel('oai-events');
       dataChannelRef.current = dataChannel;
       dataChannel.onopen = () => {
-        if (generationRef.current === connectionGeneration && dataChannelRef.current === dataChannel) {
+        if (startAuthorityIsCurrent() && dataChannelRef.current === dataChannel) {
           publishMilestone('data_channel_open', connectionGeneration);
           setLiveStatus('listening');
         }
       };
       dataChannel.onmessage = (event: unknown) => {
-        if (generationRef.current !== connectionGeneration || dataChannelRef.current !== dataChannel) return;
+        if (!startAuthorityIsCurrent() || dataChannelRef.current !== dataChannel) return;
         handleProviderEvent((event as { data?: unknown }).data, connectionGeneration);
       };
       dataChannel.onerror = () => {
@@ -902,12 +1169,12 @@ export function usePersonalRealtime(options: {
       };
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
       const offer = await peer.createOffer();
-      if (generationRef.current !== connectionGeneration || peerRef.current !== peer) return;
+      if (!startAuthorityIsCurrent() || peerRef.current !== peer) return;
       await peer.setLocalDescription(offer);
-      if (generationRef.current !== connectionGeneration || peerRef.current !== peer) return;
+      if (!startAuthorityIsCurrent() || peerRef.current !== peer) return;
       const localSDP = await waitForOfferSDP(peer, offer);
       if (
-        generationRef.current !== connectionGeneration
+        !startAuthorityIsCurrent()
         || peerRef.current !== peer
         || !officeControlChannelIsLive(sessionToken)
       ) return;
@@ -919,7 +1186,7 @@ export function usePersonalRealtime(options: {
         expectedThreadId,
       );
       if (
-        generationRef.current !== connectionGeneration
+        !startAuthorityIsCurrent()
         || peerRef.current !== peer
         || !lease.isCurrent()
         || !officeControlChannelIsLive(sessionToken)
@@ -943,6 +1210,15 @@ export function usePersonalRealtime(options: {
       voiceLeaseTokenRef.current = answer.leaseToken;
       voiceLeaseGenerationRef.current = answer.leaseGeneration;
       voiceLeaseExpiresAtRef.current = answer.leaseExpiresAt;
+      const initialLeaseWatchdog = armLeaseExpiryWatchdog({
+        connectionGeneration,
+        leaseGeneration: answer.leaseGeneration,
+        leaseToken: answer.leaseToken,
+        leaseExpiresAt: answer.leaseExpiresAt,
+      });
+      if (!initialLeaseWatchdog) {
+        throw new Error('Scout voice received an expired private session.');
+      }
       activeTransportRevisionRef.current = {
         generation: connectionGeneration,
         revision: answer.transportRevision,
@@ -962,7 +1238,7 @@ export function usePersonalRealtime(options: {
       if (!answerSDP) throw new Error('Scout voice returned an empty answer.');
       await peer.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerSDP }));
       if (
-        generationRef.current !== connectionGeneration
+        !startAuthorityIsCurrent()
         || peerRef.current !== peer
         || !lease.isCurrent()
       ) return;
@@ -1004,45 +1280,108 @@ export function usePersonalRealtime(options: {
       setError(message);
       setLiveStatus('error');
     }
-  }, [cancelReconnect, cleanupTransport, handleProviderEvent, publishMilestone, queueReconnect, sessionToken, setLiveStatus, startLeaseRenewal, startStats, terminateTransportWithError]);
+  }, [armLeaseExpiryWatchdog, cancelReconnect, cleanupTransport, handleProviderEvent, loadQualifiedClientConfig, publishMilestone, queueReconnect, sessionToken, setLiveStatus, startLeaseRenewal, startStats, terminateTransportWithError]);
 
   reconnectRunnerRef.current = (binding) => {
     void start(binding);
   };
 
-  const stop = useCallback(async (
+  const stop = useCallback((
     reason: AudioFocusTerminalReason = 'completed',
-  ) => {
-    terminalRequestRef.current += 1;
-    // Keep the exact server binding until cleanup snapshots it for Stop.
-    cancelReconnect(false);
-    const lease = leaseRef.current;
-    leaseRef.current = null;
-    try {
-      if (lease) await lease.release(reason);
-      else await cleanupTransport();
-    } catch (stopError) {
-      if (mountedRef.current) {
-        setError(userFacingRealtimeError(stopError));
-        setLiveStatus('error');
+  ): Promise<void> => {
+    if (stopInFlightRef.current) return stopInFlightRef.current;
+    const representsLiveMedia = (
+      tearingDownRef.current
+      || statusRef.current !== 'idle'
+      || leaseRef.current !== null
+      || mediaSessionGenerationRef.current !== null
+      || streamRef.current !== null
+    );
+    if (representsLiveMedia) {
+      tearingDownRef.current = true;
+      if (mountedRef.current) setTearingDown(true);
+    }
+    const operation = (async () => {
+      terminalRequestRef.current += 1;
+      // Keep the exact server binding until cleanup snapshots it for Stop.
+      cancelReconnect(false);
+      const lease = leaseRef.current;
+      leaseRef.current = null;
+      try {
+        await releasePersonalRealtimeTerminalFocus(lease, cleanupTransport, reason);
+      } catch (stopError) {
+        if (mountedRef.current) {
+          setError(userFacingRealtimeError(stopError));
+          setLiveStatus('error');
+        }
+        // A failed or timed-out native terminal path is not yet safe to depict
+        // as microphone-off. Keep the indicator and Stop affordance available
+        // so the exact-generation finalizer can finish or the user can retry.
+        return;
       }
-      return;
-    }
-    if (mountedRef.current) {
-      setThreadId(null);
-      setLiveStatus('idle');
-    }
+      tearingDownRef.current = false;
+      if (mountedRef.current) {
+        setThreadId(null);
+        setLiveStatus('idle');
+        setTearingDown(false);
+      }
+    })();
+    let trackedOperation!: Promise<void>;
+    trackedOperation = operation.finally(() => {
+      if (stopInFlightRef.current === trackedOperation) stopInFlightRef.current = null;
+    });
+    stopInFlightRef.current = trackedOperation;
+    return trackedOperation;
   }, [cancelReconnect, cleanupTransport, setLiveStatus]);
 
   useEffect(() => {
-    if (authorityTokenRef.current === sessionToken) return;
-    authorityTokenRef.current = sessionToken;
+    if (!authorityTransitionsRef.current.length) return;
+    const transitions = authorityTransitionsRef.current.splice(0);
+    setQualification(NATIVE_REALTIME_VOICE_ENABLED && sessionToken ? 'checking' : 'unqualified');
+    for (const transition of transitions) {
+      nativeClientConfigCache.clear(transition.previousToken ?? undefined);
+    }
     setThreadId(null);
     // A private voice transcript is authorized to exactly one signed-in
     // account. Moving this hook above navigation must never let a transport or
     // its bound thread survive an account/session boundary.
     void stop('cancelled');
   }, [sessionToken, stop]);
+
+  useEffect(() => {
+    if (!NATIVE_REALTIME_VOICE_ENABLED || !sessionToken) {
+      if (qualifiedAuthorityTokenRef.current) qualificationEpochRef.current += 1;
+      qualifiedAuthorityTokenRef.current = '';
+      setQualification('unqualified');
+      return undefined;
+    }
+    let disposed = false;
+    const refresh = async (force: boolean) => {
+      try {
+        await loadQualifiedClientConfig(force);
+      } catch {
+        if (
+          !disposed
+          && authorityTokenRef.current === sessionToken
+          && qualifiedAuthorityTokenRef.current !== sessionToken
+        ) setQualification('checking');
+      }
+    };
+    void refresh(false);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') void refresh(true);
+    }, PERSONAL_REALTIME_QUALIFICATION_POLL_MS);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [loadQualifiedClientConfig, sessionToken]);
+
+  useEffect(() => {
+    if (qualification === 'unqualified' && statusRef.current !== 'idle') {
+      void stop('cancelled');
+    }
+  }, [qualification, stop]);
 
   useEffect(() => () => {
     mountedRef.current = false;
@@ -1055,17 +1394,27 @@ export function usePersonalRealtime(options: {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState !== 'active' && !['idle', 'error'].includes(statusRef.current)) {
-        void stop('cancelled');
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+      if (nextState === 'active' && sessionToken) {
+        lifecycleStopLatchRef.current.rearm();
+        void loadQualifiedClientConfig(true).catch(() => undefined);
+      }
+      if (personalRealtimeAppLifecycleAction(previousState, nextState, statusRef.current) === 'stop') {
+        void lifecycleStopLatchRef.current.run(() => stop('cancelled'));
       }
     });
     return () => subscription.remove();
-  }, [stop]);
+  }, [loadQualifiedClientConfig, sessionToken, stop]);
 
   return {
-    enabled: NATIVE_REALTIME_VOICE_ENABLED,
+    enabled: NATIVE_REALTIME_VOICE_ENABLED
+      && qualification === 'qualified'
+      && Boolean(sessionToken)
+      && qualifiedAuthorityTokenRef.current === sessionToken,
     status,
     active: !['idle', 'error'].includes(status),
+    tearingDown,
     turn,
     error,
     trace,

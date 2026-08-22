@@ -105,19 +105,21 @@ type deckElement struct {
 }
 
 type deckArtifactView struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Type         string `json:"type"`
-	Version      int    `json:"version"`
-	SceneRef     string `json:"sceneRef,omitempty"`
-	UpdatedAt    string `json:"updatedAt,omitempty"`
-	SavedToFiles bool   `json:"savedToFiles"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Type          string `json:"type"`
+	Version       int    `json:"version"`
+	ContentDigest string `json:"contentDigest"`
+	GoalID        string `json:"goalId,omitempty"`
+	SceneRef      string `json:"sceneRef,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+	SavedToFiles  bool   `json:"savedToFiles"`
 }
 
 func deckArtifactViewFromEntry(entry meetingMemoryEntry) deckArtifactView {
 	return deckArtifactView{
 		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
-		Version: artifactVersion(entry), SceneRef: strings.TrimSpace(entry.Metadata[deckSceneRefMetadataKey]), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
+		Version: artifactVersion(entry), ContentDigest: artifactCapabilityDigest(entry), GoalID: strings.TrimSpace(firstNonEmptyString(entry.Metadata["goalId"], entry.Metadata["goalParentId"])), SceneRef: strings.TrimSpace(entry.Metadata[deckSceneRefMetadataKey]), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
 		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
 }
@@ -374,12 +376,13 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, aclCanWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
+		_, aclCanExport := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLExport)
 		canWrite := aclCanWrite && importQuality != "approximate"
 		qualityState, admitted, stable := kanbanApp.authoredResultFinalExportState(artifact)
 		admitted = stable && admitted
 		response := map[string]any{
 			"ok": true, "artifact": deckArtifactViewFromEntry(artifact), "deck": deck, "imported": imported, "importQuality": importQuality, "canWrite": canWrite,
-			"qualityState": qualityState, "canPresent": admitted, "canExport": admitted,
+			"qualityState": qualityState, "canPresent": admitted, "canExport": admitted && aclCanExport,
 		}
 		if aclCanWrite && !canWrite {
 			response["writeBlockedReason"] = "legacy deck cannot be edited without losing unrecognized content"
@@ -442,9 +445,10 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	qualityState, canPublish, stable := kanbanApp.authoredResultFinalExportState(updated)
 	canPublish = stable && canPublish
+	_, aclCanExport := authorizedArtifactForActions(r.Context(), user, updated.ID, ACLReadContent, ACLExport)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": deckArtifactViewFromEntry(updated), "deck": payload.Deck,
-		"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish,
+		"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish && aclCanExport,
 	})
 }
 

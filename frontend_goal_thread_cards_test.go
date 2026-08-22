@@ -65,8 +65,8 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 	for _, want := range []string{
 		"scout-chat-deck-result",
 		"renderArtifactDeck(result, artifact, {",
-		"canPresent: message?.thread?.resultCanPresent === true",
-		"canExport: message?.thread?.resultCanExport === true",
+		"Object.prototype.hasOwnProperty.call(resultRef, 'resultCanPresent')",
+		"Object.prototype.hasOwnProperty.call(resultRef, 'resultCanExport')",
 		"candidate?.thread?.resultArtifactId",
 		"deliveredInManifest",
 		"candidate?.manifest?.deliverables",

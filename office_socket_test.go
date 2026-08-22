@@ -509,6 +509,7 @@ func TestPrivateThreadPostDoesNotReachOtherUsersRoomSocket(t *testing.T) {
 // surface. A forged legacy create_ticket call is rejected before mutation or
 // fan-out; board work must enter through route_conversation_turn.
 func TestPrivateVoiceDirectBoardMutationIsUnavailable(t *testing.T) {
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)

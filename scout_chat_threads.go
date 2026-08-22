@@ -23,7 +23,26 @@ const (
 	scoutChatThreadRequestLimit = 768 << 10
 	scoutChatMaxFilesPerMessage = 6
 	scoutChatMaxFileTextBytes   = 64 << 10
+	// A cold conversation open is a tail read, not a history export. Keep the
+	// transport comfortably below the browser's long-task threshold even when a
+	// channel has accumulated years of messages. Callers can walk backward with
+	// the server-authored nextBeforeMessageId cursor without losing any record.
+	scoutChatHydrationDefaultLimit = 80
+	scoutChatHydrationMaxLimit     = 100
+	scoutChatHydrationResponseMax  = 512 << 10
 )
+
+type scoutChatHistoryPage struct {
+	Mode                string         `json:"mode"`
+	MessageCount        int            `json:"messageCount"`
+	HasEarlier          bool           `json:"hasEarlier"`
+	NextBeforeMessageID string         `json:"nextBeforeMessageId,omitempty"`
+	OldestMessageID     string         `json:"oldestMessageId,omitempty"`
+	NewestMessageID     string         `json:"newestMessageId,omitempty"`
+	UnreadCount         int            `json:"unreadCount,omitempty"`
+	UnreadRootCount     int            `json:"unreadRootCount,omitempty"`
+	ReplyCounts         map[string]int `json:"replyCounts,omitempty"`
+}
 
 type scoutConversationMessageRequest struct {
 	Text                string                    `json:"text"`
@@ -406,10 +425,15 @@ type scoutChatMessageReaction struct {
 // MessageID preserves navigation to the live original while the author/snippet
 // keep the reply intelligible if that original is later edited or deleted.
 type scoutChatReplyRef struct {
-	MessageID   string `json:"messageId"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail,omitempty"`
-	Text        string `json:"text"`
+	MessageID string `json:"messageId"`
+	// RootMessageID is a read-projection hint for bounded history pages. The
+	// durable MessageID remains the exact direct parent; this canonical root lets
+	// clients group a deeply nested reply even when intermediate ancestors are
+	// intentionally outside the page's hard message cap.
+	RootMessageID string `json:"rootMessageId,omitempty"`
+	AuthorName    string `json:"authorName"`
+	AuthorEmail   string `json:"authorEmail,omitempty"`
+	Text          string `json:"text"`
 }
 
 type scoutChatReplyLifecycle struct {
@@ -1083,6 +1107,263 @@ func selectScoutChatThreadsListProjection(indexOnly bool, index, full func() []m
 	return full()
 }
 
+func scoutChatHydrationLimit(raw string) int {
+	limit, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || limit <= 0 {
+		return scoutChatHydrationDefaultLimit
+	}
+	if limit > scoutChatHydrationMaxLimit {
+		return scoutChatHydrationMaxLimit
+	}
+	return limit
+}
+
+func scoutChatHistoryUnreadCounts(messages []scoutChatMessageRecord, since string) (all int, roots int) {
+	sinceAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(since))
+	if err != nil {
+		return 0, 0
+	}
+	for _, message := range messages {
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.CreatedAt))
+		if parseErr != nil || !createdAt.After(sinceAt) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(message.Kind)) {
+		case "artifact", "proposal", "manifest":
+			continue
+		}
+		all++
+		if message.ReplyTo == nil || strings.TrimSpace(message.ReplyTo.MessageID) == "" {
+			roots++
+		}
+	}
+	return all, roots
+}
+
+// scoutChatTailWindow applies a stable, exclusive-before cursor to an already
+// authorized viewer projection. Appends after the first page do not move the
+// cursor because it names the oldest returned record, so the next page ends at
+// that exact record and cannot overlap or skip history.
+func scoutChatTailWindow(projected scoutChatThreadRecord, before string, limit int, since string) (scoutChatThreadRecord, scoutChatHistoryPage, error) {
+	messages := projected.Messages
+	end := len(messages)
+	before = strings.TrimSpace(before)
+	if before != "" {
+		end = -1
+		for index := range messages {
+			if strings.TrimSpace(messages[index].ID) == before {
+				end = index
+				break
+			}
+		}
+		if end < 0 {
+			return scoutChatThreadRecord{}, scoutChatHistoryPage{}, fmt.Errorf("chat history cursor is no longer available; reload the conversation")
+		}
+	}
+	if limit <= 0 || limit > scoutChatHydrationMaxLimit {
+		limit = scoutChatHydrationDefaultLimit
+	}
+	start := end - limit
+	if start < 0 {
+		start = 0
+	}
+	window := append([]scoutChatMessageRecord(nil), messages[start:end]...)
+	projected.Messages = window
+	page := scoutChatHistoryPage{Mode: "tail", MessageCount: len(window), HasEarlier: start > 0}
+	if len(window) > 0 {
+		page.OldestMessageID = strings.TrimSpace(window[0].ID)
+		page.NewestMessageID = strings.TrimSpace(window[len(window)-1].ID)
+		if page.HasEarlier {
+			page.NextBeforeMessageID = page.OldestMessageID
+		}
+	}
+	if before == "" && strings.TrimSpace(since) != "" {
+		page.UnreadCount, page.UnreadRootCount = scoutChatHistoryUnreadCounts(messages, since)
+	}
+	return projected, page, nil
+}
+
+// scoutChatReplyRootIndices resolves every message's canonical conversation
+// root in linear time. Reply graphs are functional (at most one parent), so a
+// run marker and memoized roots avoid walking the same deep ancestor chain once
+// per message. Malformed cycles resolve to their oldest indexed member.
+func scoutChatReplyRootIndices(messages []scoutChatMessageRecord, byID map[string]int) []int {
+	roots := make([]int, len(messages))
+	visitRun := make([]int, len(messages))
+	visitPosition := make([]int, len(messages))
+	for index := range roots {
+		roots[index] = -1
+	}
+	path := make([]int, 0, min(len(messages), 64))
+	for start := range messages {
+		if roots[start] >= 0 {
+			continue
+		}
+		runID := start + 1
+		path = path[:0]
+		current := start
+		canonical := -1
+		for {
+			if roots[current] >= 0 {
+				canonical = roots[current]
+				break
+			}
+			if visitRun[current] == runID {
+				cycleStart := visitPosition[current]
+				canonical = path[cycleStart]
+				for _, candidate := range path[cycleStart+1:] {
+					if candidate < canonical {
+						canonical = candidate
+					}
+				}
+				break
+			}
+			visitRun[current] = runID
+			visitPosition[current] = len(path)
+			path = append(path, current)
+			reply := messages[current].ReplyTo
+			if reply == nil || strings.TrimSpace(reply.MessageID) == "" {
+				canonical = current
+				break
+			}
+			parent, ok := byID[strings.TrimSpace(reply.MessageID)]
+			if !ok {
+				// A missing/deleted parent cannot authorize or force another record
+				// into this page. Treat the surviving record as its own root.
+				canonical = current
+				break
+			}
+			current = parent
+		}
+		for _, index := range path {
+			roots[index] = canonical
+		}
+	}
+	return roots
+}
+
+func scoutChatTailSourceWindow(thread scoutChatThreadRecord, before string, limit int, since string) (scoutChatThreadRecord, scoutChatHistoryPage, error) {
+	pendingDeletes := map[string]bool{}
+	for _, operation := range thread.ProjectSourceMutationOperations {
+		if operation.State == "pending" && operation.Kind == "delete" {
+			pendingDeletes[operation.MessageID] = true
+		}
+	}
+	eligible := make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	for _, message := range thread.Messages {
+		if pendingDeletes[message.ID] || (message.CausedByMessageID != "" && pendingDeletes[message.CausedByMessageID]) {
+			continue
+		}
+		eligible = append(eligible, message)
+	}
+	end := len(eligible)
+	before = strings.TrimSpace(before)
+	if before != "" {
+		end = -1
+		for index := range eligible {
+			if strings.TrimSpace(eligible[index].ID) == before {
+				end = index
+				break
+			}
+		}
+		if end < 0 {
+			return scoutChatThreadRecord{}, scoutChatHistoryPage{}, fmt.Errorf("chat history cursor is no longer available; reload the conversation")
+		}
+	}
+	if limit <= 0 || limit > scoutChatHydrationMaxLimit {
+		limit = scoutChatHydrationDefaultLimit
+	}
+	baseStart := end - limit
+	if baseStart < 0 {
+		baseStart = 0
+	}
+	byID := make(map[string]int, len(eligible))
+	for index := range eligible {
+		if id := strings.TrimSpace(eligible[index].ID); id != "" {
+			byID[id] = index
+		}
+	}
+	rootIndices := scoutChatReplyRootIndices(eligible, byID)
+	selection := func(start int) []int {
+		selected := map[int]bool{}
+		for index := start; index < end; index++ {
+			selected[index] = true
+			rootIndex := rootIndices[index]
+			if rootIndex >= 0 && rootIndex < end {
+				selected[rootIndex] = true
+			}
+		}
+		// The desktop timeline hides reply records, so inject each suffix
+		// conversation's canonical root. Do not inject every ancestor: one
+		// pathological nested chain must never defeat the 100-record wire cap.
+		indices := make([]int, 0, len(selected))
+		for index := range selected {
+			indices = append(indices, index)
+		}
+		sort.Ints(indices)
+		return indices
+	}
+	indices := selection(baseStart)
+	for len(indices) > scoutChatHydrationMaxLimit && baseStart < end-1 {
+		baseStart++
+		indices = selection(baseStart)
+	}
+	window := make([]scoutChatMessageRecord, 0, len(indices))
+	for _, index := range indices {
+		message := eligible[index]
+		if message.ReplyTo != nil {
+			reply := *message.ReplyTo
+			rootIndex := rootIndices[index]
+			if rootIndex >= 0 && rootIndex < end && rootIndex != index {
+				reply.RootMessageID = strings.TrimSpace(eligible[rootIndex].ID)
+			}
+			message.ReplyTo = &reply
+		}
+		window = append(window, message)
+	}
+	thread.Messages = window
+	page := scoutChatHistoryPage{Mode: "tail", MessageCount: len(window), HasEarlier: baseStart > 0}
+	if len(window) > 0 {
+		page.OldestMessageID = strings.TrimSpace(window[0].ID)
+		page.NewestMessageID = strings.TrimSpace(window[len(window)-1].ID)
+		if page.HasEarlier {
+			page.NextBeforeMessageID = strings.TrimSpace(eligible[baseStart].ID)
+		}
+	}
+	if before == "" && strings.TrimSpace(since) != "" {
+		page.UnreadCount, page.UnreadRootCount = scoutChatHistoryUnreadCounts(eligible, since)
+	}
+	includedRoots := map[string]bool{}
+	for _, index := range indices {
+		rootIndex := rootIndices[index]
+		if rootIndex >= 0 {
+			rootID := strings.TrimSpace(eligible[rootIndex].ID)
+			if rootID != "" {
+				includedRoots[rootID] = true
+			}
+		}
+	}
+	if len(includedRoots) > 0 {
+		page.ReplyCounts = map[string]int{}
+		for index, message := range eligible {
+			if message.ReplyTo == nil {
+				continue
+			}
+			rootIndex := rootIndices[index]
+			if rootIndex >= 0 {
+				rootID := strings.TrimSpace(eligible[rootIndex].ID)
+				if includedRoots[rootID] {
+					page.ReplyCounts[rootID]++
+				}
+			}
+		}
+		if len(page.ReplyCounts) == 0 {
+			page.ReplyCounts = nil
+		}
+	}
+	return thread, page, nil
+}
+
 func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 	if !websocketOriginAllowed(r) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
@@ -1148,14 +1429,33 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		marker := lookupThreadReadMarker("", user.Email, threadID)
-		writeAuthJSON(w, http.StatusOK, map[string]any{
+		payload := map[string]any{
 			"ok":                true,
-			"thread":            kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, episodeID, r.Context()),
 			"readAt":            marker.ReadAt,
 			"lastReadMessageId": marker.LastReadMessageID,
 			"muted":             threadMuted("", user.Email, threadID),
 			"notificationLevel": threadNotificationLevel("", user.Email, threadID),
-		})
+		}
+		if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "tail") || strings.TrimSpace(r.URL.Query().Get("before")) != "" {
+			effectiveLimit := scoutChatHydrationLimit(r.URL.Query().Get("limit"))
+			for {
+				projected, page, projectionErr := kanbanApp.projectScoutChatThreadTailForViewer(user.Email, thread, episodeID, r.URL.Query().Get("before"), effectiveLimit, r.URL.Query().Get("since"), r.Context())
+				if projectionErr != nil {
+					writeAuthError(w, http.StatusConflict, projectionErr.Error())
+					return
+				}
+				payload["thread"] = projected
+				payload["history"] = page
+				encoded, marshalErr := json.Marshal(payload)
+				if marshalErr != nil || len(encoded) <= scoutChatHydrationResponseMax || effectiveLimit <= 1 {
+					break
+				}
+				effectiveLimit = max(1, effectiveLimit/2)
+			}
+		} else {
+			payload["thread"] = kanbanApp.projectScoutChatThreadForViewerEpisode(user.Email, thread, episodeID, r.Context())
+		}
+		writeAuthJSON(w, http.StatusOK, payload)
 		return
 	}
 
@@ -1475,7 +1775,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(payload.ToolTemplate) != "" {
 			response["clientToolTemplateIgnored"] = true
 		}
-		projected := kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response, r.Context())
+		projected := kanbanApp.projectScoutChatMutationResponseForViewer(user.Email, threadID, response, r.Context())
 		if legacyNativeOperationIssued {
 			projected["legacyOperationIdIssued"] = true
 			projected["legacyOperationIdReused"] = legacyNativeOperationReused
@@ -1633,7 +1933,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatMutationResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
 		return
 	}
 
@@ -1662,7 +1962,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
+		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatMutationResponseForViewer(user.Email, threadID, map[string]any{"ok": true, "thread": thread, "message": message}, r.Context()))
 		return
 	}
 

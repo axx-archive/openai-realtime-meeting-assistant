@@ -10476,6 +10476,51 @@
       }
       .scout-chat-thread > :first-child { margin-top: 0; }
 
+      /* Dense channels paint the exact recent conversation first, then attach
+         the retained history in bounded browser turns. This quiet receipt is
+         honest about that short projection window without competing with the
+         messages that are already ready to read or act on. */
+      .scout-chat-history-loading {
+        flex: 0 0 auto;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        margin: 0 0 10px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-3);
+        box-shadow: inset 0 0 0 1px var(--line-1);
+        font: var(--type-label);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-history-control {
+        flex: 0 0 auto;
+        align-self: center;
+        display: flex;
+        justify-content: center;
+        margin: 0 0 12px;
+      }
+      .scout-chat-history-control--latest { margin: 14px 0 0; }
+      .scout-chat-history-control__button {
+        min-height: 34px;
+        padding: 0 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+        color: var(--text-2);
+        box-shadow: var(--shadow-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .scout-chat-history-control__button:hover { color: var(--text-1); background: var(--surface-2); }
+      .scout-chat-history-control__button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+      .scout-chat-history-control__button:disabled { opacity: .56; cursor: wait; }
+
       /* sheet 2f/3a time marker — "sunday · jul 5" as a quiet centered
          caption. No hairlines: the air above it is the divider (mobile's
          timelineMarkers treatment). */
@@ -11368,6 +11413,26 @@
       .manifest-card--deck-first .manifest-card__supporting {
         max-width: 720px;
         margin: 8px auto 0;
+      }
+
+      .manifest-card__deck-unavailable {
+        display: grid;
+        gap: 6px;
+        margin-top: 14px;
+        padding: 18px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: var(--surface-1);
+      }
+
+      .manifest-card__deck-unavailable strong {
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .manifest-card__deck-unavailable span {
+        color: var(--text-3);
+        font: var(--type-caption);
       }
 
       .manifest-card__supporting {
@@ -12917,6 +12982,20 @@
         color: var(--text-3);
       }
       .deck-editor__save-state[data-state="saved"]::before { content: '✓'; margin-right: 4px; color: var(--live); }
+      .deck-editor__publication-state {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 8px;
+        border: 1px solid color-mix(in srgb, var(--ember) 34%, var(--line-1));
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--ember) 8%, var(--surface-2));
+        color: var(--text-2);
+        font: var(--type-caption);
+        white-space: nowrap;
+      }
+      .deck-editor__publication-state[hidden] { display: none; }
       .deck-editor__divider {
         width: 1px;
         height: 24px;
@@ -33463,11 +33542,23 @@
         translate: 0 -50%;
       }
       .content-studio-drawer {
+        --content-studio-panel-width: min(1120px, 84vw);
         position: fixed;
         inset: 0;
         z-index: 1200;
         display: flex;
         justify-content: flex-end;
+      }
+      .content-studio-drawer[data-workspace-mode="full"] {
+        left: 56px;
+      }
+      /* Full workspace preserves the shell as orientation chrome, not as a
+         second interactive layer behind an aria-modal surface. Make that
+         ambient contract visible instead of leaving enabled-looking controls
+         inside the intentionally inert app shell. */
+      body:has(#contentStudioDrawer[data-workspace-mode="full"]) #toolRail {
+        opacity: 0.48;
+        pointer-events: none;
       }
       .content-studio-drawer__scrim {
         position: absolute;
@@ -33478,7 +33569,9 @@
       }
       .content-studio-drawer__panel {
         position: relative;
-        width: min(1120px, 84vw);
+        width: var(--content-studio-panel-width);
+        min-width: min(520px, 100vw);
+        max-width: calc(100vw - 56px);
         height: 100%;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
@@ -33489,6 +33582,16 @@
         transition-property: transform, opacity;
         transition-duration: var(--dur-med);
         transition-timing-function: var(--ease);
+      }
+      .content-studio-drawer[data-workspace-mode="full"] .content-studio-drawer__panel {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+      }
+      .content-studio-drawer.is-resizing,
+      .content-studio-drawer.is-resizing * { cursor: col-resize !important; }
+      .content-studio-drawer.is-resizing .content-studio-drawer__frame {
+        pointer-events: none;
       }
       .content-studio-drawer__head {
         position: relative;
@@ -33563,6 +33666,55 @@
       }
       .content-studio-drawer__action { padding: 0 13px; }
       .content-studio-drawer__close { width: 40px; padding: 0; }
+      .content-studio-drawer__workspace-mode {
+        width: 40px;
+        padding: 0;
+      }
+      .content-studio-drawer__workspace-mode svg { width: 17px; height: 17px; }
+      .content-studio-drawer__resize {
+        position: fixed;
+        z-index: 5;
+        top: 0;
+        right: calc(var(--content-studio-panel-width) - 20px);
+        bottom: 0;
+        width: 40px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: col-resize;
+        touch-action: none;
+      }
+      .content-studio-drawer__resize::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 4px;
+        height: 48px;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--text-3) 52%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-1) 62%, transparent);
+        opacity: 0.68;
+        translate: -50% -50%;
+        transition-property: width, height, opacity, background-color;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .content-studio-drawer__resize:hover::after,
+      .content-studio-drawer__resize:focus-visible::after,
+      .content-studio-drawer.is-resizing .content-studio-drawer__resize::after {
+        width: 5px;
+        height: 64px;
+        background: color-mix(in srgb, var(--ember) 74%, var(--text-1));
+        opacity: 1;
+      }
+      .content-studio-drawer__resize:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -6px;
+      }
+      .content-studio-drawer[data-workspace-mode="full"] .content-studio-drawer__resize {
+        display: none;
+      }
       .content-studio-drawer__action:hover,
       .content-studio-drawer__action:focus-visible,
       .content-studio-drawer__close:hover,
@@ -33652,6 +33804,8 @@
         .content-studio-drawer__head { padding-top: max(10px, env(safe-area-inset-top)); }
         .content-studio-drawer__status { display: none; }
         .content-studio-drawer__action { padding: 0 11px; }
+        .content-studio-drawer__workspace-mode,
+        .content-studio-drawer__resize { display: none; }
       }
       @media (max-width: 520px) {
         .content-studio-drawer__action { width: 40px; padding: 0; font-size: 0; }
@@ -33660,7 +33814,8 @@
       @media (prefers-reduced-motion: reduce) {
         .content-studio-drawer__panel,
         .content-studio-drawer__action,
-        .content-studio-drawer__close { transition: none; }
+        .content-studio-drawer__close,
+        .content-studio-drawer__resize::after { transition: none; }
         .content-studio-drawer__pulse { animation: none; }
       }
       /* Hide Work/Network/Work Search/You — only Home/Meet/Chat/Files are destinations */
@@ -37375,6 +37530,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatContextState = null
 	      let chatContextReturnFocus = null
 	      let chatContextGeneration = 0
+	      // A deck-activity open crosses an authenticated artifact refresh. Keep a
+	      // separate navigation generation so a response from the channel the user
+	      // just left can never open its sidecar against the newly active channel.
+	      let manifestDeckActivityGeneration = 0
 	      let chatContextReplyAttempt = null
 	      let privateRiffCreateAttempt = null
 	      let privateRiffPublishAttempts = new Map()
@@ -37399,8 +37558,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      // can race with the local state causing duplicate render cycles.
 	      let homeScoutOpeningJustCompleted = false
 	      let chatThreadsGeneration = 0
+	      // Failed sends are recoverable state owned by the exact authenticated
+	      // conversation generation. They never paint over the destination the
+	      // reader navigated to while a request was in flight; returning to the
+	      // source restores the draft and its honest not-sent receipt.
+	      const scoutChatFailedSendRecoveries = new Map()
 	      const scoutChatThreadRequests = new Map()
 	      const scoutChatHydrationRetries = new Map()
+	      const scoutChatHistoryRequests = new Map()
 	      // inline thread-rename state (D7)
 	      let chatRenameActive = false
 	      // mobile stacked navigator (design mobile §6): threads ↔ convo
@@ -37414,6 +37579,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      // reload starts false, so persisted thread state and replayed socket
 	      // events can never conjure a shimmer with no pending turn.
 	      let scoutChatTurnInFlight = false
+	      let scoutChatTurnScope = null
 	      let osAssistantMode = 'chat'
       let osAssistantVoiceActive = false
       let osAssistantVoiceRecognizer = null
@@ -37515,7 +37681,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let callPipLayoutFrame = 0
       let callPipSurfaceFrame = 0
       let callPipSurfaceObserver = null
-      const scoutChatMaxNodes = 200
+	      const scoutChatMaxNodes = 200
+	      const scoutChatHydrationPageSize = 80
+      const scoutChatInitialNavigationNodes = 18
+      const scoutChatProjectionFrameBudgetMs = 12
       const roomChatMaxNodes = 200
       const roomChatSeenIds = new Set()
       let roomChatUnreadCount = 0
@@ -43934,7 +44103,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       })
 
-      function applyToolState(tool) {
+	      function applyToolState(tool) {
+	        const priorTool = String(appShell.dataset.tool || '')
         appShell.dataset.tool = tool
         syncPD1DestinationForTool(tool)
         if (tool !== 'board') {
@@ -43973,7 +44143,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           } else {
             loadScoutChatThreads({ onlyIfChanged: true })
           }
-          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	          // Canonical route/session reconciliation can confirm Chat several
+	          // times after it is already open. Only a real surface entry owns a
+	          // jump to the tail; a no-op Chat -> Chat confirmation must preserve
+	          // the reader's current channel position and any progressive anchor.
+	          if (priorTool !== 'chat') scoutChatThread.scrollTop = scoutChatThread.scrollHeight
         } else if (tool === 'memory') {
           // Reads work without joining the call; the room websocket keeps
           // ownership whenever it is connected.
@@ -44337,10 +44511,180 @@ Wrap the entire export in one code block. After the code block, say whether the 
       var artifactStagePublicationWatch = null
       var artifactStageReturnFocus = null
       const contentStudioURL = 'https://kino.grok.me'
+      const contentStudioLayoutStorageKey = 'stride.content-studio.layout.v1'
+      const contentStudioRailWidth = 56
+      const contentStudioMinimumWidth = 520
       var contentStudioDrawerNode = null
       var contentStudioReturnFocus = null
       var contentStudioLoadTimer = 0
       var contentStudioBackgroundState = null
+      var contentStudioLayoutPreference = null
+      var contentStudioLayoutFrame = 0
+      var contentStudioLayoutResizeHandler = null
+      var contentStudioResizeCleanup = null
+
+      function readContentStudioLayoutPreference() {
+        if (contentStudioLayoutPreference) return contentStudioLayoutPreference
+        let stored = null
+        try {
+          stored = JSON.parse(window.localStorage.getItem(contentStudioLayoutStorageKey) || 'null')
+        } catch (_) {
+          // Private browsing and storage policy must never block the workspace.
+        }
+        const width = Number(stored?.width)
+        contentStudioLayoutPreference = {
+          width: Number.isFinite(width) && width > 0 ? Math.round(width) : 0,
+          workspaceMode: stored?.workspaceMode === 'full' ? 'full' : 'panel'
+        }
+        return contentStudioLayoutPreference
+      }
+
+      function writeContentStudioLayoutPreference() {
+        try {
+          window.localStorage.setItem(contentStudioLayoutStorageKey, JSON.stringify(readContentStudioLayoutPreference()))
+        } catch (_) {
+          // The in-memory preference still owns this session when storage is unavailable.
+        }
+      }
+
+      function contentStudioLayoutBounds() {
+        const available = Math.max(0, window.innerWidth - contentStudioRailWidth)
+        const minimum = Math.min(contentStudioMinimumWidth, available)
+        return { minimum, maximum: Math.max(minimum, available) }
+      }
+
+      function setContentStudioPanelWidth(drawer, requestedWidth, options = {}) {
+        if (!drawer) return 0
+        const bounds = contentStudioLayoutBounds()
+        const fallback = Math.min(1120, Math.round(window.innerWidth * 0.84))
+        const numericWidth = Number(requestedWidth)
+        const width = Math.round(Math.min(bounds.maximum, Math.max(bounds.minimum, Number.isFinite(numericWidth) && numericWidth > 0 ? numericWidth : fallback)))
+        drawer.style.setProperty('--content-studio-panel-width', `${width}px`)
+        drawer.dataset.panelWidth = String(width)
+        const resize = drawer.querySelector('.content-studio-drawer__resize')
+        if (resize) {
+          resize.setAttribute('aria-valuemin', String(bounds.minimum))
+          resize.setAttribute('aria-valuemax', String(bounds.maximum))
+          resize.setAttribute('aria-valuenow', String(width))
+          resize.setAttribute('aria-valuetext', `${width} pixels wide`)
+        }
+        if (options.persist) {
+          readContentStudioLayoutPreference().width = width
+          writeContentStudioLayoutPreference()
+        }
+        return width
+      }
+
+      function updateContentStudioWorkspaceControl(drawer, full) {
+        const control = drawer?.querySelector('.content-studio-drawer__workspace-mode')
+        if (!control) return
+        const label = full ? 'Return Content Studio to side panel' : 'Use full-width Content Studio workspace'
+        control.setAttribute('aria-label', label)
+        control.setAttribute('aria-pressed', String(full))
+        control.title = label
+        control.innerHTML = full
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"></path></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path></svg>'
+      }
+
+      function applyContentStudioLayout(drawer) {
+        if (!drawer) return
+        const preference = readContentStudioLayoutPreference()
+        const desktop = window.innerWidth > 860
+        const full = desktop && preference.workspaceMode === 'full'
+        drawer.dataset.workspaceMode = full ? 'full' : 'panel'
+        updateContentStudioWorkspaceControl(drawer, full)
+        const mode = drawer.querySelector('.content-studio-drawer__workspace-mode')
+        const resize = drawer.querySelector('.content-studio-drawer__resize')
+        if (mode) mode.tabIndex = desktop ? 0 : -1
+        if (resize) resize.tabIndex = desktop && !full ? 0 : -1
+        setContentStudioPanelWidth(drawer, preference.width)
+      }
+
+      function setContentStudioWorkspaceMode(drawer, full, options = {}) {
+        if (!drawer || window.innerWidth <= 860) return
+        readContentStudioLayoutPreference().workspaceMode = full ? 'full' : 'panel'
+        if (options.persist !== false) writeContentStudioLayoutPreference()
+        applyContentStudioLayout(drawer)
+        callPipScheduleSafePlacement()
+      }
+
+      function bindContentStudioResize(drawer, resize) {
+        let drag = null
+        const finish = (event, cancelled) => {
+          if (!drag || (event?.pointerId !== undefined && event.pointerId !== drag.pointerId)) return
+          const active = drag
+          drag = null
+          drawer.classList.remove('is-resizing')
+          if (cancelled) setContentStudioPanelWidth(drawer, active.startWidth)
+          else setContentStudioPanelWidth(drawer, Number(drawer.dataset.panelWidth), { persist: true })
+          try { resize.releasePointerCapture?.(active.pointerId) } catch (_) { /* already released */ }
+          callPipScheduleSafePlacement()
+        }
+        const onPointerDown = event => {
+          if (event.button !== 0 || drawer.dataset.workspaceMode === 'full' || window.innerWidth <= 860) return
+          event.preventDefault()
+          drag = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: drawer.querySelector('.content-studio-drawer__panel')?.getBoundingClientRect().width || Number(drawer.dataset.panelWidth)
+          }
+          drawer.classList.add('is-resizing')
+          try { resize.setPointerCapture?.(event.pointerId) } catch (_) { /* element listeners still own drag */ }
+        }
+        const onPointerMove = event => {
+          if (!drag || event.pointerId !== drag.pointerId) return
+          event.preventDefault()
+          setContentStudioPanelWidth(drawer, drag.startWidth + drag.startX - event.clientX)
+        }
+        const onKeyDown = event => {
+          if (drawer.dataset.workspaceMode === 'full' || window.innerWidth <= 860) return
+          const bounds = contentStudioLayoutBounds()
+          const current = Number(drawer.dataset.panelWidth) || bounds.minimum
+          const step = event.shiftKey ? 48 : 16
+          let next = null
+          if (event.key === 'ArrowLeft') next = current + step
+          if (event.key === 'ArrowRight') next = current - step
+          if (event.key === 'Home') next = bounds.minimum
+          if (event.key === 'End') next = bounds.maximum
+          if (next === null) return
+          event.preventDefault()
+          setContentStudioPanelWidth(drawer, next, { persist: true })
+          callPipScheduleSafePlacement()
+        }
+        const onPointerUp = event => finish(event, false)
+        const onPointerCancel = event => finish(event, true)
+        const onLostPointerCapture = event => finish(event, true)
+        const onWindowPointerUp = event => finish(event, false)
+        const onWindowPointerCancel = event => finish(event, true)
+        const onWindowBlur = () => finish(null, true)
+        const onVisibilityChange = () => {
+          if (document.visibilityState !== 'visible') finish(null, true)
+        }
+        resize.addEventListener('pointerdown', onPointerDown)
+        resize.addEventListener('pointermove', onPointerMove)
+        resize.addEventListener('pointerup', onPointerUp)
+        resize.addEventListener('pointercancel', onPointerCancel)
+        resize.addEventListener('lostpointercapture', onLostPointerCapture)
+        resize.addEventListener('keydown', onKeyDown)
+        window.addEventListener('pointerup', onWindowPointerUp, true)
+        window.addEventListener('pointercancel', onWindowPointerCancel, true)
+        window.addEventListener('blur', onWindowBlur)
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        return () => {
+          if (drag) finish({ pointerId: drag.pointerId }, true)
+          resize.removeEventListener('pointerdown', onPointerDown)
+          resize.removeEventListener('pointermove', onPointerMove)
+          resize.removeEventListener('pointerup', onPointerUp)
+          resize.removeEventListener('pointercancel', onPointerCancel)
+          resize.removeEventListener('lostpointercapture', onLostPointerCapture)
+          resize.removeEventListener('keydown', onKeyDown)
+          window.removeEventListener('pointerup', onWindowPointerUp, true)
+          window.removeEventListener('pointercancel', onWindowPointerCancel, true)
+          window.removeEventListener('blur', onWindowBlur)
+          document.removeEventListener('visibilitychange', onVisibilityChange)
+        }
+      }
 
       function setContentStudioBackgroundInert(inert) {
         if (!appShell) return
@@ -44375,6 +44719,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!contentStudioDrawerNode) return
         window.clearTimeout(contentStudioLoadTimer)
         contentStudioLoadTimer = 0
+        if (contentStudioLayoutFrame) window.cancelAnimationFrame(contentStudioLayoutFrame)
+        contentStudioLayoutFrame = 0
+        if (contentStudioLayoutResizeHandler) window.removeEventListener('resize', contentStudioLayoutResizeHandler)
+        contentStudioLayoutResizeHandler = null
+        contentStudioResizeCleanup?.()
+        contentStudioResizeCleanup = null
         contentStudioDrawerNode.remove()
         contentStudioDrawerNode = null
         syncStudioBackgroundInert()
@@ -44424,12 +44774,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
         external.rel = 'noopener noreferrer'
         external.textContent = 'Open externally'
         external.setAttribute('aria-label', 'Open Content Studio externally in a new tab')
+        const workspaceMode = bfEl('button', 'content-studio-drawer__action content-studio-drawer__workspace-mode')
+        workspaceMode.type = 'button'
+        workspaceMode.addEventListener('click', () => {
+          setContentStudioWorkspaceMode(drawer, drawer.dataset.workspaceMode !== 'full')
+        })
+        const resize = bfEl('span', 'content-studio-drawer__resize')
+        resize.setAttribute('role', 'separator')
+        resize.setAttribute('aria-orientation', 'vertical')
+        resize.setAttribute('aria-label', 'Resize Content Studio')
         const close = bfEl('button', 'content-studio-drawer__close')
         close.type = 'button'
         close.setAttribute('aria-label', 'Close Content Studio')
         close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
         close.addEventListener('click', closeContentStudio)
-        actions.append(external, close)
+        actions.append(external, workspaceMode, close)
 	        head.append(identity, actions)
 
 	        const viewport = bfEl('div', 'content-studio-drawer__viewport')
@@ -44483,8 +44842,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          setEmbeddedFocusPath(false)
           loading.hidden = true
           fallback.hidden = false
-          status.textContent = 'Unable to embed'
-        }
+	          status.textContent = 'Unable to embed'
+	        }
 	        const loadFrame = () => {
 	          loaded = false
 	          setEmbeddedFocusPath(true)
@@ -44499,14 +44858,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
           loaded = true
           window.clearTimeout(contentStudioLoadTimer)
           contentStudioLoadTimer = 0
+          const returnFocusToFrame = fallback.contains(document.activeElement)
+          setEmbeddedFocusPath(true)
           loading.hidden = true
           fallback.hidden = true
-          status.textContent = 'Ready'
+          // A foreign iframe's load event confirms navigation completed, but
+          // the parent cannot truthfully inspect application readiness. Keep
+          // the status scoped to this surface rather than claiming KINO is ready.
+          status.textContent = 'Open'
+          if (returnFocusToFrame) frame.focus({ preventScroll: true })
         })
         frame.addEventListener('error', showFallback)
         retry.addEventListener('click', loadFrame)
 	        viewport.append(beforeFrame, frame, afterFrame, loading, fallback)
-        panel.append(head, viewport)
+	        panel.append(resize, head, viewport)
         drawer.append(scrim, panel)
         drawer.addEventListener('keydown', event => {
           if (event.key === 'Escape') {
@@ -44519,15 +44884,42 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	          // controls hand off to the frame directly; the DOM sentinels on
 	          // either side receive focus when the browser exits the foreign
 	          // document and return it to the matching edge of this header.
-	          if (event.shiftKey && document.activeElement === external) {
+	          if (!event.shiftKey && document.activeElement === workspaceMode && resize.tabIndex === 0) {
+	            event.preventDefault()
+	            resize.focus({ preventScroll: true })
+	          } else if (!event.shiftKey && document.activeElement === resize) {
+	            event.preventDefault()
+	            close.focus({ preventScroll: true })
+	          } else if (event.shiftKey && document.activeElement === close && resize.tabIndex === 0) {
+	            event.preventDefault()
+	            resize.focus({ preventScroll: true })
+	          } else if (event.shiftKey && document.activeElement === resize) {
+	            event.preventDefault()
+	            workspaceMode.focus({ preventScroll: true })
+	          } else if (event.shiftKey && document.activeElement === external) {
 	            event.preventDefault()
 	            ;(fallback.hidden ? frame : fallbackExternal).focus({ preventScroll: true })
 	          } else if (!event.shiftKey && document.activeElement === close) {
 	            event.preventDefault()
 	            ;(fallback.hidden ? frame : retry).focus({ preventScroll: true })
+	          } else if (!event.shiftKey && !fallback.hidden && document.activeElement === fallbackExternal) {
+	            event.preventDefault()
+	            external.focus({ preventScroll: true })
 	          }
 	        })
 	        contentStudioDrawerNode = drawer
+	        applyContentStudioLayout(drawer)
+	        contentStudioResizeCleanup = bindContentStudioResize(drawer, resize)
+	        contentStudioLayoutResizeHandler = () => {
+	          if (contentStudioLayoutFrame) window.cancelAnimationFrame(contentStudioLayoutFrame)
+	          contentStudioLayoutFrame = window.requestAnimationFrame(() => {
+	            contentStudioLayoutFrame = 0
+	            if (!drawer.isConnected) return
+	            applyContentStudioLayout(drawer)
+	            callPipScheduleSafePlacement()
+	          })
+	        }
+	        window.addEventListener('resize', contentStudioLayoutResizeHandler)
 	        document.body.appendChild(drawer)
 	        syncStudioBackgroundInert()
         renderPipMeeting()
@@ -48859,6 +49251,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
               <button type="button" class="deck-editor__btn deck-editor__btn--icon" data-action="close" aria-label="Close Deck Studio">×</button>
               <input class="deck-editor__title" data-deck-title maxlength="160" aria-label="Deck name" value="${escapeHtml(state.title)}">
               <span class="deck-editor__save-state" data-save-state data-state="saved" role="status" aria-live="polite">Saved</span>
+              <span class="deck-editor__publication-state" data-publication-state role="status" hidden></span>
             </div>
             <div class="deck-editor__toolbar-center">
               <button type="button" class="deck-editor__btn" data-action="undo" title="Undo">Undo</button>
@@ -49051,6 +49444,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const copyButton = editor.querySelector('[data-action="save-copy"]')
         const titleInput = editor.querySelector('[data-deck-title]')
         const saveState = editor.querySelector('[data-save-state]')
+        const publicationState = editor.querySelector('[data-publication-state]')
         const imageStatus = editor.querySelector('[data-image-status]')
         const downloadMenu = editor.querySelector('[data-download-menu]')
         const mobileToolsMenu = editor.querySelector('[data-mobile-tools-menu]')
@@ -49063,6 +49457,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
         let lastInspectorSelectionId = ''
 
 		function updateDeckPublicationControls() {
+		  const reviewNeeded = state.managedAuthoredResult && state.canPresent !== true
+		  publicationState.hidden = !reviewNeeded
+		  publicationState.textContent = state.qualityState === 'edited_after_admission' ? 'Review changes to present' : 'Review needed to present'
+		  publicationState.title = state.qualityState === 'edited_after_admission'
+		    ? 'This deck changed after review. Review the current revision before presenting.'
+		    : 'This deck has not passed review for the current revision yet.'
 		  editor.querySelectorAll('[data-action="present"]').forEach(button => {
 			button.hidden = state.canPresent !== true
 			button.disabled = state.canPresent !== true
@@ -50648,7 +51048,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const title = String(entry?.metadata?.title || entry?.title || 'Presentation').trim()
 		    const projectedQualityState = String(options?.qualityState || '').trim().toLowerCase()
 		    const hasProjectedQuality = ['admitted', 'draft_needs_attention', 'edited_after_admission'].includes(projectedQualityState)
-		const projectedPublication = {
+		const expectedBinding = options?.expectedBinding && typeof options.expectedBinding === 'object'
+		  ? options.expectedBinding
+		  : null
+			const projectedPublication = {
 		  qualityState: projectedQualityState,
 		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canPresent') ? { canPresent: options.canPresent === true } : {}),
 		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canExport') ? { canExport: options.canExport === true } : {})
@@ -50850,8 +51253,20 @@ Wrap the entire export in one code block. After the code block, say whether the 
         let loading = false
 		let autoPresentPending = Boolean(options.autoPresent)
 		let previewAttempt = 0
-		const publicationEntry = () => artifactPublicationEntry(artifactId, deckAccess?.artifact?.version || entry?.metadata?.artifactVersion, entry)
-		const applyDeckPublicationControls = (canPresent, canExport) => {
+			const publicationEntry = () => artifactPublicationEntry(artifactId, deckAccess?.artifact?.version || entry?.metadata?.artifactVersion, entry)
+		const deckAccessMatchesExpectedBinding = access => {
+		  if (!expectedBinding) return true
+		  const current = access?.artifact || {}
+		  if (String(current.id || '').trim() !== String(expectedBinding.artifactId || '').trim()) return false
+		  const expectedVersion = Number(expectedBinding.version || 0)
+		  if (expectedVersion > 0 && Number(current.version || 0) !== expectedVersion) return false
+		  const expectedDigest = String(expectedBinding.digest || '').trim().toLowerCase()
+		  if (expectedDigest && String(current.contentDigest || '').trim().toLowerCase() !== expectedDigest) return false
+		  const expectedGoalId = String(expectedBinding.goalId || '').trim()
+		  if (expectedGoalId && String(current.goalId || '').trim() !== expectedGoalId) return false
+		  return true
+		}
+			const applyDeckPublicationControls = (canPresent, canExport) => {
 		  const deckReady = Boolean(deckAccess?.deck)
 		  presentBtn.disabled = !deckReady || !canPresent
 		  presentBtn.hidden = !deckReady || !canPresent
@@ -50971,9 +51386,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
                 return response.ok && result?.deck ? result : null
               })
               .catch(() => null)
-            deckAccess = await deckAccessPromise
-            if (!deck.isConnected) return
-            const nativePreview = createNativePreview(deckAccess)
+		            deckAccess = await deckAccessPromise
+		            if (!deck.isConnected) return
+			if (!deckAccessMatchesExpectedBinding(deckAccess)) throw new Error('historical deck binding changed')
+		            const nativePreview = createNativePreview(deckAccess)
             if (nativePreview) {
               frame.replaceWith(nativePreview)
               frame = nativePreview
@@ -51000,8 +51416,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        const responseHasExport = Object.prototype.hasOwnProperty.call(deckAccess || {}, 'canExport')
 	        const freshCanPresent = responseHasPresent ? deckAccess?.canPresent === true : true
 	        const freshCanExport = responseHasExport ? deckAccess?.canExport === true : true
-	        const canPresent = (hasProjectedQuality ? options.canPresent === true : true) && freshCanPresent
-	        const canExport = (hasProjectedQuality ? options.canExport === true : true) && freshCanExport
+	        const canPresent = projectedArtifactPublicationAllows(projectedPublication, 'present') && freshCanPresent
+	        const canExport = projectedArtifactPublicationAllows(projectedPublication, 'export') && freshCanExport
 	        const canEdit = deckAccess?.canWrite === true && (!hasProjectedQuality || options.canEdit === true)
             editBtn.disabled = !canEdit
 	        editBtn.hidden = !canEdit
@@ -51015,9 +51431,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
               autoPresentPending = false
               present()
             }
-          } catch {
-            if (!deck.isConnected) return
-            deck.dataset.previewState = 'error'
+		          } catch {
+		            if (!deck.isConnected) return
+			if (typeof options?.onUnavailable === 'function') {
+			  options.onUnavailable()
+			  return
+			}
+		            deck.dataset.previewState = 'error'
             editBtn.disabled = true
 	        editBtn.hidden = hasProjectedQuality && options.canEdit !== true
             presentBtn.disabled = false
@@ -55223,12 +55643,28 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function callPipFocusableNodes(root) {
         if (!root) return []
-        return Array.from(root.querySelectorAll('button, [href], input, textarea, select, iframe, embed, [tabindex]:not([tabindex="-1"])'))
-          .filter(node => !node.disabled
+        const visibleFocusable = node => Boolean(node
+          && !node.disabled
             && !node.hidden
             && node.getAttribute('aria-hidden') !== 'true'
             && !node.classList.contains('content-studio-drawer__focus-sentinel')
+            && node.tabIndex >= 0
             && node.getClientRects().length)
+        if (root.classList?.contains('content-studio-drawer')) {
+          const fallback = root.querySelector('.content-studio-drawer__fallback')
+          const embedded = fallback?.hidden !== false
+          return [
+            root.querySelector('.content-studio-drawer__actions a'),
+            root.querySelector('.content-studio-drawer__workspace-mode'),
+            root.querySelector('.content-studio-drawer__resize'),
+            root.querySelector('.content-studio-drawer__close'),
+            ...(embedded
+              ? [root.querySelector('.content-studio-drawer__frame')]
+              : [fallback?.querySelector('button'), fallback?.querySelector('a')])
+          ].filter(visibleFocusable)
+        }
+        return Array.from(root.querySelectorAll('button, [href], input, textarea, select, iframe, embed, [tabindex]:not([tabindex="-1"])'))
+          .filter(visibleFocusable)
       }
 
       // The body-owned PiP is allowlisted into the active viewer's keyboard
@@ -55320,6 +55756,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return { dock, left, top, right: left + width, bottom: top + height }
       }
 
+      // Full-width Content Studio intentionally owns the canvas to the right
+      // of the ambient rail. A call must therefore compose inside that canvas,
+      // not fall back to an already-invalid viewport-edge candidate. Preserve
+      // the user's dock/y preference within the explicit safe region below the
+      // KINO header and to the right of the rail.
+      function callPipContentStudioWorkspaceCandidate(stored, width, height, margin) {
+        const drawer = document.getElementById('contentStudioDrawer')
+        if (!drawer || drawer.dataset.workspaceMode !== 'full' || window.innerWidth <= 860) return null
+        const rail = document.getElementById('toolRail')?.getBoundingClientRect()
+        const header = drawer.querySelector('.content-studio-drawer__head')?.getBoundingClientRect()
+        if (!rail || !header) return null
+        const clearance = 10
+        const safeLeft = Math.max(margin, rail.right + clearance)
+        const safeRight = Math.max(safeLeft, window.innerWidth - margin)
+        const safeTop = Math.max(margin, header.bottom + clearance)
+        const safeBottom = Math.max(safeTop, window.innerHeight - margin)
+        if (safeRight - safeLeft < width || safeBottom - safeTop < height) return null
+        const dock = stored?.dock === 'left' ? 'left' : 'right'
+        const y = stored ? Math.min(1, Math.max(0, Number(stored.y) || 0)) : 0
+        const availableY = Math.max(0, safeBottom - safeTop - height)
+        const left = dock === 'left' ? safeLeft : Math.max(safeLeft, safeRight - width)
+        const top = safeTop + availableY * y
+        return { dock, left, top, right: left + width, bottom: top + height }
+      }
+
       function callPipApplySafePlacement(placement = null) {
         if (!pipMeeting || pipMeeting.hidden) {
           return
@@ -55348,7 +55809,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           callPipCandidate(dock, bottomEdge, width, height, margin),
           callPipCandidate(opposite, bottomEdge, width, height, margin)
         ]
-        const candidate = candidates.find(value => !callPipCandidateIntersectsProtected(value)) || candidates[0]
+        const workspaceCandidate = callPipContentStudioWorkspaceCandidate(stored, width, height, margin)
+        const candidate = workspaceCandidate || candidates.find(value => !callPipCandidateIntersectsProtected(value)) || candidates[0]
         pipMeeting.dataset.dock = candidate.dock
         pipMeeting.style.left = `${Math.round(candidate.left)}px`
         pipMeeting.style.top = `${Math.round(Math.min(Math.max(margin, candidate.top), margin + availableY))}px`
@@ -64151,6 +64613,85 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return scoutChatThreads.find(thread => String(thread?.id || '') === activeScoutThreadId) || null
 	      }
 
+	      // Every async chat mutation is owned by the exact signed-in browser
+	      // generation and source conversation that launched it. Account equality
+	      // alone is insufficient: logging out and back into the same account is a
+	      // new authority generation, and an old response must not enter it.
+	      function captureScoutChatMutationScope(threadId = activeScoutThreadId) {
+	        return {
+	          threadId: String(threadId || ''),
+	          generation: chatThreadsGeneration,
+	          account: String(authedUser?.email || '').trim().toLowerCase()
+	        }
+	      }
+
+	      function scoutChatMutationAuthorityIsCurrent(scope) {
+	        return Boolean(scope?.account) &&
+	          scope.generation === chatThreadsGeneration &&
+	          scope.account === String(authedUser?.email || '').trim().toLowerCase()
+	      }
+
+	      function scoutChatMutationSourceIsActive(scope) {
+	        return scoutChatMutationAuthorityIsCurrent(scope) &&
+	          String(scope?.threadId || '') === String(activeScoutThreadId || '')
+	      }
+
+	      function scoutChatMutationPayloadMatchesSource(scope, thread) {
+	        return scoutChatMutationAuthorityIsCurrent(scope) &&
+	          Boolean(scope?.threadId) &&
+	          String(thread?.id || '') === String(scope.threadId)
+	      }
+
+	      function rememberScoutChatFailedSendRecovery(scope, recovery) {
+	        if (!scoutChatMutationAuthorityIsCurrent(scope) || !scope?.threadId) return null
+	        const record = {
+	          ...recovery,
+	          threadId: String(scope.threadId),
+	          generation: scope.generation,
+	          account: scope.account,
+	          createdAt: String(recovery?.createdAt || new Date().toISOString())
+	        }
+	        scoutChatFailedSendRecoveries.set(record.threadId, record)
+	        return record
+	      }
+
+	      function scoutChatFailedSendRecovery(threadId) {
+	        const id = String(threadId || '')
+	        const recovery = scoutChatFailedSendRecoveries.get(id)
+	        if (!recovery) return null
+	        if (!scoutChatMutationAuthorityIsCurrent(recovery)) {
+	          scoutChatFailedSendRecoveries.delete(id)
+	          return null
+	        }
+	        return recovery
+	      }
+
+	      function restoreScoutChatFailedSendDraft(recovery) {
+	        if (!recovery || String(activeScoutThreadId || '') !== String(recovery.threadId || '')) return
+	        if (scoutChatInput && !String(scoutChatInput.value || '').trim()) {
+	          scoutChatInput.value = String(recovery.text || '')
+	          resizeScoutChatInput()
+	        }
+	        if (Array.isArray(recovery.files) && recovery.files.length && pendingScoutFiles.length === 0) {
+	          pendingScoutFiles = recovery.files.slice()
+	          renderPendingScoutFiles({ preserveAttempt: true })
+	        }
+	        if (recovery.replyTarget?.messageId && !scoutChatReplyTarget) {
+	          scoutChatReplyTarget = recovery.replyTarget
+	          renderScoutFollowUpTarget()
+	        }
+	      }
+
+	      function scoutChatFailedSendRecoveryNode(recovery) {
+	        if (!recovery) return null
+	        const node = scoutChatMessageNode('user', String(recovery.text || ''), recovery.createdAt, recovery.files || [])
+	        node.dataset.delivery = 'failed'
+	        node.dataset.failedSendRecovery = 'true'
+	        const state = bfEl('span', 'desktop-chat-state', 'not sent · draft restored')
+	        node.querySelector('.scout-chat-msg__stack')?.appendChild(state)
+	        return node
+	      }
+
 	      function upsertScoutChatThread(thread, options = {}) {
 	        if (!thread?.id) {
 	          return null
@@ -64187,12 +64728,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function resetPersistedScoutChatState() {
 		closeSentMessageProjectCorrection({ restoreFocus: false })
+		hideScoutChatThinking()
 		chatThreadsGeneration += 1
+		scoutChatFailedSendRecoveries.clear()
+		scoutChatMessageAttempt = null
+		chatContextReplyAttempt = null
+		if (desktopChatReactionIntents) {
+		  desktopChatReactionIntents.forEach(intent => { intent.cancelled = true })
+		  desktopChatReactionIntents.clear()
+		}
 		chatThreadsRequest = null
 		chatThreadsRefreshQueued = false
 		chatThreadsLoading = false
 		scoutChatThreadRequests.clear()
 		scoutChatHydrationRetries.clear()
+		scoutChatHistoryRequests.clear()
 		chatRenameActive = false
 		if (chatConvoRenameInput) chatConvoRenameInput.value = ''
 	        scoutChatThreads = []
@@ -64298,6 +64848,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		})
 	      }
 
+	      function scoutChatTailHydrationURL(threadId, options = {}) {
+		const params = new URLSearchParams({ view: 'tail', limit: String(scoutChatHydrationPageSize) })
+		const before = String(options.before || '')
+		const episodeId = String(options.episodeId || '')
+		if (before) params.set('before', before)
+		if (episodeId) params.set('episodeId', episodeId)
+		if (!before) {
+		  const seenAt = String(chatThreadSeenMap()[String(threadId || '')] || '')
+		  if (seenAt) params.set('since', seenAt)
+		}
+		return `/assistant/chat-threads/${encodeURIComponent(threadId)}?${params.toString()}`
+	      }
+
 	      async function hydrateScoutChatThread(threadId) {
 		const id = String(threadId || '')
 		if (!authedUser || !id) return null
@@ -64310,14 +64873,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		let retryRevision = ''
 		const request = (async () => {
 		  try {
-			const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(id)}`, { cache: 'no-store' })
+			const response = await fetch(scoutChatTailHydrationURL(id), { cache: 'no-store' })
 			if (!response.ok) {
 			  if (generation === chatThreadsGeneration && account === String(authedUser?.email || '').toLowerCase()) renderScoutChatConversationLoadError(id)
 			  return null
 			}
 			const payload = await response.json()
 			if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()) return null
-			const hydrated = payload?.thread ? { ...payload.thread, messagesLoaded: true } : null
+			const hydrated = payload?.thread ? {
+			  ...payload.thread,
+			  messagesLoaded: true,
+			  history: payload.history || { mode: 'tail', hasEarlier: false, messageCount: Array.isArray(payload.thread.messages) ? payload.thread.messages.length : 0 }
+			} : null
 			if (!hydrated?.id) return null
 			const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === id)
 			if (index < 0) return null
@@ -64338,10 +64905,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			scoutChatThreads[index] = { ...current, ...hydrated }
 			if (activeScoutThreadId === id) {
 			  const forceBottom = scoutChatNavigationTailThreadId === id
-			  renderActiveScoutThread({ forceBottom })
+			  renderActiveScoutThread({ forceBottom, progressiveNavigation: forceBottom })
 			  if (forceBottom) {
 			    scoutChatNavigationTailThreadId = ''
-			    beginScoutChatOwnSendTailPin()
+			    beginScoutChatOwnSendTailPin({ reason: 'navigation' })
 			  }
 			}
 			return scoutChatThreads[index]
@@ -64359,6 +64926,130 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  }
 		})()
 		scoutChatThreadRequests.set(id, request)
+		return request
+	      }
+
+	      function mergeScoutChatHistoryPage(current, pageThread, history) {
+		const currentMessages = Array.isArray(current?.messages) ? current.messages : []
+		const earlierMessages = Array.isArray(pageThread?.messages) ? pageThread.messages : []
+		const byID = new Map()
+		for (const message of earlierMessages) if (message?.id) byID.set(String(message.id), message)
+		// The live/current projection wins duplicate ids: a socket update may have
+		// advanced a work card while the older-page request was in flight.
+		for (const message of currentMessages) if (message?.id) byID.set(String(message.id), message)
+		const mergedMessages = []
+		const seen = new Set()
+		for (const message of [...earlierMessages, ...currentMessages]) {
+		  const messageID = String(message?.id || '')
+		  if (!messageID || seen.has(messageID)) continue
+		  seen.add(messageID)
+		  mergedMessages.push(byID.get(messageID))
+		}
+		const incomingIsNewer = scoutChatThreadRevisionCompare(pageThread?.updatedAt, current?.updatedAt) > 0
+		const metadata = incomingIsNewer ? { ...current, ...pageThread } : { ...pageThread, ...current }
+		const previousOldestID = String(currentMessages[0]?.id || '')
+		const previousOldestIndex = mergedMessages.findIndex(message => String(message?.id || '') === previousOldestID)
+		const historyWindowEndIndex = mergedMessages.length > scoutChatMaxNodes
+		  ? Math.min(mergedMessages.length, Math.max(scoutChatMaxNodes, previousOldestIndex + 1))
+		  : mergedMessages.length
+		const historyWindowEnd = historyWindowEndIndex < mergedMessages.length ? mergedMessages[historyWindowEndIndex - 1] : null
+		const mergedHistory = {
+		  ...(history || { mode: 'tail', hasEarlier: false, messageCount: earlierMessages.length }),
+		  replyCounts: { ...(current?.history?.replyCounts || {}), ...(history?.replyCounts || {}) }
+		}
+		return {
+		  ...metadata,
+		  messages: mergedMessages,
+		  messagesLoaded: true,
+		  history: mergedHistory,
+		  historyWindowEndMessageId: String(historyWindowEnd?.id || ''),
+		  historyWindowEndAt: String(historyWindowEnd?.createdAt || '')
+		}
+	      }
+
+	      function mergeScoutChatMutationPage(current, pageThread, history, exactMessage = null) {
+		if (!current?.id) return { ...pageThread, messagesLoaded: true, history }
+		const currentMessages = Array.isArray(current.messages) ? current.messages : []
+		const tailMessages = Array.isArray(pageThread?.messages) ? pageThread.messages : []
+		const replacements = new Map()
+		for (const message of tailMessages) if (message?.id) replacements.set(String(message.id), message)
+		if (exactMessage?.id) {
+		  const exactID = String(exactMessage.id)
+		  const contextual = replacements.get(exactID) || currentMessages.find(message => String(message?.id || '') === exactID)
+		  const rootMessageId = String(contextual?.replyTo?.rootMessageId || '')
+		  replacements.set(exactID, rootMessageId && exactMessage.replyTo && !exactMessage.replyTo.rootMessageId
+		    ? { ...exactMessage, replyTo: { ...exactMessage.replyTo, rootMessageId } }
+		    : exactMessage)
+		}
+		const mergedMessages = []
+		const seen = new Set()
+		for (const message of [...currentMessages, ...tailMessages, ...(exactMessage ? [exactMessage] : [])]) {
+		  const messageID = String(message?.id || '')
+		  if (!messageID || seen.has(messageID)) continue
+		  seen.add(messageID)
+		  mergedMessages.push(replacements.get(messageID) || message)
+		}
+		const exactWasKnown = exactMessage?.id && [...currentMessages, ...tailMessages].some(message => String(message?.id || '') === String(exactMessage.id))
+		if (exactMessage?.id && !exactWasKnown) {
+		  const exactIndex = mergedMessages.findIndex(message => String(message?.id || '') === String(exactMessage.id))
+		  if (exactIndex >= 0) mergedMessages.splice(exactIndex, 1)
+		  const exactAt = String(exactMessage.createdAt || '')
+		  const insertion = exactAt ? mergedMessages.findIndex(message => String(message?.createdAt || '') > exactAt) : -1
+		  mergedMessages.splice(insertion < 0 ? mergedMessages.length : insertion, 0, replacements.get(String(exactMessage.id)) || exactMessage)
+		}
+		const mutationHistory = current.history?.nextBeforeMessageId
+		  ? { ...(history || {}), ...current.history, replyCounts: { ...(current.history?.replyCounts || {}), ...(history?.replyCounts || {}) } }
+		  : { ...(current.history || {}), ...(history || {}), replyCounts: { ...(current.history?.replyCounts || {}), ...(history?.replyCounts || {}) } }
+		return {
+		  ...current,
+		  ...pageThread,
+		  messages: mergedMessages,
+		  messagesLoaded: true,
+		  // The newest repair tail must not move the cursor behind history the
+		  // reader already loaded. Preserve that older seam when it exists.
+		  history: mutationHistory,
+		  historyWindowEndMessageId: current.historyWindowEndMessageId || '',
+		  historyWindowEndAt: current.historyWindowEndAt || ''
+		}
+	      }
+
+	      async function loadEarlierScoutChatMessages(threadId, trigger) {
+		const id = String(threadId || '')
+		const current = scoutChatThreads.find(thread => String(thread?.id || '') === id)
+		const before = String(current?.history?.nextBeforeMessageId || '')
+		if (!authedUser || !id || !before || scoutChatHistoryRequests.has(id)) return null
+		const generation = chatThreadsGeneration
+		const account = String(authedUser.email || '').toLowerCase()
+		const restoreLoadEarlierFocus = trigger === document.activeElement
+		if (trigger) trigger.disabled = true
+		const request = (async () => {
+		  try {
+			const response = await fetch(scoutChatTailHydrationURL(id, { before, episodeId: current?.historyEpisodeId }), { cache: 'no-store' })
+			const payload = await response.json().catch(() => ({}))
+			if (!response.ok) throw new Error(payload?.error || 'Earlier messages could not be loaded')
+			if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()) return null
+			const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === id)
+			if (index < 0 || !payload?.thread?.id) return null
+			const fresh = scoutChatThreads[index]
+			// A reload or another history request may have advanced the cursor. Do
+			// not attach a page to a different seam; ids remain safe to request again.
+			if (String(fresh?.history?.nextBeforeMessageId || '') !== before) return fresh
+			const merged = mergeScoutChatHistoryPage(fresh, payload.thread, payload.history)
+			scoutChatThreads[index] = merged
+			if (activeScoutThreadId === id) {
+			  renderActiveScoutThread()
+			  if (restoreLoadEarlierFocus) scoutChatThread.querySelector('.scout-chat-history-control__button')?.focus?.({ preventScroll: true })
+			}
+			return merged
+		  } catch (error) {
+			showToast({ text: error?.message || 'Earlier messages could not be loaded', kind: 'error' })
+			return null
+		  } finally {
+			if (scoutChatHistoryRequests.get(id) === request) scoutChatHistoryRequests.delete(id)
+			if (trigger?.isConnected) trigger.disabled = false
+		  }
+		})()
+		scoutChatHistoryRequests.set(id, request)
 		return request
 	      }
 
@@ -64696,7 +65387,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      async function ensurePersistedScoutThread() {
+	      async function ensurePersistedScoutThread(options = {}) {
 	        if (selectedScoutChatThread()) {
 	          return selectedScoutChatThread()
 	        }
@@ -64704,7 +65395,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!result.ok) {
 	          throw new Error(result.data?.error || 'could not create chat thread')
 	        }
-	        return upsertScoutChatThread(result.data.thread)
+	        return upsertScoutChatThread(result.data.thread, options)
 	      }
 
 	      function sendScoutChat(text) {
@@ -64745,6 +65436,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      async function sendScoutChatViaOffice(text, files = []) {
+	        const sourceThread = selectedScoutChatThread()
+	        const mutationScope = captureScoutChatMutationScope(sourceThread?.id)
 	        // capture-and-clear the armed follow-up target at entry so an error
 	        // can never leave a stale armed chip; a target armed on another
 	        // thread's card is dropped instead of mis-firing here
@@ -64778,7 +65471,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Channel agent launches additionally require an explicit "mode:"
 	        // prefix — conversational keywords must not read as a launch. A
 	        // follow-up target counts as explicit engagement (no @scout needed).
-	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
+	        const isChannel = chatThreadIsChannel(sourceThread)
 	        const scoutEngaged = Boolean(followUp) || !isChannel || /@scout/i.test(text)
 	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
 	        // Private threads never keyword-launch anymore (the propose-confirm
@@ -64787,10 +65480,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // prefixes.
 	        const threadMode = followUp ? '' : !scoutEngaged ? '' : channelPrefixMode
 	        if (scoutEngaged) {
-	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}` : threadMode ? 'launching workstream' : 'thinking')
+	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}` : threadMode ? 'launching workstream' : 'thinking', mutationScope)
 	        }
+	        let messageAttempt = null
 	        try {
-	          const thread = await ensurePersistedScoutThread()
+	          const thread = await ensurePersistedScoutThread({ select: false })
+	          if (!mutationScope.threadId) {
+	            mutationScope.threadId = String(thread?.id || '')
+	            if (scoutChatMutationAuthorityIsCurrent(mutationScope) && !activeScoutThreadId) {
+	              activeScoutThreadId = mutationScope.threadId
+	            }
+	          }
+	          if (!scoutChatMutationPayloadMatchesSource(mutationScope, thread)) return
 	          // D7 — a placeholder title means the server will auto-name the
 	          // thread from this first message; toast when the name lands.
 	          const hadPlaceholderTitle = !chatThreadIsChannel(thread) && chatThreadTitleIsPlaceholder(thread)
@@ -64805,7 +65506,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  scoutChatMessageAttempt = scoutChatMessageAttempt?.key === attemptKey
 			? scoutChatMessageAttempt
 			: { key: attemptKey, operationId: globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}` }
-		  messagePayload.operationId = scoutChatMessageAttempt.operationId
+		  messageAttempt = scoutChatMessageAttempt
+		  messagePayload.operationId = messageAttempt.operationId
 	          const requestBody = JSON.stringify(messagePayload)
 	          const postMessage = () => fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
 	            method: 'POST',
@@ -64818,31 +65520,50 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          } catch (error) {
 	            // The operation id is bound to the exact request body, so a lost
 	            // response can retry once without re-routing or duplicating work.
+	            if (!scoutChatMutationAuthorityIsCurrent(mutationScope)) throw error
 	            response = await postMessage()
 	          }
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok) {
 	            throw new Error(payload.error || 'assistant query failed')
 	          }
-		  scoutChatMessageAttempt = null
+		  if (scoutChatMessageAttempt === messageAttempt && scoutChatMutationAuthorityIsCurrent(mutationScope)) {
+		    scoutChatMessageAttempt = null
+		  }
 	          const finish = () => {
-	            hideScoutChatThinking()
+	            if (!scoutChatMutationAuthorityIsCurrent(mutationScope)) return
+	            const sourceIsActive = scoutChatMutationSourceIsActive(mutationScope)
+	            const failedRecovery = scoutChatFailedSendRecoveries.get(mutationScope.threadId)
+	            if (!failedRecovery || !messageAttempt || failedRecovery.operationId === messageAttempt.operationId) {
+	              scoutChatFailedSendRecoveries.delete(mutationScope.threadId)
+	            }
+	            finishScoutChatThinking(mutationScope)
 	            if (payload.artifact) {
 	              addArtifactEntry(payload.artifact, { select: false })
 	              scheduleArtifactRefresh()
 	            }
-	            if (payload.thread) {
-	              upsertScoutChatThread(payload.thread)
-	              renderActiveScoutThread({ forceBottom: true })
-	              maintainScoutChatOwnSendTailPin()
-	            } else if (payload.answer?.text) {
+		            if (payload.thread) {
+		              if (scoutChatMutationPayloadMatchesSource(mutationScope, payload.thread)) {
+		                const cached = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(payload.thread.id || ''))
+		                const merged = mergeScoutChatMutationPage(cached, payload.thread, payload.history, payload.message || null)
+		                // Sending is an explicit return to the live edge even when the
+		                // reader had paged back through history before composing.
+		                merged.historyWindowEndMessageId = ''
+		                merged.historyWindowEndAt = ''
+		                upsertScoutChatThread(merged, { select: false })
+		                if (sourceIsActive) {
+		                  renderActiveScoutThread({ forceBottom: true })
+	                  maintainScoutChatOwnSendTailPin()
+		                }
+		              }
+	            } else if (payload.answer?.text && sourceIsActive) {
 	              appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
 	              updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
 	            }
 			// Project and No-project selections apply to exactly one outgoing
 			// turn. Refresh canonical thread context after every accepted send.
-			resetScoutChatProjectContext({ reload: true })
-			if (payload.boardAction?.surface === 'board') {
+			if (sourceIsActive) resetScoutChatProjectContext({ reload: true })
+			if (sourceIsActive && payload.boardAction?.surface === 'board') {
 			  setActiveTool('board')
 			  if (payload.boardAction.requestedIntent === 'clear' && !payload.boardAction.mutationExecuted) {
 				const count = Number(payload.boardAction.activeCardCount || 0)
@@ -64852,20 +65573,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 				})
 	              }
 	            }
-	            if (Array.isArray(payload.actions)) {
+	            if (sourceIsActive && Array.isArray(payload.actions)) {
 	              handleOSAssistantActions(payload.actions)
 	            }
 	            // A bare "mode:" prefix without @scout posts as a plain channel
 	            // message — say so instead of silently doing nothing.
-	            if (isChannel && !scoutEngaged && channelPrefixMode) {
+	            if (sourceIsActive && isChannel && !scoutEngaged && channelPrefixMode) {
 	              appendScoutChatHintChip(`mention @scout to launch this ${channelPrefixMode} as an agent run`)
 	            }
-	            if (hadPlaceholderTitle && payload.thread?.title && !chatThreadTitleIsPlaceholder(payload.thread)) {
+	            if (sourceIsActive && hadPlaceholderTitle && payload.thread?.title && !chatThreadTitleIsPlaceholder(payload.thread)) {
 	              showToast({ text: `scout named the thread · ${payload.thread.title}`, kind: 'note' })
 	            }
 	            // D5 — workstream launches announce with the design copy
 	            const launchToast = workstreamLaunchToast(payload.agentThread?.mode)
-	            if (payload.agentThread && launchToast) {
+	            if (sourceIsActive && payload.agentThread && launchToast) {
 	              showToast({ text: launchToast, kind: 'done' })
 	            }
 	          }
@@ -64877,27 +65598,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            finish()
 	          }
 	        } catch (error) {
-	          hideScoutChatThinking()
+	          if (!scoutChatMutationAuthorityIsCurrent(mutationScope)) return
+	          finishScoutChatThinking(mutationScope)
+	          rememberScoutChatFailedSendRecovery(mutationScope, {
+	            text,
+	            files: files.slice(),
+	            replyTarget,
+	            operationId: messageAttempt?.operationId || '',
+	            createdAt: ts,
+	            error: error?.message || 'assistant query failed'
+	          })
+	          if (!scoutChatMutationSourceIsActive(mutationScope)) return
 	          optimisticMessage.dataset.delivery = 'failed'
-	          optimisticState.textContent = 'not sent'
-		  if (projectContextToken && scoutChatInput) {
-			scoutChatInput.value = text
-			resizeScoutChatInput()
-			scoutChatInput.focus()
-		  }
-		  if (projectContextToken && files.length && pendingScoutFiles.length === 0) {
-			pendingScoutFiles = files.slice()
-			renderPendingScoutFiles({ preserveAttempt: true })
-		  }
-		  if (projectContextToken && replyTarget?.messageId && !scoutChatReplyTarget) {
-			scoutChatReplyTarget = replyTarget
-			renderScoutFollowUpTarget()
-			scheduleScoutChatProjectContextRefresh({ preserveAttempt: true })
-		  }
+	          optimisticState.textContent = 'not sent · draft restored'
+	          restoreScoutChatFailedSendDraft(scoutChatFailedSendRecovery(mutationScope.threadId))
+	          scheduleScoutChatProjectContextRefresh({ preserveAttempt: true })
 	          const message = error.message || 'assistant query failed'
-	          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
-          updateChatThreadItem(message, new Date().toISOString())
-        }
+	          showToast({ text: message, kind: 'error' })
+	        }
       }
 
       function scoutOfficeChatHistoryPayload() {
@@ -67522,12 +68240,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const kind = String(payload?.kind || '').toLowerCase()
         const text = String(payload?.text || '')
         const ts = payload?.ts || ''
-        if (kind === 'status') {
+	        if (kind === 'status') {
           // a status echo may only refresh a shimmer this session is
           // actually waiting on — a replayed/broadcast status after a
           // reload must not conjure one with no pending turn
-          if (scoutChatTurnInFlight) {
-            showScoutChatThinking(text || 'searching memory…')
+	          if (scoutChatTurnInFlight && (!scoutChatTurnScope || scoutChatMutationSourceIsActive(scoutChatTurnScope))) {
+	            showScoutChatThinking(text || 'searching memory…')
           }
           return
         }
@@ -70075,6 +70793,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 		      function selectScoutChatThread(id) {
 		        const nextThreadId = String(id || '')
+		        manifestDeckActivityGeneration += 1
 			if (nextThreadId !== activeScoutThreadId) closeSentMessageProjectCorrection({ restoreFocus: false })
 	        // A side reply is authority-bound to the thread that opened it.
 	        // Never leave that composer visible after navigation: its submit
@@ -70099,11 +70818,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        hideScoutChatThinking()
 		syncChatThreadSelection(nextThreadId)
-	        renderActiveScoutThread({ forceBottom: true })
+	        renderActiveScoutThread({ forceBottom: true, progressiveNavigation: true })
 		const selected = selectedScoutChatThread()
 		if (selected?.messagesLoaded === true) {
 		  scoutChatNavigationTailThreadId = ''
-		  beginScoutChatOwnSendTailPin()
+		  beginScoutChatOwnSendTailPin({ reason: 'navigation' })
 		}
 		void hydrateScoutChatThread(nextThreadId)
 	      }
@@ -70235,7 +70954,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-history-loading, .scout-chat-history-control, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -70259,6 +70978,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // var + lazy init: boot can call renderActiveScoutThread before this
 	      // late chat section executes, matching the render-pass vars above.
 	      var desktopChatPreviewCache = null
+	      // Dense cached channels project in two truthful layers: the exact tail
+	      // is immediately interactive, while retained history is assembled in
+	      // short browser turns and attached above it. A separate connected,
+	      // hidden target keeps rich-card capability watchers alive while those
+	      // older nodes are prepared.
+	      var scoutChatRenderTarget = null
+	      var scoutChatProgressiveProjection = null
+	      var scoutChatProgressiveProjectionGeneration = 0
+	      var scoutChatProgressiveAnchorSettle = null
 
 	      function resetScoutFeedRenderPass() {
 	        runlogOpen = null
@@ -70269,12 +70997,323 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatIncrementalAnchorPin = null
 	      }
 
-	      function desktopChatUnreadBoundaryNode() {
+	      function scoutChatRenderSurface() {
+	        return scoutChatRenderTarget || scoutChatThread
+	      }
+
+	      function scoutChatFeedRenderState() {
+	        return { runlogOpen, runlogMarkerGoalId, feedPrevMsgKey, feedPrevMsgDay, feedPrevMsgTs }
+	      }
+
+	      function applyScoutChatFeedRenderState(state) {
+	        runlogOpen = state?.runlogOpen || null
+	        runlogMarkerGoalId = String(state?.runlogMarkerGoalId || '')
+	        feedPrevMsgKey = String(state?.feedPrevMsgKey || '')
+	        feedPrevMsgDay = String(state?.feedPrevMsgDay || '')
+	        feedPrevMsgTs = Number(state?.feedPrevMsgTs || 0)
+	      }
+
+	      function cancelScoutChatProgressiveProjection() {
+	        const job = scoutChatProgressiveProjection
+	        if (!job) return
+	        job.cancelled = true
+	        window.cancelAnimationFrame(job.frame || 0)
+	        window.clearTimeout(job.timer || 0)
+	        window.cancelAnimationFrame(job.readerFrame || 0)
+	        window.clearTimeout(job.readerTimer || 0)
+	        scoutChatThread?.removeEventListener('wheel', job.noteReaderIntent)
+	        scoutChatThread?.removeEventListener('touchstart', job.noteReaderIntent)
+	        scoutChatThread?.removeEventListener('pointerdown', job.noteReaderIntent)
+	        window.removeEventListener('keydown', job.noteReaderKeyboard)
+	        job.stage?.remove()
+	        job.status?.remove()
+	        scoutChatProgressiveProjection = null
+	        scoutChatThread?.removeAttribute('data-projection-state')
+	      }
+
+	      function cancelScoutChatProgressiveAnchorSettle() {
+	        const settle = scoutChatProgressiveAnchorSettle
+	        if (!settle) return
+	        settle.cancelled = true
+	        window.cancelAnimationFrame(settle.frame || 0)
+	        window.clearTimeout(settle.timer || 0)
+	        scoutChatThread?.removeEventListener('wheel', settle.cancelForReader)
+	        scoutChatThread?.removeEventListener('touchstart', settle.cancelForReader)
+	        scoutChatThread?.removeEventListener('pointerdown', settle.cancelForReader)
+	        window.removeEventListener('keydown', settle.cancelForKeyboard)
+	        scoutChatProgressiveAnchorSettle = null
+	      }
+
+	      function beginScoutChatProgressiveAnchorSettle(viewport, generation, threadId) {
+	        cancelScoutChatProgressiveAnchorSettle()
+	        if (!viewport?.anchor?.isConnected || viewport.followBottom) return
+	        const settle = {
+	          generation,
+	          threadId: String(threadId || ''),
+	          anchor: viewport.anchor,
+	          anchorTop: viewport.anchorTop,
+	          frame: 0,
+	          timer: 0,
+	          frameCount: 0,
+	          stableFrames: 0,
+	          cancelled: false,
+	          cancelForReader: () => cancelScoutChatProgressiveAnchorSettle(),
+	          cancelForKeyboard: null
+	        }
+	        settle.cancelForKeyboard = event => {
+	          const target = event.target
+	          if (target?.matches?.('input, textarea, select, [contenteditable="true"]')) return
+	          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancelScoutChatProgressiveAnchorSettle()
+	        }
+	        const restore = () => {
+	          if (settle.cancelled || scoutChatProgressiveAnchorSettle !== settle ||
+	              settle.generation !== scoutChatProgressiveProjectionGeneration ||
+	              settle.threadId !== String(activeScoutThreadId || '') || !settle.anchor.isConnected) {
+	            cancelScoutChatProgressiveAnchorSettle()
+	            return null
+	          }
+	          const bounds = scoutChatThread.getBoundingClientRect()
+	          const nextTop = settle.anchor.getBoundingClientRect().top - bounds.top
+	          const error = nextTop - settle.anchorTop
+	          scoutChatThread.scrollTop += error
+	          return error
+	        }
+	        scoutChatProgressiveAnchorSettle = settle
+	        scoutChatThread.addEventListener('wheel', settle.cancelForReader, { passive: true })
+	        scoutChatThread.addEventListener('touchstart', settle.cancelForReader, { passive: true })
+	        scoutChatThread.addEventListener('pointerdown', settle.cancelForReader, { passive: true })
+	        window.addEventListener('keydown', settle.cancelForKeyboard)
+	        const scheduleSettleTurn = () => {
+	          settle.frame = window.requestAnimationFrame(() => {
+	            settle.timer = window.setTimeout(settleTurn, 0)
+	          })
+	        }
+	        const settleTurn = () => {
+	          const error = restore()
+	          if (error === null) return
+	          settle.frameCount += 1
+	          settle.stableFrames = Math.abs(error) <= 1 ? settle.stableFrames + 1 : 0
+	          const overflowBusy = Boolean(scoutChatOverflowFrame || scoutChatOverflowQueue?.size)
+	          if ((settle.stableFrames >= 2 && !overflowBusy) || settle.frameCount >= 12) {
+	            cancelScoutChatProgressiveAnchorSettle()
+	            return
+	          }
+	          scheduleSettleTurn()
+	        }
+	        scheduleSettleTurn()
+	      }
+
+	      function scoutChatNavigationTailStart(messages) {
+	        let start = Math.max(0, messages.length - scoutChatInitialNavigationNodes)
+	        // Do not split a compact stage spine. Process receipts commonly
+	        // collapse to fragments, so including the whole contiguous run is
+	        // cheaper and more exact than manufacturing a second runlog.
+	        while (start > 0 && String(messages[start]?.kind || '') === 'artifact' && String(messages[start - 1]?.kind || '') === 'artifact') {
+	          start -= 1
+	        }
+		return start
+	      }
+
+	      function scoutChatHistoryControlNode(thread, firstVisibleMessage) {
+		if (!thread?.history?.hasEarlier || !thread.history.nextBeforeMessageId) return null
+		const control = bfEl('div', 'scout-chat-history-control')
+		// The control is replaced after a successful prepend. Bind its viewport
+		// identity to the first record already on screen so restoration can keep
+		// that record at the exact same pixel while earlier messages appear above.
+		control.dataset.messageId = String(firstVisibleMessage?.id || '')
+		const button = bfEl('button', 'scout-chat-history-control__button', 'Load earlier messages')
+		button.type = 'button'
+		button.disabled = scoutChatHistoryRequests.has(String(thread.id || ''))
+		button.addEventListener('click', () => void loadEarlierScoutChatMessages(thread.id, button))
+		control.appendChild(button)
+		return control
+	      }
+
+	      function scoutChatHistoryReturnNode(thread) {
+		if (!thread?.historyWindowEndMessageId && !thread?.historyWindowEndAt) return null
+		const control = bfEl('div', 'scout-chat-history-control scout-chat-history-control--latest')
+		const button = bfEl('button', 'scout-chat-history-control__button', 'Return to latest')
+		button.type = 'button'
+		button.addEventListener('click', () => {
+		  thread.historyWindowEndMessageId = ''
+		  thread.historyWindowEndAt = ''
+		  renderActiveScoutThread({ forceBottom: true })
+		})
+		control.appendChild(button)
+		return control
+	      }
+
+	      function scoutChatMessageFollowKey(message) {
+	        if (!message || String(message.kind || 'message') !== 'message' || String(message.postedOnBehalfOf || '').trim()) return ''
+	        const role = String(message.role || '').toLowerCase()
+	        let kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
+	        const authorEmail = String(message.authorEmail || '').toLowerCase()
+	        const authorName = String(message.authorName || '').trim()
+	        const selfEmail = String(authedUser?.email || '').toLowerCase()
+	        if (kind === 'user' && authorEmail && authorEmail !== selfEmail) kind = 'peer'
+	        return `${kind}|${authorEmail || authorName.toLowerCase() || kind}`
+	      }
+
+	      function scoutChatProgressiveUnreadBoundary(job, sourceIndex) {
+	        if (sourceIndex !== job.firstUnreadIndex) return
+	        const remaining = job.messages.slice(sourceIndex).filter(record =>
+	          !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
+	        ).length
+	        appendScoutChatNode(desktopChatUnreadBoundaryNode(remaining))
+	      }
+
+	      function finishScoutChatProgressiveProjection(job) {
+	        if (job.cancelled || scoutChatProgressiveProjection !== job || job.threadId !== String(activeScoutThreadId || '')) {
+	          cancelScoutChatProgressiveProjection()
+	          return
+	        }
+	        const viewport = job.readerViewport || captureScoutChatViewport()
+	        window.cancelAnimationFrame(job.readerFrame || 0)
+	        window.clearTimeout(job.readerTimer || 0)
+	        scoutChatThread.removeEventListener('wheel', job.noteReaderIntent)
+	        scoutChatThread.removeEventListener('touchstart', job.noteReaderIntent)
+	        scoutChatThread.removeEventListener('pointerdown', job.noteReaderIntent)
+	        window.removeEventListener('keydown', job.noteReaderKeyboard)
+	        const firstTailMessage = job.messages[job.tailStart]
+	        const firstTailNode = firstTailMessage?.id
+	          ? scoutChatThread.querySelector(`[data-message-id="${selectorEscape(String(firstTailMessage.id))}"]`)
+	          : null
+	        if (viewport?.anchor === job.status && firstTailNode) {
+	          const bounds = scoutChatThread.getBoundingClientRect()
+	          viewport.anchor = firstTailNode
+	          viewport.anchorMessageId = String(firstTailMessage.id || '')
+	          viewport.anchorTop = firstTailNode.getBoundingClientRect().top - bounds.top
+	        }
+
+	        // The tail was intentionally self-contained for its first paint. If
+	        // the prepared head proves the same day/turn continues across that
+	        // seam, remove only the temporary boundary and restore the normal
+	        // conversation grouping before the history becomes visible.
+	        const firstTailCreatedAt = String(firstTailMessage?.createdAt || '')
+	        const firstTailDay = scoutChatDayLabel(firstTailCreatedAt)
+	        const firstTailTs = Date.parse(firstTailCreatedAt) || 0
+	        const seamNeedsDaybreak = !job.feedState.feedPrevMsgTs ||
+	          firstTailDay !== job.feedState.feedPrevMsgDay ||
+	          firstTailTs - job.feedState.feedPrevMsgTs >= 3600000
+	        const temporaryDaybreak = job.status?.nextElementSibling?.classList?.contains('scout-chat-daybreak')
+	          ? job.status.nextElementSibling
+	          : null
+	        if (!seamNeedsDaybreak) temporaryDaybreak?.remove()
+
+	        const tailFollowKey = scoutChatMessageFollowKey(firstTailMessage)
+	        if (firstTailNode?.classList?.contains('scout-chat-msg') && tailFollowKey && tailFollowKey === job.feedState.feedPrevMsgKey) {
+	          firstTailNode.classList.add('is-followup')
+	          const headMessages = job.stage.querySelectorAll('.scout-chat-msg')
+	          headMessages[headMessages.length - 1]?.querySelector('.scout-chat-msg__meta')?.remove()
+	        }
+
+	        const prepared = document.createDocumentFragment()
+	        while (job.stage.firstChild) prepared.appendChild(job.stage.firstChild)
+	        scoutChatThread.insertBefore(prepared, job.status)
+	        job.status.remove()
+	        job.stage.remove()
+	        scoutChatProgressiveProjection = null
+	        scoutChatThread.dataset.projectionState = 'complete'
+	        restoreScoutChatViewport(viewport)
+	        syncRunlogLiveness()
+	        syncScoutChatResearchCards()
+	        syncDesktopActiveWorkIndicator()
+	        syncDesktopOpenChatContext()
+	        maintainScoutChatOwnSendTailPin()
+	        beginScoutChatProgressiveAnchorSettle(viewport, job.generation, job.threadId)
+	      }
+
+	      function runScoutChatProgressiveProjectionChunk(job) {
+	        if (job.cancelled || scoutChatProgressiveProjection !== job || job.threadId !== String(activeScoutThreadId || '')) {
+	          cancelScoutChatProgressiveProjection()
+	          return
+	        }
+	        const liveState = scoutChatFeedRenderState()
+	        const liveTarget = scoutChatRenderTarget
+	        applyScoutChatFeedRenderState(job.feedState)
+	        scoutChatRenderTarget = job.stage
+	        const startedAt = performance.now()
+	        let projected = 0
+	        try {
+	          while (job.index < job.tailStart && (projected === 0 || performance.now() - startedAt < scoutChatProjectionFrameBudgetMs)) {
+	            scoutChatProgressiveUnreadBoundary(job, job.index)
+	            appendScoutChatNode(scoutChatMessageRecordNode(job.messages[job.index]))
+	            job.index += 1
+	            projected += 1
+	          }
+	          job.feedState = scoutChatFeedRenderState()
+	        } finally {
+	          scoutChatRenderTarget = liveTarget
+	          applyScoutChatFeedRenderState(liveState)
+	        }
+	        if (job.index >= job.tailStart) {
+	          finishScoutChatProgressiveProjection(job)
+	          return
+	        }
+	        job.frame = window.requestAnimationFrame(() => {
+	          job.timer = window.setTimeout(() => runScoutChatProgressiveProjectionChunk(job), 0)
+	        })
+	      }
+
+	      function startScoutChatProgressiveProjection(thread, messages, tailStart, firstUnreadIndex, status) {
+	        cancelScoutChatProgressiveProjection()
+	        const stage = document.createElement('div')
+	        stage.hidden = true
+	        stage.inert = true
+	        stage.setAttribute('aria-hidden', 'true')
+	        document.body.appendChild(stage)
+	        const job = {
+	          generation: ++scoutChatProgressiveProjectionGeneration,
+	          threadId: String(thread?.id || ''),
+	          messages,
+	          tailStart,
+	          firstUnreadIndex,
+	          index: 0,
+	          status,
+	          stage,
+	          feedState: { runlogOpen: null, runlogMarkerGoalId: '', feedPrevMsgKey: '', feedPrevMsgDay: '', feedPrevMsgTs: 0 },
+	          frame: 0,
+	          timer: 0,
+	          readerFrame: 0,
+	          readerTimer: 0,
+	          readerViewport: null,
+	          noteReaderIntent: null,
+	          noteReaderKeyboard: null,
+	          cancelled: false
+	        }
+	        job.noteReaderIntent = () => {
+	          window.cancelAnimationFrame(job.readerFrame || 0)
+	          window.clearTimeout(job.readerTimer || 0)
+	          job.readerFrame = window.requestAnimationFrame(() => {
+	            job.readerTimer = window.setTimeout(() => {
+	              if (!job.cancelled && scoutChatProgressiveProjection === job && job.threadId === String(activeScoutThreadId || '')) {
+	                job.readerViewport = captureScoutChatViewport()
+	              }
+	            }, 0)
+	          })
+	        }
+	        job.noteReaderKeyboard = event => {
+	          const target = event.target
+	          if (target?.matches?.('input, textarea, select, [contenteditable="true"]')) return
+	          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) job.noteReaderIntent()
+	        }
+	        scoutChatProgressiveProjection = job
+	        scoutChatThread.dataset.projectionState = 'partial'
+	        scoutChatThread.addEventListener('wheel', job.noteReaderIntent, { passive: true })
+	        scoutChatThread.addEventListener('touchstart', job.noteReaderIntent, { passive: true })
+	        scoutChatThread.addEventListener('pointerdown', job.noteReaderIntent, { passive: true })
+	        window.addEventListener('keydown', job.noteReaderKeyboard)
+	        job.frame = window.requestAnimationFrame(() => {
+	          job.timer = window.setTimeout(() => runScoutChatProgressiveProjectionChunk(job), 0)
+	        })
+	      }
+
+	      function desktopChatUnreadBoundaryNode(count = 0) {
 	        const boundary = document.createElement('div')
 	        boundary.className = 'desktop-chat-unread'
 	        boundary.setAttribute('role', 'separator')
 	        boundary.setAttribute('aria-label', 'Unread messages')
-	        boundary.textContent = 'unread'
+	        boundary.textContent = count === 1 ? '1 new message' : count > 1 ? `${count} new messages` : 'unread'
 	        return boundary
 	      }
 
@@ -70402,6 +71441,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      let scoutChatRenderBatchDepth = 0
 	      var scoutChatOwnSendTailPin = null
+	      const scoutChatOwnSendTailPinMs = 6000
+	      const scoutChatNavigationTailPinMs = 12000
 
 	      function cancelScoutChatOwnSendTailPin() {
 	        const pin = scoutChatOwnSendTailPin
@@ -70411,7 +71452,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        window.clearTimeout(pin.expiryTimer)
 	        scoutChatThread?.removeEventListener('wheel', pin.cancelForReader)
 	        scoutChatThread?.removeEventListener('touchstart', pin.cancelForReader)
-	        scoutChatThread?.removeEventListener('scroll', pin.cancelIfAway)
+	        scoutChatThread?.removeEventListener('pointerdown', pin.cancelForReader)
+	        window.removeEventListener('keydown', pin.cancelForKeyboard)
 	        scoutChatOwnSendTailPin = null
 	      }
 
@@ -70440,23 +71482,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        })
 	      }
 
-	      function beginScoutChatOwnSendTailPin() {
+	      function beginScoutChatOwnSendTailPin(options = {}) {
 	        cancelScoutChatOwnSendTailPin()
+	        const reason = options.reason === 'navigation' ? 'navigation' : 'own-send'
+	        const durationMs = reason === 'navigation' ? scoutChatNavigationTailPinMs : scoutChatOwnSendTailPinMs
 	        const pin = {
 	          threadId: String(activeScoutThreadId || ''),
-	          expiresAt: Date.now() + 6000,
+	          reason,
+	          expiresAt: Date.now() + durationMs,
 	          mutationObserver: null,
 	          resizeObserver: null,
 	          expiryTimer: 0,
 	          cancelForReader: () => cancelScoutChatOwnSendTailPin(),
-	          cancelIfAway: null,
+	          cancelForKeyboard: null,
 	          lastPinnedScrollTop: 0
 	        }
-	        pin.cancelIfAway = () => requestAnimationFrame(() => {
-	          if (scoutChatOwnSendTailPin === pin && Math.abs(scoutChatThread.scrollTop - pin.lastPinnedScrollTop) > 2) {
+	        pin.cancelForKeyboard = event => {
+	          const target = event.target
+	          if (target?.matches?.('input, textarea, select, [contenteditable="true"]')) return
+	          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
 	            cancelScoutChatOwnSendTailPin()
 	          }
-	        })
+	        }
 	        if (typeof ResizeObserver === 'function') {
 	          pin.resizeObserver = new ResizeObserver(() => maintainScoutChatOwnSendTailPin())
 	        }
@@ -70471,7 +71518,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        observeScoutChatOwnSendGeometry(pin)
 	        scoutChatThread.addEventListener('wheel', pin.cancelForReader, { passive: true })
 	        scoutChatThread.addEventListener('touchstart', pin.cancelForReader, { passive: true })
-	        scoutChatThread.addEventListener('scroll', pin.cancelIfAway, { passive: true })
+	        scoutChatThread.addEventListener('pointerdown', pin.cancelForReader, { passive: true })
+	        window.addEventListener('keydown', pin.cancelForKeyboard)
 	        pin.expiryTimer = window.setTimeout(() => {
 	          if (scoutChatOwnSendTailPin === pin) cancelScoutChatOwnSendTailPin()
 	        }, Math.max(0, pin.expiresAt - Date.now()))
@@ -70496,7 +71544,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        // A keyboard user's active control is the strongest possible anchor:
 	        // retaining focus but moving its record is still a perceptual jump.
-	        const anchor = visible(focusedRecord) ? focusedRecord : children.find(visible)
+	        if (focusedRecord?.classList?.contains('scout-chat-history-control')) focusedRecord = null
+	        const anchor = visible(focusedRecord)
+	          ? focusedRecord
+	          : children.find(node => String(node?.dataset?.messageId || '') && visible(node)) ||
+	            children.find(node => !node.classList?.contains('scout-chat-history-control') && !node.classList?.contains('scout-chat-history-loading') && visible(node)) ||
+	            children.find(visible)
 	        return {
 	          followBottom: options.forceBottom === true || scoutChatIsNearBottom(),
 	          scrollTop: scoutChatThread.scrollTop,
@@ -70515,7 +71568,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const anchor = snapshot.anchor?.isConnected
 	          ? snapshot.anchor
 	          : snapshot.anchorMessageId
-	            ? scoutChatThread.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(snapshot.anchorMessageId)}"]`)
+		          ? scoutChatThread.querySelector(`[data-message-id="${selectorEscape(snapshot.anchorMessageId)}"]`)
 	            : null
 	        if (anchor) {
 	          const bounds = scoutChatThread.getBoundingClientRect()
@@ -70557,20 +71610,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function renderActiveScoutThread(options = {}) {
+	        cancelScoutChatProgressiveAnchorSettle()
+	        cancelScoutChatProgressiveProjection()
 	        return withScoutChatRenderTransaction(() => {
 	        const focusedWorkCardId = scoutWorkCardFocusSnapshot()
+	        const thread = selectedScoutChatThread()
 	        // a rebuild from persisted state (reload, poll, socket echo) never
 	        // shows a shimmer — only a send still in flight THIS session may
 	        // keep it up
 	        if (!scoutChatTurnInFlight) {
 	          hideScoutChatThinking()
+	        } else {
+	          scoutChatThinking.hidden = Boolean(scoutChatTurnScope && !scoutChatMutationSourceIsActive(scoutChatTurnScope))
 	        }
 	        clearScoutChatThreadNodes()
 	        // goalcards are cached nodes (goalThreadCardNodes) — detach them so
 	        // this pass re-mounts only the ones this thread's messages (or its
 	        // own ghost launches) own; nothing typed inside them is lost
 	        scoutChatThread.querySelectorAll('.goalcard').forEach(node => node.remove())
-	        const thread = selectedScoutChatThread()
 		if (thread && thread.messagesLoaded !== true) {
 		  syncChatConvoHeader()
 		  renderScoutChatDestination()
@@ -70605,6 +71662,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        renderScoutFollowUpTarget()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        const failedSendRecovery = scoutChatFailedSendRecovery(thread?.id)
+	        if (failedSendRecovery) restoreScoutChatFailedSendDraft(failedSendRecovery)
 	        if (thread?.riff) {
 	          const checkpoint = privateRiffCheckpointNode(thread)
 	          checkpoint.classList.add('private-riff-checkpoint--conversation')
@@ -70618,10 +71677,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const feedMessages = desktopChatLayoutQuery.matches
 	          ? messages.filter(message => !message?.replyTo?.messageId)
 	          : messages
-		const boundedFeedMessages = feedMessages.slice(-scoutChatMaxNodes)
+		let feedWindowEnd = feedMessages.length
+		const historyWindowEndMessageId = String(thread?.historyWindowEndMessageId || '')
+		const historyWindowEndAt = String(thread?.historyWindowEndAt || '')
+		if (historyWindowEndMessageId) {
+		  const exactEnd = feedMessages.findIndex(message => String(message?.id || '') === historyWindowEndMessageId)
+		  if (exactEnd >= 0) feedWindowEnd = exactEnd + 1
+		  else if (historyWindowEndAt) {
+			let timestampEnd = -1
+			for (let index = feedMessages.length - 1; index >= 0; index -= 1) {
+			  if (String(feedMessages[index]?.createdAt || '') <= historyWindowEndAt) { timestampEnd = index; break }
+			}
+			if (timestampEnd >= 0) feedWindowEnd = timestampEnd + 1
+		  }
+		}
+		const boundedFeedMessages = feedMessages.slice(Math.max(0, feedWindowEnd - scoutChatMaxNodes), feedWindowEnd)
 	        if (!messages.length) {
+	          const failedNode = scoutChatFailedSendRecoveryNode(failedSendRecovery)
+	          if (failedNode) appendScoutChatNode(failedNode)
 	          remountGhostGoalCards()
-	          if (!scoutChatThread.querySelector('.goalcard')) {
+	          if (!failedNode && !scoutChatThread.querySelector('.goalcard')) {
 	            ensureScoutChatEmptyState()
 	          }
 	          syncDesktopActiveWorkIndicator()
@@ -70629,11 +71704,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          updateChatThreadItem(chatThreadDisplayPreview(thread), thread?.updatedAt || '')
 	          return
 	        }
+	        const progressiveNavigation = options.progressiveNavigation === true && !thread?.riff && boundedFeedMessages.length > scoutChatInitialNavigationNodes
+	        const projectionTailStart = progressiveNavigation ? scoutChatNavigationTailStart(boundedFeedMessages) : 0
+	        const projectedFeedMessages = boundedFeedMessages.slice(projectionTailStart)
+	        const firstUnreadIndex = priorSeenAt
+	          ? boundedFeedMessages.findIndex(message => String(message?.createdAt || '') > priorSeenAt)
+	          : -1
 	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
-	        let unreadBoundaryMounted = false
+		const historyControl = scoutChatHistoryControlNode(thread, boundedFeedMessages[0])
+		if (historyControl) scoutChatThread.insertBefore(historyControl, scoutChatThinking)
+	        // When the unread seam belongs to the retained head, its exact count
+	        // is assembled there. Do not place a second, misleading seam at the
+	        // beginning of the already-visible tail.
+	        let unreadBoundaryMounted = progressiveNavigation && firstUnreadIndex >= 0 && firstUnreadIndex < projectionTailStart
 	        let renderedRiffEpisodeId = ''
-	        boundedFeedMessages.forEach((message, messageIndex) => {
+	        projectedFeedMessages.forEach((message, messageIndex) => {
+	          const sourceIndex = projectionTailStart + messageIndex
 	          if (thread?.riff) {
 	            const messageEpisodeId = String(message?.riffEpisodeId || message?.riffAuthority?.episodeId || thread.riff.activeEpisodeId || 'legacy')
 	            if (messageEpisodeId !== renderedRiffEpisodeId) {
@@ -70647,15 +71734,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            // word. Machine records (run-log stages, proposals, manifests)
 	            // are not messages and must not inflate the count; thread-kind
 	            // records DO count — a workstream landing is real catch-up debt.
-	            const remaining = boundedFeedMessages.slice(messageIndex).filter(record =>
-	              !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
-	            ).length
-	            boundary.textContent = remaining === 1 ? '1 new message' : `${remaining} new messages`
+		            const remaining = boundedFeedMessages.slice(sourceIndex).filter(record =>
+		              !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
+		            ).length
+		            const pagedUnread = sourceIndex === 0 && thread?.history?.hasEarlier
+		              ? Number(desktopChatLayoutQuery.matches ? thread.history.unreadRootCount : thread.history.unreadCount) || 0
+		              : 0
+		            const unreadCount = Math.max(remaining, pagedUnread)
+		            boundary.textContent = unreadCount === 1 ? '1 new message' : `${unreadCount} new messages`
 	            appendScoutChatNode(boundary)
 	            unreadBoundaryMounted = true
 	          }
 	          appendScoutChatNode(scoutChatMessageRecordNode(message))
 	        })
+	        const failedNode = scoutChatFailedSendRecoveryNode(failedSendRecovery)
+	        if (failedNode) appendScoutChatNode(failedNode)
+	        let progressiveStatus = null
+	        if (progressiveNavigation) {
+	          progressiveStatus = bfEl('div', 'scout-chat-history-loading', 'Loading earlier messages')
+	          progressiveStatus.setAttribute('role', 'status')
+	          progressiveStatus.setAttribute('aria-live', 'polite')
+	          progressiveStatus.setAttribute('aria-atomic', 'true')
+	          const firstTailNode = Array.from(scoutChatThread.children).find(node => node !== scoutChatThinking && node.matches?.(scoutChatFeedRecordSelector))
+	          scoutChatThread.insertBefore(progressiveStatus, firstTailNode || scoutChatThinking)
+	        }
+		const historyReturn = scoutChatHistoryReturnNode(thread)
+		if (historyReturn) scoutChatThread.insertBefore(historyReturn, scoutChatThinking)
 	        remountGhostGoalCards()
 	        syncRunlogLiveness()
 	        // reconcile the in-chat research cards this pass just built against
@@ -70663,7 +71767,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // stays hidden until an unrelated loadArtifacts fires. No-op (early
 	        // return) when no card carries a thread-artifact id, so an empty
 	        // thread is safe.
-	        syncScoutChatResearchCards()
+	        if (!progressiveNavigation) syncScoutChatResearchCards()
 	        syncDesktopActiveWorkIndicator()
 	        // The right rail is a projection of the durable message ref, not a
 	        // snapshot captured when it opened. Terminal socket/poll updates must
@@ -70671,6 +71775,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        syncDesktopOpenChatContext()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	        restoreScoutWorkCardFocus(focusedWorkCardId)
+	        if (progressiveNavigation && progressiveStatus) {
+	          startScoutChatProgressiveProjection(thread, boundedFeedMessages, projectionTailStart, firstUnreadIndex, progressiveStatus)
+	        } else {
+	          scoutChatThread.dataset.projectionState = 'complete'
+	        }
 	        }, options)
       }
 
@@ -70924,7 +72033,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Agent-authored channel messages intentionally carry no human email.
 	        // Keep the server-stamped author name in the grouping key so Mary,
 	        // Colton, Jules, and Scout never collapse into one visual speaker.
-	        const followKey = `${kind}|${authorEmail || authorName.toLowerCase() || kind}`
+	        const followKey = scoutChatMessageFollowKey(message)
 		const isFollowup = !viaScout && feedPrevMsgKey === followKey
 	        feedPrevMsgKey = viaScout ? '' : followKey
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
@@ -71296,16 +72405,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const messageId = String(message?.id || '')
 	          if (!messageId) return ''
 	          if (rootIdById.has(messageId)) return rootIdById.get(messageId)
+	          const projectedRootId = String(message?.replyTo?.rootMessageId || '')
+	          if (projectedRootId && byId.has(projectedRootId)) {
+	            rootIdById.set(messageId, projectedRootId)
+	            return projectedRootId
+	          }
 	          let current = message
+	          const path = []
 	          const seen = new Set([messageId])
 	          while (current?.replyTo?.messageId) {
+	            const currentId = String(current?.id || '')
+	            if (currentId) path.push(currentId)
 	            const parentId = String(current.replyTo.messageId)
+	            if (rootIdById.has(parentId)) {
+	              const rootId = rootIdById.get(parentId)
+	              path.forEach(id => rootIdById.set(id, rootId))
+	              return rootId
+	            }
 	            const parent = byId.get(parentId)
 	            if (!parent || seen.has(parentId)) break
 	            seen.add(parentId)
 	            current = parent
 	          }
 	          const rootId = String(current?.id || messageId)
+	          path.forEach(id => rootIdById.set(id, rootId))
 	          rootIdById.set(messageId, rootId)
 	          return rootId
 	        }
@@ -71554,6 +72677,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        editor.addEventListener('submit', async event => {
 	          event.preventDefault()
 	          if (!canSave()) return
+	          const mutationScope = captureScoutChatMutationScope(thread.id)
 	          save.disabled = true
 	          cancel.disabled = true
 	          try {
@@ -71564,10 +72688,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            })
 	            const payload = await response.json().catch(() => ({}))
 	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'message could not be edited')
-	            upsertScoutChatThread(payload.thread, { select: false })
-	            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
-	            if (!updatedMessage || !patchActiveScoutChatMessage(message, updatedMessage)) renderActiveScoutThread()
+	            if (!scoutChatMutationPayloadMatchesSource(mutationScope, payload.thread)) return
+	            const cached = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(payload.thread.id || ''))
+	            const merged = mergeScoutChatMutationPage(cached, payload.thread, payload.history, payload.message)
+	            upsertScoutChatThread(merged, { select: false })
+	            if (scoutChatMutationSourceIsActive(mutationScope)) {
+	              const updatedMessage = payload.message || merged.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
+	              if (!updatedMessage || !patchActiveScoutChatMessage(message, updatedMessage)) renderActiveScoutThread()
+	            }
 	          } catch (error) {
+	            if (!scoutChatMutationSourceIsActive(mutationScope)) return
 	            save.disabled = false
 	            cancel.disabled = false
 	            syncSaveState()
@@ -71629,6 +72759,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        editor.addEventListener('submit', async event => {
 	          event.preventDefault()
 	          if (!canSave()) return
+	          const mutationScope = captureScoutChatMutationScope(thread.id)
 	          save.disabled = true
 	          cancel.disabled = true
 	          try {
@@ -71639,12 +72770,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            })
 		            const payload = await response.json().catch(() => ({}))
 		            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be edited')
-		            upsertScoutChatThread(payload.thread, { select: false })
-		            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
-		            const patched = updatedMessage && patchActiveScoutChatMessage(message, updatedMessage)
-		            const root = desktopChatReplyTopology(payload.thread.messages).rootFor(updatedMessage || message)
-		            syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId, { skipRail: Boolean(patched) })
+		            if (!scoutChatMutationPayloadMatchesSource(mutationScope, payload.thread)) return
+		            const cached = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(payload.thread.id || ''))
+		            const merged = mergeScoutChatMutationPage(cached, payload.thread, payload.history, payload.message)
+		            upsertScoutChatThread(merged, { select: false })
+		            if (scoutChatMutationSourceIsActive(mutationScope)) {
+		              const updatedMessage = payload.message || merged.messages?.find(candidate => String(candidate?.id || '') === String(message.id || ''))
+		              const patched = updatedMessage && patchActiveScoutChatMessage(message, updatedMessage)
+		              const root = desktopChatReplyTopology(merged.messages).rootFor(updatedMessage || message)
+		              syncDesktopReplySurfaces(merged, root?.id || message?.replyTo?.messageId, { skipRail: Boolean(patched) })
+		            }
 	          } catch (error) {
+	            if (!scoutChatMutationSourceIsActive(mutationScope)) return
 	            save.disabled = false
 	            cancel.disabled = false
 	            syncSaveState()
@@ -72086,10 +73223,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!thread?.id || !episodeId) return
 	        trigger.disabled = true
 	        try {
-	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}?episodeId=${encodeURIComponent(episodeId)}`, { cache: 'no-store' })
+	          const response = await fetch(scoutChatTailHydrationURL(thread.id, { episodeId }), { cache: 'no-store' })
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok || !payload?.thread?.id) throw new Error(payload?.error || 'That Riff pass could not be opened')
-	          const viewed = upsertScoutChatThread({ ...payload.thread, messagesLoaded: true }, { select: false })
+	          const viewed = upsertScoutChatThread({ ...payload.thread, messagesLoaded: true, history: payload.history, historyEpisodeId: episodeId }, { select: false })
 	          if (chatContextState?.mode === 'riff' && String(chatContextState.threadId || '') === String(viewed.id || '')) {
 	            chatContextState.readOnlyEpisode = privateRiffViewingEarlier(viewed)
 	            chatContextState.viewedEpisodeId = String(viewed.riff?.viewedEpisodeId || episodeId)
@@ -72346,25 +73483,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        const topology = desktopChatReplyTopology(messages)
 		        const resolvedRoot = topology.rootFor(root)
 		        const replies = topology.repliesFor(resolvedRoot)
+		        const totalReplies = Math.max(replies.length, Number(thread?.history?.replyCounts?.[String(resolvedRoot?.id || '')]) || 0)
 		        const viewport = captureDesktopChatContextViewport(options)
 		        const fragment = document.createDocumentFragment()
 		        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
 		        chatContextParent.replaceChildren(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
 		        chatContextParent.hidden = false
 		        chatContextBody.replaceChildren(fragment)
-		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
+		        chatContextMeta.textContent = `${totalReplies} ${totalReplies === 1 ? 'reply' : 'replies'}${replies.length < totalReplies ? ` · ${replies.length} recent loaded` : ''}`
 		        restoreDesktopChatContextViewport(viewport)
 		      }
 
 		      function desktopChatThreadSummaryNode(message, threadMessages) {
 		        const replyTopology = desktopChatReplyTopology(threadMessages)
 		        const threadReplies = message?.replyTo?.messageId ? [] : replyTopology.repliesFor(message)
-		        if (!threadReplies.length) return null
+		        const totalReplies = Math.max(threadReplies.length, Number(selectedScoutChatThread()?.history?.replyCounts?.[String(message?.id || '')]) || 0)
+		        if (!totalReplies || !threadReplies.length) return null
 		        const summary = document.createElement('button')
 		        summary.type = 'button'
 		        summary.className = 'desktop-chat-thread-summary'
 		        const latest = threadReplies[threadReplies.length - 1]
-		        summary.setAttribute('aria-label', `Open ${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}; latest ${scoutChatTimeLabel(latest?.createdAt)}`)
+		        summary.setAttribute('aria-label', `Open ${totalReplies} ${totalReplies === 1 ? 'reply' : 'replies'}; latest ${scoutChatTimeLabel(latest?.createdAt)}`)
 		        const avatars = bfEl('span', 'desktop-chat-thread-summary__avatars')
 		        const seen = new Set()
 		        threadReplies.slice().reverse().forEach(replyMessage => {
@@ -72375,7 +73514,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        })
 		        const copy = bfEl('span', 'desktop-chat-thread-summary__copy')
 		        copy.append(
-		          bfEl('span', 'desktop-chat-thread-summary__count', `${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}`),
+		          bfEl('span', 'desktop-chat-thread-summary__count', `${totalReplies} ${totalReplies === 1 ? 'reply' : 'replies'}`),
 		          bfEl('span', 'desktop-chat-thread-summary__latest', `latest ${scoutChatTimeLabel(latest?.createdAt)}`)
 		        )
 		        summary.append(avatars, copy)
@@ -72600,6 +73739,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            return
 	          }
 	          if ((!text && !files.length) || !state.threadId) return
+	          const mutationScope = captureScoutChatMutationScope(state.threadId)
+	          const sourceContextIsActive = () => scoutChatMutationAuthorityIsCurrent(mutationScope) &&
+	            chatContextState === state &&
+	            chatContextState?.mode === 'riff' &&
+	            String(chatContextState?.threadId || '') === mutationScope.threadId
 	          chatContextReplySend.disabled = true
 	          const riffThread = scoutChatThreads.find(thread => String(thread?.id || '') === String(state.threadId))
 	          state.pending = true
@@ -72612,22 +73756,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          try {
 	            const result = await postAuthJSON(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, { text, files, operationId: replyAttempt.operationId })
 	            if (!result.ok || !result.data?.thread) throw new Error(result.data?.error || 'Private message was not sent')
-	            chatContextReplyAttempt = null
+	            if (!scoutChatMutationPayloadMatchesSource(mutationScope, result.data.thread)) return
+	            if (chatContextReplyAttempt === replyAttempt) chatContextReplyAttempt = null
 	            state.pending = false
 	            const updated = upsertScoutChatThread(result.data.thread, { select: false })
-	            chatContextReplyInput.value = ''
-	            chatContextReplyInput.style.height = 'auto'
-	            clearPendingDesktopReplyFiles()
-	            renderPrivateRiffContext(updated)
+	            if (sourceContextIsActive()) {
+	              chatContextReplyInput.value = ''
+	              chatContextReplyInput.style.height = 'auto'
+	              clearPendingDesktopReplyFiles()
+	              renderPrivateRiffContext(updated)
+	            }
 	          } catch (error) {
+	            if (!scoutChatMutationAuthorityIsCurrent(mutationScope)) return
 	            state.pending = false
-	            if (riffThread) renderPrivateRiffContext(riffThread)
-	            showToast({ text: error?.message || 'Private message was not sent', kind: 'error' })
-	            chatContextReplySend.disabled = false
+	            if (sourceContextIsActive()) {
+	              if (riffThread) renderPrivateRiffContext(riffThread)
+	              showToast({ text: error?.message || 'Private message was not sent', kind: 'error' })
+	              chatContextReplySend.disabled = false
+	            }
 	          }
 	          return
 	        }
 	        if ((!text && !files.length) || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
+	        const mutationScope = captureScoutChatMutationScope(state.threadId)
+	        const sourceRootMessageId = String(state.rootMessageId)
 	        chatContextReplySend.disabled = true
 		const projectSourceKey = desktopReplyProjectSourceKey(files, state)
 		const selectedProject = chatContextProjectContext.selected
@@ -72650,7 +73802,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              headers: { 'Content-Type': 'application/json' },
 	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId, operationId: replyAttempt.operationId, ...(projectContextToken ? { projectContextToken } : {}) })
 	            })
-	          } catch {
+	          } catch (error) {
+	            if (!scoutChatMutationAuthorityIsCurrent(mutationScope)) throw error
 	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
 	              method: 'POST',
 	              headers: { 'Content-Type': 'application/json' },
@@ -72667,12 +73820,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!payload?.thread) {
 	            throw new Error('Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.')
 	          }
-	          chatContextReplyAttempt = null
-		  chatContextProjectContext.selected = null
-		  chatContextProjectContext.explicitNone = false
-		          upsertScoutChatThread(payload.thread, { select: false })
-		          syncDesktopReplySurfaces(payload.thread, state.rootMessageId, { clearComposer: true, scrollRailToBottom: true })
+	          if (!scoutChatMutationPayloadMatchesSource(mutationScope, payload.thread)) return
+	          if (chatContextReplyAttempt === replyAttempt) chatContextReplyAttempt = null
+	          const cached = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(payload.thread.id || ''))
+	          const merged = mergeScoutChatMutationPage(cached, payload.thread, payload.history, payload.message || null)
+	          upsertScoutChatThread(merged, { select: false })
+	          const sourceContextIsActive = scoutChatMutationSourceIsActive(mutationScope) &&
+	            chatContextState?.mode === 'thread' &&
+	            String(chatContextState.threadId || '') === mutationScope.threadId &&
+	            String(chatContextState.rootMessageId || '') === sourceRootMessageId
+	          if (sourceContextIsActive) {
+		    chatContextProjectContext.selected = null
+		    chatContextProjectContext.explicitNone = false
+	            syncDesktopReplySurfaces(merged, sourceRootMessageId, { clearComposer: true, scrollRailToBottom: true })
+	          }
 	        } catch (error) {
+	          if (!scoutChatMutationSourceIsActive(mutationScope) ||
+	            chatContextState?.mode !== 'thread' ||
+	            String(chatContextState.threadId || '') !== mutationScope.threadId ||
+	            String(chatContextState.rootMessageId || '') !== sourceRootMessageId) return
 	          showToast({ text: error?.message || 'reply could not be sent', kind: 'error' })
 	          chatContextReplySend.disabled = false
 	        }
@@ -72949,7 +74115,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        chatContextBody.replaceChildren(...[summary, (isPackagingStudio || sources.length) ? worklog : null].filter(Boolean))
 	      }
 
-	      function openDesktopWorkContext(message, trigger) {
+	      function openDesktopWorkContext(message, trigger, options = {}) {
 	        if (!message?.thread || !showDesktopChatContext({
 	          mode: 'work',
 	          title: String(message.thread.query || 'Workstream'),
@@ -72958,9 +74124,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reply: false
 	        })) return
 	        const generation = ++chatContextGeneration
-	        chatContextState = { mode: 'work', messageId: String(message.id || ''), threadId: String(activeScoutThreadId || '') }
+	        chatContextState = {
+	          mode: 'work',
+	          messageId: String(message.id || ''),
+	          threadId: String(activeScoutThreadId || ''),
+	          ...(options.synthetic === true ? { activityMessage: message } : {})
+	        }
 	        const artifactId = String(message.thread.artifactId || '')
-	        const artifact = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
+	        const artifact = options.artifact || artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
 	        renderDesktopWorkContext(message, artifact)
 	        if (!artifactId || (artifact?.text && artifact?.metadata?.currentStage)) return
 	        fetch(`/artifacts?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
@@ -73009,7 +74180,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        if (chatContextState.mode !== 'work') return
-	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.messageId || ''))
+	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.messageId || '')) || chatContextState.activityMessage
 	        if (!message?.thread) {
 	          closeDesktopChatContext({ restoreFocus: false })
 	          return
@@ -73256,20 +74427,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        ))
 	      }
 
-	      function mergeDesktopChatReactionThread(payloadThread, messageId, emoji, intent) {
+	      function desktopChatReactionIntentIsCurrent(intent) {
+	        return Boolean(intent) && !intent.cancelled &&
+	          desktopChatReactionIntents.get(intent.key) === intent &&
+	          scoutChatMutationAuthorityIsCurrent(intent)
+	      }
+
+	      function mergeDesktopChatReactionThread(payloadThread, history, exactMessage, messageId, emoji, intent) {
+	        if (!desktopChatReactionIntentIsCurrent(intent)) return
 	        if (!payloadThread?.id) {
 	          intent.confirmed = intent.requested
 	          return
 	        }
-	        const merged = upsertScoutChatThread({ ...payloadThread, messagesLoaded: true }, { select: false }) || payloadThread
+	        if (!scoutChatMutationPayloadMatchesSource(intent, payloadThread)) return
+	        const current = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(payloadThread.id || ''))
+	        const mergedPage = mergeScoutChatMutationPage(current, payloadThread, history, exactMessage)
+	        const merged = upsertScoutChatThread(mergedPage, { select: false }) || mergedPage
 	        const message = merged.messages?.find(candidate => String(candidate?.id || '') === String(messageId || ''))
 	        intent.confirmed = message ? desktopChatServerReactionMine(message, emoji) : intent.requested
 	      }
 
 	      async function flushDesktopChatReactionIntent(intent) {
-	        if (!intent || intent.sending) return
+	        if (!desktopChatReactionIntentIsCurrent(intent) || intent.sending) return
 	        if (intent.desired === intent.confirmed) {
-	          desktopChatReactionIntents.delete(intent.key)
+	          if (desktopChatReactionIntents.get(intent.key) === intent) desktopChatReactionIntents.delete(intent.key)
 	          patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
 	          return
 	        }
@@ -73284,21 +74465,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            body: intent.requested ? JSON.stringify({ emoji: intent.emoji }) : undefined
 	          })
 	          const payload = await response.json().catch(() => ({}))
+	          if (!desktopChatReactionIntentIsCurrent(intent)) return
 	          if (!response.ok) throw new Error(payload.error || 'reaction could not be saved')
-	          mergeDesktopChatReactionThread(payload.thread, intent.messageId, intent.emoji, intent)
+	          mergeDesktopChatReactionThread(payload.thread, payload.history, payload.message, intent.messageId, intent.emoji, intent)
 	        } catch (error) {
+	          if (!desktopChatReactionIntentIsCurrent(intent)) return
 	          // The failed request never became server truth. If the user tapped
 	          // again while it was in flight, that latest intent still wins; when
 	          // it already matches confirmed truth there is no second request.
 	          if (intent.desired === intent.requested) intent.desired = intent.confirmed
-	          showToast({ text: error.message || 'reaction could not be saved', kind: 'error' })
+	          if (scoutChatMutationSourceIsActive(intent)) {
+	            showToast({ text: error.message || 'reaction could not be saved', kind: 'error' })
+	          }
 	        } finally {
 	          intent.sending = false
+	          if (!desktopChatReactionIntentIsCurrent(intent)) return
 	          patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
 	          if (intent.desired !== intent.confirmed) {
 	            void flushDesktopChatReactionIntent(intent)
 	          } else {
-	            desktopChatReactionIntents.delete(intent.key)
+	            if (desktopChatReactionIntents.get(intent.key) === intent) desktopChatReactionIntents.delete(intent.key)
 	            patchDesktopChatReactionSurfaces(intent.threadId, intent.messageId)
 	          }
 	        }
@@ -73310,16 +74496,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const key = desktopChatReactionIntentKey(threadId, messageId, emoji)
 	        const message = desktopChatMessageById(threadId, messageId)
 	        if (!message) return
-	        const intent = desktopChatReactionIntents.get(key) || {
+	        const existingIntent = desktopChatReactionIntents.get(key)
+	        const intent = existingIntent && desktopChatReactionIntentIsCurrent(existingIntent) ? existingIntent : {
 	          key,
 	          threadId,
+	          generation: chatThreadsGeneration,
+	          account: String(authedUser?.email || '').trim().toLowerCase(),
 	          messageId: String(messageId),
 	          emoji: String(emoji),
 	          confirmed: desktopChatServerReactionMine(message, emoji),
 	          desired: desktopChatServerReactionMine(message, emoji),
 	          requested: false,
 	          sending: false,
-	          contextOnly: Boolean(options.contextOnly)
+	          contextOnly: Boolean(options.contextOnly),
+	          cancelled: false
 	        }
 	        intent.desired = Boolean(set)
 	        intent.contextOnly = intent.contextOnly || Boolean(options.contextOnly)
@@ -73972,12 +75162,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          sourceMetadata.goalId ||
 	          (String(message?.thread?.mode || '') === 'goal' ? sourceArtifactId : '')
 	        ).trim()
-	        const deliveredInManifest = messages.some(candidate => {
-	          if (String(candidate?.kind || '') !== 'manifest' || String(candidate?.manifest?.status || '') === 'held') return false
-	          if (goalId && String(candidate?.manifest?.goalId || '').trim() === goalId) return true
-	          return (Array.isArray(candidate?.manifest?.deliverables) ? candidate.manifest.deliverables : [])
-	            .some(deliverable => String(deliverable?.artifactId || '').trim() === resultId)
-	        })
+		        const deliveredInManifest = messages.some(candidate => {
+		          if (String(candidate?.kind || '') !== 'manifest' || String(candidate?.manifest?.status || '') === 'held') return false
+		          if (!goalId || String(candidate?.manifest?.goalId || '').trim() !== goalId) return false
+		          return (Array.isArray(candidate?.manifest?.deliverables) ? candidate.manifest.deliverables : [])
+		            .some(deliverable => {
+		              const binding = manifestDeckDeliveryBinding(candidate.manifest, deliverable)
+		              // Only an immutable delivery tuple can move this exact card
+		              // into a manifest. An older manifest for the same stable
+		              // artifact ID must never hide a newer reviewed version.
+		              return binding.artifactId === resultId && binding.version > 0 && Boolean(binding.digest) &&
+		                manifestDeckArtifactMatchesBinding(binding, artifact, { requireGoal: true })
+		            })
+		        })
 	        // Before handoff, the canonical card shows progress in place. Once a
 	        // shipped package owns this exact deck, the same rich card moves into
 	        // the manifest at the current delivery point instead of remaining
@@ -74012,12 +75209,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        result.dataset.resultArtifactId = resultId
 	        const qualityState = authoredResultQualityState(message)
 	        result.dataset.qualityState = qualityState
-	        result.setAttribute('aria-label', `${artifactDisplayTitle(artifact)} presentation`)
+	        const resultRef = message?.thread || {}
+	        const resultTitle = String(resultRef.resultTitle || artifact?.metadata?.title || artifact?.title || artifactDisplayTitle(artifact) || 'Presentation').trim()
+	        result.setAttribute('aria-label', `${resultTitle} presentation`)
+	        // Boolean capability fields are omitted from older compact thread
+	        // projections. Preserve that distinction: an omitted hint is not a
+	        // veto, while an explicit false remains one. The exact current deck
+	        // endpoint and final-publication lease still have to grant Present.
 	        renderArtifactDeck(result, artifact, {
 	          qualityState,
-	          canEdit: message?.thread?.resultCanEdit === true,
-	          canPresent: message?.thread?.resultCanPresent === true,
-	          canExport: message?.thread?.resultCanExport === true
+	          canEdit: resultRef.resultCanEdit === true,
+	          ...(Object.prototype.hasOwnProperty.call(resultRef, 'resultCanPresent') ? { canPresent: resultRef.resultCanPresent === true } : {}),
+	          ...(Object.prototype.hasOwnProperty.call(resultRef, 'resultCanExport') ? { canExport: resultRef.resultCanExport === true } : {})
 	        })
 	        const qualityNote = authoredResultQualityNote(message, 'presentation')
 	        if (qualityNote) result.appendChild(qualityNote)
@@ -74742,6 +75945,209 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // skips, and footer. DATA like a proposal — persisted on the message,
 	      // identical on reload. Actions only OPEN things (stage, download,
 	      // share mint); nothing here launches work.
+		      function manifestDeckDeliveryBinding(manifest, deliverable) {
+		        const version = Number(deliverable?.artifactVersion || deliverable?.version || 0)
+		        return {
+		          goalId: String(manifest?.goalId || '').trim(),
+		          artifactId: String(deliverable?.artifactId || '').trim(),
+		          version: Number.isInteger(version) && version > 0 ? version : 0,
+		          digest: String(deliverable?.contentDigest || deliverable?.digest || '').trim().toLowerCase()
+		        }
+		      }
+
+		      function manifestDeckArtifactMatchesBinding(binding, artifact, options = {}) {
+		        if (!binding || !artifact || String(artifact.id || '').trim() !== String(binding.artifactId || '').trim()) return false
+		        const metadata = artifact?.metadata || {}
+		        const artifactGoalId = String(metadata.goalId || metadata.goalParentId || artifact.goalId || '').trim()
+		        if (binding.goalId && (options.requireGoal === true || artifactGoalId) && artifactGoalId !== binding.goalId) return false
+		        const artifactVersion = Number(metadata.artifactVersion || artifact.version || 0)
+		        if (binding.version > 0 && artifactVersion !== binding.version) return false
+		        const artifactDigest = String(metadata.contentDigest || artifact.contentDigest || '').trim().toLowerCase()
+		        if (binding.digest && artifactDigest !== binding.digest) return false
+		        return true
+		      }
+
+		      function manifestDeckReceiptMatchesBinding(candidate, binding, requireComplete = false) {
+		        const ref = candidate?.thread
+		        if (String(candidate?.kind || '') !== 'thread' || !ref || !binding?.goalId || !binding?.artifactId) return false
+		        if (String(ref.artifactId || '').trim() !== binding.goalId || String(ref.resultArtifactId || '').trim() !== binding.artifactId) return false
+		        if (requireComplete && !['complete', 'completed', 'published'].includes(String(ref.status || '').trim().toLowerCase())) return false
+		        const receiptVersion = Number(ref.resultArtifactVersion || 0)
+		        if (binding.version > 0 && receiptVersion > 0 && receiptVersion !== binding.version) return false
+		        const receiptDigest = String(ref.resultArtifactDigest || '').trim().toLowerCase()
+		        if (binding.digest && receiptDigest && receiptDigest !== binding.digest) return false
+		        return true
+		      }
+
+		      function manifestDeckResultReceipt(manifest, binding, requireComplete = false) {
+		        if (!binding || String(manifest?.goalId || '').trim() !== binding.goalId) return null
+		        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+		        let exact = null
+		        for (const candidate of messages) {
+		          if (manifestDeckReceiptMatchesBinding(candidate, binding, requireComplete)) exact = candidate
+		        }
+		        return exact
+		      }
+
+		      function manifestDeckCompletedWorkMessage(manifest, deckArtifact, binding = null) {
+		        const exactBinding = binding || manifestDeckDeliveryBinding(manifest, {
+		          artifactId: deckArtifact?.id,
+		          artifactVersion: deckArtifact?.metadata?.artifactVersion,
+		          contentDigest: deckArtifact?.metadata?.contentDigest
+		        })
+		        return manifestDeckResultReceipt(manifest, exactBinding, true)
+		      }
+
+		      function manifestDeckResultCapabilities(message) {
+		        if (!message?.thread) return {}
+		        const ref = message.thread
+		        const capabilities = { canEdit: ref.resultCanEdit === true }
+		        const qualityState = authoredResultQualityState(message)
+		        if (qualityState) capabilities.qualityState = qualityState
+		        if (Object.prototype.hasOwnProperty.call(ref, 'resultCanPresent')) capabilities.canPresent = ref.resultCanPresent === true
+		        if (Object.prototype.hasOwnProperty.call(ref, 'resultCanExport')) capabilities.canExport = ref.resultCanExport === true
+		        return capabilities
+		      }
+
+	      function manifestDeckAcceptedResultBinding(artifact) {
+	        const plan = goalPlanFromArtifact(artifact)
+	        const report = plan?.report || {}
+	        const metadata = artifact?.metadata || {}
+	        return {
+	          artifactId: String(report.acceptedResultArtifactId || metadata.acceptedResultArtifactId || '').trim(),
+	          version: Number(report.acceptedResultArtifactVersion || metadata.acceptedResultArtifactVersion || 0),
+	          digest: String(report.acceptedResultArtifactDigest || metadata.acceptedResultArtifactDigest || '').trim().toLowerCase()
+	        }
+	      }
+
+		      async function fetchManifestDeckAdmission(artifactId) {
+	        const id = String(artifactId || '').trim()
+	        if (!id) return null
+	        try {
+	          const response = await fetch(`/artifacts/deck?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || String(payload?.artifact?.id || '').trim() !== id) return null
+		          return {
+		            artifactId: id,
+		            version: Number(payload.artifact.version || 0),
+		            digest: String(payload.artifact.contentDigest || '').trim().toLowerCase(),
+		            goalId: String(payload.artifact.goalId || '').trim(),
+		            qualityState: String(payload.qualityState || '').trim().toLowerCase()
+		          }
+	        } catch {
+	          return null
+	        }
+	      }
+
+		      function manifestDeckAdmissionMatchesBinding(binding, admission) {
+		        if (!binding || !admission || admission.artifactId !== binding.artifactId) return false
+		        if (binding.version > 0 && admission.version !== binding.version) return false
+		        if (binding.digest && admission.digest !== binding.digest) return false
+		        if (binding.goalId && admission.goalId !== binding.goalId) return false
+		        return true
+		      }
+
+		      function manifestDeckGoalActivityIsCurrent(message, artifact, deckArtifact, admission, expectedBinding = null) {
+		        if (!message?.thread || !artifact || !deckArtifact || !admission) return false
+	        if (!['complete', 'completed', 'published'].includes(String(message.thread.status || '').trim().toLowerCase())) return false
+	        const goalId = String(message.thread.artifactId || '').trim()
+	        const resultId = String(message.thread.resultArtifactId || '').trim()
+	        const deckId = String(deckArtifact.id || '').trim()
+		        const deliveryBinding = expectedBinding || manifestDeckDeliveryBinding({ goalId }, {
+		          artifactId: deckId,
+		          artifactVersion: deckArtifact?.metadata?.artifactVersion,
+		          contentDigest: deckArtifact?.metadata?.contentDigest
+		        })
+		        if (!goalId || String(artifact.id || '').trim() !== goalId || !resultId || resultId !== deckId ||
+		          deliveryBinding.goalId !== goalId || deliveryBinding.artifactId !== deckId ||
+		          !manifestDeckArtifactMatchesBinding(deliveryBinding, deckArtifact, { requireGoal: true }) ||
+		          !manifestDeckAdmissionMatchesBinding(deliveryBinding, admission)) return false
+	        // A terminal work receipt is only the parent activity for the exact
+	        // rendered result it admitted. Legacy acceptance, a post-review edit,
+	        // or an omitted quality projection falls back to artifact-only history.
+	        if (String(message.thread.resultApprovalState || '').trim() !== 'approved_exact' ||
+	          String(message.thread.resultQualityState || '').trim() !== 'admitted') return false
+	        const binding = manifestDeckAcceptedResultBinding(artifact)
+	        const deckVersion = Number(deckArtifact?.metadata?.artifactVersion || 0)
+	        const deckDigest = String(deckArtifact?.metadata?.contentDigest || '').trim().toLowerCase()
+	        const deckGoalId = String(deckArtifact?.metadata?.goalId || deckArtifact?.metadata?.goalParentId || '').trim()
+	        if (binding.artifactId !== deckId || !Number.isInteger(binding.version) || binding.version <= 0 ||
+	          binding.version !== deckVersion || !binding.digest || binding.digest !== deckDigest || deckGoalId !== goalId ||
+		          admission.artifactId !== deckId || admission.version !== deckVersion || admission.qualityState !== 'admitted') return false
+	        const artifactState = artifactStatusValue(artifact)
+	        const planState = String(goalPlanFromArtifact(artifact)?.state || '').trim().toLowerCase()
+	        return ['complete', 'completed', 'published', 'verified'].includes(artifactState)
+	          || ['complete', 'completed', 'verified'].includes(planState)
+	      }
+
+		      function openManifestDeckReceiptContext(manifest, binding, deckArtifact, trigger, options = {}) {
+		        const available = options.available === true
+		        const title = artifactDisplayTitle(deckArtifact) || String(manifest?.title || 'Presentation').trim() || 'Presentation'
+		        if (!showDesktopChatContext({
+		          mode: 'work',
+		          title,
+		          meta: available ? 'Historical delivery' : 'Historical delivery · unavailable',
+		          trigger,
+		          reply: false
+		        })) return
+		        ++chatContextGeneration
+		        chatContextState = {
+		          mode: 'manifest_receipt',
+		          messageId: `manifest-receipt-${binding?.goalId || 'goal'}-${binding?.artifactId || 'deck'}`,
+		          threadId: String(activeScoutThreadId || '')
+		        }
+		        if (chatContextParent) {
+		          chatContextParent.hidden = true
+		          chatContextParent.replaceChildren()
+		        }
+		        chatContextKicker.textContent = 'Scout · Presentation'
+		        chatContextTitle.textContent = title
+		        chatContextMeta.textContent = available ? 'Historical delivery' : 'Historical delivery · unavailable'
+		        const summary = document.createElement('section')
+		        summary.className = 'chat-context-event'
+		        summary.dataset.availability = available ? 'historical' : 'unavailable'
+		        summary.append(
+		          bfEl('strong', 'chat-context-event__phase', available ? 'Historical delivery' : 'File unavailable'),
+		          bfEl('p', 'chat-context-event__note', available
+		            ? 'This presentation belongs to an earlier delivery. Its exact file remains on the record, while the current goal activity may refer to a newer result.'
+		            : 'This historical presentation is no longer available to your account. The delivery receipt remains in the channel; edit, present, and download controls are hidden.'),
+		          bfEl('span', 'chat-context-event__meta', `Presentation · ${available ? 'earlier result' : 'no current access'}`)
+		        )
+		        chatContextBody.replaceChildren(summary)
+		      }
+
+		      async function openManifestDeckActivity(manifest, deckArtifact, trigger, expectedBinding = null) {
+		        const sourceThreadId = String(activeScoutThreadId || '')
+		        const generation = ++manifestDeckActivityGeneration
+		        const binding = expectedBinding || manifestDeckDeliveryBinding(manifest, {
+		          artifactId: deckArtifact?.id,
+		          artifactVersion: deckArtifact?.metadata?.artifactVersion,
+		          contentDigest: deckArtifact?.metadata?.contentDigest
+		        })
+		        const exactMessage = manifestDeckCompletedWorkMessage(manifest, deckArtifact, binding)
+		        const goalId = binding.goalId
+		        const resultId = binding.artifactId
+		        const [freshGoal, freshDeck, freshAdmission] = await Promise.all([
+		          exactMessage && goalId ? fetchArtifactEntryById(goalId, { refresh: true }) : Promise.resolve(null),
+		          resultId ? fetchArtifactEntryById(resultId, { refresh: true }) : Promise.resolve(null),
+		          resultId ? fetchManifestDeckAdmission(resultId) : Promise.resolve(null)
+		        ])
+		        if (generation !== manifestDeckActivityGeneration || sourceThreadId !== String(activeScoutThreadId || '') || !trigger?.isConnected) return
+		        const exactDeckAvailable = manifestDeckArtifactMatchesBinding(binding, freshDeck, { requireGoal: true }) && manifestDeckAdmissionMatchesBinding(binding, freshAdmission)
+		        if (!exactDeckAvailable) {
+		          openManifestDeckReceiptContext(manifest, binding, deckArtifact, trigger, { available: false })
+		          return
+		        }
+		        if (exactMessage) {
+		          const currentExactMessage = manifestDeckCompletedWorkMessage(manifest, freshDeck, binding)
+		          if (String(currentExactMessage?.id || '') === String(exactMessage.id || '') && manifestDeckGoalActivityIsCurrent(currentExactMessage, freshGoal, freshDeck, freshAdmission, binding)) {
+		            openDesktopWorkContext(currentExactMessage, trigger, { artifact: freshGoal })
+		            return
+		          }
+		        }
+		        openManifestDeckReceiptContext(manifest, binding, freshDeck, trigger, { available: true })
+		      }
+
 	      function scoutManifestCardNode(message) {
 	        const manifest = message.manifest || {}
 	        const held = String(manifest.status || '') === 'held'
@@ -74769,58 +76175,58 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (manifest.title) card.appendChild(bfEl('div', 'manifest-card__title', String(manifest.title)))
 	        if (manifest.subline) card.appendChild(bfEl('div', 'manifest-card__subline', String(manifest.subline)))
 
-	        const deckDeliverable = !held
+		        const deckDeliverable = !held
 	          ? deliverables.find(deliverable => {
 	              const artifactId = String(deliverable?.artifactId || '').trim()
 	              const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
 	              return String(deliverable?.badge || '').toLowerCase() === 'deck' || deliverable?.present === true || (entry && artifactIsHTMLDeck(entry))
-	            })
-	          : null
-	        const goalResultId = !held
-	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((resultId, candidate) => {
-	              const ref = candidate?.thread || {}
-	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
-	                ? String(ref.resultArtifactId).trim()
-	                : resultId
-	            }, '')
-	          : ''
-	        const goalResultApprovalState = !held
-	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((state, candidate) => {
-	              const ref = candidate?.thread || {}
-	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
-	                ? String(ref.resultApprovalState || '').trim()
-	                : state
-	            }, '')
-	          : ''
-	        const goalResultCapabilities = !held
-	          ? (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []).reduce((capabilities, candidate) => {
-	              const ref = candidate?.thread || {}
-	              return String(ref.artifactId || '').trim() === String(manifest.goalId || '').trim() && String(ref.resultArtifactId || '').trim()
-	                ? {
-	                    qualityState: authoredResultQualityState(candidate),
-	                    canEdit: ref.resultCanEdit === true,
-	                    canPresent: ref.resultCanPresent === true,
-	                    canExport: ref.resultCanExport === true
-	                  }
-	                : capabilities
-	            }, { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false })
-	          : { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false }
-	        const deliveredDeckArtifact = deckDeliverable
-	          ? ((typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
-	              String(candidate?.id || '') === (goalResultId || String(deckDeliverable.artifactId || '').trim())
-	            ) || {
-	              id: goalResultId || String(deckDeliverable.artifactId || '').trim(),
-	              title: String(deckDeliverable.title || manifest.title || 'Presentation'),
-	              metadata: { type: 'html_deck', title: String(deckDeliverable.title || manifest.title || 'Presentation') }
-	            })
-	          : null
-	        if (deliveredDeckArtifact) {
+		            })
+		          : null
+		        const deckBinding = deckDeliverable ? manifestDeckDeliveryBinding(manifest, deckDeliverable) : null
+		        const exactGoalResultMessage = !held && deckBinding ? manifestDeckResultReceipt(manifest, deckBinding) : null
+		        const goalResultId = deckBinding?.artifactId || ''
+		        const goalResultApprovalState = String(exactGoalResultMessage?.thread?.resultApprovalState || '').trim()
+		        const goalResultCapabilities = held
+		          ? { qualityState: 'draft_needs_attention', canEdit: false, canPresent: false, canExport: false }
+		          : manifestDeckResultCapabilities(exactGoalResultMessage)
+		        const cachedDeliveredDeckArtifact = deckBinding
+		          ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+		              String(candidate?.id || '').trim() === deckBinding.artifactId && manifestDeckArtifactMatchesBinding(deckBinding, candidate))
+		          : null
+		        const deliveredDeckArtifact = deckDeliverable
+		          ? (cachedDeliveredDeckArtifact || {
+		              id: deckBinding.artifactId,
+		              title: String(deckDeliverable.title || manifest.title || 'Presentation'),
+		              metadata: {
+		                type: 'html_deck',
+		                title: String(deckDeliverable.title || manifest.title || 'Presentation'),
+		                goalId: deckBinding.goalId,
+		                ...(deckBinding.version > 0 ? { artifactVersion: String(deckBinding.version) } : {}),
+		                ...(deckBinding.digest ? { contentDigest: deckBinding.digest } : {})
+		              }
+		            })
+		          : null
+		        if (deliveredDeckArtifact) {
 	          card.classList.add('manifest-card--deck-first')
 	          const deckResult = document.createElement('article')
 	          deckResult.className = 'manifest-card__deck-result scout-chat-deck-result'
-	          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
-	          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
-	          renderArtifactDeck(deckResult, deliveredDeckArtifact, goalResultCapabilities)
+		          deckResult.dataset.resultArtifactId = String(deliveredDeckArtifact.id || '')
+		          if (deckBinding.version > 0) deckResult.dataset.resultArtifactVersion = String(deckBinding.version)
+		          if (deckBinding.digest) deckResult.dataset.resultArtifactDigest = deckBinding.digest
+		          deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation`)
+		          goalResultCapabilities.expectedBinding = deckBinding
+		          goalResultCapabilities.onUnavailable = () => {
+		            if (deckResult.dataset.availability === 'unavailable') return
+		            deckResult.dataset.availability = 'unavailable'
+		            card.classList.remove('manifest-card--deck-first')
+		            card.querySelector('.manifest-card__supporting')?.remove()
+		            deckResult.className = 'manifest-card__deck-unavailable'
+		            deckResult.replaceChildren(
+		              bfEl('strong', '', 'Historical presentation unavailable'),
+		              bfEl('span', '', 'This delivery receipt remains on the record, but the exact presentation is no longer available to your account. No edit, present, or download actions are shown.')
+		            )
+		          }
+		          renderArtifactDeck(deckResult, deliveredDeckArtifact, goalResultCapabilities)
 	          if (goalResultApprovalState === 'edited_after_approval') {
 	            deckResult.setAttribute('aria-label', `${artifactDisplayTitle(deliveredDeckArtifact)} presentation, edited after approval`)
 	            deckResult.appendChild(bfEl('div', 'scout-chat-deck-result__approval-note', 'Edited after approval · review this version before presenting'))
@@ -74832,11 +76238,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            supporting.appendChild(bfEl('span', '', `${supportingCount} supporting file${supportingCount === 1 ? '' : 's'}${skips.length ? ` · ${skips.length} note${skips.length === 1 ? '' : 's'}` : ''}`))
 	            const activity = bfEl('button', 'manifest-card__supporting-action', 'View activity')
 	            activity.type = 'button'
-	            activity.addEventListener('click', () => {
-	              const workMessage = (Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : [])
-	                .find(candidate => String(candidate?.thread?.artifactId || '').trim() === String(manifest.goalId || '').trim())
-	              if (workMessage && desktopChatLayoutQuery.matches) openDesktopWorkContext(workMessage, activity)
-	              else openArtifactStage(String(manifest.goalId || deckDeliverable.artifactId || ''), 'Presentation activity')
+	            activity.addEventListener('click', async () => {
+	              if (!desktopChatLayoutQuery.matches) {
+	                openArtifactStage(String(deliveredDeckArtifact.id || deckDeliverable.artifactId || ''), artifactDisplayTitle(deliveredDeckArtifact), {
+	                  canEdit: goalResultCapabilities.canEdit,
+	                  canPresent: goalResultCapabilities.canPresent,
+	                  canExport: goalResultCapabilities.canExport,
+	                  qualityState: goalResultCapabilities.qualityState
+	                })
+	                return
+	              }
+	              activity.disabled = true
+	              activity.textContent = 'Opening…'
+	              try {
+		                await openManifestDeckActivity(manifest, deliveredDeckArtifact, activity, deckBinding)
+	              } finally {
+	                if (activity.isConnected) {
+	                  activity.disabled = false
+	                  activity.textContent = 'View activity'
+	                }
+	              }
 	            })
 	            supporting.appendChild(activity)
 	            card.appendChild(supporting)
@@ -75602,8 +77023,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         scoutChatOverflowQueue.clear()
         if (!records.length) return
 
-        const stickToBottom = scoutChatIsNearBottom()
-        const previousScrollTop = scoutChatThread.scrollTop
+	        const viewport = captureScoutChatViewport()
 
         // Prepare every body before any geometry read. scrollHeight on a
         // -webkit-line-clamped node is not stable across Safari versions.
@@ -75650,7 +77070,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           record.control.setAttribute('aria-expanded', String(record.expanded))
         })
 
-        scoutChatThread.scrollTop = stickToBottom ? scoutChatThread.scrollHeight : previousScrollTop
+	        restoreScoutChatViewport(viewport)
       }
 
       function scheduleMountedScoutChatOverflowMeasurements() {
@@ -76353,7 +77773,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function scoutChatLastEntryNode() {
-        let node = scoutChatThread.lastElementChild
+	        const target = scoutChatRenderSurface()
+	        let node = target.lastElementChild
         while (node && (node === scoutChatThinking || node.classList.contains('scout-chat-empty'))) {
           node = node.previousElementSibling
         }
@@ -76464,6 +77885,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function appendScoutChatNode(node, options = {}) {
+	        const target = scoutChatRenderSurface()
+	        if (target !== scoutChatThread) {
+	          target.appendChild(node)
+	          return 0
+	        }
 	        const stick = scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()
         scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
         scoutChatThread.insertBefore(node, scoutChatThinking)
@@ -76478,9 +77904,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return trimmed
 	      }
 
-      function showScoutChatThinking(text) {
+      function showScoutChatThinking(text, scope = null) {
         const stick = scoutChatIsNearBottom()
         scoutChatTurnInFlight = true
+        if (scope) scoutChatTurnScope = scope
         scoutChatThinkingShownAt = Date.now()
         scoutChatThinkingText.textContent = text || 'thinking'
         scoutChatThinking.hidden = false
@@ -76491,8 +77918,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function hideScoutChatThinking() {
         scoutChatTurnInFlight = false
+        scoutChatTurnScope = null
         scoutChatThinking.hidden = true
       }
+
+	  function finishScoutChatThinking(scope) {
+	    if (!scope) {
+	      hideScoutChatThinking()
+	      return
+	    }
+	    if (!scoutChatTurnScope ||
+	      scoutChatTurnScope.generation !== scope.generation ||
+	      scoutChatTurnScope.account !== scope.account ||
+	      String(scoutChatTurnScope.threadId || '') !== String(scope.threadId || '')) return
+	    hideScoutChatThinking()
+	  }
 
       // design canon: the thinking indicator shows for at least 1.7s while a
       // real Scout reply is pending, so a fast answer never flashes it
@@ -81547,11 +82987,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function artifactPublicationCapabilityAllows(capability, projected = {}, action = 'export') {
-        return capability?.ready === true && capability?.canExport === true && projectedArtifactPublicationAllows(projected, action)
+        const key = action === 'present' ? 'canPresent' : 'canExport'
+        return capability?.ready === true && capability?.[key] === true && projectedArtifactPublicationAllows(projected, action)
       }
 
       function exactArtifactFinalExportCapability(entry) {
-        const blocked = { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false }
+        const blocked = { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canPresent: false, canExport: false }
         const artifactId = String(entry?.id || '').trim()
         if (!artifactId) return blocked
         const artifactVersion = Math.max(1, Number(entry?.metadata?.artifactVersion || 1) || 1)
@@ -81579,6 +83020,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               artifactVersion,
               qualityState: String(payload?.qualityState || '').trim().toLowerCase(),
               managed: payload?.managed === true,
+              // Older compatible servers exposed one publication bit. Treat
+              // that bit as the conservative presentation fallback while new
+              // servers distinguish read/present from download/export ACL.
+              canPresent: typeof payload?.canPresent === 'boolean' ? payload.canPresent === true : payload.canExport === true,
               canExport: payload.canExport === true,
               checkedAt: Date.now()
             }
@@ -81586,7 +83031,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return capability
           })
           .catch(() => {
-            const capability = { ready: false, artifactVersion, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false, checkedAt: Date.now() }
+            const capability = { ready: false, artifactVersion, managed: artifactPublicationManagedHint(entry), qualityState: '', canPresent: false, canExport: false, checkedAt: Date.now() }
             cache.set(artifactId, capability)
             return capability
           })
@@ -81603,7 +83048,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!fresh) {
           requestArtifactFinalExportCapability(entry)
         }
-        return fresh ? cached : { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canExport: false }
+        return fresh ? cached : { ready: false, managed: artifactPublicationManagedHint(entry), qualityState: '', canPresent: false, canExport: false }
       }
 
       async function ensureArtifactFinalExportCapability(entry, options = {}) {

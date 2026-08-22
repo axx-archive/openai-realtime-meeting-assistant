@@ -9,7 +9,7 @@ import {
   pushTrace,
   smoothAmplitude,
 } from '../voice/amplitude';
-import { RESTING_PROFILE, waveform } from '../theme/waveformGeometry';
+import { RESTING_PROFILE, waveform, waveformRowWidth } from '../theme/waveformGeometry';
 
 /**
  * The waveform is an instrument, not an animation (design §3) — so these are
@@ -103,4 +103,16 @@ test('while listening the row reflects the trace and stays within bounds', () =>
 
 test('silence while listening still shows a floor, so the row never vanishes', () => {
   assert.ok(barScales(emptyTrace(), true).every((scale) => scale >= waveform.minScale));
+});
+
+test('compact waveform width accounts for every bar and every inter-bar gap', () => {
+  const scale = 0.42;
+  const expected = (
+    waveform.barCount * waveform.barWidth * scale
+    + (waveform.barCount - 1) * waveform.barGap * scale
+  );
+  assert.equal(waveformRowWidth(scale), expected);
+  assert.equal(waveformRowWidth(scale), 91.97999999999999);
+  assert.equal(waveformRowWidth(scale, 1), waveform.barWidth * scale);
+  assert.equal(waveformRowWidth(scale, 0), 0);
 });

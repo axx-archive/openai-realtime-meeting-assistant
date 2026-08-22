@@ -123,6 +123,7 @@ func TestPrivateRealtimeVoiceSessionRoutesEveryTurnToExactBoundThread(t *testing
 
 func TestAssistantRealtimeToolRequiresAndEchoesExactVoiceBinding(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	kanbanApp.apiKey = "openai-router-test"
@@ -182,6 +183,7 @@ func TestAssistantRealtimeToolRequiresAndEchoesExactVoiceBinding(t *testing.T) {
 
 func TestAssistantRealtimeToolRoutesTodaysMeetingsThroughAuthorizedBriefing(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)

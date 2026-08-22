@@ -218,3 +218,56 @@ func TestPrivateRealtimeVoiceOpenChatNavigatesWithoutRebindingOrPublishing(t *te
 		t.Fatalf("voice binding was rebound to destination: bound=%+v err=%v", bound, err)
 	}
 }
+
+func TestPrivateRealtimeVoiceOpensOwnerPrivateChatWithoutRebindingOrPublishing(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "voice-private-chat-navigation"
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user unavailable")
+	}
+	target, err := app.createScoutChatThread(user.Email, user.Name, "Western creator lab", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceSessionID := "voice-private-navigation-parity"
+	voiceThread, _, err := app.ensurePrivateRealtimeVoiceConversation(user.Email, user.Name, voiceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.ID == voiceThread.ID {
+		t.Fatal("test target unexpectedly reused the bound voice conversation")
+	}
+	targetBefore := len(target.Messages)
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("voice private navigation reached unexpected workflow %q", request.Workflow)
+		}
+		return openChatThreadRouteJSON(t, target.Title, scoutChatVisibilityPrivate), nil
+	})
+	result, changed, err := app.applyPrivateRealtimeVoiceSessionModelTool(
+		context.Background(), user.Email, voiceSessionID, voiceThread.ID, "voice-open-private-western-creator-lab",
+		"route_conversation_turn", map[string]any{"utterance": "Open my private Western creator lab chat"},
+	)
+	if err != nil || changed || result["outcome"] != string(conversationIntentStartPrivateWork) || result["thread_id"] != voiceThread.ID {
+		t.Fatalf("voice private navigation result=%#v changed=%t err=%v", result, changed, err)
+	}
+	actions, ok := result["actions"].([]map[string]any)
+	if !ok || len(actions) != 1 || actions[0]["type"] != "open_chat_thread" || actions[0]["threadId"] != target.ID ||
+		actions[0]["visibility"] != scoutChatVisibilityPrivate || result["voice_context_policy"] != "private_scout_thread" ||
+		result["voice_context_thread_id"] != voiceThread.ID {
+		t.Fatalf("voice private navigation action=%#v", result)
+	}
+	if asString(result["message"]) != "Opening Western creator lab. Nothing was posted there." {
+		t.Fatalf("voice private navigation did not preserve the typed-router receipt: %#v", result)
+	}
+	targetAfter, _, err := app.scoutChatThreadByID(user.Email, target.ID)
+	if err != nil || len(targetAfter.Messages) != targetBefore {
+		t.Fatalf("voice private navigation published ambient speech: before=%d after=%d err=%v", targetBefore, len(targetAfter.Messages), err)
+	}
+	bound, err := app.privateRealtimeVoiceConversation(user.Email, voiceSessionID, voiceThread.ID)
+	if err != nil || bound.ID != voiceThread.ID || bound.ID == target.ID {
+		t.Fatalf("voice binding was rebound to owner-private destination: bound=%+v err=%v", bound, err)
+	}
+}

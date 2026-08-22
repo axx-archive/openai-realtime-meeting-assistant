@@ -32,13 +32,13 @@ func TestWebChatSportsCarStaticContract(t *testing.T) {
 		`.desktop-chat-reactions[hidden]`,
 		`.desktop-chat-reactions button[hidden]`,
 		"data-chat-reaction-message-id",
-		"function beginScoutChatOwnSendTailPin()",
+		"function beginScoutChatOwnSendTailPin(options = {})",
 		"function maintainScoutChatOwnSendTailPin()",
 		"new ResizeObserver(() => maintainScoutChatOwnSendTailPin())",
 		"new MutationObserver(() => {",
 		"{ skipRail: patched }",
 		"renderActiveScoutThread({ forceBottom: true })",
-		"const boundedFeedMessages = feedMessages.slice(-scoutChatMaxNodes)",
+		"const boundedFeedMessages = feedMessages.slice(Math.max(0, feedWindowEnd - scoutChatMaxNodes), feedWindowEnd)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("web chat sports-car contract missing %q", want)

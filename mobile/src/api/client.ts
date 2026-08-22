@@ -526,11 +526,14 @@ export const api = {
       transportRevision: number;
       operationId: string;
     },
+    options: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<{ ok: boolean; replayed: boolean; leaseExpiresAt: string }> {
     return request("/assistant/realtime/lease/renew", {
       method: "POST",
       body: binding,
       sessionToken,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
     });
   },
 

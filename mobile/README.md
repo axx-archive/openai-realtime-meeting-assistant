@@ -7,7 +7,7 @@ Native iOS client for **Stride**. Until the coordinated domain cutover, the live
 | **Auth** | Same `/auth/login`, `/auth/me`, `/auth/logout` roster sessions as the browser; login gate matches live wordmark + “Enter your office” |
 | **Rooms** | `GET /rooms` — same room list the web lobby shows |
 | **Chat** | `GET/POST /assistant/chat-threads` + Scout `/assistant/query` |
-| **Scout voice** | Native WebRTC through `/assistant/realtime-offer`; tools and usage stay server-authoritative. Dark until provider qualification enables `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true` |
+| **Scout voice** | Native private Realtime 2.1 through `/assistant/realtime-offer`; the production Build 73 profile enables it, while tools, Brain context, thread receipts, usage, and ACLs stay server-authoritative |
 | **Board** | `GET /assistant/board` — same kanban cards |
 | **Full OS** | Authenticated WebView of the **production SPA** so any deeper tool is the live design, not a fork |
 
@@ -37,10 +37,23 @@ EXPO_PUBLIC_WEB_APP_URL=http://127.0.0.1:8080 \
 npm start
 ```
 
-The Canvas uses the incumbent record/transcribe fallback unless the native
-Realtime build flag is explicitly enabled. Do not enable it in a release build
-until the E10 provider/model, interruption, Bluetooth, and device acceptance
-matrix has passed; leaving the flag unset is the default-off state.
+Build 73 enables native private Realtime in the production EAS profile. Home
+and the signed-in tab shell expose the same voice transport: one private Scout
+thread stays bound across navigation, entering a room yields microphone focus,
+and backgrounding ends private capture. Local/ad-hoc builds remain default-off
+unless `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true` is supplied. That client
+flag is only the first key: the signed-in `/client-config` response must also
+project `privateRealtimeVoiceQualified: true`, which the server emits only when
+`PRIVATE_REALTIME_VOICE_QUALIFIED=true`. Either key off hides/stops the launcher.
+The server env value takes effect on a receipted container replacement; once
+false, offers and tool effects fail closed, Renew terminalizes the exact lease
+within the foreground 10-second cadence. Every Renew has a dynamic deadline of
+at most five seconds, always before an exact-generation local watchdog at three
+seconds before the server-provided lease expiry. That watchdog closes the peer
+and microphone tracks synchronously even if Renew or native deactivation never
+settles; the 30-second server TTL remains the final authority bound. Source
+qualification does not claim live activation, provider acceptance, or physical
+iPhone/iPad audio acceptance.
 
 ## Typecheck
 
@@ -61,8 +74,8 @@ EAS cannot set distribution credentials non-interactively without an App Store C
 
 ```bash
 cd mobile
-npx eas-cli login          # any user that is Owner/Admin on axxonlabs
-npx eas-cli credentials   # iOS → production → let EAS create/reuse dist cert + provisioning
+npx --yes eas-cli@21.4.0 login          # any user that is Owner/Admin on axxonlabs
+npx --yes eas-cli@21.4.0 credentials   # iOS → production → let EAS create/reuse dist cert + provisioning
 ```
 
 In [App Store Connect](https://appstoreconnect.apple.com):

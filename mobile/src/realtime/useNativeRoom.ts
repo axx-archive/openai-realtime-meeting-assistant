@@ -131,6 +131,7 @@ import {
 import { applyNativeCameraSenderPolicy } from './videoSenderPolicy';
 import { correlatedOfferKey } from './signalCorrelation';
 import { audioFocusRuntime } from './audioFocusRuntime';
+import { nativeClientConfigCache } from './nativeClientConfig';
 import {
   createNativeRoomTerminalAuthority,
   drainNativeRoomMediaTeardown,
@@ -2832,7 +2833,7 @@ export function useNativeRoom(
     dispatchIntelligence({ type: 'reset' });
     try {
       const clientConfigResult = await settleGenerationOperation(
-        api.clientConfig(sessionToken),
+        nativeClientConfigCache.load(sessionToken),
         joinIsCurrent,
       );
       if (!clientConfigResult.current) return;

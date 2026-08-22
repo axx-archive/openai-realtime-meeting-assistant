@@ -22,10 +22,12 @@ func TestPersistentCallPipSourceContract(t *testing.T) {
 		"function callPipConnectionPresentation(participantCount)",
 		"reconnecting · your call is still active",
 		"function callPipApplySafePlacement(placement = null)",
+		"function callPipContentStudioWorkspaceCandidate(stored, width, height, margin)",
 		"stride.call-pip.placement.compact.v1",
 		"stride.call-pip.placement.wide.v1",
 		"function callPipHandleKeyboardMove(event)",
 		"function callPipTrapCompositeTab(event)",
+		"root.classList?.contains('content-studio-drawer')",
 		"function callPipSyncOpenSurfaceContracts()",
 		"surface.setAttribute('aria-modal', composite ? 'false' : 'true')",
 		"selectors.push('.artifact-stage__panel', '.content-studio-drawer__panel')",
@@ -76,7 +78,12 @@ const server=http.createServer((req,res)=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1280,height:820}});
- await page.route('https://kino.grok.me/**',route=>route.abort());
+	 let kinoRouteMode='open';
+	 let heldKinoRoute=null;
+	 await page.route('https://kino.grok.me/**',route=>{
+	   if(kinoRouteMode==='hold'){heldKinoRoute=route;return;}
+	   return route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>KINO</title><button>Inside KINO</button>'});
+	 });
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
  await page.evaluate(()=>{
@@ -190,13 +197,72 @@ const server=http.createServer((req,res)=>{
  await page.locator('#contentStudioDrawer').waitFor({state:'visible'});
  await page.waitForTimeout(80);
  assert.equal(await pip.isVisible(),true);
- await assertComposite('#contentStudioDrawer','.content-studio-drawer__panel');
- await exerciseCompositeControls();
- await page.evaluate(()=>closeContentStudio());
- await page.locator('#contentStudioDrawer').waitFor({state:'detached'});
- assert.equal(await pip.isVisible(),true);
+	 await assertComposite('#contentStudioDrawer','.content-studio-drawer__panel');
+	 await exerciseCompositeControls();
 
- // Resize and mobile-web keep the full control surface inside the viewport.
+	 // A persisted top-left call position cannot cover either the ambient rail or
+	 // KINO's header when the canvas expands to full workspace. The call composes
+	 // within the explicit safe region instead of choosing an invalid candidate.
+	 await page.evaluate(()=>{
+	   const placement={dock:'left',y:0};
+	   localStorage.setItem('stride.call-pip.placement.wide.v1',JSON.stringify(placement));
+	   setContentStudioWorkspaceMode(document.getElementById('contentStudioDrawer'),true);
+	   callPipScheduleSafePlacement(placement);
+	 });
+	 await page.waitForTimeout(100);
+	 const fullWorkspaceGeometry=await page.evaluate(()=>{
+	   const pip=document.getElementById('pipMeeting').getBoundingClientRect();
+	   const rail=document.getElementById('toolRail').getBoundingClientRect();
+	   const head=document.querySelector('.content-studio-drawer__head').getBoundingClientRect();
+	   const panel=document.querySelector('.content-studio-drawer__panel').getBoundingClientRect();
+	   return {pip:pip.toJSON(),rail:rail.toJSON(),head:head.toJSON(),panel:panel.toJSON(),mode:document.getElementById('contentStudioDrawer').dataset.workspaceMode};
+	 });
+	 assert.equal(fullWorkspaceGeometry.mode,'full',JSON.stringify(fullWorkspaceGeometry));
+	 assert.ok(fullWorkspaceGeometry.pip.left>=fullWorkspaceGeometry.rail.right+10,JSON.stringify(fullWorkspaceGeometry));
+	 assert.ok(fullWorkspaceGeometry.pip.top>=fullWorkspaceGeometry.head.bottom+10,JSON.stringify(fullWorkspaceGeometry));
+	 assert.ok(fullWorkspaceGeometry.pip.right<=fullWorkspaceGeometry.panel.right,JSON.stringify(fullWorkspaceGeometry));
+	 assert.ok(fullWorkspaceGeometry.pip.bottom<=fullWorkspaceGeometry.panel.bottom,JSON.stringify(fullWorkspaceGeometry));
+	 await assertComposite('#contentStudioDrawer','.content-studio-drawer__panel',{desktopAvoidsPanel:false});
+	 await exerciseCompositeControls();
+	 await page.evaluate(()=>closeContentStudio());
+	 await page.locator('#contentStudioDrawer').waitFor({state:'detached'});
+	 assert.equal(await pip.isVisible(),true);
+
+	 // Fallback KINO and the live call form one keyboard composite. Capture-phase
+	 // PiP routing owns both boundaries; the drawer's no-call wrap must not skip it.
+	 kinoRouteMode='hold';
+	 heldKinoRoute=null;
+	 await page.evaluate(()=>openContentStudio(document.getElementById('contentStudioRailLink')));
+	 const fallbackStudio=page.locator('#contentStudioDrawer');
+	 await fallbackStudio.waitFor({state:'visible'});
+	 for(let attempt=0;attempt<50&&!heldKinoRoute;attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+	 assert.ok(heldKinoRoute,'KINO request was not held');
+	 await fallbackStudio.locator('iframe').dispatchEvent('error');
+	 const fallback=fallbackStudio.locator('.content-studio-drawer__fallback');
+	 await fallback.waitFor({state:'visible'});
+	 const fallbackExternal=fallback.locator('a');
+	 const headerExternal=fallbackStudio.locator('.content-studio-drawer__actions a');
+	 const focusCompositeEdge=async edge=>page.evaluate(edge=>{
+	   const nodes=callPipFocusableNodes(document.getElementById('pipMeeting'));
+	   nodes[edge==='first'?0:nodes.length-1].focus();
+	 },edge);
+	 await fallbackExternal.focus();
+	 await page.keyboard.press('Tab');
+	 assert.equal(await page.evaluate(()=>document.getElementById('pipMeeting').contains(document.activeElement)),true);
+	 await focusCompositeEdge('last');
+	 await page.keyboard.press('Tab');
+	 assert.equal(await headerExternal.evaluate(node=>node===document.activeElement),true);
+	 await page.keyboard.press('Shift+Tab');
+	 assert.equal(await page.evaluate(()=>document.getElementById('pipMeeting').contains(document.activeElement)),true);
+	 await focusCompositeEdge('first');
+	 await page.keyboard.press('Shift+Tab');
+	 assert.equal(await fallbackExternal.evaluate(node=>node===document.activeElement),true);
+	 await page.keyboard.press('Escape');
+	 await fallbackStudio.waitFor({state:'detached'});
+	 await heldKinoRoute.abort().catch(()=>{});
+	 kinoRouteMode='open';
+
+	 // Resize and mobile-web keep the full control surface inside the viewport.
  await page.evaluate(()=>{
    const node=document.getElementById('pipMeeting');
    node.style.left='1200px';node.style.top='760px';

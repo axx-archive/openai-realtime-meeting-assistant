@@ -270,6 +270,7 @@ func TestAssistantRealtimeOfferReportsQuotaBlocker(t *testing.T) {
 
 func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })

@@ -23,6 +23,26 @@ export const ROUTE_BATCH_FAILURE_MESSAGE =
 export const ROUTE_BATCH_FAILURE_SPEECH_INSTRUCTIONS =
   `Say exactly: "${ROUTE_BATCH_FAILURE_MESSAGE}" Do not say anything else.`;
 
+export const PERSONAL_REALTIME_GENERIC_ERROR = 'Scout voice could not connect.';
+
+/** Keep useful provider/native guidance while refusing markup, secrets, and dumps. */
+export function safePersonalRealtimeErrorMessage(
+  value: unknown,
+  fallback = PERSONAL_REALTIME_GENERIC_ERROR,
+): string {
+  const candidate = typeof value === 'string'
+    ? value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+  if (
+    !candidate
+    || candidate.length > 300
+    || /<\/?(?:html|head|body|script|style)\b|<!doctype/i.test(candidate)
+    || /\bbearer\s+[a-z0-9._~+\/-]{8,}/i.test(candidate)
+    || /\b(?:authorization|api[-_ ]?key|session[-_ ]?token)\s*[:=]\s*\S+/i.test(candidate)
+  ) return fallback;
+  return candidate;
+}
+
 export function realtimeToolContinuationPolicy(calls: RealtimeFunctionCall[]): {
   valid: boolean;
   shouldRespond: boolean;

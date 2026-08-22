@@ -43,7 +43,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(realtime, /terminateTransportWithError\(connectionGeneration, 'Scout voice connection was interrupted\.'\)/);
   assert.match(realtime, /terminateTransportWithError\(connectionGeneration, 'Scout voice needs attention\.'\)/);
   assert.match(realtime, /terminateTransportWithError\(connectionGeneration, 'Scout voice connection ended\.'\)/);
-  assert.match(realtime, /terminateTransportWithError\(connectionGeneration, providerError \|\| 'Scout voice needs attention\.'\)/);
+  assert.match(realtime, /const providerError = safePersonalRealtimeErrorMessage\([\s\S]*'Scout voice needs attention\.'[\s\S]*terminateTransportWithError\(connectionGeneration, providerError\)/);
   assert.match(realtime, /generationRef\.current \+= 1;[\s\S]*leaseRef\.current = null;[\s\S]*releasePersonalRealtimeTerminalFocus\(lease, cleanupTransport\)/);
   const terminalCleanup = realtime.slice(
     realtime.indexOf('const terminateTransportWithError = useCallback'),
@@ -60,7 +60,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.match(realtimeStart, /const startup = drainPersonalRealtimeStartup\(/);
   assert.match(realtimeStart, /const mediaSessionGeneration = nextMediaSessionGeneration\(\)/);
   assert.match(realtimeStart, /waitForBoundedNativeOperation\([\s\S]*activateVideoMeeting\(mediaSessionGeneration\)/);
-  assert.match(realtimeStart, /startupDrain = startup;\s*const \[clientConfig, stream\] = await startup;/);
+  assert.match(realtimeStart, /startupDrain = startup;\s*const \[startupClientConfig, stream\] = await startup;/);
   assert.match(realtimeStart, /closePersonalRealtimeStartup\(\s*startupDrain,/);
   assert.match(realtimeStart, /generationRef\.current \+= 1;\s*startupFailureTerminalRequest = \+\+terminalRequestRef\.current;/);
   assert.ok(
@@ -68,7 +68,12 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
       < realtimeStart.indexOf('releasePersonalRealtimeTerminalFocus(\n        lease,'),
     'startup siblings drain before any terminal media/focus cleanup',
   );
-  assert.match(realtimeStart, /await lease\.release\('cancelled'\)\.catch\(\(\) => undefined\);/);
+  assert.match(realtimeStart, /retireStale: \(staleLease\) => releasePersonalRealtimeTerminalFocus\([\s\S]*cleanupSessionTransport,[\s\S]*'cancelled'/);
+  assert.doesNotMatch(
+    realtimeStart,
+    /await lease\.release\('cancelled'\)/,
+    'a stale focus release must retain the exact-generation cleanup fallback',
+  );
   const startupFailure = realtimeStart.slice(realtimeStart.indexOf('} catch (startError)'));
   const startupCleanup = startupFailure.indexOf('await releasePersonalRealtimeTerminalFocus(\n        lease,');
   assert.ok(startupFailure.indexOf('generationRef.current += 1') < startupCleanup);
@@ -76,7 +81,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.ok(startupCleanup < startupFailure.indexOf("setLiveStatus('error')"));
   assert.match(realtime, /dataChannelRef\.current !== dataChannel/);
   assert.match(realtime, /dataChannel\.onclose = \(\) =>/);
-  assert.match(realtime, /peerRef\.current !== peer \|\| generationRef\.current !== connectionGeneration/);
+  assert.match(realtime, /peerRef\.current !== peer \|\| !startAuthorityIsCurrent\(\)/);
   assert.match(realtime, /personalRealtimeCleanupScope\(/);
   assert.match(realtime, /cleanupScope !== 'owned'[\s\S]*deactivateVideoMeeting\(expectedMediaSessionGeneration\)/);
   assert.match(realtime, /cleanupScope === 'detached'[\s\S]*mediaSessionGenerationRef\.current === null/);
@@ -97,8 +102,8 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   };
   assert.equal(
     eas.build?.production?.env?.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED,
-    'false',
-    'production private Realtime stays dark until provider, device, and sustained reliability qualification passes',
+    'true',
+    'Build 73 production explicitly enables the private Realtime surface',
   );
 });
 

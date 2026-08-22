@@ -7,6 +7,10 @@ import { colors, radius, space, type } from '../theme/tokens';
 import { PersonalRealtimeFloatingControl } from '../realtime/PersonalRealtimeFloatingControl';
 import { useOptionalPersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import {
+  personalRealtimeIslandPlacement,
+  type PersonalRealtimeIslandSurface,
+} from '../realtime/personalRealtimeIslandPlacement';
+import {
   nativeShellDestinations,
   nativeShellDestinationsForAccess,
   type NativeShellAccess,
@@ -19,6 +23,8 @@ type Props = {
   access?: NativeShellAccess;
   children: React.ReactNode;
   keepSidebarForFocusedRoute?: boolean;
+  personalRealtimeSurface?: PersonalRealtimeIslandSurface;
+  personalRealtimeStartAllowed?: boolean;
   personalRealtimeVisible?: boolean;
   visible: boolean;
   /** Notification badges: which dests have unread activity */
@@ -149,6 +155,8 @@ export function NativeUniversalShell({
   access,
   children,
   keepSidebarForFocusedRoute = false,
+  personalRealtimeSurface = 'shell',
+  personalRealtimeStartAllowed = false,
   personalRealtimeVisible = false,
   visible,
   unreadBadges = {},
@@ -165,13 +173,51 @@ export function NativeUniversalShell({
   const layout = nativeShellLayout(width, Platform.OS !== 'ios' || Platform.isPad, fontScale);
   const sidebar = (visible || keepSidebarForFocusedRoute) && layout === 'sidebar';
   const compact = visible && layout === 'compact';
+  const personalRealtimeRendered = Boolean(
+    realtime
+    && (
+      (realtime.enabled && personalRealtimeVisible)
+      || realtime.active
+      || realtime.tearingDown
+      || (realtime.enabled && realtime.status === 'error')
+    ),
+  );
+  const personalRealtimePlacement = personalRealtimeIslandPlacement({
+    bottomInset: insets.bottom,
+    expanded: realtime?.status === 'error',
+    rightInset: insets.right,
+    layout,
+    smallSpace: space[2],
+    largeSpace: space[4],
+    surface: personalRealtimeSurface,
+    topInset: insets.top,
+  });
+  const personalRealtimePosition = personalRealtimePlacement.top !== undefined
+    ? {
+        top: personalRealtimePlacement.top,
+        ...(personalRealtimePlacement.docked ? {} : { right: personalRealtimePlacement.right }),
+      }
+    : {
+        bottom: personalRealtimePlacement.bottom,
+        ...(personalRealtimePlacement.docked ? {} : { right: personalRealtimePlacement.right }),
+      };
   const compactItemWidth = Math.max(40, Math.min(48, Math.floor((width - 38) / visibleDestinations.length)));
   return (
     <View style={styles.root}>
       {/* The navigator always occupies this exact child slot. Route, width,
           orientation, and chrome visibility may change styles or siblings but
           never replace/reparent the navigation subtree. */}
-      <View style={[styles.content, sidebar && styles.contentSidebar, compact && styles.contentCompact]}>
+      <View
+        testID="native-shell-content"
+        style={[
+          styles.content,
+          sidebar && styles.contentSidebar,
+          compact && styles.contentCompact,
+          personalRealtimeRendered && personalRealtimePlacement.contentTopInset > 0
+            ? { paddingTop: personalRealtimePlacement.contentTopInset }
+            : null,
+        ]}
+      >
         {children}
       </View>
       {sidebar ? (
@@ -217,20 +263,20 @@ export function NativeUniversalShell({
           ))}
         </Glass>
       ) : null}
-      {(personalRealtimeVisible || realtime?.active) && realtime ? (
+      {personalRealtimeRendered && realtime ? (
         <View
           pointerEvents="box-none"
+          testID="personal-realtime-island"
           style={[
             styles.personalRealtime,
-            {
-              top: Math.max(insets.top, space[2]),
-              right: Math.max(insets.right, space[3]),
-            },
+            personalRealtimePlacement.docked && styles.personalRealtimeDocked,
+            personalRealtimePosition,
           ]}
         >
           <PersonalRealtimeFloatingControl
             realtime={realtime}
             onOpenThread={onOpenPersonalRealtimeThread}
+            startAllowed={personalRealtimeStartAllowed}
           />
         </View>
       ) : null}
@@ -329,6 +375,11 @@ const styles = StyleSheet.create({
   personalRealtime: {
     position: 'absolute',
     zIndex: 10,
+  },
+  personalRealtimeDocked: {
+    left: 0,
+    right: 0,
+    alignItems: 'center',
   },
   compactItem: {
     width: 48,

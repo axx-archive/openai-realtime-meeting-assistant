@@ -32,6 +32,8 @@ Edit `.env`:
 ```bash
 OPENAI_API_KEY=sk-proj-...
 OPENAI_REALTIME_VAD_TYPE=server_vad
+# Keep false until the exact-release activation transaction below.
+PRIVATE_REALTIME_VOICE_QUALIFIED=false
 MEETING_TRANSCRIPT_LANE_ENABLED=true
 MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
@@ -58,10 +60,41 @@ The OpenAI provider/model/reasoning matrix is compiled into the server and is
 not deployment configuration: Luna/medium routing and extraction,
 Terra/high conversation/brain/board/house-style/taste/tool work, Sol/high
 research/orchestration/narrative/deliverables, Sol/max final review, Realtime
-2.1 at private high/shared medium, GPT Live Transcribe for live input,
+2.1 at medium for both private conversational voice and shared rooms, GPT Live Transcribe for live input,
 GPT Transcribe for committed/file input, GPT Image 2 high, and
 text-embedding-3-small. Stale model/effort variables are ignored and should be
 removed from the live environment rather than copied into a new release.
+
+Private native voice has two independent release keys. Build 73's production
+EAS profile sets `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true`, and the VPS
+must separately set `PRIVATE_REALTIME_VOICE_QUALIFIED=true` before
+`/client-config` qualifies a signed-in launcher. Missing, empty, malformed, and
+false server values all fail closed. Source or EAS configuration is not proof
+that the server key is live, that OpenAI accepted a call, or that iPhone/iPad
+audio works.
+
+Activate the server key only inside the same exact-release transaction that
+replaces the app container. Preserve a mode-`0600` copy of the prior base env,
+atomically replace the single key, and write a root-private activation receipt
+under `/opt/meetingassist-backups` containing the before/after env-file SHA-256
+(never its contents), exact target commit, release generation, activation time,
+and retained rollback commit. After activation, require the exact-release
+verifier, active ledger, running image IDs, public `/healthz` and `/readyz`, and
+an authenticated `/client-config` read to agree. Only a fresh private call may
+add provider acceptance; only physical phone and iPad runs may add device/audio
+acceptance.
+
+`false` is a fail-closed deployment switch, not a hot-reloaded process flag.
+Apply it atomically and replace the container through the retained exact-release
+tool. A false process refuses every new offer and tool effect; an exact active
+lease that reaches Renew is durably marked `qualification_revoked`. The native
+client renews every 10 seconds. Each request has a dynamic deadline of at most
+five seconds and strictly before its exact-generation local watchdog at
+`leaseExpiresAt - 3s`. If Renew never settles, the watchdog still enters visible
+teardown and synchronously closes the peer and microphone tracks before native
+audio deactivation; the 30-second server TTL remains the final authority bound.
+Stop remains admitted so cleanup is never blocked. Do not describe the env
+change as instantaneous without the container replacement receipt.
 
 Codex-style server-side execution is disabled in the production-style Compose
 candidate. The former reusable `codex-runner` image/profile was not a qualified

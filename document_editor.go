@@ -113,11 +113,12 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, canWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
+		_, canExportAuthority := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLExport)
 		qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "artifact": documentStudioView(artifact),
 			"document": documentStudioDocumentFromEntry(artifact), "canWrite": canWrite,
-			"qualityState": qualityState, "canExport": stable && canExport,
+			"qualityState": qualityState, "canExport": stable && canExport && canExportAuthority,
 		})
 		return
 	}
@@ -170,10 +171,11 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(updated)
+	_, canExportAuthority := authorizedArtifactForActions(r.Context(), user, updated.ID, ACLReadContent, ACLExport)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "updated": changed, "artifact": documentStudioView(updated),
 		"document":     documentStudioDocumentFromEntry(updated),
-		"qualityState": qualityState, "canExport": stable && canExport,
+		"qualityState": qualityState, "canExport": stable && canExport && canExportAuthority,
 		"receipt": map[string]any{
 			"outcome": "document_saved", "artifactId": updated.ID,
 			"artifactVersion": artifactVersion(updated), "contentSaved": true,

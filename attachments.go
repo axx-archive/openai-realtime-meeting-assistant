@@ -1600,6 +1600,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 	if len(contexts) > 0 && contexts[0] != nil {
 		projectionContext = contexts[0]
 	}
+	messageProjectionProbe, _ := projectionContext.Value(scoutChatMessageProjectionProbeContextKey{}).(func(string))
 	var resultIndex scoutChatResultProjectionIndex
 	var resultViewer *userAccount
 	if includeArtifactResults {
@@ -1688,6 +1689,9 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 		projected.Messages = append(projected.Messages, message)
 	}
 	for messageIndex := range projected.Messages {
+		if messageProjectionProbe != nil {
+			messageProjectionProbe(projected.Messages[messageIndex].ID)
+		}
 		original := projected.Messages[messageIndex]
 		if includeArtifactResults {
 			app.projectScoutChatResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
@@ -1756,6 +1760,39 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 		}
 	}
 	return projected
+}
+
+// A request-scoped projection probe lets tests pin the expensive authorization
+// boundary without a mutable package global that could race with concurrent
+// requests under go test -race.
+type scoutChatMessageProjectionProbeContextKey struct{}
+
+func withScoutChatMessageProjectionProbe(ctx context.Context, probe func(string)) context.Context {
+	return context.WithValue(ctx, scoutChatMessageProjectionProbeContextKey{}, probe)
+}
+
+// projectScoutChatThreadTailForViewer moves the stable cursor/count boundary
+// ahead of per-message attachment and result projection. Ordinary dense
+// channels therefore reauthorize only the bounded page. Riff Spaces retain
+// their episode-wide projection because withdrawing one source can invalidate
+// an authored publication batch across that episode.
+func (app *kanbanBoardApp) projectScoutChatThreadTailForViewer(viewerEmail string, thread scoutChatThreadRecord, episodeID, before string, limit int, since string, contexts ...context.Context) (scoutChatThreadRecord, scoutChatHistoryPage, error) {
+	if thread.Riff != nil {
+		projected := app.projectScoutChatThreadForViewerEpisode(viewerEmail, thread, episodeID, contexts...)
+		return scoutChatTailWindow(projected, before, limit, since)
+	}
+	window, page, err := scoutChatTailSourceWindow(thread, before, limit, since)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatHistoryPage{}, err
+	}
+	invalidPublicationRoots := app.privateRiffInvalidPublicationRoots(thread)
+	for index := range window.Messages {
+		publication := window.Messages[index].Publication
+		if publication != nil && invalidPublicationRoots[publication.RootMessageID] {
+			window.Messages[index] = redactPrivateRiffPublicationMessage(window.Messages[index])
+		}
+	}
+	return app.projectScoutChatThreadForViewerEpisode(viewerEmail, window, episodeID, contexts...), page, nil
 }
 
 type scoutChatResultProjectionIndex struct {
@@ -2044,6 +2081,11 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	}
 	result = currentResult
 	resultCanEdit := app.artifactAuthorized(ctx, viewer, ACLWrite, result)
+	// Export is an independent viewer capability. Read authority (and even an
+	// admitted authored revision) may allow presenting without allowing a file
+	// to leave the system, so the channel projection must mirror the exact deck
+	// and final-export endpoints instead of treating admission as export ACL.
+	resultCanExportAuthority := app.artifactAuthorized(ctx, viewer, ACLExport, result)
 	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
 		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, artifactCapabilityDigest(result))) {
 		acceptedBinding.State = scoutChatResultApprovalEdited
@@ -2083,7 +2125,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		ref.ResultCanEdit = resultCanEdit
 		ref.ResultCanContinue = resultCanContinue
 		ref.ResultCanPresent = !goalResult || (resultPublicationStable && resultCanPublish)
-		ref.ResultCanExport = !goalResult || (resultPublicationStable && resultCanPublish)
+		ref.ResultCanExport = resultCanExportAuthority && (!goalResult || (resultPublicationStable && resultCanPublish))
 		if selectedAcceptedDeck {
 			ref.ResultApprovalState = acceptedBinding.State
 		}
@@ -2099,7 +2141,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref.ResultQualityState = resultQualityState
 	ref.ResultCanEdit = resultCanEdit
 	ref.ResultCanContinue = resultCanContinue
-	ref.ResultCanExport = !goalResult || (resultPublicationStable && resultCanPublish)
+	ref.ResultCanExport = resultCanExportAuthority && (!goalResult || (resultPublicationStable && resultCanPublish))
 }
 
 // authorizedScoutChatResultArtifact performs the authorization check against
@@ -2247,6 +2289,53 @@ func (app *kanbanBoardApp) projectScoutChatResponseForViewer(viewerEmail string,
 		if message, ok := response[key].(scoutChatMessageRecord); ok {
 			projected[key] = app.projectScoutChatMessageForViewer(viewerEmail, thread, message, contexts...)
 		}
+	}
+	return projected
+}
+
+// projectScoutChatMutationResponseForViewer keeps append/edit/reaction HTTP
+// acknowledgements incremental. Returning the full rewritten thread here used
+// to make a one-emoji reaction download and JSON-parse years of channel history.
+// The bounded tail repairs response loss, while the exact projected message
+// lets clients patch an older target that is outside that tail.
+func (app *kanbanBoardApp) projectScoutChatMutationResponseForViewer(viewerEmail string, threadID string, response map[string]any, contexts ...context.Context) map[string]any {
+	if response == nil {
+		return nil
+	}
+	projected := make(map[string]any, len(response)+1)
+	for key, value := range response {
+		projected[key] = value
+	}
+	thread, hasThread := response["thread"].(scoutChatThreadRecord)
+	if !hasThread {
+		thread, _, _ = app.scoutChatThreadByID(viewerEmail, threadID)
+		hasThread = strings.TrimSpace(thread.ID) != ""
+	}
+	if !hasThread {
+		return projected
+	}
+	// Never retain the source's full thread as a fallback. If a projection
+	// unexpectedly fails, an incremental acknowledgement may omit its repair
+	// tail, but it must not leak or serialize the unbounded source record.
+	delete(projected, "thread")
+	for _, key := range []string{"message", "answer"} {
+		if message, ok := response[key].(scoutChatMessageRecord); ok {
+			projected[key] = app.projectScoutChatMessageForViewer(viewerEmail, thread, message, contexts...)
+		}
+	}
+	limit := scoutChatHydrationDefaultLimit
+	for {
+		bounded, page, err := app.projectScoutChatThreadTailForViewer(viewerEmail, thread, "", "", limit, "", contexts...)
+		if err != nil {
+			break
+		}
+		projected["thread"] = bounded
+		projected["history"] = page
+		encoded, marshalErr := json.Marshal(projected)
+		if marshalErr != nil || len(encoded) <= scoutChatHydrationResponseMax || limit <= 1 {
+			break
+		}
+		limit = max(1, limit/2)
 	}
 	return projected
 }

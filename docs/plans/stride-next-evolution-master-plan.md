@@ -1338,9 +1338,19 @@ replays are process-only, swept on access/claim, removed on supersession and
 capped at 256. Web and native wait for `response.done`, serialize all function
 calls, emit one continuation, fence async results to the exact peer/generation,
 renew every ten seconds, close local media before Stop, and terminate on
-background/page exit. The server, web and future production native build stay
-dark unless `PRIVATE_REALTIME_VOICE_QUALIFIED=true`; the production EAS profile
-is explicitly false. The default-off two-person disconnect evaluator is
+background/page exit. The server stays dark unless
+`PRIVATE_REALTIME_VOICE_QUALIFIED=true`; Build 73's production EAS profile now
+explicitly sets the independent client key
+`EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true`, so both keys must be true.
+The server key remains a process-scoped deployment kill switch: false refuses
+new offers and tool effects, terminalizes an exact active lease on its next
+10-second Renew, and retains the 30-second server TTL as final authority. Native
+Renew requests are dynamically bounded to at most five seconds and strictly
+before an exact-generation watchdog at `leaseExpiresAt - 3s`; a never-settling
+Renew cannot suppress visible teardown or the synchronous peer/track close.
+Applying a changed env value requires a receipted exact container replacement.
+Live activation, provider acceptance, and physical iPhone/iPad acceptance are
+still pending. The default-off two-person disconnect evaluator is
 offline supplied-evidence only, gates exact release/media/container identity,
 current-or-peak memory and frozen recovery/loss thresholds, and cannot claim a
 real run or formal W2A qualification.

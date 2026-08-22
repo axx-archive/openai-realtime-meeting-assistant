@@ -94,6 +94,20 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 		`content-studio-drawer__focus-sentinel--before`,
 		`content-studio-drawer__focus-sentinel--after`,
 		`drawer.dataset.lastFocusBoundary = 'after'`,
+		`const contentStudioLayoutStorageKey = 'stride.content-studio.layout.v1'`,
+		`function setContentStudioPanelWidth(drawer, requestedWidth, options = {})`,
+		`function setContentStudioWorkspaceMode(drawer, full, options = {})`,
+		`function bindContentStudioResize(drawer, resize)`,
+		`resize.addEventListener('lostpointercapture', onLostPointerCapture)`,
+		`window.addEventListener('pointerup', onWindowPointerUp, true)`,
+		`window.addEventListener('blur', onWindowBlur)`,
+		`document.addEventListener('visibilitychange', onVisibilityChange)`,
+		`status.textContent = 'Open'`,
+		`resize.setAttribute('role', 'separator')`,
+		`resize.setAttribute('aria-orientation', 'vertical')`,
+		`.content-studio-drawer[data-workspace-mode="full"]`,
+		`body:has(#contentStudioDrawer[data-workspace-mode="full"]) #toolRail`,
+		`left: 56px;`,
 		`.pd1-primary-nav__external:active { scale: 0.96; }`,
 		`.pd1-primary-nav__external-wrap { display: none !important; }`,
 	} {
@@ -106,6 +120,290 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 	}
 	if strings.Contains(html, `Content Studio ↗`) {
 		t.Error("Content Studio visible label must not add punctuation")
+	}
+}
+
+func TestContentStudioWorkspaceLayoutRendered(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.CONTENT_STUDIO_INDEX,'utf8');
+const server=http.createServer((req,res)=>{
+  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
+  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1280,height:820}});
+ await page.route('https://kino.grok.me/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>KINO</title><main>KINO fixture</main>'}));
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ await page.evaluate(()=>{localStorage.removeItem('stride.content-studio.layout.v1');contentStudioLayoutPreference=null;});
+ const railLink=page.locator('#contentStudioRailLink');
+ await railLink.waitFor({state:'visible'});
+ await railLink.click();
+ const drawer=page.locator('#contentStudioDrawer');
+ const panel=drawer.locator('.content-studio-drawer__panel');
+ const frame=drawer.locator('.content-studio-drawer__frame');
+ const resize=drawer.locator('.content-studio-drawer__resize');
+ const mode=drawer.locator('.content-studio-drawer__workspace-mode');
+ await drawer.waitFor({state:'visible'});
+ await frame.waitFor({state:'visible'});
+	 await page.waitForFunction(()=>document.querySelector('.content-studio-drawer__status')?.textContent==='Open');
+ await page.evaluate(()=>{
+   const node=document.querySelector('.content-studio-drawer__frame');
+   window.__contentStudioStableFrame=node;
+   window.__contentStudioLayoutLoads=0;
+   node.addEventListener('load',()=>window.__contentStudioLayoutLoads++);
+ });
+
+ // The left edge is a full-height, accessible separator with explicit bounds.
+ assert.equal(await resize.getAttribute('role'),'separator');
+ assert.equal(await resize.getAttribute('aria-orientation'),'vertical');
+ assert.equal(await resize.getAttribute('aria-label'),'Resize Content Studio');
+ assert.equal(Number(await resize.getAttribute('aria-valuemin')),520);
+ assert.equal(Number(await resize.getAttribute('aria-valuemax')),1224);
+ const initialWidth=(await panel.boundingBox()).width;
+ const initialHandle=await resize.boundingBox();
+ assert.ok(initialHandle&&initialHandle.height===820&&initialHandle.width===40,JSON.stringify(initialHandle));
+ await page.mouse.move(initialHandle.x+20,initialHandle.y+100);
+ await page.mouse.down();
+ await page.mouse.move(initialHandle.x+200,initialHandle.y+100,{steps:5});
+ await page.mouse.up();
+	 const draggedWidth=(await panel.boundingBox()).width;
+	 assert.ok(Math.abs(draggedWidth-(initialWidth-180))<=2,JSON.stringify({initialWidth,draggedWidth}));
+	 assert.equal(Number(await resize.getAttribute('aria-valuenow')),Math.round(draggedWidth));
+	 assert.equal(JSON.parse(await page.evaluate(()=>localStorage.getItem('stride.content-studio.layout.v1'))).width,Math.round(draggedWidth));
+
+	 // Losing capture or application focus cancels the gesture and always restores
+	 // iframe interaction; neither path may strand the surface in resize mode.
+	 await page.evaluate(()=>{
+	   const node=document.querySelector('.content-studio-drawer__resize');
+	   node.addEventListener('pointerdown',event=>{window.__contentStudioPointerId=event.pointerId},{once:true});
+	 });
+	 const captureHandle=await resize.boundingBox();
+	 await page.mouse.move(captureHandle.x+20,captureHandle.y+100);
+	 await page.mouse.down();
+	 assert.equal(await drawer.evaluate(node=>node.classList.contains('is-resizing')),true);
+	 await page.evaluate(()=>{
+	   const node=document.querySelector('.content-studio-drawer__resize');
+	   node.releasePointerCapture(window.__contentStudioPointerId);
+	 });
+	 await page.mouse.move(captureHandle.x+80,captureHandle.y+100);
+	 await page.mouse.up();
+	 await page.waitForFunction(()=>!document.getElementById('contentStudioDrawer').classList.contains('is-resizing'));
+	 assert.equal(await frame.evaluate(node=>getComputedStyle(node).pointerEvents),'auto');
+	 const blurHandle=await resize.boundingBox();
+	 await page.mouse.move(blurHandle.x+20,blurHandle.y+100);
+	 await page.mouse.down();
+	 await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+	 await page.waitForFunction(()=>!document.getElementById('contentStudioDrawer').classList.contains('is-resizing'));
+	 assert.equal(await frame.evaluate(node=>getComputedStyle(node).pointerEvents),'auto');
+	 await page.mouse.up();
+	 const visibilityHandle=await resize.boundingBox();
+	 await page.mouse.move(visibilityHandle.x+20,visibilityHandle.y+100);
+	 await page.mouse.down();
+	 await page.evaluate(()=>{
+	   Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});
+	   document.dispatchEvent(new Event('visibilitychange'));
+	   delete document.visibilityState;
+	 });
+	 await page.waitForFunction(()=>!document.getElementById('contentStudioDrawer').classList.contains('is-resizing'));
+	 assert.equal(await frame.evaluate(node=>getComputedStyle(node).pointerEvents),'auto');
+	 await page.mouse.up();
+
+ // Keyboard ownership mirrors the edge: left widens, right narrows, Home/End clamp.
+ await resize.focus();
+ await page.keyboard.press('End');
+ assert.equal((await panel.boundingBox()).width,1224);
+ await page.keyboard.press('ArrowLeft');
+ assert.equal((await panel.boundingBox()).width,1224);
+ await page.keyboard.press('Home');
+ assert.equal((await panel.boundingBox()).width,520);
+ await page.keyboard.press('ArrowLeft');
+ assert.equal((await panel.boundingBox()).width,536);
+ await page.keyboard.press('ArrowRight');
+ assert.equal((await panel.boundingBox()).width,520);
+
+ // Persist a human-sized panel through a real edge drag and reopen.
+ const minimumHandle=await resize.boundingBox();
+ await page.mouse.move(minimumHandle.x+20,minimumHandle.y+120);
+ await page.mouse.down();
+ await page.mouse.move(minimumHandle.x-164,minimumHandle.y+120,{steps:5});
+ await page.mouse.up();
+ const preferredWidth=(await panel.boundingBox()).width;
+ assert.ok(Math.abs(preferredWidth-704)<=2,JSON.stringify({preferredWidth}));
+ assert.deepEqual(await page.evaluate(()=>({same:window.__contentStudioStableFrame===document.querySelector('.content-studio-drawer__frame'),loads:window.__contentStudioLayoutLoads,src:document.querySelector('.content-studio-drawer__frame').src})),{same:true,loads:0,src:'https://kino.grok.me/'});
+ await drawer.locator('.content-studio-drawer__close').click();
+ await drawer.waitFor({state:'detached'});
+ assert.equal(await railLink.evaluate(node=>node===document.activeElement),true);
+ await railLink.click();
+ await drawer.waitFor({state:'visible'});
+	 await page.waitForFunction(()=>document.querySelector('.content-studio-drawer__status')?.textContent==='Open');
+ assert.ok(Math.abs((await panel.boundingBox()).width-preferredWidth)<=1,JSON.stringify({preferredWidth,restored:(await panel.boundingBox()).width}));
+
+ // Workspace mode owns x=56..viewport: the rail stays visibly outside it.
+ await page.evaluate(()=>{
+   const node=document.querySelector('.content-studio-drawer__frame');
+   window.__contentStudioStableFrame=node;
+   window.__contentStudioLayoutLoads=0;
+   node.addEventListener('load',()=>window.__contentStudioLayoutLoads++);
+ });
+ assert.equal(await mode.getAttribute('aria-pressed'),'false');
+ await mode.click();
+ assert.equal(await mode.getAttribute('aria-pressed'),'true');
+ assert.equal(await mode.getAttribute('aria-label'),'Return Content Studio to side panel');
+ const fullGeometry=await page.evaluate(()=>{
+   const root=document.getElementById('contentStudioDrawer').getBoundingClientRect();
+   const panel=document.querySelector('.content-studio-drawer__panel').getBoundingClientRect();
+   const rail=document.querySelector('.tool-rail');
+   const railRect=rail.getBoundingClientRect();
+   const railStyle=getComputedStyle(rail);
+	   const railLink=document.getElementById('contentStudioRailLink');
+	   return {root:root.toJSON(),panel:panel.toJSON(),rail:railRect.toJSON(),railDisplay:railStyle.display,railVisibility:railStyle.visibility,railOpacity:railStyle.opacity,railPointerEvents:railStyle.pointerEvents,railAmbient:Boolean(railLink.closest('[inert]')),sameFrame:window.__contentStudioStableFrame===document.querySelector('.content-studio-drawer__frame'),loads:window.__contentStudioLayoutLoads};
+ });
+ assert.equal(fullGeometry.root.left,56,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.root.right,1280,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.panel.left,56,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.panel.right,1280,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.rail.right,56,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.railDisplay,'flex',JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.railVisibility,'visible',JSON.stringify(fullGeometry));
+	 assert.equal(fullGeometry.railOpacity,'0.48',JSON.stringify(fullGeometry));
+	 assert.equal(fullGeometry.railPointerEvents,'none',JSON.stringify(fullGeometry));
+	 assert.equal(fullGeometry.railAmbient,true,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.sameFrame,true,JSON.stringify(fullGeometry));
+ assert.equal(fullGeometry.loads,0,JSON.stringify(fullGeometry));
+ assert.equal(await resize.getAttribute('tabindex'),'-1');
+
+ // Both mode and width restore, while responsive layout keeps mobile controls absent.
+ await drawer.locator('.content-studio-drawer__close').click();
+ await railLink.click();
+ await drawer.waitFor({state:'visible'});
+ assert.equal(await drawer.getAttribute('data-workspace-mode'),'full');
+ await mode.click();
+ assert.equal(await drawer.getAttribute('data-workspace-mode'),'panel');
+ assert.ok(Math.abs((await panel.boundingBox()).width-preferredWidth)<=1);
+ await page.evaluate(()=>{
+   const node=document.querySelector('.content-studio-drawer__frame');
+   window.__contentStudioStableFrame=node;
+   window.__contentStudioLayoutLoads=0;
+   node.addEventListener('load',()=>window.__contentStudioLayoutLoads++);
+ });
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForTimeout(40);
+ assert.equal(await railLink.isVisible(),false);
+ assert.equal(await mode.isVisible(),false);
+ assert.equal(await resize.isVisible(),false);
+ assert.equal((await panel.boundingBox()).width,390);
+ assert.deepEqual(await page.evaluate(()=>({same:window.__contentStudioStableFrame===document.querySelector('.content-studio-drawer__frame'),loads:window.__contentStudioLayoutLoads})),{same:true,loads:0});
+ await page.setViewportSize({width:1280,height:820});
+ await page.waitForTimeout(40);
+ assert.ok(Math.abs((await panel.boundingBox()).width-preferredWidth)<=1);
+ await page.emulateMedia({reducedMotion:'reduce'});
+ assert.equal(await panel.evaluate(node=>getComputedStyle(node).transitionDuration),'0s');
+ await drawer.locator('.content-studio-drawer__close').click();
+ assert.equal(await railLink.evaluate(node=>node===document.activeElement),true);
+ await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	cmd.Env = append(os.Environ(), "CONTENT_STUDIO_INDEX="+indexPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered Content Studio layout harness: %v\n%s", err, output)
+	}
+}
+
+func TestContentStudioEmbedFailureFocusRendered(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.CONTENT_STUDIO_FAILURE_INDEX,'utf8');
+const server=http.createServer((req,res)=>{
+  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
+  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
+  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1280,height:820}});
+ const pattern='https://kino.grok.me/**';
+ await page.route(pattern,route=>route.abort('failed'));
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ const rail=page.locator('#contentStudioRailLink');
+
+ // Cross-origin frame failures can surface as load, not error. The parent must
+ // describe only its own open surface and keep the truthful external exit live.
+ await rail.click();
+ let drawer=page.locator('#contentStudioDrawer');
+ await drawer.waitFor({state:'visible'});
+ await page.waitForFunction(()=>document.querySelector('.content-studio-drawer__status')?.textContent==='Open');
+ assert.equal(await drawer.locator('.content-studio-drawer__status').first().textContent(),'Open');
+ assert.equal(await drawer.locator('.content-studio-drawer__fallback').isVisible(),false);
+ assert.equal(await drawer.locator('.content-studio-drawer__actions a').isVisible(),true);
+ assert.doesNotMatch(await drawer.textContent(),/\bReady\b/);
+ await drawer.locator('.content-studio-drawer__close').click();
+ await drawer.waitFor({state:'detached'});
+
+ // A genuine error/stall fallback remains an airtight modal cycle. Hold the
+ // navigation, dispatch the browser error path, and prove both tab directions.
+ await page.unroute(pattern);
+ let heldRoute=null;
+ await page.route(pattern,route=>{heldRoute=route;});
+ await rail.click();
+ drawer=page.locator('#contentStudioDrawer');
+ await drawer.waitFor({state:'visible'});
+ for(let attempt=0;attempt<50&&!heldRoute;attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.ok(heldRoute,'KINO request was not held');
+ await drawer.locator('iframe').dispatchEvent('error');
+ const fallback=drawer.locator('.content-studio-drawer__fallback');
+ await fallback.waitFor({state:'visible'});
+ assert.equal(await drawer.locator('.content-studio-drawer__status').first().textContent(),'Unable to embed');
+ assert.equal(await drawer.locator('iframe').getAttribute('tabindex'),'-1');
+ assert.deepEqual(await drawer.locator('.content-studio-drawer__focus-sentinel').evaluateAll(nodes=>nodes.map(node=>node.tabIndex)),[-1,-1]);
+ const headerExternal=drawer.locator('.content-studio-drawer__actions a');
+ const fallbackExternal=fallback.locator('a');
+ await fallbackExternal.focus();
+ await page.keyboard.press('Tab');
+ assert.equal(await headerExternal.evaluate(node=>node===document.activeElement),true);
+ await page.keyboard.press('Shift+Tab');
+ assert.equal(await fallbackExternal.evaluate(node=>node===document.activeElement),true);
+ assert.equal(await page.locator('#appShell').getAttribute('inert'),'');
+ await page.keyboard.press('Escape');
+ await drawer.waitFor({state:'detached'});
+ assert.equal(await rail.evaluate(node=>node===document.activeElement),true);
+ await heldRoute.abort().catch(()=>{});
+ await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	cmd.Env = append(os.Environ(), "CONTENT_STUDIO_FAILURE_INDEX="+indexPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered Content Studio failure harness: %v\n%s", err, output)
 	}
 }
 
@@ -357,7 +655,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.equal(await studioFrame.getAttribute('title'),'Content Studio');
  assert.equal(await studioFrame.getAttribute('referrerpolicy'),'strict-origin-when-cross-origin');
  assert.match(await studioFrame.getAttribute('sandbox'),/allow-scripts/);
- const studioExternal=studio.locator('.content-studio-drawer__actions .content-studio-drawer__action');
+ const studioExternal=studio.locator('.content-studio-drawer__actions a.content-studio-drawer__action');
  assert.equal(await studioExternal.getAttribute('href'),'https://kino.grok.me');
  assert.equal(await studioExternal.getAttribute('target'),'_blank');
  assert.equal(await studioExternal.getAttribute('rel'),'noopener noreferrer');
