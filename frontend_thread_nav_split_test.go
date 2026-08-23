@@ -74,6 +74,28 @@ func TestIndexThreadNavBothSectionsAlwaysVisible(t *testing.T) {
 	if !strings.Contains(startBody, "createScoutChatThreadOnServer('Scout', 'private')") {
 		t.Error("startNewScoutThread must create a private thread")
 	}
+	for _, want := range []string{
+		"if (scoutNewThreadPromise) return scoutNewThreadPromise",
+		"selectScoutChatThread('')",
+		"scoutNewThreadPromise = operation",
+	} {
+		if !strings.Contains(startBody, want) {
+			t.Errorf("new-thread intent is not fenced before persistence: missing %q", want)
+		}
+	}
+	createBody := functionBody(html, "async function createScoutChatThreadOnServer(title, visibility)")
+	for _, want := range []string{
+		"upsertScoutChatThread(result.data.thread, { select: false })",
+		"selectScoutChatThread(thread.id)",
+	} {
+		if !strings.Contains(createBody, want) {
+			t.Errorf("persisted new thread does not use the canonical selection path: missing %q", want)
+		}
+	}
+	sendBody := functionBody(html, "async function sendScoutChatViaOffice(text, files = [])")
+	if !strings.Contains(sendBody, "if (scoutNewThreadPromise) await scoutNewThreadPromise") {
+		t.Error("a fast Send can still race into the previously selected thread")
+	}
 }
 
 // renderChatAgentThreads populates both lists on every pass with no scope gate.

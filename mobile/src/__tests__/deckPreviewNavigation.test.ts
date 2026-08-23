@@ -184,9 +184,9 @@ test('native preview keeps deck navigation top-right and actions separate from n
         `,
         'deck-preview-stub:expo-image': `export const Image='Image';`,
         'deck-preview-stub:expo-symbols': `export const SymbolView='SymbolView';`,
-        'deck-preview-stub:../api/client': `export const api={artifactRenderToken:async()=>({url:'/artifacts/render?id=deck'})};`,
-        'deck-preview-stub:../config': `export const API_BASE_URL='https://example.test';`,
-        'deck-preview-stub:../api/requestHelpers': `export const buildApiUrl=(base,path)=>base+path;`,
+        'deck-preview-stub:../api/client': `export const api={artifact:async()=>({artifacts:[{id:'legacy-deck',metadata:{type:'html_deck',artifactVersion:'3',contentDigest:'${'b'.repeat(64)}'}}]})};`,
+        'deck-preview-stub:../config': `export const API_BASE_URL='https://example.test'; export const NATIVE_CLIENT_HEADER='expo';`,
+        'deck-preview-stub:../api/requestHelpers': `export const buildApiUrl=(base,path)=>base+path; export const buildAuthHeaders=(client,token,extra={})=>({Accept:'application/json','X-Bonfire-Client':client,...extra,...(token?{Authorization:'Bearer '+token}:{})});`,
         'deck-preview-stub:../theme/glass': `export const Glass='Glass';`,
         'deck-preview-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const space=proxy; export const type=proxy;`,
         'deck-preview-stub:../files/fileActions': `export const authenticatedFileUrl=()=>''; export const authenticatedFileHeaders=()=>({});`,
@@ -259,7 +259,14 @@ test('native preview keeps deck navigation top-right and actions separate from n
     await Promise.resolve();
   });
   const signedWebView = renderer!.root.findByType('WebViewHost' as any);
-  assert.deepEqual(signedWebView.props.source, { uri: 'https://example.test/artifacts/render?id=deck' });
+  assert.deepEqual(signedWebView.props.source, {
+    uri: `https://example.test/artifacts/preview?id=deck&version=7&digest=${'a'.repeat(64)}`,
+    headers: {
+      Accept: 'text/html',
+      'X-Bonfire-Client': 'expo',
+      Authorization: 'Bearer session',
+    },
+  });
   assert.equal(signedWebView.props.injectedJavaScript, DECK_PREVIEW_NAVIGATION_JS);
   assert.equal(signedWebView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), true);
   await act(async () => {
@@ -269,7 +276,24 @@ test('native preview keeps deck navigation top-right and actions separate from n
   });
   assert.equal(signedWebView.props.style.some((style: { opacity?: number } | false) => style && style.opacity === 0), false);
 
-  await act(async () => { signedWebView.props.onError(); });
+  await act(async () => {
+    renderer!.update(React.createElement(InlineArtifactPreview, {
+      kind: 'html_deck', title: 'Legacy field network', text: '', artifactId: 'legacy-deck', sessionToken: 'session',
+      desktopEditingOnly: true,
+    }));
+    await Promise.resolve();
+  });
+  const legacyWebView = renderer!.root.findByType('WebViewHost' as any);
+  assert.deepEqual(legacyWebView.props.source, {
+    uri: `https://example.test/artifacts/preview?id=legacy-deck&version=3&digest=${'b'.repeat(64)}`,
+    headers: {
+      Accept: 'text/html',
+      'X-Bonfire-Client': 'expo',
+      Authorization: 'Bearer session',
+    },
+  });
+
+  await act(async () => { legacyWebView.props.onError(); });
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Previous slide' }).length, 0);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Retry deck preview' }).length, 1);
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Retry deck preview' }).props.onPress(); });

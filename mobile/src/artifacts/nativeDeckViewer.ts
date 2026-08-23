@@ -17,6 +17,20 @@ export function nativeDeckRenderPath(value: unknown): string | null {
   return path.startsWith('/artifacts/render?') && !path.startsWith('//') ? path : null;
 }
 
+export function nativeDeckPreviewPath(
+  artifactId: unknown,
+  version: unknown,
+  digest: unknown,
+): string | null {
+  const id = String(artifactId ?? '').trim();
+  const exactVersion = Number(version);
+  const exactDigest = String(digest ?? '').trim().toLowerCase();
+  if (!id || !Number.isSafeInteger(exactVersion) || exactVersion < 1 || !/^[0-9a-f]{64}$/u.test(exactDigest)) {
+    return null;
+  }
+  return `/artifacts/preview?id=${encodeURIComponent(id)}&version=${encodeURIComponent(String(exactVersion))}&digest=${encodeURIComponent(exactDigest)}`;
+}
+
 /**
  * Native text surfaces render prose, never serialized Studio state or markup.
  * An untyped payload fails closed until authoritative artifact metadata can

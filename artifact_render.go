@@ -206,6 +206,70 @@ func artifactRenderTokenHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// artifactPreviewHandler serves one exact deck revision to an authenticated
+// reader. Unlike the bearer-capability render route, this lane is deliberately
+// session-bound and does not require final-export admission: people must be
+// able to see a useful draft while Scout or a human is still revising it.
+// Present, PDF, PowerPoint, and public/share capabilities remain on their
+// existing admitted-only boundaries.
+func artifactPreviewHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+
+	artifactID := strings.TrimSpace(r.URL.Query().Get("id"))
+	requestedVersion := strings.TrimSpace(r.URL.Query().Get("version"))
+	requestedDigest := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("digest")))
+	expectedVersion, err := strconv.Atoi(requestedVersion)
+	if artifactID == "" || err != nil || expectedVersion < 1 || !isHexDigest(requestedDigest) {
+		writeAuthError(w, http.StatusBadRequest, "version and digest must name one exact artifact revision")
+		return
+	}
+	artifact, found := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent)
+	if !found {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	if !artifactIsHTMLDocument(artifact) {
+		writeAuthError(w, http.StatusNotFound, "artifact is not an html document")
+		return
+	}
+	if artifactVersion(artifact) != expectedVersion || !strings.EqualFold(artifactCapabilityDigest(artifact), requestedDigest) {
+		writeAuthError(w, http.StatusConflict, "that artifact revision is no longer current")
+		return
+	}
+	body, err := artifactRenderBody(artifact)
+	if err != nil {
+		writeAuthError(w, http.StatusNotFound, "artifact preview is unavailable")
+		return
+	}
+	current, found := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent)
+	if !found {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	if !artifactIsHTMLDocument(current) || artifactVersion(current) != expectedVersion ||
+		!strings.EqualFold(artifactCapabilityDigest(current), requestedDigest) {
+		writeAuthError(w, http.StatusConflict, "that artifact revision is no longer current")
+		return
+	}
+	writeArtifactHTML(w, body)
+}
+
 // artifactRenderHandler serves GET /artifacts/render?id=...&t=... — the
 // artifact body as a real text/html document under the pinned sandbox CSP.
 // Deliberately no session lookup on this path (see the file header); the
@@ -252,6 +316,10 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeArtifactHTML(w, body)
+}
+
+func writeArtifactHTML(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Security-Policy", artifactRenderCSP)
 	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -259,7 +327,7 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if _, err := w.Write(body); err != nil {
-		log.Errorf("Failed to serve rendered artifact %s: %v", artifact.ID, err)
+		log.Errorf("Failed to serve artifact HTML: %v", err)
 	}
 }
 

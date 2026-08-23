@@ -145,6 +145,7 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.artifacts.open", AuthorizationHTTP, "/artifacts/open", []string{"artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.signals.survey", AuthorizationHTTP, "/signals/survey", []string{"artifact", "signal"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.render_token", AuthorizationHTTP, "/artifacts/render-token", []string{"artifact", "revision"}, []ACLAction{ACLReadContent, ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.preview", AuthorizationHTTP, "/artifacts/preview", []string{"artifact", "revision"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.blob", AuthorizationHTTP, "/artifacts/blob", []string{"blob", "artifact", "revision", "file"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.share", AuthorizationHTTP, "/artifacts/share", []string{"artifact", "revision", "capability"}, []ACLAction{ACLReadMetadata, ACLReadContent, ACLShare, ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.export_pdf", AuthorizationHTTP, "/artifacts/export-pdf", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),

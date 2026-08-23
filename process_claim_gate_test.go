@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -199,6 +200,35 @@ func TestProcessClaimGatePlanningRoleCannotLaunderFacts(t *testing.T) {
 				t.Fatal("unsupported factual material passed through the planning-role contract")
 			}
 		})
+	}
+}
+
+func TestPackagingStoryPanelDropsOnlyOutOfScopeVisualDirection(t *testing.T) {
+	plan, stage := packagingStoryClaimPolicyFixture()
+	body := `{"slides":[{"slide_id":"slide-1","role_in_argument":"Establish the decision and its stakes."}],"design_direction":{"identity":"Premium editorial country and sports art direction.","palette":"Warm field tones."}}`
+	canonical := canonicalProcessPanelOutput(plan, stage, body)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(canonical), &decoded); err != nil {
+		t.Fatalf("canonical story panel output is not JSON: %v", err)
+	}
+	if _, exists := decoded["design_direction"]; exists {
+		t.Fatal("out-of-scope design direction survived story-stage canonicalization")
+	}
+	if _, exists := decoded["slides"]; !exists {
+		t.Fatal("story-stage canonicalization removed the narrative")
+	}
+	if err := validateProcessFactualClaimsForStage(canonical, processAdmittedClaimManifest{}, plan, stage); err != nil {
+		t.Fatalf("claim-free story failed after removing out-of-scope visual direction: %v", err)
+	}
+
+	unsafe := `{"slides":[{"slide_id":"slide-1","role_in_argument":"Establish the decision and its stakes.","headline":"Acme is the market leader."}],"design_direction":{"identity":"Premium editorial."}}`
+	if err := validateProcessFactualClaimsForStage(canonicalProcessPanelOutput(plan, stage, unsafe), processAdmittedClaimManifest{}, plan, stage); err == nil {
+		t.Fatal("story-stage canonicalization laundered an unsupported narrative fact")
+	}
+
+	other := ProcessStage{ID: "write", OutputContract: "deck_copy_v3"}
+	if got := canonicalProcessPanelOutput(plan, other, body); got != body {
+		t.Fatal("visual direction was stripped outside the exact story panel contract")
 	}
 }
 

@@ -468,6 +468,7 @@ var (
 	externalEvidenceCurrentConstraintTimePattern = regexp.MustCompile(`(?i)\b(?:current|currently|latest|today|now|as\s+of)\b`)
 	externalEvidenceCurrentConstraintRulePattern = regexp.MustCompile(`(?i)\b(?:rules?|polic(?:y|ies)|regulations?|requirements?|requires?|guides?|guidelines?|standards?|compliance|disclosures?|attribution|reuse|branded[- ]content|terms?|laws?)\b`)
 	externalEvidenceEngagementArmyPattern        = regexp.MustCompile(`(?i)\bengagement[- ]+arm(?:y|ies)\b`)
+	externalEvidenceDecisionAssessmentPattern    = regexp.MustCompile(`(?i)\b(?:assess|evaluate|analy[sz]e|determine)\b`)
 	externalEvidenceDecisionActionPattern        = regexp.MustCompile(`(?i)\b(?:recommend|recommendation|decide|decision|choose|proceed|pilot|launch|build|stop|delay|sequence|stage|scope|scale|guardrail|measure|measurement|prioritize)\b`)
 )
 
@@ -595,6 +596,33 @@ func canonicalExternalEvidenceResearchKind(authority externalEvidenceResearchQue
 	}
 }
 
+func canonicalExternalEvidenceScopedDirectQuestion(authority externalEvidenceResearchQuestionAuthority) string {
+	// Research routing syntax is not a human decision. If an otherwise atomic
+	// decision-assessment objective is expanded into multiple measures plus a
+	// comparator, narrow it to the exact scope anchor the model already bound to
+	// both the question and authority quote. Do not repair generic programs,
+	// mechanisms, rule questions, or one-lane comparisons: choosing what those
+	// mean would change research authority instead of removing internal syntax.
+	if authority.ResearchKind != "direct_evidence" || !externalEvidenceMaterialScopeAnchor(authority.ScopeAnchor) ||
+		!externalEvidenceTextContainsExactPhrase(authority.Question, authority.ScopeAnchor) ||
+		!externalEvidenceTextContainsExactPhrase(authority.AuthorityQuote, authority.ScopeAnchor) ||
+		authority.DecisionEffect != "recommendation" ||
+		!externalEvidenceDecisionAssessmentPattern.MatchString(authority.AuthorityQuote) ||
+		!externalEvidenceStrongComparativePattern.MatchString(authority.Question) ||
+		(externalEvidenceCurrentConstraintRulePattern.MatchString(authority.Question) && externalEvidenceCurrentConstraintTimePattern.MatchString(authority.Question)) ||
+		len(externalEvidenceMeasureKinds(authority.Question)) < 2 {
+		return ""
+	}
+	question := "What current credible evidence directly supports or challenges " + canonicalEvidenceText(authority.ScopeAnchor) + "?"
+	candidate := authority
+	candidate.Question = question
+	if len([]rune(question)) > 500 || validateExternalEvidenceResearchQuestionShape(candidate, 0) != nil ||
+		!externalEvidenceCandidateRelevantToQuestion(question, authority.AuthorityQuote) {
+		return ""
+	}
+	return question
+}
+
 func canonicalExternalEvidenceDirectQuestion(authority externalEvidenceResearchQuestionAuthority) string {
 	// Prefer the exact authorized quote. It preserves every entity, population,
 	// measure, predicate, geography, and time dimension while turning an
@@ -689,7 +717,13 @@ func decodeExternalEvidenceResearchQuestionAuthority(value any, index int) (exte
 		authority.DecisionRelevance = canonicalExternalEvidenceDecisionRelevance(authority)
 	}
 	if err := validateExternalEvidenceResearchQuestionShape(authority, index); err != nil {
-		return externalEvidenceResearchQuestionAuthority{}, err
+		if authority.ResearchKind != "direct_evidence" || !strings.Contains(err.Error(), "mixes direct evidence with another research lane") {
+			return externalEvidenceResearchQuestionAuthority{}, err
+		}
+		authority.Question = canonicalExternalEvidenceScopedDirectQuestion(authority)
+		if authority.Question == "" {
+			return externalEvidenceResearchQuestionAuthority{}, err
+		}
 	}
 	return authority, nil
 }

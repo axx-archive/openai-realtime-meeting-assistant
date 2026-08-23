@@ -2732,6 +2732,31 @@ func processPanelRequiredSeats(plan *goalPlan, stage ProcessStage) int {
 	return 1
 }
 
+// canonicalProcessPanelOutput enforces stage ownership before a panel reply is
+// admitted or persisted. Packaging story architects own the causal narrative,
+// not the visual system: identity candidates, identity selection, imagery, and
+// layout are separate downstream stages with their own exact contracts. Some
+// models nevertheless volunteer a root visual-direction object. Drop only
+// those typed, out-of-scope root wrappers for this exact story contract; every
+// narrative scalar remains subject to the ordinary factual-claim gate.
+func canonicalProcessPanelOutput(plan *goalPlan, stage ProcessStage, body string) string {
+	if plan == nil || plan.ProcessID != packagingStudioProcessID || stage.ID != "story_architects" || stage.OutputContract != "story_spine_v2" {
+		return body
+	}
+	object, ok := decodeProcessClaimJSON(body)
+	if !ok {
+		return body
+	}
+	for _, key := range []string{"design_direction", "visual_direction", "art_direction", "visual_identity"} {
+		delete(object, key)
+	}
+	raw, err := json.Marshal(object)
+	if err != nil {
+		return body
+	}
+	return string(raw)
+}
+
 // runProcessPanelStage maps panel/judges onto runGoalPanel: the stage's
 // personas fan out over the shared stage task inside this one engine step, and
 // the synthesis (with every voice on the record) is the stage's artifact.
@@ -2754,6 +2779,12 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 		failProcessStage(st, stage.Role+" stage failed: "+err.Error())
 		return
 	}
+	for index := range outcome.Voices {
+		if outcome.Voices[index].Err == nil {
+			outcome.Voices[index].Text = canonicalProcessPanelOutput(plan, stage, outcome.Voices[index].Text)
+		}
+	}
+	outcome.Synthesis = canonicalProcessPanelOutput(plan, stage, outcome.Synthesis)
 	if processClaimGateStage(plan, stage) {
 		for _, voice := range outcome.Voices {
 			if voice.Err != nil {

@@ -1220,6 +1220,7 @@ func main() {
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)
 	http.HandleFunc("/artifacts/render", artifactRenderHandler)
 	http.HandleFunc("/artifacts/render-token", artifactRenderTokenHandler)
+	http.HandleFunc("/artifacts/preview", artifactPreviewHandler)
 	http.HandleFunc("/artifacts/blob", artifactBlobHandler)
 	http.HandleFunc("/artifacts/share", artifactShareHandler)
 	http.HandleFunc("/a/", shareLinkPublicHandler)

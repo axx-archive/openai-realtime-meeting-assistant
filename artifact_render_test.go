@@ -267,6 +267,123 @@ func TestArtifactRenderMintRequiresReadContentAndExport(t *testing.T) {
 	}
 }
 
+func TestArtifactPreviewIsSessionBoundExactAndDraftReadable(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp, previousAuthorizer := kanbanApp, artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp, artifactObjectAuthorizer = previousApp, previousAuthorizer })
+
+	deck, _, err := kanbanApp.createOSArtifactWithMetadata("design", "working deck", testDeckBody, "AJ", map[string]string{
+		"type":         "html_deck",
+		"goalParentId": "missing-goal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := strconv.Itoa(artifactVersion(deck))
+	digest := artifactCapabilityDigest(deck)
+	target := "/artifacts/preview?id=" + deck.ID + "&version=" + version + "&digest=" + digest
+
+	request := func(target string, signedIn bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		if signedIn {
+			for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+				req.AddCookie(cookie)
+			}
+		}
+		recorder := httptest.NewRecorder()
+		artifactPreviewHandler(recorder, req)
+		return recorder
+	}
+
+	if got := request(target, false); got.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out status=%d, want 401", got.Code)
+	}
+	for _, malformed := range []string{
+		"/artifacts/preview?id=" + deck.ID,
+		"/artifacts/preview?id=" + deck.ID + "&version=0&digest=" + digest,
+		"/artifacts/preview?id=" + deck.ID + "&version=" + version + "&digest=invalid",
+	} {
+		if got := request(malformed, true); got.Code != http.StatusBadRequest {
+			t.Errorf("malformed target %q status=%d, want 400", malformed, got.Code)
+		}
+	}
+	for _, stale := range []string{
+		"/artifacts/preview?id=" + deck.ID + "&version=" + strconv.Itoa(artifactVersion(deck)+1) + "&digest=" + digest,
+		"/artifacts/preview?id=" + deck.ID + "&version=" + version + "&digest=" + strings.Repeat("f", 64),
+	} {
+		if got := request(stale, true); got.Code != http.StatusConflict {
+			t.Errorf("stale target %q status=%d, want 409", stale, got.Code)
+		}
+	}
+
+	preview := request(target, true)
+	if preview.Code != http.StatusOK || preview.Body.String() != testDeckBody {
+		t.Fatalf("draft preview status=%d body=%q, want exact deck body", preview.Code, preview.Body.String())
+	}
+	for name, want := range map[string]string{
+		"Content-Security-Policy": artifactRenderCSP,
+		"X-Frame-Options":         "SAMEORIGIN",
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "no-referrer",
+		"Cache-Control":           "no-store",
+		"Content-Type":            "text/html; charset=utf-8",
+	} {
+		if got := preview.Header().Get(name); got != want {
+			t.Errorf("%s=%q, want %q", name, got, want)
+		}
+	}
+
+	// The same managed draft is visible to its reader but cannot mint a
+	// bearer presentation capability until final review admits it.
+	renderReq := httptest.NewRequest(http.MethodGet, "/artifacts/render-token?id="+deck.ID+"&version="+version+"&digest="+digest, nil)
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		renderReq.AddCookie(cookie)
+	}
+	renderRecorder := httptest.NewRecorder()
+	artifactRenderTokenHandler(renderRecorder, renderReq)
+	if renderRecorder.Code != http.StatusConflict {
+		t.Fatalf("draft render-token status=%d, want 409", renderRecorder.Code)
+	}
+
+	artifactObjectAuthorizer = denyArtifactActionAuthorizer{denied: ACLExport}
+	if got := request(target, true); got.Code != http.StatusOK {
+		t.Fatalf("export-denied preview status=%d, want 200", got.Code)
+	}
+	artifactObjectAuthorizer = denyArtifactActionAuthorizer{denied: ACLReadContent}
+	if got := request(target, true); got.Code != http.StatusNotFound {
+		t.Fatalf("read-denied preview status=%d, want 404", got.Code)
+	}
+}
+
+func TestArtifactPreviewRejectsMissingAndNonHTMLArtifacts(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	brief, _, err := kanbanApp.createOSArtifact("research", "brief", "# Evidence", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(id string, version int, digest string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/artifacts/preview?id="+id+"&version="+strconv.Itoa(version)+"&digest="+digest, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		artifactPreviewHandler(recorder, req)
+		return recorder
+	}
+	if got := request(brief.ID, artifactVersion(brief), artifactCapabilityDigest(brief)); got.Code != http.StatusNotFound {
+		t.Fatalf("non-html status=%d, want 404", got.Code)
+	}
+	if got := request("os-artifact-missing", 1, strings.Repeat("a", 64)); got.Code != http.StatusNotFound {
+		t.Fatalf("missing status=%d, want 404", got.Code)
+	}
+}
+
 func TestArtifactRenderTokenIsRevokedByACLGenerationChange(t *testing.T) {
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)

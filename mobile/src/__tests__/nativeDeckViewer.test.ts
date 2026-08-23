@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   nativeDeckFrame,
+  nativeDeckPreviewPath,
   nativeDeckRenderPath,
   nativeTextArtifactIsRenderable,
 } from '../artifacts/nativeDeckViewer';
@@ -26,6 +27,13 @@ test('native deck viewer admits only the signed render route and never Studio JS
   assert.equal(nativeDeckRenderPath('/artifacts?id=deck'), null);
   assert.equal(nativeDeckRenderPath('/studio/deck/deck?mode=edit'), null);
   assert.equal(nativeDeckRenderPath('//attacker.example/artifacts/render?token=x'), null);
+  assert.equal(
+    nativeDeckPreviewPath('deck one', 7, 'A'.repeat(64)),
+    `/artifacts/preview?id=deck%20one&version=7&digest=${'a'.repeat(64)}`,
+  );
+  assert.equal(nativeDeckPreviewPath('', 7, 'a'.repeat(64)), null);
+  assert.equal(nativeDeckPreviewPath('deck', 0, 'a'.repeat(64)), null);
+  assert.equal(nativeDeckPreviewPath('deck', 7, 'not-a-digest'), null);
   assert.equal(nativeTextArtifactIsRenderable('A concise research finding.'), true);
   assert.equal(nativeTextArtifactIsRenderable('[Finding](https://example.test)'), true);
   assert.equal(nativeTextArtifactIsRenderable('{A human-written aside}'), true);
@@ -49,6 +57,9 @@ test('native deck viewer admits only the signed render route and never Studio JS
   assert.match(viewer, /injectedJavaScript=\{DECK_PREVIEW_NAVIGATION_JS\}/u);
   assert.match(viewer, /!ready && styles\.webViewHidden/u);
   assert.match(inline, /injectedJavaScript=\{DECK_PREVIEW_NAVIGATION_JS\}/u);
+  assert.match(inline, /nativeDeckPreviewPath/u);
+  assert.doesNotMatch(inline, /api\.artifactRenderToken/u);
+  assert.match(inline, /headers: buildAuthHeaders\(NATIVE_CLIENT_HEADER, sessionToken/u);
   assert.match(inline, /deckNavigation\.status !== 'ready' && styles\.deckWebViewHidden/u);
   assert.match(thread, /navigation\.navigate\('DeckViewer'/u);
   assert.match(thread, /nativeTextArtifactIsRenderable\(text\)/u);

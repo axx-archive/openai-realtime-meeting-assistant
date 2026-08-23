@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
 import { api } from '../api/client';
-import { API_BASE_URL } from '../config';
-import { buildApiUrl } from '../api/requestHelpers';
-import { nativeTextArtifactIsRenderable } from '../artifacts/nativeDeckViewer';
+import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
+import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
+import { nativeDeckPreviewPath, nativeTextArtifactIsRenderable } from '../artifacts/nativeDeckViewer';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
 import { ScoutRichText } from './ScoutRichText';
@@ -153,32 +153,41 @@ export function InlineArtifactPreview({
     setDeckLoading(true);
     setDeckError(false);
     resetDeckNavigation();
-    const exactVersion = Number(artifactVersion ?? 0);
-    const exactDigest = String(artifactDigest ?? '').trim().toLowerCase();
-    if (!Number.isSafeInteger(exactVersion) || exactVersion < 1 || !/^[0-9a-f]{64}$/u.test(exactDigest)) {
-      setDeckError(true);
-      setDeckLoading(false);
-      return;
-    }
-    api.artifactRenderToken(sessionToken, artifactId, { version: exactVersion, digest: exactDigest })
-      .then((response) => {
-        if (!active) return;
-        const path = String(response.url ?? '').trim();
-        if (path.startsWith('/artifacts/render?')) {
-          setDeckUrl(buildApiUrl(API_BASE_URL, path));
-          setDeckHtml(null);
-        } else {
-          setDeckError(true);
+    void (async () => {
+      try {
+        let path = nativeDeckPreviewPath(artifactId, artifactVersion, artifactDigest);
+        // Historical cards predate revision-bound result metadata. Hydrate the
+        // current artifact once, then pin the preview to that exact tuple.
+        if (!path) {
+          const response = await api.artifact(sessionToken, artifactId);
+          const artifact = response.artifacts.find((candidate) => candidate.id === artifactId);
+          const metadata = artifact?.metadata ?? {};
+          const type = String(metadata.type ?? '').trim().toLowerCase();
+          if (!artifact || !['html_deck', 'deck', 'presentation', 'slides'].includes(type)) {
+            throw new Error('Deck artifact binding is unavailable.');
+          }
+          path = nativeDeckPreviewPath(artifact.id, metadata.artifactVersion, metadata.contentDigest);
         }
+        if (!path) throw new Error('Deck artifact binding is invalid.');
+        if (!active) return;
+        setDeckUrl(buildApiUrl(API_BASE_URL, path));
+        setDeckHtml(null);
         setDeckLoading(false);
-      })
-      .catch(() => {
+      } catch {
         if (!active) return;
         setDeckError(true);
         setDeckLoading(false);
-      });
+      }
+    })();
     return () => { active = false; };
   }, [kind, artifactDigest, artifactId, artifactVersion, sessionToken, loading, htmlContent, deckRetryNonce, resetDeckNavigation]);
+
+  const deckSource = useMemo(() => deckUrl
+    ? {
+        uri: deckUrl,
+        headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken, { Accept: 'text/html' }),
+      }
+    : { html: deckHtml ?? '' }, [deckHtml, deckUrl, sessionToken]);
 
   const navigateDeck = useCallback((direction: 'previous' | 'next') => {
     const target = deckPreviewNavigationTarget(deckNavigationRef.current, direction);
@@ -267,7 +276,7 @@ export function InlineArtifactPreview({
         <View style={styles.deckWebViewWrapper}>
           <WebView
             ref={deckWebViewRef}
-            source={deckUrl ? { uri: deckUrl } : { html: deckHtml ?? '' }}
+            source={deckSource}
             style={[
               styles.deckWebViewFill,
               deckNavigation.status !== 'ready' && styles.deckWebViewHidden,

@@ -1238,6 +1238,33 @@ func TestAuthorizedExternalEvidenceQuestionsAcceptsProductionObjectShape(t *test
 	}
 }
 
+func TestDirectResearchQuestionNarrowsMixedInternalSyntaxToExactAuthorizedScope(t *testing.T) {
+	anchor := "Western-culture engagement army"
+	value := map[string]any{
+		"question":           "How many creators and how much branded-content spend demonstrate demand for a Western-culture engagement army compared with adjacent programs?",
+		"research_kind":      "direct_evidence",
+		"importance":         "load_bearing",
+		"source_ref":         "source_message_id=report-request digest=" + strings.Repeat("a", 64),
+		"authority_quote":    "Assess demand and market opportunity for a Western-culture engagement army with trusted content creators.",
+		"scope_anchor":       anchor,
+		"decision_effect":    "recommendation",
+		"decision_relevance": "Evidence about the Western-culture engagement army could change the recommendation.",
+	}
+	authority, err := decodeExternalEvidenceResearchQuestionAuthority(value, 0)
+	if err != nil {
+		t.Fatalf("mixed internal research syntax should narrow safely: %v", err)
+	}
+	want := "What current credible evidence directly supports or challenges " + anchor + "?"
+	if authority.Question != want || authority.ResearchKind != "direct_evidence" {
+		t.Fatalf("canonical authority=%+v, want exact narrowed direct question %q", authority, want)
+	}
+
+	value["scope_anchor"] = "unbound invented segment"
+	if _, err := decodeExternalEvidenceResearchQuestionAuthority(value, 0); err == nil {
+		t.Fatal("mixed research syntax with an unbound anchor must still fail closed")
+	}
+}
+
 func TestExternalEvidenceProviderRequestUsesOneFrozenAuthorityAcrossProviderReturn(t *testing.T) {
 	app, plan, parentID := authorizedExternalEvidenceTestContext(t)
 	thread := authorizedExternalEvidenceResearchThreadForTest(t, app, plan, parentID, "frozen-research-authority")

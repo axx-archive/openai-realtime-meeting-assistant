@@ -37871,6 +37871,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let scoutOfficeChatTurns = []
 	      let scoutChatThreads = []
 	      let activeScoutThreadId = ''
+	      let scoutNewThreadPromise = null
 	      let scoutChatProjectContext = { available: false, scopeKey: '', status: 'unlinked', choices: [], selected: null, explicitNone: false }
 	      let scoutChatProjectGeneration = 0
 	      let scoutChatProjectTimer = 0
@@ -65536,6 +65537,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		if (chatConvoRenameInput) chatConvoRenameInput.value = ''
 	        scoutChatThreads = []
 	        activeScoutThreadId = ''
+	        scoutNewThreadPromise = null
 	        pendingScoutFiles = []
 	        chatThreadsFingerprint = ''
 	        resetHomeProjection()
@@ -66225,6 +66227,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      async function sendScoutChatViaOffice(text, files = []) {
+	        // A click on + establishes a new-conversation intent immediately,
+	        // while persistence finishes asynchronously. Never let a fast Send
+	        // race back into the previously selected conversation.
+	        if (scoutNewThreadPromise) await scoutNewThreadPromise
 	        const sourceThread = selectedScoutChatThread()
 	        const mutationScope = captureScoutChatMutationScope(sourceThread?.id)
 	        // capture-and-clear the armed follow-up target at entry so an error
@@ -71210,15 +71216,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      async function createScoutChatThreadOnServer(title, visibility) {
+	        const generation = chatThreadsGeneration
+	        const account = String(authedUser?.email || '').trim().toLowerCase()
 	        const result = await postAuthJSON('/assistant/chat-threads', { title, visibility })
 	        if (!result.ok) {
 	          throw new Error(result.data?.error || 'could not create chat thread')
 	        }
-	        upsertScoutChatThread(result.data.thread)
-	        renderActiveScoutThread()
+	        if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').trim().toLowerCase()) return null
+	        const thread = upsertScoutChatThread(result.data.thread, { select: false })
+	        if (thread?.id) selectScoutChatThread(thread.id)
+	        return thread
 	      }
 
 	      async function startNewScoutThread() {
+	        if (scoutNewThreadPromise) return scoutNewThreadPromise
 	        hideScoutChatThinking()
 	        scoutOfficeChatTurns = []
 	        scoutChatSessionSeen = false
@@ -71228,13 +71239,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (authedUser) {
 	          // card 070: the new-thread + is private only; channels get created
 	          // from their own section's + (setChannelCreateOpen)
-	          try {
-	            await createScoutChatThreadOnServer('Scout', 'private')
-	            // a fresh thread lands you straight in the conversation (§6c)
-	            setMobileChatView('convo')
-	          } catch (error) {
-	            appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not create chat thread', new Date().toISOString()))
-	          }
+	          // Clear the old authority before the network round-trip. This also
+	          // closes any old work sidecar through selectScoutChatThread.
+	          selectScoutChatThread('')
+	          let operation
+	          operation = (async () => {
+	            try {
+	              await createScoutChatThreadOnServer('Scout', 'private')
+	              // a fresh thread lands you straight in the conversation (§6c)
+	              setMobileChatView('convo')
+	            } catch (error) {
+	              appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not create chat thread', new Date().toISOString()))
+	            } finally {
+	              if (scoutNewThreadPromise === operation) scoutNewThreadPromise = null
+	            }
+	          })()
+	          scoutNewThreadPromise = operation
+	          await operation
 	        } else {
 	          clearScoutChatThreadNodes()
 	          ensureScoutChatEmptyState()
@@ -71916,7 +71937,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  scoutChatNavigationTailThreadId = ''
 		  beginScoutChatOwnSendTailPin({ reason: 'navigation' })
 		}
-		void hydrateScoutChatThread(nextThreadId)
+		if (nextThreadId) void hydrateScoutChatThread(nextThreadId)
 	      }
 
 	      // ---------- thread renaming (D7) ----------
