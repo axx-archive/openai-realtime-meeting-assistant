@@ -2759,7 +2759,7 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 			if voice.Err != nil {
 				continue
 			}
-			if err := validateProcessStageFactualClaims(e.app, plan, parentID, stage, voice.Text); err != nil {
+			if err := validateProcessPanelVoiceStageFactualClaims(e.app, plan, parentID, stage, voice.Text); err != nil {
 				failProcessStage(st, voice.Persona+" produced unsupported factual material: "+err.Error())
 				return
 			}
@@ -2888,11 +2888,15 @@ func (e *goalEngine) runProcessSynthesizerStage(ctx context.Context, plan *goalP
 		extra[packagingStudioSelectedCandidateKey] = identitySelectedCandidateDigest
 	}
 	if stage.ID == "context_snapshot" && externalEvidenceFreshResearchContextContract(stage.OutputContract) {
-		authorized, mode, err := authorizeExternalEvidenceResearchText(e.app, plan, strings.TrimSpace(text))
+		authorized, mode, canonicalText, err := authorizeAndCanonicalizeExternalEvidenceResearchText(e.app, plan, strings.TrimSpace(text))
 		if err != nil {
 			failProcessStage(st, "context snapshot research authority is invalid: "+err.Error())
 			return
 		}
+		// The exact canonical authority that will be executed and digested must
+		// be the durable stage artifact, not a server-only interpretation of
+		// slightly different model prose.
+		text = canonicalText
 		extra["researchMode"] = mode
 		extra["researchQuestionCount"] = strconv.Itoa(len(authorized.Questions))
 		if mode == "external" {

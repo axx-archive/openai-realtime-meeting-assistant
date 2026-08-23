@@ -2989,44 +2989,78 @@ const artifactListMetaFieldCap = 300
 
 var artifactListHeavyMetaFields = []string{"query", "threadQuery", "objective"}
 
-// artifactListView returns lightweight COPIES of the given artifacts for a list
-// response: an entry whose body exceeds the excerpt is trimmed to the leading
-// runes, and its heavy free-text metadata fields are capped. Anything trimmed is
-// flagged bodyTrimmed so the client fetches the full entry (body AND full
-// metadata) via ?id= on open. It never mutates the stored entries or their
-// metadata maps (the memory store owns them; search/context/recall still need
-// the full values), so the metadata map is deep-copied before anything changes.
+// artifactListRunePrefix returns at most limit leading runes without first
+// converting the whole value to []rune. That distinction matters for generated
+// decks whose body can be ~10 MB: a list excerpt should copy ~2 KB, not allocate
+// a 40 MB rune slice merely to discover the cut point.
+func artifactListRunePrefix(value string, limit int) (string, bool) {
+	if value == "" || limit < 1 {
+		return value, false
+	}
+	runes := 0
+	for byteIndex := range value {
+		if runes == limit {
+			// Clone detaches the small prefix from a potentially multi-megabyte
+			// backing string retained by the durable store.
+			return strings.Clone(value[:byteIndex]), true
+		}
+		runes++
+	}
+	return value, false
+}
+
+// artifactListEntryView returns one lightweight COPY for a list response. Any
+// trimmed body or heavy free-text metadata is flagged bodyTrimmed so the client
+// fetches the exact full entry via ?id= on open. It never mutates the stored
+// entry or its metadata map.
+func artifactListEntryView(entry meetingMemoryEntry) meetingMemoryEntry {
+	text, trimmedBody := artifactListRunePrefix(entry.Text, artifactListExcerptRunes)
+	meta := make(map[string]string, len(entry.Metadata)+1)
+	trimmedMeta := false
+	for key, value := range entry.Metadata {
+		meta[key] = value
+	}
+	for _, field := range artifactListHeavyMetaFields {
+		if prefix, trimmed := artifactListRunePrefix(meta[field], artifactListMetaFieldCap); trimmed {
+			meta[field] = prefix
+			trimmedMeta = true
+		}
+	}
+	if !trimmedBody && !trimmedMeta {
+		entry.Metadata = meta
+		return entry
+	}
+	meta["bodyTrimmed"] = "true"
+	entry.Text = text
+	entry.Metadata = meta
+	return entry
+}
+
+// artifactListView returns lightweight copies of the given artifacts. The
+// per-entry helper is also used at the store's exact-header list seam so a
+// selected large body is excerpted before it leaves the lock.
 func artifactListView(entries []meetingMemoryEntry) []meetingMemoryEntry {
 	out := make([]meetingMemoryEntry, len(entries))
 	for i, entry := range entries {
-		trimmedBody := false
-		text := entry.Text
-		if runes := []rune(entry.Text); len(runes) > artifactListExcerptRunes {
-			text = string(runes[:artifactListExcerptRunes])
-			trimmedBody = true
-		}
-		meta := make(map[string]string, len(entry.Metadata)+1)
-		trimmedMeta := false
-		for key, value := range entry.Metadata {
-			meta[key] = value
-		}
-		for _, field := range artifactListHeavyMetaFields {
-			if runes := []rune(meta[field]); len(runes) > artifactListMetaFieldCap {
-				meta[field] = string(runes[:artifactListMetaFieldCap])
-				trimmedMeta = true
-			}
-		}
-		if !trimmedBody && !trimmedMeta {
-			out[i] = entry
-			continue
-		}
-		meta["bodyTrimmed"] = "true"
-		copyEntry := entry
-		copyEntry.Text = text
-		copyEntry.Metadata = meta
-		out[i] = copyEntry
+		out[i] = artifactListEntryView(entry)
 	}
 	return out
+}
+
+// artifactListCandidatesETag fingerprints only the principal-authorized rows
+// that can affect a bare list response. Candidate Text is deliberately empty;
+// its exact content digest and full metadata make body/status changes advance
+// the validator without pulling body bytes into the polling path.
+func artifactListCandidatesETag(recent, published []artifactListAuthorizationCandidate) string {
+	payload := struct {
+		Recent    []artifactListAuthorizationCandidate `json:"recent"`
+		Published []artifactListAuthorizationCandidate `json:"published"`
+	}{Recent: recent, Published: published}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return `"` + sha256Hex(raw) + `"`
 }
 
 func artifactsHandler(w http.ResponseWriter, r *http.Request) {
@@ -3161,23 +3195,6 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	// matching what the client already renders.
 	beforeID := strings.TrimSpace(r.URL.Query().Get("before"))
 	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
-	if beforeID == "" && limitParam == "" {
-		artifacts := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, false)
-		if len(artifacts) > 100 {
-			artifacts = artifacts[len(artifacts)-100:]
-		}
-		published := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, true)
-		if len(published) > 10 {
-			published = published[len(published)-10:]
-		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{
-			"ok":                 true,
-			"artifacts":          artifactListView(artifacts),
-			"publishedArtifacts": artifactListView(published),
-		})
-		return
-	}
-
 	limit := 100
 	if limitParam != "" {
 		parsed, err := strconv.Atoi(limitParam)
@@ -3190,14 +3207,57 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	candidates := authorizedArtifactListCandidates(r.Context(), user, ACLReadContent)
+	publishedCandidates := make([]artifactListAuthorizationCandidate, 0, 10)
+	for _, candidate := range candidates {
+		if artifactIsPublished(candidate.Entry) {
+			publishedCandidates = append(publishedCandidates, candidate)
+		}
+	}
+	if len(publishedCandidates) > 10 {
+		publishedCandidates = publishedCandidates[len(publishedCandidates)-10:]
+	}
+	if beforeID == "" && limitParam == "" {
+		recentCandidates := candidates
+		if len(recentCandidates) > 100 {
+			recentCandidates = recentCandidates[len(recentCandidates)-100:]
+		}
+		// A 304 tells the browser to retain its previously authorized bodies, so
+		// revalidate every row that contributes to this principal-scoped view
+		// immediately before issuing it. A concurrent ACL/content mutation clears
+		// the validator and falls through to exact-header hydration instead.
+		etag := ""
+		if artifactListAuthorizationCandidatesCurrent(r.Context(), recentCandidates, publishedCandidates) {
+			etag = artifactListCandidatesETag(recentCandidates, publishedCandidates)
+		}
+		if etag != "" && requestETagMatches(r.Header.Get("If-None-Match"), etag) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("ETag", etag)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		cache := make(map[string]meetingMemoryEntry, len(recentCandidates)+len(publishedCandidates))
+		artifacts := hydrateAuthorizedArtifactListCandidates(r.Context(), recentCandidates, cache)
+		published := hydrateAuthorizedArtifactListCandidates(r.Context(), publishedCandidates, cache)
+		if etag != "" {
+			w.Header().Set("ETag", etag)
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":                 true,
+			"artifacts":          artifacts,
+			"publishedArtifacts": published,
+		})
+		return
+	}
 
-	artifacts := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, false)
-	end := len(artifacts)
+	end := len(candidates)
 	if beforeID != "" {
 		end = -1
-		for index, artifact := range artifacts {
-			if artifact.ID == beforeID {
-				end = index
+		for index, candidate := range candidates {
+			if candidate.Entry.ID == beforeID {
+				if artifactListAuthorizationCandidateCurrent(r.Context(), candidate) {
+					end = index
+				}
 				break
 			}
 		}
@@ -3210,22 +3270,21 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	if start < 0 {
 		start = 0
 	}
-	window := artifacts[start:end]
-	published := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, true)
-	if len(published) > 10 {
-		published = published[len(published)-10:]
-	}
+	windowCandidates := candidates[start:end]
+	cache := make(map[string]meetingMemoryEntry, len(windowCandidates)+len(publishedCandidates))
+	window := hydrateAuthorizedArtifactListCandidates(r.Context(), windowCandidates, cache)
+	published := hydrateAuthorizedArtifactListCandidates(r.Context(), publishedCandidates, cache)
 
 	payload := map[string]any{
 		"ok":                 true,
-		"artifacts":          artifactListView(window),
-		"publishedArtifacts": artifactListView(published),
+		"artifacts":          window,
+		"publishedArtifacts": published,
 		"hasMore":            start > 0,
 	}
-	if start > 0 && len(window) > 0 {
+	if start > 0 && len(windowCandidates) > 0 {
 		// nextBefore is the oldest id in this window — pass it back as
 		// ?before= to continue into strictly older artifacts.
-		payload["nextBefore"] = window[0].ID
+		payload["nextBefore"] = windowCandidates[0].Entry.ID
 	}
 	writeAuthJSON(w, http.StatusOK, payload)
 }

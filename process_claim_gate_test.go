@@ -94,6 +94,32 @@ func scopedEvidenceAuthorityFixture() processEvidenceGateAuthority {
 	}
 }
 
+func TestProcessPanelVoiceGateAllowsDeliberationButRejectsInventedFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	// A panelist may argue for a direction. That voice is retained for audit but
+	// is not the authoritative downstream decision, so it need not reproduce the
+	// synthesis-only scoped-evidence envelope.
+	if err := validateProcessPanelVoiceFactualClaims(`{"decision":"Build the smallest useful prototype."}`, authority); err != nil {
+		t.Fatalf("claim-free panel deliberation was rejected: %v", err)
+	}
+	insufficient := authority
+	insufficient.Adequacy = processEvidenceAdequacyInsufficient
+	if err := validateProcessPanelVoiceFactualClaims(`{"decision":"Keep exploring."}`, insufficient); err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("panel deliberation ran without minimum evidence coverage: %v", err)
+	}
+	// Deliberation is not a loophole for invented market facts.
+	err := validateProcessPanelVoiceFactualClaims(`{"decision":"Build it because the market is worth $6.8 billion."}`, authority)
+	if err == nil || !strings.Contains(err.Error(), "outside every exact admitted claim") {
+		t.Fatalf("unsupported panel fact passed: %v", err)
+	}
+	// The authoritative synthesis continues to carry the full conditional
+	// posture contract; this split does not weaken the downstream gate.
+	unsafeSynthesis := `{"evidence_scope":"scoped","evidence_scope_receipt":"` + authority.DossierDigest + `","decision_posture":"conditional","evidence_scope_disclosure":"` + processScopedEvidenceDisclosure + `","decision":"Build the product now."}`
+	if err := validateProcessScopedEvidenceOutput(unsafeSynthesis, ProcessStage{ID: "story_architects"}, authority); err == nil || !strings.Contains(err.Error(), "unconditional high-consequence action") {
+		t.Fatalf("unconditional panel synthesis passed: %v", err)
+	}
+}
+
 func TestProcessScopedEvidenceGateBindsConditionalJSONToExactDossier(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	stage := ProcessStage{ID: "story_architects"}

@@ -543,6 +543,51 @@ func validateExternalEvidenceResearchQuestionShape(authority externalEvidenceRes
 	return nil
 }
 
+func canonicalExternalEvidenceDecisionRelevance(authority externalEvidenceResearchQuestionAuthority) string {
+	anchor := canonicalEvidenceText(authority.ScopeAnchor)
+	switch strings.ToLower(canonicalEvidenceText(authority.DecisionEffect)) {
+	case "recommendation":
+		return "Evidence about " + anchor + " could change the recommendation."
+	case "scope":
+		return "Evidence about " + anchor + " could change the scope."
+	case "sequence":
+		return "Evidence about " + anchor + " could change the recommended sequence."
+	case "guardrail":
+		return "Evidence about " + anchor + " could change a launch guardrail."
+	case "measurement":
+		return "Evidence about " + anchor + " could change the measurement plan."
+	default:
+		return canonicalEvidenceText(authority.DecisionRelevance)
+	}
+}
+
+func externalEvidenceDecisionRelevanceValid(authority externalEvidenceResearchQuestionAuthority) bool {
+	relevance := canonicalEvidenceText(authority.DecisionRelevance)
+	return len([]rune(relevance)) >= 20 && len([]rune(relevance)) <= externalEvidenceMaxDecisionRelevanceRunes &&
+		externalEvidenceTextContainsExactPhrase(relevance, authority.ScopeAnchor) && externalEvidenceDecisionActionPattern.MatchString(relevance)
+}
+
+func canonicalExternalEvidenceDirectQuestion(authority externalEvidenceResearchQuestionAuthority) string {
+	// Prefer the exact authorized quote. It preserves every entity, population,
+	// measure, predicate, geography, and time dimension while turning an
+	// imperative/direct ask into one research question.
+	quote := canonicalEvidenceText(authority.AuthorityQuote)
+	quote = strings.NewReplacer("?", ",", ";", ",").Replace(quote)
+	quote = strings.TrimSpace(strings.TrimRight(quote, ".,!,:"))
+	exact := "What credible evidence directly supports or challenges this authorized scope: " + quote + "?"
+	exactAuthority := authority
+	exactAuthority.Question = exact
+	if len([]rune(exact)) <= 500 && validateExternalEvidenceResearchQuestionShape(exactAuthority, 0) == nil &&
+		externalEvidenceCandidateRelevantToQuestion(exact, authority.AuthorityQuote) {
+		return exact
+	}
+
+	// A long or multi-measure source cannot be losslessly collapsed into one
+	// atomic lane without choosing which authorized dimensions to discard. Fail
+	// closed and let the bounded stage revision select an atomic quote instead.
+	return ""
+}
+
 func externalEvidenceComparativeDimensionsBoundToAuthority(question, authorityQuote string) bool {
 	questionMeasures, authorityMeasures := externalEvidenceMeasureKinds(question), externalEvidenceMeasureKinds(authorityQuote)
 	if len(questionMeasures) > 0 && (len(authorityMeasures) == 0 || !externalEvidenceSetsOverlap(questionMeasures, authorityMeasures)) {
@@ -606,6 +651,13 @@ func decodeExternalEvidenceResearchQuestionAuthority(value any, index int) (exte
 		Question: values["question"], ResearchKind: strings.ToLower(values["research_kind"]), Importance: strings.ToLower(values["importance"]), SourceRef: values["source_ref"],
 		AuthorityQuote: values["authority_quote"], ScopeAnchor: values["scope_anchor"], DecisionEffect: strings.ToLower(values["decision_effect"]),
 		DecisionRelevance: values["decision_relevance"],
+	}
+	// Decision relevance is routing metadata, not an external claim. Once the
+	// model has supplied a valid bound anchor and decision-effect enum, normalize
+	// weak prose deterministically instead of spending another model revision on
+	// copy that cannot change research authority.
+	if !externalEvidenceDecisionRelevanceValid(authority) {
+		authority.DecisionRelevance = canonicalExternalEvidenceDecisionRelevance(authority)
 	}
 	if err := validateExternalEvidenceResearchQuestionShape(authority, index); err != nil {
 		return externalEvidenceResearchQuestionAuthority{}, err
@@ -735,9 +787,12 @@ func authorizeExternalEvidenceResearchQuestionAuthorities(app *kanbanBoardApp, p
 	if err != nil {
 		return externalEvidenceAuthorizedResearch{}, fmt.Errorf("authorized research source packet is unavailable: %w", err)
 	}
-	questions := make([]string, 0, len(authorities))
-	bindings := make([]string, 0, len(authorities))
-	for index, authority := range authorities {
+	canonicalAuthorities := append([]externalEvidenceResearchQuestionAuthority(nil), authorities...)
+	questions := make([]string, 0, len(canonicalAuthorities))
+	bindings := make([]string, 0, len(canonicalAuthorities))
+	seenQuestions := map[string]bool{}
+	for index := range canonicalAuthorities {
+		authority := canonicalAuthorities[index]
 		source, ok := sources[authority.SourceRef]
 		if !ok || !externalEvidenceAuthorityQuoteIsAtomic(authority.AuthorityQuote, source.Text) {
 			return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d does not bind one atomic quote to an exact authorized source", index+1)
@@ -748,35 +803,92 @@ func authorizeExternalEvidenceResearchQuestionAuthorities(app *kanbanBoardApp, p
 		switch authority.ResearchKind {
 		case "direct_evidence":
 			if !externalEvidenceCandidateRelevantToQuestion(authority.Question, authority.AuthorityQuote) {
-				return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized direct-evidence dimensions", index+1)
+				// Rebuild a drifting direct-evidence question from its exact,
+				// source-validated authority quote. If that quote cannot remain one
+				// bounded lane, fail closed instead of dropping material dimensions.
+				authority.Question = canonicalExternalEvidenceDirectQuestion(authority)
+				if authority.Question == "" {
+					return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized direct-evidence dimensions; bind it to one atomic authority_quote with one measure lane", index+1)
+				}
+				if err := validateExternalEvidenceResearchQuestionShape(authority, index); err != nil || !externalEvidenceCandidateRelevantToQuestion(authority.Question, authority.AuthorityQuote) {
+					return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized direct-evidence dimensions", index+1)
+				}
+				canonicalAuthorities[index] = authority
 			}
 		case "comparative_evidence":
 			if !externalEvidenceComparativeDimensionsBoundToAuthority(authority.Question, authority.AuthorityQuote) {
 				return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d drifts from the authorized comparative-evidence dimensions", index+1)
 			}
 		}
+		questionKey := strings.ToLower(canonicalEvidenceText(authority.Question))
+		if seenQuestions[questionKey] {
+			return externalEvidenceAuthorizedResearch{}, fmt.Errorf("context snapshot research question %d duplicates a canonical research question", index+1)
+		}
+		seenQuestions[questionKey] = true
 		questions = append(questions, authority.Question)
 		bindings = append(bindings, authority.SourceRef+"\x00"+sha256Hex([]byte(source.Text))+"\x00"+sha256Hex([]byte(authority.AuthorityQuote)))
 	}
-	authorityDigest := externalEvidenceResearchQuestionAuthorityDigest(authorities)
+	authorityDigest := externalEvidenceResearchQuestionAuthorityDigest(canonicalAuthorities)
 	sourceDigest := sha256Hex([]byte(strings.Join(bindings, "\n")))
 	if !isHexDigest(authorityDigest) || !isHexDigest(sourceDigest) {
 		return externalEvidenceAuthorizedResearch{}, fmt.Errorf("authorized research authority could not be frozen")
 	}
 	return externalEvidenceAuthorizedResearch{
-		Authorities: authorities, Questions: questions, QuestionAuthorityDigest: authorityDigest, SourceAuthorityDigest: sourceDigest,
+		Authorities: canonicalAuthorities, Questions: questions, QuestionAuthorityDigest: authorityDigest, SourceAuthorityDigest: sourceDigest,
 	}, nil
 }
 
-func authorizeExternalEvidenceResearchText(app *kanbanBoardApp, plan *goalPlan, text string) (externalEvidenceAuthorizedResearch, string, error) {
+func canonicalExternalEvidenceResearchText(text string, authorities []externalEvidenceResearchQuestionAuthority) (string, error) {
+	extracted := strings.TrimSpace(extractJSONObject(strings.TrimSpace(text)))
+	decoder := json.NewDecoder(strings.NewReader(extracted))
+	decoder.UseNumber()
+	value, err := decodeUniqueJSONValue(decoder)
+	if err != nil || ensureJSONEOF(decoder) != nil {
+		return "", fmt.Errorf("context snapshot is not valid structured context")
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("context snapshot is not a JSON object")
+	}
+	rawQuestions, ok := object["research_questions"].([]any)
+	if !ok || len(rawQuestions) != len(authorities) {
+		return "", fmt.Errorf("context snapshot research authority count changed during canonicalization")
+	}
+	canonicalQuestions := make([]any, 0, len(authorities))
+	for _, authority := range authorities {
+		canonicalQuestions = append(canonicalQuestions, map[string]any{
+			"question": authority.Question, "research_kind": authority.ResearchKind, "importance": authority.Importance,
+			"source_ref": authority.SourceRef, "authority_quote": authority.AuthorityQuote, "scope_anchor": authority.ScopeAnchor,
+			"decision_effect": authority.DecisionEffect, "decision_relevance": authority.DecisionRelevance,
+		})
+	}
+	object["research_questions"] = canonicalQuestions
+	canonical, err := json.Marshal(object)
+	if err != nil {
+		return "", fmt.Errorf("context snapshot research authority could not be canonicalized")
+	}
+	return string(canonical), nil
+}
+
+func authorizeAndCanonicalizeExternalEvidenceResearchText(app *kanbanBoardApp, plan *goalPlan, text string) (externalEvidenceAuthorizedResearch, string, string, error) {
 	authorities, mode, err := externalEvidenceResearchQuestionAuthoritiesFromText(text)
 	if err != nil {
-		return externalEvidenceAuthorizedResearch{}, "", err
+		return externalEvidenceAuthorizedResearch{}, "", "", err
 	}
 	if mode != "external" {
-		return externalEvidenceAuthorizedResearch{Authorities: authorities}, mode, nil
+		canonical, canonicalErr := canonicalExternalEvidenceResearchText(text, authorities)
+		return externalEvidenceAuthorizedResearch{Authorities: authorities}, mode, canonical, canonicalErr
 	}
 	authorized, err := authorizeExternalEvidenceResearchQuestionAuthorities(app, plan, authorities)
+	if err != nil {
+		return externalEvidenceAuthorizedResearch{}, mode, "", err
+	}
+	canonical, err := canonicalExternalEvidenceResearchText(text, authorized.Authorities)
+	return authorized, mode, canonical, err
+}
+
+func authorizeExternalEvidenceResearchText(app *kanbanBoardApp, plan *goalPlan, text string) (externalEvidenceAuthorizedResearch, string, error) {
+	authorized, mode, _, err := authorizeAndCanonicalizeExternalEvidenceResearchText(app, plan, text)
 	return authorized, mode, err
 }
 

@@ -427,6 +427,32 @@ func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatchesInternal(id stri
 	return cloneMemoryEntry(entry), true
 }
 
+// artifactListSnapshotIfHeaderMatches is the bounded-body sibling of
+// artifactSnapshotIfHeaderMatches. It performs the same exact header fence but
+// projects the list excerpt while holding the store lock, so a selected 10 MB
+// deck never escapes into list serialization as a full-body entry. Exact-id,
+// render, editor, share, and export routes continue using the full-body seam.
+func (store *meetingMemoryStore) artifactListSnapshotIfHeaderMatches(id string, authorized ArtifactAuthorizationHeader) (meetingMemoryEntry, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	index, found := store.artifactEntryIndexByIDLocked(id)
+	if !found {
+		return meetingMemoryEntry{}, false
+	}
+	entry := store.entries[index]
+	if memoryEntryHiddenFromRecall(entry) {
+		return meetingMemoryEntry{}, false
+	}
+	current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
+	if !artifactAuthorizationHeaderEqual(authorized, current) {
+		return meetingMemoryEntry{}, false
+	}
+	return artifactListEntryView(entry), true
+}
+
 // artifactEventSnapshot requires the caller's complete authorization header to
 // match the currently stored row while the store lock is held. The returned
 // body is used only to construct the title-only event after that comparison.
@@ -689,39 +715,131 @@ func blobOrganizationVisible(ctx context.Context, user *userAccount, ref string)
 	return false
 }
 
-func authorizedArtifactsSnapshot(ctx context.Context, user *userAccount, action ACLAction, publishedOnly bool) []meetingMemoryEntry {
-	if kanbanApp == nil || kanbanApp.memory == nil {
+// artifactListAuthorizationCandidate is the body-free directory row used by
+// /artifacts list reads. Entry carries the exact metadata/ordering projection
+// the list needs; Header is the immutable authorization fence that must still
+// match before the selected body's bytes are copied out of the store.
+type artifactListAuthorizationCandidate struct {
+	Entry  meetingMemoryEntry
+	Header ArtifactAuthorizationHeader
+}
+
+// artifactListAuthorizationSnapshot returns the visible artifact directory in
+// durable order without reading or retaining any artifact Text. The handler
+// can therefore authorize and window years of artifacts before hydrating only
+// the bounded rows it will actually send.
+func (store *meetingMemoryStore) artifactListAuthorizationSnapshot() []artifactListAuthorizationCandidate {
+	if store == nil {
 		return nil
 	}
-	kanbanApp.memory.mu.Lock()
-	headers := make([]ArtifactAuthorizationHeader, 0)
-	for _, entry := range kanbanApp.memory.entries {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	candidates := make([]artifactListAuthorizationCandidate, 0, len(store.artifactIndexes))
+	for _, index := range store.artifactIndexes {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.artifactEntryVisitHook != nil {
+			store.artifactEntryVisitHook()
+		}
+		entry := store.entries[index]
 		if entry.Kind != meetingMemoryKindOSArtifact || memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
-		if publishedOnly && !artifactIsPublished(meetingMemoryEntry{Metadata: entry.Metadata}) {
+		metadata := make(map[string]string, len(entry.Metadata))
+		for key, value := range entry.Metadata {
+			metadata[key] = value
+		}
+		projected := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
+		header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(projected))
+		candidates = append(candidates, artifactListAuthorizationCandidate{Entry: projected, Header: header})
+	}
+	return candidates
+}
+
+// authorizedArtifactListCandidates applies principal and source-currentness
+// checks to body-free rows. Full bodies remain behind the exact header-match
+// fence until the handler has applied its 100/10 (or pagination) bounds.
+func authorizedArtifactListCandidates(ctx context.Context, user *userAccount, action ACLAction) []artifactListAuthorizationCandidate {
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		return nil
+	}
+	candidates := kanbanApp.memory.artifactListAuthorizationSnapshot()
+	authorized := make([]artifactListAuthorizationCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !artifactHeaderAuthorized(ctx, user, action, candidate.Header) || !kanbanApp.projectBoundArtifactCurrent(ctx, candidate.Entry) {
 			continue
 		}
-		headers = append(headers, kanbanApp.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata})))
+		authorized = append(authorized, candidate)
 	}
-	kanbanApp.memory.mu.Unlock()
-	artifacts := make([]meetingMemoryEntry, 0, len(headers))
-	for _, header := range headers {
-		if !artifactHeaderAuthorized(ctx, user, action, header) {
+	return authorized
+}
+
+// artifactListAuthorizationCandidateCurrent revalidates a body-free row that
+// influences response control flow without itself being hydrated (notably a
+// pagination cursor). This preserves the same opaque-denial/TOCTOU behavior as
+// an exact object read without copying the cursor's body.
+func artifactListAuthorizationCandidateCurrent(ctx context.Context, candidate artifactListAuthorizationCandidate) bool {
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		return false
+	}
+	if artifactAuthorizationAfterCheckProbe != nil {
+		artifactAuthorizationAfterCheckProbe()
+	}
+	current, found := kanbanApp.memory.artifactAuthorizationHeaderByID(candidate.Header.ObjectID)
+	return found && artifactAuthorizationHeaderEqual(candidate.Header, current) && kanbanApp.projectBoundArtifactCurrent(ctx, candidate.Entry)
+}
+
+func artifactListAuthorizationCandidatesCurrent(ctx context.Context, groups ...[]artifactListAuthorizationCandidate) bool {
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, candidate := range group {
+			id := strings.TrimSpace(candidate.Header.ObjectID)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			if !artifactListAuthorizationCandidateCurrent(ctx, candidate) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// hydrateAuthorizedArtifactListCandidates copies bounded body excerpts only for
+// rows selected by the handler. A shared cache ensures an artifact appearing in
+// both the recent and published windows is projected once. The second
+// project-currentness check preserves the prior post-body-fetch source fence;
+// a concurrent metadata/body mutation fails the exact header match and drops
+// the row rather than serving bytes authorized against stale authority.
+func hydrateAuthorizedArtifactListCandidates(ctx context.Context, candidates []artifactListAuthorizationCandidate, cache map[string]meetingMemoryEntry) []meetingMemoryEntry {
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		return nil
+	}
+	artifacts := make([]meetingMemoryEntry, 0, len(candidates))
+	for _, candidate := range candidates {
+		id := strings.TrimSpace(candidate.Header.ObjectID)
+		if artifact, found := cache[id]; found {
+			artifacts = append(artifacts, artifact)
 			continue
 		}
 		if artifactAuthorizationAfterCheckProbe != nil {
 			artifactAuthorizationAfterCheckProbe()
 		}
-		if artifact, found := kanbanApp.memory.artifactSnapshotIfHeaderMatches(header.ObjectID, header); found {
-			if !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
-				continue
-			}
-			if artifactBodyReadProbe != nil {
-				artifactBodyReadProbe(header.ObjectID)
-			}
-			artifacts = append(artifacts, artifact)
+		artifact, found := kanbanApp.memory.artifactListSnapshotIfHeaderMatches(id, candidate.Header)
+		if !found || !kanbanApp.projectBoundArtifactCurrent(ctx, artifact) {
+			continue
 		}
+		if artifactBodyReadProbe != nil {
+			artifactBodyReadProbe(id)
+		}
+		artifact = decorateArchiveDownloadURLForClient(artifact)
+		cache[id] = artifact
+		artifacts = append(artifacts, artifact)
 	}
 	return artifacts
 }

@@ -37473,6 +37473,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let artifactEditMode = false
       let artifactStatusTimer = 0
       let artifactRefreshTimer = 0
+      let artifactListETag = ''
       let assistantMessages = []
       let pc
       let ws
@@ -37798,6 +37799,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // authority projections. Remove them synchronously after publishing the
         // replacement identity, before that account's shell can paint or fetch.
         resetPersistedScoutChatState()
+        artifactEntries = []
+        selectedArtifactId = ''
+        artifactListETag = ''
+        if (artifactRefreshTimer) {
+          clearTimeout(artifactRefreshTimer)
+          artifactRefreshTimer = 0
+        }
+        renderArtifacts()
+        syncScoutChatResearchCards()
 		memoryMeetingsListRequestGeneration += 1
 		memoryMeetingDetailRequestGeneration += 1
 		memoryConversationRequestGeneration += 1
@@ -82815,15 +82825,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!canUseArtifactLibrary()) {
           artifactEntries = []
           selectedArtifactId = ''
+          artifactListETag = ''
           renderArtifacts()
           syncScoutChatResearchCards()
           return
         }
         try {
-          const response = await fetch('/artifacts', { cache: 'no-store' })
+          const headers = artifactListETag ? { 'If-None-Match': artifactListETag } : {}
+          const response = await fetch('/artifacts', { cache: 'no-store', headers })
+          if (response.status === 304) {
+            if (artifactEntries.some(entry => ['queued', 'running'].includes(artifactStatusValue(entry)))) {
+              scheduleArtifactRefresh()
+            }
+            return
+          }
           if (!response.ok) {
             return
           }
+          artifactListETag = response.headers.get('ETag') || ''
           const payload = await response.json()
           const fresh = Array.isArray(payload?.artifacts) ? payload.artifacts : []
           // preserve an explicitly-selected artifact that fell out of the

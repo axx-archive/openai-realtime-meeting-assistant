@@ -1978,6 +1978,32 @@ func validateProcessFactualClaims(body string, manifest processAdmittedClaimMani
 	return nil
 }
 
+// validateProcessPanelVoiceFactualClaims keeps every independently recorded
+// panel voice inside the admitted-claim boundary without treating a critic's
+// exploratory recommendation as the process's authoritative decision. The
+// panel synthesis is the only text forwarded to downstream stages, so it still
+// receives the full scoped-evidence posture and decision validation below.
+func validateProcessPanelVoiceFactualClaims(body string, authority processEvidenceGateAuthority) error {
+	if authority.Adequacy == processEvidenceAdequacyInsufficient {
+		return fmt.Errorf("external research has no authorized question coverage; panel deliberation is not permitted")
+	}
+	return validateProcessFactualClaims(body, authority.Claims)
+}
+
+func validateProcessPanelVoiceStageFactualClaims(app *kanbanBoardApp, plan *goalPlan, parentID string, stage ProcessStage, body string) error {
+	if !processClaimGateStage(plan, stage) {
+		return nil
+	}
+	authority, err := loadProcessEvidenceGateAuthority(app, plan, parentID)
+	if err != nil {
+		return fmt.Errorf("factual claim gate could not load authority: %w", err)
+	}
+	if err := validateProcessPanelVoiceFactualClaims(body, authority); err != nil {
+		return fmt.Errorf("factual claim gate rejected %s panel voice: %w", stage.ID, err)
+	}
+	return nil
+}
+
 func validateProcessStageFactualClaims(app *kanbanBoardApp, plan *goalPlan, parentID string, stage ProcessStage, body string) error {
 	if !processClaimGateStage(plan, stage) {
 		return nil

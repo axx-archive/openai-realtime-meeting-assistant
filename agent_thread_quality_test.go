@@ -759,11 +759,6 @@ func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
 			value["authority_quote"] = "the official program's 2026 opted-in creator count"
 			return []any{value}
 		}, want: "one atomic quote"},
-		{name: "direct count to spend drift", questions: func() []any {
-			value := cloneResearchAuthorityObjectForTest(base)
-			value["question"] = "What is the official program's 2026 advertising spend?"
-			return []any{value}
-		}, want: "direct-evidence dimensions"},
 		{name: "comparative count to spend drift", questions: func() []any {
 			value := cloneResearchAuthorityObjectForTest(base)
 			value["question"] = "How does the official program's 2026 advertising spend compare with peer programs?"
@@ -778,11 +773,6 @@ func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
 			value["decision_relevance"] = "The official program rules determine the launch guardrail."
 			return []any{value}
 		}, want: "current-constraint lane"},
-		{name: "generic decision relevance", questions: func() []any {
-			value := cloneResearchAuthorityObjectForTest(base)
-			value["decision_relevance"] = "The official program fact might be useful later."
-			return []any{value}
-		}, want: "generic or unbound"},
 		{name: "invalid importance", questions: func() []any {
 			value := cloneResearchAuthorityObjectForTest(base)
 			value["importance"] = "nice_to_have"
@@ -802,6 +792,47 @@ func TestFreshResearchAuthorityAdversarialMatrix(t *testing.T) {
 				t.Fatalf("error=%v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestFreshDirectResearchAuthorityCanonicalizesModelWordingWithoutWideningScope(t *testing.T) {
+	app, plan, _ := authorizedExternalEvidenceTestContext(t)
+	value := externalEvidenceResearchAuthorityObjectForTest(t, plan, "What is the official program's 2026 opted-in creator count?")
+	value["question"] = "What is the official program's 2026 advertising spend?"
+	value["decision_relevance"] = "This might be useful later."
+	body := externalEvidenceContextWithQuestionsForTest(t, plan, []any{value})
+
+	authorized, mode, canonical, err := authorizeAndCanonicalizeExternalEvidenceResearchText(app, &plan, body)
+	if err != nil || mode != "external" || len(authorized.Authorities) != 1 {
+		t.Fatalf("safe canonicalization failed: authority=%+v mode=%q err=%v", authorized, mode, err)
+	}
+	wantRelevance := "Evidence about official program could change the recommendation."
+	got := authorized.Authorities[0]
+	if got.DecisionRelevance != wantRelevance || strings.Contains(strings.ToLower(got.Question), "spend") || !strings.Contains(got.Question, "2026") || !strings.Contains(strings.ToLower(got.Question), "creator") {
+		t.Fatalf("canonical authority widened or retained invented dimensions: %+v", got)
+	}
+	unrelated := "The official program supports creators with weekly workshops."
+	if externalEvidenceCandidateRelevantToQuestion(got.Question, unrelated) {
+		t.Fatalf("same-topic non-answering evidence passed repaired authority: question=%q candidate=%q", got.Question, unrelated)
+	}
+	parsed, parsedMode, err := externalEvidenceResearchQuestionAuthoritiesFromText(canonical)
+	if err != nil || parsedMode != "external" || len(parsed) != 1 || parsed[0] != got {
+		t.Fatalf("durable canonical context differs from executed authority: parsed=%+v mode=%q err=%v\n%s", parsed, parsedMode, err, canonical)
+	}
+}
+
+func TestFreshDirectResearchAuthorityRefusesLossyFallback(t *testing.T) {
+	authority := externalEvidenceResearchQuestionAuthority{
+		Question: "What is the market opportunity for official program?", ResearchKind: "direct_evidence", Importance: "load_bearing",
+		AuthorityQuote: "Assess the official program market opportunity and its 2026 opted-in creator count in the United States.",
+		ScopeAnchor:    "official program", DecisionEffect: "recommendation", DecisionRelevance: "The official program evidence could change the recommendation.",
+	}
+	if repaired := canonicalExternalEvidenceDirectQuestion(authority); repaired != "" {
+		t.Fatalf("multi-measure authority was collapsed into a lossy question: %q", repaired)
+	}
+	authority.AuthorityQuote = "Assess the official program's 2026 opted-in creator count in the United States " + strings.Repeat("with exact authorized context ", 24) + "."
+	if repaired := canonicalExternalEvidenceDirectQuestion(authority); repaired != "" {
+		t.Fatalf("overlong authority was truncated into a lossy question: %q", repaired)
 	}
 }
 
